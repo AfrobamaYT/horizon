@@ -228,6 +228,7 @@ pub(crate) struct Options {
     distance: i32,
     distance_override: Option<i32>,
     seed: i64,
+    developer_single_player: bool,
     creative: bool,
     test_terrain: bool,
     /// `--pregen`: enable the command even when the saved Extras switch is off.
@@ -318,57 +319,6 @@ impl Options {
             )
         })
     }
-    fn read(mut o: Self) -> Result<Self> {
-        if o.pregen {
-            horizon_client::command::vanilla::set_horizon_commands(true);
-        }
-        // The launcher's account: online-mode servers need it. A bad file
-        // only leaves the game offline.
-        let session = if o.session_stdin {
-            let mut text = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
-                .map_err(|e| e.to_string())
-                .and_then(|_| horizon_client::auth::AuthSession::parse(&text))
-                .map(Some)
-        } else {
-            o.session_file
-                .take()
-                .filter(|p| !p.is_empty())
-                .map(|path| horizon_client::auth::AuthSession::load(path.as_ref()))
-                .transpose()
-        };
-        match session {
-            Ok(Some(session)) => {
-                o.player_name = Some(session.name.clone());
-                horizon_client::auth::set_current(session);
-                // The chat key pair, ready before the first join.
-                horizon_client::auth::prepare_chat_keys(true);
-            }
-            Ok(None) => {}
-            Err(e) => eprintln!("Horizon: not signed in: {e}"),
-        }
-        split::launcher::read_now();
-        if let Some(dir) = o.game_dir.take() {
-            std::fs::create_dir_all(&dir)
-                .and_then(|()| std::env::set_current_dir(&dir))
-                .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
-        }
-        // Vanilla's quick play (Main, QuickPlay.joinSingleplayerWorld): only a
-        // world that exists opens; else the title screen. --world also creates one.
-        if let Some(world) = o.quick_play.take() {
-            if std::env::current_dir()?
-                .join("saves")
-                .join(&world)
-                .join("level.dat")
-                .is_file()
-            {
-                o.world = Some(world);
-            } else {
-                eprintln!("Quick play: there is no world {world} in saves/");
-            }
-        }
-        Ok(o)
-    }
     /// The command line alone: no file is read and nothing changes. `None` for `--help` and
     /// `--launch-api`, which print and end the run.
     #[cfg(test)]
@@ -394,6 +344,7 @@ impl Options {
             distance: 12,
             distance_override: None,
             seed: 0,
+            developer_single_player: false,
             creative: false,
             test_terrain: false,
             pregen: false,
@@ -452,6 +403,7 @@ impl Options {
                     }
                     "--fullscreen" => o.fullscreen = true,
                     "--session-stdin" => o.session_stdin = true,
+                    "--developer-single-player" => o.developer_single_player = true,
                     "--creative" => o.creative = true,
                     "--test-terrain" => o.test_terrain = true,
                     "--no-pause" => o.no_pause = true,
@@ -569,6 +521,7 @@ impl Options {
                 }
             }
         }
+        o.validate_developer_single_player()?;
         Ok(Some(o))
     }
 }

@@ -1,4 +1,8 @@
 use mod_api::Hooks;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static ENTITY_PRE_CALLS: AtomicU32 = AtomicU32::new(0);
+static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
 pub mod matrix;
@@ -16,6 +20,31 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn entity_tick_listened(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::EntityTickListenedEvent,
+    ) {
+        event.listened = true;
+    }
+
+    fn entity_tick_pre(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::EntityTickPreEvent<'_>,
+    ) -> mod_api::Flow {
+        ENTITY_PRE_CALLS.fetch_add(1, Ordering::Relaxed);
+        mod_api::Flow::Continue
+    }
+
+    fn entity_tick_post(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::EntityTickPostEvent<'_>,
+    ) {
+        ENTITY_POST_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
     #[listener(priority = 37)]
     fn server_stopped(&self, _: &mut dyn mod_api::ServerHost, _: &mut mod_api::ServerStoppedEvent) {
     }
@@ -105,6 +134,14 @@ impl mod_api::BlockEntityPart for Counter {
             .entity
             .nbt
             .insert("counter".into(), mod_api::Tag::Int(17));
+        event.entity.nbt.insert(
+            "entity_pre_calls".into(),
+            mod_api::Tag::Int(ENTITY_PRE_CALLS.load(Ordering::Relaxed) as i32),
+        );
+        event.entity.nbt.insert(
+            "entity_post_calls".into(),
+            mod_api::Tag::Int(ENTITY_POST_CALLS.load(Ordering::Relaxed) as i32),
+        );
         event.entity.data = vec![23];
         event.entity.items.clear();
     }
