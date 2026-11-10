@@ -71,6 +71,14 @@ pub fn mark(cmd: &mut Command) {
 pub fn validate(cmd: &Command) -> Result<(), String> {
     let offline = cmd.get_args().any(|a| a == FLAG);
     if offline
+        && cmd.get_envs().any(|(key, value)| {
+            (key == "HORIZON_SESSION_FILE" || key == "HORIZON_ACCOUNT_SESSIONS")
+                && value.is_some_and(|v| !v.is_empty())
+        })
+    {
+        return Err(tr(NOTICE).into());
+    }
+    if offline
         && cmd.get_args().any(|a| {
             let a = a.to_string_lossy();
             [
@@ -184,6 +192,37 @@ mod tests {
             assert!(!eligible(base, dir, None));
         }
     }
+    #[test]
+    fn composition_cannot_reintroduce_account_state_or_clear_the_restriction() {
+        let mut command = Command::new("game");
+        command.env("HORIZON_SESSION_FILE", "inherited-session.json");
+        command.env("HORIZON_ACCOUNT_SESSIONS", "inherited sessions");
+        mark(&mut command);
+        for key in [
+            "HORIZON_SESSION_FILE",
+            "HORIZON_ACCOUNT_SESSIONS",
+            "HORIZON_LAUNCHER_EXE",
+        ] {
+            assert_eq!(
+                command.get_envs().find(|(name, _)| *name == key).unwrap().1,
+                None
+            );
+        }
+        command.env(ENV, "0");
+        assert!(command.get_args().any(|argument| argument == FLAG));
+        assert!(validate(&command).is_ok());
+        for key in ["HORIZON_SESSION_FILE", "HORIZON_ACCOUNT_SESSIONS"] {
+            let mut command = Command::new("game");
+            mark(&mut command);
+            let launch = crate::launch::Launch {
+                env: [(key.to_string(), "reintroduced".to_string())].into(),
+                ..Default::default()
+            };
+            let wrapped = crate::launch::wrap(command, &launch);
+            assert!(validate(&wrapped).is_err(), "{key}");
+        }
+    }
+
     #[test]
     fn final_network_and_session_intents_are_refused() {
         for flag in [

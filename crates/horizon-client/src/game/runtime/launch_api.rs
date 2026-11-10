@@ -272,6 +272,37 @@ mod tests {
     }
 
     #[test]
+    fn developer_offline_never_consumes_inherited_sessions() {
+        if let Some(file) = std::env::var_os("OFFLINE_SESSION_TEST_FILE") {
+            assert!(parse(&["--developer-single-player"]).is_err());
+            assert_eq!(std::fs::read(file).unwrap(), b"unconsumed session sentinel");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("session.json");
+        std::fs::write(&file, b"unconsumed session sentinel").unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "game::launch_api::tests::developer_offline_never_consumes_inherited_sessions",
+                "--nocapture",
+            ])
+            .env("OFFLINE_SESSION_TEST_FILE", &file)
+            .env("HORIZON_SESSION_FILE", &file)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"unconsumed session sentinel"
+        );
+    }
+
+    #[test]
     fn developer_single_player_rejects_network_and_account_intents() {
         let game = parse(&["--developer-single-player", "--world", "DeveloperProof"])
             .unwrap()
