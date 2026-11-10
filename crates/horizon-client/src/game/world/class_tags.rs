@@ -47,3 +47,19 @@ pub(super) fn merge<'a>(
     }
     tags
 }
+
+/// Install generated membership into both views of the same tag table.
+pub(super) fn install(items: &mut horizon_items::items::Items, facts: &BlockFacts) {
+    let generated = prepare(&items.block_tags, facts);
+    items
+        .block_tag_order
+        .retain(|tag, _| !tag.starts_with("horizon:class/"));
+    for (tag, members) in &generated {
+        if tag.starts_with("horizon:class/") {
+            let mut members: Vec<_> = members.iter().cloned().collect();
+            members.sort_unstable();
+            items.block_tag_order.insert(tag.clone(), members);
+        }
+    }
+    items.block_tags = generated;
+}

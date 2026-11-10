@@ -258,12 +258,6 @@ impl Game<'_> {
         let health = base.with_packs(root, &overlay, reload)?;
         // With no pack, `res` holds the tables, unless content mods switched
         // live since it was loaded: their data is in the new root.
-        if files.is_empty()
-            && !data_switched
-            && conditions == horizon_world::conditions::LoadConditions::vanilla()
-        {
-            return Ok((None, health));
-        }
         let mut items = Items::load(
             root,
             self.pack.assets.registry,
@@ -271,6 +265,7 @@ impl Game<'_> {
             &overlay,
             self.res.item_defaults(),
         )?;
+        class_tags::install(&mut items, self.res.facts());
         // Item damage predicates use the same frozen registry as player hurt.
         Arc::make_mut(&mut items.enchantments).bind_damage_catalog(&health.damage);
         // The recipe tables, the stations and the recipe book read one folder:
@@ -480,10 +475,10 @@ impl Game<'_> {
 
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
-        let block_tags = class_tags::prepare(&items.block_tags, self.res.facts());
-        let tags = native_world_read::prepare_block_tags(&block_tags);
+        let block_tags = &items.block_tags;
+        let tags = native_world_read::prepare_block_tags(block_tags);
         let parts = mod_api::__private::prepare_parts(
-            &block_tags,
+            block_tags,
             &items.item_tags,
             mod_api::__private::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
