@@ -417,6 +417,56 @@ mod tests {
     use horizon_client::hud::{GuiScale, HudBatch};
     use horizon_client::window::GuiSize;
 
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes"]
+    fn production_screen_build_geometry() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.screen = Screen::Inventory;
+            game.container = None;
+            game.craft_size = 2;
+            game.title = None;
+            game.potions.effects.list = vec![horizon_client::effects::EffectInstance::new(
+                "speed", 200, 0,
+            )];
+            let batch = HudBatch::new(
+                [320, 240],
+                GuiScale {
+                    requested: 1,
+                    unicode: false,
+                },
+            );
+            let layout = game.container_layout(&batch);
+            assert_eq!(layout.origin, (72.0, 37.0));
+            assert_eq!(layout.effects, Some([250.0, 37.0, 32.0, 32.0]));
+            game.screen = Screen::Creative;
+            let layout = game.container_layout(&batch);
+            assert_eq!(
+                layout.tabs,
+                Some([[62.0, 24.0, 195.0, 28.0], [62.0, 188.0, 195.0, 28.0]])
+            );
+            game.build_screen();
+            let before = game.screen_state.build.builds;
+            let constructions =
+                crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|count| count.get());
+            let slots = match &game.screen_state.build.current.as_ref().unwrap().layout {
+                BuildLayout::Container(layout) => layout.slots.as_ptr(),
+                _ => panic!("container"),
+            };
+            game.build_screen();
+            assert_eq!(game.screen_state.build.builds, before);
+            assert_eq!(
+                crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|count| count.get()),
+                constructions
+            );
+            let BuildLayout::Container(layout) =
+                &game.screen_state.build.current.as_ref().unwrap().layout
+            else {
+                panic!("container")
+            };
+            assert_eq!(layout.slots.as_ptr(), slots);
+        });
+    }
+
     fn gui(framebuffer: [u32; 2], scale: u32) -> GuiSize {
         GuiSize::new(framebuffer, scale, false)
     }
