@@ -715,6 +715,18 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn block_entity_neighbor_far_read_keeps_chunk_unloaded() {
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let count = world.chunks.len();
+        assert!(world.loaded(15, 0));
+        assert!(!world.loaded(16, 0));
+        assert_eq!(world.block(16, 64, 0), BlockStateId(0));
+        assert_eq!(world.chunks.len(), count);
+        assert!(!world.loaded(16, 0));
+    }
+
+    #[test]
     fn container_limit_index_tracks_load_rollback_removal_and_replacement() {
         use crate::chunk::ChunkExtras;
         use horizon_core::nbt::{Compound, Tag};

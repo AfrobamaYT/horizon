@@ -14,6 +14,8 @@
 //! Worlds saved by older Horizon builds (`region/`, `DIM-1/`, `Player` in
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
+mod respawn;
+
 use crate::{
     Result,
     beehive::BeehiveExt,
@@ -394,7 +396,7 @@ fn dimension_is_vanilla_like(key: &str, dimension: &Tag) -> bool {
 }
 /// A data pack's JSON as the NBT `dimension_is_vanilla_like` reads (what a codec gets from
 /// either one is the same data).
-fn json_tag(value: &serde_json::Value) -> Tag {
+pub(crate) fn json_tag(value: &serde_json::Value) -> Tag {
     use serde_json::Value;
     match value {
         Value::Null => Tag::compound(std::iter::empty::<(&str, Tag)>()),
@@ -1126,10 +1128,7 @@ pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::contain
             }
             b.fuel = int("Fuel").unwrap_or(0);
             b.total_fuel = int("total_fuel").unwrap_or(20);
-            b.speed = match tag.get("speed_multiplier") {
-                Some(Tag::Float(f)) => f32::from_bits(*f),
-                _ => 1.0,
-            };
+            b.speed = float(tag.get("speed_multiplier")).map_or(1.0, |v| v as f32);
         }
         BlockEntity::Brushable(b) => {
             b.loot_table = tag.get("LootTable").cloned();
@@ -3715,6 +3714,7 @@ pub fn world_gen_settings(world: &Path) -> Option<Tag> {
             .cloned()
     })
 }
+include!("save/preset_saved.rs");
 fn write_saved_data(world: &Path, name: &str, data: Tag) -> Result<()> {
     write_dat(
         &saved_data_path(world, name),
@@ -3959,147 +3959,9 @@ impl Default for WorldGen {
 }
 /// Writes a new world's `world_gen_settings` (seed, options and dimensions).
 pub fn write_world_gen_settings(dir: &Path, seed: i64, options: WorldGen) -> Result<()> {
-    write_world_gen_settings_with(dir, seed, options, None, None)
+    write_world_gen_settings_with(dir, seed, options, None, None, None)
 }
-/// [`write_world_gen_settings`] with a flat overworld's own generator
-/// settings (FlatLevelGeneratorSettings, as `flatgen::settings_from_json`
-/// reads them) instead of the Superflat preset's classic layers, and with the
-/// biome the single-biome preset fixes (`CreateBuffetWorldScreen`'s choice,
-/// `minecraft:plains` when none was made).
-pub fn write_world_gen_settings_with(
-    dir: &Path,
-    seed: i64,
-    options: WorldGen,
-    flat_settings: Option<Tag>,
-    single_biome: Option<&str>,
-) -> Result<()> {
-    fs::create_dir_all(dir)?;
-    // worldgen/world_preset/flat.json's overworld: the classic flat layers.
-    let layer = |block: &str, height: i32| {
-        Tag::compound([("block", string(block)), ("height", Tag::Int(height))])
-    };
-    let classic = || {
-        Tag::compound([
-            ("biome", string("minecraft:plains")),
-            ("features", Tag::Byte(0)),
-            ("lakes", Tag::Byte(0)),
-            (
-                "layers",
-                Tag::List(vec![
-                    layer("minecraft:bedrock", 1),
-                    layer("minecraft:dirt", 2),
-                    layer("minecraft:grass_block", 1),
-                ]),
-            ),
-            (
-                "structure_overrides",
-                Tag::List(vec![
-                    string("minecraft:strongholds"),
-                    string("minecraft:villages"),
-                ]),
-            ),
-        ])
-    };
-    let flat = Tag::compound([
-        ("type", string("minecraft:overworld")),
-        (
-            "generator",
-            Tag::compound([
-                ("type", string("minecraft:flat")),
-                ("settings", flat_settings.unwrap_or_else(classic)),
-            ]),
-        ),
-    ]);
-    let dimension = |kind: &str, settings: &str, source: Tag| {
-        Tag::compound([
-            ("type", string(kind)),
-            (
-                "generator",
-                Tag::compound([
-                    ("type", string("minecraft:noise")),
-                    ("settings", string(settings)),
-                    ("biome_source", source),
-                ]),
-            ),
-        ])
-    };
-    let preset = |p: &str| {
-        Tag::compound([
-            ("type", string("minecraft:multi_noise")),
-            ("preset", string(p)),
-        ])
-    };
-    // The overworld generator of worldgen/world_preset/<preset>.json: the
-    // noise settings and the biome source each preset uses.
-    let overworld = match options.preset {
-        WorldPreset::Flat => flat,
-        WorldPreset::LargeBiomes => dimension(
-            "minecraft:overworld",
-            "minecraft:large_biomes",
-            preset("minecraft:overworld"),
-        ),
-        WorldPreset::Amplified => dimension(
-            "minecraft:overworld",
-            "minecraft:amplified",
-            preset("minecraft:overworld"),
-        ),
-        WorldPreset::SingleBiomeSurface => dimension(
-            "minecraft:overworld",
-            "minecraft:overworld",
-            Tag::compound([
-                ("type", string("minecraft:fixed")),
-                ("biome", string(single_biome.unwrap_or("minecraft:plains"))),
-            ]),
-        ),
-        WorldPreset::Normal => dimension(
-            "minecraft:overworld",
-            "minecraft:overworld",
-            preset("minecraft:overworld"),
-        ),
-        // worldgen/world_preset/debug_all_block_states.json's overworld.
-        WorldPreset::Debug => Tag::compound([
-            ("type", string("minecraft:overworld")),
-            (
-                "generator",
-                Tag::compound([("type", string("minecraft:debug"))]),
-            ),
-        ]),
-    };
-    write_saved_data(
-        dir,
-        "world_gen_settings",
-        Tag::compound([
-            ("seed", Tag::Long(seed)),
-            (
-                "generate_structures",
-                Tag::Byte(i8::from(options.structures)),
-            ),
-            ("bonus_chest", Tag::Byte(i8::from(options.bonus_chest))),
-            (
-                "dimensions",
-                Tag::compound([
-                    ("minecraft:overworld", overworld),
-                    (
-                        "minecraft:the_nether",
-                        dimension(
-                            "minecraft:the_nether",
-                            "minecraft:nether",
-                            preset("minecraft:nether"),
-                        ),
-                    ),
-                    (
-                        "minecraft:the_end",
-                        dimension(
-                            "minecraft:the_end",
-                            "minecraft:end",
-                            Tag::compound([("type", string("minecraft:the_end"))]),
-                        ),
-                    ),
-                ]),
-            ),
-        ]),
-    )
-}
+include!("save/preset_generation.rs");
 #[derive(Clone, Debug, Default)]
 pub struct Level {
     pub name: String,
@@ -4121,8 +3983,8 @@ pub struct Level {
     pub spawn: Option<[f64; 3]>,
     /// A respawn point resolved through its block when the player respawns
     /// (a bed, a respawn anchor, a forced point in any dimension):
-    /// dimension, block, yaw and `forced`.
-    pub respawn_elsewhere: Option<(String, [i32; 3], f32, bool)>,
+    /// dimension, block, yaw, pitch and `forced`.
+    pub respawn_elsewhere: Option<(String, [i32; 3], f32, f32, bool)>,
     pub position: Option<[f64; 3]>,
     pub rotation: [f32; 2],
     pub health: f32,
@@ -4531,20 +4393,8 @@ impl Level {
         if let Some(d) = text(p.get("Dimension")) {
             self.dimension = d;
         }
-        if let Some(respawn) = p.get("respawn")
-            && let Some(Tag::IntArray(pos)) = respawn.get("pos")
-            && pos.len() == 3
-        {
-            let dimension =
-                text(respawn.get("dimension")).unwrap_or_else(|| "minecraft:overworld".into());
-            let forced = number(respawn.get("forced")).is_some_and(|v| v != 0);
-            // Forced points, including Overworld ones, are validated through
-            // their blocks on death, just like beds and respawn anchors.
-            let yaw = match respawn.get("yaw") {
-                Some(Tag::Float(b)) => f32::from_bits(*b),
-                _ => 0.0,
-            };
-            self.respawn_elsewhere = Some((dimension, [pos[0], pos[1], pos[2]], yaw, forced));
+        if let Some(respawn) = respawn::read(p) {
+            self.respawn_elsewhere = Some(respawn);
         }
         let mut inventory = Vec::new();
         let mut inventory_components = HashMap::new();
@@ -4796,17 +4646,8 @@ impl Level {
             ));
         }
         // A respawn point other than the world spawn: an anchor elsewhere, or a bed.
-        if let Some((dimension, block, yaw, forced)) = &self.respawn_elsewhere {
-            let mut respawn = vec![
-                ("dimension", string(dimension)),
-                ("pos", Tag::IntArray(block.to_vec())),
-                ("yaw", Tag::Float(yaw.to_bits())),
-                ("pitch", Tag::Float(0f32.to_bits())),
-            ];
-            if *forced {
-                respawn.push(("forced", Tag::Byte(1)));
-            }
-            entries.push(("respawn", Tag::compound(respawn)));
+        if let Some(saved) = &self.respawn_elsewhere {
+            entries.push(("respawn", respawn::write(saved)));
         } else if let Some(s) = self.spawn {
             let block = [
                 s[0].floor() as i32,
@@ -5835,6 +5676,63 @@ fn effect_details(e: &crate::effects::SavedEffect) -> Vec<(&'static str, Tag)> {
 #[cfg(test)]
 mod tests {
     use crate::mobs::spawner::SpawnDataExt;
+
+    #[test]
+    fn saved_preset_editor_stems_supply_shapes_and_facts_below_pack_stems() {
+        use super::*;
+        use horizon_world::worldgen::overrides::{DIMENSIONS, WorldgenOverrides};
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-preset-shapes-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dimensions = json_tag(&serde_json::json!({
+            "minecraft:overworld": {"type":"minecraft:the_nether","generator":{"type":"minecraft:debug"}},
+            "example:pocket": {
+                "type":{"min_y":-128,"height":448,"logical_height":320,"has_skylight":false,"has_ceiling":true},
+                "generator":{"type":"minecraft:debug"}
+            }
+        }));
+        write_world_gen_settings_with(&dir, 1, WorldGen::default(), None, None, Some(dimensions))
+            .unwrap();
+        let mut overrides = WorldgenOverrides::default();
+        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        let overworld = overrides.level_height("minecraft:overworld").unwrap();
+        assert_eq!((overworld.min_y, overworld.height), (0, 256));
+        assert!(overworld.has_ceiling && !overworld.has_skylight);
+        let pocket = overrides.level_height("example:pocket").unwrap();
+        assert_eq!(
+            (pocket.min_y, pocket.height, pocket.logical_height),
+            (-128, 448, 320)
+        );
+        assert!(pocket.has_ceiling && !pocket.has_skylight);
+        assert!(
+            overrides
+                .level_facts("minecraft:overworld")
+                .unwrap()
+                .unwrap()
+                .fast_lava
+        );
+        let pack_stem = r#"{"type":"minecraft:overworld","generator":{"type":"minecraft:debug"}}"#;
+        overrides.set(DIMENSIONS, "minecraft:overworld", pack_stem.into());
+        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        assert_eq!(
+            overrides
+                .entries(DIMENSIONS)
+                .find(|(id, _)| *id == "minecraft:overworld")
+                .unwrap()
+                .1,
+            pack_stem
+        );
+        assert_eq!(
+            overrides.level_height("minecraft:overworld").unwrap().min_y,
+            -64
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn an_ender_chest_saves_none_of_the_players_items() {
@@ -8349,7 +8247,7 @@ mod tests {
         assert_eq!(back.spawn, Some([8.0, 64.0, 8.0]));
         assert_eq!(
             back.respawn_elsewhere,
-            Some(("minecraft:overworld".into(), [20, 70, 20], 0.0, true))
+            Some(("minecraft:overworld".into(), [20, 70, 20], 0.0, 0.0, true))
         );
         assert!(back.difficulty_locked);
         assert!(back.weather.raining);
@@ -8620,7 +8518,7 @@ mod tests {
         // A personal point coinciding with the world spawn must still keep
         // its forced flag and yaw, rather than turning into a world fallback.
         for pos in [[5, 64, 5], [0, 80, 0]] {
-            let point = ("minecraft:overworld".to_owned(), pos, 37.0, true);
+            let point = ("minecraft:overworld".to_owned(), pos, 37.0, 0.0, true);
             let level = Level {
                 respawn_elsewhere: Some(point.clone()),
                 ..Level::default()

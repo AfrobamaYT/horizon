@@ -198,8 +198,8 @@ impl Cell {
     /// namespaced identifier (explicit namespace, nonempty path) and must
     /// not be one of the vanilla air states. Each property name and value
     /// must be nonempty and drawn from `[a-z0-9_]` — vanilla's registry
-    /// tokens all match — with no length or count limit, exactly as the
-    /// declaration boundary sets none; names must not repeat. The payload
+    /// tokens all match — with no additional length or count limit beyond
+    /// the shared NBT string limit; names must not repeat. The payload
     /// must fit [`MAX_CELL_DATA_BYTES`]. Every bound is checked as it is
     /// reached — properties are consumed lazily and nothing is
     /// pre-allocated from an unchecked count.
@@ -273,8 +273,8 @@ impl Cell {
 }
 
 /// A nonempty property name or value drawn from `[a-z0-9_]`, the pattern
-/// every vanilla registry token matches. Length is unbounded, as the
-/// declaration boundary leaves it.
+/// every vanilla registry token matches. This syntax check adds no length
+/// bound; the shared NBT string limit is checked at the owning boundary.
 fn valid_property_token(token: &str) -> bool {
     !token.is_empty()
         && token

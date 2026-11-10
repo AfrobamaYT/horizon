@@ -8,6 +8,8 @@ use std::{rc::Rc, sync::Arc};
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/loot_tags.rs"]
+mod loot_tags_wire;
 #[derive(Clone)]
 struct WasmMod {
     group: u8,
@@ -159,16 +161,38 @@ impl LoopContext for Context {
     fn mods(&self) -> mod_api::LoadedMods {
         unreachable!("not used by this fixture")
     }
+    fn mod_recipe_property_contains(&self, _: &str, _: mod_api::ItemKey) -> bool {
+        false
+    }
 }
 #[unsafe(no_mangle)]
 fn __horizon_mod_hooks() -> Box<dyn Hooks> {
     struct Mod;
     impl Hooks for Mod {
+        fn loot_function(&self, event: &mut mod_api::LootFunctionEvent<'_>) {
+            let tag = event
+                .tags
+                .key(&mod_api::Identifier::parse("test:ingredients").unwrap())
+                .unwrap();
+            let members = event.tags.items(tag).unwrap();
+            assert_eq!(members, vec![event.stack.item]);
+            assert_eq!(event.tags.is_in_tag(event.stack.item, tag), Some(true));
+            event.stack.count = 29;
+        }
+        fn loot_condition(&self, event: &mut mod_api::LootConditionEvent<'_>) {
+            let tag = event
+                .tags
+                .key(&mod_api::Identifier::parse("test:ingredients").unwrap())
+                .unwrap();
+            let item = event.tags.items(tag).unwrap()[0];
+            event.holds = event.tags.is_in_tag(item, tag).unwrap();
+        }
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
             _: &mod_api::RegistrationContext,
         ) {
+            arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
@@ -1645,3 +1669,6 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
     assert_eq!(flow, mod_api::Flow::Continue);
     assert!(!event.cancelled);
 }
+
+#[path = "wire_loopback/arm_pose_registration.rs"]
+mod arm_pose_registration;

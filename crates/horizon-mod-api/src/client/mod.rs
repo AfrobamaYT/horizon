@@ -27,11 +27,13 @@ pub mod hud_layout;
 #[doc(hidden)]
 pub mod hud_mode;
 pub(crate) mod key_mapping;
+pub(crate) mod keyframe_animation;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod mesher;
 pub(crate) mod model_instance;
 pub(crate) mod model_layers;
+pub(crate) mod model_loader;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod music;
@@ -49,3 +51,7 @@ pub(crate) mod types;
 /// Buttons and text fields for mod screens.
 pub mod widgets;
 pub(crate) mod world_draw;
+
+pub(crate) mod spectator_shader;
+
+pub(crate) mod arm_pose;

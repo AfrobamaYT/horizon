@@ -789,6 +789,7 @@ struct NewItem {
     arm_pose: Option<horizon_mod_package::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
+    template: Option<String>,
 }
 
 struct Plan<'a> {
@@ -999,12 +1000,10 @@ fn read_json(path: &Path) -> Result<J> {
 
 impl Plan<'_> {
     /// `entity-types.json` with a row for each mod type: its template's, so its
-    /// size, eyes and category are the template's (`execute anchored eyes`,
-    /// spawner checks and the commands' entity type list, `reg.entity_types`),
-    /// with `template` naming it and a living type's own attribute bases
-    /// (`MobTypes` makes the mob from it). The rows are appended as text, each
-    /// value as the template has it: parsed and written back, a float such as
-    /// a zombie's `movement_speed` can come back one ulp off.
+    /// size, eyes and category remain the template's (eyes, spawners and `reg.entity_types`),
+    /// with `template`, passenger attachments and a living type's attribute bases (`MobTypes`
+    /// makes the mob from it). Template values stay raw text: parsing and rewriting a float
+    /// such as a zombie's `movement_speed` can come back one ulp off.
     fn entity_types_json(&self, bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         use serde_json::value::RawValue;
         let rows: BTreeMap<String, Box<RawValue>> =
@@ -1045,13 +1044,11 @@ fn mod_entity_row(
     let fail = |e: serde_json::Error| format!("{}: {e}", t.template);
     let mut fields: Raw = serde_json::from_str(row.get()).map_err(fail)?;
     if !t.attributes.is_empty() {
-        let mut attributes: Raw = match fields.get("attributes") {
-            Some(a) => serde_json::from_str(a.get()).map_err(fail)?,
-            None => Raw::new(),
-        };
+        let mut attributes: Raw = fields.get("attributes").map_or(Ok(Raw::new()), |a| {
+            serde_json::from_str(a.get()).map_err(fail)
+        })?;
         for (id, value) in &t.attributes {
-            // Refused rather than added: the mob reads the attributes its
-            // template's class has, so an extra one would do nothing.
+            // Refused rather than added: the mob reads the template's class attributes.
             let Some(base) = attributes.get_mut(id) else {
                 return Err(format!(
                     "{}: attribute {id} is not one of {}'s",
@@ -1064,6 +1061,10 @@ fn mod_entity_row(
             "attributes".into(),
             to_raw_value(&attributes).map_err(fail)?,
         );
+    }
+    if !t.passenger_attachments.is_empty() {
+        let raw = to_raw_value(&t.passenger_attachments).map_err(fail)?;
+        fields.insert("passenger_attachments".into(), raw);
     }
     fields.insert("template".into(), to_raw_value(&t.template).map_err(fail)?);
     serde_json::to_vec(&fields).map_err(fail)
@@ -1494,6 +1495,7 @@ impl<'a> Plan<'a> {
                     block: None,
                     arm_pose: None,
                     wall_block: b.decl.wall_block.clone(),
+                    template: None,
                 });
             }
         }
@@ -1514,6 +1516,7 @@ impl<'a> Plan<'a> {
                     block: i.block.clone(),
                     arm_pose: i.arm_pose,
                     wall_block: None,
+                    template: i.block.is_none().then(|| i.template.clone()),
                 });
             }
         }
@@ -3480,27 +3483,24 @@ pub fn build(
         horizon_mod_package::enabled::MARKER,
         &serde_json::to_vec(inventory)?,
     )?;
-    let remainders: BTreeMap<&str, &str> = plan
-        .items
-        .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.crafting_remainder.as_deref()?)))
-        .collect();
-    if !remainders.is_empty() {
-        overlay.write(
-            horizon_items::items::MOD_CRAFT_REMAINDERS,
-            &serde_json::to_vec(&remainders)?,
-        )?;
-    }
-    let placed_blocks: BTreeMap<&str, &str> = plan
-        .items
-        .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.block.as_deref()?)))
-        .collect();
-    if !placed_blocks.is_empty() {
-        overlay.write(
-            horizon_items::items::MOD_ITEM_BLOCKS,
-            &serde_json::to_vec(&placed_blocks)?,
-        )?;
+    let by_item = |value: fn(&NewItem) -> Option<&str>| {
+        let items = plan.items.iter();
+        items
+            .filter_map(|i| Some((i.rename.to.as_str(), value(i)?)))
+            .collect::<BTreeMap<_, _>>()
+    };
+    use horizon_items::items::{MOD_CRAFT_REMAINDERS, MOD_ITEM_BLOCKS, MOD_ITEM_TEMPLATES};
+    for (name, map) in [
+        (
+            MOD_CRAFT_REMAINDERS,
+            by_item(|i| i.crafting_remainder.as_deref()),
+        ),
+        (MOD_ITEM_TEMPLATES, by_item(|i| i.template.as_deref())),
+        (MOD_ITEM_BLOCKS, by_item(|i| i.block.as_deref())),
+    ] {
+        if !map.is_empty() {
+            overlay.write(name, &serde_json::to_vec(&map)?)?;
+        }
     }
     let arm_poses: BTreeMap<&str, horizon_mod_package::content::ArmPose> = plan
         .items

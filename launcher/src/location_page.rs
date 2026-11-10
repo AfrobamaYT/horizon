@@ -209,7 +209,18 @@ impl Launcher {
                 n,
                 tr("Data folder"),
                 Some(div().font_family(theme::MONO).child(short(&backend::data_dir())).into_any_element()),
-                Some(move_button.into_any_element()),
+                Some(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .child(
+                            button("about-open-data", "Open", Kind::Secondary, &t).on_click(
+                                |_, _, cx| crate::glass_toast::open(cx, &backend::data_dir()),
+                            ),
+                        )
+                        .child(move_button)
+                        .into_any_element(),
+                ),
                 &t,
             ))
             .child(text(theme::CAPTION).text_color(t.muted).child(tr(
@@ -282,29 +293,5 @@ impl Launcher {
             );
         }
         body.mb(px(16.))
-    }
-}
-
-/// A data folder that did not open starts on Settings, where the message, Retry and
-/// "Use the default folder" are; an explicit page still wins.
-pub(super) fn page_after_startup(page: Page, data_folder_failed: bool) -> Page {
-    if page == Page::Play && data_folder_failed {
-        Page::Settings
-    } else {
-        page
-    }
-}
-
-#[cfg(test)]
-mod startup_page_tests {
-    #[test]
-    fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
-        use super::{page_after_startup, Page};
-        assert!(matches!(
-            page_after_startup(Page::Play, true),
-            Page::Settings
-        ));
-        assert!(matches!(page_after_startup(Page::Play, false), Page::Play));
-        assert!(matches!(page_after_startup(Page::Mods, true), Page::Mods));
     }
 }

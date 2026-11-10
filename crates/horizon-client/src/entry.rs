@@ -1,4 +1,6 @@
 //! Startup shared by the gameplay library and its executable.
+#[path = "horizon_look.rs"]
+mod horizon_look;
 use crate::{crash, game, logging};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
@@ -76,6 +78,21 @@ pub fn main_with(
         }
     };
     horizon_threads::configure_allocator();
+    horizon_look::give();
+    // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
+    horizon_client::pack_formats::install();
+    // horizon-extras (docs/forking.md): without the feature, no Horizon Settings or Mods page.
+    if !cfg!(feature = "horizon-extras") {
+        horizon_client::options_ui::HORIZON_EXTRAS
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    horizon_client::telemetry::mark_start();
+    // Opt-in telemetry keeps each crash report (docs/telemetry.md), whatever the mode.
+    crash::on_report(horizon_client::telemetry::keep_crash);
+    // Crates above the engine registered their hooks before this (horizon-official's `main`),
+    // then the Horizon parts still in this crate; none registers after this point.
+    game::player_hooks::register();
+    horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
     let wasm = horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
@@ -175,11 +192,11 @@ pub fn main_with(
                 let context = reader.context();
                 mod_api::dispatch_modify_default_components(&context, item, components);
             },
-            loot_function: |kind, data, ctx, stack| {
-                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack);
+            loot_function: |kind, data, ctx, stack, tags| {
+                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack, tags);
             },
-            loot_condition: |kind, data, ctx, holds| {
-                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds);
+            loot_condition: |kind, data, ctx, holds, tags| {
+                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds, tags);
             },
         },
     )
@@ -227,6 +244,7 @@ pub fn main_with(
             game::exit_code::ERROR
         });
     }
+    horizon_hooks::engine::shutdown();
     logging::flush();
 }
 
@@ -346,6 +364,9 @@ pub(crate) fn install_client_hooks() {
         },
         block_speed_factor: |context, state, factor| {
             crate::game::block_speed_factor(context, state, factor);
+        },
+        is_ladder: |context, entity, pos, state, ladder| {
+            crate::game::is_ladder(context, entity, pos, state, ladder);
         },
         player_stays_on_ground_surface: |context, entity, staying| {
             if !mod_api::__private::listened(mod_api::HookId::PlayerStaysOnGroundSurface) {

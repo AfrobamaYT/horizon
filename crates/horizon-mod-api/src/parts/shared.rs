@@ -142,6 +142,7 @@ pub(crate) struct TagParts {
 /// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
 pub(crate) struct Installed {
+    pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) game_rule_slots: Vec<u32>,
@@ -162,6 +163,7 @@ pub(crate) struct Installed {
     pub(crate) particles: OnceLock<horizon_mod_runtime::registry_keys::Particles>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     pub(crate) controllers: Vec<ControllerInfo>,
+    pub(crate) arm_poses: Vec<crate::client::arm_pose::PoseInfo>,
     pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
     pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
     pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
@@ -529,6 +531,7 @@ pub(crate) fn attached<'a, 'k, P: ?Sized>(
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) mod_id: &'static str,
@@ -546,6 +549,7 @@ pub struct PartRegistrar {
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
+    pub(crate) arm_poses: Vec<crate::client::arm_pose::PoseInfo>,
     pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
     pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
     pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
@@ -556,6 +560,7 @@ pub struct PartRegistrar {
 impl PartRegistrar {
     pub(crate) fn new(mod_id: &'static str) -> Self {
         Self {
+            recipe_book_types: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
             mod_id,
@@ -572,6 +577,7 @@ impl PartRegistrar {
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
+            arm_poses: Vec::new(),
             structure_types: Vec::new(),
             dimensions: Vec::new(),
             dimension_shape: |_| false,
@@ -699,6 +705,7 @@ pub(crate) fn install_registrar(
     }
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let mut installed = Installed {
+        recipe_book_types: registrar.recipe_book_types,
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,
@@ -720,6 +727,7 @@ pub(crate) fn install_registrar(
         resolved_blocks: OnceLock::new(),
         particles: OnceLock::new(),
         controllers: registrar.controllers,
+        arm_poses: registrar.arm_poses,
         structure_types: registrar.structure_types,
         dimensions: registrar.dimensions,
         chunk_generators: registrar.chunk_generators,

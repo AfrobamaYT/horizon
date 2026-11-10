@@ -1,6 +1,5 @@
 use super::*;
 use mod_api::ModBlockEntity;
-
 impl GameLevel<'_> {
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
     /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
@@ -28,7 +27,6 @@ impl GameLevel<'_> {
     ) {
         self.fire_hopper_pickup_item(dimension, pos, item, count, cancel);
     }
-
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.
     #[inline(always)]
@@ -41,7 +39,6 @@ impl GameLevel<'_> {
     ) {
         self.fire_block_changed(dimension, pos, old, new);
     }
-
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
     /// level. Server-side.
@@ -730,12 +727,12 @@ impl Game<'_> {
         self.fire_server_tick(context, phase);
     }
     /// Before an authoritative server level's tick pass. `dimension` is its ID.
-    pub(in crate::game) fn native_level_tick_pre(&mut self, dimension: &str) {
-        self.fire_level_tick_pre(dimension);
+    pub(in crate::game) fn native_level_tick_pre(&mut self, level: LevelRef) {
+        self.fire_level_tick_pre(level);
     }
     /// After a successful authoritative server level tick pass.
-    pub(in crate::game) fn native_level_tick_post(&mut self, dimension: &str) {
-        self.fire_level_tick_post(dimension);
+    pub(in crate::game) fn native_level_tick_post(&mut self, level: LevelRef) {
+        self.fire_level_tick_post(level);
     }
     /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
     /// draw here to put something below the layer, or set `canceled` to hide
@@ -3517,15 +3514,15 @@ impl Game<'_> {
     ) {
         self.fire_use_animation(stack, animation);
     }
-    /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
-    /// when eating starts: `vanilla_can_eat` is vanilla's answer (creative,
+    /// `Player.canEat` for held `stack` (None for an empty hand) for food and cake.
+    /// Cake uses `can_always_eat = false`; `vanilla_can_eat` is vanilla's answer (creative,
     /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
     pub(in crate::game) fn native_can_eat(
         &self,
-        stack: &ItemStack,
+        stack: Option<&ItemStack>,
         vanilla_can_eat: bool,
         can_eat: &mut Option<bool>,
     ) {
@@ -3703,7 +3700,10 @@ impl Game<'_> {
         canceled: &mut bool,
         exp_to_drop: &mut Option<u32>,
     ) {
+        self.prepare_part_break_experience(pos, state, exp_to_drop);
+        let initial = *exp_to_drop;
         self.fire_break_block(pos, state, canceled, exp_to_drop);
+        *exp_to_drop = exp_to_drop.or(initial);
     }
     /// A player right clicks a block (NeoForge's
     /// `PlayerInteractEvent.RightClickBlock`): once per hand, where

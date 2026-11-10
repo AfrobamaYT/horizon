@@ -3,9 +3,11 @@ use std::{fmt, hash::Hash, slice, sync::Arc};
 
 use super::{
     AttachmentError, AttachmentType,
-    index::{AttachmentIndex, AttachmentOwner, AttachmentRow},
+    index::{AttachmentIndex, AttachmentOwner, AttachmentRow, AttachmentSnapshot},
 };
 
+// no wire: owned by the lower runtime crate, which cannot depend on mod_api's derive;
+// mod_api supplies the explicit tagged Wire implementation, including bounded static text.
 /// A failed row read or write through a retained batch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -14,6 +16,10 @@ pub enum AttachmentRowError {
     Value(AttachmentError),
     /// The holder unloaded, was replaced, or belongs to another index.
     StaleHolder,
+    /// The physical holder storage is temporarily unavailable; retry after the pass.
+    HolderBusy,
+    /// This holder family cannot own attachments.
+    UnsupportedHolder(&'static str),
 }
 
 impl fmt::Display for AttachmentRowError {
@@ -21,6 +27,8 @@ impl fmt::Display for AttachmentRowError {
         match self {
             Self::Value(error) => write!(f, "attachment row read failed: {error:?}"),
             Self::StaleHolder => f.write_str("attachment row holder is stale"),
+            Self::HolderBusy => f.write_str("attachment row holder is busy"),
+            Self::UnsupportedHolder(kind) => write!(f, "unsupported attachment holder: {kind}"),
         }
     }
 }
@@ -32,12 +40,12 @@ impl std::error::Error for AttachmentRowError {}
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentBatch<H> {
-    rows: Option<Arc<Vec<AttachmentRow<H>>>>,
+    rows: Option<Arc<AttachmentSnapshot<H>>>,
 }
 
 impl<H> AttachmentBatch<H> {
     /// Wrap a captured index bucket without copying its contents.
-    pub fn new(rows: Arc<Vec<AttachmentRow<H>>>) -> Self {
+    pub fn new(rows: Arc<AttachmentSnapshot<H>>) -> Self {
         Self { rows: Some(rows) }
     }
 

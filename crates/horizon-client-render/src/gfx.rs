@@ -349,7 +349,7 @@ fn packed_wanted() -> bool {
     std::env::var("HORIZON_PACKED_QUADS").as_deref() != Ok("0")
 }
 
-mod animate;
+pub(crate) mod animate;
 mod arena;
 pub mod capture;
 pub mod compositor;
@@ -364,12 +364,14 @@ mod frame_gen;
 mod gpu_culling;
 mod hdr;
 mod hdr_icc;
+mod hdr_start;
 mod hdr_stats;
 pub(crate) mod hud_coverage;
 pub use hdr::{Calibration as HdrCalibration, Output as HdrOutput};
 mod hold;
 pub use hold::WorldHold;
 pub use output::{DisplayReading, EffectiveOutput, FrameConfiguration, FrameRequest};
+
 pub mod block_light;
 mod custom_sky;
 mod displace;
@@ -385,6 +387,7 @@ mod occlusion;
 mod oit;
 mod oit_features;
 pub(crate) mod output;
+mod output_apply;
 mod pack_atlas;
 mod pack_center_depth;
 pub mod pack_draw;
@@ -405,10 +408,13 @@ mod readback;
 mod resident;
 mod reuse;
 mod screenshot;
-pub use screenshot::PendingScreenshot;
+pub use screenshot::{PendingScreenshot, ScreenshotSave};
+mod screenshot_readback;
 mod stars;
 mod surface_setup;
 use surface_setup::{AdapterChoice, AdapterFailure, open_adapter, pick_adapter, set_up_surface};
+mod off_page;
+use off_page::move_off_page;
 pub mod submit;
 mod sunrise_fan;
 mod timing;
@@ -895,62 +901,6 @@ impl Part {
         }
     }
 }
-/// `Renderer::compact_arena`'s and `shrink_translucent`'s moves: what the meshes
-/// hold on `page` of `arena` (`part`) goes to its other pages in video memory,
-/// until the next range would pass `budget` bytes (it keeps what is left; the
-/// first range moves whatever its size, so none keeps the page closed), the
-/// copies into `encoder`, the ranges' flat draw ids (`flat`) and, in the
-/// section arena, GPU culling's records (`records`) along. False when the other
-/// pages have no room left.
-fn move_off_page<'a>(
-    arena: &mut arena::Arena,
-    encoder: &mut wgpu::CommandEncoder,
-    mut flat: Option<(&mut flat::Flat, &wgpu::Device, &mut upload::Uploads)>,
-    mut records: Option<&mut gpu_culling::Records>,
-    meshes: impl Iterator<Item = &'a mut SectionGpu>,
-    page: u32,
-    part: Part,
-    budget: &mut u64,
-) -> bool {
-    debug_assert!(
-        records.is_none() || matches!(part, Part::Section { .. }),
-        "records follow the section arena's ranges"
-    );
-    let mut moved = false;
-    for s in meshes {
-        // Nothing of a mesh here: split, one without solid quads (its (0, 0) is no
-        // range of page 0); in the other arenas, one without translucent quads.
-        let Some((_, start, vertices)) = part.of(s).filter(|r| r.0 == page) else {
-            continue;
-        };
-        let bytes = vertices * arena.stride();
-        if moved && bytes > *budget {
-            break;
-        }
-        let Some(to) = arena.alloc_moved(vertices) else {
-            return false;
-        };
-        arena.copy(encoder, (page, start), to, vertices);
-        arena.release(page, start, vertices);
-        if let (Some((flat, device, uploads)), Some(id)) = (&mut flat, s.flat_id) {
-            let key = match part {
-                Part::Translucent => to.0 + flat::TRANSLUCENT_KEYS,
-                _ => to.0,
-            };
-            flat.place(device, encoder, uploads, id, key, to.1, vertices);
-        }
-        part.set(s, to);
-        // Its solid quads start the range in either layout.
-        if let (Part::Section { .. }, Some(records), Some(id)) =
-            (part, records.as_deref_mut(), s.gpu_id)
-        {
-            records.relocate(id, to.0, u64::from(s.solid_base()));
-        }
-        *budget = budget.saturating_sub(bytes);
-        moved = true;
-    }
-    true
-}
 /// Starts moving a page of a large arena far larger than its ranges in use
 /// (`Arena::oversized`) into a new page of the size they get (`Arena::open_page`),
 /// for `Renderer::shrink_translucent`: the page closes and `move_off_page` empties
@@ -1307,6 +1257,9 @@ pub struct ScreenshotRequest {
     /// F2's: drawn at the game's resolution (Resolution Scale above 100%) times
     /// `Renderer::screenshot_quality`, not the window's.
     pub scaled: bool,
+    /// Read back on a worker (F2 and world icons); CPU pixels arrive in
+    /// `Renderer::screenshot_result` for the owning thread's hook before encoding.
+    pub background: bool,
 }
 /// A solid terrain pipeline without HDR output's lighting (terrain.wgsl's `HDR_LIGHTING`),
 /// for the frames HDR is off, and with it where the display offers HDR output: the
@@ -1496,7 +1449,7 @@ pub struct Renderer {
     celestial_buffer: wgpu::Buffer,
     end_sky: end_sky::EndSky,
     stars: stars::Stars,
-    /// OptiFine custom sky layers (`crate::custom_sky`), and the frame's from the game.
+    /// Custom sky layers (`crate::custom_sky`), and the frame's from the game.
     custom_sky: custom_sky::CustomSky,
     custom_sky_draws: Vec<crate::custom_sky::Draw>,
     /// The glowing entities' outline (`LevelRenderer.entityOutlineTarget`).
@@ -1705,6 +1658,10 @@ pub struct Renderer {
     emission_stats: hdr_stats::EmissionStats,
     /// What this renderer's destination offers and its device draws.
     output_caps: output::OutputCapabilities,
+    /// An output that failed to apply, not tried again until something it needs changes.
+    output_rejected: Option<output_apply::Rejected>,
+    /// Since when Auto keeps HDR on through the display's loss of its report.
+    auto_off_since: Option<std::time::Instant>,
     /// The output applied (`update_output`), with the frame every pipeline that draws it
     /// targets: the swapchain's 8-bit format, or `Rgba16Unorm` when the renderer was made with
     /// HDR output on and Smooth Gradients and the device draws and blends into it, or
@@ -1717,6 +1674,8 @@ pub struct Renderer {
     /// The marker file of an HDR output that has not presented a frame yet
     /// (`graphics::HDR_MARKER`).
     hdr_marker: Option<std::path::PathBuf>,
+    /// The window's graphics driver (`hdr_start`); `None` offscreen.
+    hdr_driver: Option<String>,
     /// The HDR Lighting setting, kept for the HDR output made when HDR turns on.
     hdr_lighting_setting: bool,
     /// The shader pack's post-processing, and the dimension (legacy id) it was loaded for.
@@ -1801,6 +1760,7 @@ pub struct Renderer {
     pub screenshot: Option<ScreenshotRequest>,
     /// Readback outcome: CPU pixels for the game to approve before writing, or an error.
     pub screenshot_result: Option<std::result::Result<PendingScreenshot, String>>,
+    screenshot_readbacks: screenshot_readback::Readbacks,
     /// Screenshot Quality (Horizon setting): a `scaled` screenshot's frame is this many
     /// times the game's resolution (1, 2, 4 or 8).
     pub screenshot_quality: u32,
@@ -2310,6 +2270,35 @@ struct Opened {
     configured: Option<(wgpu::SurfaceConfiguration, wgpu::SurfaceCapabilities)>,
 }
 /// Logs the adapter and records it for crash reports.
+#[derive(Clone, Debug, Default)]
+pub struct Adapter {
+    pub name: String,
+    pub vendor: String,
+    /// `integrated`, `discrete`, `virtual`, `cpu` or `other`.
+    pub kind: String,
+    pub driver: String,
+    pub backend: String,
+}
+
+static ADAPTER: std::sync::Mutex<Option<Adapter>> = std::sync::Mutex::new(None);
+
+/// The adapter, once the renderer has one.
+pub fn adapter() -> Option<Adapter> {
+    ADAPTER.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// wgpu's device type in the words reports use.
+pub fn gpu_kind(device_type: &str) -> &'static str {
+    match device_type {
+        "IntegratedGpu" => "integrated",
+        "DiscreteGpu" => "discrete",
+        "VirtualGpu" => "virtual",
+        "Cpu" => "cpu",
+        _ => "other",
+    }
+}
+
+/// Logs the adapter and records it ([`adapter`]) for crash reports and telemetry.
 fn describe_adapter(adapter: &wgpu::Adapter) {
     let info = adapter.get_info();
     log::info!(
@@ -2318,6 +2307,15 @@ fn describe_adapter(adapter: &wgpu::Adapter) {
         info.backend,
         info.device_type
     );
+    *ADAPTER.lock().unwrap_or_else(|e| e.into_inner()) = Some(Adapter {
+        name: info.name.clone(),
+        vendor: horizon_system::gpu_vendor(&info.name, info.vendor).to_owned(),
+        kind: gpu_kind(&format!("{:?}", info.device_type)).to_owned(),
+        driver: format!("{} {}", info.driver, info.driver_info)
+            .trim()
+            .to_owned(),
+        backend: format!("{:?}", info.backend),
+    });
     crate::crash::set_detail(
         "Graphics Adapter",
         format!(
@@ -2478,7 +2476,7 @@ async fn open_device(
         api.with_env(),
         std::env::consts::OS,
         // The machine's: the x64 build emulated on a Windows ARM64 PC has its GPU too (#7513).
-        horizon_system::system::machine_arch(),
+        horizon_system::machine_arch(),
         wgpu_backend,
     ) {
         match open_device_with(window, offscreen, &order, layers, allow_cpu).await {
@@ -3176,11 +3174,13 @@ impl Renderer {
             adapter.get_downlevel_capabilities().flags,
             adapter.get_texture_format_features(hud_coverage::FORMAT),
         );
+        let hdr_driver = surface.is_some().then(|| output::window_driver(&info));
         let output_caps = output::OutputCapabilities {
             hdr: hdr_output,
             wide_frame: wide_ok,
             float_frame: float_ok,
             hud_layer: coverage_ok,
+            held: output::held(settings, hdr_driver.as_deref()),
         };
         let frame = output::resolve_frame(settings, request, output_caps, display, config.format);
         let (frame_format, hud_coverage, overlay_format) =
@@ -5434,10 +5434,13 @@ impl Renderer {
             hdr_lighting_setting: true,
             emission_stats,
             output_caps,
+            output_rejected: None,
+            auto_off_since: None,
             // Nothing is presented as HDR yet: `update_output` applies the settings.
             output: output::resolve_output(settings, output_caps, display, frame, false),
             frame_kept_logged: false,
             hdr_marker: None,
+            hdr_driver,
             pack_post: None,
             pack_loading: None,
             native: None,
@@ -5479,6 +5482,7 @@ impl Renderer {
             started: Instant::now(),
             screenshot: None,
             screenshot_result: None,
+            screenshot_readbacks: screenshot_readback::Readbacks::default(),
             screenshot_quality: 1,
             screenshot_halvings: 0,
             gamma: 0.5,
@@ -5594,18 +5598,18 @@ impl Renderer {
             ))
         });
     }
-    /// The pack's OptiFine custom sky layer textures (`crate::custom_sky::CustomSky::load`).
-    pub fn set_custom_sky(&mut self, pack: &crate::custom_sky::CustomSky) {
+    /// The pack's custom sky layer textures (`crate::custom_sky::load`).
+    pub fn set_custom_sky(&mut self, pack: &dyn crate::custom_sky::SkyLayers) {
         self.custom_sky.set_pack(&self.device, &self.queue, pack);
     }
-    /// The custom sky layers the next frame draws (`CustomSky::draws`): the game refills it each
+    /// The custom sky layers the next frame draws (`SkyLayers::draws`): the game refills it each
     /// frame, empty when the world's sky has none.
     pub fn custom_sky_draws(&mut self) -> &mut Vec<crate::custom_sky::Draw> {
         &mut self.custom_sky_draws
     }
     /// The resource packs' `core/rendertype_lines` (`HudAtlas::lines_shader`) for the block
     /// outline, or the built-in one.
-    pub fn set_lines_shader(&mut self, program: Option<&horizon_shaders::CoreProgram>) {
+    pub fn set_lines_shader(&mut self, program: Option<&crate::core_shader::CoreProgram>) {
         let format = self.output.frame.format;
         self.core_lines =
             program.and_then(|program| core_lines::CoreLines::new(&self.device, format, program));
@@ -5614,8 +5618,8 @@ impl Renderer {
     /// `stars_shader`), or the built-in sky and stars.
     pub fn set_sky_shaders(
         &mut self,
-        disc: Option<&horizon_shaders::CoreProgram>,
-        stars: Option<&horizon_shaders::CoreProgram>,
+        disc: Option<&crate::core_shader::CoreProgram>,
+        stars: Option<&crate::core_shader::CoreProgram>,
     ) {
         self.core_sky = core_sky::CoreSky::new(&self.device, self.output.frame.format, disc, stars);
     }
@@ -5718,6 +5722,7 @@ impl Renderer {
         }
         self.surface_unconfigured = configured.is_err();
         self.surface = Some(Arc::new(surface));
+        self.surface_recreated();
         Ok(())
     }
     /// The world's depth, which occlusion culling's test and post effects may read.
@@ -7170,21 +7175,11 @@ impl Renderer {
             horizon_hdr::set_metadata(&self.device, surface, hdr.declared_peak(), hdr.black);
         }
     }
-    /// The swapchain's configuration: `config` (what every pipeline draws in), or
-    /// HDR10 or scRGB while HDR output is on.
-    fn surface_config(&self) -> wgpu::SurfaceConfiguration {
-        let mut config = self.config.clone();
-        if let Some(hdr) = &self.hdr {
-            config.format = hdr.output.format();
-            config.view_formats = vec![hdr.output.format()];
-            config.color_space = hdr.output.color_space();
-            config.usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
-        }
-        config
-    }
     /// This renderer's output as applied, with what its destination offers and reports.
-    pub fn output(&self) -> &output::EffectiveOutput {
-        &self.output
+    pub fn output(&self) -> output::EffectiveOutput {
+        let native = self.native.as_ref().map(|n| n.frame.api);
+        self.output
+            .with_pack(self.shader_pack_kind() == Some("iris"), native)
     }
     /// What this renderer's display last reported: a renderer made again for the window
     /// starts from it (`Renderer::new`'s `display`).
@@ -7236,105 +7231,10 @@ impl Renderer {
         output::resolve_frame(
             settings,
             request,
-            self.output_caps,
-            self.reading,
+            self.caps_for(settings),
+            output_apply::graced(self.auto_off_since, self.reading, &self.output),
             self.config.format,
         )
-    }
-    /// Follows the selected mode even when Auto currently wants SDR. Off never asks
-    /// the system about the display; selecting On or Auto starts a fresh watch.
-    fn watch_hdr(&mut self, mode: crate::graphics::HdrMode) {
-        if mode == crate::graphics::HdrMode::Off {
-            self.display = None;
-            self.display_fresh = false;
-            self.reading.stop_watching();
-        } else if self.display.is_none() {
-            let (watch, now) =
-                DisplayWatch::new(&self.window, self.surface.as_deref(), &self.adapter);
-            self.display = Some(watch);
-            self.refresh_hdr_offer();
-            self.reading = now;
-            self.display_fresh = true;
-        }
-    }
-    /// What the window's surface offers now: Vulkan's offered formats can change with desktop
-    /// HDR or the window's output.
-    fn refresh_hdr_offer(&mut self) {
-        if let Some(surface) = &self.surface {
-            self.output_caps.hdr = hdr::output(&surface.get_capabilities(&self.adapter));
-        }
-    }
-    /// HDR output (Horizon setting) as `settings` ask for it on this renderer's frame
-    /// (`output::resolve_output`): HDR10 or scRGB at paper white, the world's highlights
-    /// expanded up to the peak. Off where the surface can't present it. Offscreen
-    /// (`hdr::offscreen_output`) the frame is drawn the same and its HDR screenshot taken,
-    /// but nothing is presented, and Auto takes its defaults: no display reports.
-    pub fn update_output(
-        &mut self,
-        settings: &crate::graphics::Graphics,
-        marker: &std::path::Path,
-    ) {
-        self.watch_hdr(settings.hdr);
-        let next = output::resolve_output(
-            settings,
-            self.output_caps,
-            self.reading,
-            self.output.frame,
-            self.surface.is_some() || self.offscreen.is_some(),
-        );
-        let [paper_white, peak, black] = next.nits;
-        if next.encoding.is_some() != self.hdr.is_some() {
-            // If the game dies before HDR output shows a frame, the marker is still there at
-            // the next start, which then comes up with HDR off.
-            if next.encoding.is_some() {
-                if self.surface.is_some() {
-                    let _ = std::fs::write(marker, "HDR output was being switched on\n");
-                    self.hdr_marker = Some(marker.to_owned());
-                }
-            } else if let Some(marker) = self.hdr_marker.take() {
-                let _ = std::fs::remove_file(marker);
-            }
-            let frame = self.output.frame;
-            self.hdr = next.encoding.map(|output| {
-                hdr::Hdr::new(
-                    &self.device,
-                    &self.queue,
-                    frame.format,
-                    output,
-                    frame.hud_layer,
-                )
-            });
-            if let Some(hdr) = &mut self.hdr {
-                hdr.look = self.hdr_lighting_setting;
-            }
-            self.configure_surface();
-            match next.encoding {
-                Some(output) => log::info!(
-                    "Horizon renderer: HDR on: {} ({:?}), {paper_white}/{peak} nits",
-                    output.name(),
-                    output.format()
-                ),
-                None => log::info!("Horizon renderer: HDR off"),
-            }
-            self.measure_emission();
-        }
-        if let Some(hdr) = &mut self.hdr {
-            hdr.ui = next.ui_brightness;
-        }
-        if let Some(hdr) = &mut self.hdr
-            && (hdr.paper_white, hdr.peak, hdr.black) != (paper_white, peak, black)
-        {
-            hdr.paper_white = paper_white;
-            hdr.peak = peak;
-            hdr.black = black;
-            self.send_hdr_metadata();
-        }
-        // An output of another encoding than the one presented doesn't replace it yet, only
-        // Off does: the snapshot says what is presented.
-        self.output = output::EffectiveOutput {
-            encoding: self.hdr.as_ref().map(|hdr| hdr.output),
-            ..next
-        };
     }
     /// Measures which pixels of each block sprite may shine (`hdr_stats`), at the current
     /// masks. Only with HDR output on: without it the frame's alpha is never read.
@@ -7344,24 +7244,6 @@ impl Renderer {
             self.emission_stats
                 .measure(&self.device, &self.queue, &views, hdr.masks);
         }
-    }
-    /// Whether what the system reports for the display changed (another output, the
-    /// player recalibrating the desktop): the settings' Auto values follow it then, so
-    /// apply them again.
-    pub fn display_changed(&mut self) -> bool {
-        flush_display_log();
-        if std::mem::take(&mut self.display_fresh) {
-            return true;
-        }
-        let Some(watch) = self.display.as_mut() else {
-            return false;
-        };
-        let Some(now) = watch.changed(self.reading, self.surface.as_deref(), &self.adapter) else {
-            return false;
-        };
-        self.refresh_hdr_offer();
-        self.reading = now;
-        true
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
@@ -8551,8 +8433,12 @@ impl Renderer {
             t.begin(&self.device, &self.queue);
         }
         if self.animated_textures {
-            self.hud
-                .animate_sprites(&mut self.uploads, &mut encoder, frame.ticks);
+            self.hud.animate(
+                &mut self.uploads,
+                &mut encoder,
+                frame.ticks,
+                &self.animations,
+            );
         }
         self.update_lightmap(
             &mut encoder,
@@ -8571,9 +8457,7 @@ impl Renderer {
         let taa = !frame.title
             && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
             && self.native.as_ref().is_none_or(|n| n.post.is_none());
-        let hdr_lighting = self.native.is_none()
-            && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
-            && std::env::var_os("HORIZON_HDR_LIGHTING").is_none_or(|v| v != "0");
+        let hdr_lighting = self.shader_pack_kind().is_none();
         if let Some(hdr) = &mut self.hdr {
             hdr.lighting = hdr_lighting && hdr.look;
         }
@@ -9467,13 +9351,11 @@ impl Renderer {
         }
         // Near water and distant water share one back-to-front draw order.
         if self.translucent_draws.len() > section_translucent {
-            // Distant water goes after the near chunks', and replaced tiles'
-            // after all: each is a hair behind the one before, so depth leaves
-            // it only where that one has none. Back to front together, a far
-            // tile's water under a near chunk's (one fading in, or brought
-            // into view by a longer render distance) blended twice and looked
-            // opaque. The cost: far water just behind near water shows no
-            // surface of its own there.
+            // Distant water goes after the near chunks', and replaced tiles' after all: each is a
+            // hair behind the one before, so depth leaves it only where that one has none. Back to
+            // front together, a far tile's water under a near chunk's (one fading in, or brought
+            // into view by a longer render distance) blended twice and looked opaque. The cost: far
+            // water just behind near water shows no surface of its own there.
             let tier = |instance: usize| match instance.checked_sub(visible.len()) {
                 None => 0,
                 Some(tile) if visible_lods[tile].old => 2,
@@ -10346,7 +10228,11 @@ impl Renderer {
         let pack_reads_world = pack_post || native_post;
         laps.lap("r_uploads");
         // Phase 2 of occlusion culling draws over the depth, and a shader pack or TAA reads it.
+        // Post effects (a resource pack's chains, `use_depth_buffer`) read the world's depth
+        // after the world pass, as `GameRenderer.render` hands them the main target's.
+        let post_reads_depth = !frame.title && !frame.post_effects.effects.is_empty();
         let keep_depth = pack_reads_world
+            || post_reads_depth
             || (taa && self.world_post.taa)
             || oit_on
             || native_render::needs().world_depth
@@ -12350,11 +12236,28 @@ impl Renderer {
                 self.screenshot = Some(request);
             } else {
                 self.screenshot_halvings = 0;
-                self.screenshot_result = Some(
-                    self.read_screenshot(&request, &buffer, hdr_readback.as_ref())
-                        .map_err(|e| e.to_string()),
-                );
+                let reader = screenshot_readback::Reader {
+                    device: self.device.clone(),
+                    config: self.config.clone(),
+                };
+                if request.background {
+                    if let Err(error) =
+                        self.screenshot_readbacks
+                            .start(reader, request, buffer, hdr_readback)
+                    {
+                        self.screenshot_result = Some(Err(error.to_string()));
+                    }
+                } else {
+                    self.screenshot_result = Some(
+                        reader
+                            .read_screenshot(&request, &buffer, hdr_readback.as_ref())
+                            .map_err(|e| e.to_string()),
+                    );
+                }
             }
+        }
+        if self.screenshot_result.is_none() {
+            self.screenshot_result = self.screenshot_readbacks.poll();
         }
         // The frame's own waits for the submit thread (its queue writes and passes).
         self.last_wait += self.queue.take_waited();
@@ -12560,7 +12463,7 @@ impl Renderer {
                 &self.device,
                 &self.queue,
                 frame.post_effects.root,
-                &crate::post_chain::SPECTATOR_CHAINS,
+                crate::spectator_shaders::chains(),
                 target_texture.format(),
             );
             post.apply(
@@ -12959,81 +12862,13 @@ impl Renderer {
             let texture = copy.as_ref().unwrap_or(texture);
             Some((request, copy_frame(&self.device, encoder, texture, size)))
         } else {
-            self.screenshot_result = Some(Err(format!(
+            let error = format!(
                 "screenshots need a 32-bit surface format, not {:?}",
                 self.config.format
-            )));
+            );
+            self.screenshot_result = Some(Err(error));
             None
         }
-    }
-    /// The pixels `copy_frame` read back into `buffer`, 4 bytes each, row after row.
-    fn read_frame(&self, buffer: &wgpu::Buffer) -> Result<Vec<[u8; 4]>> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer.map_async(wgpu::MapMode::Read, .., move |r| {
-            let _ = sender.send(r);
-        });
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| e.to_string())?;
-        receiver
-            .recv()
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
-        let (width, height, row) = (
-            self.config.width as usize,
-            self.config.height as usize,
-            padded_row(self.config.width) as usize,
-        );
-        let mut pixels = Vec::with_capacity(width * height);
-        {
-            let data = buffer.get_mapped_range(..).map_err(|e| e.to_string())?;
-            for y in 0..height {
-                pixels.extend_from_slice(data[y * row..y * row + width * 4].as_chunks::<4>().0);
-            }
-        }
-        buffer.unmap();
-        Ok(pixels)
-    }
-    fn read_screenshot(
-        &self,
-        request: &ScreenshotRequest,
-        buffer: &wgpu::Buffer,
-        hdr_buffer: Option<&wgpu::Buffer>,
-    ) -> Result<PendingScreenshot> {
-        let bgra = matches!(
-            self.config.format.remove_srgb_suffix(),
-            wgpu::TextureFormat::Bgra8Unorm
-        );
-        let mut pixels = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
-        for px in self.read_frame(buffer)? {
-            let (r, b) = if bgra { (px[2], px[0]) } else { (px[0], px[2]) };
-            pixels.extend_from_slice(&[r, px[1], b, 255]);
-        }
-        // NativeImage.resizeSubRectTo on takeAutoScreenshot's grab: the icon
-        // is the frame's centre square averaged down to its size.
-        let (width, height, pixels) = match request.size {
-            Some(size) => (
-                size[0],
-                size[1],
-                square_downscale(&pixels, self.config.width, self.config.height, size),
-            ),
-            None => (self.config.width, self.config.height, pixels),
-        };
-        let hdr = hdr_buffer.and_then(|buffer| match self.read_frame(buffer) {
-            Ok(pixels) => Some(screenshot::HdrScreenshot {
-                size: [self.config.width, self.config.height],
-                pixels: hdr10_to_rgb16(&pixels),
-            }),
-            Err(e) => {
-                log::warn!("Horizon renderer: HDR screenshot readback: {e}");
-                None
-            }
-        });
-        Ok(PendingScreenshot {
-            path: request.path.clone(),
-            image: mod_api::ScreenshotImage::new(width, height, pixels),
-            hdr,
-        })
     }
 }
 /// `screenshots/2026-10-28_12.00.00.png` -> `screenshots/2026-10-28_12.00.00-hdr.png`.
@@ -13951,6 +13786,7 @@ mod tests {
             Some(Reported {
                 paper_white: 240,
                 peak: 998,
+                peak_guessed: true,
             })
         );
         assert_eq!(
@@ -13958,6 +13794,7 @@ mod tests {
             Some(Reported {
                 paper_white: 480,
                 peak: 480,
+                peak_guessed: true,
             })
         );
         // White above the calibrated peak (a Samsung QD-OLED's 380, the slider at 456).
@@ -13966,6 +13803,7 @@ mod tests {
             Some(Reported {
                 paper_white: 456,
                 peak: 456,
+                peak_guessed: true,
             })
         );
         assert_eq!(os_reported(&info(Some(1000.0), None)), None);
@@ -15519,6 +15357,10 @@ struct DisplayWatch {
 }
 
 impl DisplayReading {
+    /// What wgpu reads from the OS for `surface`'s display; nothing without one.
+    fn read(surface: Option<&wgpu::Surface>, adapter: &wgpu::Adapter) -> Self {
+        surface.map_or_else(Self::default, |s| Self::os(&s.display_hdr_info(adapter)))
+    }
     fn os(info: &wgpu::DisplayHdrInfo) -> Self {
         #[cfg(target_os = "macos")]
         let hdr = macos_hdr(info);
@@ -15559,9 +15401,7 @@ impl DisplayWatch {
             return (watch, wayland_reading(now));
         }
         let _ = window;
-        let now = surface.map_or_else(DisplayReading::default, |surface| {
-            DisplayReading::os(&surface.display_hdr_info(adapter))
-        });
+        let now = DisplayReading::read(surface, adapter);
         log_os_reported(now.luminance);
         let watch = Self {
             #[cfg(target_os = "linux")]
@@ -15570,30 +15410,28 @@ impl DisplayWatch {
         };
         (watch, now)
     }
-    /// What the system reports, if that changed from `last`.
-    fn changed(
+    /// What the system reports at each poll that is due at `time` (`read`; on Wayland, at each
+    /// event), whether or not it is `last` again: the surface's capabilities are read with it.
+    fn poll(
         &mut self,
         last: DisplayReading,
-        surface: Option<&wgpu::Surface>,
-        adapter: &wgpu::Adapter,
+        time: std::time::Instant,
+        read: impl FnOnce() -> DisplayReading,
     ) -> Option<DisplayReading> {
         #[cfg(target_os = "linux")]
         if let Some(wayland) = &mut self.wayland {
             return wayland.changed().map(wayland_reading);
         }
         let next = self.polled.as_mut()?;
-        let time = std::time::Instant::now();
         if time < *next {
             return None;
         }
         *next = time + DISPLAY_POLL;
-        let now = surface.map_or_else(DisplayReading::default, |surface| {
-            DisplayReading::os(&surface.display_hdr_info(adapter))
-        });
-        (now != last).then(|| {
+        let now = read();
+        if now != last {
             log_os_reported(now.luminance);
-            now
-        })
+        }
+        Some(now)
     }
 }
 
@@ -15651,11 +15489,9 @@ fn log_os_reported(reported: Option<crate::graphics::Reported>) {
         None => "Horizon renderer: the system doesn't report the display's luminance".into(),
     });
 }
-/// What the OS reports in absolute nits (Windows: DXGI's `MaxLuminance` and the SDR
-/// white level the brightness slider sets), which is HDR output's scale there: SDR
-/// white is Paper White, the display's peak is Peak Brightness. Both are kept within
-/// the settings' ranges. The OS's figures often come from the display's EDID and may
-/// run optimistic; the player's own value always wins.
+/// What the OS reports in absolute nits, HDR output's scale (Windows: DXGI's SDR white level,
+/// the brightness slider's, as Paper White, and its `MaxLuminance`, mostly the display's EDID
+/// guess, as Peak Brightness), kept within the settings' ranges. The player's values win.
 fn os_reported(info: &wgpu::DisplayHdrInfo) -> Option<crate::graphics::Reported> {
     let luminance = info.luminance?;
     let usable = |n: f32| n.is_finite() && n > 0.0;
@@ -15667,6 +15503,7 @@ fn os_reported(info: &wgpu::DisplayHdrInfo) -> Option<crate::graphics::Reported>
         // Windows' SDR brightness slider can set white above the reported peak (480 against
         // a calibrated 380): the highlights then stay at white instead of dropping below it.
         peak: (peak.round() as u32).clamp(200, 10_000).max(paper_white),
+        peak_guessed: true,
     })
 }
 
@@ -15702,6 +15539,7 @@ fn reported(l: horizon_hdr::wayland::Luminances) -> crate::graphics::Reported {
     crate::graphics::Reported {
         paper_white: 203,
         peak: peak.clamp(200, 10_000),
+        peak_guessed: false,
     }
 }
 

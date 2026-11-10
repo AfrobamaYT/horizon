@@ -3,6 +3,7 @@
 use super::{Game, ResizeState, Screen};
 use horizon_client::{
     Result,
+    hdr_calibration::WindowState,
     hud::HudBatch,
     lang,
     options_ui::{Event, Page},
@@ -127,7 +128,6 @@ impl Game<'_> {
         self.keys.clear();
         self.set_screen(Screen::Options);
         self.options_from_title = from_title;
-        self.options_to_game = false;
         let minecart_improvements = self.minecart_improvements();
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
@@ -186,10 +186,10 @@ impl Game<'_> {
         let output = self
             .renderer
             .as_ref()
-            .map_or(Default::default(), |r| *r.output());
+            .map_or(Default::default(), |r| r.output());
         ui.draw(&self.settings, output, batch, &self.gui.atlas, self.cursor);
         self.ui.options = ui;
-        self.show_calibration(batch.height);
+        self.show_calibration((batch.width, batch.height));
     }
     /// Whose controller settings these are and what this game sees (`controller_ui`): the
     /// player's badge in splitscreen with its name, and its own controller.
@@ -207,10 +207,10 @@ impl Game<'_> {
         }
     }
     /// HDR calibration's test picture to the renderer, full screen while it runs: the
-    /// window goes fullscreen for it and back after, if it wasn't already.
-    pub(super) fn show_calibration(&mut self, h: f32) {
+    /// window goes fullscreen for it and back after, as it was (maximized, say).
+    pub(super) fn show_calibration(&mut self, size: (f32, f32)) {
         let picture = (self.screen == Screen::Options)
-            .then(|| self.ui.options.calibration_picture(h))
+            .then(|| self.ui.options.calibration_picture(&self.gui.atlas, size))
             .flatten();
         if let Some(r) = self.renderer.as_mut() {
             r.set_hdr_calibration(picture.map(|(step, nits, band)| {
@@ -224,20 +224,25 @@ impl Game<'_> {
         let Some(window) = &self.window else {
             return;
         };
-        match (picture.is_some(), self.ui.options.calibration_fullscreen) {
+        match (picture.is_some(), self.ui.options.calibration_window) {
             (true, None) => {
-                let was = window.fullscreen().is_some();
-                if !was {
+                // Before entering fullscreen, which un-maximizes a window on Windows.
+                let was = WindowState::of(window.fullscreen().is_some(), window.is_maximized());
+                if was != WindowState::Fullscreen {
                     let borderless = horizon_client::window::borderless_fullscreen(window);
                     horizon_client::window::enter_fullscreen(window, borderless);
                 }
-                self.ui.options.calibration_fullscreen = Some(was);
+                self.ui.options.calibration_window = Some(was);
             }
             (false, Some(was)) => {
-                if !was {
+                let (leave_fullscreen, maximize) = was.leaving();
+                if leave_fullscreen {
                     window.set_fullscreen(None);
                 }
-                self.ui.options.calibration_fullscreen = None;
+                if maximize {
+                    window.set_maximized(true);
+                }
+                self.ui.options.calibration_window = None;
             }
             _ => {}
         }
@@ -386,12 +391,12 @@ impl Game<'_> {
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
-                    let to_game = std::mem::take(&mut self.options_to_game);
+                    let to_game = self.options_from_title;
                     let back = if let Some(screen) = self.panel.recipes_settings_return.take() {
                         screen
                     } else if std::mem::take(&mut self.options_to_world_options) {
                         Screen::WorldOptions
-                    } else if self.options_from_title || to_game {
+                    } else if self.options_from_title {
                         Screen::Playing
                     } else {
                         Screen::Paused
@@ -402,7 +407,7 @@ impl Game<'_> {
                     }
                     self.dragging = false;
                     // Closed from calibration (horizon-ctl, a lost window): out of it.
-                    self.show_calibration(0.0);
+                    self.show_calibration((0.0, 0.0));
                 }
                 Event::Language(code) => {
                     self.load_language(&code);
@@ -563,6 +568,14 @@ impl Game<'_> {
             self.reload_packs();
         }
         self.apply_fullscreen();
+        // A failed HDR start that named no driver becomes the window's driver's, and another
+        // driver's is dropped, so HDR output is tried again.
+        if let Some(driver) = self.renderer.as_ref().and_then(|r| r.hdr_driver())
+            && self.settings.horizon.settle_failed_start(driver)
+            && let Some(dir) = Self::options_path().parent()
+        {
+            self.settings.horizon.save(dir);
+        }
         let s = &self.settings;
         if let Some(r) = self.renderer.as_mut() {
             r.gamma = s.gamma;
@@ -628,6 +641,9 @@ impl Game<'_> {
             self.ui.chat.rescale(&self.gui.atlas);
         }
         self.notify_window_resize();
+        // The GUI scale is part of the screen's size (`Screen.resize`): a
+        // change remakes its build before this frame draws it.
+        self.build_screen();
         // 3D skin layers: a skin's slabs are built when it is resolved, so a
         // change here rebuilds the players already on screen (the Options
         // screen keeps resolving them every frame; this covers the console
@@ -664,6 +680,7 @@ impl Game<'_> {
                 now.gui_size[0],
                 now.gui_size[1],
             );
+            self.build_screen();
         }
     }
     /// `Window.updateFullscreenState`: a fullscreen change made by the window
@@ -671,7 +688,7 @@ impl Game<'_> {
     pub(super) fn observe_fullscreen(&mut self) {
         // HDR calibration's own fullscreen is not the player's option: it
         // goes back to what it was when the calibration ends.
-        if self.ui.options.calibration_fullscreen.is_some() {
+        if self.ui.options.calibration_window.is_some() {
             return;
         }
         let Some(w) = &self.window else { return };

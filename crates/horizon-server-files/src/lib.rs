@@ -5,6 +5,7 @@
 //! (`horizon-client --dedicated`) reads them, and `horizon-server` manages
 //! them; this crate needs neither a window nor the game.
 pub mod durable;
+pub mod duration;
 pub mod eula;
 pub mod java_properties;
 pub mod json;

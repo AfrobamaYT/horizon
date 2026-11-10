@@ -92,6 +92,21 @@ pub fn native_block_speed_factor(context: &LoopContext, state: BlockStateId, fac
     crate::native_client_hooks::block_speed_factor(context, state, factor);
 }
 
+/// Whether a block is a ladder to a living entity (`IBlockExtension.isLadder`, which
+/// `LivingEntity.onClimbable` asks of the block the entity stands in) is being decided. `ladder`
+/// starts with the `#minecraft:climbable` answer and the block's parts may change it. Fires on
+/// replayed ticks too, so a listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_is_ladder(
+    context: &LoopContext,
+    entity: u32,
+    pos: BlockPos,
+    state: BlockStateId,
+    ladder: &mut bool,
+) {
+    crate::native_client_hooks::is_ladder(context, entity, pos, state, ladder);
+}
+
 /// The factors the `block_jump_factor` and `block_speed_factor` parts give the blocks an entity
 /// reads, for the loop of the side that ticks it.
 pub(crate) struct ModBlockFactors<'a>(pub &'a LoopContext);
@@ -141,6 +156,7 @@ pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
 
 pub(crate) mod environment;
 mod fluids;
+mod ladder;
 pub use fluids::{
     BubbleColumn, FluidResources, FluidTags, LAVA, PlayerFluids, RiddenBoat, WATER,
     bubble_column_at, bubble_column_push, bubble_column_push_over, bubble_column_surfaces,
@@ -2234,18 +2250,16 @@ impl MotionWorld<'_, '_, '_> {
         let gravity = living_motion::effective_gravity(self)?;
         self.player.velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
         let movement = self.player.velocity;
-        let before = self.player.position;
         self.move_self(movement)?;
         // LivingEntity.handleFallFlyingCollisions: the fall-damage sound plays
         // on both sides (a glider's own travel is client-side, and the sound
         // must reach its own ears, #8906), only the server hurts, and it
-        // compares the delta before the move with the one after it, which
-        // `Entity.move` leaves as the movement it resolved. `move_entity` does
-        // not write that back, so the distance actually travelled stands in.
+        // compares the horizontal speed before `updateFallFlyingMovement`
+        // with the delta `Entity.move` leaves (the collided axes zeroed).
         if self.player.collision.horizontal {
-            let travelled = self.player.position.subtract(before);
-            let new_h = (travelled.x * travelled.x + travelled.z * travelled.z).sqrt();
-            let dmg = fly_into_wall_damage(move_h, new_h);
+            let v = self.player.velocity;
+            let after_h = (v.x * v.x + v.z * v.z).sqrt();
+            let dmg = fly_into_wall_damage(move_h, after_h);
             if dmg > 0.0 {
                 let first = self.player.events.len();
                 // getFallDamageSound((int) dmg)
@@ -2344,30 +2358,6 @@ impl MotionWorld<'_, '_, '_> {
             self.player.auto_jump_time = 1;
         }
         Ok(())
-    }
-}
-impl ClimbingWorld for MotionWorld<'_, '_, '_> {
-    type Error = std::convert::Infallible;
-    fn is_spectator(&mut self) -> std::result::Result<bool, Self::Error> {
-        Ok(self.player.spectator)
-    }
-    fn block_position(&mut self) -> std::result::Result<BlockPos, Self::Error> {
-        Ok(BlockPos::containing(self.player.position))
-    }
-    fn in_block_state(&mut self) -> std::result::Result<BlockStateId, Self::Error> {
-        Ok(self.block(BlockPos::containing(self.player.position)))
-    }
-    fn is_fall_flying(&mut self) -> std::result::Result<bool, Self::Error> {
-        Ok(self.player.fall_flying)
-    }
-    fn block_state(
-        &mut self,
-        position: BlockPos,
-    ) -> std::result::Result<BlockStateId, Self::Error> {
-        Ok(self.block(position))
-    }
-    fn set_last_climbable_position(&mut self, position: BlockPos) {
-        self.player.last_climbable = Some(position);
     }
 }
 impl crate::auto_jump::AutoJumpWorld for MotionWorld<'_, '_, '_> {
@@ -3342,6 +3332,7 @@ mod tests {
         assert_eq!(fly_into_wall_damage(0.3, 0.0), 0.0);
         assert!((fly_into_wall_damage(0.5, 0.1) - 1.0).abs() < 1e-5);
         assert!((fly_into_wall_damage(1.2, 0.0) - 9.0).abs() < 1e-5);
+        assert!(fly_into_wall_damage(0.01, 0.0) < 0.0);
     }
 
     use super::*;
@@ -4516,17 +4507,16 @@ mod tests {
             health: &resources.health,
         };
         w.travel_fall_flying().unwrap();
-        assert!(
-            w.player.events.iter().any(|e| matches!(
+        let is_fall = |e: &_| {
+            matches!(
                 e,
-                MotionEvent::Fall(crate::landing::FallEvent::Sound {
-                    sound: crate::landing::SceneSound::SmallFall,
-                    ..
-                })
-            )),
-            "{:?}",
-            w.player.events
-        );
+                MotionEvent::Fall(crate::landing::FallEvent::Sound { .. })
+            )
+        };
+        assert_eq!(w.player.events.iter().filter(|e| is_fall(e)).count(), 1);
+        // The sound must play only once on impact, not repeat on subsequent ticks (#12304):
+        w.travel_fall_flying().unwrap();
+        assert_eq!(w.player.events.iter().filter(|e| is_fall(e)).count(), 1);
         assert!(
             !w.player
                 .hurt_log
