@@ -7,11 +7,9 @@ impl Game<'_> {
             return;
         };
         if parts {
-            ids.extend(
-                (0..8)
-                    .filter(|&i| bounds.intersects(dragon.part_geometry(i).1))
-                    .filter_map(|i| dragon.id.checked_add(i as u32 + 1)),
-            );
+            ids.extend(self.dragon.parts_table().iter().filter(|&id| {
+                bounds.intersects(dragon.part_geometry((id - dragon.id - 1) as usize).1)
+            }));
         } else {
             // EntityType.ENDER_DRAGON dimensions: 16 wide, 8 high.
             let p = dragon.position;
@@ -68,10 +66,14 @@ mod tests {
                 game.living_health(game.living(entity).unwrap()),
                 Some(200.0)
             );
+            assert_eq!(
+                query(game, [-100.0, -10.0, -100.0], [100.0, 200.0, 100.0]),
+                vec![12, 20, 25, 27, 28, 24, 26, 23, 22, 21]
+            );
             // Vanilla parts begin at the origin until the first dragon tick.
             assert_eq!(
                 query(game, [-10.0, -1.0, -10.0], [10.0, 10.0, 10.0]),
-                vec![21, 22, 23, 24, 25, 26, 27, 28]
+                vec![25, 27, 28, 24, 26, 23, 22, 21]
             );
         });
     }

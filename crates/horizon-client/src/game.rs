@@ -3014,7 +3014,7 @@ struct Game<'a> {
     maps: maps::Maps,
     /// The ender dragon fight (game/mobs/dragon.rs).
     fight: dragon::Fight,
-    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
+    dragon: native_entity_refs::dragon_parts_table::DragonSlot,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
     breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     dragon_model: Option<horizon_client::mobs::Part>,
