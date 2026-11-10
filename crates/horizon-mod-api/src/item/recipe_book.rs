@@ -28,7 +28,6 @@ pub struct RecipeBookCategory {
 
 /// A namespaced custom recipe book identity returned during registration.
 /// This owns no settings; player settings and synchronization are separate.
-// exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(Clone, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 // exhaustive: its private identity field prevents external construction or destructuring
 pub struct RecipeBookTypeKey {

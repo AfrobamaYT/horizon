@@ -3,7 +3,6 @@ use crate::*;
 
 /// What one slot in a recipe display shows. Resource references use names, never
 /// process-local registry ordinals. The host resolves these at recipe load.
-// exhaustive: mirrors the finite vanilla display forms; new forms are a coordinated API break
 #[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 // exhaustive: a closed set of slot forms the host resolves without a wildcard
 pub enum RecipeSlotDisplay {
@@ -34,7 +33,6 @@ pub enum RecipeSlotDisplay {
 }
 
 /// Vanilla's five recipe display layouts, independent of the recipe's JSON.
-// exhaustive: mirrors the finite vanilla display forms; new forms are a coordinated API break
 #[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 // exhaustive: the five vanilla layouts the host validates without a wildcard
 pub enum RecipeBookDisplay {
@@ -74,7 +72,6 @@ pub enum RecipeBookDisplay {
 
 /// Displays supplied by a recipe type for one recipe. A recipe may have several
 /// displays. Declarations are evaluated once per recipe-table load, not per frame.
-// exhaustive: mirrors the finite vanilla display forms; new forms are a coordinated API break
 #[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 // exhaustive: mods construct complete recipe display declarations with a literal
 pub struct RecipeBookDisplayEntry {
