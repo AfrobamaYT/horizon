@@ -2499,6 +2499,7 @@ impl Addition {
 const BIOMES: &str = "worldgen/biomes.json";
 const FEATURE_TAGS: &str = "worldgen/feature_tags.json";
 const PLACED_FEATURES: &str = "worldgen/placed_features.json";
+const CARVERS: &str = "worldgen/carvers.json";
 
 /// Rewrites the biome bundle with the mods' biome modifiers. `biome_tags`
 /// and `placed` are the bundles as the mods left them (`None`: the base's).
@@ -2537,7 +2538,9 @@ fn place_in_biomes(
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
     let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
+    let carver_ids = biomes::carver_ids(&base.join(CARVERS))?;
     let mut saved = SavedModifiers {
+        carver_ids,
         enabled_mods,
         modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
         unmodified: BTreeMap::new(),
@@ -2645,6 +2648,9 @@ struct SavedModifiers {
     feature_tags: BTreeMap<String, String>,
     entity_categories: BTreeMap<String, String>,
     entity_tags: BTreeMap<String, String>,
+    /// The configured carvers of the root (a world's packs' carvers are not among them).
+    #[serde(default)]
+    carver_ids: BTreeSet<String>,
 }
 
 impl SavedModifiers {
@@ -2663,24 +2669,18 @@ impl SavedModifiers {
             _ => return Err(format!("{BIOMES}: not an object").into()),
         };
         let entity_ids: BTreeSet<String> = self.entity_categories.keys().cloned().collect();
+        let registries = biomes::Registries::of(
+            &biome_ids,
+            biome_tags,
+            placed,
+            &self.feature_tags,
+            (&entity_ids, &self.entity_tags),
+            &self.carver_ids,
+        );
         biomes::apply(
             doc,
             modifiers,
-            &biomes::Registry {
-                what: "biome",
-                ids: &biome_ids,
-                tags: biome_tags,
-            },
-            &biomes::Registry {
-                what: "placed feature",
-                ids: placed,
-                tags: &self.feature_tags,
-            },
-            &biomes::Registry {
-                what: "entity type",
-                ids: &entity_ids,
-                tags: &self.entity_tags,
-            },
+            &registries,
             &self.entity_categories,
             warnings,
         )

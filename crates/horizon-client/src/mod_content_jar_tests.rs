@@ -472,3 +472,57 @@ fn a_biome_modifier_declared_in_code_applies_to_the_root_biomes() {
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+/// `add_carvers` and `remove_carvers` edit a biome's `carvers`; a carver the root lacks is
+/// skipped with a warning.
+#[test]
+fn carver_modifiers_edit_the_biomes_carvers() {
+    let base = biome_base("biome-modifiers-carvers");
+    let scratch = base.parent().unwrap().to_owned();
+    fs::write(
+        base.join("worldgen/carvers.json"),
+        r#"{"minecraft:cave":{},"zinc:pit":{}}"#,
+    )
+    .unwrap();
+    let path = base.join("worldgen/biomes.json");
+    let mut bundle: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    bundle.insert(
+        "minecraft:plains".into(),
+        r#"{"temperature":0.8,"carvers":["minecraft:cave"]}"#.into(),
+    );
+    fs::write(&path, serde_json::to_string(&bundle).unwrap()).unwrap();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[
+            (
+                "pit",
+                r#"{"type":"neoforge:add_carvers","biomes":"minecraft:desert","carvers":"zinc:pit"}"#,
+            ),
+            (
+                "fill",
+                r#"{"type":"neoforge:remove_carvers","biomes":"minecraft:plains","carvers":"minecraft:cave"}"#,
+            ),
+            (
+                "missing",
+                r#"{"type":"neoforge:add_carvers","biomes":"minecraft:desert","carvers":"zinc:none"}"#,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    let after: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let carvers = |id: &str| {
+        serde_json::from_str::<serde_json::Value>(&after[id]).unwrap()["carvers"].clone()
+    };
+    assert_eq!(carvers("minecraft:desert"), serde_json::json!(["zinc:pit"]));
+    assert_eq!(carvers("minecraft:plains"), serde_json::json!([]));
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("unknown carver zinc:none")),
+        "{warnings:?}"
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
