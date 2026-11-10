@@ -832,6 +832,7 @@ fn replay_chunk(
     chunk: [i32; 2],
     region_dir: &Path,
 ) -> Result<bool, RecoveryRefused> {
+    let entities = root_entities(&root);
     let mut data = horizon_world::chunk::ChunkData::new(root).map_err(|e| {
         RecoveryRefused::Chunk(format!(
             "chunk ({},{}) does not parse: {e}",
@@ -851,7 +852,14 @@ fn replay_chunk(
                 pos.x, pos.y, pos.z
             ))
         })?;
-        let matches = |image: &CellImage| match &found {
+        let entity = entities
+            .iter()
+            .find(|tag| entity_at(tag, [pos.x, pos.y, pos.z]))
+            .cloned();
+        // Exact witnesses: the state AND the block entity must equal
+        // the image's. A matching state over a different entity is a
+        // mismatch, never a silent pass.
+        let state_is = |image: &CellImage| match &found {
             None => image.name == "minecraft:air" && image.properties.is_empty(),
             Some(state) => {
                 state.name == image.name
@@ -862,15 +870,23 @@ fn replay_chunk(
                         .all(|(key, value)| state.properties.get(key).is_some_and(|v| v == value))
             }
         };
-        if matches(&cell.after) {
+        let entity_is = |image: &CellImage| match (&entity, &image.entity) {
+            (None, None) => true,
+            (Some(found), Some(expected)) => entities_equal(found, expected),
+            _ => false,
+        };
+        if state_is(&cell.after) && entity_is(&cell.after) {
             continue;
         }
-        if !matches(&cell.before) {
+        if !(state_is(&cell.before) && entity_is(&cell.before)) {
             let found = found
                 .map(|state| {
                     let mut text = state.name.clone();
                     for (key, value) in &state.properties {
                         text.push_str(&format!(",{key}={value}"));
+                    }
+                    if entity.is_some() {
+                        text.push_str(",+entity");
                     }
                     text
                 })
@@ -896,12 +912,46 @@ fn replay_chunk(
         return Ok(false);
     }
     // Block entities ride the root's own list: the after-image's entity
-    // is installed, the before-image's position cleared, by plain NBT
-    // edits so nothing else in the chunk moves.
+    // is installed, the before position's cleared, by plain NBT edits
+    // so nothing else in the chunk moves.
     let root = data.into_nbt();
     let root = edit_block_entities(root, operation, chunk)?;
     write_chunk_back(region_dir, root, chunk)?;
     Ok(true)
+}
+
+/// The chunk root's `block_entities` list, by value.
+fn root_entities(root: &horizon_core::nbt::NamedTag) -> Vec<horizon_core::nbt::Tag> {
+    match root.tag.get("block_entities") {
+        Some(horizon_core::nbt::Tag::List(list)) => list.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether an entity tag sits at `pos`.
+fn entity_at(tag: &horizon_core::nbt::Tag, pos: [i32; 3]) -> bool {
+    let read = |name: &str| match tag.get(name) {
+        Some(horizon_core::nbt::Tag::Int(value)) => Some(*value),
+        _ => None,
+    };
+    read("x") == Some(pos[0]) && read("y") == Some(pos[1]) && read("z") == Some(pos[2])
+}
+
+/// Whether two serialized block entities carry the same content: the
+/// exact replay witness. The positional `x`/`y`/`z` ints are placement,
+/// not content — the stored image keeps its own coordinates — so the
+/// comparison strips them and then compares everything else.
+fn entities_equal(a: &horizon_core::nbt::Tag, b: &horizon_core::nbt::Tag) -> bool {
+    let strip = |tag: &horizon_core::nbt::Tag| -> horizon_core::nbt::Tag {
+        let mut clone = tag.clone();
+        if let horizon_core::nbt::Tag::Compound(map) = &mut clone {
+            for key in ["x", "y", "z"] {
+                map.remove(&horizon_core::nbt::JavaString::from(key));
+            }
+        }
+        clone
+    };
+    horizon_core::nbt::compare_nbt(&strip(a), Some(&strip(b)))
 }
 
 /// Installs the after-images' block entities and clears the before

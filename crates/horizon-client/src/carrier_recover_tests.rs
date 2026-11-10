@@ -611,141 +611,154 @@ fn an_unreadable_or_missing_operation_refuses_the_world_load() {
 
 #[test]
 fn damaged_regions_refuse_without_generating_content() {
-    let fixture = Fixture::new("damaged");
-    let position = ChunkPos::new(0, 0);
-    let chest_at = [4, 0, 4];
-    put_chunk(
-        &fixture,
-        position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
-    );
-    let region = fixture.region().join("r.0.0.mca");
-    let whole = fs::read(&region).unwrap();
-
-    let prepare_store = || {
+    // Each damage shape gets its own fresh prepared case, because the
+    // store holds exactly one open operation at a time now.
+    fn prepared_case(name: &str) -> (Fixture, Store, ChunkPos, PathBuf, [i32; 3]) {
+        let fixture = Fixture::new(name);
+        let position = ChunkPos::new(0, 0);
+        let chest_at = [4, 0, 4];
+        put_chunk(
+            &fixture,
+            position,
+            &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
+        );
         let mut store = fixture.store();
         let operation = assemble_chest(store.next_op_id(), chest_at);
         prepare(&mut store, &operation);
-        store
-    };
-
-    // A truncated header.
-    fs::write(&region, &whole[..4096]).unwrap();
-    let mut store = prepare_store();
-    assert!(matches!(
-        recover(
-            &mut store,
-            &fixture.region(),
-            &AllStatesKnown,
-            "minecraft:overworld"
-        ),
-        Err(RecoveryRefused::Region {
-            why: Strict::ShortHeader,
-            ..
-        })
-    ));
-    // A zeroed header: no entry at all, which for an affected chunk is
-    // damage, not absence.
-    fs::write(&region, vec![0_u8; 8192]).unwrap();
-    let mut store = prepare_store();
-    assert!(matches!(
-        recover(
-            &mut store,
-            &fixture.region(),
-            &AllStatesKnown,
-            "minecraft:overworld"
-        ),
-        Err(RecoveryRefused::Region {
-            why: Strict::Missing,
-            ..
-        })
-    ));
-    // An offset past the file's end.
-    let mut past = whole.clone();
-    past[0..4].copy_from_slice(&0x0100_0001_u32.to_be_bytes());
-    fs::write(&region, &past).unwrap();
-    let mut store = prepare_store();
-    assert!(matches!(
-        recover(
-            &mut store,
-            &fixture.region(),
-            &AllStatesKnown,
-            "minecraft:overworld"
-        ),
-        Err(RecoveryRefused::Region {
-            why: Strict::EntryPastEof,
-            ..
-        })
-    ));
-    // A zero sector count.
-    let mut zeroed = whole.clone();
-    zeroed[3] = 0;
-    fs::write(&region, &zeroed).unwrap();
-    let mut store = prepare_store();
-    assert!(matches!(
-        recover(
-            &mut store,
-            &fixture.region(),
-            &AllStatesKnown,
-            "minecraft:overworld"
-        ),
-        Err(RecoveryRefused::Region {
-            why: Strict::EntryPastEof,
-            ..
-        })
-    ));
-    // A truncated payload: the entry stays, the sectors do not.
-    fs::write(&region, &whole[..whole.len() - 2]).unwrap();
-    let mut store = prepare_store();
-    assert!(matches!(
-        recover(
-            &mut store,
-            &fixture.region(),
-            &AllStatesKnown,
-            "minecraft:overworld"
-        ),
-        Err(RecoveryRefused::Region {
-            why: Strict::TruncatedPayload,
-            ..
-        }) | Err(RecoveryRefused::Region {
-            why: Strict::EntryPastEof,
-            ..
-        })
-    ));
-    // A missing external .mcc stream: the chunk carries two mebibytes of
-    // incompressible noise in a root key, past the 256-sector threshold.
-    fs::write(&region, &whole).unwrap();
-    let mut state = 0x4d59_5ea1_u64;
-    let noise = (0..2 * 1024 * 1024)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            (state >> 32) as u8
-        })
-        .collect::<Vec<u8>>();
-    let mut huge = chunk_root(Tag::String("minecraft:stone".into()), &[]);
-    if let Tag::Compound(map) = &mut huge.tag {
-        map.insert("horizon:noise".into(), Tag::ByteArray(noise));
+        let region = fixture.region().join("r.0.0.mca");
+        (fixture, store, position, region, chest_at)
     }
-    let huge = ChunkData::new(huge).unwrap().into_nbt();
-    put_chunk(&fixture, position, &huge);
-    let external = fixture.region().join("c.0.0.mcc");
-    assert!(external.exists(), "the fixture must go external");
-    fs::remove_file(&external).unwrap();
-    let mut store = prepare_store();
-    assert!(matches!(
-        recover(
+    // A truncated header.
+    {
+        let (fixture, mut store, _position, region, _chest) = prepared_case("short-header");
+        let whole = fs::read(&region).unwrap();
+        fs::write(&region, &whole[..4096]).unwrap();
+        match recover(
             &mut store,
             &fixture.region(),
             &AllStatesKnown,
-            "minecraft:overworld"
-        ),
-        Err(RecoveryRefused::Region {
-            why: Strict::ExternalMissing,
-            ..
-        })
-    ));
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::Region {
+                why: Strict::ShortHeader,
+                ..
+            }) => {}
+            other => panic!("expected a short header, got {other:?}"),
+        }
+    }
+    // A zeroed header: no entry at all.
+    {
+        let (fixture, mut store, _position, region, _chest) = prepared_case("zeroed-header");
+        fs::write(&region, vec![0_u8; 8192]).unwrap();
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::Region {
+                why: Strict::Missing,
+                ..
+            }) => {}
+            other => panic!("expected a missing entry, got {other:?}"),
+        }
+    }
+    // An offset past the file's end.
+    {
+        let (fixture, mut store, _position, region, _chest) = prepared_case("offset-eof");
+        let mut past = fs::read(&region).unwrap();
+        past[0..4].copy_from_slice(&0x0100_0001_u32.to_be_bytes());
+        fs::write(&region, &past).unwrap();
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::Region {
+                why: Strict::EntryPastEof,
+                ..
+            }) => {}
+            other => panic!("expected an eof entry, got {other:?}"),
+        }
+    }
+    // A zero sector count.
+    {
+        let (fixture, mut store, _position, region, _chest) = prepared_case("zero-sectors");
+        let mut zeroed = fs::read(&region).unwrap();
+        zeroed[3] = 0;
+        fs::write(&region, &zeroed).unwrap();
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::Region {
+                why: Strict::EntryPastEof,
+                ..
+            }) => {}
+            other => panic!("expected a zero sector count, got {other:?}"),
+        }
+    }
+    // A truncated payload.
+    {
+        let (fixture, mut store, _position, region, _chest) = prepared_case("short-payload");
+        let whole = fs::read(&region).unwrap();
+        fs::write(&region, &whole[..whole.len() - 2]).unwrap();
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::Region {
+                why: Strict::TruncatedPayload | Strict::EntryPastEof,
+                ..
+            }) => {}
+            other => panic!("expected a truncated payload, got {other:?}"),
+        }
+    }
+    // A missing external .mcc stream: incompressible noise in a root
+    // key pushes the chunk past the 256-sector threshold.
+    {
+        let fixture = Fixture::new("external-mcc");
+        let position = ChunkPos::new(0, 0);
+        let mut state = 0x4d59_5ea1_u64;
+        let noise = (0..2 * 1024 * 1024)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 32) as u8
+            })
+            .collect::<Vec<u8>>();
+        let mut huge = chunk_root_at(Tag::String("minecraft:stone".into()), &[], 0, 0);
+        if let Tag::Compound(map) = &mut huge.tag {
+            map.insert("horizon:noise".into(), Tag::ByteArray(noise));
+        }
+        let huge = ChunkData::new(huge).unwrap().into_nbt();
+        put_chunk(&fixture, position, &huge);
+        let external = fixture.region().join("c.0.0.mcc");
+        assert!(external.exists(), "the fixture must go external");
+        fs::remove_file(&external).unwrap();
+        let mut store = fixture.store();
+        let chest_at = [4, 0, 4];
+        let operation = assemble_chest(store.next_op_id(), chest_at);
+        prepare(&mut store, &operation);
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::Region {
+                why: Strict::ExternalMissing,
+                ..
+            }) => {}
+            other => panic!("expected the missing external stream, got {other:?}"),
+        }
+    }
 }
 
 #[test]
@@ -968,7 +981,6 @@ fn a_prepared_assembly_recovery_owns_the_cargo_in_a_carrier_file() {
     let _ = report;
 }
 
-
 /// (c) A second assembly with an occupied UUID refuses; the first
 /// carrier keeps its payload.
 #[test]
@@ -1007,7 +1019,6 @@ fn an_occupied_uuid_refuses_and_keeps_the_first_carrier() {
     assert!(store.journal().lists(7, 1));
 }
 
-
 /// (d) `Store::begin` refuses when an operation is already open.
 #[test]
 fn begin_refuses_an_already_open_operation() {
@@ -1024,7 +1035,6 @@ fn begin_refuses_an_already_open_operation() {
     assert_eq!(op.uuid, 1);
     assert_eq!(op.op_id, 1);
 }
-
 
 /// (e) Recovery refuses when the operation file's id, kind, UUID or
 /// generation disagrees with the journal's prepared record.
@@ -1080,5 +1090,58 @@ fn recovery_refuses_a_mismatched_operation_identity() {
         let root = get_chunk(&fixture, position).unwrap();
         assert_eq!(chest_items(&root, chest_at), Some(8));
         assert!(store.journal().in_progress.is_some());
+    }
+}
+/// (b) A journal replay where the block state already matches the
+/// after-image but the block entity differs: skipping the cell
+/// silently would strand the entity — recovery must refuse or restore
+/// the after-image, never pass the difference by.
+#[test]
+fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
+    let fixture = Fixture::new("entity-witness");
+    let position = ChunkPos::new(0, 0);
+    let chest_at = [4, 0, 4];
+    // The cell is air — the after-image's state — but a leftover block
+    // entity with different items sits there.
+    let mut root = chunk_root_at(Tag::String("minecraft:air".into()), &[], 0, 0);
+    if let Tag::Compound(map) = &mut root.tag {
+        map.insert(
+            "block_entities".into(),
+            Tag::List(vec![Tag::compound([
+                ("id", Tag::String("minecraft:chest".into())),
+                ("x", Tag::Int(4)),
+                ("y", Tag::Int(0)),
+                ("z", Tag::Int(4)),
+                ("Items", Tag::ByteArray(vec![3; 5])),
+            ])]),
+        );
+    }
+    put_chunk(&fixture, position, &root);
+    let mut store = fixture.store();
+    let mut operation = assemble_chest(store.next_op_id(), chest_at);
+    operation.cells[0].before.entity = Some(entity_with_items(5));
+    prepare(&mut store, &operation);
+
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
+        // Either outcome is honest: the leftover entity removed (the
+        // after-image restored) or the load refused.
+        Ok(_) => {
+            let root = get_chunk(&fixture, position).unwrap();
+            assert_eq!(
+                chest_items(&root, chest_at),
+                None,
+                "the after-image's entity state is restored, not skipped"
+            );
+            assert!(store.journal().in_progress.is_none());
+        }
+        Err(RecoveryRefused::CellMismatch { .. }) => {}
+        other => {
+            panic!("a differing entity under a matching state must not pass silently: {other:?}")
+        }
     }
 }

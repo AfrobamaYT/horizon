@@ -98,6 +98,25 @@ impl std::fmt::Display for TransferError {
     }
 }
 
+/// Whether a live block entity's serialized form carries exactly the
+/// image's content: the positional `x`/`y`/`z` are placement, not
+/// content, so the comparison strips them first.
+fn entities_content_equal(
+    live: &horizon_core::nbt::Tag,
+    image: &horizon_core::nbt::Tag,
+) -> bool {
+    let strip = |tag: &horizon_core::nbt::Tag| -> horizon_core::nbt::Tag {
+        let mut clone = tag.clone();
+        if let horizon_core::nbt::Tag::Compound(map) = &mut clone {
+            for key in ["x", "y", "z"] {
+                map.remove(&horizon_core::nbt::JavaString::from(key));
+            }
+        }
+        clone
+    };
+    horizon_core::nbt::compare_nbt(&strip(live), Some(&strip(image)))
+}
+
 impl Game<'_> {
     /// Assembles `cells` into one carrier. One synchronous call on the
     /// server's thread at a tick boundary — no tick runs between
@@ -426,14 +445,36 @@ impl Game<'_> {
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect();
-            operation_cells.push(OperationCell {
-                world,
-                local: [cell.pos().x(), cell.pos().y(), cell.pos().z()],
-                before: CellImage {
+            // The destination's before-image records what is really
+            // there — the replaceable block's own state, not a guess
+            // that it was air.
+            let before_descriptor = registry.state(state);
+            let before = if state == registry.default_state("minecraft:air").unwrap_or(state) {
+                CellImage {
                     name: "minecraft:air".to_string(),
                     properties: Vec::new(),
                     entity: None,
-                },
+                }
+            } else {
+                CellImage {
+                    name: before_descriptor
+                        .map(|d| d.name.clone())
+                        .unwrap_or_default(),
+                    properties: before_descriptor
+                        .map(|d| {
+                            d.properties
+                                .iter()
+                                .map(|(k, v)| (k.to_string(), v.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    entity: None,
+                }
+            };
+            operation_cells.push(OperationCell {
+                world,
+                local: [cell.pos().x(), cell.pos().y(), cell.pos().z()],
+                before,
                 after: CellImage {
                     name: cell.name().to_string(),
                     properties,
@@ -611,12 +652,25 @@ impl Game<'_> {
             if !same_state {
                 return Err(TransferError::Revalidation(pos));
             }
-            let entity_present = self
+            let found_entity = self
                 .world
                 .block_entities
-                .contains_key(&(pos[0], pos[1], pos[2]));
-            if entity_present != cell.before.entity.is_some() {
-                return Err(TransferError::Revalidation(pos));
+                .get(&(pos[0], pos[1], pos[2]));
+            match (found_entity, &cell.before.entity) {
+                (None, None) => {}
+                // Presence alone is not a witness: the live entity must
+                // serialize to exactly the image's content.
+                (Some(live), Some(image)) => {
+                    let name = registry
+                        .state(state)
+                        .map(|descriptor| descriptor.name.as_str())
+                        .unwrap_or("");
+                    let encoded = encode_block_entity((pos[0], pos[1], pos[2]), live, name);
+                    if !entities_content_equal(&encoded, image) {
+                        return Err(TransferError::Revalidation(pos));
+                    }
+                }
+                _ => return Err(TransferError::Revalidation(pos)),
             }
         }
         Ok(())
@@ -695,7 +749,7 @@ impl Game<'_> {
             .map_err(|e| e.to_string())
     }
 
-    /// Saves every affected chunk and waits for the writer's barrier, so
+/// Saves every affected chunk and waits for the writer's barrier, so
     /// the sectors are on disk with the regions synced.
     #[cfg_attr(not(test), allow(dead_code))]
     fn save_affected(&mut self, cells: &[BlockPos]) -> crate::Result<()> {
