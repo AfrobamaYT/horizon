@@ -10,7 +10,7 @@
 //! `#[derive(Wire)]` (or a hand-written `impl Wire`), as [`crate::wire_types`] finds them. Nothing adds the derive: any other parameter makes the point's API
 //! listeners refuse, naming it, and leaves its `internals` form.
 use super::{Found, GamePoint, WireTypes, file_functions, imports, module_files, unraw};
-pub use point_shape::catalog::Catalog;
+use point_shape::catalog::Catalog;
 use quote::{ToTokens, quote};
 use std::collections::BTreeSet;
 use std::fs;
