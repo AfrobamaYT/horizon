@@ -11,7 +11,7 @@ What a mod can do with biomes, by what it wants. Each row names the call or file
 | Find the nearest biome or tag | `LevelRef::find_closest_biome` with a `BiomeSearch` | Server |
 | Change a biome | `LevelRef::set_biome`, one 4x4x4 cell, as `/fillbiome` does | Server |
 | Run bone meal at a position | `LevelRef::bone_meal` | Server |
-| Tint foliage, grass or water by biome | The biome colour resolvers a mod registers ([client effects](client-effects.md)) | Client |
+| Tint foliage, grass or water by biome | The `register_color_resolvers` hook for new colour resolvers, and the `biome_colors` hook to change a biome's own colours | Client |
 
 ## What is not here yet
 
