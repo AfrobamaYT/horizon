@@ -203,8 +203,8 @@ impl WorldView {
         Self { roll, ..self }
     }
 
-    /// Whether it can be drawn: every value finite and in range.
-    fn valid(&self) -> bool {
+    /// Whether it can be drawn: every value finite and in range, no side over `max_side`.
+    fn valid(&self, max_side: u32) -> bool {
         self.camera.is_finite()
             && [self.yaw, self.pitch, self.roll]
                 .iter()
@@ -213,7 +213,7 @@ impl WorldView {
             && self
                 .size
                 .iter()
-                .all(|&s| (1..=MAX_WORLD_VIEW_SIDE).contains(&s))
+                .all(|&s| (1..=max_side.min(MAX_WORLD_VIEW_SIDE)).contains(&s))
     }
 }
 
@@ -268,11 +268,13 @@ pub fn world_views_hooked() -> bool {
             .load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// The views of those asked for ([`world_views`]) that can be drawn.
-pub fn drawable_world_views(mut views: Vec<WorldView>) -> Vec<WorldView> {
+/// The views of those asked for ([`world_views`]) that can be drawn on a device whose textures
+/// are at most `max_side` pixels a side (`max_texture_dimension_2d`; never above
+/// [`MAX_WORLD_VIEW_SIDE`]).
+pub fn drawable_world_views(mut views: Vec<WorldView>, max_side: u32) -> Vec<WorldView> {
     let mut ids = Vec::new();
     views.retain(|v| {
-        v.valid() && !ids.contains(&v.id) && {
+        v.valid(max_side) && !ids.contains(&v.id) && {
             ids.push(v.id);
             true
         }
@@ -567,8 +569,18 @@ mod tests {
             ),
         ];
         asked.extend((10..20).map(|id| view(id, 170.0, [1, MAX_WORLD_VIEW_SIDE])));
-        let drawn: Vec<u64> = drawable_world_views(asked).iter().map(|v| v.id).collect();
+        let drawn: Vec<u64> = drawable_world_views(asked, MAX_WORLD_VIEW_SIDE)
+            .iter()
+            .map(|v| v.id)
+            .collect();
         // the first id 1 only; the out-of-range ones left out; at most four in all
         assert_eq!(drawn, [1, 10, 11, 12]);
+        // A device with smaller textures (downlevel, GL: 2048) leaves out what it cannot hold.
+        let small = vec![view(20, 70.0, [2049, 64]), view(21, 70.0, [2048, 2048])];
+        let drawn: Vec<u64> = drawable_world_views(small, 2048)
+            .iter()
+            .map(|v| v.id)
+            .collect();
+        assert_eq!(drawn, [21]);
     }
 }

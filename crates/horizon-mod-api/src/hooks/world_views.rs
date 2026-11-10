@@ -12,7 +12,7 @@ second camera's preview beside the player's view, stills for a film strip. As ea
 the title screen's panorama), `world_views` asks for them, more than once a frame, so keep it cheap: push a
 `WorldView::new(id, camera, yaw, pitch, fov_degrees, size)` (`with_roll(degrees)` turns it about the view
 direction) for each one wanted this frame. Up to `MAX_WORLD_VIEWS` (4) draw, each at most `MAX_WORLD_VIEW_SIDE`
-(4096) pixels a side; one with a value out of range or an `id` already asked for is left out. Push the same views
+(4096) pixels a side, or the device's largest texture side when that is smaller; one with a value out of range or an `id` already asked for is left out. Push the same views
 each time within a frame.
 
 Each view is drawn after the frame's world with the frame's terrain (solid and translucent), sky colour, fog and

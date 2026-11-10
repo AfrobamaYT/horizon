@@ -1413,8 +1413,9 @@ pub struct Renderer {
     mirror_globals: wgpu::Buffer,
     mirror_group: wgpu::BindGroup,
     mirror: Option<MirrorTarget>,
-    /// Native mods' world views' targets, by id.
+    /// Native mods' world views' targets, by id, and the largest side the device can give one.
     world_views: world_views::Targets,
+    world_view_side: u32,
     entity_pipeline: wgpu::RenderPipeline,
     static_entity_pipeline: wgpu::RenderPipeline,
     static_entity_group: wgpu::BindGroup,
@@ -5284,6 +5285,7 @@ impl Renderer {
             mirror_group,
             mirror: None,
             world_views: Default::default(),
+            world_view_side: max_side,
             entity_pipeline,
             static_entity_pipeline,
             hdr_mark_pipeline,
@@ -7958,9 +7960,12 @@ impl Renderer {
         depth_far: f32,
     ) -> Frustum {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        world_views::open_while_asked(Frustum {
-            planes: frustum(views.cull().view_proj(bob)),
-        })
+        world_views::open_while_asked(
+            Frustum {
+                planes: frustum(views.cull().view_proj(bob)),
+            },
+            self.world_view_side,
+        )
     }
     /// A conservative view for geometry built before TAA chooses this frame's
     /// jitter. Cover a whole rendered pixel on each side, at the configured
@@ -7974,11 +7979,14 @@ impl Renderer {
         depth_far: f32,
     ) -> Frustum {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        world_views::open_while_asked(taa_frustum(
-            views.cull().view_proj(bob),
-            self.world_post
-                .taa_render_size([self.config.width, self.config.height]),
-        ))
+        world_views::open_while_asked(
+            taa_frustum(
+                views.cull().view_proj(bob),
+                self.world_post
+                    .taa_render_size([self.config.width, self.config.height]),
+            ),
+            self.world_view_side,
+        )
     }
     fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
         let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
@@ -8710,7 +8718,7 @@ impl Renderer {
         let camera_section = camera_section(camera, self.layout.min_y());
         // Native mods' world views (`world_views`): the lists take in their frusta, and nothing is
         // left out by what follows the camera alone.
-        let asked = world_views::Asked::new(frame);
+        let asked = world_views::Asked::new(frame, self.world_view_side);
         // The water mirror draws the same lists: they take in what its camera sees too
         // (above the screen's top, the far shore, the trees against the sky).
         let mirror_plane = frame

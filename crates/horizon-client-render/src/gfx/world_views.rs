@@ -15,8 +15,12 @@ pub(super) struct Asked {
 }
 
 impl Asked {
-    pub fn new(frame: &Frame) -> Self {
-        let views = if frame.title { Vec::new() } else { asked() };
+    pub fn new(frame: &Frame, max_side: u32) -> Self {
+        let views = if frame.title {
+            Vec::new()
+        } else {
+            asked(max_side)
+        };
         let frusta = views
             .iter()
             .map(|v| Frustum {
@@ -47,21 +51,21 @@ impl<C: Cull> Cull for Union<'_, C> {
     }
 }
 
-/// This frame's world views (`native_render::world_views`) that can be drawn; none, and no
-/// allocation, while no mod listens.
-fn asked() -> Vec<native_render::WorldView> {
+/// This frame's world views (`native_render::world_views`) that can be drawn at most `max_side`
+/// pixels a side (`Renderer::world_view_side`); none, and no allocation, while no mod listens.
+fn asked(max_side: u32) -> Vec<native_render::WorldView> {
     if !native_render::world_views_hooked() {
         return Vec::new();
     }
     let mut views = Vec::new();
     native_render::world_views(&mut views);
-    native_render::drawable_world_views(views)
+    native_render::drawable_world_views(views, max_side)
 }
 
 /// The camera's frustum the game culls entities with (`Renderer::camera_frustum`): one that takes
 /// in everything while a mod asks for world views, which see the entities it would leave out.
-pub(super) fn open_while_asked(camera: Frustum) -> Frustum {
-    if asked().is_empty() {
+pub(super) fn open_while_asked(camera: Frustum, max_side: u32) -> Frustum {
+    if asked(max_side).is_empty() {
         camera
     } else {
         Frustum {
