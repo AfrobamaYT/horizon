@@ -31,7 +31,7 @@ TEMPLATE = "native_main.rs.template"
 # Source files the folder carries besides compiler outputs.
 CARRIED = {IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
 # What the game's build script asks the `horizon-client` executable's link for (Windows' 8 MB main stack).
-LINK_ARG = "cargo:rustc-link-arg-bin=horizon-client="
+LINK_ARG = "cargo:horizon-executable-link-arg="
 # Native libraries the build scripts point the final link at (the `windows` crates' MinGW import libraries):
 # cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
 NATIVE = "native"
@@ -201,7 +201,7 @@ def build(out: Path, server: bool) -> None:
     for manifest in (POINTS, INTERNALS):
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
-    link_args = [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
+    link_args = executable_link_args(output)
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
         "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
@@ -216,6 +216,11 @@ def build(out: Path, server: bool) -> None:
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
     check(out)
+
+
+def executable_link_args(output: Path) -> list[str]:
+    """Executable policy emitted by the engine library's build script into the SDK identity."""
+    return [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
 
 
 def dylib(deps: Path, crate: str) -> Path | None:

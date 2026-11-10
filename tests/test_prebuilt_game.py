@@ -1,6 +1,9 @@
 import contextlib
 import io
+import json
+import sys
 import struct
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +21,32 @@ class AllocatorSelectionTests(unittest.TestCase):
         for platform in ("linux", "darwin"):
             self.assertEqual(prebuilt_game.cargo_features(False, platform), [])
             self.assertEqual(prebuilt_game.cargo_features(True, platform), ["--no-default-features"])
+
+
+class ExecutableLinkPolicyTests(unittest.TestCase):
+    def test_windows_sdk_identity_keeps_the_source_executable_stack_policy(self):
+        target = prebuilt_game.ROOT / "target"
+        target.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=target) as directory:
+            root = Path(directory)
+            policy = prebuilt_game.ROOT / "packaging/executable_link.rs"
+            source = root / "policy.rs"
+            source.write_text(
+                f'#[path = {json.dumps(str(policy))}] mod policy;\n'
+                + 'fn main() { let args: Vec<_> = std::env::args().collect(); '
+                + 'for arg in policy::arguments(&args[1], &args[2]) { '
+                + 'println!("cargo:horizon-executable-link-arg={arg}"); } }\n'
+            )
+            binary = root / ("policy.exe" if sys.platform == "win32" else "policy")
+            subprocess.run(["rustc", "--edition=2024", str(source), "-o", str(binary)], check=True)
+            for os, env, expected in [("windows", "msvc", ["/STACK:8388608"]),
+                                      ("windows", "gnu", ["-Wl,--stack,8388608"]),
+                                      ("linux", "gnu", []), ("macos", "", [])]:
+                with self.subTest(os=os, env=env):
+                    output = root / "output"
+                    output.write_text(subprocess.check_output([str(binary), os, env], text=True))
+                    identity = {"link_args": prebuilt_game.executable_link_args(output)}
+                    self.assertEqual(identity["link_args"], expected)
 
 
 class PrebuiltContentsTests(unittest.TestCase):
