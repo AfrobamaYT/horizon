@@ -69,7 +69,7 @@ The first derive PR commits these as a golden test, plus one case per shape and 
 **Keeps** (this is call-table plumbing, not a type's encoding):
 - The `Arc<dyn Trait>` / `Box<dyn Trait>` resource impls for the exported traits and capability handlers (`emit.rs:109`, 70 traits × 2 plus `Any`). These come from the `EXPORTS` list, not from types.
 - The constructors for borrowed records (`__wire_record_N`, 463 of them), and the `Put` impls with checked write-back for records that take appends, projections or views (3). These describe how a call's borrowed arguments cross and come back. That is a call-table concern.
-- The guest and host call glue, `wasm-coverage.md`, and `index.rs`. The index stays only to read trait signatures for the call tables. It stops resolving type definitions for owned value encodings only. It still reads the field definitions of the borrowed records whose constructors and `Put` impls it keeps.
+- The guest and host call glue, the wasm coverage page, and `index.rs`. The index stays only to read trait signatures for the call tables. It stops resolving type definitions for owned value encodings only. It still reads the field definitions of the borrowed records whose constructors and `Put` impls it keeps.
 
 The kept constructors and `Put` impls are generated at the API root, so after the restructure a field private to its module is invisible to them. The crate-visible-fields rule (`ty.rs:635`) therefore stays for those borrowed records and goes away only for value impls.
 
@@ -161,7 +161,7 @@ The first PR classifies every impl in a table in its description, with the golde
 
 - **Tests that go:** `the_hand_written_wire_impls_are_tracked_sources` (it guards the `manual` scan, which goes away) and the generator's emit fixtures.
 - **Tests that change:** `layout_includes_private_borrowed_shapes` hashes the call-table shapes it still owns.
-- **Tests that stay:** `coverage_document_is_current` and `wasm-coverage.md` describe calls, which still cross, so they stay; the document is regenerated if a wording names generated impls.
+- **Tests that stay:** the wasm coverage page (rendered from the generator when the book builds) and `coverage_page_is_well_formed` describe calls, which still cross, so they stay.
 - **Crossing layouts:** `crossing.rs` is deleted by #2242. The `WIRE_LAYOUT` value changes once, in the derive PR, which is expected and refuses old wasm builds.
 
 ### PR plan for the derive

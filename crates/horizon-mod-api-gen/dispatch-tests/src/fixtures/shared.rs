@@ -584,7 +584,9 @@ mod stubs {
     }
     pub(super) struct LootStack;
     pub(super) struct LootContext;
+    pub(super) trait Tags {}
     pub(super) struct NativeReloadListener;
+    #[derive(Clone)]
     pub(super) struct RecipePropertyAddition;
     pub(super) struct AdvancementProgress {
         pub done: bool,
