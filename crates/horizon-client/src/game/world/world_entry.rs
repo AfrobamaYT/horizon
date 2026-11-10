@@ -364,6 +364,7 @@ impl Game<'_> {
             );
         }
         self.world_tables = tables;
+        self.refresh_recipe_property_context();
         self.structure_spawns = structure_spawns;
         self.health_resources = health;
         self.server_items = None;

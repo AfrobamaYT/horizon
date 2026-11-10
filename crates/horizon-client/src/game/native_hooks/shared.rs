@@ -1918,7 +1918,7 @@ impl GameLevel<'_> {
         changed
     }
     /// `Level.removeBlock`: replace a block with its fluid's legacy block.
-    pub(super) fn native_remove_block(
+    pub(super) fn remove_block_write(
         &mut self,
         ticks: &mut Ticks,
         pos: [i32; 3],
@@ -5079,8 +5079,8 @@ mod tests {
     fn native_loot_kinds_stay_hookable() {
         let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
-            "pub fn native_loot_function(",
-            "pub fn native_loot_condition(",
+            "pub fn native_invoke_loot_function(",
+            "pub fn native_invoke_loot_condition(",
         ] {
             let at = source
                 .find(hook)
