@@ -376,12 +376,13 @@ class BoatRoutingTests(unittest.TestCase):
         read.assert_not_called()
         output, read = self.run_main(published=(("on", ["alice"]), ""), BOAT_FALLBACK="true", BOAT_CI="on", BOAT_USERS="alice")
         self.assertIn("label=ubuntu-latest", output)
+        read.assert_not_called()
 
     def test_present_variables_are_never_overridden(self):
         output, read = self.run_main(published=(("on", ["alice"]), ""), BOAT_CI="off", BOAT_USERS="alice")
         self.assertIn("label=ubuntu-latest", output)
         read.assert_not_called()
-        output, read = self.run_main(BOAT_CI="on", BOAT_USERS="alice")
+        output, read = self.run_main(BOAT_CI="on", BOAT_USERS="bob, alice")
         self.assertIn("label=boat-large", output)
         read.assert_not_called()
 

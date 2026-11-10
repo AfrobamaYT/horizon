@@ -141,7 +141,7 @@ def main():
     jobs = []
     reason = ""
     enabled = os.environ.get("BOAT_CI", "")
-    users = os.environ.get("BOAT_USERS", "").split(",")
+    users = [user.strip() for user in os.environ.get("BOAT_USERS", "").split(",") if user.strip()]
     author, actor = os.environ["AUTHOR"], os.environ["ACTOR"]
     if os.environ.get("BOAT_FALLBACK") == "true":
         enabled = "off"
