@@ -208,6 +208,9 @@ jobs:
         run: echo 'Rust lint is not selected; verify retains documentation hygiene and relevant contracts.'
       - uses: actions/checkout@v4
         if: needs.changes.outputs.rust_required != 'false'
+      - name: Check mod API boundary
+        if: needs.changes.outputs.rust_required != 'false'
+        run: python3 tools/ci/check_api_boundary.py --source-only
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
