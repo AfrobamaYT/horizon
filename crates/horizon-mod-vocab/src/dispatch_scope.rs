@@ -12,7 +12,7 @@ static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 #[doc(hidden)]
 pub struct Backend {
     pub enter: fn(ModGuardFactory, ModCall) -> ModGuard,
-    pub leave: fn(State),
+    pub leave: fn(&mut State),
     pub current_native: fn() -> Option<ModCall>,
     pub current_converted: fn() -> Option<crate::content::crash::ConvertedCall>,
     pub enter_converted: fn(
@@ -45,14 +45,15 @@ pub struct State {
 /// Its fields are private and it is neither Clone nor Copy.
 #[doc(hidden)]
 pub struct ModGuardFactory {
-    leave: fn(State),
+    leave: fn(&mut State),
 }
 impl ModGuardFactory {
     /// Consume the capability, transferring the backend's per-call state.
     #[inline]
     pub fn finish(self, state: State) -> ModGuard {
         ModGuard {
-            active: Some((self.leave, state)),
+            leave: Some(self.leave),
+            state,
             _thread: std::marker::PhantomData,
         }
     }
@@ -62,14 +63,15 @@ impl ModGuardFactory {
 /// inert; otherwise Drop restores attribution, including during unwinding.
 #[must_use]
 pub struct ModGuard {
-    active: Option<(fn(State), State)>,
+    leave: Option<fn(&mut State)>,
+    state: State,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
     #[inline]
     fn drop(&mut self) {
-        if let Some((leave, state)) = self.active.take() {
-            leave(state);
+        if let Some(leave) = self.leave {
+            leave(&mut self.state);
         }
     }
 }
@@ -93,7 +95,12 @@ pub(crate) fn enter(call: ModCall) -> ModGuard {
             call,
         ),
         None => ModGuard {
-            active: None,
+            leave: None,
+            state: State {
+                outer_frame: None,
+                outer_call: None,
+                timing: None,
+            },
             _thread: std::marker::PhantomData,
         },
     }
