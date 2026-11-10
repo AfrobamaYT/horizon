@@ -151,6 +151,22 @@ mod tests {
     }
 
     #[test]
+    fn wire_attachment_batch_refuses_different_generations_for_one_holder() {
+        use crate::wire::{Reader, WireError, Writer};
+        use horizon_core::nbt::{self, Compound, Limits, Tag};
+        let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), 42));
+        let token = AttachmentWriteToken(index::AttachmentOwner::from_parts(holder, 7));
+        let bytes = nbt::write_network(&Tag::Compound(Compound::new()), Limits::default()).unwrap();
+        let mut out = Writer::new();
+        let newer = AttachmentWriteToken(index::AttachmentOwner::from_parts(holder, 8));
+        out.put(&vec![(token, bytes.clone()), (newer, bytes)]);
+        assert!(matches!(
+            Reader::new(out.bytes()).take::<AttachmentBatch>(),
+            Err(WireError::Invalid("duplicate attachment residency"))
+        ));
+    }
+
+    #[test]
     fn wire_attachment_rows_and_stale_tokens() {
         use crate::wire::{Reader, Writer};
         use horizon_core::nbt::{Compound, Tag};
