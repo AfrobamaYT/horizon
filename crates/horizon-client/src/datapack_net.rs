@@ -59,6 +59,12 @@ pub fn reload_payload(player: u128) -> Option<Vec<u8>> {
     }
 }
 
+/// A new id for a world session's set, whether this process published it or received it, so
+/// no two sets of one process share a session and a handle never reads another world's entry.
+pub fn next_session() -> u64 {
+    SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 fn held(slot: &Held) -> Option<Arc<mod_api::DatapackRegistrySet>> {
     slot.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -180,7 +186,7 @@ fn receive(
             .received_next(&snapshot, candidate)
             .ok_or_else(|| "The server's mod registries arrived out of order.".to_owned());
     }
-    let session = SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let session = next_session();
     Ok(mod_api::DatapackRegistrySet::received(
         &snapshot, candidate, session,
     ))

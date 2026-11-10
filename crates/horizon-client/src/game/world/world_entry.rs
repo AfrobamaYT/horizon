@@ -2,13 +2,6 @@
 //! resources' background load, and the world's own content tables.
 use super::*;
 
-/// A new id for a world session's published datapack registries: a handle from an earlier
-/// session fails with `WrongSession` against the next one.
-fn next_datapack_session() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
 impl Game<'_> {
     /// The server's data-pack enchantments, or the local world's registry.
     pub(super) fn item_enchantments(&self) -> &Arc<horizon_client::enchant::Enchantments> {
@@ -407,7 +400,7 @@ impl Game<'_> {
         self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
             Arc::new(mod_api::DatapackRegistrySet::first(
                 candidate,
-                next_datapack_session(),
+                horizon_client::datapack_net::next_session(),
             ))
         });
         horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
@@ -428,7 +421,7 @@ impl Game<'_> {
             },
             (Some(candidate), None) => Some(Arc::new(mod_api::DatapackRegistrySet::first(
                 candidate,
-                next_datapack_session(),
+                horizon_client::datapack_net::next_session(),
             ))),
         };
         horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());

@@ -244,7 +244,7 @@ impl DatapackFieldKind {
             }
             (Self::Text { max_len }, DatapackValue::Text(v)) => v.len() <= *max_len as usize,
             (Self::Identifier | Self::Reference { .. }, DatapackValue::Text(v)) => {
-                Identifier::parse(v).is_ok()
+                Identifier::parse(v).is_ok_and(|id| id.to_string() == *v)
             }
             _ => false,
         }
