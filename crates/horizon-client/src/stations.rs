@@ -977,7 +977,7 @@ fn trim_material(
 }
 /// `SmithingTrimRecipe.applyTrim`: none when the material provides no trim
 /// or the base already has this one.
-fn apply_trim(
+pub fn apply_trim(
     e: &Enchantments,
     base: &ItemStack,
     material: &ItemStack,
@@ -2081,6 +2081,7 @@ mod tests {
         let banners = Banners::load(&root, &defaults);
         let names = Names::default();
         let env = menu::Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: ctx,

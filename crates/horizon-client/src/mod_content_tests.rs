@@ -1,15 +1,13 @@
 use super::*;
-use crate::{assets::Assets, blocks::BlockFacts, items::Items};
+use crate::{assets::Assets, blocks::BlockFacts, crafting::CraftingRemainder, items::Items};
 use horizon_mod_package::manifest::JarRef;
 use horizon_world::native_load_context::DataLoadOrigin;
-
 #[path = "mod_content_block_entity_tests.rs"]
 mod block_entity_tests;
 #[path = "mod_content_farmland_tests.rs"]
 mod farmland_tests;
 #[path = "mod_content_jar_tests.rs"]
 mod jar_tests;
-
 /// A Java jar's assets are a pack layer under the mod's own files, in mod
 /// order under the later mods. Passive assets stay in the jar, and the files
 /// every pack stacks (atlases here) merge across vanilla, the jars and the
@@ -79,7 +77,6 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     fn own<'a>(path: &'a str, text: &str) -> (&'a str, String) {
         (path, text.to_owned())
     }
-
     let atlas_file = |source: &str| ("assets/minecraft/atlases/blocks.json", atlas(source));
     let jar_a = jar(
         "porteda",
@@ -530,6 +527,7 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
         asked: RefCell<Vec<String>>,
         client: bool,
     }
+    impl horizon_world::level::BlockEntityNeighbors for Level {}
     impl LevelAccess for Level {
         fn block_state(&self, p: BlockPos) -> BlockStateId {
             self.blocks.get(&p).copied().unwrap_or(self.air)
@@ -1489,6 +1487,7 @@ fn content_root_loads_with_every_table() {
             events: Vec<LevelEvent>,
             time: i64,
         }
+        impl horizon_world::level::BlockEntityNeighbors for TestLevel {}
         impl LevelAccess for TestLevel {
             fn block_state(&self, pos: BlockPos) -> BlockStateId {
                 *self.blocks.get(&pos).unwrap_or(&self.air)
@@ -1633,7 +1632,7 @@ fn content_root_loads_with_every_table() {
         .find(crate::test_resources::server_loop_context(), &grid, 2)
         .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
-    let rest = recipes.remainders(id, &grid, 2);
+    let rest = recipes.remainders(id, &grid, 2, &|s| items.crafting_remainder(s));
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
     assert!(!items.items.contains_key("ruby:ruby_glass"));
     let pickaxe = &items.block_tags["minecraft:mineable/pickaxe"];
@@ -3566,6 +3565,7 @@ fn connecting_blocks_and_vanilla_fences_use_content_tags() {
         air: BlockStateId,
         random: LegacyRandom,
     }
+    impl horizon_world::level::BlockEntityNeighbors for Level {}
     impl LevelAccess for Level {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.blocks.get(&pos).copied().unwrap_or(self.air)

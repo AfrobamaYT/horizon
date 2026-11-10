@@ -28,6 +28,67 @@ class PrebuiltContentsTests(unittest.TestCase):
             (root / name).write_bytes(b"")
         return root
 
+    def test_only_current_cargo_artifacts_enter_the_archive(self):
+        root = self.folder(
+            "cache/libpoint_shape-old.rmeta", "cache/libpoint_shape-host.rmeta",
+            "cache/libpoint_shape-target.rmeta", "cache/libpoint_shape-target.rlib",
+            "cache/libderive.so", "cache/libhorizon_client.so",
+        )
+        output = root / "sdk"
+        output.mkdir()
+        current = ["libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+                   "libpoint_shape-target.rlib", "libderive.so", "libhorizon_client.so"]
+        prebuilt_game.copy_artifacts([
+            {"reason": "compiler-artifact", "filenames": [str(root / "cache" / name) for name in current]},
+            {"reason": "build-finished", "success": True},
+        ], output)
+        self.assertEqual({path.name for path in output.iterdir()}, {
+            "libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta", "libderive.so", "libhorizon_client.so",
+        })
+
+    def test_facades_exclude_build_only_and_ambiguous_runtime_crates(self):
+        def package(name, kind="lib"):
+            return {"id": name, "name": name, "targets": [{"name": name.replace('-', '_'), "kind": [kind]}]}
+
+        def node(name, *dependencies):
+            return {"id": name, "deps": [
+                {"pkg": target, "dep_kinds": [{"kind": kind}]} for target, kind in dependencies
+            ]}
+
+        metadata = {
+            "packages": [package("horizon-client"), package("point_shape"), package("horizon_core"),
+                         package("build_tool"), package("derive", "proc-macro"), package("macro_helper")],
+            "resolve": {"nodes": [
+                node("horizon-client", ("point_shape", None), ("horizon_core", None),
+                     ("build_tool", "build"), ("derive", None)),
+                node("point_shape"), node("horizon_core"), node("build_tool"),
+                node("derive", ("macro_helper", None)), node("macro_helper"),
+            ]},
+        }
+        runtime = prebuilt_game.runtime_crates(metadata)
+        self.assertEqual(runtime, {"horizon_client", "point_shape", "horizon_core"})
+        deps = self.folder("libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+                           "libhorizon_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta")
+        eligible = prebuilt_game.facade_crates(deps, runtime)
+        self.assertEqual(eligible, ["horizon_core"])
+
+    def test_sdk_assertion_refuses_a_duplicate_eligible_facade_on_every_os(self):
+        root = self.folder("deps/libhorizon_core-one.rmeta", "deps/libmod_api-one.rmeta",
+                           "deps/libhorizon_mod_package-one.rmeta")
+        prebuilt_game.assert_externs(root, ["horizon_core"])
+        (root / "deps/libhorizon_core-two.rmeta").write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "expected exactly one SDK metadata for horizon_core"):
+            prebuilt_game.assert_externs(root, ["horizon_core"])
+
+    def test_native_extern_lookup_refuses_a_second_package_variant(self):
+        root = self.folder("libhorizon_mod_package-runtime.rmeta")
+        self.assertEqual(prebuilt_game.extern_args(root, "horizon_mod_package"), [
+            "--extern", f"horizon_mod_package={root / 'libhorizon_mod_package-runtime.rmeta'}",
+        ])
+        (root / "libhorizon_mod_package-build.rmeta").write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "expected exactly one SDK metadata for horizon_mod_package"):
+            prebuilt_game.extern_args(root, "horizon_mod_package")
+
     def test_compiler_outputs_pass(self):
         prebuilt_game.check(self.folder(
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",

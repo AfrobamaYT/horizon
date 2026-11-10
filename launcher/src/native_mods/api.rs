@@ -80,9 +80,9 @@ pub(super) fn template(path: &Path) -> Result<String, String> {
 pub(super) fn main_rs(
     template: &str,
     mods: &[&horizon_mod_package::Manifest],
-    listed: &[super::inject::ListedPoint],
-    sites: &[super::sites::Site],
+    catalog: &internals::Catalog,
 ) -> String {
+    let (listed, sites) = (&catalog.points, &catalog.sites);
     let entries = mods
         .iter()
         .enumerate()
@@ -98,19 +98,30 @@ pub(super) fn main_rs(
             let place = point.place(injection.at_return);
             let entry = manifest.inject.iter().find(|entry| entry.id == injection.id)
                 .expect("unified point entry");
+            if entry.kind == horizon_mod_package::manifest::inject::Kind::Replace {
+                let replace = horizon_mod_point_emit::internals_replace(entry, &manifest.id, &point.emitted(), &format!("mod_{i}_internals::raw::{place}"), &format!("mod_{i}::{}", entry.with))
+                    .expect("internals replace checked");
+                return format!("        {replace}, // injection {:?}\n", injection.id);
+            }
             let order = format!(".ordered({}, {:?})", entry.priority, entry.id);
             format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}){order}, // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
     }).collect::<String>();
+    // An addon's internals listeners at another mod's points (#2339).
+    let raw = raw
+        + &(0..mods.len())
+            .map(|i| super::mod_points::internals(catalog, mods, i))
+            .collect::<String>();
+    let api_points = listed
+        .iter()
+        .map(super::inject::ListedPoint::emitted)
+        .chain(super::mod_points::emitted(catalog, mods))
+        .collect::<Vec<_>>();
     let raw = raw
         + &mods
             .iter()
             .enumerate()
             .flat_map(|(i, manifest)| {
-                let api_points = listed
-                    .iter()
-                    .map(super::inject::ListedPoint::emitted)
-                    .collect::<Vec<_>>();
                 horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
                     .expect("API slots checked")
                     .into_iter()
@@ -404,6 +415,7 @@ pub(super) fn stage(
         let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
         super::copy_bundle(bundle, &dest)?;
+        super::mod_points::stage(&dest, &catalog.wire)?;
         let path = dest.join("Cargo.toml");
         let mut manifest = project.cargo.clone();
         let package = project.package.clone();
@@ -554,7 +566,7 @@ pub(super) fn stage(
         .iter()
         .map(|(_, project)| &project.bundle.manifest)
         .collect();
-    let mut main = main_rs(&template, &manifests, &catalog.points, &catalog.sites);
+    let mut main = main_rs(&template, &manifests, catalog);
     if official {
         main = main.replace(
             "fn main() {",
@@ -657,13 +669,16 @@ mod tests {
         extra.side = horizon_mod_package::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {
-            let text = main_rs(template, &mods[..count], &[], &[]);
+            let text = main_rs(template, &mods[..count], &internals::Catalog::default());
             let padded = ["/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"]
                 .into_iter()
                 .fold(template.to_owned(), |text, marker| {
                     text.replace(marker, &format!("    {marker}"))
                 });
-            assert_eq!(main_rs(&padded, &mods[..count], &[], &[]), text);
+            assert_eq!(
+                main_rs(&padded, &mods[..count], &internals::Catalog::default()),
+                text
+            );
             let facts: Vec<_> = text
                 .lines()
                 .filter(|line| line.contains(" => mod_"))
@@ -700,13 +715,17 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(index, kind)| Inject {
+                local: None,
+                local_type: None,
+                position: None,
+                expr: None,
                 id: format!("listen_{index}"),
                 at: "game::Game<'_>::tick".into(),
                 kind,
                 with: format!("listen_{index}"),
                 access: Access::Api,
                 priority: 12,
-                hash: "pin".into(),
+                hash: Some("pin".into()),
                 call: None,
                 nth: None,
                 ctx: None,
@@ -730,8 +749,10 @@ mod tests {
         let output = main_rs(
             "/* MOD_ENTRIES */START\n/* MOD_SLOTS */END/* BUILT_MODS */",
             &[&manifest],
-            &listed,
-            &[],
+            &internals::Catalog {
+                points: listed.to_vec(),
+                ..Default::default()
+            },
         );
         let slots = output
             .split_once("START\n")
@@ -743,7 +764,7 @@ mod tests {
         assert_eq!(slots, concat!(
             "        mod_points::listeners::tick(\"fixture\", 12, \"listen_0\", mod_0::listen_0),\n",
             "        mod_points::listeners::tick_return(\"fixture\", 12, \"listen_1\", mod_0::listen_1),\n",
-            "        mod_points::replace!(tick, cancel, host, \"fixture\", 12, \"listen_2\", mod_0::listen_2),\n",
+            "        mod_points::replace!(mod_points::listeners::tick, cancel, host, \"fixture\", 12, \"listen_2\", mod_0::listen_2),\n",
         ));
         fs::remove_dir_all(dir).unwrap();
     }

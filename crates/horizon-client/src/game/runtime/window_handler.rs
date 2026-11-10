@@ -179,6 +179,16 @@ impl Game<'_> {
         event_loop: &dyn EventLoopCtl,
         mut event: WindowEvent,
     ) {
+        let pressed = match &event {
+            WindowEvent::KeyboardInput { event, .. } => {
+                event.state == ElementState::Pressed && !event.repeat
+            }
+            WindowEvent::MouseInput { state, .. } => *state == ElementState::Pressed,
+            _ => false,
+        };
+        if pressed && !self.pad.menu.synthetic {
+            self.pad_radial_cancel();
+        }
         if let WindowEvent::Focused(false) = &event {
             self.modifiers = winit::keyboard::ModifiersState::empty();
             self.physical_keys.clear();
@@ -194,10 +204,8 @@ impl Game<'_> {
                 &mut self.toggles,
                 [self.settings.toggle_crouch, self.settings.toggle_sprint],
                 [
-                    self.pad
-                        .holds_action(&self.settings.controller, "key.sneak"),
-                    self.pad
-                        .holds_action(&self.settings.controller, "key.sprint"),
+                    self.pad.holds_action("key.sneak"),
+                    self.pad.holds_action("key.sprint"),
                 ],
             );
             self.sync_toggle(SNEAK);
@@ -1641,6 +1649,7 @@ impl Game<'_> {
                         server.set_legacy_rules(self.settings.extras.pvp.combat.rules);
                     }
                     self.clock.end_frame(self.pause);
+                    self.poll_screenshot_writes();
                     let mut consumed = !self.ui.screenshot_messages.is_empty();
                     let finished = self
                         .renderer
@@ -1842,8 +1851,10 @@ impl Game<'_> {
         horizon_client::spans::time("pads", || self.poll_pads(event_loop));
         self.settle_after_run(event_loop);
         self.pause_if_inactive();
-        if self.options.frames.is_some() && self.started.elapsed() > self.options.timeout {
-            self.error = Some("frame-limited run timed out".into());
+        if let Some(limit) = self.options.time_limit()
+            && self.started.elapsed() > limit
+        {
+            self.error = Some(format!("run timed out after {} s", limit.as_secs()).into());
             event_loop.exit();
             return;
         }
@@ -1981,6 +1992,9 @@ impl ApplicationHandler for Game<'_> {
             && self.screen == Screen::Playing
             && let DeviceEvent::MouseMotion { delta: (x, y) } = event
         {
+            if self.pad_radial_captures() {
+                return;
+            }
             if x != 0.0 || y != 0.0 {
                 self.pad_yield_input(event_loop);
             }

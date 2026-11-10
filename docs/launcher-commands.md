@@ -34,6 +34,21 @@ Download and install a release (a tag such as v2026.10.13, or "latest").
 
 MCP: `install`.
 
+## `horizon-launcher developer-install`
+
+Install a local unsigned developer build from a trusted checkout.
+
+    horizon-launcher developer-install --program <PROGRAM> --trust-unsigned <CHECKOUT>
+
+- `CHECKOUT`: The trusted clean Horizon checkout to package
+- `--program`: The real horizon-client executable built from that committed checkout
+- `--trust-unsigned`: Allow executing this checkout's build code and unsigned game with your rights
+
+Example: horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned
+This executes the checkout's build code and an unsigned game with your rights. Trust both before continuing.
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher remove`
 
 Remove an installed version.
@@ -46,7 +61,7 @@ MCP: `remove`, needs `confirm: true`.
 
 ## `horizon-launcher import-build`
 
-Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed release or Nightly's game files, and select it. Nothing signed it: it runs with your rights, and updates never replace it.
+Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed base's game files, and select it. A local unsigned developer base is allowed only when explicitly selected or named with --version. Nothing signed it: it runs with your rights, and updates never replace it.
 
     horizon-launcher import-build <PATH>
 
@@ -116,6 +131,8 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
     horizon-launcher native-build [FOLDER]
 
 - `--sync-internals`: Discover internal uses through compiler diagnostics. Prints resolved declarations as JSON for cargo horizon-mod internals sync; never installs or selects a game
+- `--catalog`
+- `--catalog-output`: Copy discovery catalogs into this caller-owned empty directory
 - `FOLDER`: A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance). Server exports also read wasm internals declarations from .hmod packages directly in this folder
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
 - `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder

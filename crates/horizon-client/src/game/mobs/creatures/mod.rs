@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod borrowed_panic_tests;
 mod borrowed_tick;
+mod death_tail;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 
@@ -1126,6 +1127,7 @@ impl Game<'_> {
             leash_boats: &self.leash_boats,
             others_grid: None,
             others_index: None,
+            passenger_objects: &[],
             others_villagers: None,
             others_solid: None,
             daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
@@ -1406,6 +1408,7 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        let blocked = self.mobs_below_off_level();
         let level_id = self.dim.id();
         if let Some(pending) = self.creatures.pending.get_mut(level_id)
             && (pending.refusal_logged || pending.retained_passes >= MAX_PENDING_MOB_PASSES)
@@ -1451,7 +1454,7 @@ impl Game<'_> {
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
                 let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
-                if self.world.loaded(x, z) && ticking(x, z) {
+                if !blocked.contains(&m.id) && self.world.loaded(x, z) && ticking(x, z) {
                     let (id, kind) = (m.id, super::native_ticks::TickKind::Mob(m.kind.clone()));
                     if self.native_tick_pre_batch(&mut round, id, kind) {
                         self.sync_sleeping_mob(i);
@@ -1478,6 +1481,7 @@ impl Game<'_> {
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
+        let passenger_objects = self.retained_passenger_snapshot(uuid);
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let primable = self.sulfur_cubes_adopted_explosive();
         let mut mobs = self.mobs.lift();
@@ -1523,6 +1527,8 @@ impl Game<'_> {
         let (lent, dispatch_panic) = self.tick_borrowed_creatures(borrowed_tick::BorrowedMobTick {
             mobs: &mut mobs,
             snapshot: &mut snapshot,
+            passenger_objects: &passenger_objects,
+            blocked: &blocked,
             events: &mut events,
             pushes: &mut pending.pushes,
             dead: &mut dead,
@@ -1728,25 +1734,6 @@ impl Game<'_> {
             self.particles.add(&options, [x, y, z], [xa, ya, za]);
         }
     }
-    /// The killing blow of a mob as the death hooks name it: its damage
-    /// type and the causing entity's id (0 for none).
-    fn mob_damage_source(&self, m: &Mob) -> (&'static str, u32) {
-        let (damage_type, attacker) = match m.last_damage {
-            Some((d, _)) => (source_damage_type(d), d.attacker),
-            None => ("minecraft:generic", None),
-        };
-        let attacker = match attacker {
-            Some(Who::Mob(id)) => id,
-            Some(Who::Player) => self
-                .last_hurt_by_player
-                .get(&m.id)
-                .and_then(|credit| self.resolve_player_credit(*credit))
-                .and_then(|conn| self.player_entity_id_by_connection(conn))
-                .map_or(0, |id| id as u32),
-            None => 0,
-        };
-        (damage_type, attacker)
-    }
     /// `LivingDeathEvent` for a mob whose health ran out: whether a native
     /// mod canceled the death. A canceled mob stays alive at 1 health.
     fn mob_death_canceled(&mut self, m: &Mob) -> bool {
@@ -1867,11 +1854,7 @@ impl Game<'_> {
             pos,
             source,
         );
-        self.create_wither_rose(m);
-        if m.species() == Species::CopperGolem {
-            // CopperGolem.dropEquipment: the preserved equipment too.
-            self.golem_drop_equipment(&mut dying);
-        }
+        self.finish_mob_death(m, &mut dying, source);
     }
     /// `AbstractCubeMob.remove`: split only as the dead body is removed.
     fn split_dead_cube(&mut self, mut dying: Mob) {
@@ -2961,13 +2944,13 @@ impl Game<'_> {
                             direct: 0,
                             position: None,
                         };
-                        self.knock_back_player(power, x, z, source, &attack);
+                        self.knock_back_player(power, x, z, source, &attack, 0.0);
                     }
                     Who::Mob(id) => {
                         let attack = self.attack_of_who(source.attacker);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let level = crate::game::entity::damage_level_of!(self, &attack);
-                            m.knockback(level, power, x, z, &source);
+                            m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
                 },
@@ -3677,16 +3660,7 @@ impl Game<'_> {
                         let entity = by.or(breaker);
                         let mut drops = self.roll_block_loot(pos, old, entity, Default::default());
                         self.native_block_loot(pos, old, None, None, None, &mut drops);
-                        let dropped = self.with_level(|_, level, _| {
-                            level.block_dropped(
-                                BlockPos::new(pos[0], pos[1], pos[2]),
-                                old,
-                                None,
-                                None,
-                                drops,
-                                None,
-                            )
-                        });
+                        let dropped = self.entity_block_dropped(pos, old, entity, drops);
                         let canceled = dropped.canceled;
                         self.spawn_block_drops(pos, dropped);
                         // InfestedBlock.spawnAfterBreak runs after the drops,
@@ -4631,11 +4605,6 @@ impl Game<'_> {
         let post_attack_if_alive = std::mem::take(&mut self.combat.post_attack_if_alive);
         let rocket = std::mem::take(&mut self.combat.rocket_hit);
         let melee = self.combat.melee_mob.take();
-        // ServerPlayer.canHarmPlayer refused another player's projectile.
-        if self.creative || self.combat.refuse_player_hit {
-            self.combat.forget_noted(false);
-            return false;
-        }
         // A projectile entity dealt it: `#is_projectile`, or a firework
         // rocket (its `fireworks` type is not in the tag).
         let projectile = rocket
@@ -4809,7 +4778,7 @@ impl Game<'_> {
         // `LivingEntity.dealDefaultKnockback`: after the item's block push, so
         // a half-blocked hit pushes the defender back the way vanilla does.
         if let Some(([xd, zd], source)) = default_push {
-            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack);
+            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack, amount);
             if let Some(p) = self.player.as_mut()
                 && let Some(r) = p.hurt_log.last_mut()
             {
@@ -4817,35 +4786,6 @@ impl Game<'_> {
             }
         }
         outcome.hurt
-    }
-    /// `LivingEntity.knockback` on the player: pushed `power` away from the
-    /// direction (`xd`, `zd`), less its knockback resistance, and up only from
-    /// the ground.
-    /// The native knockback hook runs before resistance is applied, with
-    /// `source`, the hit's.
-    pub(super) fn knock_back_player(
-        &mut self,
-        power: f64,
-        xd: f64,
-        zd: f64,
-        source: HurtSource<'_>,
-        attack: &Attack,
-    ) {
-        // No attacker named: the mob the player was last hurt by.
-        let credited;
-        let attack = if attack.attacker == 0
-            && let Some((Who::Mob(id), _)) = self.player_hurt_by()
-        {
-            credited = self.attack_of(id as i32);
-            &credited
-        } else {
-            attack
-        };
-        let legacy = self.legacy_rules();
-        if let Some(p) = self.player.as_mut() {
-            let level = crate::game::entity::damage_level_of!(self, attack);
-            knock_back(p, level, power, (xd, zd), source, legacy);
-        }
     }
     /// A status effect from a mob, arrow or splash potion (`addEffect`).
     pub(super) fn give_player_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
@@ -4873,8 +4813,7 @@ impl Game<'_> {
     pub(in crate::game) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
         let mut canceled = false;
         let attack = self.current_attack();
-        if !self.creative
-            && self.player.is_some()
+        if self.player.is_some()
             && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = self.hurt_player_equipment(id, amount, None, false, 0, false, &attack)
         {
@@ -6583,24 +6522,22 @@ impl Game<'_> {
             (ProjectileKind::SmallFireball, hit) => match hit {
                 Hit::Entity { who, .. } => match who {
                     Who::Player => {
-                        if !self.creative {
-                            // SmallFireball.onHitEntity: remember the fire, ignite,
-                            // and restore it when the hurt is refused (a raised shield).
-                            let remaining = self.player.as_ref().map(|p| p.fire_ticks);
-                            if let Some(p) = self.player.as_mut() {
-                                p.ignite_for_ticks(100)?;
-                            }
-                            let hurt = self.mob_hits_player(
-                                5.0,
-                                [p.previous.x, p.previous.y, p.previous.z],
-                                "minecraft:fireball",
-                            );
-                            if !hurt
-                                && let Some(remaining) = remaining
-                                && let Some(pl) = self.player.as_mut()
-                            {
-                                pl.set_remaining_fire_ticks(remaining);
-                            }
+                        // SmallFireball.onHitEntity: remember the fire, ignite,
+                        // and restore it when the hurt is refused (a raised shield).
+                        let remaining = self.player.as_ref().map(|p| p.fire_ticks);
+                        if let Some(p) = self.player.as_mut() {
+                            p.ignite_for_ticks(100)?;
+                        }
+                        let hurt = self.mob_hits_player(
+                            5.0,
+                            [p.previous.x, p.previous.y, p.previous.z],
+                            "minecraft:fireball",
+                        );
+                        if !hurt
+                            && let Some(remaining) = remaining
+                            && let Some(pl) = self.player.as_mut()
+                        {
+                            pl.set_remaining_fire_ticks(remaining);
                         }
                     }
                     Who::Mob(id) => {
@@ -6800,13 +6737,11 @@ impl Game<'_> {
             (ProjectileKind::ShulkerBullet { .. }, Hit::Entity { who, .. }) => match who {
                 Who::Player => {
                     // Only a hit that hurt (`wasHurt`) brings the levitation.
-                    if !self.creative
-                        && self.mob_hits_player(
-                            4.0,
-                            [p.previous.x, p.previous.y, p.previous.z],
-                            "minecraft:mob_projectile",
-                        )
-                    {
+                    if self.mob_hits_player(
+                        4.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:mob_projectile",
+                    ) {
                         self.give_player_effect("minecraft:levitation", 200, 0);
                     }
                 }
@@ -9320,67 +9255,6 @@ impl Game<'_> {
         }
     }
 }
-/// `LivingEntity.knockback` on `p`: [`Game::knock_back_player`]; 1.8.9's
-/// `EntityLivingBase.knockBack` under `legacy` rules.
-fn knock_back(
-    p: &mut horizon_client::motion::PlayerMotion,
-    level: &mut horizon_client::health::DamageLevel<'_>,
-    power: f64,
-    (xd, zd): (f64, f64),
-    source: HurtSource<'_>,
-    legacy: bool,
-) {
-    let resistance = p.attribute("minecraft:knockback_resistance").unwrap_or(0.0);
-    // The native hook runs first, on the raw strength (`LivingKnockBackEvent`), then the
-    // resistance scales what it left.
-    let mut knock = Knock {
-        strength: power,
-        x: xd,
-        z: zd,
-    };
-    if level.knockback_canceled(Hurting::Player(p.entity_id, source), &mut knock) {
-        return;
-    }
-    let Knock {
-        strength: power,
-        x: mut xd,
-        z: mut zd,
-    } = knock;
-    if legacy && horizon_client::legacy_combat::resists(resistance, level.random().next_double()) {
-        return;
-    }
-    let power = if legacy {
-        power
-    } else {
-        power * (1.0 - resistance)
-    };
-    if power <= 0.0 {
-        return;
-    }
-    while xd * xd + zd * zd < f64::from(1.0e-5_f32) {
-        let random = level.random();
-        xd = (random.next_double() - random.next_double()) * 0.01;
-        zd = (random.next_double() - random.next_double()) * 0.01;
-    }
-    if legacy {
-        let v = p.velocity;
-        let [x, y, z] = horizon_client::legacy_combat::knockback([v.x, v.y, v.z], power, (xd, zd));
-        p.velocity = Vec3::new(x, y, z);
-        return;
-    }
-    let l = (xd * xd + zd * zd).sqrt();
-    let v = p.velocity;
-    p.velocity = Vec3::new(
-        v.x / 2.0 - xd / l * power,
-        if p.ground.on_ground {
-            (v.y / 2.0 + power).min(0.4)
-        } else {
-            v.y
-        },
-        v.z / 2.0 - zd / l * power,
-    );
-}
-
 /// The instance a mob effect gives the player; `None` for a creative or
 /// spectator player (`immune`) unless it is ambient (the nautilus's Breath).
 fn mob_effect_instance(
@@ -9503,92 +9377,8 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod mob_griefing_tests {
-    use super::super::native_entity_refs::tests::with_game;
-    use super::super::native_item_places::tests::{guest, open_to_lan};
-    use std::sync::{Arc, Mutex};
-
-    /// Denies griefing to the entities in `self.0`, and logs who was asked.
-    struct Deny(Vec<u32>, Arc<Mutex<Vec<(u32, bool)>>>);
-    #[mod_api::__subscriptions]
-    impl mod_api::Hooks for Deny {
-        fn entity_mob_griefing(
-            &self,
-            _: &dyn mod_api::Host,
-            event: &mut mod_api::EntityMobGriefingEvent,
-        ) {
-            self.1
-                .lock()
-                .unwrap()
-                .push((event.entity.id(), event.can_grief));
-            if self.0.contains(&event.entity.id()) {
-                event.can_grief = false;
-            }
-        }
-    }
-
-    /// `EntityMobGriefingEvent`: the mod's answer for one entity reaches the
-    /// game's checks and the mob AI's; another entity keeps the rule, and a
-    /// check with no entity reads the rule without asking.
-    #[test]
-    #[ignore = "needs prepared resources"]
-    fn a_mod_denies_one_entity_griefing() {
-        let heard = Arc::default();
-        let (denied, other) = (900, 901);
-        // Guest 5's entity id (`guest` gives `conn + 19`): a player the mod denies.
-        let denied_player = 24;
-        let mods = vec![mod_api::ModEntry::new(
-            "deny",
-            Box::new(Deny(vec![denied, denied_player], Arc::clone(&heard))),
-        )]
-        .into();
-        mod_api::testing::with_mods(mods, || {
-            with_game(|game| {
-                open_to_lan(game);
-                assert!(
-                    game.ui
-                        .rules
-                        .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
-                );
-                assert!(!game.can_entity_grief(Some(denied)));
-                assert!(game.can_entity_grief(Some(other)));
-                assert!(game.can_entity_grief(None));
-                let world = game.mob_world_base(&[]);
-                assert!(!world.can_grief(denied));
-                assert!(world.can_grief(other));
-                let asked = heard.lock().unwrap().clone();
-                assert_eq!(
-                    asked,
-                    [(denied, true), (other, true), (denied, true), (other, true)]
-                );
-                // A large fireball asks for its owner: the ghast the mod denies
-                // lights no fire and another ghast's does; a fireball sent back
-                // by the guest the mod denies lights none and another guest's
-                // does. A gone owner, or none, reads the rule without asking.
-                use super::Who;
-                let hub = &mut game.lan.as_mut().unwrap().hub;
-                hub.guests.push(guest(5));
-                hub.guests.push(guest(6));
-                heard.lock().unwrap().clear();
-                assert!(!game.large_fireball_fire(Some(Who::Mob(denied)), None));
-                assert!(game.large_fireball_fire(Some(Who::Mob(other)), None));
-                assert!(!game.large_fireball_fire(Some(Who::Player), Some(5)));
-                assert!(game.large_fireball_fire(Some(Who::Player), Some(6)));
-                assert!(game.large_fireball_fire(Some(Who::Player), Some(7)));
-                assert!(game.large_fireball_fire(None, None));
-                assert_eq!(
-                    *heard.lock().unwrap(),
-                    [
-                        (denied, true),
-                        (other, true),
-                        (denied_player, true),
-                        (25, true)
-                    ]
-                );
-            });
-        });
-    }
-}
+#[path = "mob_griefing_tests.rs"]
+mod mob_griefing_tests;
 
 #[cfg(test)]
 mod living_visibility_tests {
@@ -11758,6 +11548,7 @@ mod pearl_tests {
             who_lookup: None,
             others_grid: None,
             others_index: None,
+            passenger_objects: &[],
             others_villagers: None,
             others_solid: None,
             daylight: true,
@@ -11901,7 +11692,14 @@ mod knockback_tests {
                 let set = p.set_modifier(attribute, "horizon:test", resistance, "add_value", true);
                 set.unwrap();
             }
-            knock_back(&mut p, &mut test_level.level(), 0.4, (0.0, 3.0), hit, false);
+            knockback::apply_player_knockback(
+                &mut p,
+                &mut test_level.level(),
+                0.4,
+                (0.0, 3.0),
+                hit,
+                false,
+            );
             (p.velocity.x, p.velocity.y, p.velocity.z)
         };
         // No mod in the way: vanilla's push, away from z = 3.
@@ -14166,3 +13964,5 @@ mod leash_without_item_postbaseline_controls;
 #[cfg(test)]
 #[path = "../tests/revenge_home_tests.rs"]
 mod revenge_home_tests;
+
+mod knockback;

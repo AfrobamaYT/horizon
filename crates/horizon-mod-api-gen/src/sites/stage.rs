@@ -121,7 +121,9 @@ pub(super) fn stage_declarations(
     }
     for d in declarations {
         if !sites.iter().any(|s| {
-            s.target == d.target
+            s.local == d.local
+                && s.expression.as_ref().map(|e| &e.ty) == d.expression.as_ref().map(|e| &e.ty)
+                && s.target == d.target
                 && s.selector == d.selector
                 && Some(s.ordinal) == d.ordinal.or(Some(0))
         }) {

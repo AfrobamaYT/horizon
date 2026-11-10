@@ -27,6 +27,25 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 
 `mob_spawn_placement_check` is the separate per-check moment: it runs after the rule and is told its answer as `default_result`, so a listener can still overturn it for one position.
 
+## Walking every entity in a level
+
+`host.level_all_entities(level)` returns the authoritative level's available
+`EntityRef`s without an AABB filter, including spectator players. Unlike
+`level_entities_in`, it does not append the dragon's parts: vanilla's
+`ServerLevel.getAllEntities` iterates the entity lookup, not multipart hit boxes.
+A remote client, stale handle or parked level returns `None`, never a partial
+client-side list. The query also returns `None` while any lookup member is
+temporarily extracted, rather than returning an incomplete authoritative list.
+
+The walk preserves lookup admission order across storage families, including
+removal and re-admission at the end. Initial world loading still admits storage
+families in the engine's loading order, which can differ from vanilla's chunk
+entity loading order. Exact order parity for saved worlds requires a shared
+chunk-load admission stream, rather than reconstructing it from grouped storage.
+The call allocates buffers for the result and sorts admission keys; it does not
+allocate an object per entity. Cache the result when doing several passes in one
+hook rather than repeatedly crossing the host boundary.
+
 ## Checking a spawn
 
 `mob_spawn_placement_check` and `mob_spawn_position_check` both get the `level` the mob would join (a `LevelRef`, so a

@@ -126,8 +126,9 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             listener,
         }));
         let id = Box::leak(id.into_boxed_str());
-        let mut slot = SlotListener::forwarded(owner, place, endpoint, 0x8000_0000 + place as u32)
-            .ordered(priority, id);
+        let mut slot =
+            SlotListener::forwarded(owner, place.place(), endpoint, 0x8000_0000 + place as u32)
+                .ordered(priority, id);
         // The guest's listener already owns the outcome (`mod_points::replace!`); the host's
         // slot carries the mark, so a second replace at the place is refused for either target.
         if replace {
@@ -149,10 +150,7 @@ fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, Strin
         return Err(format!("{id}: no API record for place {place}"));
     };
     if inject.access != Access::Api
-        || !matches!(
-            inject.kind,
-            Kind::Head | Kind::ModifyArg | Kind::Replace | Kind::Return
-        )
+        || !matches!(inject.kind, Kind::Head | Kind::Replace | Kind::Return)
         || (inject.kind == Kind::Return) != at_return
         || horizon_mod_point_emit::plain_path(&inject.at)
             != horizon_mod_point_emit::plain_path(target)
@@ -176,13 +174,17 @@ mod tests {
 
     fn inject(kind: Kind, at: &str) -> Inject {
         Inject {
+            local: None,
+            local_type: None,
+            position: None,
+            expr: None,
             id: "own".into(),
             at: at.into(),
             kind,
             with: "own".into(),
             access: Access::Api,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: None,
             nth: None,
             ctx: None,

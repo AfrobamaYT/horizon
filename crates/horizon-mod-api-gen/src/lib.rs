@@ -3,6 +3,9 @@ mod catalog;
 mod dispatch_fixtures;
 mod exports;
 mod game_modules;
+mod interface_cache;
+#[cfg(test)]
+mod interface_cache_tests;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 pub use game_modules::materialize_game_modules;
@@ -339,7 +342,7 @@ pub fn neoforge_catalog(root: &Path) -> Result<String, String> {
 fn free_function_source(target: &str) -> Option<(&'static str, String)> {
     let prefixes = [
         ("horizon_world::", "horizon-world"),
-        ("mod_api::", "horizon-mod-api"),
+        ("mod_api::", "horizon-mod-vocab"),
         ("mod_render::", "horizon-mod-render"),
         ("horizon_client_lib::", "horizon-client"),
         ("horizon_client_render::", "horizon-client-render"),
@@ -467,8 +470,10 @@ const ENTITY_PART_DOCS: &str = "/// An entity type's part (arismoko/horizon#1077
 /// The crate whose generated sources are being built.
 #[derive(Clone, Copy)]
 pub enum Target {
-    /// `horizon-mod-api`: the hook traits, their dispatch, and the host traits.
+    /// `horizon-mod-api`: the mod-side WebAssembly guest transport.
     Api,
+    /// Engine vocabulary: hook and host traits, values, and dispatch.
+    Vocab,
     /// The game: the host traits' implementation on `Game`.
     Client,
 }
@@ -613,6 +618,23 @@ mod host_param;
 mod index;
 mod wire;
 pub use wire::generate as generate_wire;
+pub use wire::generate_coverage as generate_wire_coverage;
+
+static GENERATED_ON_STDOUT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// For a tool that prints generated text on stdout (`xtask mod-api coverage`): the generator's
+/// `cargo:rerun-if-changed` lines, meant for a build script's Cargo, are left out of it.
+pub fn generated_on_stdout() {
+    GENERATED_ON_STDOUT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tells the build script's Cargo to rerun it when `path` changes.
+pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
+    if !GENERATED_ON_STDOUT.load(std::sync::atomic::Ordering::Relaxed) {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_table;
@@ -621,7 +643,7 @@ pub mod notes;
 pub mod points;
 pub mod sites;
 pub mod staging;
-pub use build::{generate, generate_points, generate_render};
+pub use build::{generate, generate_points, generate_render, write_if_changed};
 pub use notes::generate as generate_hook_notes;
 mod staged;
 pub use staged::{MODS_STAGE, staged_mods};
@@ -629,7 +651,7 @@ pub use staged::{MODS_STAGE, staged_mods};
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]
 pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
-    build::track(root)?;
+    build::track(root, true)?;
     dispatch_fixtures::generate(root, out_dir)?;
     // These fixtures deliberately substitute dispatch-only stub values for API
     // types. Encoding is exercised by the real mod_api's Wire tests, not stubs.
@@ -891,13 +913,13 @@ mod tests {
             .join("target")
             .join(format!("mod-api-fill-{}", std::process::id()));
         let mut inputs: Vec<String> = [
-            "crates/horizon-mod-api/src/hooks",
-            "crates/horizon-mod-api/src/exports",
-            "crates/horizon-mod-api/src/host",
-            "crates/horizon-mod-api/src/parts",
+            "crates/horizon-mod-vocab/src/hooks",
+            "crates/horizon-mod-vocab/src/exports",
+            "crates/horizon-mod-vocab/src/host",
+            "crates/horizon-mod-vocab/src/parts",
             "crates/horizon-client/src/game.rs",
             "crates/horizon-client/src/game",
-            "crates/horizon-mod-api/src/lib.rs",
+            "crates/horizon-mod-vocab/src/lib.rs",
         ]
         .map(str::to_owned)
         .into();
@@ -1117,3 +1139,6 @@ mod tests {
         );
     }
 }
+
+/// Native source-only transient fields.
+pub mod fields;

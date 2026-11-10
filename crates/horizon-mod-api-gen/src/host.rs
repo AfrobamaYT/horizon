@@ -156,7 +156,7 @@ pub(super) const GOAL_VIEW_LOOKUPS: &[&str] = &[
     "block_entity",
 ];
 
-pub(super) const DIRECTORY: &str = "crates/horizon-mod-api/src/host";
+pub(super) const DIRECTORY: &str = "crates/horizon-mod-vocab/src/host";
 /// The generated file `horizon-mod-api/src/host.rs` includes: the area modules and the prelude.
 pub(super) const AREAS_OUTPUT: &str = "mod_api_host_areas.rs";
 
@@ -315,14 +315,14 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
     let mut areas = Vec::new();
     for stem in catalog::Catalog::modules(&dir)? {
         let path = dir.join(format!("{stem}.rs"));
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let camel = stem.to_upper_camel_case();
         let tiers = area_tiers(&camel, file).map_err(|e| format!("{}: {e}", path.display()))?;
         areas.push(Area { stem, camel, tiers });
     }
-    println!("cargo:rerun-if-changed={}", dir.display());
+    crate::rerun_if_changed(&dir.display());
     Ok(areas)
 }
 
@@ -839,13 +839,15 @@ fn handle_method(
 /// The unions, the handles' methods and the hidden backends' side of the host, and the goal view.
 pub(super) fn generate(root: &Path) -> Result<(String, String), String> {
     let areas = load(root)?;
-    let api_source = fs::read_to_string(root.join("crates/horizon-mod-api/src/lib.rs"))
+    let api_source = fs::read_to_string(root.join("crates/horizon-mod-vocab/src/lib.rs"))
         .map_err(|e| e.to_string())?;
     let api_source = super::exports::expand(root, &api_source)?;
     let mut types = api_types(&api_source)?;
     // Parse domain files separately: their inner docs and attributes belong to
     // that file, not to the middle of a concatenated API root.
-    for entry in fs::read_dir(root.join("crates/horizon-mod-api/src")).map_err(|e| e.to_string())? {
+    for entry in
+        fs::read_dir(root.join("crates/horizon-mod-vocab/src")).map_err(|e| e.to_string())?
+    {
         let path = entry.map_err(|e| e.to_string())?.path().join("types.rs");
         if path.is_file() {
             let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;

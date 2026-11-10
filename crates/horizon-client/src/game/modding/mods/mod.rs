@@ -3,6 +3,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
+mod menu_books;
 use horizon_client::{
     lang,
     mod_list::{self, Installed},
@@ -226,12 +227,24 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
 /// hook runs, so every step sees the same values.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
+    let directory = Game::game_dir();
+    #[cfg(unix)]
+    let directory = {
+        use std::os::unix::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
+    };
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
+    };
     mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
         builtin_registry_names(root)?,
         horizon_world::native_load_context::capture_settings(
             &Game::mod_data_root(),
             packages.ids(),
         ),
+        directory,
     ));
     Ok(())
 }
@@ -263,8 +276,12 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
 }
 
 /// Finish every once-only content declaration on the registration thread.
-pub(super) fn freeze_declarations() {
-    let _ = native_declared();
+pub(super) fn freeze_declarations() -> horizon_client::Result<()> {
+    let declared = native_declared();
+    if !declared.errors.is_empty() {
+        return Err(declared.errors.join("\n").into());
+    }
+    Ok(())
 }
 
 struct NativeDeclared {
@@ -280,11 +297,12 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
-        Game::native_items(&RegistrationContext::new(), &mut items);
+        let context = RegistrationContext::new();
+        Game::native_blocks(&context, &mut blocks);
+        Game::native_items(&context, &mut items);
+        let mut errors = mod_api::__private::take_declaration_refusals(&context);
         let types = super::api_values::block_entity_declarations();
         use super::api_values::TryIntoEngine;
-        let mut errors = Vec::new();
         let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
             .iter()
             .filter_map(|v| {
@@ -530,15 +548,19 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
-/// The native mods' particle providers (`native_register_particle_providers`), kept once at
-/// start, before resources load; every particle sprite-set load resolves each type's provider.
-pub(super) fn register_particle_providers(role: ExecutionRole) {
+/// The native mods' particle providers (`native_register_particle_providers`) and render groups
+/// (`native_register_particle_groups`), kept once at start, before resources load; every particle
+/// sprite-set load resolves each type's provider and group.
+pub(super) fn register_particles(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::ParticleProviderRegistry::default();
     Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
     horizon_client::particles::register_particle_providers(registry.into_providers());
+    let mut groups = Vec::new();
+    Game::native_register_particle_groups(&RegistrationContext::new(), &mut groups);
+    horizon_client::particles::register_particle_groups(groups);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -657,14 +679,8 @@ pub(super) fn content_overlay(
         .iter()
         .map(|&index| {
             let source = &packages[index];
-            let declared = native_items
-                .iter()
-                .filter(|i| {
-                    i.id.split_once(':')
-                        .is_some_and(|(ns, _)| ns == source.manifest.id)
-                })
-                .map(|i| i.id.clone())
-                .collect::<Vec<_>>();
+            let declared =
+                super::native_content_items::owned_item_ids(source.manifest, native_items);
             (source.path, source.manifest, declared)
         })
         .collect();
@@ -895,9 +911,28 @@ pub(super) fn content_root(
             .join("\n")
     })?;
     register_entity_types(&overlay.mods);
-    register_menu_types(&overlay.mods);
+    register_menu_types(&overlay.mods)?;
+    register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
+}
+
+/// Publish the built-in registry orders mods iterate. The report already
+/// includes the types and menus the content overlay registered, in registration
+/// order (`BuiltInRegistries` protocol ids).
+fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
+    use horizon_protocol::registry::Builtin;
+    let path = Builtin::find(root).ok_or("registries.json not found")?;
+    let builtin = Builtin::load(&path)?;
+    if let Some(ids) = builtin.get("minecraft:entity_type") {
+        mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    if let Some(ids) = builtin.get("minecraft:menu") {
+        mod_api::__private::resolve_menus(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    Ok(())
 }
 
 fn register_block_entity_types(
@@ -1099,9 +1134,12 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
 
 /// the mods' menu types, as their entity types: set once, from the startup
 /// root.
-fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
+fn register_menu_types(
+    mods: &[horizon_client::mod_content::ContentMod],
+) -> horizon_client::Result<()> {
     use horizon_client::containers;
     let menus = horizon_client::mod_content::menu_types(mods);
+    menu_books::validate_registered(&menus)?;
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
         let crafting = m.crafting.map(|c| containers::ModCrafting {
@@ -1130,6 +1168,7 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
+    Ok(())
 }
 
 /// The embedded inventory, formatted for the crash report.
@@ -1295,10 +1334,8 @@ impl Game<'_> {
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
         self.loop_context = context.game;
+        self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.loop_context = self.loop_context.clone();
-        }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
         }

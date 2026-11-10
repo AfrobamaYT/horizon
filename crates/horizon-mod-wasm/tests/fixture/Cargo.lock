@@ -131,6 +131,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-game-discovery"
+version = "0.1.0"
+dependencies = [
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "horizon-mod-api"
 version = "0.1.0"
 dependencies = [
@@ -140,6 +147,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
+ "horizon-mod-vocab",
  "log",
  "serde",
  "serde_json",
@@ -150,6 +158,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
+ "horizon-game-discovery",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
@@ -179,6 +188,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn 2.0.119",
 ]
 
@@ -198,6 +208,21 @@ name = "horizon-mod-runtime"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+]
+
+[[package]]
+name = "horizon-mod-vocab"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "horizon-core",
+ "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "horizon-mod-runtime",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

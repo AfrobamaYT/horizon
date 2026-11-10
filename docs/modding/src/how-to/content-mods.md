@@ -5,12 +5,32 @@ Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-own
 `Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
-A block's `item` defaults to false in code.
+A block's `item` defaults to false in code. Each mod receives its own declaration
+batch. New identifiers from code—including block entity types and other registrar
+declarations—may use any namespace owned by that mod's manifest. Bare names use
+the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
+refuses registration with a diagnostic naming both the mod and namespace. This
+is identical for native and wasm mods. Attaching a Part to an existing vanilla or
+foreign block or item is a reference, not a new declaration, and remains allowed.
 
 Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
+
+## Choosing what remains after removal
+
+Implement `BlockPart::remove_block` for a block that leaves a support or another
+state behind when removed. This server-only replacement receives the dimension,
+position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
+replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+removed block's own Part is called, not the replacement block's Part.
+
+The chosen state goes through the normal `setBlock` effects with flags 3, plus
+64 for piston movement. An unknown or unregistered state is refused with a
+reason and the vanilla replacement is written. This covers `Level.removeBlock`,
+not every direct `setBlock` or the separate `destroyBlock` path. The level view
+is read-only while answering, on both native and wasm.
 
 ## Making a content mod
 
@@ -368,6 +388,23 @@ player models, in the first person's own third-person view and in other players'
 with a kinetic weapon. A code mod that must decide by stack, hand or entity answers the `get_arm_pose` hook instead,
 which wins over the declared key.
 
+Code mods can also register a namespaced custom pose once in `Hooks::register` through
+`Registrar::register_arm_pose("mymod:flip", uses_both_arms, affects_offhand)`. Keep its
+`CustomArmPose` token and return `ArmPose::Custom(token)` from `get_arm_pose`. The two
+flags independently control the humanoid's two-arm ordering and whether the other
+hand's pose gives way. The token carries these flags as Wire data, so the pose's
+flag getters do not require a registration table inside a wasm guest. Duplicate, malformed and foreign-namespace ids refuse registration.
+
+In `arm_pose_transform`, match `event.pose` to that token and set `event.angles.right`
+or `event.angles.left` to absolute `[pitch, yaw, roll]` in radians. `event.right_arm`
+identifies the physical arm; `event.humanoid` supplies both stacks, the use state,
+and the poses selected after `get_arm_pose` answers. Transformers follow vanilla's
+physical-arm application order and do not run for a suppressed pose.
+Each non-finite angle leaves the base model component unchanged. The transform runs
+only for selected registered poses, on local players, remote players and humanoid mobs;
+swing and mob-specific animations still run afterward and can change those angles.
+Native and wasm mods use the same registration, token and Wire angle value.
+
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }
 ```
@@ -381,6 +418,17 @@ An item can place a block by naming it with `block`, whether it is a vanilla blo
 This uses the block's placement state and survival rules and consumes the item outside creative mode. Add seeds to
 `minecraft:villager_plantable_seeds` for farmers to plant them. The mapping does not change what the block drops or
 what Pick Block gives.
+
+An item whose template is `minecraft:fishing_rod` (and no `block`) is a fishing rod, as a NeoForge mod's
+`new FishingRodItem(...)` is: it casts, floats, bites, reels in and wears as vanilla's rod, its item model's
+`minecraft:fishing_rod/cast` is true while its bobber is out, and `native_player_fish` hears it. List it in
+`#minecraft:enchantable/fishing` for Lure and Luck of the Sea, as vanilla's rod is. Other behaviour that vanilla ties
+to an item's class, such as a bow's draw or a shield's block, still belongs to vanilla's item alone; components
+(`minecraft:tool`, `minecraft:consumable`, `minecraft:equippable` and the others) carry over for every template.
+
+```json
+{ "template": "minecraft:fishing_rod", "components": { "minecraft:max_damage": 128 } }
+```
 
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
@@ -467,6 +515,11 @@ as vanilla's; without one it draws as the missing texture). It does nothing on i
 attribute modifiers. A world opened without the mod drops the effect from its players and mobs. Clients join a server
 only with the same mods' effects, as with its blocks.
 
+Code mods read a registered type's classification with `effect_key.category(host)`,
+which returns `EffectCategory::Beneficial`, `Harmful` or `Neutral`. For an active
+instance, use `active_effect.id.category(host)`. The read works on both sides and
+returns `None` before the effect registry is complete; it never guesses a category.
+
 A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type:
 `minecraft:snowball`, a thrown item projectile, or a living mob (below). A thrown type's `item` is one of the mod's own
 items (one type per item), and `damage` (0 by default) is what a hit deals to anything it hits, as `thrown` damage from
@@ -485,6 +538,21 @@ chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity
 it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. Not yet: a dispenser doesn't throw it, and a vanilla client on a
 server with it may be disconnected when one spawns.
+
+A code mod can launch a thrown type with
+`host.spawn_projectile_from_rotation(owner, &entity_type, &stack, offset, power, inaccuracy)`.
+This is the owner-based `Projectile.spawnProjectileFromRotation` operation, not a summon:
+ownership is set before shooting and the existing launch hook runs after insertion.
+It supports registered mod thrown types and vanilla snowballs, eggs, pearls, potions,
+experience bottles and wind charges. Spread uses the projectile's own random in x/y/z
+order, and known owner movement is inherited (vertical movement only when airborne).
+It does not consume an item, award use statistics or apply cooldowns; invalid parameters
+or unsupported types return `None` without spawning or drawing random values.
+The owner must be in the current level; a guest in another dimension is refused.
+The carried item count is one; the supplied stack is unchanged. A stack whose
+enchantments contain a nonempty `projectile_spawned` component is also refused:
+generic post-insertion enchantment effects are not implemented yet (tracked in #2670),
+so this operation never silently discards them.
 
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
@@ -579,8 +647,12 @@ namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
 A listed namespace is the mod's as its id is: its `assets/` and `data/` files load, and the game reads its tags,
-recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types are declared in
-`data/<id>/horizon/` only. `minecraft`, `c` and
+recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types may be declared in
+`data/<owned_namespace>/horizon/`. The same owned set governs code declarations.
+For example, a package with ID `ported_farmersdelight` and
+`namespaces = ["farmersdelight"]` can declare `farmersdelight:cooking_pot`
+and its `farmersdelight:` block entity type without changing saved-world IDs.
+The namespace collision fence below still applies. `minecraft`, `c` and
 `horizon` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
@@ -698,3 +770,5 @@ A list of exactly three plain numbers is **one** `[x, y, z]` point, not three he
 For multiple seats use nested points, for example `[[1, 2, 3], [-1, 4, 5]]`.
 Seats follow passenger order; extra passengers use the last point. Offsets scale with
 the entity and rotate with its yaw.
+
+Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.

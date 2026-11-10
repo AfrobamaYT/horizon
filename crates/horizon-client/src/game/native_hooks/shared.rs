@@ -1,6 +1,10 @@
+#[path = "shared/book_screen.rs"]
+mod book_screen;
+
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+use screen_chars::chars_to_type;
 
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
@@ -546,6 +550,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// the server sent them, and what the server sent before the menu opened
 /// (`horizon:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
+    pub(super) layout_revision: u64,
     key: Pos,
     window: i32,
     block: String,
@@ -778,19 +783,6 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
     Some(left)
 }
 
-/// What of a key press's text is characters for the
-/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
-/// handling takes those, and vanilla fires no `charTyped` for them).
-/// With the edit modifier held the key is a shortcut and its characters are
-/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
-/// gets none for Ctrl+A.
-fn chars_to_type(text: &str, types_text: bool) -> String {
-    if !types_text {
-        return String::new();
-    }
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// The single admission point for all toast families. Producers decide the
@@ -923,11 +915,17 @@ impl Game<'_> {
     /// drawn this frame, which `ScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> ScreenView<'_> {
+        self.screen_view_at(screen, self.screen_rect(batch, screen))
+    }
+    /// `screen_view` with the panel `rect` the caller is laying out: the
+    /// container build tells a mod the panel it is about to draw, not the one
+    /// the previous frame drew.
+    pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
-            rect: self.screen_rect(batch, screen),
+            rect,
             slots: self.slot_count(),
             mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
@@ -1918,7 +1916,7 @@ impl GameLevel<'_> {
         changed
     }
     /// `Level.removeBlock`: replace a block with its fluid's legacy block.
-    pub(super) fn native_remove_block(
+    pub(super) fn remove_block_write(
         &mut self,
         ticks: &mut Ticks,
         pos: [i32; 3],
@@ -2297,32 +2295,16 @@ impl Game<'_> {
         let size = self.window.as_ref()?.inner_size();
         Some([size.width, size.height])
     }
-    /// The areas the game itself draws beside the open screen's window.
+    /// The areas the game itself draws beside the open screen's window: the
+    /// container build's, or the frame's own arithmetic with no build yet.
     fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
-        let mut areas = Vec::new();
-        match self.screen {
-            Screen::Creative => {
-                let image = self.container_image(batch);
-                let (x, y, w, h) = (
-                    image.left as f32,
-                    image.top as f32,
-                    image.width as f32,
-                    image.height as f32,
-                );
-                areas.push([x, y - Creative::TAB_ROW_DEPTH, w, Creative::TAB_ROW_DEPTH]);
-                areas.push([x, y + h, w, Creative::TAB_ROW_DEPTH]);
-                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
-            }
-            Screen::Inventory if self.title.is_none() => {
-                areas.extend(self.recipe_book_rect(batch));
-                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
-                    let (x, y) = self.inventory_origin(batch);
-                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
-                }
-            }
-            _ => {}
+        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            return Vec::new();
         }
-        areas
+        match self.built_container(batch) {
+            Some(layout) => layout.exclusion(),
+            None => self.container_layout(batch).exclusion(),
+        }
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {
@@ -3195,81 +3177,6 @@ impl Game<'_> {
         let c = self.world.block_entities.mod_container(state)?;
         mod_menu(c.menu.as_deref()?).map(|(menu, _)| menu)
     }
-    /// The container slots (of `size`) that the mod's screen for the block at
-    /// `pos` does not show: the server's menu does not have them either, so a
-    /// shift-click never moves an item where the player cannot see it.
-    pub(super) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
-        if self.mod_menu_at(pos).is_none() {
-            return Vec::new();
-        }
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(pos.0, pos.1, pos.2))
-            .name
-            .to_string();
-        let mut screen = None;
-        self.native_screen(&block, &mut screen);
-        let Some(screen) = screen else {
-            return Vec::new();
-        };
-        (0..size)
-            .filter(|&i| screen.slots.get(i).is_none_or(Option::is_none))
-            .collect()
-    }
-    /// A menu opened on this client with its slots under `key`, on block
-    /// `target`: a mod block's is laid out by its mod (`native_screen`).
-    /// `extra` is what the server sent for this window first.
-    pub(super) fn open_native_screen(
-        &mut self,
-        key: Pos,
-        target: Option<Pos>,
-        window: i32,
-        menu: &str,
-        extra: Option<horizon_protocol::menu_extra::Message>,
-    ) {
-        self.mod_screen = None;
-        let Some(t) = target else {
-            return;
-        };
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(t.0, t.1, t.2))
-            .name
-            .to_string();
-        if block.starts_with("minecraft:") {
-            return;
-        }
-        // Only when this is the menu the clicked block opens: `target` outlives the
-        // use that set it, so another menu opened later (a command's, another
-        // mod's) would otherwise get the last clicked machine's screen. Asked
-        // here, as the window's world has no mod containers.
-        let mut container = None;
-        self.native_block_entity_container(&block, &mut container);
-        let opens = container.and_then(|c| mod_menu(c.menu.as_deref()?).map(|(m, _)| m));
-        if opens != Some(menu) {
-            return;
-        }
-        let mut screen = None;
-        self.native_screen(&block, &mut screen);
-        if let Some(screen) = screen {
-            self.mod_screen = Some(OpenNativeScreen {
-                key,
-                window,
-                block,
-                screen,
-                data: Vec::new(),
-                extra,
-            });
-        }
-    }
-    /// The mod screen showing now, if any.
-    fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
-        self.mod_screen
-            .as_ref()
-            .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
-    }
     /// A data slot of window `window`'s menu (`ContainerSetData`); false
     /// when no mod screen is showing for that window.
     pub(super) fn native_screen_data(&mut self, window: i32, id: i16, value: i16) -> bool {
@@ -3279,16 +3186,6 @@ impl Game<'_> {
         self.mod_screen
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
-    }
-    /// Whether a mod's screen is open for the current menu: it places its own
-    /// container slots and the player's inventory, so the stock layout of the
-    /// vanilla menu underneath stands back (`slot_position`).
-    pub(super) fn native_screen_shown(&self) -> bool {
-        self.shown_native_screen().is_some()
-    }
-    /// The open mod screen's height.
-    pub(super) fn native_screen_height(&self) -> Option<f32> {
-        self.shown_native_screen().map(|s| s.screen.height)
     }
     /// Where the open mod screen puts container slot `slot`.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
@@ -5047,6 +4944,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
             block: "gtmod:machine".into(),
@@ -5079,8 +4977,8 @@ mod tests {
     fn native_loot_kinds_stay_hookable() {
         let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
-            "pub fn native_loot_function(",
-            "pub fn native_loot_condition(",
+            "pub fn native_invoke_loot_function(",
+            "pub fn native_invoke_loot_condition(",
         ] {
             let at = source
                 .find(hook)

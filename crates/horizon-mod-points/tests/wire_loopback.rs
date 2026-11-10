@@ -137,7 +137,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
     ] {
         mod_points::register(&SlotListener::forwarded(
             "guest",
-            place,
+            place.place(),
             endpoint,
             0x8000_0000 + place as u32,
         ))
@@ -160,7 +160,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
     ] {
         mod_points::register(&SlotListener::forwarded(
             "guest",
-            place,
+            place.place(),
             endpoint,
             0x8000_0000 + place as u32,
         ))

@@ -28,7 +28,7 @@ Owner decision (2026-11-08): one derive in `horizon-mod-api-macros`, used by `mo
 
 ### What the derive emits: the same bytes as today
 
-The derive implements the existing trait (`crates/horizon-mod-api/src/wire/wire.rs:558`: `MIN`, `put`, `put_owned`, `take`). It copies the generator's rules from `wire/emit.rs` exactly, so no encoding changes:
+The derive implements the existing trait (`crates/horizon-mod-vocab/src/wire/wire.rs:558`: `MIN`, `put`, `put_owned`, `take`). It copies the generator's rules from `wire/emit.rs` exactly, so no encoding changes:
 
 | Shape | Bytes | `MIN` | `take` |
 |---|---|---|---|
@@ -69,7 +69,7 @@ The first derive PR commits these as a golden test, plus one case per shape and 
 **Keeps** (this is call-table plumbing, not a type's encoding):
 - The `Arc<dyn Trait>` / `Box<dyn Trait>` resource impls for the exported traits and capability handlers (`emit.rs:109`, 70 traits × 2 plus `Any`). These come from the `EXPORTS` list, not from types.
 - The constructors for borrowed records (`__wire_record_N`, 463 of them), and the `Put` impls with checked write-back for records that take appends, projections or views (3). These describe how a call's borrowed arguments cross and come back. That is a call-table concern.
-- The guest and host call glue, `wasm-coverage.md`, and `index.rs`. The index stays only to read trait signatures for the call tables. It stops resolving type definitions for owned value encodings only. It still reads the field definitions of the borrowed records whose constructors and `Put` impls it keeps.
+- The guest and host call glue, the wasm coverage page, and `index.rs`. The index stays only to read trait signatures for the call tables. It stops resolving type definitions for owned value encodings only. It still reads the field definitions of the borrowed records whose constructors and `Put` impls it keeps.
 
 The kept constructors and `Put` impls are generated at the API root, so after the restructure a field private to its module is invisible to them. The crate-visible-fields rule (`ty.rs:635`) therefore stays for those borrowed records and goes away only for value impls.
 
@@ -161,7 +161,7 @@ The first PR classifies every impl in a table in its description, with the golde
 
 - **Tests that go:** `the_hand_written_wire_impls_are_tracked_sources` (it guards the `manual` scan, which goes away) and the generator's emit fixtures.
 - **Tests that change:** `layout_includes_private_borrowed_shapes` hashes the call-table shapes it still owns.
-- **Tests that stay:** `coverage_document_is_current` and `wasm-coverage.md` describe calls, which still cross, so they stay; the document is regenerated if a wording names generated impls.
+- **Tests that stay:** the wasm coverage page (rendered from the generator when the book builds) and `coverage_page_is_well_formed` describe calls, which still cross, so they stay.
 - **Crossing layouts:** `crossing.rs` is deleted by #2242. The `WIRE_LAYOUT` value changes once, in the derive PR, which is expected and refuses old wasm builds.
 
 ### PR plan for the derive
@@ -385,36 +385,38 @@ Native and wasm mods can't call each other's functions: they live in different a
 - **Opting out.** `#[mod_api::no_point]` on a function keeps the build tool from giving it a point. An addon that declares a listener there is refused at load: "chemlib::fill_tank has no point (opted out)". `eligible` treats the attribute as one more exclusion, so the pass and the generator still agree.
 - **Declaration.** The same declarations as engine points: `[[inject]]`, or code registration, naming the function's path within its crate (`chemlib::tanks::fill_tank`). There is the same `kind` (head, return), the same `priority`, and the same order: priority descending, then dependency order, then inject id.
 - **Levels.**
-  - **`access = "api"`.** The listener gets the side's host and a record holding a copy of every parameter. `&mut` parameters are copied in and out. The record has `cancel` and `result` where the contract has them. Every parameter type needs a Wire form. A mod's own types have one only if its author wrote `#[derive(Wire)]` on them: nothing adds it at build time. A same-target `api` listener on a parameter without it is refused at registration, naming the parameter and type, exactly as #2242 does for engine types. A cross-target `api` listener (wasm addon on a native library, or the reverse) is refused **at load**, naming the library, the function, the parameter and its type. The library's `points.json` records which parameters have a Wire form, so the refusal needs no decoding. The derive PRs test this on native and on wasm. With the derive, `api` listeners work across native and wasm, through the game.
+  - **`access = "api"`.** The listener gets the side's host and a record holding a copy of every parameter. `&mut` parameters are copied in and out. The record has `cancel` and `result` where the contract has them. Every parameter type needs a Wire form. A mod's own types have one only if its author wrote `#[derive(Wire)]` on them: nothing adds it at build time. A same-target `api` listener on a parameter without it is refused at registration, naming the parameter and type, exactly as #2242 does for engine types. A cross-target `api` listener (wasm addon on a native library, or the reverse) is refused **at load**, naming the library, the function, the parameter and its type. The library's `mod-points.json` records which parameters have a Wire form, so the refusal needs no decoding. The derive PRs test this on native and on wasm. With the derive, `api` listeners work across native and wasm, through the game.
   - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in its own type. This works only within one target: the same binary on native, the same dependency group on wasm, where the library's types are ordinary Rust. It is refused at load when the listener's mod is on the other target, with "internals access to chemlib needs the same target". Engine `internals` is native-only because a wasm mod can't reach the game's memory; a wasm library and its wasm addons in one dependency group share memory and no engine type crosses, so the same principle allows `internals` there and refuses it across targets (owner, on #2339).
 - **Generics.** A generic function gets the `api` level only, with no raw form, as on the engine. The record is per point, not per instantiation. A parameter whose type is a type parameter needs `T: Wire` at that instantiation, or the listener is refused.
-- **Signature check.** Each mod point carries a hash, recorded in the library's per-mod `points.json` inside its `.hmod`. Listeners pin it in their `[[inject]] hash`, written by `cargo horizon-mod inject add`. The hash is what engine internals use (`internals::signature_hash` in `horizon-mod-api-gen`: the first 8 bytes of SHA-256, as hex) over:
+- **Signature check.** Each mod point carries a hash, recorded in the library's `mod-points.json` inside its `.hmod`. Listeners pin it in their `[[inject]] hash`, written by `cargo horizon-mod inject add`. The hash is what engine internals use (`internals::signature_hash` in `horizon-mod-api-gen`: the first 8 bytes of SHA-256, as hex) over:
   1. the canonical path;
   2. the signature's token text: receiver, parameter names and types, return type;
   3. for `api` declarations, the `layout` of every record field's type (section 0), computed when the catalog is built, so a changed field in a parameter type also refuses.
 
   At load, a declaration whose hash differs from the installed library's is refused, naming the library, its version, the function, and both hashes and signatures. This is the `E_INJECT_CHANGED` path that `inject update` already reports. Engine points don't need this check at load, because a native mod is pinned to one game build.
-- **Cost when nothing listens.** The same single check as an engine point: one relaxed load of the point's `AtomicBool` slot and a branch, inside the body, so inlining keeps the check. **Unmeasured** on a real library. The first mod-point PR measures it on the chemicals sample's hottest function (a per-tick transfer), on native and wasm, and reports it in the PR.
+- **Cost when nothing listens.** The same check as an engine point: one load of the point's `AtomicBool` slot and a branch at the head, and one at the return; the listened path runs out of line. Measured on the chemicals fixture's per-tick transfer (a function of about 2 ns, 63 calls per tick): about 1.2 ns a call natively (1.7 → 2.9 ns, release) and 1.6–2 ns on wasm (2.9 → 4.5–4.9 ns, wasmtime). The rest of the cost is that the staged function is no longer inlined into its caller.
 
 ### How `cargo horizon-mod build` stages it
 
 It mirrors the engine's staging pass (`horizon-mod-api-gen/src/points.rs`, `stage()`):
 1. Walk the mod crate's module files, as `module_files`/`file_functions` do. Run `eligible` on each function and skip `#[mod_api::no_point]`.
 2. Write a staged copy of the crate with `#[point]` on each function, plus each raw form's types beside it. The author's source is never edited. This is the copy Cargo compiles.
-3. Emit the mod's `points.json`: path, kind, side, record, `api_refusal`, hash. Emit its `mod_points`-style module: records, typed slots, `PointId`. Both are build outputs, recorded in the build identity and covered by the package hash.
+3. Emit the mod's `mod-points.json`: path, kind, side, record, `api_refusal`, hash. Emit its `mod_points`-style module: records, typed slots, `PointId`. Both are build outputs, recorded in the build identity and covered by the package hash.
 4. For wasm, as now, compile into each member only the declared places' guest codecs and dispatch. The group build already knows its addons' declarations. The full catalog still sets the layout hash.
 
-### What has to change in #2242's machinery (after it merges)
+### How it is built
 
-1. The `#[point]` expansion is game-bound: it calls `crate::game::points::mirror_in/out` and the game's `POINTS`. It needs a crate parameter so a mod crate expands against its own slot table. Mod points have no engine mirrors, so the mirror step is empty for them.
-2. `horizon_mod_points::registry` holds one static `POINTS: [AtomicBool; POINT_COUNT]`, sealed once. Each mod crate gets its own generated slot table. The loader registers those tables, in dependency order, before the one seal.
-3. Staging runs in `cargo horizon-mod build` (above), not only in `horizon-stage`.
-4. The wasm build's `--points` input becomes the library's catalog plus its addons' declared places.
-5. `api` records need `Wire` on mod types: section 0 (D1) first.
+Built as stage P (the [how-to](../injections.md#mod-points-patching-another-mod) is the reference):
+1. Every point table, the game's and each mod crate's, is a `Table` in one registry (in the mod API's internal registration module). A listener carries its table, and the one seal sets every table that has listeners.
+2. `#[point(table = "…")]` expands against its table: the game's `mod_points` by default, a mod crate's generated `crate::__horizon_points` for a mod point. Mod points have no engine mirrors.
+3. `stage_mod` (`horizon-mod-api-gen/src/points/mod_crate.rs`) is the staging pass for a mod crate. `cargo horizon-mod build --wasm` runs it on every member, and the launcher on every native mod crate it compiles.
+4. The mod's catalog and the routing of an addon's injection to it (`horizon-mod-package`, `manifest::inject::mod_points`) are shared by every loader.
+5. The listened paths run out of line (in the internal cold dispatch module), so an unlistened point costs a slot load and a branch at its head and one at its return.
+6. Wasm group routing (a wasm addon's listeners registered in its library's table inside the group) follows in its own change.
 
 ### Mixed native and wasm
 
-`api` points cross through the game, as an engine point with a wasm listener does today (#2242's `real_member`): the record crosses over Wire, and the listener's changes come back. `internals` points are refused across targets (above). There is no load-time module rewriting: it can't work on native, and it would miss code the compiler has inlined.
+`internals` points are refused across targets (above). `api` points will cross through the game, as an engine point with a wasm listener does (#2242's `real_member`), once mixed-target dependencies are supported (stage 6): until then an `api` listener across targets is refused, naming a parameter without a `Wire` form when there is one. There is no load-time module rewriting: it can't work on native, and it would miss code the compiler has inlined.
 
 ## Where it lives after the restructure
 
@@ -428,7 +430,7 @@ Sizes are estimates.
 |---|---|---|---|
 | 0 | This note. | docs | — |
 | D1–D2 | `#[derive(Wire)]`, as section 0's plan. **First.** | see section 0 | #2242; D1 before or with the restructure |
-| P | Mod points (decided section above): `#[point]` generalised to mod crates, per-mod slot tables, `#[mod_api::no_point]`, staging in `cargo horizon-mod build`, per-mod `points.json` with signature hashes, the load check, the same-target rule for `internals`, the unpatched cost measured on the sample. Comes right after the derive. | ~1,500 | D1, #2242 |
+| P | Mod points (decided section above): `#[point]` generalised to mod crates, per-mod slot tables, `#[mod_api::no_point]`, staging in `cargo horizon-mod build`, per-mod `mod-points.json` with signature hashes, the load check, the same-target rule for `internals`, the unpatched cost measured on the sample. Comes right after the derive. | ~1,500 | D1, #2242 |
 | 1 | (after D1) An erased table shared by owner, kind and name: the declare-once and namespace refusals, type-agreement checks, and the load-phase "resolved table" call into wasm groups. Ported onto it: `OwnProvider`, with the capability key plan's name/type refusals. | ~600 | the restructure (lands into `runtime`) |
 | 2 | Mod hooks: `ModHook`, `declare_hook`, `listen`, the four contracts, `Subscribers` reused, the switch, crash attribution, the depth limit. Tests: a real wasm library and addon (`real_library` style) and the same source natively, covering order, cancel, `receive_cancelled`, a switched-off mod, an undeclared hook, type mismatch, and no listeners meaning no work. Sample: chem-api plus an addon listener in horizon-machine-sample. | ~900 | 1, and #2242 merged (shares listener shape and order code) |
 | 3 | Mod registries: `ModRegistry`, slots through `Names`, sync during configuration, tags, saves by name. | ~900 | 1; coordinate the key space with #2332 |

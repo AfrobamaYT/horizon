@@ -31,15 +31,36 @@ struct Scan {
 pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
     let dir = lib.parent().ok_or("library has no source directory")?;
     let files = crate::points::module_files(krate.into(), lib.into(), dir.into(), true)?;
-    let mut scan = Scan::default();
+    let mut parsed = Vec::new();
     for file in files {
         let source = fs::read_to_string(file.path).map_err(|e| e.to_string())?;
-        let parsed = syn::parse_file(&source).map_err(|e| e.to_string())?;
-        items(krate, &file.module, &parsed.items, &mut scan);
+        parsed.push((
+            file.module,
+            syn::parse_file(&source).map_err(|e| e.to_string())?,
+        ));
     }
-    let mut found = BTreeSet::new();
+    let public = reachable(
+        krate,
+        parsed
+            .iter()
+            .map(|(module, file)| (module.as_str(), file.items.as_slice())),
+    )?;
+    Ok(public.into_keys().collect())
+}
+
+/// The crate's publicly reachable wire types, each public path with the path it is defined at,
+/// from its parsed module files; refused as [`public_types`] refuses them.
+pub(crate) fn reachable<'a>(
+    krate: &str,
+    files: impl IntoIterator<Item = (&'a str, &'a [Item])>,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut scan = Scan::default();
+    for (module, items) in files {
+        self::items(krate, module, items, &mut scan);
+    }
+    let mut found = BTreeMap::new();
     visit(krate, krate, None, &scan, &mut Vec::new(), &mut found)?;
-    Ok(found.into_iter().collect())
+    Ok(found)
 }
 
 fn conditional(attrs: &[syn::Attribute]) -> Option<String> {
@@ -60,7 +81,7 @@ fn visit(
     via: Option<&str>,
     scan: &Scan,
     visiting: &mut Vec<String>,
-    found: &mut BTreeSet<String>,
+    found: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
     if visiting.iter().any(|m| m == module) {
         return Ok(());
@@ -91,7 +112,7 @@ fn visit(
                     "layouts: Wire type {path} is declared conditionally ({reason}); a Wire type a dependent can name must be unconditional"
                 ));
             }
-            found.insert(path);
+            found.insert(path, target.clone());
         } else {
             visit(target, &path, via, scan, visiting, found)?;
         }

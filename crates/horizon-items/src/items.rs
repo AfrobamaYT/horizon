@@ -279,6 +279,19 @@ pub struct ItemInfo {
     pub components: Vec<String>,
     /// Opaque native component defaults, keyed by their registered name.
     pub custom_components: std::collections::BTreeMap<String, horizon_core::nbt::Tag>,
+    /// A content mod's item: the vanilla item it copies (its `template`), whose
+    /// behaviour it has where Horizon follows the template (`ItemInfo::is`).
+    /// None for vanilla's items.
+    pub template: Option<Arc<str>>,
+}
+impl ItemInfo {
+    /// Whether this item is the vanilla item `vanilla`, or a content mod's item
+    /// copied from it: what vanilla's `instanceof` on the item's class asks
+    /// (a content item copies its template's class, as a NeoForge mod's
+    /// `new FishingRodItem(...)` would).
+    pub fn is(&self, vanilla: &str) -> bool {
+        &*self.id == vanilla || self.template.as_deref() == Some(vanilla)
+    }
 }
 /// `Item.Properties.craftRemainder` (not a data component, so not in the
 /// default-component report): what an item leaves in the grid when crafted with.
@@ -292,6 +305,9 @@ pub const CRAFT_REMAINDERS: [(&str, &str); 5] = [
 /// In a root built by `mod_content::build`: the content mods' items' crafting
 /// remainders, by item. Other roots have none.
 pub const MOD_CRAFT_REMAINDERS: &str = "horizon-mod-craft-remainders.json";
+/// In a root built by `mod_content::build`: the content mods' items' vanilla
+/// templates, by item (`ItemInfo::template`). Other roots have none.
+pub const MOD_ITEM_TEMPLATES: &str = "horizon-mod-item-templates.json";
 /// The mod items' declared arm poses (`arm_pose`): item id to the pose's name.
 pub const MOD_ITEM_ARM_POSES: &str = "horizon-mod-item-arm-poses.json";
 /// Explicit item-to-block mappings from content mods (not block drops).
@@ -903,14 +919,17 @@ impl Items {
         defaults: &ItemDefaults,
     ) -> Result<Self> {
         let entity_tags = load_tags(root, "entity_type", overlay)?;
-        let path = root.join(MOD_CRAFT_REMAINDERS);
-        let mod_remainders: HashMap<String, String> = match fs::read(&path) {
-            Ok(bytes) => {
-                serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))?
+        let by_item = |name: &str| -> Result<HashMap<String, String>> {
+            let path = root.join(name);
+            match fs::read(&path) {
+                Ok(bytes) => Ok(serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("{}: {e}", path.display()))?),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+                Err(e) => Err(format!("{}: {e}", path.display()).into()),
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
-            Err(e) => return Err(format!("{}: {e}", path.display()).into()),
         };
+        let mod_remainders = by_item(MOD_CRAFT_REMAINDERS)?;
+        let mod_templates = by_item(MOD_ITEM_TEMPLATES)?;
         let path = root.join(MOD_ITEM_ARM_POSES);
         let mod_arm_poses: HashMap<String, horizon_core::arm_pose::ArmPose> =
             match fs::read(&path) {
@@ -1060,6 +1079,7 @@ impl Items {
                         .find(|(item, _)| *item == name)
                         .map(|(_, rest)| (*rest).to_owned())
                         .or_else(|| mod_remainders.get(name).cloned()),
+                    template: mod_templates.get(name).map(|t| Arc::from(t.as_str())),
                     villager_food: c["minecraft:villager_food"]["nutrition"]
                         .as_i64()
                         .map(|n| n as i32),
@@ -2211,7 +2231,9 @@ impl<R: RandomSource> LootContext<'_, R> {
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
                 let ctx = self.native_loot_context(random);
                 let mut holds = false;
-                horizon_world::loot::native_loot_condition(k, c, &ctx, &mut holds);
+                horizon_world::loot::native_invoke_loot_condition(
+                    k, c, &ctx, &mut holds, self.items,
+                );
                 holds
             }
             _ => false,
@@ -2604,7 +2626,11 @@ impl<R: RandomSource> LootContext<'_, R> {
                 // does in the main loot engine.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let ctx = self.native_loot_context(random);
-                    mod_function(k, f, &ctx, stack, horizon_world::loot::native_loot_function);
+                    mod_function(k, f, &ctx, stack, |kind, data, ctx, stack| {
+                        horizon_world::loot::native_invoke_loot_function(
+                            kind, data, ctx, stack, self.items,
+                        );
+                    });
                 }
                 _ => {}
             }
@@ -2769,9 +2795,9 @@ fn apply_loot(
     stack.tidy();
 }
 
-/// `native_loot_function` with the items engine's stack: the stack as the
+/// `native_invoke_loot_function` with the items engine's stack: the stack as the
 /// loot engine's, the hook, and back what it changed. `hook` is the hook
-/// point (`horizon_world::loot::native_loot_function`); a test passes its own.
+/// point (`horizon_world::loot::native_invoke_loot_function`); a test passes its own.
 fn mod_function(
     kind: &str,
     data: &Value,
@@ -4522,6 +4548,36 @@ mod tests {
             Some("minecraft:bucket")
         );
         assert_eq!(remainder(&modded, "minecraft:bowl"), None);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A content root's templates make the mods' items what they copy (`ItemInfo::is`).
+    #[test]
+    fn mod_items_are_their_templates() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-item-templates-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        let items = r#"{"minecraft:fishing_rod": {}, "minecraft:stick": {}, "ruby:rod": {}}"#;
+        fs::write(root.join("items.json"), items).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let catalog = |root: &Path| Items::catalog(root, &PackOverlay::NONE, &defaults).unwrap();
+        let vanilla = catalog(&root);
+        assert!(!vanilla.items["ruby:rod"].is("minecraft:fishing_rod"));
+        fs::write(
+            root.join(MOD_ITEM_TEMPLATES),
+            r#"{"ruby:rod": "minecraft:fishing_rod"}"#,
+        )
+        .unwrap();
+        let modded = catalog(&root);
+        let rod = &modded.items["ruby:rod"];
+        assert_eq!(rod.template.as_deref(), Some("minecraft:fishing_rod"));
+        assert!(rod.is("minecraft:fishing_rod"));
+        assert!(rod.is("ruby:rod"));
+        assert!(!rod.is("minecraft:stick"));
+        assert!(modded.items["minecraft:fishing_rod"].is("minecraft:fishing_rod"));
+        assert!(!modded.items["minecraft:stick"].is("minecraft:fishing_rod"));
+        assert_eq!(modded.items["minecraft:fishing_rod"].template, None);
         fs::remove_dir_all(&root).unwrap();
     }
 }

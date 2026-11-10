@@ -93,7 +93,8 @@ pub(super) fn source_refusal(
     game: &Path,
     projects: &[api::Project<'_>],
 ) -> Result<Option<SourceReason>, String> {
-    let catalog = internals::Catalog::read(game)?;
+    let catalog =
+        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     for (_, route) in slot_routes(&catalog, projects) {
         match route {
             super::Route::Game { reason } => return Ok(Some(reason)),
@@ -407,6 +408,8 @@ struct Identity {
     target: String,
     side: String,
     link_args: Vec<String>,
+    #[serde(default)]
+    facade_crates: std::collections::BTreeSet<String>,
 }
 
 fn identity(dir: &Path) -> Result<Identity, String> {
@@ -453,15 +456,37 @@ fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
         return Ok(path);
     }
     let prefix = format!("lib{krate}-");
-    fs::read_dir(deps)
+    let candidates: Vec<_> = fs::read_dir(deps)
         .map_err(|e| e.to_string())?
         .flatten()
         .map(|entry| entry.path())
-        .find(|path| {
+        .filter(|path| {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             name.starts_with(&prefix) && name.ends_with(".rmeta")
         })
-        .ok_or_else(|| trf("The prebuilt game has no {crate}.", &[("crate", krate)]))
+        .collect();
+    match candidates.as_slice() {
+        [path] => Ok(path.clone()),
+        [] => Err(trf(
+            "The prebuilt game has no {crate}.",
+            &[("crate", krate)],
+        )),
+        _ => Err(facade_refused(krate)),
+    }
+}
+
+fn facade_refused(krate: &str) -> String {
+    trf(
+        "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.",
+        &[("crate", krate)],
+    )
+}
+
+fn facade_library(deps: &Path, krate: &str, sdk: &Identity) -> Result<PathBuf, String> {
+    if !sdk.facade_crates.contains(krate) {
+        return Err(facade_refused(krate));
+    }
+    library(deps, krate)
 }
 
 /// Rust's standard library as a dynamic library: what the prebuilt game and its executable load.
@@ -519,7 +544,8 @@ pub(super) fn compile(
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
-    let catalog = internals::Catalog::read(game)?;
+    let catalog =
+        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
@@ -529,6 +555,7 @@ pub(super) fn compile(
     let _ = fs::remove_dir_all(out);
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let deps = game.join("deps");
+    let sdk = identity(game)?;
     let api_library = library(&deps, "mod_api")?;
     let mut libraries = std::collections::HashMap::new();
     for (package, name) in api::PACKAGES {
@@ -553,7 +580,11 @@ pub(super) fn compile(
             .and_then(|l| l.get("name"))
             .and_then(toml::Value::as_str)
             .map_or_else(|| project.package.replace('-', "_"), str::to_owned);
-        let source = project.bundle.dir.join(
+        // Compiled from a staged copy: the crate with its own points (#2339).
+        let staged = out.join("staged").join(id);
+        super::copy_bundle(project.bundle, &staged)?;
+        super::mod_points::stage(&staged, &catalog.wire)?;
+        let source = staged.join(
             lib.and_then(|l| l.get("path"))
                 .and_then(toml::Value::as_str)
                 .unwrap_or("src/lib.rs"),
@@ -581,8 +612,10 @@ pub(super) fn compile(
                 .arg(source);
             for krate in &facade.crates {
                 if krate != "horizon_client" {
-                    cmd.arg("--extern")
-                        .arg(format!("{krate}={}", library(&deps, krate)?.display()));
+                    cmd.arg("--extern").arg(format!(
+                        "{krate}={}",
+                        facade_library(&deps, krate, &sdk)?.display()
+                    ));
                 }
             }
             super::run(
@@ -630,11 +663,7 @@ pub(super) fn compile(
         .map(|&i| &projects[i].bundle.manifest)
         .collect();
     let main = out.join("main.rs");
-    fs::write(
-        &main,
-        api::main_rs(&template, &manifests, &catalog.points, &catalog.sites),
-    )
-    .map_err(|e| e.to_string())?;
+    fs::write(&main, api::main_rs(&template, &manifests, &catalog)).map_err(|e| e.to_string())?;
     let binary = out.join(crate::backend::CLIENT);
     let mut cmd = rustc(rust, game, out, "2024");
     cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"])
@@ -664,11 +693,7 @@ pub(super) fn compile(
         "macos" => Some("-Wl,-rpath,@executable_path"),
         _ => None,
     };
-    for arg in origin
-        .into_iter()
-        .map(str::to_owned)
-        .chain(identity(game)?.link_args)
-    {
+    for arg in origin.into_iter().map(str::to_owned).chain(sdk.link_args) {
         cmd.arg("-C").arg(format!("link-arg={arg}"));
     }
     cmd.arg("-o").arg(&binary).arg(&main);
@@ -700,6 +725,40 @@ fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn facades_refuse_build_only_crates_and_ambiguous_runtime_metadata() {
+        let deps = super::super::tests::dir("prebuilt-facade-eligibility");
+        for name in [
+            "libpoint_shape-host.rmeta",
+            "libpoint_shape-target.rmeta",
+            "libbuild_tool-one.rmeta",
+            "libhorizon_core-one.rmeta",
+        ] {
+            fs::write(deps.join(name), b"").unwrap();
+        }
+        let mut sdk: Identity = serde_json::from_value(serde_json::json!({
+            "commit": "test", "rustc": "test", "target": "test", "side": "client",
+            "link_args": [], "facade_crates": ["horizon_core"],
+        }))
+        .unwrap();
+        assert_eq!(
+            facade_library(&deps, "horizon_core", &sdk).unwrap(),
+            deps.join("libhorizon_core-one.rmeta")
+        );
+        for krate in ["point_shape", "build_tool"] {
+            let refusal = facade_library(&deps, krate, &sdk).unwrap_err();
+            assert!(refusal.contains(krate), "{refusal}");
+            assert!(
+                refusal.contains("build-only or has ambiguous metadata"),
+                "{refusal}"
+            );
+        }
+        // Even an incorrect allowlist cannot make lookup select one of two variants.
+        sdk.facade_crates.insert("point_shape".into());
+        assert!(facade_library(&deps, "point_shape", &sdk).is_err());
+        fs::remove_dir_all(deps).unwrap();
+    }
 
     #[test]
     fn the_executable_carries_the_game_and_its_wasm_runtime() {
@@ -748,8 +807,8 @@ mod tests {
                 json!({"at":"Example::private","kind":"head","access":"api"}),
             ),
             (
-                "argument",
-                json!({"at":"Example::calls","kind":"modify_call_arg","access":"internals"}),
+                "expression",
+                json!({"at":"Example::calls","kind":"expression","access":"internals","expr":"64.0","type":"f64","nth":0,"ctx":"context"}),
             ),
         ] {
             let dir = root.join(id);
@@ -786,14 +845,14 @@ mod tests {
             .collect();
         assert_eq!(
             classes,
-            ["prebuilt", "source", "source", "invalid", "invalid"]
+            ["prebuilt", "source", "source", "invalid", "source"]
         );
         let causes: Vec<_> = routes
             .iter()
             .filter(|(_, route)| matches!(route, super::super::Route::Game { .. }))
             .map(|(id, _)| id.as_str())
             .collect();
-        assert_eq!(causes, ["private_head", "unlisted_call"]);
+        assert_eq!(causes, ["private_head", "unlisted_call", "expression"]);
         fs::remove_dir_all(root).unwrap();
     }
 
