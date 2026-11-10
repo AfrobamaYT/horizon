@@ -81,7 +81,7 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             );
             manifest.inject.push(Inject {
                 local: None,
-                local_type: None,
+                local_type: (kind == Kind::Field).then(|| "u32".into()),
                 position: None,
                 id: "test".into(),
                 at: "game::run".into(),
@@ -125,8 +125,8 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 let facade = catalog.facade(&manifest).unwrap();
                 let main = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
                 assert!(!facade.source.contains("FieldCall"));
-                assert!(!facade.source.contains("__horizon_inject_test"));
-                assert!(!main.contains("__horizon_inject_test"));
+                assert!(!facade.source.contains("fn listen"));
+                assert!(!main.contains("mod_0::listen"));
                 assert!(points(&catalog.points, &manifest).next().is_none());
                 assert!(report(&catalog, &manifest)
                     .next()
