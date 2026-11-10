@@ -534,8 +534,9 @@ impl Game<'_> {
                 return Err(ActionRefused::OutOfReach);
             }
         }
-        // Native mods, where Player.attack starts: a canceled blow does
-        // nothing (game/native_hooks.rs).
+        // Native mods, where Player.attack starts: the global `attack_entity`,
+        // then the held item's `on_left_click_entity` Part. A canceled blow
+        // does nothing (game/native_hooks.rs).
         let Some(host) = self.lan.as_ref() else {
             return Err(ActionRefused::Stale);
         };
@@ -561,7 +562,7 @@ impl Game<'_> {
             && self.as_guest_at(gi, conn, |g| {
                 let mut canceled = false;
                 g.native_attack_entity(id, &kind, at, &mut canceled);
-                canceled
+                canceled || g.native_left_click_entity_event(id, &kind)
             }) == Ok(true)
         {
             return Ok(false);

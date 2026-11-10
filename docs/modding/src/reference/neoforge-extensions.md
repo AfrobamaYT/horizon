@@ -152,7 +152,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
 | `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |
-| `onLeftClickEntity(stack, player, entity)` | Missing | — | `hurt_enemy` only hears after the hit landed and cannot veto it. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `onLeftClickEntity(stack, player, entity)` | Covered | `ItemPart::on_left_click_entity` (`hooks/item_attack.rs`) | Runs where `Player.attack` starts, after `attack_entity` let the blow through; a cancel leaves the target unhurt, with no `hurt_enemy` and no wear. |
 | `getCraftingRemainder(instance)` | Partial | content `crafting_remainder`, `host.item_crafting_remainder` | Data and a read cover content items; no per-item Part override. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getEntityLifespan(stack, level)` | Partial | `item_expire` (`hooks/base.rs`) | Adds extra ticks to a dropped item's life; no absolute lifespan and not per-item. |
 | `hasCustomEntity(stack)` | Missing | — | No custom dropped-entity selection. |
@@ -161,7 +161,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
 | `canEquip(stack, slot, entity)` | Partial | `equippable.allowed_entities`, `entity_capability::goes_in_slot` | Component data decides slot and allowed entities; no per-stack code predicate. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
-| `onEntitySwing(stack, entity, hand)` | Missing | — | No per-item swing callback. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `onEntitySwing(stack, entity, hand)` | Covered | `ItemPart::on_entity_swing` (`hooks/item_attack.rs`) | Runs where `LivingEntity.swing` starts, on both sides; a cancel starts no swing (no animation, no packet). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
 | `getMaxDamage(stack)` | Partial | `minecraft:max_damage` effective component, `host.max_damage` | The stack's effective component includes a patch over the item default; `host.max_damage` reads that default only. |
 | `isDamaged(stack)` | Covered | `ItemStack::damage`, `damage_component` | Distinguishes explicit zero from absent. |
@@ -308,8 +308,8 @@ their rows have landed or become partial since and should be narrowed when they 
 - **Block group rows that still need their own answer:** `isLadder`, `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo`, `onDestroyedByPlayer` (all Partial or Missing above).
-- **Item group rows that still need their own answer:** `onLeftClickEntity`, `onEntitySwing`,
-  `onEntityItemUpdate`, `canPerformAction` (all Partial or Missing above).
+- **Item group rows that still need their own answer:** `onEntityItemUpdate`, `canPerformAction` (both
+  Partial or Missing above).
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing
   above; they have no follow-up issue yet. The largest are the entity fluid queries, block entity model data and
   fluid tooltips.
