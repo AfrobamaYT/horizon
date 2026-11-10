@@ -131,7 +131,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 487 | 2736 | 4907 |
+| horizon-client | horizon-mod-api | 487 | 2736 | 4920 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 27 | 85 | 87 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
@@ -153,7 +153,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | area | files | prod refs | test refs |
 |---|---|---|---|
 | game/modding | 174 | 1410 | 2183 |
-| game/native_hooks | 113 | 437 | 475 |
+| game/native_hooks | 113 | 437 | 488 |
 | client (non-game) | 81 | 397 | 300 |
 | game/interface | 48 | 150 | 485 |
 | game/mobs | 28 | 165 | 444 |
@@ -175,11 +175,11 @@ Counts are source references (one per `use` leaf or path), split into production
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
 | loading | 253 | 745 | 77 |
-| host | 111 | 413 | 81 |
+| host | 111 | 414 | 81 |
 | slots | 8 | 0 | 0 |
 | attachments | 166 | 293 | 50 |
 | content_render | 304 | 407 | 175 |
-| hooks | 2603 | 3629 | 1464 |
+| hooks | 2603 | 3641 | 1464 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -210,7 +210,7 @@ Outside the host areas, 2562 `mod_api` references are in test code; 235 of them 
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (stays in the engine) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
 | content_render (phase 5) | 6 | 2750 | 6 | 1 | 46 | 46 | 19 |
-| hooks (phase 6, not built) | 425 | 103899 | 388 | 19 | 587 | 1700 | 235 |
+| hooks (phase 6, not built) | 425 | 103953 | 388 | 19 | 587 | 1700 | 235 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
