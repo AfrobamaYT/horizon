@@ -85,3 +85,12 @@ pub mod servers {
         ServerEntry, load, lock, parse_address, prepend, remove_where, save,
     };
 }
+
+/// Build-time mod source generation and point signature inspection.
+#[cfg(feature = "mod-build")]
+pub mod mod_build {
+    /// The shared mod API and source generator.
+    pub use horizon_mod_api_gen as api_gen;
+    /// Parsing and validation of injection point signatures.
+    pub use point_shape;
+}
