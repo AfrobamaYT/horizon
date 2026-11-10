@@ -2231,7 +2231,9 @@ impl<R: RandomSource> LootContext<'_, R> {
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
                 let ctx = self.native_loot_context(random);
                 let mut holds = false;
-                horizon_world::loot::native_loot_condition(k, c, &ctx, &mut holds, self.items);
+                horizon_world::loot::native_invoke_loot_condition(
+                    k, c, &ctx, &mut holds, self.items,
+                );
                 holds
             }
             _ => false,
@@ -2625,7 +2627,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let ctx = self.native_loot_context(random);
                     mod_function(k, f, &ctx, stack, |kind, data, ctx, stack| {
-                        horizon_world::loot::native_loot_function(
+                        horizon_world::loot::native_invoke_loot_function(
                             kind, data, ctx, stack, self.items,
                         );
                     });
@@ -2793,9 +2795,9 @@ fn apply_loot(
     stack.tidy();
 }
 
-/// `native_loot_function` with the items engine's stack: the stack as the
+/// `native_invoke_loot_function` with the items engine's stack: the stack as the
 /// loot engine's, the hook, and back what it changed. `hook` is the hook
-/// point (`horizon_world::loot::native_loot_function`); a test passes its own.
+/// point (`horizon_world::loot::native_invoke_loot_function`); a test passes its own.
 fn mod_function(
     kind: &str,
     data: &Value,

@@ -5079,8 +5079,8 @@ mod tests {
     fn native_loot_kinds_stay_hookable() {
         let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
-            "pub fn native_loot_function(",
-            "pub fn native_loot_condition(",
+            "pub fn native_invoke_loot_function(",
+            "pub fn native_invoke_loot_condition(",
         ] {
             let at = source
                 .find(hook)
