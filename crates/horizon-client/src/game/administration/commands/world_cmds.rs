@@ -286,9 +286,6 @@ impl Game<'_> {
                 let attack = self.current_attack();
                 self.for_player(target, |g| {
                     g.with_attack(attack, |g| {
-                        if g.spectator() {
-                            return false;
-                        }
                         if let Some(name) = named {
                             g.note_direct_entity(ty, name);
                         }

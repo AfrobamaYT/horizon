@@ -71,4 +71,5 @@ pub struct PartRegistrar {
     pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
     pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) refused: Vec<String>,
+    pub(crate) self_refusal: Option<String>,
 }
