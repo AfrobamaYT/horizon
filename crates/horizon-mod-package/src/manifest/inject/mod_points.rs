@@ -281,6 +281,18 @@ pub fn route<'a>(
             declaration: format!("{}: a mod point has head and return places only", inject.at),
         }));
     }
+    // An internals replace needs the point's raw outcome shape, which the mod point catalog
+    // doesn't record; routed as a head it would run beside the body instead of replacing it.
+    if !api && inject.kind == super::Kind::Replace {
+        return Err(Refusal::Inject(InjectError::NoSlot {
+            id,
+            reason: NoSlotReason::KindHasNoSlot,
+            declaration: format!(
+                "{}: a mod point takes an api replace only; use access = \"api\"",
+                inject.at
+            ),
+        }));
+    }
     match super::route(
         Entry {
             inject,
