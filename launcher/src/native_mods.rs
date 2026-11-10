@@ -1607,9 +1607,7 @@ fn local_source(archive: &Path, destination: &Path, revision: &str) -> Result<Pa
         .tempdir_in(parent)
         .map_err(|e| e.to_string())?;
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
-    tar::Archive::new(file)
-        .unpack(partial.path())
-        .map_err(|e| e.to_string())?;
+    unpack_source(file, partial.path())?;
     fs::write(partial.path().join(".horizon-revision"), revision).map_err(|e| e.to_string())?;
     fs::rename(partial.path(), destination).map_err(|e| e.to_string())?;
     Ok(destination.to_owned())
@@ -1637,22 +1635,31 @@ fn source(revision: &str) -> Result<PathBuf, String> {
 
 /// GitHub's archive (`.tar.gz`) at `url`, unpacked into the fresh folder `partial`: the archive's
 /// one top folder, which is returned. Links are left out; at most `limit` bytes are unpacked.
+fn unpack_source(reader: impl std::io::Read, partial: &Path) -> Result<(), String> {
+    let mut archive = tar::Archive::new(reader);
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry = entry.map_err(|e| format!("Source interrupted: {e}"))?;
+        let kind = entry.header().entry_type();
+        // Match downloaded sources: horizon-mixins refuses links, which the build does not need.
+        if !(kind.is_file() || kind.is_dir()) {
+            continue;
+        }
+        if !entry
+            .unpack_in(partial)
+            .map_err(|e| format!("Could not unpack the source: {e}"))?
+        {
+            return Err("The source archive contains a path outside its folder.".into());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<PathBuf, String> {
     use std::io::Read;
     let _ = fs::remove_dir_all(partial);
     fs::create_dir_all(partial).map_err(|e| e.to_string())?;
     let reader = flate2::read::GzDecoder::new(backend::get(url)?.into_reader()).take(limit);
-    let mut tar = tar::Archive::new(reader);
-    for entry in tar.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| format!("Download interrupted: {e}"))?;
-        let kind = entry.header().entry_type();
-        if !(kind.is_file() || kind.is_dir()) {
-            continue;
-        }
-        entry
-            .unpack_in(partial)
-            .map_err(|e| format!("Could not unpack the source: {e}"))?;
-    }
+    unpack_source(reader, partial)?;
     // The archive's one top folder (<repo>-<commit>/) is the source's root.
     fs::read_dir(partial)
         .map_err(|e| e.to_string())?
@@ -2706,7 +2713,9 @@ mod tests {
         };
         git(&["init", "-q"]);
         fs::write(repo.join("Cargo.toml"), "[workspace]\n").unwrap();
-        git(&["add", "Cargo.toml"]);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("Cargo.toml", repo.join("CLAUDE.md")).unwrap();
+        git(&["add", "--all"]);
         git(&[
             "-c",
             "user.name=Test",
@@ -2735,6 +2744,7 @@ mod tests {
             fs::read_to_string(result.join(".horizon-revision")).unwrap(),
             revision
         );
+        assert!(!result.join("CLAUDE.md").exists());
         assert!(source_or_local(
             Some(&folder.path().join("missing.tar")),
             &folder.path().join("missing-cache"),
