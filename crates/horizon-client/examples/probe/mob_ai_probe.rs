@@ -550,6 +550,7 @@ impl HiveHost for ProbeHive<'_, '_> {
     fn sound(&mut self, name: &'static str, at: [f64; 3]) {
         self.events.push(MobEvent::Sound(name, at, 1.0, 1.0));
     }
+    fn set_changed(&mut self, _at: [i32; 3]) {}
 }
 /// The hive's honey level and front from its block state.
 fn hive_state(registry: &BlockRegistry, world: &World, at: [i32; 3]) -> (Option<i32>, [i32; 2]) {
@@ -1222,6 +1223,7 @@ pub fn main() -> horizon_client::Result<()> {
                     who_lookup: None,
                     others_grid: $grid,
                     others_index: None,
+                    passenger_objects: &[],
                     others_villagers: None,
                     others_solid: None,
                     daylight: (world.day_time.rem_euclid(24000)) < 12000,

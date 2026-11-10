@@ -603,7 +603,6 @@ struct Facts {
     dye: Option<usize>,
     max_damage: u32,
     max_stack: u32,
-    remainder: Option<Arc<str>>,
 }
 /// The tables recipes consult.
 pub struct Context<'a> {
@@ -1199,7 +1198,7 @@ impl Special {
     }
 }
 /// `DyedItemColor.applyDyes` over dye indexes.
-pub(crate) fn apply_dyes(current: Option<i32>, dyes: &[usize]) -> i32 {
+pub fn apply_dyes(current: Option<i32>, dyes: &[usize]) -> i32 {
     let (mut r, mut g, mut b, mut intensity, mut n) = (0i32, 0i32, 0i32, 0i32, 0i32);
     let mut add = |rgb: u32| {
         let (red, green, blue) = (
@@ -1443,27 +1442,31 @@ pub struct ResolvedSources {
 /// the sets takes: the cooking, station and brewing acceptance and the
 /// network copy.
 #[derive(Clone, Debug, Default)]
-pub struct PropertyAdditions(HashMap<&'static str, HashSet<String>>);
+pub struct PropertyAdditions(HashMap<String, HashSet<String>>);
+#[cfg(test)]
+#[path = "crafting/property_sets_tests.rs"]
+mod property_sets_tests;
 impl PropertyAdditions {
     /// Asks the `recipe_property_sets` hook once. An unknown set key and an
     /// item that is air are logged and skipped.
     fn ask(context: &horizon_world::native_load_context::LoadContext) -> Self {
         let mut asked = Vec::new();
         native_hooks::native_recipe_property_sets(context, &mut asked);
-        let mut sets = HashMap::<&'static str, HashSet<String>>::new();
+        let mut sets = HashMap::<String, HashSet<String>>::new();
         for addition in asked {
             let key = addition
                 .set
                 .strip_prefix("minecraft:")
                 .unwrap_or(&addition.set);
-            let Some((key, ..)) = crate::lan::recipes::PROPERTY_SETS
-                .iter()
-                .find(|(set, ..)| *set == key)
-            else {
+            if !key.contains(':')
+                && !crate::lan::recipes::PROPERTY_SETS
+                    .iter()
+                    .any(|(set, ..)| *set == key)
+            {
                 log::warn!("recipe_property_sets: unknown set {}", addition.set);
                 continue;
-            };
-            let set = sets.entry(key).or_default();
+            }
+            let set = sets.entry(key.to_owned()).or_default();
             for item in addition.items {
                 if item == "minecraft:air" {
                     log::warn!("recipe_property_sets: air skipped in {key}");
@@ -1477,6 +1480,14 @@ impl PropertyAdditions {
     /// The items mods added to the set `key` (`furnace_input`).
     pub fn get(&self, key: &str) -> Option<&HashSet<String>> {
         self.0.get(key)
+    }
+    /// Custom sets, with fully qualified keys. Vanilla additions are read by
+    /// their owning recipe projections instead.
+    pub fn custom(&self) -> impl Iterator<Item = (&str, &HashSet<String>)> {
+        self.0
+            .iter()
+            .filter(|(key, _)| key.contains(':'))
+            .map(|(key, items)| (key.as_str(), items))
     }
     /// Whether a mod added `item` to the set `key`.
     pub fn adds(&self, key: &str, item: &str) -> bool {
@@ -1913,7 +1924,6 @@ impl Recipes {
                         }),
                         max_damage: info.max_damage,
                         max_stack: info.max_stack,
-                        remainder: info.crafting_remainder.as_deref().map(Arc::from),
                     },
                 )
             })
@@ -2093,6 +2103,7 @@ impl Recipes {
         recipe: &str,
         grid: &[Option<ItemStack>],
         size: usize,
+        remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
     ) -> Vec<Option<ItemStack>> {
         let mut out = vec![None; size * size];
         let Some(input) = Input::of(grid, size) else {
@@ -2106,11 +2117,7 @@ impl Recipes {
         for (i, cell) in input.cells.iter().enumerate() {
             let Some(s) = cell else { continue };
             let at = (input.top + i / input.width) * size + input.left + i % input.width;
-            let rest = self
-                .facts
-                .get(&s.item)
-                .and_then(|f| f.remainder.as_deref())
-                .map(|r| ItemStack::new(r, 1));
+            let rest = remainder(s);
             if rest.is_some() {
                 out[at] = rest;
                 continue;
@@ -2166,6 +2173,10 @@ impl Recipes {
                 .filter(|c| c.ingredient.test_in(context, input))
         })
     }
+    /// The mod-created sets of this load, with fully qualified keys.
+    pub fn custom_property_sets(&self) -> impl Iterator<Item = (&str, &HashSet<String>)> {
+        self.property_additions.custom()
+    }
     /// What mods added to the property set `key` (`furnace_input`).
     pub fn property_set(&self, key: &str) -> Option<&HashSet<String>> {
         self.property_additions.get(key)
@@ -2187,6 +2198,20 @@ impl Recipes {
         self.cooking
             .iter()
             .find(|c| c.kind == kind && c.ingredient.test_in(context, input))
+    }
+}
+
+/// Resolves the remainder from the stack at the moment it is consumed.
+pub trait CraftingRemainder {
+    /// What remains after one item of this current stack is consumed.
+    fn crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack>;
+}
+impl CraftingRemainder for crate::items::Items {
+    fn crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
+        self.get(&stack.item)?
+            .crafting_remainder
+            .as_deref()
+            .map(|id| ItemStack::new(id, 1))
     }
 }
 
@@ -3290,5 +3315,65 @@ mod tests {
     fn dyes_blend_like_dyed_item_color() {
         // One red dye on an undyed item gives the dye's own colour.
         assert_eq!(apply_dyes(None, &[14]), 0xB02E26);
+    }
+}
+
+#[cfg(test)]
+mod crafting_remainder_tests {
+    use super::*;
+    #[test]
+    fn crafting_remainder_book_copy_preserves_generation_and_components() {
+        let mut recipes = Recipes::empty();
+        recipes.crafting.push((
+            "copy".into(),
+            Recipe::Special(Special::BookCloning {
+                source: Ingredient::of(vec!["minecraft:written_book".into()]),
+                material: Ingredient::of(vec!["minecraft:writable_book".into()]),
+                min: 1,
+                max: 2,
+                result: Template {
+                    item: Some("minecraft:written_book".into()),
+                    count: 1,
+                    damage: 0,
+                    extra: None,
+                    components: None,
+                },
+            }),
+        ));
+        let mut book = ItemStack::new("minecraft:written_book", 1);
+        book.data_mut().written = Some(crate::item_data::WrittenBook {
+            title: "Original".into(),
+            author: "Author".into(),
+            generation: 1,
+            pages: vec!["page".into()],
+            page_tags: Vec::new(),
+        });
+        let grid = [
+            Some(book.clone()),
+            Some(ItemStack::new("minecraft:writable_book", 1)),
+            None,
+            None,
+        ];
+        let calls = std::cell::Cell::new(0);
+        let remainder = recipes.remainders("copy", &grid, 2, &|_| {
+            calls.set(calls.get() + 1);
+            None
+        });
+        assert_eq!(
+            calls.get(),
+            1,
+            "the source book's recipe copy ends the search"
+        );
+        assert_eq!(remainder, vec![Some(book), None, None, None]);
+        let written = remainder[0]
+            .as_ref()
+            .unwrap()
+            .data()
+            .unwrap()
+            .written
+            .as_ref()
+            .unwrap();
+        assert_eq!(written.generation, 1);
+        assert_eq!(written.pages, ["page"]);
     }
 }

@@ -43,6 +43,27 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const NO_ANSWER: &str =
     "the integrated server stopped or did not answer within 10 s (the game log says which)";
 
+/// The server thread's stack: the 8 MB the main thread has (`build.rs`), not a spawned thread's
+/// 2 MB default. It holds the server's `Game` by value (~67 KB, `serve`) and runs every tick on it,
+/// as deep as the main thread's game goes (#2430).
+const SERVER_THREAD_STACK: usize = 8 * 1024 * 1024;
+
+/// The server thread's stack size: [`SERVER_THREAD_STACK`], or what `RUST_MIN_STACK` asks for
+/// when that is larger. std reads the variable only for a thread spawned without a size, and
+/// harnesses raise it for this thread (`tools/test_wind_burst_hook.py`, the parity tools).
+fn server_thread_stack() -> usize {
+    static SIZE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *SIZE.get_or_init(|| stack_for(std::env::var("RUST_MIN_STACK").ok().as_deref()))
+}
+
+/// [`SERVER_THREAD_STACK`], or `min_stack` (a byte count, as std parses `RUST_MIN_STACK`) when
+/// that is larger.
+fn stack_for(min_stack: Option<&str>) -> usize {
+    min_stack
+        .and_then(|bytes| bytes.parse::<usize>().ok())
+        .map_or(SERVER_THREAD_STACK, |bytes| bytes.max(SERVER_THREAD_STACK))
+}
+
 /// `LevelLoadProgressTracker.EXPECTED_PLAYER_CHUNKS`: the 7x7 chunks around the spawn.
 const PLAYER_CHUNKS: usize = 49;
 
@@ -377,6 +398,11 @@ impl Game<'_> {
     pub(super) fn has_singleplayer_server(&self) -> bool {
         self.remote.is_none() || self.integrated.is_some()
     }
+    /// `Minecraft.isMultiplayerServer`: on another's server, or a world of one's own open to the
+    /// network.
+    pub(super) fn is_multiplayer_server(&self) -> bool {
+        !self.has_singleplayer_server() || self.is_published()
+    }
     /// `IntegratedServer.isPublished`: the world is open to the network.
     pub(super) fn is_published(&self) -> bool {
         self.lan.is_some()
@@ -495,6 +521,7 @@ impl Game<'_> {
         let server_flags = flags.clone();
         let thread = std::thread::Builder::new()
             .name("Server thread".into())
+            .stack_size(server_thread_stack())
             .spawn(move || {
                 // MinecraftServer.spin's Thread.setPriority(8).
                 horizon_threads::favour_current();
@@ -556,6 +583,7 @@ impl Game<'_> {
             // FileFixerProgressScreen's Cancel: the upgrade stopped, back to the title.
             Ok(Err(_)) if starting.handle.upgrade().is_canceled() => {
                 self.integrated_starting = None;
+                self.perf.cancel_world_opening();
                 return Ok(());
             }
             Ok(Err(e)) => {
@@ -792,6 +820,7 @@ impl Game<'_> {
         self.native_lifecycle_open_started();
         // `load_world`, with the world `serve` started preparing.
         startup::time("server.wait_rest", || self.join_world_rest())?;
+        self.perf.world_opening();
         let open_step = startup::step("server.open_world");
         self.finish_open_world(opening.world?.finish()?)?;
         drop(open_step);
@@ -1292,6 +1321,7 @@ impl Game<'_> {
         options.dedicated = Some(Vec::new());
         let result = std::thread::Builder::new()
             .name("Server thread".into())
+            .stack_size(server_thread_stack())
             .spawn(move || {
                 let run = || -> Result<()> {
                     let mut server = server_game(&res, pack, options, settings)?;
@@ -1345,6 +1375,26 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
 pub(super) mod tests {
     use super::*;
     use mod_api::prelude::*;
+
+    /// The server thread keeps the main thread's 8 MB, and a larger `RUST_MIN_STACK` still
+    /// reaches it (#2430).
+    #[test]
+    fn the_server_thread_stack_is_the_larger_of_8_mb_and_rust_min_stack() {
+        let eight = 8 * 1024 * 1024;
+        assert_eq!(super::stack_for(None), eight);
+        assert_eq!(
+            super::stack_for(Some("1048576")),
+            eight,
+            "smaller asks keep 8 MB"
+        );
+        assert_eq!(super::stack_for(Some("67108864")), 64 * 1024 * 1024);
+        assert_eq!(super::stack_for(Some("16777216")), 16 * 1024 * 1024);
+        assert_eq!(
+            super::stack_for(Some("lots")),
+            eight,
+            "an unparsed value is ignored"
+        );
+    }
 
     /// Observe both teardownPublishedState and the dropped server task queue.
     pub(in crate::game) fn install_serving(

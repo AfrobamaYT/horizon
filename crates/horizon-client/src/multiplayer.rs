@@ -172,7 +172,7 @@ pub fn button_action(id: u8) -> Option<crate::widgets::Action> {
 }
 
 impl Screen {
-    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// The id native mods see for this screen (`ScreenView.id`, the
     /// screen hooks): one per variant, a hook's contract, so it stays the
     /// same from release to release. A new variant must add one.
     pub fn id(&self) -> &'static str {
@@ -337,7 +337,7 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
 /// Save the list after a move or delete, keeping the icons pings stored in
 /// servers.dat since it was loaded, and the Code of Conduct accepted on a server.
 fn save_servers(file: &Path, servers: &mut [ServerEntry]) {
-    let _guard = SAVING.lock();
+    let _guard = servers::lock();
     let saved = servers::load(file);
     for entry in servers.iter_mut() {
         if let Some(s) = saved.iter().find(|s| s.ip == entry.ip) {
@@ -347,11 +347,9 @@ fn save_servers(file: &Path, servers: &mut [ServerEntry]) {
     }
     let _ = servers::save(file, servers);
 }
-/// Held while servers.dat is read and written back.
-static SAVING: Mutex<()> = Mutex::new(());
 /// Store `icon` on the entries for `address` (OnlineServerEntry.updateServerList).
 fn save_icon(file: &Path, address: &str, icon: Option<String>) {
-    let _guard = SAVING.lock();
+    let _guard = servers::lock();
     let mut list = servers::load(file);
     let mut changed = false;
     for entry in list.iter_mut().filter(|e| e.ip == address) {
@@ -1976,7 +1974,7 @@ pub fn remember_direct_join(saves: &Path, address: &str) {
         return;
     }
     let file = servers_file(saves);
-    let _guard = SAVING.lock();
+    let _guard = servers::lock();
     let (shown, hidden) = servers::load_all(&file);
     if shown.iter().chain(&hidden).any(|s| s.ip == address) {
         return;
@@ -2198,22 +2196,10 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "friends")]
     #[test]
-    fn direct_connection_joins_a_pasted_invite_and_keeps_host_names() {
-        let invite = horizon_friends::invite::Invite {
-            secret: *b"0123456789",
-            port: 25580,
-            endpoints: vec!["192.168.1.20:25580".parse().unwrap()],
-            relay: None,
-        }
-        .encode();
-        assert_eq!(
-            direct_address(&format!(" {invite} ")),
-            format!("{}{invite}", crate::net::FRIEND)
-        );
+    fn direct_connection_keeps_host_names() {
         for host in ["localhost", "example.org:25566", "abcdefgh", "[::1]:25568"] {
-            assert_eq!(direct_address(host), host);
+            assert_eq!(direct_address(&format!(" {host} ")), host);
         }
     }
 

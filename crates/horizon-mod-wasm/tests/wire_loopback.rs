@@ -8,6 +8,8 @@ use std::{rc::Rc, sync::Arc};
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/loot_tags.rs"]
+mod loot_tags_wire;
 #[derive(Clone)]
 struct WasmMod {
     group: u8,
@@ -159,16 +161,38 @@ impl LoopContext for Context {
     fn mods(&self) -> mod_api::LoadedMods {
         unreachable!("not used by this fixture")
     }
+    fn mod_recipe_property_contains(&self, _: &str, _: mod_api::ItemKey) -> bool {
+        false
+    }
 }
 #[unsafe(no_mangle)]
 fn __horizon_mod_hooks() -> Box<dyn Hooks> {
     struct Mod;
     impl Hooks for Mod {
+        fn loot_function(&self, event: &mut mod_api::LootFunctionEvent<'_>) {
+            let tag = event
+                .tags
+                .key(&mod_api::Identifier::parse("test:ingredients").unwrap())
+                .unwrap();
+            let members = event.tags.items(tag).unwrap();
+            assert_eq!(members, vec![event.stack.item]);
+            assert_eq!(event.tags.is_in_tag(event.stack.item, tag), Some(true));
+            event.stack.count = 29;
+        }
+        fn loot_condition(&self, event: &mut mod_api::LootConditionEvent<'_>) {
+            let tag = event
+                .tags
+                .key(&mod_api::Identifier::parse("test:ingredients").unwrap())
+                .unwrap();
+            let item = event.tags.items(tag).unwrap()[0];
+            event.holds = event.tags.is_in_tag(item, tag).unwrap();
+        }
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
             _: &mod_api::RegistrationContext,
         ) {
+            arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
@@ -393,7 +417,9 @@ fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
     update.insert("display".into(), Tag::Int(42));
     mod_api::ModBlockEntityView::new(&mut entity).set_client_update_fields(update);
     let mut owned = Writer::new();
-    owned.put(&mod_api::containers::ModBlockEntitySnapshot::from(&entity));
+    owned.put(&mod_api::item::containers::ModBlockEntitySnapshot::from(
+        &entity,
+    ));
     let mut borrowed = Writer::new();
     borrowed.put(&mod_api::ModBlockEntityView::new(&mut entity));
     assert!(owned.error().is_none());
@@ -666,10 +692,7 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
         |_| false,
     )
     .unwrap();
-    let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(
-        mod_api::NativeWorldEpoch::new(1),
-        7,
-    ));
+    let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 7));
     mod_api::testing::with_mods(Arc::from(mods), || {
         for attack in [0, 1, 2, 3] {
             APPEND_ATTACK.set(attack);
@@ -733,7 +756,7 @@ fn wire_loopback_optional_borrowed_render_record() {
         listeners: &[],
         corrupt: false,
     };
-    let mob = mod_api::NativeMobRender {
+    let mob = mod_api::MobRender {
         id: 1,
         kind: "test:mob",
         custom_name: Some("custom"),
@@ -749,7 +772,7 @@ fn wire_loopback_optional_borrowed_render_record() {
         death_time: 0,
         on_ground: true,
     };
-    let player = mod_api::NativePlayerRender {
+    let player = mod_api::PlayerRender {
         name: "test:player",
         local: true,
     };
@@ -761,6 +784,7 @@ fn wire_loopback_optional_borrowed_render_record() {
                 mob: &mob,
                 who,
                 draw: &mut draw,
+                parts: None,
             },
         );
         assert_eq!(draw.0, if who.is_some() { 42 } else { 7 });
@@ -845,7 +869,7 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
     install_counter();
     let table = "t".repeat(300);
-    let context: mod_api::NativeLootDrops = mod_api::__private::built::NativeLootDrops {
+    let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
         table: &table,
         dimension: "minecraft:overworld",
         origin: [0.; 3],
@@ -891,7 +915,7 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
         container: 0,
         container_slot: 0,
         primary: true,
-        carried: mod_api::menu::CarriedAccess(&mut carried),
+        carried: mod_api::item::menu::CarriedAccess(&mut carried),
         clicked: &mut clicked,
         cancellation_result: false,
     };
@@ -1645,3 +1669,6 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
     assert_eq!(flow, mod_api::Flow::Continue);
     assert!(!event.cancelled);
 }
+
+#[path = "wire_loopback/arm_pose_registration.rs"]
+mod arm_pose_registration;

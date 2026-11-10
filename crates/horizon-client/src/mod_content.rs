@@ -152,20 +152,9 @@ pub fn register_world_fluids(
     Ok(names)
 }
 
-/// Joins the world fluids native mods declare in code to the content mods of their namespaces:
-/// a fluid's file, if it has one, keeps saying how it looks.
-pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
-    for fluid in fluids {
-        let namespace = fluid.id.split_once(':').map_or("", |(ns, _)| ns);
-        let Some(owner) = mods.iter_mut().find(|m| m.id == namespace) else {
-            continue;
-        };
-        match owner.content.fluids.iter_mut().find(|f| f.id == fluid.id) {
-            Some(look) => look.world = fluid.world,
-            None => owner.content.fluids.push(fluid.clone()),
-        }
-    }
-}
+#[path = "mod_content_fluid_declarations.rs"]
+mod fluid_declarations;
+pub use fluid_declarations::accept_world_fluids;
 
 /// How the fluid `id` looks, when a mod declares it.
 pub fn fluid_look(id: &str) -> Option<FluidLook> {
@@ -789,6 +778,7 @@ struct NewItem {
     arm_pose: Option<horizon_mod_package::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
+    template: Option<String>,
 }
 
 struct Plan<'a> {
@@ -838,13 +828,10 @@ fn component_types(map: &J) -> BTreeSet<String> {
     }
 }
 
-/// Blocks and items native mods declare in code (`native_blocks`,
-/// `native_items`), joined to the content mods: each namespace's go into
-/// the content mod of that id when one is on (a native mod's own `.hmod`,
-/// with its models and textures), else into a content mod with no files of
-/// its own. Checked as files are ([`horizon_mod_package::Content::declare`],
-/// [`accept_mod`]); a namespace whose declarations are refused is left out
-/// whole, and its error returned.
+/// Code declarations, joined to their manifest owner. Each owner's namespaces
+/// validate together, independent of namespace order, with all-or-nothing refusal.
+/// Unknown namespaces become synthetic content-only mods. Checked as files are
+/// ([`horizon_mod_package::Content::declare`], [`accept_mod`]).
 pub fn accept_declared(
     mods: &mut Vec<ContentMod>,
     blocks: &[horizon_mod_package::content::Block],
@@ -852,37 +839,50 @@ pub fn accept_declared(
     types: &[BlockEntityType],
     known: &BTreeSet<String>,
 ) -> Vec<String> {
-    let namespace = |id: &str| id.split_once(':').map_or("", |(ns, _)| ns).to_owned();
-    let mut by_namespace: std::collections::BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
+    let owners: BTreeMap<_, _> = mods
+        .iter()
+        .flat_map(|m| {
+            m.content
+                .namespaces
+                .iter()
+                .map(|ns| (ns.clone(), m.id.clone()))
+        })
+        .collect();
+    let owner = |id: &str| {
+        let ns = id.split_once(':').map_or("", |(ns, _)| ns);
+        owners.get(ns).cloned().unwrap_or_else(|| ns.to_owned())
+    };
+    let mut by_owner: BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
     for block in blocks {
-        by_namespace
-            .entry(namespace(&block.id))
+        by_owner
+            .entry(owner(&block.id))
             .or_default()
             .0
             .push(block.clone());
     }
     for item in items {
-        by_namespace
-            .entry(namespace(&item.id))
+        by_owner
+            .entry(owner(&item.id))
             .or_default()
             .1
             .push(item.clone());
     }
     for kind in types {
-        by_namespace.entry(namespace(&kind.id)).or_default();
+        by_owner.entry(owner(&kind.id)).or_default();
     }
     let mut errors = Vec::new();
-    for (ns, (blocks, items)) in by_namespace {
-        let types = types.iter().filter(|t| namespace(&t.id) == ns).cloned();
-        let result = match mods.iter().position(|m| m.id == ns) {
+    for (id, (blocks, items)) in by_owner {
+        let types = types.iter().filter(|t| owner(&t.id) == id).cloned();
+        let result = match mods.iter().position(|m| m.id == id) {
             Some(i) => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&mods[i].id);
+                content.namespaces.clone_from(&mods[i].content.namespaces);
                 content.blocks.clone_from(&mods[i].content.blocks);
                 content.items.clone_from(&mods[i].content.items);
                 content
                     .declare(&blocks, &items)
                     .and_then(|()| {
-                        let mut added = horizon_mod_package::Content::declared(&ns);
+                        let mut added = horizon_mod_package::Content::declared(&id);
                         added.blocks.clone_from(&blocks);
                         added.items.clone_from(&items);
                         validate_components(&added, known).map_err(|e| e.to_string())
@@ -894,11 +894,11 @@ pub fn accept_declared(
                     })
             }
             None => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&id);
                 content.declare(&blocks, &items).and_then(|()| {
                     content.block_entity_types.extend(types);
                     let candidate = ContentMod {
-                        id: ns.clone(),
+                        id: id.clone(),
                         content,
                         jars: Vec::new(),
                     };
@@ -907,7 +907,7 @@ pub fn accept_declared(
             }
         };
         if let Err(e) = result {
-            errors.push(format!("native blocks and items of {ns}: {e}"));
+            errors.push(format!("native blocks and items of {id}: {e}"));
         }
     }
     errors
@@ -999,12 +999,10 @@ fn read_json(path: &Path) -> Result<J> {
 
 impl Plan<'_> {
     /// `entity-types.json` with a row for each mod type: its template's, so its
-    /// size, eyes and category are the template's (`execute anchored eyes`,
-    /// spawner checks and the commands' entity type list, `reg.entity_types`),
-    /// with `template` naming it and a living type's own attribute bases
-    /// (`MobTypes` makes the mob from it). The rows are appended as text, each
-    /// value as the template has it: parsed and written back, a float such as
-    /// a zombie's `movement_speed` can come back one ulp off.
+    /// size, eyes and category remain the template's (eyes, spawners and `reg.entity_types`),
+    /// with `template`, passenger attachments and a living type's attribute bases (`MobTypes`
+    /// makes the mob from it). Template values stay raw text: parsing and rewriting a float
+    /// such as a zombie's `movement_speed` can come back one ulp off.
     fn entity_types_json(&self, bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         use serde_json::value::RawValue;
         let rows: BTreeMap<String, Box<RawValue>> =
@@ -1045,13 +1043,11 @@ fn mod_entity_row(
     let fail = |e: serde_json::Error| format!("{}: {e}", t.template);
     let mut fields: Raw = serde_json::from_str(row.get()).map_err(fail)?;
     if !t.attributes.is_empty() {
-        let mut attributes: Raw = match fields.get("attributes") {
-            Some(a) => serde_json::from_str(a.get()).map_err(fail)?,
-            None => Raw::new(),
-        };
+        let mut attributes: Raw = fields.get("attributes").map_or(Ok(Raw::new()), |a| {
+            serde_json::from_str(a.get()).map_err(fail)
+        })?;
         for (id, value) in &t.attributes {
-            // Refused rather than added: the mob reads the attributes its
-            // template's class has, so an extra one would do nothing.
+            // Refused rather than added: the mob reads the template's class attributes.
             let Some(base) = attributes.get_mut(id) else {
                 return Err(format!(
                     "{}: attribute {id} is not one of {}'s",
@@ -1064,6 +1060,10 @@ fn mod_entity_row(
             "attributes".into(),
             to_raw_value(&attributes).map_err(fail)?,
         );
+    }
+    if !t.passenger_attachments.is_empty() {
+        let raw = to_raw_value(&t.passenger_attachments).map_err(fail)?;
+        fields.insert("passenger_attachments".into(), raw);
     }
     fields.insert("template".into(), to_raw_value(&t.template).map_err(fail)?);
     serde_json::to_vec(&fields).map_err(fail)
@@ -1494,6 +1494,7 @@ impl<'a> Plan<'a> {
                     block: None,
                     arm_pose: None,
                     wall_block: b.decl.wall_block.clone(),
+                    template: None,
                 });
             }
         }
@@ -1514,6 +1515,7 @@ impl<'a> Plan<'a> {
                     block: i.block.clone(),
                     arm_pose: i.arm_pose,
                     wall_block: None,
+                    template: i.block.is_none().then(|| i.template.clone()),
                 });
             }
         }
@@ -2196,7 +2198,7 @@ impl<'a> Plan<'a> {
     }
 
     /// The creative inventory (`creative-inventory.json`): each mod tab after
-    /// vanilla's, ten to a page as NeoForge pages them (the top row's first
+    /// vanilla's, ten to a page (the top row's first
     /// five columns, then the bottom row's), with only the items the game has;
     /// the mods' new items join the search tab under their English names.
     fn creative_tabs(&self, doc: &mut J) -> Result<()> {
@@ -2687,7 +2689,7 @@ impl SavedModifiers {
 }
 
 /// A world's data packs (`packs`) with the content root `root`'s biome
-/// modifiers applied over them. NeoForge applies modifiers once every data
+/// modifiers applied over them. Modifiers apply once every data
 /// pack is in, to the final biomes and tags: a pack's file for a biome
 /// (Terralith's `minecraft:plains`) keeps the mods' features and spawns, and
 /// a pack's biome its tags put under a modifier's selector gets them too.
@@ -3480,27 +3482,24 @@ pub fn build(
         horizon_mod_package::enabled::MARKER,
         &serde_json::to_vec(inventory)?,
     )?;
-    let remainders: BTreeMap<&str, &str> = plan
-        .items
-        .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.crafting_remainder.as_deref()?)))
-        .collect();
-    if !remainders.is_empty() {
-        overlay.write(
-            horizon_items::items::MOD_CRAFT_REMAINDERS,
-            &serde_json::to_vec(&remainders)?,
-        )?;
-    }
-    let placed_blocks: BTreeMap<&str, &str> = plan
-        .items
-        .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.block.as_deref()?)))
-        .collect();
-    if !placed_blocks.is_empty() {
-        overlay.write(
-            horizon_items::items::MOD_ITEM_BLOCKS,
-            &serde_json::to_vec(&placed_blocks)?,
-        )?;
+    let by_item = |value: fn(&NewItem) -> Option<&str>| {
+        let items = plan.items.iter();
+        items
+            .filter_map(|i| Some((i.rename.to.as_str(), value(i)?)))
+            .collect::<BTreeMap<_, _>>()
+    };
+    use horizon_items::items::{MOD_CRAFT_REMAINDERS, MOD_ITEM_BLOCKS, MOD_ITEM_TEMPLATES};
+    for (name, map) in [
+        (
+            MOD_CRAFT_REMAINDERS,
+            by_item(|i| i.crafting_remainder.as_deref()),
+        ),
+        (MOD_ITEM_TEMPLATES, by_item(|i| i.template.as_deref())),
+        (MOD_ITEM_BLOCKS, by_item(|i| i.block.as_deref())),
+    ] {
+        if !map.is_empty() {
+            overlay.write(name, &serde_json::to_vec(&map)?)?;
+        }
     }
     let arm_poses: BTreeMap<&str, horizon_mod_package::content::ArmPose> = plan
         .items

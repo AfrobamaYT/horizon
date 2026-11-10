@@ -180,7 +180,9 @@ impl Game<'_> {
             count: amount,
             ..resource.clone()
         };
-        let _ = tx;
+        if !self.transaction_holds(tx) {
+            return 0;
+        }
         if !self.places_simulated() || stack.count == 0 {
             return 0;
         }
@@ -310,7 +312,9 @@ impl Game<'_> {
             count: amount,
             ..resource.clone()
         };
-        let _ = tx;
+        if !self.transaction_holds(tx) {
+            return 0;
+        }
         if !self.places_simulated() {
             return 0;
         }
@@ -521,7 +525,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources"]
     fn a_bucket_fills_and_empties_whole_through_its_place_and_splits_off_its_stack() {
         use horizon_client::chunk::Chunk;
-        use mod_api::{FLUIDS, ITEM_FLUIDS, NativeBlockUpdateFlags, move_resources};
+        use mod_api::{BlockUpdateFlags, FLUIDS, ITEM_FLUIDS, move_resources};
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -541,7 +545,7 @@ pub(super) mod tests {
             };
             let set = |game: &mut super::Game<'_>, pos, n| {
                 let state = cauldron(game, n);
-                let flags = NativeBlockUpdateFlags::NEIGHBORS;
+                let flags = BlockUpdateFlags::NEIGHBORS;
                 assert_eq!(game.level_set_block(level, pos, state, flags), Ok(true));
             };
             let (a, b) = ([0, 64, 0], [2, 64, 0]);
@@ -1092,7 +1096,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources"]
     fn a_chest_menus_slots_write_the_chest_and_the_inventory_and_an_abort_puts_them_back() {
         use horizon_client::{chunk::Chunk, lan::menu::Slots};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -1100,7 +1104,7 @@ pub(super) mod tests {
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level("minecraft:overworld").unwrap();
             let chest = game.pack.assets.registry.default_state("minecraft:chest");
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             assert_eq!(
                 game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags),
                 Ok(true)
@@ -1175,7 +1179,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources"]
     fn a_chests_menu_over_the_furnace_set_in_its_place_reaches_none_of_its_slots() {
         use horizon_client::{chunk::Chunk, lan::menu::Slots};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -1189,7 +1193,7 @@ pub(super) mod tests {
                 state(game, "minecraft:chest"),
                 state(game, "minecraft:furnace"),
             );
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             assert_eq!(
                 game.level_set_block(level, [0, 64, 0], chest, flags),
                 Ok(true)
@@ -1349,7 +1353,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources"]
     fn a_furnace_menus_fuel_slot_takes_one_bucket_as_its_slot_does() {
         use horizon_client::{chunk::Chunk, lan::menu::Slots};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -1357,7 +1361,7 @@ pub(super) mod tests {
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level("minecraft:overworld").unwrap();
             let furnace = game.pack.assets.registry.default_state("minecraft:furnace");
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             assert_eq!(
                 game.level_set_block(level, [0, 64, 0], furnace.unwrap(), flags),
                 Ok(true)
@@ -2015,7 +2019,7 @@ pub(super) mod tests {
     fn a_crafter_puts_into_a_mod_entity_and_dispenses_only_what_it_refuses() {
         use horizon_client::chunk::Chunk;
         use horizon_core::{position::BlockPos, random::RandomSource as _};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
 
         let bin = Bin::default();
         with_bin_pigs(&bin, |game| {
@@ -2034,7 +2038,7 @@ pub(super) mod tests {
                 .unwrap();
             let level = game.level("minecraft:overworld").unwrap();
             assert_eq!(
-                game.level_set_block(level, [0, 64, 0], crafter, NativeBlockUpdateFlags::NONE),
+                game.level_set_block(level, [0, 64, 0], crafter, BlockUpdateFlags::NONE),
                 Ok(true)
             );
             pig(game, 700, 63.0);

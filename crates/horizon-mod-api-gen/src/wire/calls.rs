@@ -78,8 +78,26 @@ pub(super) fn trait_path(owner: &str) -> String {
             {
                 path.segments.insert(0, syn::parse_quote!(crate));
             }
+            if path.segments.len() == 4
+                && path.segments[0].ident == "crate"
+                && path.segments[1].ident == "host"
+            {
+                let name = path.segments.last().unwrap().clone();
+                *path = syn::parse_quote!(crate::prelude::#name);
+            } else if path.segments.len() == 3
+                && path.segments[0].ident == "crate"
+                && path.segments[1].ident == "parts"
+            {
+                let name = path.segments.last().unwrap().clone();
+                *path = syn::parse_quote!(crate::#name);
+            }
         }
     }
+    let owner = super::IMPORTS
+        .iter()
+        .copied()
+        .find(|candidate| candidate.rsplit("::").next() == Some(owner))
+        .unwrap_or(owner);
     let mut path: syn::Path = syn::parse_str(owner).expect("an owner is a path");
     syn::visit_mut::VisitMut::visit_path_mut(&mut Qualify, &mut path);
     super::ty::written(&path)
@@ -462,7 +480,7 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
         Ty::Ref(inner, _) => held_in(types, inner, statics)?,
         Ty::Str(Str::Static) if statics => "String".into(),
         Ty::Named(def) if types.defs[*def].lifetimes != 0 => {
-            let fields = types.defs[*def].kind.fields()?;
+            let fields = types.defs[*def].borrowed.fields()?;
             format!(
                 "({},)",
                 fields
@@ -495,10 +513,10 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
 }
 
 pub(super) fn frame_cases<'t>(types: &'t Types<'_>, def: usize) -> Option<&'t [super::ty::Case]> {
-    let super::ty::Kind::Variant(cases) = &types.defs[def].kind else {
+    let super::ty::BorrowedShape::Variant(cases) = &types.defs[def].borrowed else {
         return None;
     };
-    cases.iter().all(|case|matches!(&case.payload,super::ty::Payload::Tuple(v) if matches!(v.as_slice(),[Ty::Dyn(..)]))).then_some(cases.as_slice())
+    Some(cases.as_slice())
 }
 pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
     held_in(types, ty, false)
@@ -518,7 +536,7 @@ fn reborrow(types: &Types<'_>, ty: &Ty, place: &str) -> Option<String> {
         Ty::Str(Str::Borrowed) => format!("({place}).as_str()"),
         Ty::Str(Str::Owned) => format!("({place}).clone()"),
         Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
-            let fields = types.defs[*d].kind.fields()?;
+            let fields = types.defs[*d].borrowed.fields()?;
             format!(
                 "mod_api::__wire_record_{d}({})",
                 fields
@@ -552,7 +570,7 @@ fn reborrow(types: &Types<'_>, ty: &Ty, place: &str) -> Option<String> {
 pub(super) fn snapshot(types: &Types<'_>, ty: &Ty, place: &str) -> Option<String> {
     Some(match ty {
         Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
-            let fields = types.defs[*d].kind.fields()?;
+            let fields = types.defs[*d].borrowed.fields()?;
             fields
                 .iter()
                 .map(|f| snapshot(types, &f.ty, &format!("({place}).{}", f.rust)))
@@ -713,9 +731,7 @@ fn borrowed(
     if let Some(cases) = frame_cases(types, def) {
         let mut arms = String::new();
         for (i, case) in cases.iter().enumerate() {
-            let super::ty::Payload::Tuple(v) = &case.payload else {
-                unreachable!()
-            };
+            let v = &case.payload;
             let Ty::Dyn(_, m) = &v[0] else { unreachable!() };
             write!(
                 arms,
@@ -834,11 +850,20 @@ fn borrowed(
             "let {m}{name} = {}::__wire_from_fields({args});",
             d.rust
         ));
-    } else {
+    } else if matches!(d.borrowed, super::ty::BorrowedShape::TupleRecord(_)) {
         read.push_str(&format!(
             "let {m}{name} = {} {{ {} }};",
             d.rust,
             build.join(", ")
+        ));
+    } else {
+        let args = build
+            .iter()
+            .map(|field| field.split_once(": ").unwrap().1)
+            .collect::<Vec<_>>()
+            .join(", ");
+        read.push_str(&format!(
+            "let {m}{name} = crate::__wire_record_{def}({args});"
         ));
     }
     Some((read, name.to_string(), back))

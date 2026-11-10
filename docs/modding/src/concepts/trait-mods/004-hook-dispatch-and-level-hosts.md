@@ -1,11 +1,20 @@
 <!-- chapter: Hook dispatch and level hosts -->
 <!-- separator: 1 -->
 
-A linked trait mod implements `mod_api::Hooks`. Helper injections run first.
-An injection that returns early skips trait mods. A claimed cancellation reaches only trait listeners that receive cancelled events.
+A linked trait mod implements `mod_api::Hooks`. A hook function is not an injection point, so
+`[[inject]]` never runs inside a hook's dispatch; a `head` injection that cancels the game function
+calling a hook keeps the hook from firing at all. A claimed cancellation reaches only trait listeners that receive cancelled events.
 Otherwise, trait mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
 they receive cancelled events. For replacement hooks, the first `Some` wins. Collection hooks call every mod.
 Receiverless hooks have no `Host`.
+
+To save from inside a hook, use `level.request_save(host)` so the save runs at the next settled
+start-of-tick boundary. A synchronous `save-all` while an entity pass or held-out row is borrowed
+fails with vanilla's `commands.save.failed` feedback and a failed command result, without saving.
+
+To emit a vibration-producing game event, use `level.game_event(host, event, at, context)`.
+`GameEventContext` carries an optional source entity and affected block state; see
+[game events with context](../../how-to/game-events.md) for listener semantics and refusals.
 
 `#[listener]` on a hook method sets both, as NeoForge's `EventPriority` and `receiveCanceled` do. Two mods, each
 its own crate:
@@ -74,7 +83,7 @@ the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods kee
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
-The trait has every hook declared under `crates/horizon-mod-api/src/hooks/` ([Adding a hook](027-adding-a-hook.md#adding-a-hook)).
+The trait has every hook declared under `crates/horizon-mod-vocab/src/hooks/` ([Adding a hook](027-adding-a-hook.md#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
 `state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`

@@ -798,6 +798,7 @@ struct ShapeLevel<'w, 'a> {
     world: &'w World<'a>,
     random: horizon_core::random::LegacyRandom,
 }
+impl crate::level::BlockEntityNeighbors for ShapeLevel<'_, '_> {}
 impl crate::level::LevelAccess for ShapeLevel<'_, '_> {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.world
@@ -871,8 +872,9 @@ impl World<'_> {
             for t in &ticks {
                 let at = [t.pos.x, t.pos.y, t.pos.z];
                 if t.fluid {
-                    let fluid = crate::fluid::FluidKind::ALL[t.kind as usize];
-                    self.schedule_fluid_tick(at, fluid, t.delay)?;
+                    if let Some(fluid) = crate::fluid::FluidKind::from_tick_id(t.kind) {
+                        self.schedule_fluid_tick(at, fluid, t.delay)?;
+                    }
                 } else {
                     let state = behaviours
                         .table

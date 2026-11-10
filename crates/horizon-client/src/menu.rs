@@ -17,7 +17,7 @@ use crate::{
 #[cfg(test)]
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use horizon_world::native_load_context::{LoopContext, LoopSide};
-pub use mod_api::menu::{LogicalSide, MenuButtonContext};
+pub use mod_api::item::menu::{LogicalSide, MenuButtonContext};
 mod models;
 pub use models::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
@@ -26,7 +26,9 @@ pub use models::{
 use std::sync::Arc;
 
 mod bundle;
+mod equippable;
 pub mod place;
+mod remainder;
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.
 pub trait KnownRecipes {
@@ -84,6 +86,8 @@ impl KnownRecipes for &[&str] {
 /// What a menu needs to know about items and recipes.
 #[derive(Clone, Copy)]
 pub struct Env<'a> {
+    /// Authoritative stack query; absent for data-only consumers.
+    pub crafting_remainder: Option<&'a dyn crate::crafting::CraftingRemainder>,
     /// UUID of the player operating this menu, when a player is available.
     pub player: Option<u128>,
     pub player_entity_id: Option<i32>,
@@ -1336,7 +1340,7 @@ impl Menu {
     fn enchant_changed(&mut self, env: &Env) {
         let enchantable = self.containers[MAIN][0]
             .as_ref()
-            .is_some_and(|s| env.enchantments.enchantable_of(s) > 0 && s.enchantments().is_empty());
+            .is_some_and(|s| crate::stations::is_enchantable(env.enchantments, s));
         if enchantable {
             self.enchant_changed = true;
         } else {
@@ -1706,32 +1710,17 @@ impl Menu {
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
         match self.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
-            Role::Armor(eq) => env
-                .items
-                .get(&stack.item)
-                .and_then(|i| {
-                    let slot = match i.equip_slot.as_deref()? {
-                        "feet" => 0,
-                        "legs" => 1,
-                        "chest" => 2,
-                        "head" => 3,
-                        _ => return None,
-                    };
-                    let allowed = i
-                        .equip_allowed
-                        .as_ref()
-                        .is_none_or(|a| a.contains("minecraft:player"));
-                    Some(slot == eq && allowed)
-                })
-                .unwrap_or(false),
-            // LivingEntity.isEquippableInSlot: the item's equippable slot,
+            Role::Armor(eq) => Self::equippable(env, stack).is_some_and(|e| {
+                ["feet", "legs", "chest", "head"]
+                    .iter()
+                    .position(|s| *s == e.slot)
+                    == Some(eq)
+                    && e.allows("minecraft:player")
+            }),
+            // LivingEntity.isEquippableInSlot: the stack's equippable slot,
             // and the mount among its allowed entities.
-            Role::MountEquip(slot) => env.items.get(&stack.item).is_some_and(|i| {
-                i.equip_slot.as_deref() == Some(slot)
-                    && self
-                        .mount
-                        .as_deref()
-                        .is_some_and(|m| i.equip_allowed.as_ref().is_none_or(|a| a.contains(m)))
+            Role::MountEquip(slot) => Self::equippable(env, stack).is_some_and(|e| {
+                e.slot == slot && self.mount.as_deref().is_some_and(|m| e.allows(m))
             }),
             Role::Shulker => fits_inside_container_items(stack),
             Role::Mod | Role::ModResult => self.slots[s].role == Role::Mod,
@@ -2252,7 +2241,7 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult {
-            // SmithingMenu.onTake: NeoForge's ItemSmithedEvent first, then
+            // SmithingMenu.onTake: the `ItemSmithedEvent` hook, then
             // awardUsedRecipes, then one of each input.
             if self.kind == Kind::Smithing {
                 let inputs = [0, 1, 2].map(|i| self.containers[MAIN][i].clone());
@@ -2332,18 +2321,11 @@ impl Menu {
         let remaining = env
             .recipes
             .find_with(env.loop_context, &grid, n, &map_scale)
-            .map(|(id, _)| env.recipes.remainders(id, &grid, n))
+            .map(|(id, _)| env.recipes.remainders(id, &grid, n, &|s| env.remainder(s)))
             .unwrap_or_else(|| {
                 // CraftingRecipe.defaultCraftingReminder
                 grid.iter()
-                    .map(|cell| {
-                        cell.as_ref().and_then(|stack| {
-                            env.items
-                                .get(&stack.item)
-                                .and_then(|i| i.crafting_remainder.as_deref())
-                                .map(|r| ItemStack::new(r, 1))
-                        })
-                    })
+                    .map(|cell| cell.as_ref().and_then(|stack| env.remainder(stack)))
                     .collect()
             });
         for cell in 0..n * n {
@@ -2472,7 +2454,7 @@ impl Menu {
 
 /// `ItemStack.getMaxStackSize`: the stack's component, else the item's; a removed
 /// component (`!minecraft:max_stack_size`) uses vanilla's fallback of one.
-pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
+pub fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
     let patched = stack.data().and_then(|d| {
         if d.other("!minecraft:max_stack_size").is_some() {
             return Some(1);
@@ -2565,11 +2547,7 @@ enum Equip {
 
 impl Menu {
     fn equip(env: &Env, stack: &ItemStack) -> Equip {
-        match env
-            .items
-            .get(&stack.item)
-            .and_then(|i| i.equip_slot.as_deref())
-        {
+        match Self::equippable(env, stack).map(|e| e.slot).as_deref() {
             Some("feet") => Equip::Armor(0),
             Some("legs") => Equip::Armor(1),
             Some("chest") => Equip::Armor(2),
@@ -3976,6 +3954,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -4107,6 +4086,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -4153,6 +4133,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -4345,6 +4326,9 @@ pub(crate) mod tests {
         });
     }
 
+    #[path = "remainder_tests.rs"]
+    mod remainder;
+
     /// A test `Env` with no vanilla data: the anvil's and grindstone's own
     /// results don't matter where the mods answer.
     fn bare_env(test: impl FnOnce(&Env)) {
@@ -4369,6 +4353,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Default::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         test(&Env {
+            crafting_remainder: None,
             player: Some(7),
             player_entity_id: Some(41),
             loop_context,
@@ -4979,6 +4964,9 @@ pub(crate) mod tests {
                 block_speed_factor: |context, _, factor| {
                     *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 5.0);
                 },
+                is_ladder: |context, _, _, _, ladder| {
+                    *ladder |= context.setting("rules_mod", "stack").is_some();
+                },
                 player_stays_on_ground_surface: |context, _, staying| {
                     *staying |= context.setting("rules_mod", "stack").is_some();
                 },
@@ -5127,6 +5115,20 @@ pub(crate) mod tests {
         };
         assert_eq!(factors(&before), (0.5, 0.4));
         assert_eq!(factors(&after), (4.5, 5.4));
+        // The ladder test of a block reads it too.
+        let ladder = |context: &LoopContext| {
+            let mut ladder = false;
+            crate::motion::native_is_ladder(
+                context,
+                1,
+                horizon_core::position::BlockPos::new(0, 0, 0),
+                horizon_world::registry::BlockStateId(0),
+                &mut ladder,
+            );
+            ladder
+        };
+        assert!(!ladder(&before));
+        assert!(ladder(&after));
         // The edge backoff and the fluid current read it too.
         let movement = |context: &LoopContext| {
             let (mut staying, mut flow) = (false, [0.25, 0.0, 0.0]);
@@ -5226,6 +5228,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -5314,6 +5317,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -5718,6 +5722,7 @@ pub(crate) mod tests {
         let names = crate::creative::Names::default();
 
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5771,6 +5776,7 @@ pub(crate) mod tests {
 
         let known = ["minecraft:stick"];
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5824,6 +5830,7 @@ pub(crate) mod tests {
 
         let known = ["minecraft:oak_planks"];
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5881,6 +5888,7 @@ pub(crate) mod tests {
 
         let known: [&str; 0] = [];
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5928,6 +5936,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Default::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            crafting_remainder: None,
             player: Some(7),
             player_entity_id: Some(41),
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),

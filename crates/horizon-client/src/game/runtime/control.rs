@@ -626,6 +626,26 @@ impl Game<'_> {
                 }
                 ok()
             }
+            // The real event, so focus loss reaches all that a window's does (the radial menu
+            // cancels, held keys go).
+            "pad" if words.get(1) == Some(&"focus") => {
+                let focused = match arg(2)? {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("pad focus true|false".into()),
+                };
+                let id = self
+                    .window
+                    .as_ref()
+                    .map_or_else(winit::window::WindowId::dummy, |w| w.id());
+                self.handle_window_event(
+                    event_loop,
+                    id,
+                    winit::event::WindowEvent::Focused(focused),
+                    super::input_trace::InputOrigin::Agent,
+                );
+                ok()
+            }
             "pad" => Ok(Some(self.pad_command(&words)?)),
             "key" => {
                 let key = key_code(arg(1)?).ok_or_else(|| format!("unknown key {}", words[1]))?;
@@ -637,7 +657,9 @@ impl Game<'_> {
                     .into());
                 }
                 if arg(2)? != "up" {
-                    self.pad.keyboard_took_over = true;
+                    self.input_keyboard_used();
+                    // As a window's key press: the radial menu closes, and the key goes on.
+                    self.pad_radial_cancel();
                 }
                 // The command confirmation takes the keys; none go past it.
                 if self.command_prompt.is_some() {
@@ -797,7 +819,7 @@ impl Game<'_> {
                 // controller still holding one keeps it.
                 let options = [self.settings.toggle_crouch, self.settings.toggle_sprint];
                 for (slot, name) in [(0, "key.sneak"), (1, "key.sprint")] {
-                    if !self.pad.holds_action(&self.settings.controller, name) {
+                    if !self.input_holds(name) {
                         self.toggles.key(
                             slot,
                             horizon_client::keymapping::KeyAction::Release,
@@ -825,6 +847,10 @@ impl Game<'_> {
                         self.screen_name()
                     )
                     .into());
+                }
+                // As a window's click: the radial menu closes, and the click goes on.
+                if arg(2)? != "up" {
+                    self.pad_radial_cancel();
                 }
                 match arg(2)? {
                     "down" => {
@@ -870,6 +896,23 @@ impl Game<'_> {
                 self.previous_position = to;
                 ok()
             }
+            "emote" => match words.get(1).copied() {
+                None => {
+                    let owned: Vec<String> =
+                        self.owned_emotes().iter().map(|i| i.id.clone()).collect();
+                    Ok(Some(
+                        json!({ "owned": owned, "playing": self.emote_playing() }),
+                    ))
+                }
+                Some("stop") => {
+                    self.stop_emote();
+                    ok()
+                }
+                Some(id) if self.play_emote(id) => ok(),
+                Some(id) => {
+                    Err(format!("can't play emote {id} now (not owned, or not standing)").into())
+                }
+            },
             "hotbar" => {
                 let slot: usize = arg(1)?.parse()?;
                 if !(1..=9).contains(&slot) {
@@ -1020,6 +1063,7 @@ impl Game<'_> {
                     path: path.trim().into(),
                     size: None,
                     scaled: false,
+                    background: false,
                 });
                 self.pending_screenshot = Some(reply.clone());
                 Ok(None)
@@ -1084,6 +1128,7 @@ impl Game<'_> {
                     "keybinds" => Page::KeyBinds,
                     "controller" => Page::Controller,
                     "controller-binds" => Page::PadBinds,
+                    "controller-radial" => Page::ControllerRadial,
                     "mouse" => Page::Mouse,
                     "chat" => Page::Chat,
                     "accessibility" => Page::Accessibility,
@@ -1363,6 +1408,7 @@ impl Game<'_> {
             Screen::Mod => "mod",
             Screen::HudEditor => "hud-editor",
             Screen::Studio => "studio",
+            Screen::EmoteWheel => "emote-wheel",
         }
     }
 

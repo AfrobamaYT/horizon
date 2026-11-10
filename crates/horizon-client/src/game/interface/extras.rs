@@ -2,7 +2,7 @@
 //! (`native_minimap`: its tiles, image and HUD) and zoom (`native_zoom`) on the camera; clicks
 //! and frame times for mods (`native_clicks`, `native_frame_rate`).
 //! Each hook does nothing while its extra is off and no mod uses it.
-use super::{Dim, Game, Screen, native_hooks::NativeMinimap};
+use super::{Dim, Game, Screen};
 use horizon_client::{
     extras::{Corner, Cps, FpsCounter, fov_target},
     extras_hud::{self, Corners},
@@ -140,7 +140,13 @@ impl Game<'_> {
     /// (the launcher's session file is gone after the first read).
     pub(super) fn extras_retry(&mut self) -> horizon_client::Result<()> {
         if let Some(retry) = self.title.as_mut().and_then(|t| t.due_retry()) {
-            self.connect_server_with_options(&retry.address, &retry.name, None, retry.lan)?;
+            self.connect_server_with_options(
+                &retry.address,
+                &retry.name,
+                None,
+                retry.lan,
+                self.realm_session,
+            )?;
         }
         Ok(())
     }
@@ -163,7 +169,7 @@ impl Game<'_> {
         Some((m.corner, m.size, view))
     }
     /// The minimap shown: a native mod's (`native_minimap`).
-    fn minimap_wanted(&self) -> Option<NativeMinimap> {
+    fn minimap_wanted(&self) -> Option<mod_api::Minimap> {
         self.native_minimap_now()
     }
     /// Refresh the minimap's tiles within the frame budget, recompose its

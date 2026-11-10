@@ -317,11 +317,11 @@ mod tests {
     use horizon_client::lan::waypoints::Icon;
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
-    use mod_api::first_person::Hand;
+    use mod_api::client::first_person::Hand;
     use mod_api::{
         EntityRef, Flow, Hooks, HostSide, Identifier, ItemPart, LivingEntityUseItemStartEvent,
         LivingEntityUseItemStopEvent, LivingEntityUseItemTickEvent, LivingRef, ModEntry, Mods,
-        NativeWorldEpoch, OnUseTickEvent, Registrar, ReleaseUsingEvent,
+        OnUseTickEvent, Registrar, ReleaseUsingEvent, WorldEpoch,
     };
     use std::sync::{Arc, Mutex};
 
@@ -422,8 +422,7 @@ mod tests {
                 game.player = Some(
                     horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
                 );
-                game.lan_acting_uuid = Some(123);
-                game.lan_acting_entity = Some(20);
+                crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
                 game.screen = super::super::Screen::Playing;
                 game.right = true;
                 let player = game.living(game.entity(20).unwrap()).unwrap();
@@ -653,8 +652,7 @@ mod tests {
             assert!(!game.living_set_item_use_remaining(zombie, 3));
             assert!(!game.living_set_riptiding(zombie, 20, 8.0));
 
-            let stale =
-                EntityRef::new(NativeWorldEpoch::new(zombie.entity().epoch().get() + 1), 12);
+            let stale = EntityRef::new(WorldEpoch::new(zombie.entity().epoch().get() + 1), 12);
             let stale = mod_api::LivingRef::new(stale);
             assert!(!game.living_swing(stale, Hand::Main, true));
             assert_eq!(game.living_arrow_count(stale), None);

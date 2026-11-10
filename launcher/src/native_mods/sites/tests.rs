@@ -68,7 +68,7 @@ fn unchanged_callback_compiles_against_both_canonical_facades() {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
-    let canonical = horizon_mod_api_gen::sites::source::facade_name(
+    let canonical = horizon_platform::mod_build::api_gen::sites::source::facade_name(
         "horizon_client::game::Game::run",
         "horizon_client::game::Game::step",
         0,
@@ -100,6 +100,7 @@ fn unchanged_callback_compiles_against_both_canonical_facades() {
             extern crate self as horizon_client;
             extern crate self as mod_points;
             #[derive(Debug, PartialEq)] pub enum SiteId {{ {physical} }}
+            impl SiteId {{ pub const fn place(self) -> Self {{ self }} }}
             pub mod __private {{ pub struct SlotListener {{ pub place: super::SiteId, pub f: *const () }} impl SlotListener {{ pub const unsafe fn site(_: &'static str, place: super::SiteId, _: i32, _: &'static str, f: *const ()) -> Self {{ Self {{ place, f }} }} }} }}
             pub mod game {{
                 pub struct __{physical}Args {{ pub value: u32 }}
@@ -155,7 +156,6 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
         "pub fn hook(receiver: &mut u32, args: &Args) -> bool { *receiver += 10; args.value == 0 }";
     for case in [
         Case { kind: "before_call", body: before, output: "u32", initial: 2, expected: "30", state: 11 },
-        Case { kind: "modify_call_arg", body: before, output: "u32", initial: 2, expected: "30", state: 11 },
         Case { kind: "after_call", body: "pub fn hook(receiver: &mut u32, value: &u32) { assert_eq!(*value, 20); *receiver += 10; }", output: "u32", initial: 2, expected: "20", state: 11 },
         Case { kind: "modify_value", body: "pub fn hook(receiver: &mut u32, value: u32) -> u32 { *receiver += 10; value + 7 }", output: "u32", initial: 2, expected: "27", state: 11 },
         Case { kind: "wrap_call", body: "pub fn hook(receiver: &mut u32, args: &mut Args, original: &mut dyn FnMut(&mut u32, &mut Args) -> u32) -> u32 { let first = original(receiver, args); args.value += 1; first + original(receiver, args) }", output: "u32", initial: 2, expected: "50", state: 2 },
@@ -170,21 +170,19 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
             discovery: false,
             points: vec![],
             sites: vec![site.clone()],
+            wire: Default::default(),
+            mods: Vec::new(),
             internals: serde_json::from_value(serde_json::json!([{
                 "path":"horizon_client::game::Game::run", "kind":"method", "signature":"fn run(&mut self)", "hash":"signature"
             }])).unwrap(),
         };
-        use horizon_mod_package::manifest::inject::{InjectError, NoSlotReason};
-        if kind == "modify_call_arg" {
-            assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::NoSlot { reason: NoSlotReason::SourcePending, .. })));
-            continue;
-        }
+        use horizon_mod_package::manifest::inject::InjectError;
         super::super::slots::check(&catalog, &manifest).unwrap();
-        let registration = super::super::api::main_rs("/* MOD_SLOTS */", &[&manifest], &[], &catalog.sites);
+        let registration = super::super::api::main_rs("/* MOD_SLOTS */", &[&manifest], &super::super::internals::Catalog { sites: catalog.sites.clone(), ..Default::default() });
         exercise(&dir, &registration, &site.constructor(), &case);
-        manifest.inject[0].hash = "changed".into();
+        manifest.inject[0].hash = Some("changed".into());
         assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::Changed { .. })));
-        manifest.inject[0].hash = "signature".into();
+        manifest.inject[0].hash = Some("signature".into());
         manifest.inject[0].ctx = Some("changed".into());
         assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::Lost { .. })));
         manifest.inject[0].ctx = Some("statement".into());
@@ -252,6 +250,7 @@ fn private_wrap_adapters_repeat_suppress_and_condition_the_original() {
             "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature", "cfg":"", "shape_only":false
         }])).unwrap(),
         points: vec![], sites: vec![], discovery: false,
+        wire: Default::default(), mods: Vec::new(),
     };
     for (kind, case) in [
         (Kind::WrapCall, Case { kind: "wrap_call", body: "pub fn hook(receiver: &mut u32, args: &mut Args, original: &mut dyn FnMut(&mut u32, &mut Args) -> u32) -> u32 { let first = original(receiver, args); args.value += 1; first + original(receiver, args) }", output: "u32", initial: 2, expected: "50", state: 2 }),
@@ -261,8 +260,9 @@ fn private_wrap_adapters_repeat_suppress_and_condition_the_original() {
     ] {
         let mut manifest = Manifest::parse(&base).unwrap();
         manifest.inject.push(Inject {
+            local: None, local_type: None, position: None, expr: None,
             id: "wrap".into(), at: "game::run".into(), kind, with: "hook".into(),
-            access: Access::Internals, priority: 7, hash: "signature".into(),
+            access: Access::Internals, priority: 7, hash: Some("signature".into()),
             call: Some("game::step".into()), nth: Some(0), ctx: Some("statement".into()),
         });
         catalog.sites.clear();
@@ -271,7 +271,7 @@ fn private_wrap_adapters_repeat_suppress_and_condition_the_original() {
         private.output = case.output.into();
         catalog.sites.push(private);
         assert!(matches!(slots::routes(&catalog, &manifest).unwrap().as_slice(), [Route::Source(_)]));
-        let registration = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog.points, &catalog.sites);
+        let registration = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
         exercise(&dir, &registration, &site.constructor(), &case);
         if kind == Kind::WrapIf {
             catalog.sites[0].output = "u32".into();

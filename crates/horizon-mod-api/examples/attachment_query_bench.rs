@@ -32,7 +32,7 @@ struct BenchHost {
     maps: Vec<Attachments>,
 }
 fn holder(id: u32) -> AttachmentHolder {
-    AttachmentHolder::Entity(EntityRef::new(NativeWorldEpoch::new(1), id))
+    AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), id))
 }
 impl BenchHost {
     fn new(cold: bool, indexed: bool) -> Self {
@@ -74,7 +74,7 @@ impl BenchHost {
         }
         host
     }
-    fn raw(&self) -> Arc<Vec<runtime::index::AttachmentRow<AttachmentHolder>>> {
+    fn raw(&self) -> Arc<runtime::index::AttachmentSnapshot<AttachmentHolder>> {
         self.index
             .lock()
             .unwrap()

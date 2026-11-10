@@ -17,7 +17,7 @@ use horizon_client::{
 use horizon_core::geometry::Vec3;
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::Clientbound as C;
-use mod_api::NativeProgressType;
+use mod_api::ProgressType;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -213,6 +213,10 @@ impl adv::World for View<'_, '_> {
             })
             .unwrap_or_default();
         (name, props)
+    }
+    fn block_property_values(&self, block: &str, property: &str) -> Option<Vec<String>> {
+        let values = self.0.pack.assets.registry.property_values(block, property);
+        (!values.is_empty()).then(|| values.into_iter().map(str::to_owned).collect())
     }
     fn fluid(&self, p: [i32; 3]) -> Option<String> {
         match self
@@ -896,7 +900,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
-                self.advancement_progress(a, criterion, NativeProgressType::Grant);
+                self.advancement_progress(a, criterion, ProgressType::Grant);
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -909,7 +913,7 @@ impl Game<'_> {
         &mut self,
         advancement: &adv::Advancement,
         criterion: &str,
-        progress_type: NativeProgressType,
+        progress_type: ProgressType,
     ) {
         if !mod_api::__private::listened(mod_api::HookId::PlayerAdvancementProgress) {
             return;
@@ -994,7 +998,7 @@ impl Game<'_> {
                             name: &task.name,
                             advancement: &grant.advancement,
                             criterion: &grant.criterion,
-                            progress_type: NativeProgressType::Grant,
+                            progress_type: ProgressType::Grant,
                             progress: &progress,
                         },
                     );
@@ -2009,7 +2013,6 @@ impl Game<'_> {
             adv::conditions(&c["player"], &ctx, w) && adv::block(c, pos, w)
         });
     }
-
     /// `TargetBlockTrigger`: signal and projectile conditions are evaluated in
     /// the shooter's context, including distance from the shooter.
     pub(super) fn trigger_target_hit(&mut self, projectile: &EntityView, strength: i32) {
@@ -2031,7 +2034,6 @@ impl Game<'_> {
                 && adv::conditions(&c["projectile"], &target, w)
         });
     }
-
     /// `ItemUsedOnLocationTrigger` (placed_block, item_used_on_block).
     pub(super) fn trigger_block(&mut self, name: &str, pos: [i32; 3], stack: &ItemStack) {
         let me = self.player_entity_for(name);
@@ -2531,7 +2533,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
-                self.advancement_progress(a, c, NativeProgressType::Grant);
+                self.advancement_progress(a, c, ProgressType::Grant);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -2564,7 +2566,7 @@ impl Game<'_> {
     fn revoke_criterion(&mut self, advancement: &adv::Advancement, criterion: &str) -> bool {
         let revoked = self.adv.progress.revoke(&advancement.id, criterion);
         if revoked {
-            self.advancement_progress(advancement, criterion, NativeProgressType::Revoke);
+            self.advancement_progress(advancement, criterion, ProgressType::Revoke);
         }
         revoked
     }
@@ -3660,7 +3662,8 @@ mod movement_predicate_tests {
     #[test]
     #[ignore = "requires prepared resources and scratch cwd/homes"]
     fn actual_registered_movement_predicate_uses_admitted_mob() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks

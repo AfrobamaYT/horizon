@@ -289,6 +289,7 @@ impl Game<'_> {
                 // the raw compound alone does not contain generated clouds.
                 let mut tag = self.other_to_nbt(
                     &super::OtherEntity {
+                        attachment_lifetime: Default::default(),
                         join: Default::default(),
                         id,
                         kind: "minecraft:area_effect_cloud".into(),
@@ -302,6 +303,8 @@ impl Game<'_> {
                     },
                     uuid,
                 );
+                // Entity.saveWithoutId's common fields, also for a cloud never saved.
+                crate::game::persist::write_static_entity_fields(&mut tag);
                 set_key(&mut tag, "Age", Tag::Int(c.age));
                 set_key(&mut tag, "Duration", Tag::Int(c.duration));
                 set_key(&mut tag, "Radius", Tag::Float(c.radius.to_bits()));
@@ -343,7 +346,7 @@ impl Game<'_> {
             Target::Trident(id) => {
                 let uuid = self.uuid_for(id);
                 let t = self.tridents.iter().find(|t| t.id == id)?;
-                t.to_nbt(uuid, self.persist.raw.get(&id))
+                t.to_nbt(uuid, self.pack.assets.registry, self.persist.raw.get(&id))
             }
             Target::Spawner(id) => {
                 let s = self.ominous_spawners.iter().find(|s| s.id == id)?;
@@ -362,6 +365,7 @@ impl Game<'_> {
                 let fence = self.natural_knot(id)?;
                 let uuid = *self.persist.uuids.get(&id)?;
                 let knot = super::OtherEntity {
+                    attachment_lifetime: Default::default(),
                     // A serialization view, not a second resident entity.
                     join: horizon_client::join_seq::JoinSeq::UNJOINED,
                     id,
@@ -440,6 +444,16 @@ impl Game<'_> {
                     new.join = slot.join;
                     new.random = slot.random.clone();
                     let old = horizon_client::join_seq::store_back(slot, new);
+                    // Entity.load does not replace the live passenger graph or
+                    // the runtime seating state, even for an off-level vehicle.
+                    slot.extra.mount = old.extra.mount;
+                    slot.extra.rider = old.extra.rider;
+                    slot.extra.passenger = old.extra.passenger;
+                    slot.extra.vehicle_order = old.extra.vehicle_order;
+                    slot.extra.seat = old.extra.seat;
+                    slot.extra.vehicle_body = old.extra.vehicle_body;
+                    slot.extra.boarding_cooldown = old.extra.boarding_cooldown;
+                    slot.rider = old.rider;
                     // Runtime-only state (AI, animation) carries over.
                     if keep_liked_player {
                         slot.extra.tame = old.extra.tame;
@@ -481,10 +495,10 @@ impl Game<'_> {
                     // Wolf.readAdditionalSaveData initializes persistent anger at
                     // the live level clock, just as load_mob does on admission.
                     if slot.species() == horizon_client::mobs::Species::Wolf {
-                        slot.extra.anger = horizon_client::mobs::anger_left(
-                            slot.extra.anger_end,
-                            self.world.game_time,
-                        );
+                        horizon_client::mobs::adopt_anger_end(slot, self.world.game_time);
+                    } else {
+                        // `readPersistentAngerSaveData` set the end time as written.
+                        slot.extra.anger_stamp = Some((slot.extra.anger, slot.age));
                     }
                 }
                 if unresolved {
@@ -516,6 +530,7 @@ impl Game<'_> {
                 if let Some(slot) = self.dropped.iter_mut().find(|e| e.id == id) {
                     new.join = slot.join;
                     new.bob_offset = slot.bob_offset;
+                    new.random = slot.random.clone();
                     horizon_client::join_seq::store_back(slot, new);
                 }
             }
@@ -701,7 +716,7 @@ impl Game<'_> {
                     .iter_mut()
                     .find(|trident| trident.id == id)
                     .ok_or_else(stale)?
-                    .load_nbt(loaded);
+                    .load_nbt(loaded, &tag, self.pack.assets.registry);
                 set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
             }
             Target::Rocket(id) => {
@@ -788,6 +803,59 @@ impl Game<'_> {
             self.persist.raw.insert(id, tag);
         }
         Ok(())
+    }
+    /// The block entity part of `BlockInput.place`: load the block entity
+    /// from the argument's tag (read; `load_block_entity_nbt` reads SNBT); true when its saved data changed.
+    pub(in crate::game) fn load_block_entity_tag(
+        &mut self,
+        pos: [i32; 3],
+        mut tag: horizon_core::nbt::Tag,
+    ) -> bool {
+        use horizon_core::nbt::Tag;
+        if self.pot_data(pos).is_some() {
+            return self.set_pot_data(pos, &tag).unwrap_or(false);
+        }
+        let key = (pos[0], pos[1], pos[2]);
+        let was_auto = self.command_block_auto(key);
+        let Some(e) = self.world.block_entities.get(&key) else {
+            return false;
+        };
+        let name = self.data_block_name(pos);
+        let before = horizon_client::save::encode_block_entity(key, e, &name);
+        if let Tag::Compound(c) = &mut tag {
+            for k in ["id", "x", "y", "z"] {
+                if let Some(v) = before.get(k) {
+                    c.insert(k.into(), v.clone());
+                }
+            }
+        }
+        let Some((_, mut new)) = self.decode_block_entity_at(key, &tag) else {
+            return false;
+        };
+        let rolled = self.take_loot_table(key, &tag, &mut new);
+        let after = horizon_client::save::encode_block_entity(key, &new, &name);
+        // The lock is outside the model: a tag that only changes it still
+        // changes the block entity.
+        let lock_changed = self.world.block_lock(key) != tag.get("lock");
+        // So is the custom name.
+        let name_changed = self.load_block_name(key, &new, &tag);
+        let cooldown_changed = if name == "minecraft:hopper" {
+            let state = super::super::machines::HopperState::load(&tag);
+            let changed = self.hoppers.get(&key).map_or(-1, |s| s.cooldown) != state.cooldown;
+            self.hoppers.insert(key, state);
+            changed
+        } else {
+            false
+        };
+        if after == before && !rolled && !lock_changed && !name_changed && !cooldown_changed {
+            return false;
+        }
+        self.world.block_entities.insert(key, new);
+        self.world.set_block_lock(key, &tag);
+        self.update_spawner_display(key);
+        self.command_block_loaded(key, was_auto);
+        self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
+        true
     }
     pub(in crate::game) fn data_block_name(&self, p: [i32; 3]) -> String {
         let state = self.world.block(p[0], p[1], p[2]);
@@ -1069,7 +1137,8 @@ impl Game<'_> {
                     self.mark_block_entity_updated(key);
                     return Ok(());
                 }
-                if let Some((_, mut new)) = save::decode_block_entity(&tag) {
+                if let Some((_, mut new)) = self.decode_block_entity_at(key, &tag) {
+                    let was_auto = self.command_block_auto(key);
                     if self.data_block_name(*p) == "minecraft:hopper" {
                         self.hoppers
                             .insert(key, super::super::machines::HopperState::load(&tag));
@@ -1090,6 +1159,7 @@ impl Game<'_> {
                     }
                     self.world.set_block_lock(key, &tag);
                     self.update_spawner_display(key);
+                    self.command_block_loaded(key, was_auto);
                     // BlockDataAccessor.setData: setChanged and sendBlockUpdated(3),
                     // even when the block state itself stays the same.
                     self.mark_block_entity_updated(key);
@@ -1698,6 +1768,7 @@ mod tests {
             game.persist.raw.insert(12, Tag::Compound(raw));
             game.persist.uuids.insert(12, [1, 2, 3, 4]);
             game.others.push(super::super::OtherEntity {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 item_transformation: None,
                 knot_check: None,
@@ -1752,85 +1823,8 @@ mod tests {
 }
 
 #[cfg(test)]
-mod orb_uuid_tests {
-    use super::Target;
-    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
-    use horizon_core::nbt::Tag;
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn saved_orb_uuid_comes_from_registered_identity_without_or_despite_raw() {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
-            Vec::new(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            crate::game::execution_role::ExecutionRole::IntegratedServer,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        let uuid = [0, 0, 0, 2];
-        let tag = Tag::compound([
-            ("UUID", Tag::IntArray(uuid.to_vec())),
-            (
-                "Pos",
-                Tag::List(vec![
-                    Tag::Double(4.5_f64.to_bits()),
-                    Tag::Double(200.0_f64.to_bits()),
-                    Tag::Double(4.5_f64.to_bits()),
-                ]),
-            ),
-            ("Value", Tag::Short(1)),
-            ("Age", Tag::Short(0)),
-            ("Health", Tag::Short(5)),
-            ("NoGravity", Tag::Byte(1)),
-        ]);
-        game.load_orb(tag, Some(uuid));
-        assert_eq!(game.orbs.len(), 1);
-        let id = game.orbs[0].id;
-        assert_eq!(game.persist.uuids.get(&id), Some(&uuid));
-        let time = game.world.game_time;
-        for raw in [
-            None,
-            Some(Tag::compound([("UUID", Tag::IntArray(vec![9, 9, 9, 9]))])),
-        ] {
-            if let Some(raw) = &raw {
-                game.persist.raw.insert(id, raw.clone());
-            } else {
-                game.persist.raw.remove(&id);
-            }
-            for _ in 0..3 {
-                let saved = game.entity_nbt_in_level(Target::Orb(id)).unwrap();
-                assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
-                assert_eq!(game.persist.uuids.get(&id), Some(&uuid));
-                assert_eq!(game.persist.raw.get(&id), raw.as_ref());
-                assert_eq!(game.world.game_time, time);
-            }
-        }
-    }
-}
+#[path = "data/orb_uuid_tests.rs"]
+mod orb_uuid_tests;
 
 #[cfg(test)]
 mod wolf_live_anger_tests {

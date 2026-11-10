@@ -161,6 +161,29 @@ impl Registry {
         let mut modifiers = Vec::new();
         let mut entity_modifiers = Vec::new();
         let mut particle_modifiers = Vec::new();
+        // Custom colours' `particle.<id>`: a modifier that sets only the colour, below the files'.
+        for (id, color) in horizon_polytone::colors::PackColors::from_files(
+            pack_root.namespaces("assets").into_iter().map(|namespace| {
+                let base = format!("assets/{namespace}/polytone");
+                (
+                    pack_root
+                        .read_to_string(&format!("{base}/color.properties"))
+                        .ok(),
+                    pack_root
+                        .read_to_string(&format!("{base}/colors.json"))
+                        .ok(),
+                )
+            }),
+        )
+        .particles()
+        {
+            let json = serde_json::json!({"targets": [id], "color": color});
+            match ParticleModifier::parse(&json, None) {
+                Ok(Some(m)) => particle_modifiers.push((m, None, None)),
+                Ok(None) => {}
+                Err(e) => log::warn!("colors particle.{id}: {e}"),
+            }
+        }
         for namespace in pack_root.namespaces("assets") {
             let polytone = std::path::PathBuf::from(format!("assets/{namespace}/polytone"));
             for (relative, json) in json_files(pack_root, &polytone.join("custom_particles")) {
@@ -470,14 +493,14 @@ enum Subject<'a> {
 }
 
 /// What one expression runs against: its subject, the frame and the level.
-struct Ctx<'a> {
+struct Ctx<'a, 'l> {
     subject: Subject<'a>,
     random: &'a mut LegacyRandom,
     custom: &'a mut f64,
     customs: &'a mut BTreeMap<String, f64>,
     frame: &'a Frame,
     registry: &'a Registry,
-    level: Option<&'a ParticleLevel<'a>>,
+    level: Option<&'a ParticleLevel<'l>>,
     blocks: Vec<[i32; 3]>,
 }
 
@@ -495,7 +518,7 @@ fn axis(name: &str) -> usize {
     usize::from(name.as_bytes()[0] - b'x')
 }
 
-impl Ctx<'_> {
+impl Ctx<'_, '_> {
     fn position(&self) -> [f64; 3] {
         match &self.subject {
             Subject::Particle(p) => p.position,
@@ -663,7 +686,7 @@ impl Ctx<'_> {
     }
 }
 
-impl Host for Ctx<'_> {
+impl Host for Ctx<'_, '_> {
     fn root(&mut self, root: Root) -> V {
         match root {
             Root::Object => V::Object(SELF),
@@ -780,6 +803,26 @@ impl Host for Ctx<'_> {
                 .ok_or_else(|| format!("no config {id}")),
             _ => Err(format!("{name} is not available here")),
         }
+    }
+
+    /// A particle's own fields, as `particle_method` answers them.
+    fn field(&mut self, root: Root, field: horizon_polytone::expr::Field) -> Option<V> {
+        use horizon_polytone::expr::Field as F;
+        let Subject::Particle(p) = &self.subject else {
+            return None;
+        };
+        if root != Root::Object {
+            return None;
+        }
+        Some(V::Num(match field {
+            F::Age => f64::from(p.age),
+            F::Life => f64::from(p.lifetime),
+            F::Custom => *self.custom,
+            F::X => p.position[0],
+            F::Y => p.position[1],
+            F::Z => p.position[2],
+            F::Temperature | F::Downfall => return None,
+        }))
     }
 }
 
@@ -1595,6 +1638,7 @@ mod tests {
                 set: 0,
                 behaviour: None,
                 provider: None,
+                group: None,
             },
         );
         engine.set_sprites.push(vec![10, 11, 12]);
@@ -1674,6 +1718,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -1717,6 +1762,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -1744,6 +1790,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -1795,6 +1842,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let registry = Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -1855,6 +1903,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let registry = Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -1897,6 +1946,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -1953,6 +2003,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -2018,6 +2069,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -2070,6 +2122,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -2140,6 +2193,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let registry = Arc::new(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -2164,6 +2218,7 @@ mod tests {
                 set: 0,
                 behaviour: None,
                 provider: None,
+                group: None,
             },
         );
         engine.set_sprites.push(vec![10]);
@@ -2189,6 +2244,27 @@ mod tests {
             (sounds[0].0, sounds[0].2, sounds[0].3),
             ("minecraft:block.note_block.harp", 0.5, 1.0)
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn custom_colours_recolour_their_particle_type() {
+        let root = pack(&[(
+            "assets/obs/polytone/colors.json",
+            serde_json::json!({"particle": {"minecraft:flame": "0x0000ff"}}),
+        )]);
+        let registry = Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks(),
+        );
+        let colour = |kind: &str| {
+            let mut p = Particle::blank(ParticleType::Flame, [0.0; 3]);
+            modify(&registry, kind, None, &mut p);
+            p.rgba
+        };
+        assert_eq!(colour("minecraft:flame"), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(colour("minecraft:smoke"), [1.0; 4]);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2264,6 +2340,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
@@ -2352,6 +2429,7 @@ mod tests {
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
+            cached_chunk: std::cell::Cell::new(None),
         };
         let mut engine = engine(Registry::read(
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),

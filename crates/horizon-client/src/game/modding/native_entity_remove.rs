@@ -11,7 +11,7 @@
 use super::{Game, commands::Target};
 use horizon_client::items::ItemStack;
 use horizon_core::{geometry::Vec3, position::BlockPos};
-use mod_api::{EntityRef, NativeRemovalReason};
+use mod_api::{EntityRef, RemovalReason};
 
 impl Game<'_> {
     /// Removes the entity with no death and no loot (`Entity.discard`): a
@@ -19,15 +19,15 @@ impl Game<'_> {
     /// a boat its lead, as vanilla's `remove` does. False for a player, a dragon part,
     /// or a stale handle.
     pub(super) fn entity_discard(&mut self, entity: EntityRef) -> bool {
-        self.entity_remove(entity, NativeRemovalReason::Discarded)
+        self.entity_remove(entity, RemovalReason::Discarded)
     }
     /// Removes the entity for `reason` (`Entity.remove`): `Discarded`, as
     /// `discard`, or `Killed`, which also runs a mob's effects that act on
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
     /// still with no death and no loot. False for a player, a dragon part, or a stale
     /// handle.
-    pub(super) fn entity_remove(&mut self, entity: EntityRef, reason: NativeRemovalReason) -> bool {
-        let killed = reason == NativeRemovalReason::Killed;
+    pub(super) fn entity_remove(&mut self, entity: EntityRef, reason: RemovalReason) -> bool {
+        let killed = reason == RemovalReason::Killed;
         match self.native_entity_target(entity) {
             // A part leaves the level with its dragon, never alone.
             None | Some(Target::Player | Target::Guest(_) | Target::DragonPart(_)) => false,
@@ -37,13 +37,38 @@ impl Game<'_> {
             }
             Some(t) => {
                 // Read before the entity counts as removed: its handle stops resolving.
-                let passengers = self.entity_passengers(entity).unwrap_or_default();
+                let vehicle_y = match t {
+                    Target::Boat(id) => {
+                        self.boats.iter().find(|b| b.id == id).map(|b| b.position.y)
+                    }
+                    Target::Cart(id) => {
+                        self.carts.iter().find(|c| c.id == id).map(|c| c.position.y)
+                    }
+                    _ => None,
+                };
+                let passengers: Vec<_> = self
+                    .entity_passengers(entity)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|passenger| {
+                        vehicle_y.is_none()
+                            || !matches!(
+                                self.native_entity_target(*passenger),
+                                Some(Target::Mob(_))
+                            )
+                    })
+                    .collect();
                 // `Entity.setRemoved`: the reason first, so the hooks below see
                 // it removed; then the passengers get off and the level is told.
                 // Only players and mobs ride, so this kind has no vehicle to leave.
                 self.persist.removals.push(t);
                 for passenger in passengers {
                     self.entity_stop_riding(passenger);
+                }
+                if let Some(y) = vehicle_y {
+                    // Complete actual Mob edges here, including rejected objects.
+                    // The deferred physical removal then has no edge to notify twice.
+                    self.dismount_destroyed_vehicle_mobs(entity.id(), y);
                 }
                 self.native_entity_left(entity.id());
                 true
@@ -197,7 +222,7 @@ mod tests {
             cart.items[26] = Some(ItemStack::new("minecraft:sand", 7));
             game.carts.push(cart);
             let entity = game.entity(600).unwrap();
-            assert!(game.entity_remove(entity, NativeRemovalReason::Killed));
+            assert!(game.entity_remove(entity, RemovalReason::Killed));
             assert!(game.dropped.is_empty());
             game.native_removals_flush();
             assert!(game.carts.is_empty());
@@ -226,6 +251,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),
@@ -335,6 +361,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),
@@ -389,8 +416,7 @@ mod tests {
             assert!(game.mobs[0].removed);
             assert!(!mob.discard(game));
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             assert!(!player.discard(game));
             assert!(game.player.is_some());
@@ -521,6 +547,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),

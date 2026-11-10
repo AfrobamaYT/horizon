@@ -1,15 +1,13 @@
 use super::*;
-use crate::{assets::Assets, blocks::BlockFacts, items::Items};
+use crate::{assets::Assets, blocks::BlockFacts, crafting::CraftingRemainder, items::Items};
 use horizon_mod_package::manifest::JarRef;
 use horizon_world::native_load_context::DataLoadOrigin;
-
 #[path = "mod_content_block_entity_tests.rs"]
 mod block_entity_tests;
 #[path = "mod_content_farmland_tests.rs"]
 mod farmland_tests;
 #[path = "mod_content_jar_tests.rs"]
 mod jar_tests;
-
 /// A Java jar's assets are a pack layer under the mod's own files, in mod
 /// order under the later mods. Passive assets stay in the jar, and the files
 /// every pack stacks (atlases here) merge across vanilla, the jars and the
@@ -79,7 +77,6 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     fn own<'a>(path: &'a str, text: &str) -> (&'a str, String) {
         (path, text.to_owned())
     }
-
     let atlas_file = |source: &str| ("assets/minecraft/atlases/blocks.json", atlas(source));
     let jar_a = jar(
         "porteda",
@@ -530,6 +527,7 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
         asked: RefCell<Vec<String>>,
         client: bool,
     }
+    impl horizon_world::level::BlockEntityNeighbors for Level {}
     impl LevelAccess for Level {
         fn block_state(&self, p: BlockPos) -> BlockStateId {
             self.blocks.get(&p).copied().unwrap_or(self.air)
@@ -1489,6 +1487,7 @@ fn content_root_loads_with_every_table() {
             events: Vec<LevelEvent>,
             time: i64,
         }
+        impl horizon_world::level::BlockEntityNeighbors for TestLevel {}
         impl LevelAccess for TestLevel {
             fn block_state(&self, pos: BlockPos) -> BlockStateId {
                 *self.blocks.get(&pos).unwrap_or(&self.air)
@@ -1633,7 +1632,7 @@ fn content_root_loads_with_every_table() {
         .find(crate::test_resources::server_loop_context(), &grid, 2)
         .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
-    let rest = recipes.remainders(id, &grid, 2);
+    let rest = recipes.remainders(id, &grid, 2, &|s| items.crafting_remainder(s));
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
     assert!(!items.items.contains_key("ruby:ruby_glass"));
     let pickaxe = &items.block_tags["minecraft:mineable/pickaxe"];
@@ -2616,35 +2615,33 @@ fn content_root_with_only_an_item_checks_its_identity() {
     fs::remove_dir_all(&scratch).unwrap();
 }
 
-/// a living mod type's row in `entity-types.json` is its template's with
-/// `template` added and its own attribute bases; every other value keeps the
-/// template's text, to the digit. An attribute the template lacks is refused.
+/// a living mod type's row in `entity-types.json` is its template's with `template`,
+/// attribute bases and passenger attachments; other values keep the template's text.
 #[test]
 fn a_living_mod_types_row_is_its_templates_with_its_attributes() {
-    let zombie = r#"{"width":0.6,"height":1.95,"eye_height":1.74,"category":"monster",
-        "fire_immune":false,"attributes":{"minecraft:max_health":20.0,
-        "minecraft:movement_speed":0.23000000417232513,"minecraft:armor":2.0}}"#;
+    let zombie = r#"{"width":0.6,"height":1.95,"eye_height":1.74,"category":"monster","fire_immune":false,"attributes":{"minecraft:max_health":20.0,"minecraft:movement_speed":0.23000000417232513,"minecraft:armor":2.0}}"#;
     let row = serde_json::value::RawValue::from_string(zombie.to_owned()).unwrap();
-    let ghoul = |attributes: &[(&str, f64)]| EntityType {
+    let ghoul = |attributes: &[(&str, f64)], attachments: &[[f32; 3]]| EntityType {
         id: "ruby:ghoul".into(),
         template: "minecraft:zombie".into(),
         item: None,
         damage: 0.0,
-        attributes: attributes
-            .iter()
-            .map(|(a, v)| (a.to_string(), *v))
-            .collect(),
+        attributes: attributes.iter().map(|&(a, v)| (a.into(), v)).collect(),
+        passenger_attachments: attachments.to_vec(),
     };
-    let written = mod_entity_row(&row, &ghoul(&[("minecraft:max_health", 40.0)])).unwrap();
-    let written: serde_json::Value = serde_json::from_slice(&written).unwrap();
+    let modded = ghoul(&[("minecraft:max_health", 40.0)], &[[0.0, 0.7, -0.1]]);
+    let written: serde_json::Value =
+        serde_json::from_slice(&mod_entity_row(&row, &modded).unwrap()).unwrap();
     let mut expected: serde_json::Value = serde_json::from_str(zombie).unwrap();
     expected["attributes"]["minecraft:max_health"] = 40.0.into();
     expected["template"] = "minecraft:zombie".into();
+    expected["passenger_attachments"] = serde_json::json!([[0.0, 0.7, -0.1]]);
     assert_eq!(written, expected);
     // the untouched speed keeps the template's text, not a reparsed float.
-    let text = String::from_utf8(mod_entity_row(&row, &ghoul(&[])).unwrap()).unwrap();
+    let text = String::from_utf8(mod_entity_row(&row, &ghoul(&[], &[])).unwrap()).unwrap();
     assert!(text.contains("0.23000000417232513"), "{text}");
-    let e = mod_entity_row(&row, &ghoul(&[("minecraft:flying_speed", 1.0)])).unwrap_err();
+    assert!(!text.contains("passenger_attachments"), "{text}");
+    let e = mod_entity_row(&row, &ghoul(&[("minecraft:flying_speed", 1.0)], &[])).unwrap_err();
     assert!(e.contains("not one of minecraft:zombie's"), "{e}");
 }
 
@@ -3328,7 +3325,7 @@ fn content_shapes_drive_outline_and_collision() {
     let facts = BlockFacts::load(&root, registry).unwrap();
     let (named, _) = nbt::read_named(
         &fs::read(root.join("cached-collision.nbt")).unwrap(),
-        Limits::tables(),
+        nbt::Limits::tables(),
     )
     .unwrap();
     let collision = CachedCollisionRegistry::from_nbt(&named.tag, registry).unwrap();
@@ -3568,6 +3565,7 @@ fn connecting_blocks_and_vanilla_fences_use_content_tags() {
         air: BlockStateId,
         random: LegacyRandom,
     }
+    impl horizon_world::level::BlockEntityNeighbors for Level {}
     impl LevelAccess for Level {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.blocks.get(&pos).copied().unwrap_or(self.air)
@@ -5469,7 +5467,7 @@ fn configured_features_load_from_the_26_3_path() {
 
 /// A world's data pack that replaces a vanilla biome (Terralith's plains)
 /// keeps the mods' modifier features, and a pack's own biome its tag puts
-/// under the modifier's selector gets them: NeoForge applies modifiers after
+/// under the modifier's selector gets them: modifiers apply after
 /// every pack. A biome no pack touches stays as the content root has it.
 #[test]
 fn biome_modifiers_apply_over_world_packs() {

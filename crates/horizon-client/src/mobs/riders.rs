@@ -31,12 +31,31 @@ fn avatar(m: &Mob) -> bool {
 /// rider's attachment point sits relative to the vehicle's feet, in its
 /// scale (`getDimensions` scales the attachments with the box).
 pub fn passenger_attachment(v: &Mob) -> [f64; 3] {
-    let [x, y, z] = base_attachment(v);
+    passenger_attachment_at(v, 0)
+}
+/// Passenger attachment for seat `index`, clamped to the vehicle's last seat.
+pub fn passenger_attachment_at(v: &Mob, index: usize) -> [f64; 3] {
+    let [x, y, z] = base_attachment_at(v, index);
     let s = scale(v);
     // AbstractHorse.getPassengerAttachmentPoint: a rearing horse slides it,
     // after the scaled attachment (`rear_offset` scales with age itself).
     let rear = super::equine::rear_offset(v);
     [x * s + rear[0], y * s + rear[1], z * s + rear[2]]
+}
+pub(crate) fn parse_passenger_attachments(value: &serde_json::Value) -> Vec<[f32; 3]> {
+    value.as_array().map_or_else(Vec::new, |a| {
+        a.iter()
+            .filter_map(|p| match p {
+                serde_json::Value::Array(c) if c.len() == 3 => Some([
+                    c[0].as_f64()? as f32,
+                    c[1].as_f64()? as f32,
+                    c[2].as_f64()? as f32,
+                ]),
+                serde_json::Value::Number(y) => Some([0.0, y.as_f64()? as f32, 0.0]),
+                _ => None,
+            })
+            .collect()
+    })
 }
 /// An `EntityType` attachment point: the builder takes floats, so the double
 /// the position math sees is the float's widening (`Vec3(x, y, z)` of
@@ -62,11 +81,16 @@ pub fn happy_ghast_attachment(index: usize) -> [f64; 3] {
     pt(x, y, z)
 }
 /// `Pig.getDefaultDimensions` and other species' age-specific passenger attachments.
-fn base_attachment(v: &Mob) -> [f64; 3] {
+fn base_attachment_at(v: &Mob, index: usize) -> [f64; 3] {
     let baby = v.is_baby();
     // Players and mannequins have no `passengerAttachments`: their box top.
     if avatar(v) {
         return [0.0, f64::from(v.height()) / scale(v), 0.0];
+    }
+    if !v.kind.passenger_attachments.is_empty() {
+        let i = index.min(v.kind.passenger_attachments.len() - 1);
+        let [x, y, z] = v.kind.passenger_attachments[i];
+        return pt(x, y, z);
     }
     match v.species() {
         Species::Chicken => pt(0.0, 0.7, -0.1),
@@ -99,7 +123,7 @@ fn base_attachment(v: &Mob) -> [f64; 3] {
         Species::Endermite | Species::Silverfish => up(0.2375),
         Species::Enderman => up(2.80625),
         Species::Ghast => up(4.0625),
-        Species::HappyGhast => happy_ghast_attachment(0),
+        Species::HappyGhast => happy_ghast_attachment(index),
         Species::Warden => up(3.15),
         Species::Sniffer => up(2.09375),
         Species::Fox => pt(0.0, 0.6375, -0.25),
@@ -370,13 +394,16 @@ fn controller<'a>(m: &Mob, w: &'a MobWorld) -> Option<&'a Seen> {
     if m.no_ai {
         return None;
     }
-    m.extra.rider.and_then(|id| w.seen(id)).filter(|r| {
-        r.alive
-            && !w.data.entity_has(
-                "minecraft:non_controlling_rider",
-                &format!("minecraft:{}", super::species::def(r.species).name),
-            )
-    })
+    m.extra
+        .rider
+        .and_then(|id| w.passenger_object(id))
+        .filter(|r| {
+            r.alive
+                && !w.data.entity_has(
+                    "minecraft:non_controlling_rider",
+                    &format!("minecraft:{}", super::species::def(r.species).name),
+                )
+        })
 }
 /// Vehicle goal flags are independent of whether the rider has a combat target.
 /// Ravager.updateControlFlags permits raiders, unlike Mob.updateControlFlags.
@@ -564,7 +591,9 @@ pub fn resume_after_consumption(
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
     tick_with(mobs, index, w, level, events, |m, w, level, events| {
-        super::ai::resume_after_consumption(m, w, level, was_on_fire, events)
+        let kept = super::ai::resume_after_consumption(m, w, level, was_on_fire, events);
+        super::neutral_anger::after_tick(m, w.game_time);
+        kept
     })
 }
 
@@ -767,6 +796,42 @@ mod tests {
     }
 
     // Lower-layer loan test, not a native GoalContext integration test.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn retained_controller_disables_goals_without_becoming_a_target() {
+        let mut vehicle = of(71, Species::Spider);
+        let mut rider = of(72, Species::Skeleton);
+        rider.extra.mount = Some(vehicle.id);
+        vehicle.extra.rider = Some(rider.id);
+        let retained = [rider.seen(None)];
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required");
+        assert!(crate::mobs::world::with_resource_test_world(
+            std::path::Path::new(&root),
+            &[],
+            true,
+            true,
+            |_, _| {},
+            |w, _| {
+                let w = MobWorld {
+                    passenger_objects: &retained,
+                    ..w.clone()
+                };
+                drive(&mut vehicle, &w);
+                assert_eq!(vehicle.ai.goals.disabled & CONTROLLED, CONTROLLED);
+                assert!(w.seen(rider.id).is_none());
+                assert!(w.target_info(super::super::Who::Mob(rider.id)).is_none());
+                assert_eq!(w.others_near(vehicle.bounds()).count(), 0);
+                vehicle.extra.rider = None;
+                drive(&mut vehicle, &w);
+                assert_eq!(vehicle.ai.goals.disabled & CONTROLLED, 0);
+                vehicle.extra.rider = Some(rider.id);
+                vehicle.no_ai = true;
+                drive(&mut vehicle, &w);
+                assert_eq!(vehicle.ai.goals.disabled & CONTROLLED, 0);
+            }
+        ));
+    }
+
     #[test]
     fn navigation_loan_restores_both_owners_after_unwind() {
         for unwind in [false, true] {
@@ -1109,5 +1174,37 @@ mod happy_ghast_seat_tests {
             assert!(seats[i + 1..].iter().all(|b| a != b));
         }
         assert_eq!(happy_ghast_attachment(9), seats[3]);
+    }
+
+    #[test]
+    fn content_mod_mob_uses_configured_passenger_attachments() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "ruby:bird".into();
+        kind.species = super::Species::Zombie;
+        kind.passenger_attachments = vec![[0.0, 0.7, -0.1], [0.0, 0.9, 0.2]];
+        let kind = std::sync::Arc::new(kind);
+
+        let vehicle = super::Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
+        let first = super::passenger_attachment(&vehicle);
+        assert!(close(first[0], 0.0));
+        assert!(close(first[1], 0.7));
+        assert!(close(first[2], -0.1));
+
+        let second = super::passenger_attachment_at(&vehicle, 1);
+        assert!(close(second[0], 0.0));
+        assert!(close(second[1], 0.9));
+        assert!(close(second[2], 0.2));
+
+        // Clamps to last seat
+        let clamped = super::passenger_attachment_at(&vehicle, 5);
+        assert_eq!(clamped, second);
+
+        // Scale scales the attachments
+        let mut scaled = super::Mob::new(2, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
+        scaled.extra.model_scale = 2.0;
+        let scaled_first = super::passenger_attachment(&scaled);
+        assert!(close(scaled_first[1], 1.4));
+        assert!(close(scaled_first[2], -0.2));
     }
 }

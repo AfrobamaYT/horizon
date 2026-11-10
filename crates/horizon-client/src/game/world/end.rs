@@ -751,7 +751,8 @@ impl Game<'_> {
         // anchor puts the player, facing it; else onto the spawn column.
         let mut target = target;
         if let Some(c) = self.respawn_config.filter(|c| c.dim == self.dim) {
-            if let Some((at, yaw)) = self.find_respawn_and_use(c, false)? {
+            // This existing owner transition adapter carries yaw only; its pitch path remains open.
+            if let Some((at, yaw, _pitch)) = self.find_respawn_and_use(c, false)? {
                 return Ok(Some((at, Some(yaw))));
             }
             target = fallback_spawn(self.spawn, self.level.world_spawn);
@@ -1344,6 +1345,7 @@ impl Game<'_> {
 
     /// EyeOfEnder.tick: fly, then drop (4 in 5) or shatter after 80 ticks.
     fn tick_eyes(&mut self) {
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut eyes = std::mem::take(&mut self.end.eyes);
         let mut shattered = Vec::new();
         eyes.retain_mut(|eye| {

@@ -21,7 +21,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use horizon_world::registry::BlockStateId;
-use mod_api::particles::PositionSource;
+use mod_api::client::particles::PositionSource;
 use std::collections::HashSet;
 
 pub const HELP: &[&str] = &[
@@ -364,12 +364,19 @@ impl Game<'_> {
             self.sculk.tracker = WardenSpawnTracker::from_nbt(tag);
         }
     }
-    /// Write the tracker into the player data being saved.
+    /// The tracker as saved, once it has been loaded.
+    pub(super) fn warden_tracker_tag(&self) -> Option<horizon_core::nbt::Tag> {
+        self.sculk
+            .tracker_loaded
+            .then(|| self.sculk.tracker.to_nbt())
+    }
+    /// Write the tracker into the player data being saved. With a LAN owner,
+    /// `store_owner` rewrites that from the owner's guest, so it puts the
+    /// tracker there as well (`playerdata::with_warden`).
     pub(super) fn save_warden_tracker(&mut self) {
-        if !self.sculk.tracker_loaded {
+        let Some(tag) = self.warden_tracker_tag() else {
             return;
-        }
-        let tag = self.sculk.tracker.to_nbt();
+        };
         let extra = self
             .level
             .player_extra
@@ -1453,7 +1460,7 @@ impl Game<'_> {
                 f64::from(at.1),
                 f64::from(at.2) + 0.5,
             ];
-            let yaw = mod_api::camera::wrap_degrees(self.world.random.next_float() * 360.0);
+            let yaw = mod_api::client::camera::wrap_degrees(self.world.random.next_float() * 360.0);
             self.next_entity += 1;
             let mut mob = Mob::new(
                 self.next_entity,
@@ -1564,7 +1571,7 @@ impl Game<'_> {
     /// `LightmapRenderStateExtractor`: the night vision effect's intensity
     /// (`GameRenderer.nightVisionScale`), or conduit power's water vision.
     pub(super) fn night_vision_intensity(&self, partial: f32) -> f32 {
-        use mod_api::fog::FogType;
+        use mod_api::client::fog::FogType;
         if let Some(e) = self.potions.effects.get("night_vision") {
             // MobEffectInstance.endsWithin(200); -1 is infinite.
             return if e.duration < 0 || e.duration > 200 {
@@ -2116,8 +2123,8 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         held: Option<&horizon_client::items::ItemStack>,
-    ) -> Result<Option<mod_api::NativeInteractionResult>> {
-        use mod_api::NativeInteractionResult as Answer;
+    ) -> Result<Option<mod_api::InteractionResult>> {
+        use mod_api::InteractionResult as Answer;
         if !matches!(
             &*self.block_name(pos),
             "minecraft:redstone_ore" | "minecraft:deepslate_redstone_ore"
@@ -2487,17 +2494,27 @@ impl Game<'_> {
         at: [f64; 3],
         source: Option<super::commands::Target>,
     ) {
+        self.entity_event_by("minecraft:entity_die", at, source);
+    }
+    /// `Entity.gameEvent(event, attributedTo)` at `at`, attributed to `source`
+    /// (a LAN guest posts as that player), else to the entity itself.
+    pub(super) fn entity_event_by(
+        &mut self,
+        event: &'static str,
+        at: [f64; 3],
+        source: Option<super::commands::Target>,
+    ) {
         use super::commands::Target;
         if let Some(Target::Guest(conn)) = source {
             if self.lan_acting == Some(conn) {
                 let ctx = self.player_context(None);
-                self.post_game_event("minecraft:entity_die", at, ctx);
+                self.post_game_event(event, at, ctx);
                 return;
             }
             let posted = self
                 .as_guest(conn, |g| {
                     let ctx = g.player_context(None);
-                    g.post_game_event("minecraft:entity_die", at, ctx);
+                    g.post_game_event(event, at, ctx);
                 })
                 .is_some();
             if posted {
@@ -2512,7 +2529,7 @@ impl Game<'_> {
         let mut ctx = self.who_context(who, None);
         // A stand is living, but Warden.canTargetEntity explicitly excludes it.
         ctx.living |= matches!(source, Some(Target::Stand(_)));
-        self.post_game_event("minecraft:entity_die", at, ctx);
+        self.post_game_event(event, at, ctx);
     }
 }
 

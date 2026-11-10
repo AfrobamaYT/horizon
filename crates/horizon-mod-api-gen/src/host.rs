@@ -156,7 +156,7 @@ pub(super) const GOAL_VIEW_LOOKUPS: &[&str] = &[
     "block_entity",
 ];
 
-pub(super) const DIRECTORY: &str = "crates/horizon-mod-api/src/host";
+pub(super) const DIRECTORY: &str = "crates/horizon-mod-vocab/src/host";
 /// The generated file `horizon-mod-api/src/host.rs` includes: the area modules and the prelude.
 pub(super) const AREAS_OUTPUT: &str = "mod_api_host_areas.rs";
 
@@ -315,14 +315,14 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
     let mut areas = Vec::new();
     for stem in catalog::Catalog::modules(&dir)? {
         let path = dir.join(format!("{stem}.rs"));
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let camel = stem.to_upper_camel_case();
         let tiers = area_tiers(&camel, file).map_err(|e| format!("{}: {e}", path.display()))?;
         areas.push(Area { stem, camel, tiers });
     }
-    println!("cargo:rerun-if-changed={}", dir.display());
+    crate::rerun_if_changed(&dir.display());
     Ok(areas)
 }
 
@@ -466,13 +466,17 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     }
                 } else if text_result {
                     // Writes with converted Text arguments call an infallible engine
-                    // body. A read returning an API-owned aggregate already converts
-                    // its fields in the backend and therefore already returns Result.
+                    // body. Read backends return Result so converting API-owned
+                    // aggregate fields can refuse without losing a boundary error.
                     let text_input =
                         entry.sig.inputs.iter().any(
                             |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
                         );
-                    if text_input {
+                    let read = entry
+                        .sig
+                        .receiver()
+                        .is_some_and(|receiver| receiver.mutability.is_none());
+                    if text_input && !read {
                         format!("Ok({call})")
                     } else {
                         call
@@ -839,10 +843,26 @@ fn handle_method(
 /// The unions, the handles' methods and the hidden backends' side of the host, and the goal view.
 pub(super) fn generate(root: &Path) -> Result<(String, String), String> {
     let areas = load(root)?;
-    let api_source = fs::read_to_string(root.join("crates/horizon-mod-api/src/lib.rs"))
+    let api_source = fs::read_to_string(root.join("crates/horizon-mod-vocab/src/lib.rs"))
         .map_err(|e| e.to_string())?;
     let api_source = super::exports::expand(root, &api_source)?;
-    let types = api_types(&api_source)?;
+    let mut types = api_types(&api_source)?;
+    // Parse domain files separately: their inner docs and attributes belong to
+    // that file, not to the middle of a concatenated API root.
+    for entry in
+        fs::read_dir(root.join("crates/horizon-mod-vocab/src")).map_err(|e| e.to_string())?
+    {
+        let path = entry.map_err(|e| e.to_string())?.path().join("types.rs");
+        if path.is_file() {
+            let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let domain = api_types(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+            for (receiver, name) in domain.handles {
+                if types.handles.insert(receiver.clone(), name).is_some() {
+                    return Err(format!("duplicate handle receiver {receiver}"));
+                }
+            }
+        }
+    }
     let supertraits = |union: &str| -> String {
         areas
             .iter()

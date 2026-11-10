@@ -3,6 +3,10 @@
 //! read from the prepared resources.
 use super::*;
 
+#[cfg(test)]
+#[path = "incoming_tests/resource_load_scope.rs"]
+mod scope_tests;
+
 pub(super) const STAGE_LINES: [&str; 10] = [
     "Loading menu",
     "Loading assets",
@@ -53,6 +57,7 @@ pub(super) fn synchronous_startup(options: &Options) -> bool {
         || options.benchmark.is_some()
         || options.control.is_some()
         || !options.execution_role.is_client()
+        || std::env::var_os("HORIZON_SCREEN_BUILD_FIXTURE").is_some()
         || std::env::var_os("HORIZON_DISPENSE_FIXTURE").is_some()
         || std::env::var_os("HORIZON_SCULK_FIXTURE").is_some()
         || std::env::var_os("HORIZON_COMMAND_SCRIPT").is_some()
@@ -80,6 +85,10 @@ pub(super) fn named_scope<'scope, T: Send + 'scope>(
     name: &str,
     f: impl FnOnce() -> T + Send + 'scope,
 ) -> std::thread::ScopedJoinHandle<'scope, T> {
+    #[cfg(test)]
+    let inherited = mod_api::testing::inherit_mods(move |_: &()| f());
+    #[cfg(test)]
+    let f = move || inherited(&());
     std::thread::Builder::new()
         // Linux keeps 15 bytes of a thread name: a short prefix keeps them apart
         // ("horizon-load-core" and "horizon-load-collision" would both read
@@ -485,12 +494,16 @@ pub(super) fn load_resources(
 ) -> Result<Loaded> {
     let mut root = resolved.prepared().to_path_buf();
     let headless = !role.is_client();
-    let runtime_sprites = if headless {
-        Vec::new()
+    let (runtime_sprites, texture_atlases) = if headless {
+        (Vec::new(), Vec::new())
     } else {
-        client_reload::collect_runtime_sprites()
+        (
+            client_reload::collect_runtime_sprites(),
+            client_reload::collect_texture_atlases(),
+        )
     };
     resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
+    resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
     let threads = settings.horizon.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
     // server thread's (horizon_threads::jobs), sized before any world opens.
@@ -566,6 +579,7 @@ pub(super) fn load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             &runtime_sprites,
         );
+        resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
     let CoreTables {
@@ -755,8 +769,7 @@ pub(super) fn load_resources(
         (None, None)
     };
     // The client reload listeners register once before any prepare runs (no
-    // game exists yet, as NeoForge's construction-time event fires before
-    // resources load) and prepare here beside the rest of the load, against
+    // game exists yet) and prepare here beside the rest of the load, against
     // the same merged root; the game applies them at handoff. A dedicated
     // server never fires the client event. A failed prepare keeps the game
     // running without mod reload listeners, like the reload path's rollback.

@@ -8,6 +8,7 @@ pub use crate::settings::Opt;
 
 use crate::{
     gamepad::{self, GlyphStyle},
+    hdr_calibration::Picture,
     hud::{HudAtlas, HudBatch, rgba},
     keybinds::{self, CATEGORIES, KeyBinds, MAPPINGS},
     lang::{self, LanguageInfo},
@@ -17,8 +18,18 @@ use crate::{
     ui,
 };
 
+mod shell_pages;
+
 fn tr(key: &str) -> Text {
     Text::translate(key, &[])
+}
+
+/// False only in a game built without the `horizon-extras` feature (docs/forking.md), which says
+/// so once at startup: the Options screen then has vanilla's Telemetry Data slot instead of
+/// Horizon Settings and Mods, and Credits & Attribution names the official build.
+pub static HORIZON_EXTRAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+fn horizon_extras() -> bool {
+    HORIZON_EXTRAS.load(std::sync::atomic::Ordering::Relaxed)
 }
 fn generic(caption: &str, value: Text) -> Text {
     Text::translate("options.generic_value", &[tr(caption), value])
@@ -55,6 +66,32 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
         lines.push(line);
     }
     lines
+}
+/// Setting `j` of the native mod in row `i` of Options > Mods.
+fn mod_setting(s: &Settings, i: u16, j: u16) -> Option<&crate::mod_list::NativeSetting> {
+    s.mods
+        .installed
+        .get(usize::from(i))?
+        .native
+        .as_ref()?
+        .settings
+        .get(usize::from(j))
+}
+/// A native mod's setting as its row says it: the label, then the value.
+fn mod_setting_label(setting: &crate::mod_list::NativeSetting) -> Text {
+    use crate::mod_list::NativeSettingValue as V;
+    let value = match &setting.value {
+        V::Toggle(on) => on_off(*on),
+        V::Choice { options, index } => options
+            .get(*index)
+            .map_or_else(|| Text::literal(""), |o| tr(o)),
+        V::Range { value, .. } => {
+            let shown = format!("{value:.2}");
+            Text::literal(shown.trim_end_matches('0').trim_end_matches('.'))
+        }
+        V::Color(rgb) => Text::literal(format!("#{rgb:06X}")).with_color(*rgb),
+    };
+    Text::option_name_value(tr(&setting.label), value)
 }
 fn on_off(v: bool) -> Text {
     tr(if v { "options.on" } else { "options.off" })
@@ -212,6 +249,7 @@ impl Opt {
             Opt::DiscreteScroll => "options.discrete_mouse_scroll",
             Opt::AllowCursorChanges => "options.allowCursorChanges",
             Opt::Volume(_) => "soundCategory.master",
+            Opt::ModSetting(..) => "horizon.mods.settings",
             Opt::SoundDevice => "options.audioDevice",
             Opt::GuiScale => "options.guiScale",
             Opt::ViewBobbing => "options.viewBobbing",
@@ -313,6 +351,8 @@ impl Opt {
             Opt::PadNintendoButtons => "horizon.options.nintendo_buttons",
             Opt::PadKeyboard => "horizon.options.on_screen_keyboard",
             Opt::PadGameplayGuide => "horizon.options.gameplay_guide",
+            Opt::PadRadialMode => "horizon.options.radial_mode",
+            Opt::PadRadialStick => "horizon.options.radial_stick",
             Opt::ModelPart(i) => [
                 "options.modelPart.cape",
                 "options.modelPart.jacket",
@@ -330,11 +370,15 @@ impl Opt {
             Opt::SharePresence => "options.sharePresence",
             Opt::DirectionalAudio => "options.directionalAudio",
             Opt::MusicToast => "options.musicToast",
+            Opt::Page(page, row) => pages::slider_caption(page, row),
         }
     }
     pub(crate) fn kind(self, s: &Settings) -> Kind {
         let unit = |v: f32, lo: f32, hi: f32| Kind::Slider(((v - lo) / (hi - lo)).clamp(0.0, 1.0));
         match self {
+            Opt::ModSetting(i, j) => {
+                Kind::Slider(mod_setting(s, i, j).map_or(0.0, |m| m.value.fraction()))
+            }
             Opt::FovEffects | Opt::DarknessPulsing => {
                 Kind::Slider(s.file.double(self.file_key().unwrap()).sqrt() as f32)
             }
@@ -393,11 +437,17 @@ impl Opt {
             Opt::PadLookDeadzone => unit(s.controller.look_deadzone, 0.0, 0.5),
             Opt::PadTriggerThreshold => unit(s.controller.trigger_threshold, 0.1, 0.9),
             Opt::SprintWindow => unit(s.sprint_window as f32, 0.0, 10.0),
+            Opt::Page(page, row) => pages::slider_kind(page, row),
             _ => Kind::Cycle,
         }
     }
     /// OptionInstance's static or value-dependent tooltip translation.
     fn tooltip_key(self, s: &Settings) -> String {
+        if let Opt::ModSetting(i, j) = self {
+            return mod_setting(s, i, j)
+                .and_then(|m| m.tooltip.clone())
+                .unwrap_or_default();
+        }
         let key = match self {
             Opt::InactivityFps => {
                 if s.inactivity_fps_limit == "minimized" {
@@ -469,7 +519,17 @@ impl Opt {
         let Some(pos) = self.slider_position(s) else {
             return;
         };
-        let next_pos = if let Some(steps) = self.slider_steps() {
+        // A mod's range steps by its registered step.
+        let steps = match self {
+            Opt::ModSetting(i, j) => match mod_setting(s, i, j).map(|m| &m.value) {
+                Some(crate::mod_list::NativeSettingValue::Range { min, max, step, .. }) => {
+                    Some(((max - min) / step).round().max(1.0) as u32)
+                }
+                _ => None,
+            },
+            _ => self.slider_steps(),
+        };
+        let next_pos = if let Some(steps) = steps {
             let steps = steps as f32;
             let current = (pos * steps).round();
             let next = if forward {
@@ -490,6 +550,9 @@ impl Opt {
     }
     /// The widget message (OptionInstance.toString / CycleButton full name).
     pub fn label(self, s: &Settings) -> Text {
+        if let Opt::ModSetting(i, j) = self {
+            return mod_setting(s, i, j).map_or_else(|| Text::literal(""), mod_setting_label);
+        }
         let c = self.caption();
         match self {
             Opt::ChatDelay => tr("options.chat.delay_none"),
@@ -869,11 +932,25 @@ impl Opt {
                 gamepad::TextKeyboard::Horizon => "horizon.options.keyboard.horizon",
                 gamepad::TextKeyboard::Steam => "horizon.options.keyboard.steam",
             }),
+            Opt::PadRadialMode | Opt::PadRadialStick => self.radial_text(s),
+            Opt::Page(page, row) => pages::slider_text(page, row),
             _ => Text::empty(),
         }
     }
     /// Set a slider from its 0..1 position (OptionInstance value sets).
     pub fn set_slider(self, s: &mut Settings, v: f32) {
+        if let Opt::ModSetting(i, j) = self {
+            let setting = s
+                .mods
+                .installed
+                .get_mut(usize::from(i))
+                .and_then(|m| m.native.as_mut())
+                .and_then(|page| page.settings.get_mut(usize::from(j)));
+            if let Some(setting) = setting {
+                setting.value.slide(v);
+            }
+            return;
+        }
         if !self.available() {
             return;
         }
@@ -943,6 +1020,7 @@ impl Opt {
             Opt::PadLookDeadzone => s.controller.look_deadzone = step(0.0, 50.0) / 100.0,
             Opt::PadTriggerThreshold => s.controller.trigger_threshold = step(10.0, 90.0) / 100.0,
             Opt::SprintWindow => s.sprint_window = step(0.0, 10.0) as i32,
+            Opt::Page(page, row) => pages::slide(page, row, v),
             _ => {}
         }
         if self.affects_preset() {
@@ -1188,6 +1266,7 @@ impl Opt {
                     .unwrap_or(0) as u8;
                 s.controller.keyboard = all[usize::from(next(i, 3))];
             }
+            Opt::PadRadialMode | Opt::PadRadialStick => self.radial_step(s, back),
             _ => {}
         }
         if self.affects_preset() {
@@ -1220,6 +1299,9 @@ fn drag_slider(opt: Opt, s: &mut Settings, v: f32, events: &mut Vec<Event>) {
     let before = volume(s);
     set_slider(opt, s, v);
     events.push(Event::SliderDrag);
+    if let Opt::ModSetting(i, j) = opt {
+        events.push(Event::NativeSetting(usize::from(i), usize::from(j)));
+    }
     if let (Opt::Volume(source), Some(after)) = (opt, volume(s))
         && before != Some(after)
     {
@@ -1418,6 +1500,8 @@ pub enum Page {
     ModProject,
     /// A native mod's settings page: its index in `mods.installed`.
     NativeMod(usize),
+    /// A page a crate registered (`horizon_hooks::pages`): its index in `OptionsUi::pages`.
+    Added(usize),
     /// Horizon's shader packs, either kind (`shader_pack_list`).
     ShaderPacks,
     /// The picked pack's options: the shader screen (`shader_ui`) at the pack's main screen.
@@ -1433,6 +1517,11 @@ pub enum Page {
     /// Horizon's controller settings and button binds.
     Controller,
     PadBinds,
+    /// The radial menu's pages (`radial_editor`), on the settings shell, and a page's name.
+    ControllerRadial,
+    ControllerRadialName,
+    /// The list of every action for one of its slots.
+    ControllerRadialPick,
     Extras,
     /// PvP & HUD (`pvp`): the extras a PvP player sets, on their own page.
     Pvp,
@@ -1475,7 +1564,9 @@ enum Act {
     /// A key a native mod registered (mod, mapping) waits for a key, or is reset.
     ModKey(usize, usize),
     ResetModKey(usize, usize),
-    NativeButton(usize, usize),
+    /// Setting `.1` of native mod `.0`'s page clicked: a toggle, choice or colour steps on.
+    NativeSetting(usize, usize),
+    PageRow(usize, usize),
     /// Browse mods: the page of listing `.0` of `mod_browser`.
     ModProject(usize),
     /// The open project page's Install or Update.
@@ -1631,12 +1722,11 @@ pub enum Event {
     /// The options of `shader_packs[.0]`, a Horizon pack, changed: save them (the pack reloads
     /// with them).
     NativePackOptions(usize),
-    /// Native mod `.0`'s page opened: the game asks the mod for its labels
-    /// again (they were made with the list, maybe in another language).
+    /// Native mod `.0`'s page opened: the game reads its settings' kept values again.
     NativeSettings(usize),
-    /// Button `.1` of native mod `.0`'s page was pressed: the game tells the
-    /// mod and refreshes the page.
-    NativeButton(usize, usize),
+    /// Setting `.1` of native mod `.0`'s page changed (`settings.mods`): the game keeps it and
+    /// tells the mod (`setting_changed`).
+    NativeSetting(usize, usize),
     /// Roll the credits (`CreditsAndAttributionScreen.openCreditsScreen`).
     Credits,
     /// PvP & HUD's Edit HUD: open the HUD editor over the game.
@@ -1711,6 +1801,7 @@ pub struct OptionsUi {
     pub selected_key: Option<&'static str>,
     /// The registered key waiting: (mod, mapping) in `mods.installed`.
     selected_mod_key: Option<(usize, usize)>,
+    selected_page_key: Option<(usize, usize)>,
     pending_mod_key: Option<winit::keyboard::KeyCode>,
     /// Bindings: the action waiting for a pad button.
     pub selected_pad_action: Option<&'static str>,
@@ -1760,11 +1851,18 @@ pub struct OptionsUi {
     pub minecart_improvements: bool,
     /// Scroll the selected language into the middle on the next layout.
     center_language: bool,
+    /// The output of the renderer the options are drawn for, as of the last draw. It lives
+    /// here, not on the graphics screen, which opening resets: `shell_mut` hands it over.
+    output: crate::gfx::EffectiveOutput,
     graphics: shell::Shell<crate::graphics_ui::GraphicsScreen>,
     /// Controller Settings, on the settings shell.
     controller: shell::Shell<crate::controller_ui::ControllerScreen>,
     /// Horizon Extras, on the settings shell.
     extras: shell::Shell<crate::extras_ui::ExtrasScreen>,
+    /// The radial menu's pages, on the settings shell.
+    radial: shell::Shell<crate::radial_editor::RadialScreen>,
+    /// The list of actions for one of the radial menu's slots.
+    radial_pick: shell::Shell<crate::radial_editor::PickScreen>,
     /// Shaders: the shader packs and the picked one's options, on the settings shell.
     shader: shell::Shell<crate::shader_ui::ShaderScreen>,
     /// The Pack Options page, and the packs' Polytone config entries by pack id (the game
@@ -1774,8 +1872,8 @@ pub struct OptionsUi {
     pub split_profiles: crate::split_profiles::SplitProfiles,
     /// HDR calibration while its page is open.
     pub calibration: Option<crate::hdr_calibration::Calibration>,
-    /// Whether the window was fullscreen before calibration made it so (the game keeps it).
-    pub calibration_fullscreen: Option<bool>,
+    /// The window as calibration found it before making it fullscreen (the game keeps it).
+    pub calibration_window: Option<crate::hdr_calibration::WindowState>,
     pub split_setup: crate::split_ui::SplitUi,
     pub studio: crate::studio_ui::StudioUi,
     /// The AI Agent page's status lines (set by the game while it shows).
@@ -1822,6 +1920,7 @@ impl Default for OptionsUi {
             scrollbar_drag_y: None,
             selected_key: None,
             selected_mod_key: None,
+            selected_page_key: None,
             pending_mod_key: None,
             selected_pad_action: None,
             pad_glyphs: crate::pad_glyph::Glyphs::default(),
@@ -1848,15 +1947,18 @@ impl Default for OptionsUi {
             in_world: false,
             minecart_improvements: false,
             center_language: false,
+            output: crate::gfx::EffectiveOutput::NONE,
             graphics: Default::default(),
             controller: Default::default(),
             extras: Default::default(),
+            radial: Default::default(),
+            radial_pick: Default::default(),
             shader: Default::default(),
             pack_options: Default::default(),
             pack_configs: Default::default(),
             split_profiles: Default::default(),
             calibration: None,
-            calibration_fullscreen: None,
+            calibration_window: None,
             split_setup: Default::default(),
             studio: Default::default(),
             agent_status: Vec::new(),
@@ -1954,25 +2056,6 @@ fn wide_extras(s: &Settings, width: impl Fn(&str) -> f32) -> Vec<crate::extras::
         })
         .collect()
 }
-/// What a button opening one of Horizon's pages says on hover.
-fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
-    Some(match page {
-        Page::Horizon => "horizon.pages.settings.tooltip",
-        Page::Studio => "horizon.pages.studio.tooltip",
-        Page::Graphics => "horizon.pages.graphics.tooltip",
-        Page::GraphicsAdvanced => "horizon.pages.graphics_advanced.tooltip",
-        Page::Controller => "horizon.pages.controller.tooltip",
-        Page::Extras => "horizon.pages.extras.tooltip",
-        Page::Pvp => "horizon.pages.pvp.tooltip",
-        Page::Agent => "horizon.pages.agent.tooltip",
-        Page::SplitProfiles => "horizon.pages.split_profiles.tooltip",
-        Page::ShaderPacks => "horizon.pages.shader_packs.tooltip",
-        Page::Mods => "horizon.pages.mods.tooltip",
-        Page::SplitSetup => "horizon.pages.split_setup.tooltip",
-        Page::Music => "horizon.pages.music.tooltip",
-        _ => return None,
-    })
-}
 /// Rows of an OptionsList: (big?, options) or a header.
 enum Row {
     Big(Opt),
@@ -1992,14 +2075,17 @@ fn tooltip_text(s: &Settings, wd: &Widget) -> Option<Text> {
             return None;
         };
         let key = opt.tooltip_key(s);
-        return lang::has(&key).then(|| tr(&key));
+        let Opt::Page(page, row) = opt else {
+            return lang::has(&key).then(|| tr(&key));
+        };
+        return pages::tooltip(*page, *row);
     };
     let mut tip = None;
     if let Act::Extra(item) = act {
         tip = Some(Text::literal(item.description_text()));
     }
     if let Act::Push(page) = act
-        && let Some(text) = horizon_page_tooltip(*page)
+        && let Some(text) = pages::horizon_page_tooltip(*page)
     {
         tip = Some(tr(text));
     }
@@ -2019,6 +2105,7 @@ fn tooltip_text(s: &Settings, wd: &Widget) -> Option<Text> {
     }
     match act {
         Act::Cycle(opt) if !opt.available() => Some(tr("horizon.options.unavailable")),
+        Act::PageRow(page, row) => pages::tooltip(*page, *row),
         Act::ModKey(i, k) => {
             let installed = s.mods.installed.get(*i)?;
             let mapping = installed.native.as_ref()?.mappings.get(*k)?;
@@ -2254,6 +2341,7 @@ impl OptionsUi {
                     .mods_screen
                     .as_ref()
                     .is_some_and(|p| p.search_focused()),
+                Page::ControllerRadialName => self.radial_name_typing(),
                 _ => match self.shell() {
                     Some(shell) => shell.typing(),
                     None => self.settings_search_active(),
@@ -2329,6 +2417,9 @@ impl OptionsUi {
         opt.step_slider(s, forward, width);
         self.slider_value = None;
         let mut events = vec![Event::Changed, Event::SliderDrag];
+        if let Opt::ModSetting(i, j) = opt {
+            events.push(Event::NativeSetting(usize::from(i), usize::from(j)));
+        }
         if let (Opt::Volume(source), Some(after)) = (opt, volume(s))
             && before_vol != Some(after)
         {
@@ -2395,92 +2486,15 @@ impl OptionsUi {
             self.studio.refresh();
         }
     }
-    /// The open page's screen on the settings shell. This, with `shell_mut`, is all a screen
-    /// needs here: drawing, clicks, the wheel, a stick's scrolling, keys and typing all go
-    /// through them, so no input path can miss one.
-    fn shell(&self) -> Option<&dyn shell::Hosted> {
-        match self.page() {
-            Page::Extras => Some(&self.extras),
-            page if Self::graphics_page(page).is_some() => Some(&self.graphics),
-            page if Self::controller_page(page).is_some() => Some(&self.controller),
-            page if Self::shader_page(page).is_some() => Some(&self.shader),
-            _ => None,
-        }
-    }
-    fn shell_mut(&mut self) -> Option<&mut dyn shell::Hosted> {
-        match self.page() {
-            Page::Extras => Some(&mut self.extras),
-            page if Self::graphics_page(page).is_some() => Some(&mut self.graphics),
-            page if Self::controller_page(page).is_some() => Some(&mut self.controller),
-            page if Self::shader_page(page).is_some() => Some(&mut self.shader),
-            _ => None,
-        }
-    }
     /// A controller's or the keyboard's focus landed on `rect`: a row of a shell screen's list
     /// that is partly hidden scrolls all into view. How far it moved down, when it moved.
     pub fn reveal(&mut self, s: &Settings, size: (f32, f32), rect: [f32; 4]) -> Option<f32> {
         self.shell_mut()?.reveal(s, size, rect)
     }
-    /// The window's size, for the graphics and controller screens' rows that step an option
-    /// (`Opt::cycle`, which a fullscreen resolution needs): before each input that can press one.
-    fn shell_framebuffers(&mut self) {
-        self.graphics.screen.framebuffer = self.framebuffer;
-        self.controller.screen.framebuffer = self.framebuffer;
-    }
-    /// Who and what Controller Settings is about: the game sets it before each draw.
-    pub fn set_controller_context(&mut self, context: crate::controller_ui::Context) {
-        self.controller.screen.context = context;
-    }
-    /// The binding the screen waits on: a controller button's, else a key's.
-    fn waiting(&self) -> Option<shell::Capture> {
-        let pad = self.selected_pad_action.map(shell::Capture::Pad);
-        pad.or(self.selected_key.map(shell::Capture::Key))
-    }
-    /// What a shell screen's outputs do to these options.
-    fn shell_events(&mut self, s: &mut Settings, outputs: Vec<shell::Output>) -> Vec<Event> {
-        let mut events = Vec::new();
-        for output in outputs {
-            match output {
-                shell::Output::Event(event) => events.push(event),
-                shell::Output::Bind(shell::Capture::Key(name)) => self.selected_key = Some(name),
-                shell::Output::Bind(shell::Capture::Pad(action)) => {
-                    self.selected_pad_action = Some(action)
-                }
-                shell::Output::Push(page) => {
-                    if page == Page::HdrCalibration {
-                        self.calibration = Some(crate::hdr_calibration::Calibration::new(s));
-                    }
-                    self.push(page);
-                }
-                shell::Output::Done => events.extend(self.back(s)),
-            }
-        }
-        events
-    }
-    /// Where the shader screen opens for `page`, if it is one of its pages.
-    fn shader_page(page: Page) -> Option<crate::shader_ui::Tab> {
-        match page {
-            Page::ShaderPacks => Some(crate::shader_ui::Tab::Packs),
-            Page::ShaderOptions => Some(crate::shader_ui::Tab::Screen(0)),
-            _ => None,
-        }
-    }
-    /// Where the controller screen opens for `page`, if it is one of its pages.
-    fn controller_page(page: Page) -> Option<crate::controller_ui::Page> {
-        match page {
-            Page::Controller => Some(crate::controller_ui::Page::General),
-            Page::PadBinds => Some(crate::controller_ui::Page::Bindings),
-            _ => None,
-        }
-    }
     /// Whether a video settings screen is open, Horizon's or vanilla's: the fullscreen mode
     /// waits for it to close, and Ctrl with the wheel steps the GUI scale.
     pub fn video_open(&self) -> bool {
         self.page() == Page::Video || Self::graphics_page(self.page()).is_some()
-    }
-    /// Whether the controller screen is open: a controller button pressed now may bind.
-    pub fn controller_open(&self) -> bool {
-        Self::controller_page(self.page()).is_some()
     }
     /// Where the graphics screen opens for `page`, if it is one of its pages.
     fn graphics_page(page: Page) -> Option<crate::graphics_ui::Page> {
@@ -2510,6 +2524,7 @@ impl OptionsUi {
             Page::ModBrowser => "horizon.mods.browse.title",
             Page::ModProject => "horizon.mods.browse.project",
             Page::NativeMod(_) => "Mod Settings",
+            Page::Added(i) => pages::title(i),
             Page::ShaderPacks => "horizon.pages.shader_packs",
             Page::ShaderOptions => "horizon.pages.shader_options",
             Page::PackOptions => "horizon.pack.options.title",
@@ -2517,6 +2532,9 @@ impl OptionsUi {
                 "options.videoTitle"
             }
             Page::Controller | Page::PadBinds => "horizon.pages.controller",
+            Page::ControllerRadial => "horizon.pages.controller_radial",
+            Page::ControllerRadialName => "horizon.radial.name_title",
+            Page::ControllerRadialPick => "horizon.radial.pick_title",
             Page::Extras => "horizon.pages.extras",
             Page::Pvp => "horizon.pages.pvp",
             Page::Credits => "credits_and_attribution.screen.title",
@@ -2713,14 +2731,29 @@ impl OptionsUi {
         let Some(page) = &m.native else {
             return rows;
         };
-        for (b, label) in page.buttons.iter().enumerate() {
-            let widget = button(
-                0.0,
-                0.0,
-                310.0,
-                Text::literal(label.clone()),
-                Act::NativeButton(i, b),
-            );
+        for (j, setting) in page.settings.iter().enumerate() {
+            let widget = match (&setting.value, u16::try_from(i), u16::try_from(j)) {
+                (crate::mod_list::NativeSettingValue::Range { .. }, Ok(i), Ok(j)) => Widget {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 310.0,
+                    h: 20.0,
+                    kind: WKind::Slider {
+                        label: mod_setting_label(setting),
+                        value: setting.value.fraction(),
+                        opt: Opt::ModSetting(i, j),
+                    },
+                    list: false,
+                    row: 0,
+                },
+                _ => button(
+                    0.0,
+                    0.0,
+                    310.0,
+                    mod_setting_label(setting),
+                    Act::NativeSetting(i, j),
+                ),
+            };
             rows.push(Row::Buttons(widget, None));
         }
         rows
@@ -2790,47 +2823,7 @@ impl OptionsUi {
                 flush(&mut rows, &mut section);
                 rows
             }
-            Page::Horizon => {
-                // Two to a row, as vanilla's OptionsList.addSmall lays out
-                // buttons; each opens one of Horizon's settings pages. Each page has
-                // one way in: graphics and shader packs are Video Settings' (the graphics
-                // screen), the controller is Controls', mods are the Options screen's.
-                let open =
-                    |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
-                vec![
-                    Row::Buttons(
-                        open("horizon.pages.open.extras", Page::Extras),
-                        Some(open("horizon.pages.open.pvp", Page::Pvp)),
-                    ),
-                    Row::Buttons(
-                        open(
-                            "horizon.pages.open.split_setup",
-                            if self.split_guest {
-                                Page::SplitProfiles
-                            } else {
-                                Page::SplitSetup
-                            },
-                        ),
-                        Some(open("horizon.pages.open.studio", Page::Studio)),
-                    ),
-                    // No AI hides the AI Agent page and everything AI.
-                    Row::Buttons(
-                        if s.extras.no_ai {
-                            self.extra_button(s, crate::extras::Item::NoAi)
-                        } else {
-                            open("horizon.pages.open.agent", Page::Agent)
-                        },
-                        None,
-                    ),
-                ]
-                .into_iter()
-                .chain(
-                    (!s.extras.no_ai).then(|| {
-                        Row::Buttons(self.extra_button(s, crate::extras::Item::NoAi), None)
-                    }),
-                )
-                .collect()
-            }
+            Page::Horizon => self.horizon_rows(s),
             Page::Agent => {
                 let mut rows = vec![Row::Buttons(
                     self.extra_button(s, crate::extras::Item::AgentControl),
@@ -3058,6 +3051,7 @@ impl OptionsUi {
             Page::ModBrowser => self.mod_browser_rows(),
             Page::ModProject => self.mod_project_rows(),
             Page::NativeMod(i) => self.native_rows(s, i),
+            Page::Added(i) => self.added_rows(i),
             _ => {
                 let _ = s;
                 Vec::new()
@@ -3154,6 +3148,22 @@ impl OptionsUi {
                     ("horizon.pages.open.mods", Some(Page::Mods)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
+                // horizon-extras: without it, vanilla's last row instead of Horizon Settings and
+                // Mods: Telemetry Data (greyed: nothing is sent) and Credits & Attribution.
+                let plain;
+                let entries: &[_] = if horizon_extras() {
+                    &entries
+                } else {
+                    plain = [
+                        &entries[..entries.len() - 3],
+                        &[
+                            ("options.telemetry", None),
+                            ("options.credits_and_attribution", Some(Page::Credits)),
+                        ],
+                    ]
+                    .concat();
+                    &plain
+                };
                 let rows = entries.len().div_ceil(2) as f32;
                 let gy = (61.0 + 30.0f32).min(h - 33.0 - rows * 24.0);
                 for (i, (key, page)) in entries.iter().enumerate() {
@@ -3202,6 +3212,22 @@ impl OptionsUi {
                 {
                     let y = y + 28.0 * (i + 1) as f32;
                     out.push(inactive(button(x, y, 210.0, tr(key), Act::None)));
+                }
+                // horizon-extras: a build without them says where the official one is.
+                if !horizon_extras() {
+                    out.push(Widget {
+                        x: 0.0,
+                        y: (y + 92.0).min(h - 42.0),
+                        w,
+                        h: 9.0,
+                        kind: WKind::Text {
+                            text: tr("horizon.plain.official"),
+                            color: 0xFFA0A0A0,
+                            centered: true,
+                        },
+                        list: false,
+                        row: 0,
+                    });
                 }
                 out.push(done(h - 27.0));
                 top = 0.0;
@@ -3719,13 +3745,18 @@ impl OptionsUi {
             Narratable::container_list(self.row_bands.len(), hovered_row, rect).key(key)
         });
     }
+    /// `output`: that of the renderer the options are drawn for, each draw, so the graphics
+    /// screen's rows and calibration read its offer and report as they are now, not another
+    /// window's, and not one from before the page opened.
     pub fn draw(
         &mut self,
         s: &Settings,
+        output: crate::gfx::EffectiveOutput,
         batch: &mut HudBatch,
         atlas: &HudAtlas,
         cursor: (f32, f32),
     ) {
+        self.output = output;
         let (w, h) = (batch.width, batch.height);
         if let Some(error) = &self.resource_error {
             ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
@@ -3791,6 +3822,9 @@ impl OptionsUi {
         }
         let waiting = self.waiting();
         let in_world = self.in_world;
+        if self.draw_radial_name(batch, atlas, cursor, in_world) {
+            return;
+        }
         if let Some(shell) = self.shell_mut() {
             shell.draw(s, batch, atlas, cursor, in_world, waiting);
             // The keys lay the screen out at the size it was drawn at.
@@ -4150,8 +4184,11 @@ impl OptionsUi {
             if right {
                 return Vec::new();
             }
-            let outcome = c.click((x, y), size, drag);
+            let outcome = c.click(&atlas.font, (x, y), size, drag);
             return self.calibration_outcome(s, outcome);
+        }
+        if self.page() == Page::ControllerRadialName {
+            return self.click_radial_name(s, atlas, (x, y), size, drag || right);
         }
         if self.shell().is_some() {
             // Waiting on a controller button: a click cancels the wait.
@@ -4432,7 +4469,19 @@ impl OptionsUi {
                                 events.push(Event::Changed);
                             }
                         }
-                        Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
+                        Act::PageRow(p, r) => events.extend(self.page_act(p, r, self.shift)),
+                        Act::NativeSetting(i, j) => {
+                            let setting = s
+                                .mods
+                                .installed
+                                .get_mut(i)
+                                .and_then(|m| m.native.as_mut())
+                                .and_then(|page| page.settings.get_mut(j));
+                            if let Some(setting) = setting {
+                                setting.value.click();
+                                events.push(Event::NativeSetting(i, j));
+                            }
+                        }
                         Act::ModProject(i) => {
                             if let Some(listing) = self.mod_browser.listings.get(i) {
                                 self.mod_project = listing.id.clone();
@@ -4812,13 +4861,12 @@ impl OptionsUi {
             }
         }
     }
-    /// HDR calibration's test picture, while its page is open: the step, its nits and
-    /// where the controls start (a share of the height `h`).
-    pub fn calibration_picture(&self, h: f32) -> Option<(crate::hdr_calibration::Step, f32, f32)> {
+    /// HDR calibration's test picture, while its page is open, in a GUI of `size`.
+    pub fn calibration_picture(&self, atlas: &HudAtlas, size: (f32, f32)) -> Option<Picture> {
         self.calibration
             .as_ref()
             .filter(|_| self.page() == Page::HdrCalibration)
-            .map(|c| c.picture(h))
+            .map(|c| c.picture(&atlas.font, size))
     }
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
         let mut events = Vec::new();
@@ -4921,6 +4969,8 @@ impl OptionsUi {
             self.scroll = 0.0;
         } else if self.page() == Page::SplitProfiles {
             self.split_profiles.type_text(text);
+        } else if self.page() == Page::ControllerRadialName {
+            self.type_radial_name(text);
         } else if let Some(shell) = self.shell_mut() {
             if shell.typing() {
                 shell.type_text(text);
@@ -4962,6 +5012,9 @@ impl OptionsUi {
         if self.page() == Page::SplitProfiles {
             return self.split_profiles.shortcut(shortcut, clipboard);
         }
+        if self.page() == Page::ControllerRadialName {
+            return self.radial_name_shortcut(shortcut, clipboard);
+        }
         if let Some(shell) = self.shell_mut() {
             return shell.shortcut(shortcut, clipboard);
         }
@@ -4978,6 +5031,9 @@ impl OptionsUi {
         let Some(name) = self.selected_key.take() else {
             return Vec::new();
         };
+        if name == pages::PAGE_KEY {
+            return self.bind_page_key(value);
+        }
         if name == MOD_KEY {
             let (i, k) = self.selected_mod_key.take().unwrap_or_default();
             let Some((id, mapping)) = mod_mapping(s, i, k) else {
@@ -4998,7 +5054,7 @@ impl OptionsUi {
             s.mods.set_binding(&id, &mapping, &value, modifiers);
             return vec![Event::Changed];
         }
-        if !s.extras.set_key(name, value.clone()) && !s.horizon.set_key(name, value.clone()) {
+        if !s.extras.set_key(name, value.clone()) {
             s.keys.set(name, &value);
         }
         vec![Event::Changed]
@@ -5128,6 +5184,9 @@ impl OptionsUi {
         }
         if self.page() == Page::SplitProfiles && self.split_profiles.key(key, text) {
             return Vec::new();
+        }
+        if self.page() == Page::ControllerRadialName {
+            return self.radial_name_key(s, key, text);
         }
 
         // The size it was drawn at; before the first draw, one its keys can lay out at.
@@ -5425,7 +5484,19 @@ impl OptionsUi {
                                 events.push(Event::Changed);
                             }
                         }
-                        Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
+                        Act::PageRow(p, r) => events.extend(self.page_act(p, r, shift)),
+                        Act::NativeSetting(i, j) => {
+                            let setting = s
+                                .mods
+                                .installed
+                                .get_mut(i)
+                                .and_then(|m| m.native.as_mut())
+                                .and_then(|page| page.settings.get_mut(j));
+                            if let Some(setting) = setting {
+                                setting.value.click();
+                                events.push(Event::NativeSetting(i, j));
+                            }
+                        }
                         Act::ModProject(i) => {
                             if let Some(listing) = self.mod_browser.listings.get(i) {
                                 self.mod_project = listing.id.clone();
@@ -5476,6 +5547,10 @@ impl OptionsUi {
 mod tests {
     use super::*;
     use crate::extras_ui::ExtraRow;
+    use crate::gfx::EffectiveOutput;
+
+    /// A renderer whose destination offers nothing and whose display reports nothing.
+    const NONE: EffectiveOutput = EffectiveOutput::NONE;
 
     /// The window allows the input method only while `typing` says a search
     /// box has the focus (`Game::text_field_focused`), so a page without one
@@ -5789,7 +5864,7 @@ mod tests {
         assert!(file.set_text("renderDistance", "1").is_err());
         assert_eq!(file.int("renderDistance"), 128);
     }
-    fn atlas() -> HudAtlas {
+    pub(super) fn atlas() -> HudAtlas {
         HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
             (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
         ))
@@ -6009,7 +6084,12 @@ mod tests {
             problem: None,
             dev: false,
             native: Some(crate::mod_list::NativePage {
-                buttons: vec!["Setting".into()],
+                settings: vec![crate::mod_list::NativeSetting {
+                    key: "trails".into(),
+                    label: "Trails".into(),
+                    tooltip: None,
+                    value: crate::mod_list::NativeSettingValue::Toggle(true),
+                }],
                 ..Default::default()
             }),
         });
@@ -6044,6 +6124,103 @@ mod tests {
         let events = click(&mut ui, &mut s, 394.0, 223.0);
         assert_eq!(events.first(), Some(&Event::ButtonClick));
         assert_eq!(ui.page(), Page::Main);
+    }
+
+    #[test]
+    fn a_mod_page_draws_its_settings_and_a_change_reaches_the_game() {
+        use crate::mod_list::{NativeSetting, NativeSettingValue as V};
+        let atlas = atlas();
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        let size = (480.0, 240.0);
+        let setting = |key: &str, value: V| NativeSetting {
+            key: key.into(),
+            label: key.into(),
+            tooltip: None,
+            value,
+        };
+        s.mods.installed.push(crate::mod_list::Installed {
+            id: "native".into(),
+            title: "Native 1.0".into(),
+            description: String::new(),
+            problem: None,
+            dev: false,
+            native: Some(crate::mod_list::NativePage {
+                settings: vec![
+                    setting("trails", V::Toggle(true)),
+                    setting(
+                        "speed",
+                        V::Range {
+                            min: 0.0,
+                            max: 4.0,
+                            step: 1.0,
+                            value: 1.0,
+                        },
+                    ),
+                ],
+                ..Default::default()
+            }),
+        });
+        ui.show(Page::NativeMod(0));
+        let (widgets, ..) = ui.layout(&s, size.0, size.1);
+        let toggle = widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    w.kind,
+                    WKind::Button {
+                        act: Act::NativeSetting(0, 0),
+                        ..
+                    }
+                )
+            })
+            .expect("a toggle is a button");
+        let slider = widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    w.kind,
+                    WKind::Slider {
+                        opt: Opt::ModSetting(0, 1),
+                        ..
+                    }
+                )
+            })
+            .expect("a range is a slider");
+        let (slider_x, slider_y, slider_w) = (slider.x, slider.y, slider.w);
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            toggle.x + 1.0,
+            toggle.y + 1.0,
+            size,
+            [480, 240],
+            false,
+            false,
+        );
+        assert!(events.contains(&Event::NativeSetting(0, 0)), "{events:?}");
+        let page = |s: &Settings| s.mods.installed[0].native.clone().unwrap();
+        assert_eq!(page(&s).settings[0].value, V::Toggle(false));
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            slider_x + slider_w - 1.0,
+            slider_y + 1.0,
+            size,
+            [480, 240],
+            false,
+            false,
+        );
+        assert!(events.contains(&Event::NativeSetting(0, 1)), "{events:?}");
+        assert_eq!(
+            page(&s).settings[1].value,
+            V::Range {
+                min: 0.0,
+                max: 4.0,
+                step: 1.0,
+                value: 4.0
+            }
+        );
     }
 
     /// Typing goes to the Mods search box once a click focuses it; the one match is selected,
@@ -6324,7 +6501,7 @@ mod tests {
                     key: "key.keyboard.z".into(),
                     ..Default::default()
                 }],
-                buttons: Vec::new(),
+                settings: Vec::new(),
             }),
         });
         ui.show(Page::KeyBinds);
@@ -6470,6 +6647,7 @@ mod tests {
         let _ = take_cursor();
         ui.draw(
             &s,
+            NONE,
             &mut HudBatch::new(
                 [480, 480],
                 crate::hud::GuiScale {
@@ -6483,6 +6661,7 @@ mod tests {
         assert_eq!(take_cursor(), Cursor::PointingHand);
         ui.draw(
             &s,
+            NONE,
             &mut HudBatch::new(
                 [480, 480],
                 crate::hud::GuiScale {
@@ -6501,6 +6680,7 @@ mod tests {
         ui.focus_from_keyboard = true;
         ui.draw(
             &s,
+            NONE,
             &mut HudBatch::new(
                 [480, 480],
                 crate::hud::GuiScale {
@@ -6538,6 +6718,7 @@ mod tests {
         let _ = take_cursor();
         ui.draw(
             &s,
+            NONE,
             &mut HudBatch::new(
                 [480, 480],
                 crate::hud::GuiScale {
@@ -6568,6 +6749,7 @@ mod tests {
         );
         ui.draw(
             &s,
+            NONE,
             &mut HudBatch::new(
                 [480, 480],
                 crate::hud::GuiScale {
@@ -6615,6 +6797,7 @@ mod tests {
         let mut on = HudBatch::scratch([480, 480]);
         ui.draw(
             &s,
+            NONE,
             &mut on,
             &atlas,
             (extra.x + extra.w / 2.0, extra.y + extra.h / 2.0),
@@ -6627,6 +6810,7 @@ mod tests {
         let mut off = HudBatch::scratch([480, 480]);
         ui.draw(
             &s,
+            NONE,
             &mut off,
             &atlas,
             (extra.x + extra.w + 40.0, extra.y + extra.h + 40.0),
@@ -6663,7 +6847,12 @@ mod tests {
             dev: false,
             native: Some(crate::mod_list::NativePage {
                 mappings: Vec::new(),
-                buttons: vec!["Zoom".into()],
+                settings: vec![crate::mod_list::NativeSetting {
+                    key: "trails".into(),
+                    label: "Trails".into(),
+                    tooltip: None,
+                    value: crate::mod_list::NativeSettingValue::Toggle(true),
+                }],
             }),
         });
         let labels = lang::scoped(english(), || ui.extras.row_labels(&s)).0;
@@ -6869,7 +7058,7 @@ mod tests {
                     .unwrap();
                 let cursor = (option.x + 1.0, option.y + 1.0);
                 let mut actual = HudBatch::scratch([480, 480]);
-                ui.draw(&s, &mut actual, &atlas, cursor);
+                ui.draw(&s, NONE, &mut actual, &atlas, cursor);
                 let key = format!("options.inactivityFpsLimit.{mode}.tooltip");
                 assert!(lang::has(&key));
                 let mut expected = HudBatch::scratch([480, 480]);
@@ -7501,7 +7690,7 @@ mod tests {
         ui.show(Page::Language);
         let draw_hint = |ui: &mut OptionsUi| {
             let mut batch = HudBatch::scratch([960, 640]);
-            ui.draw(&settings, &mut batch, &atlas, (-1.0, -1.0));
+            ui.draw(&settings, NONE, &mut batch, &atlas, (-1.0, -1.0));
             let search = &ui.language_search;
             batch.vertices.iter().any(|v| {
                 v.color == rgba(170, 170, 170, 255)
@@ -7607,7 +7796,7 @@ mod tests {
             let row_y = if above { top - 5.0 } else { bottom - 16.0 };
             ui.scroll = row.y - row_y;
             let (x, width, height) = (row.x, row.w, row.h);
-            ui.draw(&s, &mut batch, &atlas, (-1.0, -1.0));
+            ui.draw(&s, NONE, &mut batch, &atlas, (-1.0, -1.0));
             let vertices: Vec<_> = batch
                 .vertices
                 .iter()
@@ -7751,7 +7940,7 @@ mod tests {
             MouseButton::Back,
             MouseButton::Forward,
         ] {
-            for name in [SORT_KEY, crate::graphics::HDR_KEY, "key.jump"] {
+            for name in [SORT_KEY, "key.jump"] {
                 let mut ui = OptionsUi::default();
                 let mut s = Settings::default();
                 ui.selected_key = Some(name);
@@ -7760,7 +7949,6 @@ mod tests {
                 let value = keybinds::mouse_name(button);
                 match name {
                     SORT_KEY => assert_eq!(s.extras.sort_key, value),
-                    crate::graphics::HDR_KEY => assert_eq!(s.horizon.hdr_key, value),
                     _ => assert_eq!(s.keys.get(name), value),
                 }
                 assert_eq!(Extras::parse(&s.extras.serialize()), s.extras);
@@ -8084,42 +8272,6 @@ mod tests {
         }
     }
 
-    /// Shader packs, both kinds, are on the graphics screen's Shaders page: its Shader
-    /// Packs... opens the pack list, listed afresh, and Done comes back to that page.
-    #[test]
-    fn the_graphics_shaders_page_opens_the_shader_pack_list() {
-        use crate::graphics_ui::{H, Item};
-        use winit::keyboard::KeyCode;
-        let atlas = atlas();
-        let mut s = Settings::default();
-        let mut ui = OptionsUi {
-            size: (427.0, 240.0),
-            ..Default::default()
-        };
-        ui.show(Page::Graphics);
-        ui.graphics.show(crate::graphics_ui::Page::Shaders);
-        let packs = Item::Horizon(H::ShaderPacks);
-        assert!(
-            (0..40).any(|_| {
-                ui.key(&mut s, &atlas, KeyCode::Tab, None);
-                ui.graphics.focused_row() == Some(packs)
-            }),
-            "{:?}",
-            ui.graphics.focused()
-        );
-        let events = ui.key(&mut s, &atlas, KeyCode::Enter, None);
-        assert_eq!(ui.page(), Page::ShaderPacks);
-        assert!(events.contains(&Event::ListShaderPacks), "{events:?}");
-        // The picked pack's own settings are read with the list.
-        assert!(events.contains(&Event::OpenShaderOptions), "{events:?}");
-        ui.back(&mut s);
-        assert_eq!(ui.page(), Page::Graphics);
-        assert_eq!(
-            ui.graphics.open_page(),
-            Some(crate::graphics_ui::Page::Shaders)
-        );
-    }
-
     #[test]
     fn horizon_settings_hang_off_options_and_reach_every_horizon_page() {
         let s = Settings::default();
@@ -8336,28 +8488,6 @@ mod tests {
         let events = ui.wheel(&mut s, size, cursor, [854, 480], 1.0);
         assert_eq!(s.master_volume, 0.5);
         assert!(!events.iter().any(|e| matches!(e, Event::Volume(0, _))));
-    }
-
-    #[test]
-    fn the_graphics_screens_wheel_scrolls_even_over_a_slider_being_changed() {
-        use crate::graphics_ui::{H, Item};
-        use winit::keyboard::KeyCode as K;
-        let mut s = Settings::default();
-        let mut ui = OptionsUi::default();
-        ui.show(Page::Graphics);
-        ui.graphics.show(crate::graphics_ui::Page::Performance);
-        let size = (640.0, 360.0);
-        s.horizon.chunk_updates = 16;
-        let chunk_updates = Item::Horizon(H::ChunkUpdates);
-        // Tab onto it: the arrows change it.
-        while ui.graphics.focused_row() != Some(chunk_updates) {
-            shell::Hosted::key(&mut ui.graphics, &mut s, K::Tab, None, false, size);
-        }
-        assert!(ui.graphics.changes_value());
-        let before = ui.graphics.scroll_amount();
-        ui.wheel(&mut s, size, (320.0, 150.0), [1920, 1080], -1.0);
-        assert_eq!(s.horizon.chunk_updates, 16);
-        assert!(ui.graphics.scroll_amount() > before);
     }
 
     #[test]
@@ -8850,3 +8980,9 @@ mod tests {
         ui.shift = false;
     }
 }
+
+#[cfg(test)]
+#[path = "options_ui_graphics_tests.rs"]
+mod graphics_tests;
+#[path = "options_ui_pages.rs"]
+mod pages;

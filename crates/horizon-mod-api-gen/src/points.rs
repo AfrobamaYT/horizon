@@ -13,6 +13,7 @@ use std::{
 };
 use syn::{ImplItem, Item, Type};
 
+pub mod mod_crate;
 pub mod source;
 
 /// One point, as `points.json` lists it.
@@ -35,6 +36,9 @@ pub struct GamePoint {
     /// What its listeners may do with the return: `cancel`, `result` (an API-typed value they
     /// may set at the head or change at the return) or `none`.
     pub returns: &'static str,
+    /// The function's return type as written (`()` when it has none). A `cancel` point that
+    /// returns `Result<(), E>` has no `replace` listener, which would have to produce it.
+    pub return_ty: String,
     /// Whether its API listeners run at the return: not when the value returned borrows.
     pub at_return: bool,
     /// Whether it has a raw form: native listeners with the receiver and every parameter by its
@@ -49,12 +53,93 @@ pub struct GamePoint {
     /// Its raw return listeners' function type, by path: they get the value returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_listener: Option<String>,
+    /// A mod point's signature hash (#2339): what an addon's declaration pins, checked at load.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    /// A mod point's signature as hashed: its path, receiver, parameters and return type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
     #[serde(skip)]
     record_item: String,
     /// Its typed function constructors, place ids and dispatch functions
     /// ([`point_shape::Shape::api_items`]).
     #[serde(skip)]
     api: [String; 3],
+}
+
+impl GamePoint {
+    /// The return type a `replace` at this point's head can't produce: none when it returns `()`
+    /// (the cancel is forced) or an API value (the listener's). The rule `horizon-mod-point-emit`
+    /// applies when a mod builds, kept for the loader of a module built elsewhere.
+    fn replace_refusal(&self) -> Option<&str> {
+        match self.returns {
+            "result" => None,
+            "cancel" if self.return_ty == "()" => None,
+            _ => Some(&self.return_ty),
+        }
+    }
+}
+
+impl GamePoint {
+    /// The point of `found`'s function, whose shape is `shape`, as `points.json` lists it.
+    pub(crate) fn new(shape: point_shape::Shape, found: &Found<'_>, target: String) -> Self {
+        let api = shape.api_items(&target);
+        GamePoint {
+            record_item: if shape.api() {
+                shape.record_item(&target).to_string()
+            } else {
+                String::new()
+            },
+            api: [
+                api.listeners.to_string(),
+                api.variants.to_string(),
+                api.dispatch.to_string(),
+            ],
+            at_return: shape.api() && shape.has_return(),
+            raw: shape.raw,
+            api_refusal: shape.api_refusal.clone(),
+            raw_shape: shape
+                .raw
+                .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
+            listener: shape
+                .raw
+                .then(|| format!("{}::{}", found.module, shape.raw_listener())),
+            return_listener: shape
+                .raw
+                .then(|| format!("{}::{}", found.module, shape.raw_return_listener())),
+            target,
+            side: shape.side.map_or("none", point_shape::Side::name),
+            host: match (shape.receiver, shape.side) {
+                (_, None) => "none",
+                (point_shape::Receiver::Mut, Some(side)) => side.name(),
+                (_, Some(_)) => "host",
+            },
+            args: shape
+                .args
+                .iter()
+                .map(|arg| {
+                    (
+                        arg.name.to_string(),
+                        arg.ty.to_token_stream().to_string().replace("& ", "&"),
+                    )
+                })
+                .collect(),
+            record: shape.record().to_string(),
+            returns: match (&shape.returns, shape.api()) {
+                (_, false) => "none",
+                (point_shape::Returns::Unit | point_shape::Returns::UnitResult, true) => "cancel",
+                (point_shape::Returns::Value(_), true) => "result",
+                (point_shape::Returns::Opaque, true) => "none",
+            },
+            return_ty: match &found.sig.output {
+                syn::ReturnType::Default => "()".to_owned(),
+                syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
+            },
+            name: shape.name,
+            hash: None,
+            signature: None,
+        }
+    }
 }
 
 /// A source file of the game's crates, with its module path and the `cfg`s it is compiled under.
@@ -255,12 +340,26 @@ fn children(
 
 /// The files of `horizon_client::game`; see [`module_files`] for `every_build`.
 pub(crate) fn game_files(src: &Path, every_build: bool) -> Result<Vec<GameFile>, String> {
-    module_files(
+    let files = module_files(
         "horizon_client::game".to_owned(),
         src.join("game.rs"),
         src.join("game"),
         every_build,
-    )
+    )?;
+    #[cfg(feature = "listener-fixture")]
+    let files = {
+        let mut files = files;
+        let path = src.join("../../horizon-mod-wasm/tests/fixture/src/points.rs");
+        if path.is_file() {
+            files.push(GameFile {
+                module: "listener_fixture".into(),
+                path,
+                cfg: Vec::new(),
+            });
+        }
+        files
+    };
+    Ok(files)
 }
 
 /// The crate `krate`'s package folder and library root, from its manifest.
@@ -600,7 +699,7 @@ struct Scanned {
 }
 
 /// The `mod_api` types a record may hold ([`crate::build::wire_types`]), by path.
-type WireTypes = std::collections::BTreeSet<String>;
+pub type WireTypes = std::collections::BTreeSet<String>;
 
 /// Every file with points: the game module's, then each listed lower crate's. Fails on a listed
 /// path that names no point function, or a crate the points' own crate is built on.
@@ -630,8 +729,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut scanned = Vec::new();
     for (file, package) in files {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
-        let parsed =
-            syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let parsed = crate::interface_cache::parse(&file.path, &source)?;
         scanned.push(Scanned {
             path: file.path,
             module: file.module,
@@ -667,7 +765,7 @@ impl Scanned {
             }
         };
         file_points(&self.module, &self.parsed.items, &keep, &mut out);
-        let uses = imports(&self.parsed.items);
+        let uses = imports(&self.parsed.items, "horizon_client");
         for found in &mut out {
             // Only the game's own crate has the conversions a mirror goes through.
             found.mirrors = mirrors(found.sig, &uses, wire, self.package.is_none());
@@ -687,9 +785,9 @@ pub const MIRRORS: &[(&str, &str)] = &[
     ),
 ];
 
-/// A file's top-level `use`s: each name it brings in, with the path it names (`crate::` as the
-/// game's crate). Globs and `self`/`super` paths are left out: a type they name has no mirror.
-fn imports(items: &[Item]) -> Vec<(String, String)> {
+/// A file's top-level `use`s: each name it brings in, with the path it names (`crate::` as
+/// `krate`). Globs and `self`/`super` paths are left out: a type they name has no mirror.
+pub(crate) fn imports(items: &[Item], krate: &str) -> Vec<(String, String)> {
     fn walk(prefix: &str, tree: &syn::UseTree, out: &mut Vec<(String, String)>) {
         let join = |name: &str| {
             if prefix.is_empty() {
@@ -722,7 +820,7 @@ fn imports(items: &[Item]) -> Vec<(String, String)> {
     }
     for (_, path) in &mut out {
         if let Some(rest) = path.strip_prefix("crate::") {
-            *path = format!("horizon_client::{rest}");
+            *path = format!("{krate}::{rest}");
         }
     }
     out
@@ -824,7 +922,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
 }
 
 /// [`game_points`] with the `mod_api` types a record may hold.
-fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
+pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
     let private = source::read(root)?
         .into_iter()
         .map(|point| plain_path(&point.target))
@@ -837,56 +935,7 @@ fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> 
             continue;
         }
         let shape = found.shape()?;
-        let api = shape.api_items(&target);
-        points.push(GamePoint {
-            record_item: if shape.api() {
-                shape.record_item(&target).to_string()
-            } else {
-                String::new()
-            },
-            api: [
-                api.listeners.to_string(),
-                api.variants.to_string(),
-                api.dispatch.to_string(),
-            ],
-            at_return: shape.api() && shape.has_return(),
-            raw: shape.raw,
-            api_refusal: shape.api_refusal.clone(),
-            raw_shape: shape
-                .raw
-                .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
-            listener: shape
-                .raw
-                .then(|| format!("{}::{}", found.module, shape.raw_listener())),
-            return_listener: shape
-                .raw
-                .then(|| format!("{}::{}", found.module, shape.raw_return_listener())),
-            target,
-            side: shape.side.map_or("none", point_shape::Side::name),
-            host: match (shape.receiver, shape.side) {
-                (_, None) => "none",
-                (point_shape::Receiver::Mut, Some(side)) => side.name(),
-                (_, Some(_)) => "host",
-            },
-            args: shape
-                .args
-                .iter()
-                .map(|arg| {
-                    (
-                        arg.name.to_string(),
-                        arg.ty.to_token_stream().to_string().replace("& ", "&"),
-                    )
-                })
-                .collect(),
-            record: shape.record().to_string(),
-            returns: match (&shape.returns, shape.api()) {
-                (_, false) => "none",
-                (point_shape::Returns::Unit | point_shape::Returns::UnitResult, true) => "cancel",
-                (point_shape::Returns::Value(_), true) => "result",
-                (point_shape::Returns::Opaque, true) => "none",
-            },
-            name: shape.name,
-        });
+        points.push(GamePoint::new(shape, &found, target));
     }
     points.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(points)
@@ -923,7 +972,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
 }
 
 /// [`stage`] with the `mod_api` types a record may hold.
-fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String> {
+pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String> {
     let (scanned, list) = scan(root)?;
     let points = all_points(&scanned, &list, wire)?;
     let mut staged = Staged::default();
@@ -1146,7 +1195,7 @@ pub(crate) fn records_selected(
         quote!(#file)
     });
     let listeners = points.iter().map(|point| parse(&point.api[0]));
-    let variants = points.iter().map(|point| parse(&point.api[1]));
+    let variants: Vec<_> = points.iter().map(|point| parse(&point.api[1])).collect();
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
@@ -1202,7 +1251,12 @@ pub(crate) fn records_selected(
             let variant = quote::format_ident!("{}", point_shape::camel(&name));
             let target = &point.target;
             let at_return = name != point.name;
-            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            let replace_refusal = match point.replace_refusal().filter(|_| !at_return) {
+                Some(ty) => quote!(::std::option::Option::Some(#ty)),
+                None => quote!(::std::option::Option::None),
+            };
+            api_places
+                .extend(quote! { (PointId::#variant, #target, #at_return, #replace_refusal), });
             if selected.is_some_and(|names| !names.contains(&name)) {
                 continue;
             }
@@ -1211,19 +1265,29 @@ pub(crate) fn records_selected(
             });
         }
     }
-    let private_variants = sources.iter().map(|point| {
-        let head = quote::format_ident!("{}", point_shape::camel(&point.name));
-        let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
-        quote!(#head, #back,)
-    });
+    let private_variants: Vec<_> = sources
+        .iter()
+        .map(|point| {
+            let head = quote::format_ident!("{}", point_shape::camel(&point.name));
+            let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
+            quote!(#head, #back,)
+        })
+        .collect();
+    let ids: syn::ItemEnum = syn::parse2(quote! {
+        enum PointId { #(#variants)* #(#private_variants)* __Count }
+    })
+    .expect("point variants");
+    let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
     quote! {
         #(#records)*
         /// The generated point export table and record layout, checked separately from the API layout.
         #[doc(hidden)]
         pub const POINT_LAYOUT: u64 = #layout;
-        /// API places as (place, target function, return phase), for manifest validation.
+        /// API places as (place, target function, return phase, the return type a `replace` there
+        /// can't produce), for manifest validation: a head whose return is neither `()` nor an
+        /// API value refuses a replacement when a module loads.
         #[doc(hidden)]
-        pub const API_PLACES: &[(PointId, &str, bool)] = &[#api_places];
+        pub const API_PLACES: &[(PointId, &str, bool, Option<&str>)] = &[#api_places];
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
         #[doc(hidden)]
         pub fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
@@ -1247,9 +1311,17 @@ pub(crate) fn records_selected(
         /// A point's place: its head and return in catalog order.
         #[doc(hidden)]
         #[repr(usize)]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, PartialEq, Eq)]
         #[non_exhaustive]
         pub enum PointId { #(#variants)* #(#private_variants)* __Count }
+        // Deriving Debug creates an enormous match for this enum. Keep the exact
+        // unit-variant names without its compiler-memory cost.
+        impl ::std::fmt::Debug for PointId {
+            fn fmt(&self, formatter: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                static NAMES: [&str; PointId::__Count as usize + 1] = [#(#debug_names),*];
+                formatter.write_str(NAMES[*self as usize])
+            }
+        }
         /// The number of places, the length of the game's slot table.
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
@@ -1281,11 +1353,14 @@ mod tests {
                 record: shape.record().to_string(),
                 args: vec![],
                 returns: "cancel",
+                return_ty: "()".into(),
                 at_return: true,
                 raw: false,
                 raw_shape: None,
                 listener: None,
                 return_listener: None,
+                hash: None,
+                signature: None,
                 record_item: shape.record_item(name).to_string(),
                 api: [
                     api.listeners.to_string(),
@@ -1319,6 +1394,93 @@ mod tests {
         assert!(!selected.contains("fn point_second"));
         assert!(selected.contains("table [PointId :: FirstReturn as usize]"));
         assert!(!selected.contains("table [PointId :: First as usize]"));
+    }
+
+    #[test]
+    fn point_id_debug_preserves_every_declared_variant() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = records(
+            &game_points(&root).unwrap(),
+            &source::build_input(&root).unwrap(),
+        );
+        let file = syn::parse_file(&source).unwrap();
+        let ids = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Enum(ids) if ids.ident == "PointId" => Some(ids),
+                _ => None,
+            })
+            .unwrap();
+        let debug = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(item)
+                    if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+                        path.segments.last().unwrap().ident == "Debug"
+                    }) =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .unwrap();
+        // Expected names and discriminant order come from the enum declarations,
+        // independently of the implementation's name table.
+        let variants: Vec<_> = ids.variants.iter().map(|variant| &variant.ident).collect();
+        let names: Vec<_> = variants.iter().map(|variant| variant.to_string()).collect();
+        let samples: Vec<_> = [
+            0,
+            variants.len() / 4,
+            variants.len() / 2,
+            variants.len() - 2,
+            variants.len() - 1,
+        ]
+        .into_iter()
+        .map(|index| variants[index])
+        .collect();
+        let program = quote! {
+            #ids
+            #debug
+            #[derive(Debug)]
+            enum Reference { #(#samples),* }
+            fn main() {
+                let cases = [#((PointId::#variants, #names)),*];
+                assert_eq!(cases.len(), PointId::__Count as usize + 1);
+                for (index, (place, expected)) in cases.into_iter().enumerate() {
+                    assert_eq!(place as usize, index);
+                    assert_eq!(format!("{place:?}"), expected);
+                    assert_eq!(format!("{place:#?}"), expected);
+                }
+                #(assert_eq!(format!("{:?}", PointId::#samples), format!("{:?}", Reference::#samples));)*
+            }
+        };
+        let directory = root
+            .join("target")
+            .join(format!("point-debug-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("main.rs");
+        let binary = directory.join("point-debug");
+        fs::write(&source, program.to_string()).unwrap();
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2024", "-o"])
+            .arg(&binary)
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            std::process::Command::new(&binary)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     /// The census: how many points have an API record, and why the others refuse.
@@ -1358,6 +1520,39 @@ mod tests {
             println!("refused {count}: {reason}");
         }
         assert!(api > 0);
+    }
+
+    #[test]
+    fn no_wire_public_values_refuse_before_point_record_emission() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let wire = crate::build::wire_types(&root).unwrap();
+        for name in [
+            "EnchantmentEffect",
+            "RegistrationData",
+            "Parts",
+            "Attachments",
+            "AttachmentAccess",
+        ] {
+            let method: syn::ImplItemFn =
+                syn::parse_str(&format!("fn patch(&mut self, value: &{name}) {{}}")).unwrap();
+            let imports = vec![(name.to_owned(), format!("mod_api::{name}"))];
+            assert!(
+                super::mirrors(&method.sig, &imports, &wire, false).is_empty(),
+                "{name} must not be admitted by Clone alone"
+            );
+            let shape = point_shape::shape(quote!(side = "server"), &method.sig).unwrap();
+            assert!(shape.api_refusal.as_ref().unwrap().contains(name));
+            assert!(shape.api_items("test").listeners.is_empty());
+        }
+        for name in [
+            "mod_api::ConnectionKind",
+            "mod_api::item::containers::ModRevision",
+            "mod_api::client::camera::UseItem",
+            "mod_api::wire::Id",
+        ] {
+            assert!(wire.contains(name), "supported public path {name} was lost");
+        }
+        assert!(!wire.contains("mod_api::wire::wire_slots::Id"));
     }
 
     fn point(attribute: &str, method: &str) -> Result<point_shape::Shape, String> {

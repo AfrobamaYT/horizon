@@ -23,7 +23,7 @@ use horizon_client::{
 };
 use horizon_core::nbt::{JavaString, Tag};
 use horizon_protocol::text::translatable;
-use mod_api::NativePermissionLevel;
+use mod_api::PermissionLevel;
 use std::{
     io::Write,
     path::PathBuf,
@@ -755,7 +755,7 @@ impl Game<'_> {
             bonus_chest: false,
         };
         horizon_client::save::write_world_gen_settings_with(
-            dir, props.seed, options, settings, None,
+            dir, props.seed, options, settings, None, None,
         )
     }
 }
@@ -1617,8 +1617,8 @@ impl Game<'_> {
             user.id,
             entity,
             &user.name,
-            NativePermissionLevel::from_level(old),
-            NativePermissionLevel::from_level(new),
+            PermissionLevel::from_level(old),
+            PermissionLevel::from_level(new),
             &mut cancel,
         );
         cancel
@@ -2708,7 +2708,7 @@ mod tests {
     #[test]
     fn a_temporarily_banned_player_is_refused_with_the_end_until_it_has_passed() {
         use super::{BanEntry, BanList, Lists, NameAndId};
-        use horizon_chat_filter::now_millis;
+        use horizon_server_files::duration::now_millis;
         let dir = std::env::temp_dir().join(format!("horizon-can-login-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let mut lists = Lists {

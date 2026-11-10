@@ -12,7 +12,10 @@ Call `host.query(&TYPE)` on `&dyn Host`, then borrow its rows with `batch.iter()
 Reads require `T: Send + Sync + 'static`, not `Clone`. Each successful row has a
 Copy `holder` and a borrowed `value: &T`. Match `AttachmentHolder` to work with the
 existing `EntityRef`, `PlayerRef`, `BlockEntityRef`, `ChunkRef` or `LevelRef`.
-Copying that identity does not keep its holder loaded.
+Copying that identity does not keep its holder loaded. Attachment ownership follows
+an entity object, not its saved UUID. A rejected passenger can own attachments
+without being in the level; it is absent from queries until admitted. Equal-UUID
+objects never share attachment contents.
 
 This example defines a serialized counter and sums its captured values:
 
@@ -126,3 +129,24 @@ native or wasm type produces `TypeMismatch`; a failed
 decoded downcast does not fall back to saved decoding. Share attachment type
 identity through the normal dependency model rather than redeclaring a different
 type with the same key.
+
+## First-store errors
+
+First stores on resident mobs and paintings bind their lifetime registration.
+Inspection and removal do not create one. First-store indexing for other
+families is not extended by this foundation. A store can return
+`AttachmentError::HolderBusy` while the
+engine has lifted or extracted its physical storage: retry after the current
+pass. The refused store writes no value and creates no registration.
+
+`AttachmentError::UnsupportedHolder(family)` means the physical family cannot
+own attachments; retrying cannot help. The name is bounded static text, not an
+engine type. Wire decoding accepts at most 256 UTF-8 bytes for that text and
+rejects longer names on both native and wasm guest paths. Family names are stable lowercase identifiers: `mob`, `item`,
+`orb`, `projectile`, `armorstand`, `itemframe`, `painting`, `boat`,
+`minecart`, `other`, `fangs`, `crystal`, `dragon`, `tnt`, `falling`,
+`rocket`, `trident`, `spawner`, `cloud`, `cushion`, `knot`, `player`, `hook`,
+and `dragonpart`.
+Retained row writes report the matching `AttachmentRowError::HolderBusy` or
+`AttachmentRowError::UnsupportedHolder`; a missing holder is instead
+`StaleHolder`.

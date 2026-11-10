@@ -119,7 +119,7 @@ impl Game<'_> {
         // read from the protector copy (the totem's clear-then-effects, or a
         // custom list; `death_protection={}` has none).
         for effect in self.death_effects(&protector) {
-            self.apply_consume_effect(&protector, &effect, None, true);
+            self.apply_consume_effect(&protector, &effect, None);
         }
         Some(Body {
             protector: Some(protector),
@@ -160,7 +160,7 @@ impl Game<'_> {
         self.audio
             .play_unshared("minecraft:item.totem.use", Some(body.bounds.feet), 1.0, 1.0);
         if target == TrackingTarget::LocalPlayer {
-            self.pad_rumble(horizon_client::gamepad::Rumble::Totem);
+            self.input_feedback(horizon_client::input_source::Feedback::Totem);
             // findTotem, then LocalPlayer.displayItemActivation. The offsets
             // come from the player's own random in vanilla, not the level's:
             // the client-only particle random stands in for it. The server
