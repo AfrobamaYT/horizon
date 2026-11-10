@@ -219,12 +219,13 @@ def runtime_reexport_names(source):
 
 
 def repository_violations(root=ROOT):
-    api = root / 'crates/horizon-mod-api/src'
     sources = {}
-    for path in sorted(api.rglob('*.rs')):
-        if path.name == '__private.rs' or path.name.endswith('_tests.rs'):
-            continue
-        sources[str(path.relative_to(root))] = path.read_text()
+    for crate in ('horizon-mod-api', 'horizon-mod-vocab'):
+        api = root / 'crates' / crate / 'src'
+        for path in sorted(api.rglob('*.rs')):
+            if path.name == '__private.rs' or path.name.endswith('_tests.rs'):
+                continue
+            sources[str(path.relative_to(root))] = path.read_text()
     result = []
     for path, source in sources.items():
         result.extend(f'{path}:{line}: {name}' for line, name in violations(source))

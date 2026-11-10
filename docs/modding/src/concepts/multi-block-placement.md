@@ -16,7 +16,7 @@ A queued piston block event belongs to the action's effects, but a piston moveme
 
 Fire server-side entity_place after synchronous execution, before publishing or committing it. Hook docs must state that listeners read tentative block states, but tentative entity changes are not visible in entity rows until commit. Single is one touched position; Multi is two or more, delivered through existing Placement::Multi. Primary pos/state and placed_against preserve their existing meaning; capture placed_against before writing. Failed placement emits no entity_place.
 
-This deliberately changes the existing “before it is written” promise in `crates/horizon-mod-api/src/hooks/entity_place.rs:4` and `hooks/notes.rs:2859`: update both, generated documentation and samples together. It is a veto after tentative writes, not a pre-write preview. A separate pre-action permission hook and a committed notification are different moments if required; never alias either to entity_place or fire it twice. Any existing committed notice remains after successful root commit. No per-class hooks, revived preview or compatibility path.
+This deliberately changes the existing “before it is written” promise in `crates/horizon-mod-vocab/src/hooks/entity_place.rs:4` and `hooks/notes.rs:2859`: update both, generated documentation and samples together. It is a veto after tentative writes, not a pre-write preview. A separate pre-action permission hook and a committed notification are different moments if required; never alias either to entity_place or fire it twice. Any existing committed notice remains after successful root commit. No per-class hooks, revived preview or compatibility path.
 
 ## Cancellation domains
 
