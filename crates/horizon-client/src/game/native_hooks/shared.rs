@@ -1918,7 +1918,7 @@ impl GameLevel<'_> {
         changed
     }
     /// `Level.removeBlock`: replace a block with its fluid's legacy block.
-    pub(super) fn native_remove_block(
+    pub(super) fn remove_block_write(
         &mut self,
         ticks: &mut Ticks,
         pos: [i32; 3],

@@ -12,6 +12,20 @@ Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
 
+## Choosing what remains after removal
+
+Implement `BlockPart::remove_block` for a block that leaves a support or another
+state behind when removed. This server-only replacement receives the dimension,
+position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
+replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+removed block's own Part is called, not the replacement block's Part.
+
+The chosen state goes through the normal `setBlock` effects with flags 3, plus
+64 for piston movement. An unknown or unregistered state is refused with a
+reason and the vanilla replacement is written. This covers `Level.removeBlock`,
+not every direct `setBlock` or the separate `destroyBlock` path. The level view
+is read-only while answering, on both native and wasm.
+
 ## Making a content mod
 
 ```sh

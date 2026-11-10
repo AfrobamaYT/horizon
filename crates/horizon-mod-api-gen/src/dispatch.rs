@@ -947,7 +947,7 @@ fn stack_crossing_routed(
                 )
             } else if block {
                 format!(
-                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(_) => return }}"
+                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(error) => {{ log::warn!(\"mod block state write refused: {{error:?}}\"); return; }} }}"
                 )
             } else if stack {
                 let result = format!("__checked_{name}");
@@ -1316,6 +1316,11 @@ fn main() {
         let unguarded = body.replace(guard, "");
         assert_ne!(early, body);
         assert_ne!(unguarded, body);
+        let silent = body.replace(
+            "log::warn!(\"mod block state write refused: {error:?}\");",
+            "",
+        );
+        assert_ne!(silent, body);
         let fixture = include_str!("../../../tools/refactors/api-pr3b/hook_crossing.rs");
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/hook-crossing-proof");
@@ -1324,6 +1329,7 @@ fn main() {
             ("baseline", body, true),
             ("early_commit", early, false),
             ("no_guard", unguarded, false),
+            ("silent_refusal", silent, false),
         ] {
             let source = directory.join(format!("{name}.rs"));
             let binary = directory.join(name);
