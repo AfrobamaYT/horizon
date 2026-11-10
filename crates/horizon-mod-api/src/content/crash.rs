@@ -32,7 +32,7 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
     let _ = ensure_installed();
     mod_vocab::content::crash::enter_native_mod(call)
 }
-fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory<'_>, call: ModCall) {
+fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
     let frame = NEXT_FRAME
         .try_with(|c| {
             let next = c.get().checked_add(1);
@@ -116,10 +116,10 @@ fn leave_converted(token: u64, mut outer: Option<ConvertedScope>) {
     });
 }
 
-fn leave_native(state: &mut mod_vocab::dispatch_scope::State) {
+fn leave_native(mut state: mod_vocab::dispatch_scope::State) {
     let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
     let _ = IN_NATIVE_MOD.try_with(|c| c.set(state.outer_call));
-    if let Some(timing) = state.timing.take() {
+    if let Some(timing) = state.timing {
         crate::__private::profiler::leave(timing);
     }
 }
