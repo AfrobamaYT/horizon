@@ -62,6 +62,9 @@ impl mod_api::LoopReader for LoopReader<'_> {
 }
 
 #[cfg(test)]
+mod recipe_properties_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use mod_api::{DataLoadContext, LoopContext};
