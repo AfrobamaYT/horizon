@@ -197,3 +197,6 @@ pub use horizon_items::enchant;
 pub use horizon_items::item_data;
 pub use horizon_items::items;
 pub use horizon_items::random_sequences;
+
+pub mod render_geometry;
+pub mod render_slots;
