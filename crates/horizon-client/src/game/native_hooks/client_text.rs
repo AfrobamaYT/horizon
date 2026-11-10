@@ -1,34 +1,25 @@
 use super::*;
-use crate::game::api_values::{TryIntoApi, TryIntoEngine};
-
 impl Game<'_> {
-    pub(in crate::game) fn text_width(
-        &self,
-        text: &mod_api::Text,
-    ) -> std::result::Result<i32, mod_api::text::TextFormError> {
-        let text = text.try_into_engine(&())?;
-        Ok(self.gui.atlas.font.width_text(&text) as i32)
+    pub(in crate::game) fn text_width(&self, text: &horizon_client::text::Text) -> i32 {
+        self.gui.atlas.font.width_text(text) as i32
     }
 
     pub(in crate::game) fn text_split(
         &self,
-        text: &mod_api::Text,
+        text: &horizon_client::text::Text,
         width: i32,
-    ) -> std::result::Result<Vec<mod_api::Text>, mod_api::text::TextFormError> {
-        let text = text.try_into_engine(&())?;
+    ) -> Vec<horizon_client::text::Text> {
         self.gui
             .atlas
             .font
             .split_formatted(&text.resolved(), width as f32)
-            .iter()
-            .map(TryIntoApi::try_into_api)
-            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::api_values::TryIntoEngine;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -58,12 +49,39 @@ mod tests {
                 2
             );
 
+            let lines = host
+                .text_split(&mod_api::Text::literal("A\nAA"), 100)
+                .unwrap();
+            let plain: Vec<_> = lines
+                .iter()
+                .map(|line| {
+                    let line: horizon_client::text::Text = line.try_into_engine(&()).unwrap();
+                    line.plain()
+                })
+                .collect();
+            assert_eq!(plain, ["A", "AA"]);
+
+            let mut invalid = mod_api::Text::literal("A");
+            for _ in 0..mod_api::text::MAX_TEXT_DEPTH {
+                let mut parent = mod_api::Text::literal("");
+                parent.children.push(invalid);
+                invalid = parent;
+            }
+            assert_eq!(
+                host.text_width(&invalid),
+                Err(mod_api::TextFormError::TooDeep)
+            );
+            assert!(matches!(
+                host.text_split(&invalid, 100),
+                Err(mod_api::TextFormError::TooDeep)
+            ));
+
             let translated = mod_api::Text::new(mod_api::text::TextContent::Translatable {
                 key: "test.measure".into(),
                 fallback: None,
                 arguments: vec![],
             });
-            for (value, width) in [("A", 6), ("AA", 12)] {
+            for (value, width, lines) in [("A", 6, 1), ("AA", 12, 2)] {
                 horizon_client::lang::scoped(
                     horizon_client::lang::Language::of(
                         "test",
@@ -71,6 +89,7 @@ mod tests {
                     ),
                     || {
                         assert_eq!(host.text_width(&translated).unwrap(), width);
+                        assert_eq!(host.text_split(&translated, 6).unwrap().len(), lines);
                     },
                 );
             }
@@ -87,6 +106,12 @@ mod tests {
             game.gui.atlas.font = horizon_client::font::Font::metrics(&source);
             let host: &dyn mod_api::ClientHost = game;
             assert_eq!(host.text_width(&mod_api::Text::literal("AA")).unwrap(), 8);
+            assert_eq!(
+                host.text_split(&mod_api::Text::literal("AA"), 8)
+                    .unwrap()
+                    .len(),
+                1
+            );
         });
     }
 }
