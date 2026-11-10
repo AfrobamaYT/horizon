@@ -1,6 +1,6 @@
 import contextlib
 import io
-import json
+import os
 import sys
 import struct
 import subprocess
@@ -29,22 +29,42 @@ class ExecutableLinkPolicyTests(unittest.TestCase):
         target.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=target) as directory:
             root = Path(directory)
-            policy = prebuilt_game.ROOT / "packaging/executable_link.rs"
-            source = root / "policy.rs"
-            source.write_text(
-                f'#[path = {json.dumps(str(policy))}] mod policy;\n'
-                + 'fn main() { let args: Vec<_> = std::env::args().collect(); '
-                + 'for arg in policy::arguments(&args[1], &args[2]) { '
-                + 'println!("cargo:horizon-executable-link-arg={arg}"); } }\n'
-            )
-            binary = root / ("policy.exe" if sys.platform == "win32" else "policy")
-            subprocess.run(["rustc", "--edition=2024", str(source), "-o", str(binary)], check=True)
-            for os, env, expected in [("windows", "msvc", ["/STACK:8388608"]),
+            # Isolate unrelated code generation/resource compilation, but execute the actual
+            # engine build script and its real shared link policy, as the SDK build does.
+            stubs = {
+                "horizon_game_discovery": 'pub fn declarations(_: &std::path::Path, _: &[&str]) '
+                    '-> std::io::Result<String> { Ok(String::new()) }',
+                "horizon_mod_api_gen": 'pub enum Target { Client } '
+                    'pub fn generate(_: &std::path::Path, _: &std::path::Path, _: Target) '
+                    '-> std::io::Result<()> { Ok(()) }',
+                "winresource": 'pub struct WindowsResource; impl WindowsResource { '
+                    'pub fn new() -> Self { Self } pub fn set_icon(&mut self, _: &str) {} '
+                    'pub fn set_manifest_file(&mut self, _: &str) {} '
+                    'pub fn compile(&self) -> Result<(), String> { Ok(()) } }',
+            }
+            externs = []
+            for name, code in stubs.items():
+                source = root / f"{name}.rs"
+                source.write_text(code)
+                library = root / f"lib{name}.rlib"
+                subprocess.run(["rustc", "--edition=2024", "--crate-type=rlib", str(source),
+                                "-o", str(library)], check=True)
+                externs.extend(["--extern", f"{name}={library}"])
+            binary = root / ("producer.exe" if sys.platform == "win32" else "producer")
+            subprocess.run(["rustc", "--edition=2024",
+                            str(prebuilt_game.ROOT / "crates/horizon-client/build.rs"),
+                            *externs, "-o", str(binary)], check=True)
+            for target_os, env, expected in [("windows", "msvc", ["/STACK:8388608"]),
                                       ("windows", "gnu", ["-Wl,--stack,8388608"]),
                                       ("linux", "gnu", []), ("macos", "", [])]:
-                with self.subTest(os=os, env=env):
+                with self.subTest(os=target_os, env=env):
                     output = root / "output"
-                    output.write_text(subprocess.check_output([str(binary), os, env], text=True))
+                    output.write_text(subprocess.check_output([str(binary)], text=True, env={
+                        **os.environ,
+                        "CARGO_MANIFEST_DIR": str(prebuilt_game.ROOT / "crates/horizon-client"),
+                        "OUT_DIR": str(root), "CARGO_PKG_NAME": "horizon-client",
+                        "CARGO_CFG_TARGET_OS": target_os, "CARGO_CFG_TARGET_ENV": env,
+                    }))
                     identity = {"link_args": prebuilt_game.executable_link_args(output)}
                     self.assertEqual(identity["link_args"], expected)
 
