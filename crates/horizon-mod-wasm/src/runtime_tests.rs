@@ -1327,6 +1327,7 @@ fn refusal_replies_survive_and_report_once() {
         "i64.const 2203318222847", // error reply: empty string at 512
         "i64.const 2199023255553", // too short for u32
         "i64.const 2199023255557", // trailing byte
+        "i32.const 100 i32.load i32.const 1 i32.eq if (result i64) i64.const 2199023255553 else i64.const 2199023255557 end", // changing reasons
     ]
     .into_iter()
     .enumerate()
