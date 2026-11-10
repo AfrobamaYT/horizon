@@ -18,6 +18,7 @@ use horizon_world::worldgen::structure::start::STEPS;
 use serde::Deserialize;
 use serde_json::{Number, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 /// The folders a biome modifier sits in, under `data/<ns>`.
 const FOLDERS: [&str; 2] = ["/neoforge/biome_modifier/", "/forge/biome_modifier/"];
@@ -75,13 +76,20 @@ enum Action {
     },
     /// Takes these entity types out of `spawn_costs`.
     RemoveSpawnCosts(Value),
+    /// Appends configured carvers to the biome's `carvers` (`add_carvers`).
+    AddCarvers { carvers: Value },
+    /// Takes configured carvers out of the biome's `carvers` (`remove_carvers`).
+    RemoveCarvers { carvers: Value },
 }
 
 impl Action {
     fn is_add(&self) -> bool {
         matches!(
             self,
-            Self::AddFeatures { .. } | Self::AddSpawns(_) | Self::AddSpawnCosts { .. }
+            Self::AddFeatures { .. }
+                | Self::AddSpawns(_)
+                | Self::AddSpawnCosts { .. }
+                | Self::AddCarvers { .. }
         )
     }
 }
@@ -144,7 +152,7 @@ pub(super) fn spawner(v: &Value) -> std::result::Result<Spawner, String> {
 
 impl Modifier {
     /// The modifier in `text`; `None` for `neoforge:none`, which does nothing,
-    /// and for a type Horizon doesn't read yet (`add_carvers`, a mod's own
+    /// and for a type Horizon doesn't read yet (a mod's own
     /// serializer), which is skipped with a line in `warnings`: real mods ship
     /// those beside their feature and spawn modifiers, and one must not drop
     /// every content mod.
@@ -213,10 +221,16 @@ impl Modifier {
                 }
             }
             "remove_spawn_costs" => Action::RemoveSpawnCosts(field("entity_types")?),
+            "add_carvers" => Action::AddCarvers {
+                carvers: field("carvers")?,
+            },
+            "remove_carvers" => Action::RemoveCarvers {
+                carvers: field("carvers")?,
+            },
             other => {
                 warnings.push(at(format!(
-                    "biome modifier type {other:?} skipped: only feature, spawn and none \
-                     modifiers are read"
+                    "biome modifier type {other:?} skipped: only feature, spawn, carver and \
+                     none modifiers are read"
                 )));
                 return Ok(None);
             }
@@ -236,6 +250,47 @@ fn full(id: &str) -> String {
         true => id.to_owned(),
         false => format!("minecraft:{id}"),
     }
+}
+
+/// The registries the modifiers name entries of.
+pub(super) struct Registries<'a> {
+    pub biome: Registry<'a>,
+    pub feature: Registry<'a>,
+    pub entity: Registry<'a>,
+    pub carver: Registry<'a>,
+}
+
+impl<'a> Registries<'a> {
+    /// The registries a content build or a world open names entries of.
+    pub(super) fn of(
+        biome_ids: &'a BTreeSet<String>,
+        biome_tags: &'a BTreeMap<String, String>,
+        placed: &'a BTreeSet<String>,
+        feature_tags: &'a BTreeMap<String, String>,
+        entities: (&'a BTreeSet<String>, &'a BTreeMap<String, String>),
+        carver_ids: &'a BTreeSet<String>,
+    ) -> Self {
+        let registry = |what, ids, tags| Registry { what, ids, tags };
+        // A world's packs' carver tags are not read: ids only.
+        static NO_TAGS: BTreeMap<String, String> = BTreeMap::new();
+        Self {
+            biome: registry("biome", biome_ids, biome_tags),
+            feature: registry("placed feature", placed, feature_tags),
+            entity: registry("entity type", entities.0, entities.1),
+            carver: registry("carver", carver_ids, &NO_TAGS),
+        }
+    }
+}
+
+/// The ids of the configured carvers in the bundle `path` (none when it is absent).
+pub(super) fn carver_ids(path: &Path) -> Result<BTreeSet<String>> {
+    if !path.exists() {
+        return Ok(BTreeSet::new());
+    }
+    Ok(match super::read_json(path)? {
+        J::Obj(entries) => entries.into_iter().map(|(id, _)| id).collect(),
+        _ => BTreeSet::new(),
+    })
 }
 
 /// A registry the modifiers name entries of: its ids and its tags (tag id →
@@ -498,12 +553,16 @@ impl Selector {
 pub(super) fn apply(
     biomes: &mut J,
     modifiers: &[Modifier],
-    biome_reg: &Registry<'_>,
-    feature_reg: &Registry<'_>,
-    entity_reg: &Registry<'_>,
+    registries: &Registries<'_>,
     entity_categories: &BTreeMap<String, String>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<(String, String)>> {
+    let Registries {
+        biome: biome_reg,
+        feature: feature_reg,
+        entity: entity_reg,
+        carver: carver_reg,
+    } = registries;
     let adds = modifiers.iter().filter(|m| m.action.is_add());
     let removes = modifiers.iter().filter(|m| !m.action.is_add());
     // Each biome changed, parsed once, in the bundle's order.
@@ -517,6 +576,9 @@ pub(super) fn apply(
                 let ids = match &m.action {
                     Action::AddFeatures { features, .. }
                     | Action::RemoveFeatures { features, .. } => feature_reg.resolve(features)?,
+                    Action::AddCarvers { carvers } | Action::RemoveCarvers { carvers } => {
+                        carver_reg.resolve(carvers)?
+                    }
                     Action::AddSpawns(spawners) => {
                         if let Some(s) = spawners
                             .iter()
@@ -585,7 +647,46 @@ fn edit(
             ..
         } => add_spawn_costs(biome, ids, energy_budget, charge),
         Action::RemoveSpawnCosts(_) => remove_spawn_costs(biome, ids),
+        Action::AddCarvers { .. } => edit_carvers(biome, true, ids),
+        Action::RemoveCarvers { .. } => edit_carvers(biome, false, ids),
     }
+}
+
+/// One carver modifier's change to one biome's `carvers` (a list of configured carver ids).
+fn edit_carvers(biome: &mut J, add: bool, carvers: &[String]) -> std::result::Result<(), String> {
+    if biome.get("carvers").is_none() {
+        if !add {
+            return Ok(());
+        }
+        biome.set("carvers", J::Arr(Vec::new()));
+    }
+    let Some(list) = biome.get_mut("carvers") else {
+        return Ok(());
+    };
+    // The list may be one id; a tag cannot take more carvers.
+    if let J::Str(one) = list {
+        if one.starts_with('#') {
+            return Err(format!("carvers is the carver tag {one}"));
+        }
+        *list = J::Arr(vec![J::Str(one.clone())]);
+    }
+    let J::Arr(list) = list else {
+        return Err("carvers: not a list".into());
+    };
+    let held = |v: &J| match v {
+        J::Str(s) => Some(full(s)),
+        _ => None,
+    };
+    if add {
+        for carver in carvers {
+            if !list.iter().any(|v| held(v).as_deref() == Some(carver)) {
+                list.push(J::Str(carver.clone()));
+            }
+        }
+    } else {
+        list.retain(|v| !held(v).is_some_and(|h| carvers.contains(&h)));
+    }
+    Ok(())
 }
 
 /// One feature modifier's change to one biome's `features` (a list per step).

@@ -76,6 +76,16 @@ pub enum BiomeModifierOperation {
         /// Entity type ids or tags.
         entity_types: Vec<String>,
     },
+    /// `add_carvers`: append configured carvers to the biome's `carvers`.
+    AddCarvers {
+        /// Configured carver ids (`mymod:pit`) or tags.
+        carvers: Vec<String>,
+    },
+    /// `remove_carvers`: take configured carvers out of the biome's `carvers`.
+    RemoveCarvers {
+        /// Configured carver ids or tags.
+        carvers: Vec<String>,
+    },
 }
 
 /// A biome modifier: the biomes it applies to and what it does to them.
@@ -167,6 +177,8 @@ impl BiomeModifier {
             | BiomeModifierOperation::RemoveSpawnCosts { entity_types } => {
                 names_ok(entity_types, true)
             }
+            BiomeModifierOperation::AddCarvers { carvers }
+            | BiomeModifierOperation::RemoveCarvers { carvers } => names_ok(carvers, true),
             BiomeModifierOperation::AddSpawnCosts {
                 entity_types,
                 energy_budget,
@@ -231,6 +243,14 @@ impl BiomeModifier {
                 "type": "neoforge:remove_spawn_costs",
                 "entity_types": set(entity_types),
             }),
+            BiomeModifierOperation::AddCarvers { carvers } => json!({
+                "type": "neoforge:add_carvers",
+                "carvers": set(carvers),
+            }),
+            BiomeModifierOperation::RemoveCarvers { carvers } => json!({
+                "type": "neoforge:remove_carvers",
+                "carvers": set(carvers),
+            }),
         };
         file["biomes"] = set(&self.biomes);
         file.to_string()
@@ -269,6 +289,25 @@ mod tests {
                 "step": "underground_ores",
             })
         );
+    }
+
+    #[test]
+    fn carver_operations_render_neoforges_field_names() {
+        let add = modifier(BiomeModifierOperation::AddCarvers {
+            carvers: strings(&["ruby:pit"]),
+        });
+        assert_eq!(add.check(), Ok(()));
+        let file: Value = serde_json::from_str(&add.json()).unwrap();
+        assert_eq!(file["type"], "neoforge:add_carvers");
+        assert_eq!(file["carvers"], "ruby:pit");
+        let remove = modifier(BiomeModifierOperation::RemoveCarvers {
+            carvers: strings(&["minecraft:cave", "ruby:pit"]),
+        });
+        let file: Value = serde_json::from_str(&remove.json()).unwrap();
+        assert_eq!(file["type"], "neoforge:remove_carvers");
+        assert_eq!(file["carvers"], json!(["minecraft:cave", "ruby:pit"]));
+        let empty = modifier(BiomeModifierOperation::AddCarvers { carvers: vec![] });
+        assert_eq!(empty.check(), Err(BiomeModifierError::EmptyList));
     }
 
     #[test]
