@@ -1531,7 +1531,7 @@ impl Game<'_> {
             PlayerRead::Acting { .. } => self.respawn_config.map(|c| c.saved()),
             PlayerRead::Guest(guest) => guest.respawn_elsewhere.clone(),
         };
-        let Some((dimension, [x, y, z], yaw, forced)) = saved else {
+        let Some((dimension, [x, y, z], yaw, _pitch, forced)) = saved else {
             return Some(None);
         };
         Some(Some(PlayerRespawnConfig {
@@ -3977,6 +3977,7 @@ mod fake_action_tests {
                 dim,
                 pos: [1, 2, 3],
                 yaw: 0.0,
+                pitch: 0.0,
                 forced: false,
             };
             let spawn = horizon_core::geometry::Vec3::new(1.0, 2.0, 3.0);
@@ -5138,7 +5139,7 @@ mod player_rule_tests {
             );
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guests[0].respawn_elsewhere,
-                Some((nether.into(), [1, 2, 3], -90.0, true)),
+                Some((nether.into(), [1, 2, 3], -90.0, 0.0, true)),
                 "the record a respawn reads"
             );
             assert_eq!(

@@ -35,7 +35,6 @@ use horizon_core::{
 };
 use horizon_world::registry::BlockStateId;
 use std::{collections::HashMap, sync::Arc};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum CartKind {
     Rideable,
@@ -245,6 +244,7 @@ pub(super) fn forget_unreadable_display(
         c.custom_display = None;
     }
 }
+
 /// The carts' and mobs' boxes for one tick's cart pushes (`push_from_cart`,
 /// `pickup_from_cart`), so a cart reads its neighbours instead of every cart and
 /// every mob of the level. Both answer in slot order, as the scans did.

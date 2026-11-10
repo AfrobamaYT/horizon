@@ -60,6 +60,10 @@ pub mod mod_behaviors;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
+pub mod neutral_anger;
+pub use neutral_anger::{
+    adopt_anger_end, anger_left, persistent_anger, resume_anger, settle_anger_end,
+};
 pub mod nav;
 pub mod nether;
 pub mod panda;
@@ -108,7 +112,7 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-pub use world::{TargetInfo, visual_clip};
+pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
@@ -502,6 +506,7 @@ pub struct MobType {
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
     pub tempt: Arc<[String]>,
+    pub passenger_attachments: Vec<[f32; 3]>,
 }
 impl MobType {
     pub fn inventory_stack_limit(&self, stack: &crate::items::ItemStack) -> u32 {
@@ -765,10 +770,7 @@ impl MobTypes {
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let fields = MobType::attribute_fields(|name| defaults.get(name).copied());
             let mut layers = crate::fast_hash::FxHashMap::default();
-            if let Some(all) = models
-                .as_ref()
-                .and_then(|models| models.value().as_object())
-            {
+            if let Some(all) = models.as_ref().and_then(|m| m.value().as_object()) {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
@@ -785,6 +787,8 @@ impl MobTypes {
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
+            let passenger_attachments =
+                riders::parse_passenger_attachments(&t["passenger_attachments"]);
             out.insert(
                 id.clone(),
                 MobType {
@@ -835,15 +839,12 @@ impl MobTypes {
                     anim: def.anim,
                     sounds: def.sounds,
                     step_sound: def.step_sound,
-                    food: def
-                        .food_tag()
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                    food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
                         .or(def.food_tag())
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                        .map_or_else(|| Arc::from(Vec::new()), tag),
+                    passenger_attachments,
                     category,
                     id,
                 },
@@ -1255,14 +1256,6 @@ pub struct Attrs {
 }
 /// `minecraft:wolf_armor`'s maximum damage.
 pub const WOLF_ARMOR_DURABILITY: i32 = 64;
-/// `NeutralMob.readPersistentAngerSaveData`: the anger runs until its end
-/// time, so a mob that is loaded again is angry for what is left of it.
-pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
-    if anger_end <= 0 {
-        return 0;
-    }
-    (anger_end - game_time).clamp(0, i64::from(i32::MAX)) as i32
-}
 
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
@@ -1377,6 +1370,8 @@ pub struct Extra {
     /// anger ends at, -1 when the mob is calm. The save keeps it, so the
     /// anger goes on while the chunk is unloaded.
     pub anger_end: i64,
+    /// Countdown and age when `anger_end` was last settled (`neutral_anger`).
+    pub anger_stamp: Option<(i32, u32)>,
     /// `NeutralMob.getPersistentAngerTarget`: the entity the mob is angry
     /// at, which the save keeps with it.
     pub angry_at: Option<Who>,
@@ -1919,6 +1914,9 @@ pub struct Mob {
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
+    /// A pose laid over this player's body after the vanilla animation (`anim::setup`), timed on
+    /// `age`: a Horizon emote (docs/cosmetics.md), given by the game. Visual only.
+    pub emote: Option<Arc<dyn anim::BodyPose>>,
     /// A mannequin's `DATA_PROFILE` (ResolvableProfile): the profile's
     /// `textures` property resolves to `skin` like a player's.
     pub profile: Option<horizon_protocol::entity_data::Profile>,
@@ -4016,6 +4014,7 @@ impl Mob {
         random: LegacyRandom,
     ) -> Self {
         let mut mob = Self {
+            emote: None,
             attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
@@ -4132,6 +4131,7 @@ impl Mob {
         if mob.species() == Species::Salmon {
             mob.extra.variant = 1;
         }
+        neutral_anger::init(&mut mob);
         // `Creeper.explosionRadius = 3` until a save or a command sets it.
         mob.extra.explosion_radius = 3;
         // The PathNavigation constructor: the base follow range.
@@ -4913,7 +4913,7 @@ impl Mob {
         events: &mut Vec<MobEvent>,
     ) -> bool {
         self.prepare_tick();
-        ai::tick(self, w, level, events)
+        neutral_anger::around_tick(self, w.game_time, |m| ai::tick(m, w, level, events))
     }
     /// A game-owned tick may pause before fox consumption to release its loans.
     pub fn tick_until_consumption(
@@ -5985,6 +5985,7 @@ pub(crate) mod sensor_scan_tests {
             step_sound: None,
             food: Arc::default(),
             tempt: Arc::default(),
+            passenger_attachments: Vec::new(),
         })
     }
     #[test]

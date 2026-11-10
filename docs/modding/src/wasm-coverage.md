@@ -155,6 +155,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientHost::panel_items` | crosses | Wire call |
 | `ClientHost::place_recipe` | crosses | Wire call |
 | `ClientHost::transfer_recipe` | crosses | Wire call |
+| `ClientHost::preset_editor` | crosses | Wire call |
+| `ClientHost::preset_editor_dimensions` | crosses | Wire call |
+| `ClientHost::set_preset_editor_dimensions` | crosses | Wire call |
 | `ClientHost::screen_pos` | crosses | Wire call |
 | `ClientHost::screen_exclusion` | crosses | Wire call |
 | `ClientHost::screen_hovered_item` | crosses | Wire call |
@@ -1538,7 +1541,6 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::config_loading` | crosses | Wire call |
 | `Hooks::config_reloading` | crosses | Wire call |
 | `Hooks::config_unloading` | crosses | Wire call |
-| `Hooks::layer_definitions` | crosses | Wire call |
 | `Hooks::movement_input` | crosses | Wire call |
 | `Hooks::note_block_change` | crosses | Wire call |
 | `Hooks::potential_spawns` | crosses | Wire call |
@@ -1572,14 +1574,18 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_debug_renderers` | crosses | Wire call |
 | `Hooks::register_dimension_transition_screen` | crosses | Wire call |
 | `Hooks::register_enchantment_damage_effects` | crosses | Wire call |
+| `Hooks::register_entity_spectator_shaders` | crosses | Wire call |
 | `Hooks::register_fluid_models` | crosses | Wire call |
 | `Hooks::register_game_tests` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
+| `Hooks::register_layer_definitions` | crosses | Wire call |
 | `Hooks::register_particle_providers` | crosses | Wire call |
+| `Hooks::register_preset_editors` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
+| `Hooks::register_sprite_sources` | crosses | Wire call |
 | `Hooks::register_texture_atlases` | crosses | Wire call |
 | `Hooks::render_arm` | crosses | Wire call |
 | `Hooks::render_frame_post` | crosses | Wire call |
@@ -1621,6 +1627,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::play_streaming_source` | crosses | Wire call |
 | `Hooks::sound_engine_load` | crosses | Wire call |
 | `Hooks::spread_players_teleport` | crosses | Wire call |
+| `Hooks::sprite_source` | crosses | Wire call |
 | `Hooks::submit_custom_geometry` | crosses | Wire call |
 | `Hooks::sweep_attack` | crosses | Wire call |
 | `Hooks::tags_updated` | crosses | Wire call |
