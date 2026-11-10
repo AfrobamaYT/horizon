@@ -1,4 +1,6 @@
 //! Behavioural proofs of the broadcast events around scoped interaction Parts.
+#[path = "item_fallthrough_tests.rs"]
+mod item_fallthrough_tests;
 #[path = "use_item_hand_tests.rs"]
 mod use_item_hand_tests;
 use super::super::{
@@ -679,7 +681,7 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                         [Step::Air(side, Hand::Main), Step::ItemPart]
                     );
                 }
-                observer.0.lock().unwrap().steps.clear();
+                *observer.0.lock().unwrap() = Controls::default();
                 let stone = game
                     .pack
                     .assets
@@ -688,12 +690,16 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                     .unwrap();
                 game.world.set(0, 64, 0, stone).unwrap();
                 game.forced_hit = Some(hit());
-                // Even a passing block remains a block target for Item.use.
+                // A passing target permits the same hand's Item.use hook.
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), true)
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
                         .is_none()
                 );
-                assert!(observer.0.lock().unwrap().steps.is_empty());
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Air(side, Hand::Main)]
+                );
+                observer.0.lock().unwrap().steps.clear();
                 game.forced_hit = None;
                 let kind = game
                     .res
@@ -709,10 +715,13 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 ));
                 assert!(game.entity_targeted());
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), false)
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
                         .is_none()
                 );
-                assert!(observer.0.lock().unwrap().steps.is_empty());
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Air(side, Hand::Main)]
+                );
             });
         }
     });

@@ -7147,9 +7147,6 @@ impl Game<'_> {
     /// then `useItem`. Whether the click ends here (it acted or failed).
     fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
         self.use_failed = false;
-        // The click's target as it was decided, before the adventure gate
-        // below may drop the block for the item's own use.
-        let aimed_at_block = block_hit.is_some();
         // isSecondaryUseActive with something in either hand keeps blocks
         // from reacting.
         let sneaking = self.keys.held(Mapping::Sneak);
@@ -7550,7 +7547,7 @@ impl Game<'_> {
             }
         }
         if !claimed && !on_block {
-            if let Some(answer) = self.right_click_item(self.hand, &stack, aimed_at_block) {
+            if let Some(answer) = self.right_click_item(self.hand, &stack) {
                 if matches!(answer, Answer::Success | Answer::SuccessServer) {
                     self.swing_arm();
                 }

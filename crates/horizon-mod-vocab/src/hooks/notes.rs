@@ -448,8 +448,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   Part and template. `UsePhase::ItemBeforeBlock`, `Block` and `ItemAfterBlock` all fire; `ItemBeforeBlock` precedes the item's
   `on_item_use_first` Part.
 - **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
-  `PlayerInteractEvent.RightClickItem`, on both sides, before air `Item.use` and its Part, never for a
-  block/entity target. Canceling answers with `cancellation_result` (default `Pass`). On the client,
+  `PlayerInteractEvent.RightClickItem`, on both sides, before `Item.use` and its Part after target
+  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). On the client,
   every canceled result except `Success` continues to the other hand without a predicted swing.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_pre(dimension, piston,
   direction, extending, push, destroy, canceled)`** and **`native_piston_post(dimension, piston, direction, extending, push, destroy)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
@@ -2850,13 +2850,13 @@ registration path.
   `use_item_on_block`'s `ItemBeforeBlock` phase.
 
 - `Hooks::right_click_item(host, event)` is NeoForge's `PlayerInteractEvent.RightClickItem`, before
-  `Item.use` and the item's `use_item` Part on both sides, only when no block or entity is targeted.
+  `Item.use` and the item's `use_item` Part on both sides, after the same hand's target interaction falls through.
   `event.click` (`ItemClick`) contains the dimension, player's feet block position, player,
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
   (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
   canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
-  target that `use_item_on_block` was asked about, even one the block passed on, is still a block
-  target: the hook never fires for that click.
+  success or FAIL prevents item fallback; the server fires this on the separate UseItem packet
+  rather than on UseItemOn.
 
 - A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces
   `Block.useWithoutItem` on the server, on the main hand only, after `useItemOn` returns
