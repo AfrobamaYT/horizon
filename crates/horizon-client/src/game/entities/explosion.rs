@@ -1175,7 +1175,10 @@ impl Game<'_> {
                 p.position.z - center[2],
             ];
             let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            self.pad_rumble(horizon_client::gamepad::Rumble::Explosion { distance, radius });
+            self.input_feedback(horizon_client::input_source::Feedback::Explosion {
+                distance,
+                radius,
+            });
         }
         // Explosion.explode: the blast is heard.
         let ctx = horizon_client::sculk::Context::default();
@@ -1459,6 +1462,46 @@ impl Game<'_> {
         for item in merged.into_iter().flatten().chain(edited) {
             self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
         }
+    }
+
+    /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
+    /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
+    /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
+    /// rule picks decay).
+    pub(super) fn explode(
+        &mut self,
+        source: Option<u32>,
+        center: [f64; 3],
+        radius: f32,
+        blast: ExplosionSource,
+    ) -> Result<()> {
+        self.explode_with(source, center, radius, false, blast)
+    }
+    /// `ServerLevel.explode` with `ExplosionInteraction.MOB` and the caller's fire flag.
+    pub(super) fn explode_mob(
+        &mut self,
+        center: [f64; 3],
+        radius: f32,
+        fire: bool,
+        blast: ExplosionSource,
+    ) -> Result<()> {
+        self.explode_with(None, center, radius, fire, blast)
+    }
+    /// `SulfurCube.tickFuse`: `ExplosionInteraction.TNT` (the
+    /// tnt_explosion_drop_decay rule) with mobGriefing, `NONE` without.
+    pub(super) fn explode_sulfur_cube(
+        &mut self,
+        source: Option<u32>,
+        center: [f64; 3],
+        radius: f32,
+        blast: ExplosionSource,
+    ) -> Result<()> {
+        let interaction = if !self.can_entity_grief(source) {
+            BlockInteraction::Keep
+        } else {
+            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY)
+        };
+        self.server_explode_from(center, radius, interaction, false, blast)
     }
 }
 
