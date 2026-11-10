@@ -272,7 +272,7 @@ impl Game<'_> {
     /// spear's 4.5 blocks), with the item the keys select (attribute
     /// swapping a spear's reach onto a mace).
     pub(super) fn pick_tick_targets(&mut self) {
-        self.tick_hit = Some(self.pick());
+        self.tick_hit.set(Some(self.pick()));
         self.tick_mob = None;
         let mob = match self.active_attack_range() {
             Some(range) => self.attack_range_pick(&range),
@@ -289,7 +289,7 @@ impl Game<'_> {
     }
     /// The tick's clicks are done: later picks follow the crosshair again.
     pub(super) fn release_tick_targets(&mut self) {
-        self.tick_hit = None;
+        self.tick_hit.set(None);
         self.tick_mob = None;
     }
     /// `Minecraft.startAttack` on an entity: a main-hand item with an
@@ -535,6 +535,9 @@ impl Game<'_> {
     /// Whether an attack would hit an entity rather than the block behind
     /// it: the crosshair's `EntityHitResult`.
     pub(super) fn entity_targeted(&self) -> bool {
+        if let Some(entity) = self.targeting().entity {
+            return self.targeting_entity_hit(entity).is_some();
+        }
         let before = |d: Option<f64>| d.is_some_and(|d| self.before_block(d));
         before(self.painting_hit().map(|h| h.1))
             || before(self.frame_hit().map(|h| h.1))

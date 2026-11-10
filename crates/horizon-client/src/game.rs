@@ -3327,7 +3327,7 @@ struct Game<'a> {
     /// `Minecraft.hitResult` while the clicks of a tick act (game/network/remote/mod.rs
     /// `remote_handle_input`): picked once, so a creative break does not
     /// move the use that follows it past the broken block.
-    tick_hit: Option<Option<Hit>>,
+    tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// The mob of that `hitResult`, picked with the item held at the pick
     /// (`LocalPlayer.raycastHitResult`: a spear's `attack_range`), before the
     /// tick's number keys change it.
@@ -3340,6 +3340,7 @@ struct Game<'a> {
     /// +2): the pick helpers' `&self` reach.
     entity_reach: f64,
     block_reach: f64,
+    client_targeting: std::cell::Cell<mod_api::ClientTargeting>,
     /// The part of a right click a guest's packet asks for (game/network/lan_actions/interaction.rs).
     guest_use: Option<GuestUse>,
     /// The last `use_hand` that ended the click did so with `FAIL`, which
@@ -4410,28 +4411,18 @@ impl Game<'_> {
         if let Some(hit) = self.forced_hit {
             return Some(hit);
         }
-        if let Some(hit) = self.tick_hit {
+        if let Some(hit) = self.tick_hit.get() {
             return hit;
         }
         let (origin, dir) = self.aim()?;
         // GameRenderer.pick: the block ray runs out to the larger of the two
         // interaction ranges; filterHitResult then drops a hit past the
         // block's.
-        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
+        self.clip_targeting_ray(origin, dir, self.block_reach.max(self.entity_reach))
             .filter(|hit| {
                 let distance: [f64; 3] = std::array::from_fn(|i| hit.point[i] - origin[i]);
                 distance.iter().map(|v| v * v).sum::<f64>() <= self.block_reach.powi(2)
             })
-    }
-    /// The same traversal without `filterHitResult`: the block hit that
-    /// bounds the entity ray in `GameRenderer.pick`, out to the larger
-    /// interaction range — a wall between the two still hides the entity.
-    fn pick_unfiltered(&self) -> Option<Hit> {
-        if let Some(hit) = self.forced_hit {
-            return Some(hit);
-        }
-        let (origin, dir) = self.aim()?;
-        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
     }
     /// The first block outline hit within `reach` along the unit `dir`.
     fn clip_ray(&self, origin: [f64; 3], dir: [f64; 3], reach: f64) -> Option<Hit> {
@@ -16704,11 +16695,12 @@ impl<'a> Game<'a> {
             frame_drawn: true,
             world_icon: None,
             forced_hit: None,
-            tick_hit: None,
+            tick_hit: Default::default(),
             tick_mob: None,
             hotbar_presses: Vec::new(),
             entity_reach: 3.0,
             block_reach: 4.5,
+            client_targeting: Default::default(),
             guest_use: None,
             use_failed: false,
             lan_events: Vec::new(),
