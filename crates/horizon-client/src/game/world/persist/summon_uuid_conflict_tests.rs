@@ -404,7 +404,10 @@ fn summon_refuses_a_tree_holding_a_live_uuid() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn a_resident_below_an_offlevel_passenger_round_trips_and_resumes_after_dismount() {
     with_game(|game, _| {
-        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(game, ChunkPos::new(0, 0));
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            game,
+            ChunkPos::new(0, 0),
+        );
         let baby = |tag: &str, n: i32, passengers: &str| {
             pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
         };
@@ -490,7 +493,10 @@ fn a_resident_below_an_offlevel_passenger_round_trips_and_resumes_after_dismount
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn removed_root_retains_its_geometry_until_offlevel_passengers_dismount() {
     with_game(|game, _| {
-        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(game, ChunkPos::new(0, 0));
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            game,
+            ChunkPos::new(0, 0),
+        );
         game.options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let baby = |tag: &str, n: i32, passengers: &str| {
             pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
