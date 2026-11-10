@@ -1,4 +1,4 @@
-use horizon_mod_api_gen::points;
+use horizon_platform::mod_build::api_gen::points;
 use horizon_mod_package::manifest::inject::{
     route, Access, CallPlace, Entry, Inject, InjectError, Kind, Place, Target,
 };

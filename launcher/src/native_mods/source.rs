@@ -99,7 +99,7 @@ pub(super) fn stage(
     catalog_dir: &std::path::Path,
     mods: &[super::Bundle],
 ) -> Result<(), String> {
-    use horizon_mod_api_gen::{
+    use horizon_platform::mod_build::api_gen::{
         points::source::{self, Point},
         sites::{source as call_source, Declaration},
     };
@@ -121,7 +121,7 @@ pub(super) fn stage(
                 continue;
             }
             if inject.kind == Kind::Field {
-                fields.push(horizon_mod_api_gen::fields::Declaration {
+                fields.push(horizon_platform::mod_build::api_gen::fields::Declaration {
                     id: inject.id.clone(),
                     target: super::internals::plain_path(&inject.at),
                     mod_id: manifest.id.clone(),
@@ -154,7 +154,7 @@ pub(super) fn stage(
                     })
                     .or_insert(Declaration {
                         local: None,
-                        expression: Some(horizon_mod_api_gen::sites::Expression {
+                        expression: Some(horizon_platform::mod_build::api_gen::sites::Expression {
                             ty,
                             origin: origin.clone(),
                         }),
@@ -186,7 +186,7 @@ pub(super) fn stage(
                     .or_insert(Declaration {
                         expression: None,
                         local: inject.local.as_ref().map(|binding| {
-                            horizon_mod_api_gen::sites::Local {
+                            horizon_platform::mod_build::api_gen::sites::Local {
                                 binding: binding.clone(),
                                 ty: inject.local_type.clone().expect("validated type"),
                                 after: inject.position
@@ -262,12 +262,12 @@ pub(super) fn stage(
     let entries = if calls.is_empty() {
         Vec::new()
     } else {
-        horizon_mod_api_gen::internals_view::catalog(
+        horizon_platform::mod_build::api_gen::internals_view::catalog(
             &std::fs::read_to_string(catalog_dir.join(super::internals::INTERNALS))
                 .map_err(|error| error.to_string())?,
         )?
     };
-    horizon_mod_api_gen::fields::stage(root, &fields)?;
+    horizon_platform::mod_build::api_gen::fields::stage(root, &fields)?;
     call_source::stage(root, &entries, &calls)?;
     std::fs::copy(
         root.join(call_source::FILE),
@@ -457,7 +457,7 @@ fn private_source_stage_exports_and_registers_priorities() {
 #[test]
 fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
     use super::{api, internals::Catalog, Bundle};
-    use horizon_mod_api_gen::sites::{source as calls, Declaration};
+    use horizon_platform::mod_build::api_gen::sites::{source as calls, Declaration};
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
         "../target/source-call-wrapper-{}",
         std::process::id()
@@ -480,7 +480,7 @@ fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
         {"path":target, "kind":"method", "signature":"impl Game { fn run(&mut self) -> u32 }", "hash":"fingerprint"},
         {"path":callee, "kind":"method", "signature":"impl Game { fn step(&mut self, value: u32) -> u32 }", "hash":"step"}
     ]).to_string();
-    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
+    let entries = horizon_platform::mod_build::api_gen::internals_view::catalog(&metadata).unwrap();
     let discovered = calls::stage(
         &root,
         &entries,
@@ -595,13 +595,13 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         {"path":"horizon_client::game::f", "kind":"fn", "signature":"fn f() -> i32", "hash":"fingerprint"},
         {"path":"horizon_client::game::sink", "kind":"fn", "signature":"fn sink(n: i32)", "hash":"sink"}
     ]).to_string();
-    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
-    let local = horizon_mod_api_gen::sites::Local {
+    let entries = horizon_platform::mod_build::api_gen::internals_view::catalog(&metadata).unwrap();
+    let local = horizon_platform::mod_build::api_gen::sites::Local {
         binding: "n".into(),
         ty: "i32".into(),
         after: false,
     };
-    let request = horizon_mod_api_gen::sites::Declaration {
+    let request = horizon_platform::mod_build::api_gen::sites::Declaration {
         expression: None,
         target: "horizon_client::game::f".into(),
         selector: "horizon_client::game::sink".into(),
@@ -611,7 +611,7 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         local: Some(local),
     };
     std::fs::write(&file, source).unwrap();
-    let discovered = horizon_mod_api_gen::sites::source::stage(&root, &entries, &[request])
+    let discovered = horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
         .unwrap()
         .remove(0);
     std::fs::write(&file, source).unwrap();
@@ -637,7 +637,7 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
     };
     // Production runs horizon-stage before private-source staging. Preserve that
     // order here so local rewriting is exercised on ordinary point-marked source.
-    horizon_mod_api_gen::points::stage(&root).unwrap();
+    horizon_platform::mod_build::api_gen::points::stage(&root).unwrap();
     stage(&root, &dir, std::slice::from_ref(&bundle)).unwrap();
     let catalog = Catalog::read(&dir).unwrap();
     assert_eq!(catalog.sites.len(), 1);
@@ -670,10 +670,10 @@ fn expression_source_stage_shares_one_site_and_adapts_each_listener() {
         {"path":"horizon_client::game::reach", "kind":"fn", "signature":"fn reach() -> f64", "hash":"fingerprint"}
     ])
     .to_string();
-    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
-    let request = horizon_mod_api_gen::sites::Declaration {
+    let entries = horizon_platform::mod_build::api_gen::internals_view::catalog(&metadata).unwrap();
+    let request = horizon_platform::mod_build::api_gen::sites::Declaration {
         local: None,
-        expression: Some(horizon_mod_api_gen::sites::Expression {
+        expression: Some(horizon_platform::mod_build::api_gen::sites::Expression {
             ty: "f64".into(),
             origin: "discovery".into(),
         }),
@@ -684,7 +684,7 @@ fn expression_source_stage_shares_one_site_and_adapts_each_listener() {
         origin: "discovery".into(),
     };
     std::fs::write(&file, source).unwrap();
-    let discovered = horizon_mod_api_gen::sites::source::stage(&root, &entries, &[request])
+    let discovered = horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
         .unwrap()
         .remove(0);
     std::fs::write(&file, source).unwrap();
@@ -706,7 +706,7 @@ fn expression_source_stage_shares_one_site_and_adapts_each_listener() {
         manifest,
         dir: root.clone(),
     };
-    horizon_mod_api_gen::points::stage(&root).unwrap();
+    horizon_platform::mod_build::api_gen::points::stage(&root).unwrap();
     stage(&root, &dir, std::slice::from_ref(&bundle)).unwrap();
     let catalog = Catalog::read(&dir).unwrap();
     assert_eq!(catalog.sites.len(), 1);
@@ -722,7 +722,7 @@ fn expression_source_stage_shares_one_site_and_adapts_each_listener() {
     let main = api::main_rs("/* MOD_SLOTS */", &[&bundle.manifest], &catalog);
     assert_eq!(main.matches("mod_0::callback(value)").count(), 2, "{main}");
     let staged = std::fs::read_to_string(file).unwrap();
-    let marker = horizon_mod_api_gen::sites::expression::marker(&site.name);
+    let marker = horizon_platform::mod_build::api_gen::sites::expression::marker(&site.name);
     assert!(
         staged.contains(&format!("let {marker} : f64 = 64.0")),
         "{staged}"
