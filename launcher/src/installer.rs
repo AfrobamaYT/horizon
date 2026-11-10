@@ -418,7 +418,14 @@ fn close_running_launchers(progress: &impl Fn(Step, f32)) {
 /// Takes the install away. Returns what could not be removed (a file in use, say).
 pub fn uninstall(remove_data: bool, progress: impl Fn(Step, f32)) -> Result<Vec<String>, String> {
     let dir = registered()
-        .ok_or("Horizon Launcher is not installed for this account.")?
+        .ok_or_else(|| {
+            crate::i18n::tr(if cfg!(horizon_fork_launcher) {
+                "Horizon Fork Launcher (arismoko) is not installed for this account."
+            } else {
+                "Horizon Launcher is not installed for this account."
+            })
+            .to_string()
+        })?
         .dir;
     close_running_launchers(&progress);
     clean_aside(&dir);

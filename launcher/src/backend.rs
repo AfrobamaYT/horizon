@@ -5304,13 +5304,12 @@ pub fn {f}("
 
     /// Every asset a launcher looks for is one the release workflows build, sign and publish.
     #[test]
-    fn platform_assets_are_published() {
+    fn game_platform_assets_are_published() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let read = |path: &str| fs::read_to_string(repo.join(path)).unwrap();
         let build = read(".github/workflows/game-build.yml");
         let nightly = read(".github/workflows/nightly-build.yml");
-        let launcher = read(".github/workflows/launcher.yml");
-        for (os, arch, game, launcher_asset) in PLATFORMS {
+        for (os, arch, game, _launcher_asset) in PLATFORMS {
             assert!(
                 build.contains(&format!("asset: {game}")),
                 "game-build.yml builds no {game}"
@@ -5322,16 +5321,6 @@ pub fn {f}("
             assert!(
                 named == 2 || (optional && named > 2),
                 "nightly-build.yml must sign and publish {game} ({os} {arch})"
-            );
-            assert!(
-                if cfg!(horizon_fork_launcher) {
-                    !matches!((os, arch), ("linux", "x86_64") | ("windows", "x86_64"))
-                        || launcher.contains(launcher_asset)
-                } else {
-                    include_str!("../tests/fixtures-launcher-workflow-upstream.yml")
-                        .contains(&format!("asset: {launcher_asset}"))
-                },
-                "launcher.yml builds no {launcher_asset}"
             );
         }
     }

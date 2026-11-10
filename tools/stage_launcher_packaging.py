@@ -19,6 +19,7 @@ def stage(source: Path, destination: Path, repository: str):
         return
     replacements = {
         'horizon-launcher': 'horizon-fork-launcher',
+        'horizon-fork-launcher.desktop': 'io.github.arismoko.horizonfork.launcher.desktop',
         'dev.horizon.launcher': 'io.github.arismoko.horizonfork.launcher',
         'Horizon.app': 'Horizon Fork Launcher (arismoko).app',
         '<string>Horizon</string>': '<string>Horizon Fork Launcher (arismoko)</string>',
@@ -38,7 +39,7 @@ def stage(source: Path, destination: Path, repository: str):
             text = text.replace('"title": "Horizon"', '"title": "Horizon Fork Launcher (arismoko)"')
             text = text.replace('"$out/dmg.json" Horizon "$dmg"', '"$out/dmg.json" "Horizon Fork Launcher (arismoko)" "$dmg"')
         path.write_text(text)
-    (destination / 'linux/horizon-launcher.desktop').rename(destination / 'linux/horizon-fork-launcher.desktop')
+    (destination / 'linux/horizon-launcher.desktop').rename(destination / 'linux/io.github.arismoko.horizonfork.launcher.desktop')
     shutil.copyfile(source / 'icons/fork/launcher.ico', destination / 'icons/horizon.ico')
     shutil.copyfile(source / 'icons/fork/launcher.icns', destination / 'icons/horizon.icns')
     for size in (16, 24, 32, 48, 64, 128, 256, 512):

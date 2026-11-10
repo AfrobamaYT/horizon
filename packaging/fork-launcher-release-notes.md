@@ -3,10 +3,13 @@
 This is the arismoko fork, not the official Horizon launcher. It uses separate
 settings, game data and account storage and updates only from arismoko/horizon.
 
-Microsoft sign-in and signed Nightly Play are unavailable until this fork's own
-Microsoft application ID is configured. Installation is available. Until then,
-Play works only for explicitly enabled unsigned local developer single-player
-builds; signed releases still require an account that owns Minecraft.
+A source-built launcher can install fork builds today. Configured Microsoft
+sign-in and signed Nightly Play arrive with the fork launcher; no release date is
+announced. Upstream authorized the fork to use its Microsoft application ID,
+configured through the fork repository variable. Account and token storage remain
+separate. A build without the configured ID cannot sign in; explicitly enabled
+unsigned local developer single-player Play remains available. Signed builds
+still require an account that owns Minecraft.
 
 Windows: this fork is not Authenticode-signed. SmartScreen may show “Windows
 protected your PC” or an unknown-publisher warning. The fork's signed checksums do

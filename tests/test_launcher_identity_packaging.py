@@ -5,6 +5,7 @@ Fixtures are verbatim da81e38705 objects, not outputs of the staging function.
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -28,7 +29,17 @@ class PackagingIdentity(unittest.TestCase):
             source = temporary / 'metadata.rs'
             source.write_text(program)
             outputs = []
-            for flags in ([], ['--cfg', 'horizon_fork_launcher']):
+            build_script = temporary / 'build-script'
+            subprocess.run(['rustc', '--edition=2021', str(ROOT / 'launcher/build.rs'), '-o', str(build_script)], check=True)
+            for repository in (STAGE.UPSTREAM, STAGE.FORK):
+                env = dict(os.environ, HORIZON_LAUNCHER_REPOSITORY=repository,
+                           CARGO_CFG_TARGET_OS='linux', CARGO_CFG_TARGET_ENV='gnu',
+                           CARGO_MANIFEST_DIR=str(ROOT / 'launcher'))
+                directives = subprocess.check_output([str(build_script)], env=env, text=True)
+                flags = []
+                for line in directives.splitlines():
+                    if line.startswith('cargo:rustc-cfg='):
+                        flags += ['--cfg', line.removeprefix('cargo:rustc-cfg=')]
                 binary = temporary / 'metadata'
                 subprocess.run(['rustc', '--edition=2021', str(source), '-o', str(binary), *flags], check=True)
                 output = subprocess.check_output([str(binary)], text=True)
@@ -38,6 +49,31 @@ class PackagingIdentity(unittest.TestCase):
             self.assertEqual(outputs[1]['KEYCHAIN_SERVICE'], 'io.github.arismoko.horizonfork.launcher')
             self.assertEqual(outputs[1]['LAUNCHER_FOLDER'], 'horizon-fork-arismoko/launcher')
             self.assertEqual(outputs[1]['GAME_FOLDER'], 'horizon-fork-arismoko/game')
+
+    def test_real_workflow_repository_input_and_matrix(self):
+        workflow = (ROOT / '.github/workflows/launcher.yml').read_text()
+        self.assertIn('HORIZON_LAUNCHER_REPOSITORY: ${{ github.repository }}', workflow)
+        self.assertIn('--repository "$GITHUB_REPOSITORY" --tag', workflow)
+        original = (ROOT / 'launcher/tests/fixtures-launcher-workflow-upstream.yml').read_text()
+        block = original.split('      matrix:\n', 1)[1].split('    runs-on:', 1)[0]
+        expected = []
+        for line in block.splitlines():
+            if line.startswith('          - name: '):
+                expected.append({'name': line.split(': ', 1)[1]})
+            elif line.startswith('            ') and not line.strip().startswith('#') and ': ' in line:
+                key, value = line.strip().split(': ', 1)
+                expected[-1][key] = True if value == 'true' else value
+        for repository in (STAGE.UPSTREAM, STAGE.FORK):
+            output = subprocess.check_output(['python3', str(ROOT / 'tools/launcher_build_matrix.py')],
+                                            env=dict(os.environ, GITHUB_REPOSITORY=repository), text=True)
+            entries = json.loads(output)['include']
+            if repository == STAGE.UPSTREAM:
+                self.assertEqual(entries, expected)
+            else:
+                self.assertEqual([entry['name'] for entry in entries], ['linux', 'windows'])
+                self.assertEqual([entry['asset'] for entry in entries],
+                                 ['horizon-fork-launcher-linux-x86_64.tar.gz', 'horizon-fork-launcher-windows-x64.zip'])
+                self.assertEqual(entries[1]['setup_asset'], 'horizon-fork-launcher-setup.exe')
 
     def test_upstream_metadata_is_byte_identical_to_base_objects(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -59,7 +95,7 @@ class PackagingIdentity(unittest.TestCase):
             self.assertIn('<string>io.github.arismoko.horizonfork.launcher</string>', plist)
             self.assertIn('<string>horizon-fork-launcher</string>', plist)
             self.assertNotIn('<string>Horizon</string>', plist)
-            desktop = (destination / 'linux/horizon-fork-launcher.desktop').read_text()
+            desktop = (destination / 'linux/io.github.arismoko.horizonfork.launcher.desktop').read_text()
             self.assertIn('Name=Horizon Fork Launcher (arismoko)\n', desktop)
             self.assertIn('Exec=horizon-fork-launcher\n', desktop)
             self.assertIn('StartupWMClass=io.github.arismoko.horizonfork.launcher\n', desktop)

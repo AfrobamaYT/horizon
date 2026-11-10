@@ -37,7 +37,7 @@ fn menu_registration_preserves_the_package_wrapper() {
     let entry = home
         .join("data/applications")
         .join(if cfg!(horizon_fork_launcher) {
-            "horizon-fork-launcher.desktop"
+            "io.github.arismoko.horizonfork.launcher.desktop"
         } else {
             "horizon-launcher.desktop"
         });
@@ -46,7 +46,7 @@ fn menu_registration_preserves_the_package_wrapper() {
         .join(if cfg!(horizon_fork_launcher) {
             "horizon-launcher.desktop"
         } else {
-            "horizon-fork-launcher.desktop"
+            "io.github.arismoko.horizonfork.launcher.desktop"
         });
     std::fs::create_dir_all(other.parent().unwrap()).unwrap();
     std::fs::write(&other, "other launcher registration").unwrap();

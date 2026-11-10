@@ -8,11 +8,14 @@ Their launcher and game data live under `horizon-fork-arismoko/launcher` and
 `horizon-fork-arismoko/game`. Relocation metadata and the OS keychain service are
 separate. Explicit home overrides still work for developers.
 
-Signed Nightly Play and Microsoft sign-in are unavailable until the fork's own
-Microsoft application ID is configured. Do not use the official launcher's ID.
-Meanwhile, the launcher can install builds; Play is available only for an unsigned
-local developer build, single-player, with the explicit developer offline switch.
-Signed builds retain the account and ownership checks.
+A source-built launcher can install fork builds today. Configured Microsoft
+sign-in and signed Nightly Play arrive with the fork launcher; no release date is
+announced. Upstream has authorized use of its Microsoft application ID, supplied
+through the fork repository's `HORIZON_MSA_CLIENT_ID` variable rather than
+hard-coded in the fork. Accounts and tokens remain in this fork's separate
+storage; nothing is imported from the official launcher. A build without a
+configured ID cannot sign in. Unsigned local developer builds retain the explicit
+offline single-player switch. Signed builds retain account and ownership checks.
 
 Windows builds are **not Authenticode-signed**. Windows may show “Windows protected
 your PC” or an unknown-publisher warning. Signed checksums do not remove SmartScreen
@@ -25,8 +28,11 @@ repository. Set `HORIZON_LAUNCHER_REPOSITORY=horizon-rust/horizon` at build time
 retain upstream identity. Other values fail the build. Stage packaging with
 `python3 tools/stage_launcher_packaging.py OUTPUT --repository REPOSITORY` using
 the same repository selection. The original packaging templates and icons are
-left unchanged. The fork's workflow is manual, dry-run only, and must remain
-disabled until root authorizes a dispatch. No release or signing step is included.
+left unchanged. The workflow passes `github.repository` to the real build selector
+and generates the corresponding build matrix. Existing signing, signature
+verification and publication gates are retained: dry runs use an ephemeral key,
+while publication uses the fork's existing signing key and still requires separate
+approval. The workflow must remain disabled until root authorizes a dispatch.
 Linux x86_64 and Windows x64 are the initial package targets; Windows ARM64 and
 macOS packages are not produced by this dry-run workflow. Any future macOS job
 must use GitHub-hosted runners, never the upstream private runner.

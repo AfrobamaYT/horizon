@@ -6,7 +6,8 @@ macro_rules! identity {
 }
 identity! {
     VERSION_PREFIX: "horizon-launcher " => "horizon-fork-launcher ",
-    DESKTOP_ENTRY: "horizon-launcher.desktop" => "horizon-fork-launcher.desktop",
+    DESKTOP_ENTRY: "horizon-launcher.desktop" => "io.github.arismoko.horizonfork.launcher.desktop",
+    WINDOW_TITLE: "Horizon" => "Horizon Fork Launcher (arismoko)",
     QUIT_LABEL: "Quit Horizon Launcher" => "Quit Horizon Fork Launcher (arismoko)",
     DISPLAY_NAME: "Horizon Launcher" => "Horizon Fork Launcher (arismoko)",
     EXECUTABLE: "horizon-launcher" => "horizon-fork-launcher",
