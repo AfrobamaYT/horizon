@@ -7,6 +7,7 @@ pub mod link;
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
 mod points;
+mod registration_capabilities;
 mod runtime;
 #[allow(
     dead_code,
@@ -543,6 +544,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                         |r| r.take(),
                     )
                     .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
+                registration_capabilities::check(&subscriptions)?;
                 let names: Vec<String> = subscriptions
                     .iter()
                     .map(|(name, _, _)| name.clone())
