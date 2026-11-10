@@ -2,11 +2,11 @@
 """First-pass scaffolding of missing mod_api types, written as ordinary hand-editable source.
 
 For each engine type in the allow-list (api_scaffold.toml) it adds, never overwriting:
-  * the API type to crates/horizon-mod-api/src/<domain>/<topic>.rs (a mirror, or an `XRef` handle);
+  * the API type to crates/horizon-mod-vocab/src/<domain>/<topic>.rs (a mirror, or an `XRef` handle);
   * its re-export to src/exports/<topic>.rs;
   * for a handle with methods, a `<Name>Backend` host area to src/host/<topic>.rs;
   * both conversions to crates/horizon-client/src/game/modding/api_values/<topic>.rs.
-It refuses when the type or its `<Name>Backend` already exists in crates/horizon-mod-api/src, and never
+It refuses when the type or its `<Name>Backend` already exists in crates/horizon-mod-vocab/src, and never
 targets lib.rs. Conversions in the client crate are not checked. Every emitted value explicitly derives `Wire`; handles also get a `Fields` impl.
 
   api_scaffold.py --dry-run [--inventory points-inventory-runtime.json] [--report out.md]
@@ -21,7 +21,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-API = Path('crates/horizon-mod-api/src')
+API = Path('crates/horizon-mod-vocab/src')
 CONV = Path('crates/horizon-client/src/game/modding/api_values')
 DOMAINS = ('world', 'block', 'item', 'entity', 'client', 'command', 'text', 'content', 'wire')
 SKIP = set('Option Vec Result R Box Self dyn mut str String Path static Game Host super std path crate fn impl '
