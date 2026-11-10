@@ -1672,6 +1672,7 @@ mod tests {
 
 #[cfg(test)]
 mod depth_tests;
+mod json_tree;
 mod tag_tree;
 mod text_tree;
 pub(crate) mod wire_handlers;

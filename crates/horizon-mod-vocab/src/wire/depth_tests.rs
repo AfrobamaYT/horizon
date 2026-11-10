@@ -142,3 +142,106 @@ fn vanilla_trees_keep_their_depth_on_the_guest_shadow_stack() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn json_backed_codecs_preflight_before_serde_recursion() {
+    std::thread::Builder::new()
+        .stack_size(128 * 1024)
+        .spawn(|| {
+            let quoted = serde_json::Value::String("[\\\"{".repeat(1024));
+            let mut quoted_bytes = Writer::new();
+            quoted_bytes.put(&quoted);
+            assert_eq!(
+                Reader::decode::<serde_json::Value>(quoted_bytes.bytes()).unwrap(),
+                quoted
+            );
+            let mut value = serde_json::Value::Null;
+            for _ in 0..32 {
+                value = serde_json::Value::Array(vec![value]);
+            }
+            let mut out = Writer::new();
+            out.put(&value);
+            assert_eq!(out.error(), None);
+            let mut map_at_limit = serde_json::Map::new();
+            let mut child = serde_json::Value::Null;
+            for _ in 0..31 {
+                child = serde_json::Value::Array(vec![child]);
+            }
+            map_at_limit.insert("leaf".into(), child);
+            let mut map_bytes = Writer::new();
+            map_bytes.put(&map_at_limit);
+            assert_eq!(map_bytes.error(), None);
+            assert!(
+                Reader::decode::<serde_json::Map<String, serde_json::Value>>(map_bytes.bytes())
+                    .is_ok()
+            );
+            let decoded = Reader::decode::<serde_json::Value>(out.bytes()).unwrap();
+            drop(decoded);
+            value = serde_json::Value::Array(vec![value]);
+            let mut out = Writer::new();
+            out.put(&value);
+            assert_eq!(out.error(), Some(WireError::Depth));
+            let text = format!("{}null{}", "[".repeat(33), "]".repeat(33));
+            let mut raw = Writer::new();
+            raw.put(&text);
+            assert!(matches!(
+                Reader::decode::<serde_json::Value>(raw.bytes()),
+                Err(WireError::Depth)
+            ));
+            for _ in 33..1024 {
+                value = serde_json::Value::Array(vec![value]);
+            }
+            let mut map = serde_json::Map::new();
+            map.insert("deep".into(), value);
+            let mut out = Writer::new();
+            out.put(&map);
+            assert_eq!(out.error(), Some(WireError::Depth));
+            let mut pending = vec![serde_json::Value::Object(map)];
+            while let Some(value) = pending.pop() {
+                match value {
+                    serde_json::Value::Array(values) => pending.extend(values),
+                    serde_json::Value::Object(values) => pending.extend(values.into_values()),
+                    _ => {}
+                }
+            }
+            let mut model = crate::ModelPart::new(vec![], vec![], Default::default());
+            for _ in 0..10 {
+                model = crate::ModelPart::new(
+                    vec![],
+                    vec![("child".into(), model)],
+                    Default::default(),
+                );
+            }
+            let mut valid_model = Writer::new();
+            valid_model.put(&model);
+            assert_eq!(valid_model.error(), None);
+            let _ = Reader::decode::<crate::ModelPart>(valid_model.bytes()).unwrap();
+            for depth in 10..1024 {
+                if depth == 11 {
+                    let mut refused = Writer::new();
+                    refused.put(&model);
+                    assert_eq!(refused.error(), Some(WireError::Depth));
+                }
+                model = crate::ModelPart::new(
+                    vec![],
+                    vec![("child".into(), model)],
+                    Default::default(),
+                );
+            }
+            let mut out = Writer::new();
+            out.put(&model);
+            assert_eq!(out.error(), Some(WireError::Depth));
+            let mut parts = vec![model];
+            while let Some(mut part) = parts.pop() {
+                for (_, child) in part.children_mut() {
+                    parts.push(std::mem::replace(
+                        child,
+                        crate::ModelPart::new(vec![], vec![], Default::default()),
+                    ));
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

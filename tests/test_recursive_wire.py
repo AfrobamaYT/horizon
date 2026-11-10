@@ -23,9 +23,9 @@ POLICIES = {
     "TextHover": "cycle broken by TextForm; generic envelope; wire/depth_tests.rs",
     "TextObject": "cycle broken by TextForm; generic envelope; wire/depth_tests.rs",
     "TextStyle": "cycle broken by TextForm; generic envelope; wire/depth_tests.rs",
-    "ModelPart": "wire(via = String); serde JSON parser bounds its depth",
-    "PreparedStep": "no Wire; process-local callback storage",
-    "EntityCapabilityKey": "no Wire; process-local function pointer",
+    "ModelPart": "JSON preflight before serde; wire/depth_tests.rs",
+    "serde_json::Value": "iterative preflight before serde; wire/depth_tests.rs",
+    "serde_json::Map": "iterative preflight before serde; wire/depth_tests.rs",
     "WalkedIngredient": "no Wire; private parser work tree",
 }
 
@@ -42,7 +42,8 @@ class RecursiveWire(unittest.TestCase):
                 pub enum B { Other(Box<C>), A }
                 pub struct C { pub value: B }
                 pub struct Leaf { pub b: u8 }
+                pub struct Generic<T: Fn()> { children: Vec<Generic<T>>, marker: T }
                 // pub struct Fake { self: Fake }
                 #[cfg(test)] mod tests { pub struct Fake { x: Fake } }
             ''')
-            self.assertEqual(recursive_types(Path(directory)), ["A", "B", "C"])
+            self.assertEqual(recursive_types(Path(directory)), ["A", "B", "C", "Generic"])

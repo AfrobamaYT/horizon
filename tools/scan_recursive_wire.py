@@ -4,19 +4,29 @@ Uses the Wire declaration guard's Rust lexer so comments, strings and test-only
 items cannot introduce phantom types. Run directly to print the inventory.
 """
 from pathlib import Path
+import re
 from check_mod_api_wire import ROOT, code_tokens
 
 
 def recursive_types(root=ROOT / "crates/horizon-mod-vocab/src", extra_paths=()):
     declarations = {}
+    external_json = set()
     for path in sorted([*Path(root).rglob("*.rs"), *extra_paths]):
         ts = [value for value, _ in code_tokens(path.read_text())]
+        # Handwritten external JSON codecs are recursive even though their
+        # declarations live in a dependency, not the public vocabulary source.
+        external_json.update("serde_json::" + name for name in re.findall(
+            r"impl (?:crate : : wire : : )?Wire for serde_json : : (\w+)", " ".join(ts)))
         for i in range(len(ts) - 3):
             if ts[i:i + 2] not in (["pub", "struct"], ["pub", "enum"], ["pub", "type"]):
                 continue
             name = ts[i + 2]
             j = i + 3
-            while j < len(ts) and ts[j] not in ("{", "(", ";", "="):
+            angle = 0
+            while j < len(ts):
+                if not angle and ts[j] in ("{", "(", ";", "="):
+                    break
+                angle += (ts[j] == "<") - (ts[j] == ">")
                 j += 1
             if j == len(ts) or ts[j] == ";":
                 continue
@@ -64,7 +74,7 @@ def recursive_types(root=ROOT / "crates/horizon-mod-vocab/src", extra_paths=()):
             if current not in seen:
                 seen.add(current)
                 pending.extend(graph[current])
-    return result
+    return sorted(set(result) | external_json)
 
 
 if __name__ == "__main__":

@@ -729,14 +729,19 @@ impl crate::wire::Wire for serde_json::Value {
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(serde_json::Value));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
-        out.put_str(&::serde_json::to_string(self).unwrap_or_default());
+        if !super::json_tree::value_depth([self], 0) {
+            out.fail(WireError::Depth);
+            return;
+        }
+        match serde_json::to_string(self) {
+            Ok(text) => out.put_str(&text),
+            Err(_) => out.fail(WireError::Invalid("not valid JSON")),
+        }
     }
     fn take(
         input: &mut crate::wire::Reader<'_>,
     ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        let text: ::std::string::String = input.take()?;
-        ::serde_json::from_str(&text)
-            .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
+        super::json_tree::take(input)
     }
 }
 impl crate::wire::Wire for crate::Direction {
@@ -980,14 +985,19 @@ impl crate::wire::Wire for serde_json::Map<String, serde_json::Value> {
         crate::wire::layout_seed(stringify!(serde_json::Map<String, serde_json::Value>));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
-        out.put_str(&::serde_json::to_string(self).unwrap_or_default());
+        if !super::json_tree::value_depth(self.values(), 1) {
+            out.fail(WireError::Depth);
+            return;
+        }
+        match serde_json::to_string(self) {
+            Ok(text) => out.put_str(&text),
+            Err(_) => out.fail(WireError::Invalid("not valid JSON")),
+        }
     }
     fn take(
         input: &mut crate::wire::Reader<'_>,
     ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        let text: ::std::string::String = input.take()?;
-        ::serde_json::from_str(&text)
-            .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
+        super::json_tree::take(input)
     }
 }
 impl crate::wire::Wire for crate::UseAnimation {

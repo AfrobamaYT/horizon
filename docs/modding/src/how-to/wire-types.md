@@ -33,6 +33,12 @@ validated flat `TextForm` table, preserving its **512** component-depth contract
 These encodings are identical on native and wasm. Text's layout identity is the
 flat table's identity; mods must rebuild.
 
+JSON-backed `serde_json::Value`, JSON maps and `ModelPart` also refuse beyond
+32 JSON containers. Their encoders preflight the in-memory tree iteratively
+before serde recursion; their decoders scan the JSON's nesting outside quoted
+strings before parsing. A model part's JSON includes object, children-list and
+named-child-tuple containers, so one part can consume several JSON levels.
+
 The smallest configured guest shadow stack is **256 KiB** (`horizon-mod-wasm`'s
 shared linker). Wasmtime also has its default **512 KiB** native call-stack budget.
 Native decoding runs synchronously on the calling thread: world workers use Rust's
