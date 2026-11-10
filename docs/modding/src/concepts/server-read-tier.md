@@ -8,16 +8,16 @@ server reads take `&dyn ServerHost`; shared reads retain `&dyn Host`.
 
 Evidence is from main at `d5b9b22cd1`. The declarations now live in
 `crates/horizon-mod-vocab/src/host`, despite older generator comments naming
-horizon-mod-api. `crates/horizon-mod-api-gen/src/host.rs:169` owns that directory.
-The same file's `Tier` at line 177 has Backend, ClientBackend and their mutable
-variants, but no ServerBackend. `area_tiers` at line 250 classifies by trait
-name; Entry at line 222 retains attributes but no parsed side.
+horizon-mod-api. `crates/horizon-mod-api-gen/src/host.rs:159` owns that directory.
+The same file's `Tier` at line 165 has Backend, ClientBackend and their mutable
+variants, but no ServerBackend. `area_tiers` at line 247 classifies by trait
+name; Entry at line 221 retains attributes but no parsed side.
 
-`handle_method` at line 743 matches the first argument's handle type and the
+`handle_method` at line 749 matches the first argument's handle type and the
 method prefix. Its receiver selection at line 781 uses mutability and
 `tier.client()` only: every non-client immutable read takes `&dyn Host`.
-Its forwarding body at line 810 uses `backend_of` for reads. The generation loop
-at line 869 emits handle methods and gathers Backend/ClientBackend reads.
+Its forwarding body at line 808 uses `backend_of` for reads. The generation loop
+at line 878 emits handle methods and gathers Backend/ClientBackend reads.
 `HostSide` at line 903 carries mutable server/client host borrows; the generated
 unions at line 923 expose the shared backend from Host. A server label in prose
 therefore cannot restrict a client caller.
@@ -31,19 +31,34 @@ level/dimension example, but those additions are not in this main snapshot;
 they must join the same inventory if merged before implementation.
 
 The inventory of immutable server-labelled declarations with a handle first
-argument is 204 reads (including multiline signatures):
+argument is 255 reads (including multiline signatures):
 
 | Handle | Reads | Handle | Reads |
 |---|---:|---|---:|
 | BlockEntityRef | 2 | BossBarRef | 11 |
-| ChunkRef | 1 | DisplayRef | 21 |
-| DragonRef | 3 | EntityRef | 48 |
-| FishingHookRef | 3 | ItemEntityRef | 3 |
-| LevelRef | 34 | LivingRef | 7 |
-| MenuRef | 4 | MerchantRef | 4 |
-| MinecartRef | 9 | MobRef | 14 |
-| PlayerRef | 17 | ProjectileRef | 5 |
-| RaidRef | 14 | UnspawnedMobRef | 4 |
+| ChunkRef | 4 | DisplayRef | 24 |
+| DragonRef | 3 | EntityRef | 53 |
+| FishingHookRef | 3 | ItemEntityRef | 5 |
+| LevelRef | 48 | LivingRef | 12 |
+| MenuRef | 5 | MerchantRef | 6 |
+| MinecartRef | 13 | MobRef | 18 |
+| PlayerRef | 22 | ProjectileRef | 5 |
+| RaidRef | 14 | UnspawnedMobRef | 7 |
+
+Reproduce from the fetched main ref with this single shell command (prints each
+handle count and the total; no build required):
+
+```sh
+python3 -c 'exec("import subprocess,re,collections\nc=collections.Counter()\nfor p in subprocess.check_output(['"'"'git'"'"','"'"'ls-tree'"'"','"'"'-r'"'"','"'"'--name-only'"'"','"'"'arismoko/main'"'"','"'"'--'"'"','"'"'crates/horizon-mod-vocab/src/host'"'"'],text=True).splitlines():\n s=subprocess.check_output(['"'"'git'"'"','"'"'show'"'"','"'"'arismoko/main:'"'"'+p],text=True)\n for t in re.finditer(r'"'"'pub trait \\w*Backend\\s*\\{(.*?)\\n\\}'"'"',s,re.S):\n  for m in re.finditer(r'"'"'/// Side: (server|both|client)\\.(.*?)(?=/// Side:|\\Z)'"'"',t[1],re.S):\n   f=re.search(r'"'"'fn\\s+(\\w+)\\s*\\(\\s*&self\\s*,\\s*\\w+\\s*:\\s*(\\w+)'"'"',m[2])\n   if f and m[1]=='"'"'server'"'"' and f[2].endswith(('"'"'Ref'"'"','"'"'Key'"'"')) and f[1].startswith(re.sub(r'"'"'(?<!^)(?=[A-Z])'"'"','"'"'_'"'"',re.sub(r'"'"'(Ref|Key)$'"'"','"'"''"'"',f[2])).lower()+'"'"'_'"'"'): c[f[2]]+=1\nprint(dict(sorted(c.items())));print(sum(c.values()))\n")'
+```
+
+This gives 255, versus Dyna's reported 252 across the same 18 handles.
+LevelRef 48 and EntityRef 53 agree; DisplayRef is 24 here versus Dyna's 23.
+The other two differences cannot be attributed without Dyna's full inventory
+and revision. The command pins the counting rule to the fetched ref rather than
+assuming those totals agree. The earlier 204 undercount used semicolons as
+method boundaries; semicolons inside documentation truncated the side label.
+This command uses side-labelled blocks within Backend traits instead.
 
 Recompute with the generator's parsed handle map and prefix rule before rewriting;
 these counts are a review baseline, not a hard-coded migration allowlist.
@@ -73,9 +88,31 @@ shared reads through an immutable reborrow; in Client only shared and client
 reads compile. Shared reads use Host upcasting in either arm. Do not add a
 HostSide conversion that erases the side and then restores server authority.
 Read-only server hooks currently receiving only Host need an immutable
-ServerHost parameter; audit `crates/horizon-mod-api-gen/src/host_param.rs:111`
+ServerHost parameter; audit `crates/horizon-mod-api-gen/src/host_param.rs:107`
 and scoped goal views alongside handle signatures so legitimate callers retain
 the required capability.
+
+The audit must also include level-scoped hooks and Part callbacks: LevelSide,
+LevelHost, LevelTicksHost, LevelRandomHost and LevelWriteHost. None of those
+traits extends ServerHost today: see
+`crates/horizon-mod-vocab/src/world/types.rs:1147` (LevelHost),
+`crates/horizon-mod-vocab/src/world/types.rs:1266` (LevelTicksHost), and
+`crates/horizon-mod-vocab/src/world/types.rs:1304` (LevelWriteHost).
+`crates/horizon-mod-api-gen/src/host_param.rs:125` selects LevelSide or the
+level host family; `crates/horizon-mod-api-gen/src/host.rs:910` currently gives
+both LevelSide arms the same `&dyn LevelHost` type.
+
+Proposed rule: server-only reads must be reachable through an explicit immutable
+server-read capability on server-side level hosts. Recommend a small shared
+server-read supertrait/accessor rather than requiring the entire ServerHost
+service surface on a scoped level view. Server-side level views implement that
+tier subject to their existing scope refusals; the client LevelHost must not.
+Split the LevelSide payload types accordingly. Do not add server authority to
+the shared LevelHost merely to make callers compile. This remains a proposal:
+the implementation must settle the exact capability trait and its receiver
+conversion together with option A, update Part callback signatures and both
+native/wasm adapters, and compile-test server level access and client rejection.
+
 
 **B — typed side or sealed marker.** Replace the host vocabulary with
 `Host<Server>` and `Host<Client>`, with a sealed Side and server-only marker.
@@ -136,7 +173,7 @@ fixtures cover an empty tier combination. Mutable backend signatures must stay
 separately covered. Run both native and wasm target checks in implementation.
 A documentation test must enumerate every immutable read, require exactly one
 Side label, and compare generated rustdoc's label and receiver with that side.
-Do not satisfy it with a fixed list of 204 methods.
+Do not satisfy it with a fixed list of 255 methods.
 
 | Example | Expected result |
 |---|---|
