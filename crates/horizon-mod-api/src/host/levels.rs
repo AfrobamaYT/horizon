@@ -74,6 +74,19 @@ pub trait LevelsBackend {
     /// stale handle or an unloaded selected noise column. Never generates or loads chunks.
     #[access(WorldOnly)]
     fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: both.
+    /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
+    /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool or a block it has no
+    /// rule for), before the player's enchantments, attributes, water, ground and
+    /// `player_break_speed` hooks, which `player_break_speed` itself hears. None for a stale
+    /// handle or an unloaded or out-of-height position. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32>;
     /// Side: client.
     /// The biome in the client's current level (`LevelReader.getBiome`). None before
     /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.
@@ -909,19 +922,6 @@ pub trait LevelsBackendMut {
         pos: [i32; 3],
         progress: i32,
     ) -> bool;
-    /// Side: both.
-    /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
-    /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool or a block it has no
-    /// rule for), before the player's enchantments, attributes, water, ground and
-    /// `player_break_speed` hooks, which `player_break_speed` itself hears. None for a stale
-    /// handle or an unloaded or out-of-height position. Reads no chunks.
-    #[access(WorldOnly)]
-    fn level_block_break_speed(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-        tool: Option<&ItemStack>,
-    ) -> Option<f32>;
     /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
