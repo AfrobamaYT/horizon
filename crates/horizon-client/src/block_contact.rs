@@ -222,10 +222,12 @@ pub struct Hooks {
 
 pub static HOOKS: OnceLock<Hooks> = OnceLock::new();
 
-/// A contact kept until the entity's batch ends, delivered in the order it happened.
+/// What a contact asked to keep until the entity's batch ends, delivered in
+/// the order it happened: the parts' `entity_inside` contacts themselves fire
+/// mid-walk now, on the shared inside sweep, so what stays here is the level
+/// writes they and the landings asked for, and the minecart passes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pending {
-    Inside(Inside),
     Landed(Landed),
     MinecartPass(MinecartPass),
     /// Level writes a mid-walk `entity_inside` part asked for, at the block it
@@ -247,18 +249,6 @@ pub struct Landed {
     pub state: BlockStateId,
     pub position: BlockPos,
     pub writes: Vec<LandingWrite>,
-}
-
-/// An entity inside a block whose Part listens to `entity_inside`
-/// (`Block.entityInside`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Inside {
-    pub entity: i32,
-    pub state: BlockStateId,
-    pub position: BlockPos,
-    /// `Entity.checkInsideBlocks`' `isPrecise`: the entity moved far, or its box
-    /// at the target intersects the block.
-    pub precise: bool,
 }
 
 /// A minecart on a rail whose Part listens to `minecart_pass`.
@@ -389,25 +379,6 @@ pub fn landed(state: BlockStateId, position: BlockPos, writes: Vec<LandingWrite>
     }
 }
 
-/// Note an entity inside a block, if a part there listens; nothing is kept
-/// otherwise, so a world without such a part pays one test per block.
-pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: bool) {
-    if LEVEL.get().is_some()
-        && HOOKS
-            .get()
-            .is_some_and(|hooks| (hooks.inside_listens)(state))
-    {
-        PENDING.with_borrow_mut(|pending| {
-            pending.push(Pending::Inside(Inside {
-                entity,
-                state,
-                position,
-                precise,
-            }));
-        });
-    }
-}
-
 /// Keep the level writes a mid-walk `entity_inside` contact asked for until the
 /// entity's batch ends; nothing is kept when none were asked.
 pub fn inside_written(state: BlockStateId, position: BlockPos, writes: Vec<InsideWrite>) {
@@ -452,31 +423,6 @@ pub fn is_precise(
     let far = 0.999_990_000_000_252_6_f64;
     from.distance_squared(to) > far * far
         || at_target.intersects(horizon_core::geometry::Aabb::block(position))
-}
-
-/// Reuse the entity block sweep for item and projectile ticks without an effect collector.
-pub fn swept_inside(
-    entity: i32,
-    from: horizon_core::geometry::Vec3,
-    to: horizon_core::geometry::Vec3,
-    bounds: horizon_core::geometry::Aabb,
-    mut block: impl FnMut(BlockPos) -> BlockStateId,
-) {
-    if LEVEL.get().is_none() || !HOOKS.get().is_some_and(|hooks| (hooks.any_inside)()) {
-        return;
-    }
-    let bounds = bounds.deflate(horizon_core::geometry::Vec3::new(1e-5, 1e-5, 1e-5));
-    let mut visited = std::collections::HashSet::new();
-    let _ =
-        horizon_core::geometry::sweep_intersected_blocks(from, to, bounds, 1_000_000, |p, step| {
-            if step >= 16 {
-                return false;
-            }
-            if visited.insert(p) {
-                inside(entity, block(p), p, is_precise(from, to, bounds, p));
-            }
-            true
-        });
 }
 
 #[cfg(test)]

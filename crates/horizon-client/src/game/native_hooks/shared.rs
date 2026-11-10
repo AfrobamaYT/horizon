@@ -1239,14 +1239,15 @@ impl Game<'_> {
         };
         Some(LivingRef::new(EntityRef::new(epoch, id)))
     }
-    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` and
-    /// `minecart_pass` to the parts, and the writes a landing asked for to the level. A contact is skipped when its
-    /// entity is gone (an item merged away later in the batch) or the block at its position
-    /// is no longer the state it touched, as vanilla never sees a stale one.
+    /// Deliver what the batch just ticked recorded, in order: `minecart_pass`
+    /// to the parts, and the writes a landing or a mid-walk `entity_inside`
+    /// contact asked for to the level. A write is skipped when the block at
+    /// its position is no longer the state it touched, as vanilla never sees
+    /// a stale one. The parts' own `entity_inside` contacts fire mid-walk now,
+    /// on the shared inside sweep, not here.
     pub(super) fn drain_entity_inside(&mut self) {
         for contact in horizon_client::block_contact::take_pending() {
             let (state, pos) = match &contact {
-                Pending::Inside(inside) => (inside.state, inside.position),
                 Pending::Landed(landed) => (landed.state, landed.position),
                 Pending::MinecartPass(pass) => (pass.state, pass.position),
                 Pending::InsideWritten(written) => (written.state, written.position),
@@ -1258,48 +1259,6 @@ impl Game<'_> {
                 continue;
             }
             match contact {
-                Pending::Inside(inside) => {
-                    if let Some(entity) = u32::try_from(inside.entity)
-                        .ok()
-                        .and_then(|id| self.entity(id))
-                        && let Some(kind) = self.entity_kind(entity)
-                    {
-                        // The recorded contacts of the kinds not yet on the shared sweep
-                        // (mobs, projectiles, items) deliver the notification through the
-                        // level host, as the mid-sweep contact will. Their level writes
-                        // apply here, at the batch end, guarded on the touched state; the
-                        // queued entity writes and effects need the entity's own tick,
-                        // which the recorded route is past, so they apply when each kind
-                        // moves onto the shared walk.
-                        let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
-                        let level = horizon_client::health::DamageLevel::lent(
-                            &self.world,
-                            self.pack.assets.registry,
-                            &mut lent,
-                            Some(world_items!(self)),
-                            Some(&self.pack.block_registries),
-                            &self.damage_hooks,
-                        );
-                        let mut effects = mod_api::InsideEffects::default();
-                        let mut writes = Vec::new();
-                        HitLevel(level).native_entity_inside(fire::EntityInsideCall {
-                            dimension: self.dim.id(),
-                            entity: inside.entity,
-                            kind: &kind,
-                            state,
-                            pos,
-                            precise: inside.precise,
-                            effects: &mut effects,
-                            writes: &mut writes,
-                        });
-                        lent.give_back(&mut self.world);
-                        if let Some(level) = self.level(self.dim.id()) {
-                            for write in writes {
-                                self.apply_inside_write(level, pos, write);
-                            }
-                        }
-                    }
-                }
                 Pending::MinecartPass(pass) => {
                     if let Some(entity) = u32::try_from(pass.entity)
                         .ok()
