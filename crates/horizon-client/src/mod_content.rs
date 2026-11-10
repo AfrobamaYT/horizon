@@ -789,6 +789,7 @@ struct NewItem {
     arm_pose: Option<horizon_mod_package::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
+    template: Option<String>,
 }
 
 struct Plan<'a> {
@@ -1494,6 +1495,7 @@ impl<'a> Plan<'a> {
                     block: None,
                     arm_pose: None,
                     wall_block: b.decl.wall_block.clone(),
+                    template: None,
                 });
             }
         }
@@ -1514,6 +1516,7 @@ impl<'a> Plan<'a> {
                     block: i.block.clone(),
                     arm_pose: i.arm_pose,
                     wall_block: None,
+                    template: i.block.is_none().then(|| i.template.clone()),
                 });
             }
         }
@@ -3480,27 +3483,24 @@ pub fn build(
         horizon_mod_package::enabled::MARKER,
         &serde_json::to_vec(inventory)?,
     )?;
-    let remainders: BTreeMap<&str, &str> = plan
-        .items
-        .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.crafting_remainder.as_deref()?)))
-        .collect();
-    if !remainders.is_empty() {
-        overlay.write(
-            horizon_items::items::MOD_CRAFT_REMAINDERS,
-            &serde_json::to_vec(&remainders)?,
-        )?;
-    }
-    let placed_blocks: BTreeMap<&str, &str> = plan
-        .items
-        .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.block.as_deref()?)))
-        .collect();
-    if !placed_blocks.is_empty() {
-        overlay.write(
-            horizon_items::items::MOD_ITEM_BLOCKS,
-            &serde_json::to_vec(&placed_blocks)?,
-        )?;
+    let by_item = |value: fn(&NewItem) -> Option<&str>| {
+        let items = plan.items.iter();
+        items
+            .filter_map(|i| Some((i.rename.to.as_str(), value(i)?)))
+            .collect::<BTreeMap<_, _>>()
+    };
+    use horizon_items::items::{MOD_CRAFT_REMAINDERS, MOD_ITEM_BLOCKS, MOD_ITEM_TEMPLATES};
+    for (name, map) in [
+        (
+            MOD_CRAFT_REMAINDERS,
+            by_item(|i| i.crafting_remainder.as_deref()),
+        ),
+        (MOD_ITEM_TEMPLATES, by_item(|i| i.template.as_deref())),
+        (MOD_ITEM_BLOCKS, by_item(|i| i.block.as_deref())),
+    ] {
+        if !map.is_empty() {
+            overlay.write(name, &serde_json::to_vec(&map)?)?;
+        }
     }
     let arm_poses: BTreeMap<&str, horizon_mod_package::content::ArmPose> = plan
         .items
