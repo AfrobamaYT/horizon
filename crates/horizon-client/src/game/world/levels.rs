@@ -326,6 +326,13 @@ impl Levels {
         }
     }
 
+    /// Whether a save of  is still waiting for a tick that admits
+    /// saves (the #2488 gate holds it back).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(in crate::game) fn save_pending(&self, dim: Dim) -> bool {
+        self.requested_saves.contains(&dim)
+    }
+
     /// Clear every parked level and dimensions recorded as heard open.
     pub(super) fn clear(&mut self) {
         self.parked.clear();

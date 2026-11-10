@@ -793,6 +793,11 @@ mod tests {
             );
             let fenced = [4, 64, 4];
             game.world.carrier_fences.lock_cell(fenced);
+            game.world.carrier_fences.lock_carrier(7);
+            // The carrier is fenced too: its inventory and motion have
+            // no route of their own until slice 4, so the fence read is
+            // the seam that will refuse them.
+            assert!(game.world.carrier_fences.locks_carrier(7));
 
             // Breaking.
             assert!(game.break_block(fenced).is_err());
@@ -1164,6 +1169,186 @@ mod tests {
             assert!(!game.world.carrier_fences.locks_carrier(12));
         });
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The region writer's per-chunk ordering: an older snapshot,
+    /// submitted first and completing after the post-state's write,
+    /// leaves the post-state on disk. The writer is one thread over an
+    /// mpsc channel (batches run in submission order) and
+    /// `IOWorker.pendingWrites` replaces a chunk's pending record with
+    /// the newer submission's sequence, so its `newest` filter
+    /// (save.rs: "a chunk queued again since is written once, by its
+    /// newest batch") drops the older snapshot. No record number of
+    /// our own is needed; this test pins the guarantee.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_older_snapshot_completing_late_cannot_overwrite_the_post_state() {
+        let root = transfer_root("writer");
+        with_game(|game| {
+            game.world_root = root.clone();
+            let save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let dirt = registry.default_state("minecraft:dirt").unwrap();
+            let mut pre_chunk = horizon_client::chunk::Chunk::empty(0, 0);
+            pre_chunk.set(4, 64, 4, stone.0);
+            let pre = Arc::new(pre_chunk);
+            let mut post_chunk = horizon_client::chunk::Chunk::empty(0, 0);
+            post_chunk.set(4, 64, 4, dirt.0);
+            let post = Arc::new(post_chunk);
+
+            // Both snapshots submitted back to back, one barrier: the
+            // pre-image's write lands behind the post-state's.
+            save.save_later(&[pre], registry, world_biomes!(game)).unwrap();
+            save.save_later(&[post], registry, world_biomes!(game)).unwrap();
+            save.flush().unwrap();
+
+            let chunk = horizon_world::carrier::region_strict::read_chunk(
+                &root.join("dimensions/minecraft/overworld/region"),
+                horizon_core::position::ChunkPos::new(0, 0),
+            )
+            .unwrap()
+            .expect("the chunk is on disk");
+            let data = horizon_world::chunk::ChunkData::new(chunk).unwrap();
+            assert_eq!(
+                data.block(horizon_core::position::BlockPos::new(4, 64, 4))
+                    .unwrap()
+                    .unwrap()
+                    .name,
+                "minecraft:dirt",
+                "the post-state must survive the older snapshot"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every save route refuses while the #2488 obligation holds —
+    /// autosave, save-all, requested parked saves and the shutdown
+    /// save all enter through `admit_entity_save` — and admits again
+    /// the moment the transfer commits. The transfer runs inside one
+    /// synchronous call, so the steps cannot interleave with a save;
+    /// this pins the gate each route passes.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn every_save_route_refuses_under_the_obligation_and_admits_after_commit() {
+        let root = transfer_root("saves");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+
+            // Under the obligation — the transfer's own state between
+            // acquire and release — every route refuses.
+            {
+                let _lease = horizon_client::join_seq::visibility::PassLease::enter();
+                assert!(game.save_game_with(true).is_err(), "autosave");
+                assert!(game.save_level(true).is_err(), "save-all");
+                game.levels.request_save(game.dim);
+                game.run_requested_saves();
+                // The requested save was refused while lifted and stays
+                // queued for the next tick, as #2488 defines.
+                assert!(game.levels.save_pending(game.dim));
+            }
+            // Committed: the routes admit again (the full save writes
+            // the harness's throwaway world, which is allowed here).
+            game.carrier_assemble(13, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+            assert!(game.save_game_with(true).is_ok(), "after the commit");
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The supported backup procedure: `save-all` flush, no pending
+    /// operation, copy the world folder, load the copy — the carriers
+    /// and chunks come out identical.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_supported_backup_restores_identical_carriers_and_chunks() {
+        let root = transfer_root("backup");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.carrier_assemble(14, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+
+            // save-all with its flush, and no pending operation.
+            assert!(game.save_game_with(true).is_ok());
+            let store = match crate::carrier_store::Store::open(&root).unwrap() {
+                crate::carrier_store::Opened::Live(store) => store,
+                _ => panic!("the store must open"),
+            };
+            assert!(
+                store.journal().in_progress.is_none(),
+                "no operation pending: the world is quiescent"
+            );
+            drop(store);
+
+            // Copy the whole world folder.
+            let copy = root.parent().unwrap().join(format!(
+                "horizon-carrier-backup-copy-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&copy);
+            copy_dir(&root, &copy).unwrap();
+
+            // Load the copy: the carrier file and every region byte
+            // are identical to the original's.
+            let carrier = format!("data/horizon_carrier_{:032x}-1.nbt", 14_u128);
+            assert_eq!(
+                std::fs::read(root.join(&carrier)).unwrap(),
+                std::fs::read(copy.join(&carrier)).unwrap(),
+                "the carrier file copies identically"
+            );
+            let original = std::fs::read(
+                root.join("dimensions/minecraft/overworld/region/r.0.0.mca"),
+            )
+            .unwrap();
+            let restored =
+                std::fs::read(copy.join("dimensions/minecraft/overworld/region/r.0.0.mca"))
+                    .unwrap();
+            assert_eq!(original, restored, "the chunk bytes copy identically");
+            // And the copy's store opens with the carrier listed.
+            match crate::carrier_store::Store::open(&copy).unwrap() {
+                crate::carrier_store::Opened::Live(store) => {
+                    assert!(store.journal().lists(14, 1));
+                }
+                _ => panic!("the copy's store must open"),
+            }
+            let _ = std::fs::remove_dir_all(&copy);
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let target = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy_dir(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), target)?;
+            }
+        }
+        Ok(())
     }
 
     /// A fresh throwaway world root with `data/` and a readable
