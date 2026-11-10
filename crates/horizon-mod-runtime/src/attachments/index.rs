@@ -32,7 +32,7 @@ pub struct AttachmentRow<H> {
 #[derive(Clone)]
 pub struct AttachmentSnapshot<H> {
     rows: Vec<AttachmentRow<H>>,
-    slots: HashMap<(H, u64), usize>,
+    slots: HashMap<H, usize>,
 }
 impl<H> Default for AttachmentSnapshot<H> {
     fn default() -> Self {
@@ -51,7 +51,7 @@ impl<H> std::ops::Deref for AttachmentSnapshot<H> {
 impl<H: Copy + Eq + Hash> AttachmentSnapshot<H> {
     /// Build a captured bucket from transferred rows, preserving their order.
     ///
-    /// rows must have distinct (holder, generation) keys.
+    /// rows must have distinct holders.
     pub fn from_rows(rows: Vec<AttachmentRow<H>>) -> Self {
         let mut snapshot = Self::default();
         for row in rows {
@@ -61,31 +61,35 @@ impl<H: Copy + Eq + Hash> AttachmentSnapshot<H> {
     }
 
     fn push(&mut self, row: AttachmentRow<H>) {
-        let previous = self
-            .slots
-            .insert((row.holder, row.generation), self.rows.len());
+        let previous = self.slots.insert(row.holder, self.rows.len());
         debug_assert!(previous.is_none(), "duplicate attachment residency");
         self.rows.push(row);
     }
     fn replace(&mut self, slot: usize, row: AttachmentRow<H>) -> AttachmentRow<H> {
         let old = std::mem::replace(&mut self.rows[slot], row);
-        self.slots.remove(&(old.holder, old.generation));
+        self.slots.remove(&old.holder);
         let row = &self.rows[slot];
-        self.slots.insert((row.holder, row.generation), slot);
+        self.slots.insert(row.holder, slot);
         old
     }
     fn swap_remove(&mut self, slot: usize) -> AttachmentRow<H> {
         let old = self.rows.swap_remove(slot);
-        self.slots.remove(&(old.holder, old.generation));
+        self.slots.remove(&old.holder);
         if let Some(row) = self.rows.get(slot) {
-            self.slots.insert((row.holder, row.generation), slot);
+            self.slots.insert(row.holder, slot);
         }
         reclaim_sparse_map(&mut self.slots);
         old
     }
+    /// Probe captured membership by holder in expected O(1) time.
+    pub fn slot_for(&self, holder: H) -> Option<usize> {
+        self.slots.get(&holder).copied()
+    }
+
     /// Probe captured membership using the existing residency token.
     pub fn slot_of(&self, owner: &AttachmentOwner<H>) -> Option<usize> {
-        self.slots.get(&(owner.holder, owner.generation)).copied()
+        self.slot_for(owner.holder)
+            .filter(|&slot| self.rows[slot].generation == owner.generation)
     }
 }
 
