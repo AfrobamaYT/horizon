@@ -32,8 +32,10 @@ pub(super) fn game_package(stage: &Path, target: super::Target, has_api: bool) -
         PACKAGE
     } else if target == super::Target::Client && has_official(stage) {
         OFFICIAL
-    } else {
+    } else if stage.join("crates/horizon-game/Cargo.toml").is_file() {
         "horizon-game"
+    } else {
+        "horizon-client"
     }
 }
 
@@ -524,13 +526,15 @@ pub(super) fn stage(
         dep.insert("optional".into(), true.into());
         deps.insert(OFFICIAL.into(), toml::Value::Table(dep));
     }
-    deps.insert(
-        "horizon-mod-host".into(),
-        toml::Value::Table(toml::Table::from_iter([
-            ("path".into(), "../horizon-mod-host".into()),
-            ("default-features".into(), false.into()),
-        ])),
-    );
+    if stage.join("crates/horizon-mod-host/Cargo.toml").is_file() {
+        deps.insert(
+            "horizon-mod-host".into(),
+            toml::Value::Table(toml::Table::from_iter([
+                ("path".into(), "../horizon-mod-host".into()),
+                ("default-features".into(), false.into()),
+            ])),
+        );
+    }
     manifest.insert("dependencies".into(), toml::Value::Table(deps));
     manifest.insert(
         "features".into(),
