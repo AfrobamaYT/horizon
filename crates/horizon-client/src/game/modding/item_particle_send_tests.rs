@@ -6,7 +6,8 @@ use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn stack_particle_crosses_server_packet_and_resolves_apple() {
-    crate::game::native_entity_refs::tests::with_client_game(|game| {
+    let mut transfer = None;
+    crate::game::native_entity_refs::tests::with_game(|game| {
         mod_api::__private::resolve_particles(["minecraft:item"], |id| {
             horizon_client::particles::ParticleType::from_name(id)
                 .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
@@ -53,6 +54,19 @@ fn stack_particle_crosses_server_packet_and_resolves_apple() {
             randomization: 0,
         })
         .encode();
+        let mut oversized = api_stack;
+        oversized.set_count(99).unwrap();
+        let bad = mod_api::ParticleOptions::item_stack(key, oversized);
+        assert!(bad.try_into_engine(game.items()).is_err());
+        assert!(!mod_api::prelude::LevelsBackendMut::level_send_particles(
+            game, level, &bad, None, [0.0; 3], [0.0; 3], 0.0, 1
+        ));
+        assert!(game.creatures.lan_particles.is_empty());
+        transfer = Some((packet, sync));
+    });
+    let (packet, sync) = transfer.unwrap();
+    crate::game::native_entity_refs::tests::with_client_game(|game| {
+        use horizon_protocol::packets::play::Clientbound;
         let mut reader = horizon_protocol::buf::Reader::new(&packet);
         let id = reader.varint().unwrap();
         let Clientbound::LevelParticles(decoded) = Clientbound::decode(id, reader.rest()).unwrap()
@@ -80,13 +94,5 @@ fn stack_particle_crosses_server_packet_and_resolves_apple() {
             game.item_particle_options(&received).unwrap().item,
             Some(vec!["item/apple".into()])
         );
-        let mut oversized = api_stack;
-        oversized.set_count(99).unwrap();
-        let bad = mod_api::ParticleOptions::item_stack(key, oversized);
-        assert!(bad.try_into_engine(game.items()).is_err());
-        assert!(!mod_api::prelude::LevelsBackendMut::level_send_particles(
-            game, level, &bad, None, [0.0; 3], [0.0; 3], 0.0, 1
-        ));
-        assert!(game.creatures.lan_particles.is_empty());
     });
 }
