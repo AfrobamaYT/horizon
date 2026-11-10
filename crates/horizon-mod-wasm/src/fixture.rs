@@ -11,6 +11,7 @@ pub fn module(bytes: &[u8]) -> Result<WasmMod, String> {
             name: "fixture",
             module: bytes,
         }],
+        None,
     )
     .map_err(|error| format!("{error:?}"))?
     .into_iter()
