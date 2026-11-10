@@ -555,11 +555,15 @@ No Host is passed by this raw internals route.
 The initial implementation accepts direct call statements in the enclosing function
 block. It refuses nested expression positions whose scope or evaluation order cannot
 be proven. The binding must be a single mutable local with a matching explicit Rust
-type, or a directly initialized integer/bool literal whose type can be established.
+type, or a directly initialized suffixed integer literal (such as `3i32`) or boolean
+literal. Unsuffixed integer literals are refused because their inferred type cannot
+be proven. The declaration must include an initializer; later assignments do not
+establish initialization for this analysis.
 Missing, shadowed, immutable, type-mismatched, moved or borrowed bindings are refused
-by name. Non-scalar uses before the position, references, closures and opaque macros
-are conservatively refused when their dataflow cannot be proven. This may refuse
-bindings that Rust's borrow checker could otherwise accept.
+by name. Non-scalar uses before the position, references (including `ref`/`ref mut`
+patterns in let, match and if-let over expressions mentioning the local), closures
+and opaque macros are conservatively refused when their dataflow cannot be proven.
+This may refuse bindings that Rust's borrow checker could otherwise accept.
 
 API access and wasm permanently refuse mutable locals; use native internals or request
 a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when

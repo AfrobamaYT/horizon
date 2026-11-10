@@ -36,21 +36,16 @@ pub(super) fn validate(
                     let ty = ty.or_else(|| {
                         decl.init.as_ref().and_then(|i| match &*i.expr {
                             syn::Expr::Lit(lit) => match &lit.lit {
-                                syn::Lit::Int(n) => Some(
-                                    if n.suffix().is_empty() {
-                                        "i32"
-                                    } else {
-                                        n.suffix()
-                                    }
-                                    .into(),
-                                ),
+                                syn::Lit::Int(n) if !n.suffix().is_empty() => {
+                                    Some(n.suffix().into())
+                                }
                                 syn::Lit::Bool(_) => Some("bool".into()),
                                 _ => None,
                             },
                             _ => None,
                         })
                     });
-                    bindings.push((index, pat, ty));
+                    bindings.push((index, pat, ty, decl.init.is_some()));
                 }
             } else if pat
                 .to_token_stream()
@@ -77,11 +72,16 @@ pub(super) fn validate(
     if bindings.len() > 1 {
         return Err(refuse("shadowed binding".into()));
     }
-    let (index, pat, ty) = bindings
+    let (index, pat, ty, initialized) = bindings
         .pop()
         .ok_or_else(|| refuse("binding not found".into()))?;
     if pat.mutability.is_none() || pat.by_ref.is_some() {
         return Err(refuse("binding must be declared mut".into()));
+    }
+    if !initialized {
+        return Err(refuse(
+            "binding is not initialized at its declaration".into(),
+        ));
     }
     let ty = ty.ok_or_else(|| refuse(format!("cannot prove declared type `{}`", local.ty)))?;
     let expected = syn::parse_str::<syn::Type>(&local.ty)
@@ -117,7 +117,48 @@ pub(super) fn validate(
         borrowed: bool,
         opaque: bool,
     }
+    impl Uses<'_> {
+        fn pattern_borrow(&mut self, pattern: &syn::Pat, value: &syn::Expr) {
+            #[derive(Default)]
+            struct ByRef(bool);
+            impl<'ast> Visit<'ast> for ByRef {
+                fn visit_pat_ident(&mut self, pat: &'ast syn::PatIdent) {
+                    self.0 |= pat.by_ref.is_some();
+                    syn::visit::visit_pat_ident(self, pat);
+                }
+            }
+            let mut pattern_scan = ByRef::default();
+            pattern_scan.visit_pat(pattern);
+            if pattern_scan.0 {
+                let mut value_scan = Uses {
+                    name: self.name,
+                    used: false,
+                    borrowed: false,
+                    opaque: false,
+                };
+                value_scan.visit_expr(value);
+                self.borrowed |= value_scan.used;
+            }
+        }
+    }
     impl<'ast> Visit<'ast> for Uses<'_> {
+        fn visit_local(&mut self, local: &'ast syn::Local) {
+            if let Some(init) = &local.init {
+                self.pattern_borrow(&local.pat, &init.expr);
+            }
+            syn::visit::visit_local(self, local);
+        }
+        fn visit_expr_let(&mut self, expr: &'ast syn::ExprLet) {
+            self.pattern_borrow(&expr.pat, &expr.expr);
+            syn::visit::visit_expr_let(self, expr);
+        }
+        fn visit_expr_match(&mut self, expr: &'ast syn::ExprMatch) {
+            for arm in &expr.arms {
+                self.pattern_borrow(&arm.pat, &expr.expr);
+            }
+            syn::visit::visit_expr_match(self, expr);
+        }
+
         fn visit_expr_path(&mut self, p: &'ast syn::ExprPath) {
             self.used |= p.path.is_ident(self.name);
         }
