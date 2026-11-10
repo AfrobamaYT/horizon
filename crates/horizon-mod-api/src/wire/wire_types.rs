@@ -70,11 +70,15 @@ impl Wire for crate::LoadedMods {
     }
 }
 impl Wire for crate::RegistrationContext {
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::RegistrationContext));
-    const MIN: usize = 0;
-    fn put(&self, _: &mut Writer) {}
-    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self::new())
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed("RegistrationContext.instance_dir.v1");
+    const MIN: usize = <Option<crate::InstanceDirectory> as Wire>::MIN;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.instance_dir);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        let mut context = Self::new();
+        context.instance_dir = input.take()?;
+        Ok(context)
     }
 }
 
@@ -91,6 +95,9 @@ mod resource_wire_tests {
             8,
             "a transaction crosses as its frame token"
         );
+        let mut context = crate::RegistrationContext::new();
+        context.instance_dir = Some(crate::InstanceDirectory::Unix(vec![b'/', 0xff, b'x']));
+        out.put(&context);
         let mut input = Reader::new(out.bytes());
         let tx: crate::Transaction = input.take().unwrap();
         assert_eq!(tx, crate::Transaction(7));
@@ -99,6 +106,10 @@ mod resource_wire_tests {
             let context: crate::RegistrationContext = input.take().unwrap();
             assert_eq!(mods.ids().collect::<Vec<_>>(), ["test_mod"]);
             assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["test_mod"]);
+            assert_eq!(
+                context.instance_dir().unwrap(),
+                &crate::InstanceDirectory::Unix(vec![b'/', 0xff, b'x'])
+            );
         });
         let package = crate::PackageInfo::new(
             "test".into(),
@@ -1093,44 +1104,6 @@ impl crate::wire::Wire for serde_json::Map<String, serde_json::Value> {
         let text: ::std::string::String = input.take()?;
         ::serde_json::from_str(&text)
             .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
-    }
-}
-impl crate::wire::Wire for crate::ArmPose {
-    layout_fields!("tag" => u32, "0:Empty" => (), "1:Item" => (), "2:Block" => (), "3:Bow" => (), "4:CrossbowHold" => (), "5:CrossbowCharge" => (), "6:ThrowTrident" => (), "7:TootHorn" => (), "8:Spyglass" => (), "9:Spear" => (), "10:Brush" => ());
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::ArmPose));
-    const MIN: usize = 4;
-    fn put(&self, out: &mut crate::wire::Writer) {
-        out.put(&match self {
-            Self::Empty => 0u32,
-            Self::Item => 1u32,
-            Self::Block => 2u32,
-            Self::Bow => 3u32,
-            Self::CrossbowHold => 4u32,
-            Self::CrossbowCharge => 5u32,
-            Self::ThrowTrident => 6u32,
-            Self::TootHorn => 7u32,
-            Self::Spyglass => 8u32,
-            Self::Spear => 9u32,
-            Self::Brush => 10u32,
-        });
-    }
-    fn take(
-        input: &mut crate::wire::Reader<'_>,
-    ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        Ok(match input.take::<u32>()? {
-            0 => Self::Empty,
-            1 => Self::Item,
-            2 => Self::Block,
-            3 => Self::Bow,
-            4 => Self::CrossbowHold,
-            5 => Self::CrossbowCharge,
-            6 => Self::ThrowTrident,
-            7 => Self::TootHorn,
-            8 => Self::Spyglass,
-            9 => Self::Spear,
-            10 => Self::Brush,
-            tag => return Err(crate::wire::WireError::Tag(tag)),
-        })
     }
 }
 impl crate::wire::Wire for crate::UseAnimation {

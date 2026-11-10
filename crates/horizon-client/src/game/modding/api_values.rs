@@ -45,6 +45,27 @@ pub(crate) fn block_speed_factor(
         factor,
     );
 }
+pub(crate) fn is_ladder(
+    context: &horizon_world::native_load_context::LoopContext,
+    entity: u32,
+    pos: horizon_core::position::BlockPos,
+    state: horizon_world::registry::BlockStateId,
+    ladder: &mut bool,
+) {
+    if !block_state::block_listens(mod_api::HookId::IsLadder, state) {
+        return;
+    }
+    let Ok(state) = state.try_into_api() else {
+        return;
+    };
+    mod_api::dispatch_is_ladder(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        entity,
+        pos,
+        state,
+        ladder,
+    );
+}
 
 /// Resolve the metadata default through the sole numeric reverse index, without allocation.
 pub(crate) fn default_state(

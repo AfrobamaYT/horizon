@@ -315,14 +315,14 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
     let mut areas = Vec::new();
     for stem in catalog::Catalog::modules(&dir)? {
         let path = dir.join(format!("{stem}.rs"));
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let camel = stem.to_upper_camel_case();
         let tiers = area_tiers(&camel, file).map_err(|e| format!("{}: {e}", path.display()))?;
         areas.push(Area { stem, camel, tiers });
     }
-    println!("cargo:rerun-if-changed={}", dir.display());
+    crate::rerun_if_changed(&dir.display());
     Ok(areas)
 }
 
