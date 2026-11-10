@@ -194,7 +194,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-      - name: Install Dyna runner dependencies without root
+      - name: Check Dyna dependencies (install fallback without root)
         if: steps.rust.outputs.required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
@@ -348,7 +348,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_file_size.py ${BASE_SHA:+--base "$BASE_SHA"}
-      - name: Install Dyna runner dependencies without root
+      - name: Check Dyna dependencies (install fallback without root)
         if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
@@ -438,7 +438,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Dyna runner dependencies
+      - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain
         run: |
@@ -528,7 +528,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py --launcher "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-      - name: Install Dyna runner dependencies without root
+      - name: Check Dyna dependencies (install fallback without root)
         if: steps.launcher.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust and the headers GPUI links against
@@ -576,7 +576,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Dyna runner dependencies
+      - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain
         run: |
@@ -616,7 +616,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Dyna runner dependencies
+      - name: Check Dyna dependencies (install fallback without root)
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Use system Python for parity harnesses
         run: |
