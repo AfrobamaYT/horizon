@@ -1636,7 +1636,7 @@ impl Game<'_> {
             return;
         }
         let plain = line.plain();
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             super::dedicated::log("INFO", &plain);
         } else {
             log::info!("{plain}");
@@ -1655,7 +1655,7 @@ impl Game<'_> {
     /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
     /// Only on a dedicated server; false elsewhere and for an empty message.
     pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
-        if self.options.dedicated.is_none() || message.trim().is_empty() {
+        if !self.is_dedicated_server() || message.trim().is_empty() {
             return false;
         }
         super::dedicated::events::record("announce", name, uuid, json!({ "message": message }));
@@ -2313,6 +2313,30 @@ impl Drop for Acting {
 mod tests {
     use super::*;
     use horizon_client::items::ItemStack;
+
+    /// A mod's `announce` reaches the dedicated server's event stream and nothing else's.
+    /// The integrated server thread keeps the launch configuration (`options.dedicated`) too,
+    /// so it cannot be what decides.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn server_events_are_posted_only_on_the_dedicated_role() {
+        use crate::game::execution_role::ExecutionRole;
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        game.options.dedicated = Some(Vec::new());
+        for (role, posted) in [
+            (ExecutionRole::DedicatedServer, true),
+            (ExecutionRole::IntegratedServer, false),
+            (ExecutionRole::Client, false),
+        ] {
+            game.options.execution_role = role;
+            assert_eq!(
+                game.native_server_event("Alex", 7, "hello"),
+                posted,
+                "{role:?}"
+            );
+        }
+    }
 
     fn with_command_sources(test: impl FnOnce(&mut Game<'_>)) {
         use horizon_client::{
