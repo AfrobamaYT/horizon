@@ -205,9 +205,11 @@ jobs:
         run: exit 1
       - name: Documentation needs no Rust lint
         if: needs.changes.outputs.rust_required == 'false'
-        run: echo 'Rust lint is not selected; verify retains documentation hygiene and relevant contracts.'
+        run: echo 'Rust lint is not selected; repository hygiene still runs.'
+      # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.rust_required != 'false'
+      - name: Check repository artifacts and workflow YAML
+        run: python3 tools/ci/check_repository_hygiene.py
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
