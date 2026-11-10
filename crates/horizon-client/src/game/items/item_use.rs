@@ -1172,6 +1172,8 @@ pub(super) mod interact_vibration_tests {
             assert!(game.use_fishing_rod(&rod), "the mod's rod casts");
             assert!(game.hook.is_some());
             assert_eq!(game.cast_rod(), Some(&rod), "drawn cast");
+            game.tick_fishing();
+            assert!(game.hook.is_some(), "the content rod keeps its hook when ticked");
             assert!(game.use_fishing_rod(&rod), "and reels in");
             assert!(game.hook.is_none());
             assert_eq!(game.cast_rod(), None);
