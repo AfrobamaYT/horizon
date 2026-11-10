@@ -34,13 +34,24 @@ def files():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--verify', action='store_true')
+    parser.add_argument('--at', help='Verify the verbatim move commit, before boundary fixes')
+    parser.add_argument('--closure', action='store_true', help='Move the dispatch dependency closure')
     args = parser.parse_args()
     paths = files()
+    if args.closure:
+        names = subprocess.check_output([
+            "git", "ls-tree", "-r", "--name-only", BASE, str(OLD)
+        ], cwd=ROOT, text=True).splitlines()
+        paths = [pathlib.Path(name).relative_to(OLD) for name in names
+                 if pathlib.Path(name).relative_to(OLD) not in paths
+                 and not name.endswith("/wire/wire_guest.rs")]
     for path in paths:
         destination = ROOT / NEW / path
         if args.verify:
             expected = subprocess.check_output(['git', 'show', f'{BASE}:{OLD / path}'], cwd=ROOT)
-            if destination.read_bytes() != expected:
+            actual = (subprocess.check_output(["git", "show", f"{args.at}:{NEW / path}"], cwd=ROOT)
+                      if args.at else destination.read_bytes())
+            if actual != expected:
                 raise SystemExit(f'non-verbatim move: {path}')
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
