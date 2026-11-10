@@ -8,6 +8,7 @@ pub(crate) mod chunk_generator;
 pub(crate) mod criteria;
 pub(crate) mod custom_spawners;
 pub(crate) mod datapack_registry;
+pub(crate) mod datapack_registry_set;
 pub(crate) mod dimension;
 pub(crate) mod dimension_transition;
 pub(crate) mod game_rule_value;
