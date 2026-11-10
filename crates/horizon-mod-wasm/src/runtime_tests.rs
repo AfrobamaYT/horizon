@@ -592,6 +592,41 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
 }
 
 #[test]
+fn loader_refuses_poi_registration_before_unsupported_metadata_can_run() {
+    let std = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (import "env" "memory" (memory 1)))"#,
+    )
+    .unwrap();
+    let mut subscriptions = Writer::new();
+    subscriptions.put(&vec![("extend_poi_types".to_owned(), 0_i32, false)]);
+    let bytes = subscriptions.into_bytes();
+    let mut body = String::new();
+    for (offset, byte) in bytes.iter().enumerate() {
+        body.push_str(&format!(
+            "i32.const {} i32.const {byte} i32.store8 ",
+            2048 + offset
+        ));
+    }
+    body.push_str(&format!(
+        "i64.const {}",
+        (2048_u64 << 32) | bytes.len() as u64
+    ));
+    let module = guest(*mod_api::wire::LAYOUT, &body);
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'poi_probe'\nname = 'POI probe'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
+    let loaded = crate::load(&std, vec![crate::WasmPackage { manifest, module }]);
+    assert!(loaded.mods.is_empty());
+    assert_eq!(loaded.refused.len(), 1);
+    assert!(
+        loaded.refused[0]
+            .1
+            .to_string()
+            .contains("PoiTypeExtensions::metadata"),
+        "{:?}",
+        loaded.refused
+    );
+}
+
+#[test]
 fn loader_initializes_and_installs_a_wasm_entry() {
     use mod_api::__private::game::Fields;
     let std = wat::parse_str(
