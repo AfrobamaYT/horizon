@@ -92,10 +92,12 @@ fn registered_angles_reach_local_remote_and_humanoid_before_species_animation() 
                     let posed = arms(mob);
                     let age = anim::state(mob, 0.0).age;
                     // Vanilla's arm bobbing follows the custom pose at the model's age.
+                    // Mth's 65536-entry trig table differs from sin/cos by at most
+                    // one sample; after the 0.05 scale that is below 0.000005.
                     let bob_x = (age * 0.067).sin() * 0.05;
                     let bob_z = (age * 0.09).cos() * 0.05 + 0.05;
                     assert!(
-                        (posed[0][3] - (-0.71 + bob_x)).abs() < 1e-6,
+                        (posed[0][3] - (-0.71 + bob_x)).abs() < 0.000005,
                         "id {} main left {} age {age} poses {:?} arms {:?}",
                         mob.id,
                         mob.main_arm_left(),
@@ -103,7 +105,7 @@ fn registered_angles_reach_local_remote_and_humanoid_before_species_animation() 
                         posed
                     );
                     assert!((posed[0][4] - 0.42).abs() < 1e-6);
-                    assert!((posed[0][5] - (0.63 + bob_z)).abs() < 1e-6);
+                    assert!((posed[0][5] - (0.63 + bob_z)).abs() < 0.000005);
                 }
                 // Zombie animation is later than the base pose and overrides its arms.
                 assert_eq!(arms(&game.mobs[2]), baseline[2]);
