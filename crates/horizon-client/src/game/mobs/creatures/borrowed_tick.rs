@@ -639,18 +639,18 @@ impl Game<'_> {
         laps.lap("creature_loop");
         if dispatch_panic.is_none() {
             if !self.persist.off_level.is_empty() {
+                let mounted: std::collections::HashSet<_> = mobs
+                    .iter()
+                    .chain(self.mob_objects())
+                    .filter_map(|passenger| passenger.extra.mount)
+                    .collect();
                 for mob in &mobs {
                     let kept = index
                         .get(&mob.id)
                         .and_then(|&slot| keep.get(slot as usize))
                         .copied()
                         .unwrap_or(true);
-                    if !kept
-                        && mobs
-                            .iter()
-                            .chain(self.mob_objects())
-                            .any(|passenger| passenger.extra.mount == Some(mob.id))
-                    {
+                    if !kept && mounted.contains(&mob.id) {
                         let mut removed = mob.clone();
                         removed.removed = true;
                         self.persist

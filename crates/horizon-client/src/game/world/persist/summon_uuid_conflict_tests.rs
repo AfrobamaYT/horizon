@@ -63,7 +63,7 @@ fn uuid(n: i32) -> Option<Tag> {
 }
 
 #[test]
-#[ignore = "needs prepared resources"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn pruning_keeps_graph_owned_objects_without_aliasing_duplicate_owners() {
     with_game(|game, _| {
         assert!(summon(
@@ -116,7 +116,7 @@ fn pruning_keeps_graph_owned_objects_without_aliasing_duplicate_owners() {
 }
 
 #[test]
-#[ignore = "needs prepared resources"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn rejected_passenger_does_not_destroy_its_resident_duplicates_scores() {
     for score_at_destruction in [false, true] {
         with_game(|game, _| {
@@ -177,7 +177,7 @@ fn rejected_passenger_does_not_destroy_its_resident_duplicates_scores() {
 }
 
 #[test]
-#[ignore = "needs prepared resources"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn data_load_keeps_passenger_links_on_both_sides_of_an_offlevel_object() {
     with_game(|game, _| {
         assert!(summon(
@@ -206,7 +206,7 @@ fn data_load_keeps_passenger_links_on_both_sides_of_an_offlevel_object() {
 }
 
 #[test]
-#[ignore = "needs prepared resources"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn dismount_uses_the_retained_vehicle_and_repairs_both_object_lists() {
     with_game(|game, _| {
         assert!(summon(
