@@ -154,6 +154,35 @@ net.minecraft.stats.RecipeBookSettings replaceFrom` and `rea_vanilla.py method
 net.minecraft.stats.ServerRecipeBook sendInitialRecipeBook`. Custom registration,
 retention and negotiation are Horizon decisions, not claims about vanilla.
 
+## Recipe displays and category membership (#828)
+
+The `recipe_book_categories` declaration now carries `target_menu`, `book`,
+`search_group` and `displays` beside the category id, recipe type and icon.
+A type supplies `RecipeBookDisplayEntry` values for its recipes during the
+existing recipe-table declaration callback. The callback can read the Host's
+recipe table and interpret its own JSON; the engine does not impose a JSON
+schema on mod recipes.
+
+`RecipeBookDisplay` names the shaped, shapeless, furnace, stonecutter and
+smithing layouts. `RecipeSlotDisplay` describes slots using API-owned values:
+items, stacks, tags, fuel, potion/component transforms, dyeing, trimming,
+remainders and composites. All three display types explicitly derive `Wire`.
+Named resource references are resolved at load, not while drawing.
+
+The engine's `ModBookIndex::build` boundary validates declarations atomically
+against resource tables. Unknown resources, invalid layouts, duplicate recipe
+ownership and conflicting book membership return `DisplayLoadError` values.
+A book has one menu and one search group; no search group can aggregate two
+books. Search membership is derived from the book's categories, so two mod
+books remain isolated and vanilla books have no mod search members.
+
+This is display/index infrastructure, **not screen integration**. Existing
+screens do not yet render these declarations. A declaration's `book` is a
+minimal namespaced identity intended to converge with #2415's registered
+`RecipeBookTypeKey`; it does not register a book or create settings. Enabling
+custom book screens still requires the registration and negotiated settings
+route described above. No vanilla book ordinal or packet meaning changes.
+
 ## Open questions
 
 - Exact public handle and registration declaration names: recommend following

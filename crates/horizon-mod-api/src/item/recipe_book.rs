@@ -1,8 +1,11 @@
-//! Moved here from the game so mods can name it.
+//! Recipe book declarations supplied by a custom recipe type.
+#[path = "recipe_display.rs"]
+mod display;
 #[allow(unused_imports)]
 use crate::*;
+pub use display::{RecipeBookDisplay, RecipeBookDisplayEntry, RecipeSlotDisplay};
 /// A native mod's book category for one custom recipe type.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct RecipeBookCategory {
@@ -12,6 +15,15 @@ pub struct RecipeBookCategory {
     pub recipe_type: String,
     /// A registered item id used as the category's icon.
     pub icon: String,
+    /// The menu whose screen owns this category.
+    pub target_menu: String,
+    /// Namespaced book identity, separate from category identity and settings.
+    /// Converges with the registered book keys in #2415; this does not register a book.
+    pub book: String,
+    /// Search category aggregating exactly this book's categories.
+    pub search_group: String,
+    /// Recipe-type supplied displays, rebuilt with this declaration on reload.
+    pub displays: Vec<RecipeBookDisplayEntry>,
 }
 
 /// A namespaced custom recipe book identity returned during registration.
