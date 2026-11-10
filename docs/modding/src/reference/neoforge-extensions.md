@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 6 | 21 | 33 | 0 |
-| `IBlockStateExtension` | 57 | 5 | 20 | 32 | 0 |
+| `IBlockExtension` | 60 | 8 | 19 | 33 | 0 |
+| `IBlockStateExtension` | 57 | 7 | 18 | 32 | 0 |
 | `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -66,7 +66,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing | — | Engine rule in the climbing code; not exposed. |
 | `isBurning(state, level, pos)` | Missing | — | No per-block burning query; `block_burn` is fire removing a block. |
 | `canHarvestBlock(state, level, pos, player)` | Covered | `BlockPart::can_harvest_block` (`hooks/can_harvest_block.rs`) | Asked where `player_harvest_check` fires, before it: the global hook still hears and may change the part's answer. |
-| `onDestroyedByPlayer(state, level, pos, player, stack, willHarvest, fluid)` | Partial | `break_block` (`hooks/base.rs`), `block_drops` (`hooks/block_drops.rs`) | `break_block` cancels the break or replaces the XP sample; `block_drops` edits drops. Neither returns "the block was destroyed" for the caller. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `onDestroyedByPlayer(state, level, pos, player, stack, willHarvest, fluid)` | Covered | `BlockPart::on_destroyed_by_player` (`hooks/on_destroyed_by_player.rs`) | Asked in the player's break after `break_block` allowed it, with the tool and whether the break harvests. The part answers whether the block was destroyed (`Some(true)`: it removed the block itself, `Some(false)`: it stays) in place of `playerWillDestroy` and the removal, and `None` keeps vanilla's. The fluid is not an argument. |
 | `onDestroyedByPushReaction(state, level, pos, direction, fluid)` | Missing | — | No hook at the piston/fluid destruction point. |
 | `getRespawnPosition(state, entityType, level, pos, angle)` | Partial | `player_respawn_position` (`hooks/base.rs`) | The global `PlayerRespawnPositionEvent` moves the player after vanilla found the bed or anchor; the per-block search is engine-owned. |
 | `getExplosionResistance(state, level, pos, explosion)` | Partial | `BlockProperties.explosion_resistance` → `StateFacts.explosion_resistance` | Static; the explosion is not consulted. |
@@ -102,7 +102,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `onBlockExploded(state, level, pos, explosion)` | Partial | `explosion_detonate` (`hooks/base.rs`) | Same global pre-blast hook; no per-block callback after the block is removed. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `collisionExtendsVertically(state, level, pos, entity)` | Missing | — | Collision shapes are data; no per-entity extension query. |
 | `shouldDisplayFluidOverlay(state, level, pos, fluid)` | Missing | — | Overlay drawing is engine-owned. |
-| `getToolModifiedState(state, context, ability, simulate)` | Partial | `block_tool_modification` (`hooks/block_tool_modification.rs`) | Global `BlockEvent.BlockToolModificationEvent` cancels or replaces the final state; not a Part method and no `simulate` flag. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `getToolModifiedState(state, context, ability, simulate)` | Covered | `BlockPart::tool_modified_state` (`hooks/tool_modified_state.rs`) | Asked of the clicked block before the global `block_tool_modification`, with the vanilla result: the part allows, replaces or, cancelled, denies the action. `simulate` is `ToolUse::simulated`. Axe, shovel and hoe actions and a shovel dousing a campfire. |
 | `isScaffolding(state, level, pos, entity)` | Missing | — | Scaffolding is identified by block class; no content field or Part. |
 | `hidesNeighborFace(level, pos, state, neighborState, direction)` | Missing | — | `block_render_visibility` hides a whole state from the mesher, not one face. |
 | `supportsExternalFaceHiding(state)` | Missing | — | No per-face culling query. |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 5 covered, 20 partial, 32 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 7 covered, 18 partial, 32 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -301,12 +301,13 @@ their rows have landed or become partial since and should be narrowed when they 
   reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds` (state-based, without a
   position or direction); `canSustainPlant` is `can_sustain_plant` (the soil) before `may_place_on` (the
   plant); `canHarvestBlock` is `can_harvest_block` before `player_harvest_check`; `isLadder` is `is_ladder`;
-  `getToolModifiedState` is partly `block_tool_modification`.
+  `getToolModifiedState` is `tool_modified_state` before `block_tool_modification`; `onDestroyedByPlayer` is
+  `on_destroyed_by_player`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
   has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
-  `canStickTo`, `onDestroyedByPlayer` (all Partial or Missing above).
+  `canStickTo` (all Partial or Missing above).
 - **Item group rows that still need their own answer:** `onEntityItemUpdate`, `canPerformAction` (both
   Partial or Missing above).
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing

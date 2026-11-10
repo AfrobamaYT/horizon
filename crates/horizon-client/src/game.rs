@@ -7003,38 +7003,15 @@ impl Game<'_> {
             let at = pos.map(f64::from);
             self.spawn_item_own(stack, at, 10);
         }
-        let mut correct_tool =
-            !facts.requires_tool || self.res.items().correct_for_drops(self.held(), &facts.name);
-        if !creative
-            && self
-                .res
-                .behaviours()
-                .data(state)
-                .is(horizon_world::level::classes::Class::Door)
-        {
-            self.mod_harvest_check(pos, state, &mut correct_tool);
-        }
-        let source = self
-            .lan_acting_uuid
-            .map(horizon_world::level::LevelEventPlayer);
-        let removed = self.with_level(|b, level, ticks| {
-            b.player_destroy_block(
-                level,
-                ticks,
-                BlockPos::new(pos[0], pos[1], pos[2]),
-                creative,
-                correct_tool,
-                source,
-            )
-        });
+        let held = self.held().cloned();
+        let (removed, harvest) = self.player_destroy_block_removal(
+            pos,
+            state,
+            &facts.name,
+            facts.requires_tool,
+            held.as_ref(),
+        );
         if !creative {
-            let held = self.held().cloned();
-            let mut harvest = !facts.requires_tool
-                || self
-                    .res
-                    .items()
-                    .correct_for_drops(held.as_ref(), &facts.name);
-            self.mod_harvest_check(pos, state, &mut harvest);
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);
             }
@@ -12478,6 +12455,7 @@ impl Game<'_> {
             _ => "east",
         };
         let registry = self.pack.assets.registry;
+        let block = world.block(pos[0], pos[1], pos[2]);
         let around = Column {
             world,
             registry,
@@ -12524,7 +12502,7 @@ impl Game<'_> {
                 ability,
                 simulated,
             });
-            self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
+            self.mod_tool_modification(stack, block, &tool, &mut state, &mut cancel);
             if cancel {
                 return None;
             }
