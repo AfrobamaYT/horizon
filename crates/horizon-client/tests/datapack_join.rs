@@ -368,7 +368,7 @@ fn a_reload_snapshot_gives_the_client_generation_two_and_stales_old_handles() {
 
     // What `/reload` does: publish the next generation, then send each joined client its snapshot.
     datapack_net::serve(Some(Arc::new(first.reload(candidate(9)).unwrap())));
-    let data = datapack_net::reload_payload(
+    let datapack_net::Step::Send(data) = datapack_net::reload_payload(
         host.hub
             .guests
             .iter()
@@ -377,8 +377,9 @@ fn a_reload_snapshot_gives_the_client_generation_two_and_stales_old_handles() {
             .sender
             .datapack_offer
             .as_deref(),
-    )
-    .expect("a snapshot for Mage");
+    ) else {
+        panic!("a snapshot for Mage");
+    };
     host.hub.send_to(
         host.joined[0],
         &play::Clientbound::CustomPayload(cfg::CustomPayload {
@@ -402,4 +403,40 @@ fn a_reload_snapshot_gives_the_client_generation_two_and_stales_old_handles() {
     assert_eq!(next.generation(), 2);
     assert_eq!(power(&next), Some(DatapackValue::Int(9)));
     assert_eq!(next.get(&held), Err(DatapackReadError::StaleGeneration));
+}
+
+#[test]
+fn a_refused_reload_disconnects_instead_of_retaining_the_old_generation() {
+    let _turn = begin();
+    let first = first_set(7);
+    datapack_net::serve(Some(first.clone()));
+    let (_resources, data) = Resources::new("refused_reload");
+    let mut host = Host::start();
+    let session = connect(host.port(), "Mage", &data);
+    join(&mut host, &session);
+    while host.joined.is_empty() {
+        host.tick();
+        std::thread::yield_now();
+    }
+    let mut sender = host
+        .hub
+        .guests
+        .iter()
+        .find(|g| g.uuid == offline_uuid("Mage"))
+        .unwrap()
+        .sender
+        .clone();
+    sender.datapack_offer = Some(Arc::from([255_u8]));
+    datapack_net::serve(Some(Arc::new(first.reload(candidate(9)).unwrap())));
+    datapack_net::reload_connection(&sender);
+    drive(&mut host, &session, |_, event| match event {
+        Event::Disconnected { reason, .. } => {
+            assert!(
+                format!("{reason:?}").contains("registries are unreadable"),
+                "{reason:?}"
+            );
+            Some(())
+        }
+        _ => None,
+    });
 }

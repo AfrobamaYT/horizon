@@ -412,35 +412,18 @@ impl Game<'_> {
         Ok(())
     }
     /// Sends each joined Horizon client the snapshot of the set just published, built from the
-    /// offer it made at the join. A client that cannot be sent one keeps what it has.
+    /// offer owned by its connection. A refused replacement ends that connection with its reason.
     fn send_datapack_snapshots(&mut self) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let payloads: Vec<(u32, Vec<u8>)> = host
+        for guest in host
             .hub
             .guests
             .iter()
             .filter(|g| g.placed && g.participates_online() && g.brand == "horizon")
-            .filter_map(|g| {
-                Some((
-                    g.conn,
-                    horizon_client::datapack_net::reload_payload(
-                        g.sender.datapack_offer.as_deref(),
-                    )?,
-                ))
-            })
-            .collect();
-        for (conn, data) in payloads {
-            host.hub.send_to(
-                conn,
-                &horizon_protocol::packets::play::Clientbound::CustomPayload(
-                    horizon_protocol::packets::configuration::CustomPayload {
-                        channel: horizon_client::datapack_net::CHANNEL.into(),
-                        data,
-                    },
-                ),
-            );
+        {
+            horizon_client::datapack_net::reload_connection(&guest.sender);
         }
     }
     /// Reload the content tables with the world's packs, as

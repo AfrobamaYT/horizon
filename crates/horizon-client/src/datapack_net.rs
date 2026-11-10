@@ -26,13 +26,8 @@ static RECEIVED: Held = Mutex::new(None);
 static SESSION: AtomicU64 = AtomicU64::new(1);
 /// The snapshot of the set now served for `player`, from the offer they made at the join, when
 /// there is one to send.
-pub fn reload_payload(offer: Option<&[u8]>) -> Option<Vec<u8>> {
-    let offer = offer?;
-    let declarations = mod_api::__private::datapack_registry_declarations();
-    match step_for(declarations, served().as_deref(), true, Some(offer)) {
-        Step::Send(bytes) => Some(bytes),
-        _ => None,
-    }
+pub fn reload_payload(offer: Option<&[u8]>) -> Step {
+    server_step(true, offer)
 }
 
 /// A new id for a world session's set, whether this process published it or received it, so
@@ -329,3 +324,7 @@ mod tests {
         );
     }
 }
+
+#[path = "datapack_delivery.rs"]
+mod delivery;
+pub use delivery::reload_connection;
