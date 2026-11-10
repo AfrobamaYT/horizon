@@ -118,6 +118,54 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-latest", blocks["pool-watch"])
         self.assertIn("permissions:\n  contents: read", workflow)
 
+    @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
+    def test_prepared_data_sentinel_reports_and_rejects_missing_coverage(self):
+        from test_ci_runners import jobs
+        import textwrap
+        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
+        aggregate = dict(jobs(workflow))["ignored-tests"]
+        condition = aggregate.split("if: >-", 1)[1].split("runs-on:", 1)[0]
+        self.assertIn("always()", condition)
+        self.assertNotIn("self_hosted", condition)
+        self.assertIn("github.event_name == 'push'", condition)
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+        self.assertNotIn("pull_request", condition)
+        script = textwrap.dedent(aggregate.split("run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "summary"
+            for result in ("success", "skipped", "failure", "cancelled", ""):
+                for route in ("true", "false"):
+                    env = dict(os.environ, RESULT=result, ROUTE=route,
+                               REASON="enabled=true; lease=0; live=unreadable",
+                               CHANGES="success", FORCED_GITHUB="false",
+                               GITHUB_STEP_SUMMARY=str(summary))
+                    run = subprocess.run(["bash", "-e", "-c", script], env=env,
+                                         capture_output=True, text=True)
+                    self.assertEqual(run.returncode, 0 if result == "success" else 1)
+                    self.assertIn("live=unreadable", summary.read_text())
+                    self.assertIn(f"Shard result: {result}", summary.read_text())
+                    summary.unlink()
+
+    @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
+    def test_missing_prepared_data_fails_push_and_nightly_dispatch(self):
+        from test_ci_runners import jobs
+        import textwrap
+        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
+        shard = dict(jobs(workflow))["ignored-tests-shards"]
+        script = textwrap.dedent(shard.split("        run: |\n          for dir", 1)[1]
+                                .split("      - name: Generate", 1)[0])
+        script = "for dir " + script
+        with tempfile.TemporaryDirectory() as directory:
+            script = script.replace("/cache/horizon-local", directory + "/missing")
+            summary = Path(directory) / "summary"
+            for event in ("push", "workflow_dispatch"):
+                env = dict(os.environ, EVENT=event, GITHUB_STEP_SUMMARY=str(summary))
+                run = subprocess.run(["bash", "-e", "-c", script], env=env,
+                                     capture_output=True, text=True)
+                self.assertEqual(run.returncode, 1)
+                self.assertIn(f"Prepared data unavailable: minecraft ({event})", summary.read_text())
+                summary.unlink()
+
     def test_telemetry_ingest_checks_require_manual_dispatch(self):
         from test_ci_runners import triggers
         workflow = (ROOT / ".github/workflows/telemetry-server.yml").read_text()
