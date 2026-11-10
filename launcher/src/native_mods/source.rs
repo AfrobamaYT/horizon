@@ -265,7 +265,7 @@ fn checked_routes_and_identities_do_not_alias() {
     assert!(message.contains("access = \"api\" never rebuilds the game"));
     assert!(message.contains("request a hook"));
     manifest.inject[0].access = Access::Internals;
-    manifest.inject[0].kind = Kind::ModifyArg;
+    manifest.inject[0].kind = Kind::Replace;
     assert!(matches!(
         adapt(&manifest, vec![], "fn target()"),
         Err(InjectError::Invalid { field: "kind", .. })

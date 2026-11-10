@@ -129,10 +129,7 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
 /// on native mods only.
 fn availability(catalog: &Catalog, request: &Request<'_>) -> String {
     use horizon_mod_point_emit::plain_path;
-    let api = if !matches!(
-        request.kind,
-        Kind::Head | Kind::Return | Kind::ModifyArg | Kind::Replace
-    ) {
+    let api = if !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace) {
         format!("refused, {} is internals only", request.kind_name)
     } else {
         match catalog
@@ -211,12 +208,12 @@ fn append_mod_point(
     let id = format!("{}:{}", manifest.id, request.with);
     if !matches!(
         request.kind,
-        Kind::Head | Kind::Return | Kind::ModifyArg | Kind::Replace
+        Kind::Head | Kind::Return | Kind::Replace
     ) || request.call.is_some()
         || request.nth.is_some()
     {
         return Err(format!(
-            "{id}: a mod point has head and return places only (--kind head, return, modify_arg or replace)"
+            "{id}: a mod point has head and return places only (--kind head, return or replace)"
         ));
     }
     let Some(point) = library
@@ -307,12 +304,7 @@ fn append(
     .map_err(|e| e.to_string())?;
     let needs_call = !matches!(
         request.kind,
-        Kind::Head
-            | Kind::Return
-            | Kind::ModifyArg
-            | Kind::Replace
-            | Kind::Field
-            | Kind::Expression
+        Kind::Head | Kind::Return | Kind::Replace | Kind::Field | Kind::Expression
     );
     let selected = if needs_call {
         let candidates: Vec<_> = catalog

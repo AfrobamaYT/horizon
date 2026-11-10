@@ -115,8 +115,9 @@ and are identical on listed and source routes; physical IDs and dispatch remain 
 The build log prints `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
 hash or missing target is refused, not silently redirected. Points order by descending priority,
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
-and inject id order. `modify_arg` is accepted on listed head slots but is a typed refusal on the
-source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
+and inject id order. To change a function's own arguments, use `head`: its listener gets every argument
+to change. To change a call's arguments, use `before_call`: its listener gets them mutably, evaluated,
+before the original runs. The old spellings `modify_arg` and `modify_call_arg` are refused, naming these.
 An API `replace` owns the function, as a mixin overwrite does: its function takes the head's inputs
 and returns the point's return type, which the caller gets, and the body never runs. At a point
 returning `()` it returns `()` and the cancel is forced. It runs after the point's other API head

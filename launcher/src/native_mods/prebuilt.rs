@@ -750,8 +750,8 @@ mod tests {
                 json!({"at":"Example::private","kind":"head","access":"api"}),
             ),
             (
-                "argument",
-                json!({"at":"Example::calls","kind":"modify_call_arg","access":"internals"}),
+                "expression",
+                json!({"at":"Example::calls","kind":"expression","access":"internals"}),
             ),
         ] {
             let dir = root.join(id);

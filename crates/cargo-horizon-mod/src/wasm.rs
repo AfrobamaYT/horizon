@@ -293,7 +293,7 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
-/// A wasm module gets a guest listener for each API head, return, `modify_arg` and `replace`
+/// A wasm module gets a guest listener for each API head, return and `replace`
 /// injection, which the shared emitter builds; `access = "internals"` and the call-site kinds
 /// exist only natively. The first that can't be built is refused, named with its reason.
 fn wasm_route(injects: &[horizon_mod_package::manifest::inject::Inject]) -> Result<(), String> {
@@ -314,7 +314,7 @@ fn wasm_route(injects: &[horizon_mod_package::manifest::inject::Inject]) -> Resu
         format!("the call-site kind `{kind}` is native-only")
     };
     Err(format!(
-        "{}: wasm takes API head, return, modify_arg and replace injections; {why}",
+        "{}: wasm takes API head, return and replace injections; {why}",
         entry.id
     ))
 }
@@ -644,26 +644,22 @@ mod route_tests {
 
     #[test]
     fn wasm_takes_the_api_head_kinds_and_names_the_first_it_cant() {
-        let head_kinds = [Kind::Head, Kind::Return, Kind::ModifyArg, Kind::Replace]
+        let head_kinds = [Kind::Head, Kind::Return, Kind::Replace]
             .map(|kind| inject("ok", kind, Access::Api, None));
         assert_eq!(wasm_route(&head_kinds), Ok(()));
         let internals = inject("raw", Kind::Head, Access::Internals, None);
         assert_eq!(
             wasm_route(&[head_kinds[0].clone(), internals]),
-            Err(
-                "raw: wasm takes API head, return, modify_arg and replace injections; \
+            Err("raw: wasm takes API head, return and replace injections; \
                  `access = \"internals\"` is native-only"
-                    .into()
-            )
+                .into())
         );
         let site = inject("site", Kind::BeforeCall, Access::Api, Some("game::step"));
         assert_eq!(
             wasm_route(&[site]),
-            Err(
-                "site: wasm takes API head, return, modify_arg and replace injections; \
+            Err("site: wasm takes API head, return and replace injections; \
                  the call-site kind `before_call` is native-only"
-                    .into()
-            )
+                .into())
         );
     }
 }

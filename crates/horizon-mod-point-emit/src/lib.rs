@@ -180,12 +180,9 @@ fn resolve<'a, 'p>(
         .iter()
         .filter(|entry| entry.access == Access::Api && entry.call.is_none())
         .map(|entry| {
-            if !matches!(
-                entry.kind,
-                Kind::Head | Kind::ModifyArg | Kind::Replace | Kind::Return
-            ) {
+            if !matches!(entry.kind, Kind::Head | Kind::Replace | Kind::Return) {
                 return Err(format!(
-                    "{}: expected an API head, return, modify_arg or replace injection",
+                    "{}: expected an API head, return or replace injection",
                     entry.id
                 ));
             }
@@ -307,12 +304,6 @@ hash = "pin"
                 "        mod_points::listeners::tick(\"fixture\", 12, \"before\", mod_3::head),\n",
                 "        mod_points::listeners::tick_return(\"fixture\", 0, \"after\", mod_3::tail),\n"
             )
-        );
-        let mut modify = manifest.clone();
-        modify.inject[0].kind = Kind::ModifyArg;
-        assert_eq!(
-            api(&modify, &points, "mod_3::").unwrap()[0],
-            api(&manifest, &points, "mod_3::").unwrap()[0]
         );
         // A replace owns the outcome, by the point's return and host, through one macro.
         let mut replace = manifest.clone();

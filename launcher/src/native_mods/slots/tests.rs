@@ -56,11 +56,9 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
     for kind in [
         Kind::Head,
         Kind::Return,
-        Kind::ModifyArg,
         Kind::Replace,
         Kind::BeforeCall,
         Kind::AfterCall,
-        Kind::ModifyCallArg,
         Kind::ModifyValue,
         Kind::WrapCall,
         Kind::WrapIf,
@@ -74,7 +72,6 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 kind,
                 Kind::BeforeCall
                     | Kind::AfterCall
-                    | Kind::ModifyCallArg
                     | Kind::ModifyValue
                     | Kind::WrapCall
                     | Kind::WrapIf
@@ -103,8 +100,6 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 continue;
             }
             let pending = match (kind, access) {
-                (Kind::ModifyCallArg, Access::Api) => Some(NoSlotReason::ApiSitesUnsupported),
-                (Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
                 (Kind::ModifyLocal, Access::Api) => Some(NoSlotReason::LocalSourceOnly),
                 (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
                 (Kind::Expression, Access::Api) => Some(NoSlotReason::KindHasNoSlot),
@@ -344,7 +339,7 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
         .next()
         .unwrap()
         .contains("source (private slot"));
-    manifest.inject[0].kind = Kind::ModifyArg;
+    manifest.inject[0].kind = Kind::Expression;
     assert!(matches!(
         check(&catalog, &manifest),
         Err(InjectError::NoSlot {

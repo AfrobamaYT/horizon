@@ -40,22 +40,83 @@ pub enum Position {
     After,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+/// What a listener does at its place, spelled in snake case in the manifest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Head,
     Return,
-    ModifyArg,
     Replace,
     BeforeCall,
     AfterCall,
-    ModifyCallArg,
     ModifyValue,
     WrapCall,
     WrapIf,
     ModifyLocal,
     Field,
     Expression,
+}
+
+impl Kind {
+    const ALL: [Self; 11] = [
+        Self::Head,
+        Self::Return,
+        Self::Replace,
+        Self::BeforeCall,
+        Self::AfterCall,
+        Self::ModifyValue,
+        Self::WrapCall,
+        Self::WrapIf,
+        Self::ModifyLocal,
+        Self::Field,
+        Self::Expression,
+    ];
+
+    /// The manifest spelling.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Head => "head",
+            Self::Return => "return",
+            Self::Replace => "replace",
+            Self::BeforeCall => "before_call",
+            Self::AfterCall => "after_call",
+            Self::ModifyValue => "modify_value",
+            Self::WrapCall => "wrap_call",
+            Self::WrapIf => "wrap_if",
+            Self::ModifyLocal => "modify_local",
+            Self::Field => "field",
+            Self::Expression => "expression",
+        }
+    }
+}
+
+impl Serialize for Kind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
+/// A removed spelling is refused naming the form that replaced it; it is never read as that form.
+impl<'de> Deserialize<'de> for Kind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = std::borrow::Cow::<str>::deserialize(deserializer)?;
+        if let Some(kind) = Self::ALL.into_iter().find(|kind| kind.name() == name) {
+            return Ok(kind);
+        }
+        Err(serde::de::Error::custom(match &*name {
+            "modify_arg" => {
+                "kind `modify_arg` was removed: use `head`, whose listener already gets \
+                             every argument to change"
+                    .to_owned()
+            }
+            "modify_call_arg" => "kind `modify_call_arg` was removed: use `before_call`, whose \
+                                  listener gets the call's arguments mutably before it runs"
+                .to_owned(),
+            other => format!(
+                "unknown kind `{other}`, expected one of {}",
+                Self::ALL.map(Self::name).join(", ")
+            ),
+        }))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -69,11 +130,10 @@ pub enum Access {
 impl Kind {
     fn slot(self) -> Option<SlotKind> {
         Some(match self {
-            Self::Head | Self::ModifyArg | Self::Replace => SlotKind::Head,
+            Self::Head | Self::Replace => SlotKind::Head,
             Self::Return => SlotKind::Return,
             Self::BeforeCall
             | Self::AfterCall
-            | Self::ModifyCallArg
             | Self::ModifyValue
             | Self::WrapCall
             | Self::WrapIf => SlotKind::Site,
@@ -527,6 +587,27 @@ mod tests {
             assert!(parse(&DECL.replace(old, new), &native).is_err(), "{new}");
         }
         assert!(parse(&format!("{DECL}{DECL}"), &native).is_err());
+        // Removed spellings name their replacement; they are never read as it.
+        for (old, new) in [
+            ("modify_arg", "`head`"),
+            ("modify_call_arg", "`before_call`"),
+        ] {
+            let error = parse(&DECL.replace("'head'", &format!("'{old}'")), &native).unwrap_err();
+            assert!(
+                error.contains(&format!("kind `{old}` was removed: use {new}")),
+                "{error}"
+            );
+        }
+        let error = parse(&DECL.replace("'head'", "'overwrite'"), &native).unwrap_err();
+        assert!(
+            error.contains("unknown kind `overwrite`, expected one of head, return, replace"),
+            "{error}"
+        );
+        for kind in Kind::ALL {
+            let value = toml::Value::try_from(kind).unwrap();
+            assert_eq!(value.as_str(), Some(kind.name()));
+            assert_eq!(value.try_into::<Kind>().unwrap(), kind);
+        }
         assert!(parse(DECL, "").is_err());
         for name in RESERVED.split_whitespace() {
             let mut i = inject(Kind::Head);
@@ -543,11 +624,9 @@ mod tests {
         let rows = [
             (Kind::Head, Some(Head)),
             (Kind::Return, Some(Return)),
-            (Kind::ModifyArg, Some(Head)),
             (Kind::Replace, Some(Head)),
             (Kind::BeforeCall, Some(Site)),
             (Kind::AfterCall, Some(Site)),
-            (Kind::ModifyCallArg, Some(Site)),
             (Kind::ModifyValue, Some(Site)),
             (Kind::WrapCall, Some(Site)),
             (Kind::WrapIf, Some(Site)),
@@ -555,6 +634,7 @@ mod tests {
             (Kind::Field, Some(Extension)),
             (Kind::Expression, None),
         ];
+        assert_eq!(rows.len(), Kind::ALL.len());
         for (kind, expected) in rows {
             for access in [Access::Api, Access::Internals] {
                 for (listed, native_only) in [(true, false), (false, false), (true, true)] {
@@ -650,11 +730,9 @@ mod tests {
         for kind in [
             Kind::Head,
             Kind::Return,
-            Kind::ModifyArg,
             Kind::Replace,
             Kind::BeforeCall,
             Kind::AfterCall,
-            Kind::ModifyCallArg,
             Kind::ModifyValue,
             Kind::WrapCall,
             Kind::WrapIf,

@@ -153,7 +153,6 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             (Route::Slot(SlotKind::Site), _, Access::Api) => {
                 Some(NoSlotReason::ApiSitesUnsupported)
             }
-            (_, Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
             // An internals replace is built from the listed point's raw shape: an unlisted
             // function needs its slot row first, which the declaration names.
             (Route::Source(reason), Kind::Replace, Access::Internals) => Some(reason),

@@ -79,7 +79,7 @@ pub(super) fn adapter(kind: horizon_mod_package::manifest::inject::Kind, f: &str
     use horizon_mod_package::manifest::inject::Kind;
     match kind {
         Kind::ModifyLocal => format!("|receiver, args, original| {{ {f}(receiver); original(receiver, args) }}"),
-        Kind::BeforeCall | Kind::ModifyCallArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
+        Kind::BeforeCall => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
         Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
         Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
         Kind::WrapCall => f.into(),
