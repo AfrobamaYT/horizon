@@ -1364,5 +1364,6 @@
   "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.",
   "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
-  "replace needs a return the API carries": "replace needs a return the API carries"
+  "replace needs a return the API carries": "replace needs a return the API carries",
+  "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.": "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds."
 }

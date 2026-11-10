@@ -32,6 +32,26 @@ pub(super) struct Declared {
 }
 
 impl Declared {
+    pub(super) fn fields<'a>(
+        manifests: impl IntoIterator<Item = &'a horizon_mod_package::manifest::Manifest>,
+    ) -> Vec<Self> {
+        manifests.into_iter().flat_map(|manifest| {
+            manifest.inject.iter().filter(|inject| inject.kind == horizon_mod_package::manifest::inject::Kind::Field).map(|inject| {
+                let prefix = if manifest.id.starts_with(|c: char| c.is_ascii_digit()) { "_" } else { "" };
+                let injections = format!("{}:{}", manifest.id, inject.id);
+                let field = format!("{prefix}{}__{}", manifest.id, inject.with);
+                Self {
+                    binding: field.clone(),
+                    explanation: crate::i18n::trf(
+                        "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.",
+                        &[("injections", &injections), ("type", inject.local_type.as_deref().expect("validated field type")), ("field", &field), ("target", &inject.at)],
+                    ),
+                    injections,
+                }
+            })
+        }).collect()
+    }
+
     /// Each staged `expression` site: an error inside its binding block means the declared
     /// `type` doesn't match how the game uses the read.
     pub(super) fn expressions(sites: &[horizon_mod_api_gen::sites::Site]) -> Vec<Self> {
@@ -475,7 +495,7 @@ mod tests {
         fs::write(dir.join("Cargo.toml"), "[workspace]\n[package]\nname = 'declared-fixture'\nversion = '0.1.0'\nedition = '2021'\n").unwrap();
         fs::write(
             dir.join("src/main.rs"),
-            "struct Game { speed: u8, __horizon_field_charge: Charge }\nfn main() {}\n",
+            "struct Game { speed: u8, charged__charge: Charge }\nfn main() {}\n",
         )
         .unwrap();
         let output = Command::new(env!("CARGO"))
@@ -488,11 +508,21 @@ mod tests {
         assert!(!output.status.success());
         let stdout = String::from_utf8(output.stdout).unwrap();
         let mods = vec![("charged".to_owned(), "1.0.0".to_owned())];
-        let declared = [Declared {
-            binding: "__horizon_field_charge".into(),
-            injections: "charged:charge".into(),
-            explanation: "E_FIELD: charged:charge: no type `Charge`".into(),
-        }];
+        let manifest = horizon_mod_package::manifest::Manifest::parse(
+            r#"
+id = "charged"
+version = "1.0.0"
+[[inject]]
+id = "charge"
+at = "game::Game"
+kind = "field"
+access = "internals"
+with = "charge"
+type = "Charge"
+"#,
+        )
+        .unwrap();
+        let declared = Declared::fields([&manifest]);
         let compiler = Compiler {
             stage: &dir,
             source: &dir,
@@ -501,7 +531,7 @@ mod tests {
         };
         let error = capture(&compiler, Cursor::new(&stdout), Vec::new()).explain(String::new());
         assert!(
-            error.starts_with("charged 1.0.0:\nE_FIELD: charged:charge: no type `Charge`\n"),
+            error.contains("charged:charge: the declared field type `Charge` for `charged__charge` in game::Game"),
             "{error}"
         );
         assert!(error.contains("E0425"), "{error}");
