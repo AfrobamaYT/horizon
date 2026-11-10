@@ -302,6 +302,9 @@ pub mod tests {
         struct HarvestMod;
         #[mod_api::__subscriptions]
         impl Hooks for HarvestMod {
+            fn player_harvest_check(&self, _: HostSide<'_>, event: &mut PlayerHarvestCheckEvent) {
+                event.can_harvest = !event.can_harvest;
+            }
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 let stone = r.block_key("minecraft:stone");
                 r.block_part(stone, Answer(true));

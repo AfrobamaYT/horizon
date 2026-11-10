@@ -1174,7 +1174,7 @@ pub(super) mod tests {
                 ("minecraft:grass_block", 0.6, None, true, "minecraft:dirt"),
             ] {
                 let state = registry.default_state(block).unwrap();
-                let harvest = part.unwrap_or(by_hand);
+                let harvest = !part.unwrap_or(by_hand);
                 game.world.set(pos[0], pos[1], pos[2], state).unwrap();
                 let divisor = if harvest { 30.0 } else { 100.0 };
                 assert_eq!(
