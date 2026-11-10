@@ -92,7 +92,7 @@ Expected values are proposals, not results.
 
 ## What I could not verify
 
-- Any NeoForge 26.3 type or setter for per-biome effects (only the 26.1-labelled page above was readable).
+- The names and signatures of NeoForge 26.3's per-biome setters. What the public record does say (the 26.3 changelog at maven.neoforged.net, `neoforge-26.3.0.102-changelog.txt`, and the descriptions of the pull requests it names on github.com/neoforged/NeoForge; no source or patches were read): the docs site has no 26.3 version (its newest is 26.1, which is the page cited above) and the 26.3 Javadoc host returned 503; `26.3.0.19-beta` "[26.3] Add ability to remove color overrides in BiomeSpecialEffectsBuilder" (#3528, a modifier can unset a colour override as well as set one; the PR text gives no field list); `26.3.0.24-beta` "Provide registries access to BiomeModifier and StructureModifier" (#3546: `modify` receives the server's `RegistryAccess`); `NoneBiomeModifier` was removed in favour of data loading conditions (#3165, described in #3553), so `neoforge:none` is a 1.21-era form that Horizon still reads for older mods. Nothing in the changelog names a per-biome sound, particle or music setter, so those stay Horizon's own `horizon:modify_biome` fields and no counterpart is claimed.
 - Vanilla client behaviour beyond the methods named (`doAnimateTick`, `BiomeAmbientSoundsHandler.tick`); music selection is cited from Horizon's own `music.rs`, not re-read from bytecode.
 - That `walk` in `SyncData::load` reads the modified content root on a dedicated server, and where a mod's brand-new biome file enters `Biomes`.
 - JSON key names for the audio attribute objects beyond what `ambience.rs` and the bytecode accessors show. No code was built or run for this note (no cargo).
