@@ -744,6 +744,13 @@ impl DataLoadContext for OwningLoad<'_> {
 /// }
 /// ```
 pub trait LoopContext {
+    /// Whether a mod-created recipe property set accepts an item ID. Unknown
+    /// sets/items and vanilla set keys return false. Use this in
+    /// `menu_slot_rules` for the same filter on server and client prediction.
+    /// Answers come from the owning load, replaced by the server's synced
+    /// generation on clients; no allocation or file IO occurs during a read.
+    fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool;
+
     /// The side whose loop fires the hook.
     fn side(&self) -> LoopSide;
 
@@ -759,6 +766,11 @@ pub trait LoopContext {
 
 /// Immutable resource-generation reads supplied by an owning loop.
 pub trait LoopReader: Sync {
+    /// Mod-created recipe property membership from the owning generation.
+    fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool {
+        let _ = (set, item);
+        false
+    }
     /// Registry names in ID order.
     fn registry(&self, name: &str) -> Option<Arc<[String]>>;
     /// A captured setting, without file I/O.
@@ -788,6 +800,9 @@ impl<'a> OwningLoop<'a> {
 }
 
 impl LoopContext for OwningLoop<'_> {
+    fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool {
+        self.source.mod_recipe_property_contains(set, item)
+    }
     fn side(&self) -> LoopSide {
         self.side
     }

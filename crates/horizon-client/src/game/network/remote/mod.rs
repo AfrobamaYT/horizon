@@ -1309,6 +1309,7 @@ impl Game<'_> {
         Ok(())
     }
 
+
     /// Prepare a client session and remote state to receive packets from a studio replay.
     pub(super) fn init_remote_for_replay(&mut self) -> Result<()> {
         self.realm_session = false;
@@ -5351,6 +5352,7 @@ impl Game<'_> {
             C::OpenScreen(p) => self.remote_open_screen(p),
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::UpdateRecipes(p) => self.remote_recipe_properties(p),
+
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),

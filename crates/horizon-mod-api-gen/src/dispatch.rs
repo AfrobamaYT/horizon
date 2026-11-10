@@ -697,7 +697,7 @@ pub(super) fn emit<'a>(
         // A trait mod's call is marked with the mod for a panic to name.
         let each = match &hook.owner {
             Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
-            None if answered => {
+            None if answered || hook.collect_validator.is_some() => {
                 format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
             }
             None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
@@ -716,9 +716,16 @@ pub(super) fn emit<'a>(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
                 o = out.unwrap()
             ),
+            Contract::Collect if hook.collect_validator.is_some() => {
+                let validator = hook.collect_validator.as_ref().unwrap();
+                let output = out.unwrap();
+                format!(
+                    "let previous = {event}.{output}.clone(); {callee}.{name}({invoke}); {validator}(mod_id, &previous, {event}.{output});"
+                )
+            }
             _ => format!("{callee}.{name}({invoke});"),
         };
-        let binding = if answered {
+        let binding = if answered || hook.collect_validator.is_some() {
             format!("(mod_id, {mod_item})")
         } else {
             mod_item.clone()
