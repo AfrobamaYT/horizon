@@ -71,8 +71,9 @@ not a lost handle or a guessed replacement state. Update flags retain their vani
 Walking a whole registry uses the typed keys, never names: `host.block_keys()` and
 `host.item_keys()` return every entry in the registry's registration order (vanilla's
 entries first, then mods' in the order they registered); `host.entity_type_keys()`,
-`host.menu_keys()` and `host.enchantment_keys()` do the same for the built-in entity-type and
-menu registries and the data-loaded enchantment registry. A block registry lists a name once
+`host.menu_keys()` do the same for the built-in entity-type and menu registries.
+`host.enchantment_keys()` uses global sorted loaded-registry order, with vanilla and mod
+data-pack entries sorted together. A block registry lists a name once
 per state, and its iteration lists the block once. Build lookup tables from these lists at
 load time instead of resolving names per tick. A table is empty before its registry loads
 (blocks and items during rest load, enchantments with the item tables); registration-time

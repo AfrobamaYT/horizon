@@ -27,8 +27,8 @@ pub trait KeysHost {
     #[access(Metadata)]
     fn menu_keys(&self) -> Vec<MenuKey>;
     /// Side: both.
-    /// Every enchantment key in the loaded registry's order (`RegistryDataLoader` sorts
-    /// data-pack entries by id), so vanilla's alphabetical order and then mods' entries.
+    /// Every enchantment key in global sorted loaded-registry order, including
+    /// vanilla and mod data-pack entries together (`RegistryDataLoader` sorts by id).
     #[access(Metadata)]
     fn enchantment_keys(&self) -> Vec<EnchantmentKey>;
 }
