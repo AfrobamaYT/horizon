@@ -25,19 +25,18 @@ pub(super) fn prepare(
         let is_mod = |at: &str| parsed.mod_point_dependency(at).is_some();
         // Native refuses these in `mod_points::route`; here the manifest never names them as mod
         // points, so the same reason is given before they could fall to the game's catalog.
-        if let Some(injection) = parsed
-            .inject
-            .iter()
-            .find(|i| !is_mod(&i.at) && libraries.iter().any(|p| p.owns(&i.at)))
-        {
-            return Err(
-                horizon_mod_package::manifest::inject::InjectError::Invalid {
+        for injection in parsed.inject.iter().filter(|i| !is_mod(&i.at)) {
+            if let Some(owner) = libraries.iter().position(|p| p.owns(&injection.at)) {
+                return Err(mod_points::Refusal::LibraryCrate {
                     id: format!("{}:{}", parsed.id, injection.id),
-                    field: "at",
-                    fix: mod_points::CRATE_NAMED_AFTER_ID,
+                    library: members[owner].manifest["id"]
+                        .as_str()
+                        .ok_or("library has no id")?
+                        .to_owned(),
+                    krate: libraries[owner].krate.clone(),
                 }
-                .to_string(),
-            );
+                .to_string());
+            }
         }
         for (index, injection) in parsed.inject.iter().filter(|i| is_mod(&i.at)).enumerate() {
             let owner = libraries

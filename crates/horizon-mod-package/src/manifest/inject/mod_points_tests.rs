@@ -229,7 +229,8 @@ fn a_library_whose_crate_is_not_named_after_its_id_is_refused() {
             route("addon", &injection, &library(&catalog))
                 .unwrap_err()
                 .to_string(),
-            format!("E_INJECT_INVALID: addon:listen: invalid at; {CRATE_NAMED_AFTER_ID}")
+            "addon:listen: mod point library chemlib's crate is chem_core; a mod point library's \
+             crate is named after its mod id: chemlib"
         );
     }
 }

@@ -1362,5 +1362,6 @@
   "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.",
   "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.": "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.",
-  "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.": "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata."
+  "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.": "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.",
+  "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}": "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate is named after its mod id: {expected}"
 }
