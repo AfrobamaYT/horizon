@@ -50,9 +50,14 @@ A mod that consumes a block use can run vanilla advancement predicates and rewar
 through `PlayerRef::trigger_block_use(host, pos)` or
 `PlayerRef::trigger_item_used_on_block(host, pos, original, after)`. These server
 operations use the player's own level and never read inventory. Default use fires
-`default_block_use`, then `any_block_use`, both without a tool. Item use fires
-`item_used_on_block` against `original` (the hook's snapshot), then `any_block_use`
-against `after` (what the mod's effect left), in that order. This follows
+`default_block_use`, then `any_block_use`, both without a tool: the default helper
+is specifically tool-free, not general default block use while holding an item.
+Item use fires `item_used_on_block` against `original` (copied after a before-block
+PASS and before block/item effects), then `any_block_use` against `after` (that
+original hand stack mutated in place, excluding a replacement swapped into the
+hand), in that order. Consuming right-click/before-block cancellation already
+fires automatic `any_block_use` only; do not call either pair helper for it,
+which would duplicate any and add an inner trigger. This follows
 `ServerPlayerGameMode.useItemOn` and `ServerGamePacketListenerImpl.handleUseItemOn`;
 the predicate evaluators are `DefaultBlockInteractionTrigger`,
 `ItemUsedOnLocationTrigger`, and `AnyBlockInteractionTrigger`.
