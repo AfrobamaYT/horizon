@@ -42,9 +42,12 @@ class PrebuiltContentsTests(unittest.TestCase):
                 prebuilt_game.check(self.folder("deps/libhorizon_client.so", "deps/libhorizon_mod_wasm.so", stray))
 
     def test_a_folder_without_either_runtime_is_refused(self):
-        for present, missing in (("horizon_client", "horizon-mod-wasm"), ("horizon_mod_wasm", "horizon-client")):
+        for present, missing in (("horizon_mod_host", "horizon-mod-wasm"), ("horizon_mod_wasm", "horizon-mod-host")):
             with self.subTest(present), self.assertRaisesRegex(SystemExit, missing):
                 prebuilt_game.check(self.folder(f"deps/lib{present}.so"))
+
+    def test_host_carries_engine_code_with_engine_metadata_for_mods(self):
+        prebuilt_game.check(self.folder("deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "deps/libhorizon_client-123.rmeta"))
 
     def test_engine_and_wasm_without_host_are_refused(self):
         with self.assertRaisesRegex(SystemExit, "horizon-mod-host"):

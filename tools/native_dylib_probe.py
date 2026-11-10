@@ -150,7 +150,7 @@ def main():
     host = next(line.split(": ", 1)[1] for line in compiler.splitlines() if line.startswith("host: "))
     runtime = sysroot / "lib/rustlib" / host / "lib"
     std_runtime = sorted(runtime.glob(f"{prefix}std-*{extension}"))
-    game = sdk_tools.dylib(deps, "horizon_client")
+    game = next(deps.glob("libhorizon_client-*.rmeta"))
     failures = []
 
     def runtime_env(*folders):

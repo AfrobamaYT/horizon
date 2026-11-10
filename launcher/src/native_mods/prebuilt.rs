@@ -687,10 +687,12 @@ pub(super) fn compile(
 /// The game's own dynamic libraries, which the executable loads from beside itself: the game and
 /// the wasm mod runtime it links (`tools/prebuilt_game.py` checks the archive holds both).
 fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut crates = vec!["horizon_client", "horizon_mod_wasm"];
-    if library(deps, "horizon_mod_host").is_ok() {
-        crates.push("horizon_mod_host");
-    }
+    let top = if library(deps, "horizon_mod_host").is_ok() {
+        "horizon_mod_host"
+    } else {
+        "horizon_client"
+    };
+    let crates = [top, "horizon_mod_wasm"];
     crates
         .into_iter()
         .map(|krate| {
@@ -730,9 +732,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                format!("libhorizon_client.{ext}"),
-                format!("libhorizon_mod_wasm.{ext}"),
-                format!("libhorizon_mod_host.{ext}")
+                format!("libhorizon_mod_host.{ext}"),
+                format!("libhorizon_mod_wasm.{ext}")
             ]
         );
         fs::remove_dir_all(deps).unwrap();

@@ -77,7 +77,7 @@ def stage(target_dir: Path) -> Path:
               cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
     # Only the prebuilt game splits the wasm runtime out: normal source builds stay static. With
     # prefer-dynamic, rustc picks this dylib for the game rather than folding its runtime stack into it.
-    for crate in ("horizon-mod-wasm", "horizon-client"):
+    for crate in ("horizon-mod-wasm",):
         with (staged / f"crates/{crate}/Cargo.toml").open("a") as manifest:
             manifest.write('\n[lib]\ncrate-type = ["rlib", "dylib"]\n')
     return staged
@@ -180,7 +180,7 @@ def check(out: Path) -> None:
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
-    for crate in ("horizon_client", "horizon_mod_wasm", "horizon_mod_host"):
+    for crate in ("horizon_mod_wasm", "horizon_mod_host"):
         if dylib(out / "deps", crate) is None:
             sys.exit(f"prebuilt folder has no {crate.replace('_', '-')} dylib")
 
@@ -211,7 +211,7 @@ def smoke(out: Path) -> None:
         link_args = json.loads((out / IDENTITY).read_text())["link_args"]
         run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_client_smoke",
              *(flag for arg in link_args for flag in ("-C", f"link-arg={arg}")),
-             "--extern", f"horizon_client={dylib(deps, 'horizon_client')}", *extern("mod_api"), *extern("horizon_mod_package"), "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
+             *extern("horizon_client"), *extern("mod_api"), *extern("horizon_mod_package"), "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(scratch / "horizon-client"), str(scratch / "main.rs")])
     print(f"smoke: the starter mod and the game executable built against {out} alone")
