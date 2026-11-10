@@ -152,7 +152,14 @@ impl<'a> Batch<'a> {
             return Err(format!("a UV outside 0 to 1: {:?}", quad.uvs));
         }
         let Some(&layer) = self.sprites.get(sprite) else {
-            return Err(format!("sprite {sprite}, which the block atlas lacks"));
+            // Bound only the diagnostic, not accepted atlas identifiers. A character
+            // boundary keeps arbitrary Unicode sprite names safe to report.
+            let end = sprite.floor_char_boundary(256);
+            let suffix = if end < sprite.len() { "…" } else { "" };
+            return Err(format!(
+                "sprite {}{suffix}, which the block atlas lacks",
+                &sprite[..end]
+            ));
         };
         if self.budget.quads_left() == 0 {
             return Err(format!(
@@ -323,3 +330,7 @@ fn emit(mesher: &Mesher<'_>, quad: &SectionQuad, layer: u16, out: &mut SectionMe
         Some(quad.color & 0xFF_FFFF),
     );
 }
+
+#[cfg(test)]
+#[path = "mod_geometry_diagnostic_tests.rs"]
+mod diagnostic_tests;
