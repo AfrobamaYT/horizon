@@ -102,7 +102,10 @@ fn played(game: &mut super::Game<'_>) -> Vec<(String, f32, f32)> {
         .replace(Vec::new())
         .unwrap_or_default()
         .into_iter()
-        .map(|s| (s.event, s.volume, s.pitch))
+        .map(|s| {
+            assert_eq!(s.source, mod_api::SoundSource::Neutral as usize);
+            (s.event, s.volume, s.pitch)
+        })
         .collect()
 }
 

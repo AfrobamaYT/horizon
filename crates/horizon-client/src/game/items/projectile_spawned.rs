@@ -165,9 +165,7 @@ impl Game<'_> {
                 if !requirements_supported(&conditional["requirements"])
                     || !valid_ranges(&conditional["effect"])
                 {
-                    eprintln!(
-                        "projectile_spawned refused enchantment {enchantment}: unsupported requirement context or invalid level-value range"
-                    );
+                    eprintln!("projectile_spawned refused enchantment {enchantment}: unsupported requirement context or invalid level-value range");
                     continue;
                 }
                 let Some(kind) = self.spawned_projectile(id).map(Projectile::entity_type) else {
@@ -241,7 +239,13 @@ impl Game<'_> {
             SpawnedEffect::AllOf | SpawnedEffect::Inert => None,
         });
         if let Some((sound, at, volume, pitch)) = sound {
-            self.audio.play(sound, Some(at), volume, pitch);
+            self.audio.play_on(
+                mod_api::SoundSource::Neutral as usize,
+                sound,
+                Some(at),
+                volume,
+                pitch,
+            );
         }
     }
 
