@@ -4,6 +4,7 @@ members = [
     "crates/horizon-cosmetics",
     "crates/horizon-telemetry",
     "crates/horizon-hooks",
+    "crates/horizon-mod-host",
     "crates/horizon-game",
     "crates/horizon-official",
     "crates/horizon-heartbeat",

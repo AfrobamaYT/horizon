@@ -2196,6 +2196,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-host"
+version = "0.1.0"
+dependencies = [
+ "horizon-client",
+]
+
+[[package]]
 name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
@@ -2550,7 +2557,6 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
- "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",
