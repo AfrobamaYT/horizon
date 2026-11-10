@@ -427,6 +427,15 @@ impl Game<'_> {
         let ty = ParticleType::from_name(&name)?;
         Some(match &p.data {
             None => ParticleOptions::simple(ty),
+            Some(ParticleData::Item(stack)) => {
+                let remote = self.remote.as_ref()?;
+                let stack = horizon_client::item_sync::from_network(
+                    stack,
+                    &remote.builtin,
+                    &remote.registries,
+                );
+                self.item_particle_options(&stack)?
+            }
             Some(ParticleData::State(s)) => {
                 let pos = at.map(|v| v.floor() as i32);
                 let state = BlockStateId(*s as u32);
@@ -855,7 +864,7 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::game) mod tests {
     use super::*;
     use horizon_client::lan::{
         Joined, Lan, NetConfig, Out, PlayerSender,
@@ -948,7 +957,7 @@ mod tests {
     /// A hub whose `minecraft:particle_type` registry holds `particle_names`
     /// in registry order, plus a near guest at (5, 64, 5) and a far one at
     /// (100, 64, 100).
-    fn test_hub(
+    pub(in crate::game) fn test_hub(
         label: &str,
         particle_names: Vec<String>,
     ) -> (
