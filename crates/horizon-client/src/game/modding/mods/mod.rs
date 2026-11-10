@@ -653,14 +653,8 @@ pub(super) fn content_overlay(
         .iter()
         .map(|&index| {
             let source = &packages[index];
-            let declared = native_items
-                .iter()
-                .filter(|i| {
-                    i.id.split_once(':')
-                        .is_some_and(|(ns, _)| ns == source.manifest.id)
-                })
-                .map(|i| i.id.clone())
-                .collect::<Vec<_>>();
+            let declared =
+                super::native_content_items::owned_item_ids(source.manifest, native_items);
             (source.path, source.manifest, declared)
         })
         .collect();
