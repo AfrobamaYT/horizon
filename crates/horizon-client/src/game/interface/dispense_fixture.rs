@@ -708,7 +708,13 @@ impl Game<'_> {
         }
         let mut lines = Vec::new();
         for _ in 0..2 {
-            self.hurt_player_from(4.0, Some([0.0, 64.0, 2.0]), "minecraft:arrow", Some(None), false);
+            self.hurt_player_from(
+                4.0,
+                Some([0.0, 64.0, 2.0]),
+                "minecraft:arrow",
+                Some(None),
+                false,
+            );
             let stack = self.inventory[self.selected].as_ref();
             let (count, damage) = stack.map_or((0, 0), |stack| (stack.count, stack.damage));
             lines.push(format!("blocking wear {count} {damage}"));

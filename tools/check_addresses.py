@@ -268,23 +268,9 @@ def restored_upstream_rows(base):
         from . import check_file_size
     else:
         import check_file_size
-    baseline = ROOT / "tools/file_size_baseline.txt"
-    marker, _ = check_file_size.parse_baseline(baseline.read_text() if baseline.exists() else "")
-    previous = subprocess.run(["git", "show", f"{base}:tools/file_size_baseline.txt"],
-                              cwd=ROOT, capture_output=True, text=True)
-    old_marker, _ = check_file_size.parse_baseline(previous.stdout if previous.returncode == 0 else "")
-    if marker is None or marker == old_marker:
-        return set(), []
-    merge_base = check_file_size.git("merge-base", base, "HEAD").strip()
-    errors = check_file_size.sync_provenance(marker, merge_base)
-    if errors:
-        return set(), errors
-    source = subprocess.run(["git", "show", f"{marker}:{CONFIG_PATH}"], cwd=ROOT,
-                            capture_output=True, text=True)
-    if source.returncode != 0:
-        return set(), ["verified upstream commit has no address inventory"]
-    config = json.loads(source.stdout)
-    return {tuple(row.split(" ", 1)) for row in config.get("allowed", [])}, []
+    config, errors = check_file_size.verified_sync_config(base, CONFIG_PATH)
+    rows = {tuple(row.split(" ", 1)) for row in config.get("allowed", [])} if config is not None else set()
+    return rows, errors
 
 
 def main(argv=None):

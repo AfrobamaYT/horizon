@@ -93,9 +93,4 @@ impl Game<'_> {
             self.particles.push(particle);
         });
     }
-
-
-
-
-
 }
