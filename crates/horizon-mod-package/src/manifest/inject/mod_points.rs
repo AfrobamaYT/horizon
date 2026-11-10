@@ -227,20 +227,22 @@ pub fn route<'a>(
             at: inject.at.clone(),
         }));
     };
-    let Some(hash) = &inject.hash else {
+    // Another mod's function moves with that mod's version, not the game's pin, so nothing
+    // records a hash for it: the declaration must carry one.
+    let Some(pinned) = &inject.hash else {
         return Err(Refusal::Inject(InjectError::Invalid {
             id,
             field: "hash",
-            fix: "mod targets require an explicit signature hash",
+            fix: "an injection at another mod's point pins its hash; add it with `cargo horizon-mod inject add`",
         }));
     };
-    if &point.hash != hash {
+    if &point.hash != pinned {
         return Err(Refusal::Changed(Box::new(Changed {
             id,
             library: library.id.to_owned(),
             version: library.version.to_owned(),
             at: inject.at.clone(),
-            pinned: hash.clone(),
+            pinned: pinned.clone(),
             installed: point.hash.clone(),
             signature: point.signature.clone(),
         })));

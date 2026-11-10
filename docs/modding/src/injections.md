@@ -159,7 +159,7 @@ Apply these rules in order and stop at the first that fits.
 | --- | --- |
 | `id` | unique, nonempty |
 | `at` | canonical function or target struct path |
-| `hash` | optional: the tool-written signature hash, pinning it; absent, the pinned game's |
+| `hash` | optional at a game function or struct: the tool-written signature hash, pinning it; absent, the pinned game's. Required at another mod's point |
 | `kind`, `with` | lowercase kind and a crate-root callback function; `field` uses `with` as its member name |
 | `access` | `api` (default) or `internals` |
 | `type` | required Rust type for `field` and `modify_local`; forbidden for other kinds |
