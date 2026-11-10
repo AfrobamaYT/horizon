@@ -1,5 +1,6 @@
 //! Dragon-owned identity and attachment metadata.
 use super::*;
+#[derive(Default)]
 pub(in crate::game) struct DragonResidency {
     pub(super) lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
 }
@@ -27,13 +28,6 @@ impl horizon_mod_runtime::attachments::HasAttachmentLifetime for DragonPart {
         &mut self.2
     }
 }
-impl Default for DragonResidency {
-    fn default() -> Self {
-        Self {
-            lifetime: Default::default(),
-        }
-    }
-}
 impl horizon_mod_runtime::attachments::HasAttachmentLifetime for Dragon {
     fn attachment_lifetime(&mut self) -> &mut horizon_mod_runtime::attachments::AttachmentLifetime {
         &mut self.residency.lifetime
@@ -41,6 +35,12 @@ impl horizon_mod_runtime::attachments::HasAttachmentLifetime for Dragon {
 }
 
 impl Game<'_> {
+    /// Install a replacement only after retiring the previous parts' sidecars.
+    pub(in crate::game) fn replace_resident_dragon(&mut self, dragon: Dragon) {
+        self.discard_resident_dragon();
+        self.dragon.replace(dragon);
+    }
+
     /// Physical retirement must forget sidecar data before IDs can be reused,
     /// not merely unregister the attachment index when the parts are dropped.
     pub(in crate::game) fn discard_resident_dragon(&mut self) {

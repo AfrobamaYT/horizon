@@ -4927,8 +4927,7 @@ impl Game<'_> {
         let id = dragon.id;
         // Finalization listeners can install another dragon after the initial
         // refusal check. Keep the constructor's existing replacement order.
-        self.discard_resident_dragon();
-        self.dragon.replace(dragon);
+        self.replace_resident_dragon(dragon);
         self.place_dragon_parts();
         self.native_joins_flush(false, id).then_some(id)
     }
@@ -4937,13 +4936,12 @@ impl Game<'_> {
     /// sets the full health and the hovering phase until the server's
     /// synched data says otherwise.
     pub(super) fn spawn_remote_dragon(&mut self, id: i32, position: [f64; 3], yaw: f32) {
-        self.discard_resident_dragon();
         let at = Vec3::new(position[0], position[1], position[2]);
         let mut d = Dragon::new(at, yaw, i64::from(id));
         d.id = id as u32;
         d.phase = Phase::from_id(10);
         d.join = horizon_client::join_seq::JoinSeq::next();
-        self.dragon.replace(d);
+        self.replace_resident_dragon(d);
         self.place_dragon_parts();
         if let Some(d) = self.dragon.as_mut() {
             for part in &mut d.parts {
