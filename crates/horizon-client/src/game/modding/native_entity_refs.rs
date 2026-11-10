@@ -3668,8 +3668,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_block_writes_validate_and_change_world() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
-        use horizon_client::chunk::Chunk;
-        use mod_api::{Authority, BlockUpdateFlags};
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use mod_api::{Authority, BlockUpdateFlags, HostTransaction};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3793,13 +3793,13 @@ pub(super) mod tests {
             &vec![(3, 64, 0), (4, 64, 0)]
         );
         // `sendBlockUpdated` queues the block again without writing; out of height it queues nothing.
+        game.world.modified.clear();
         let dirty_before = game.world.modified.clone();
         let block_before = game.world.block(5, 64, 0);
         assert!(game.level_send_block_updated(level, [5, 64, 0]));
         assert!(game.level_send_block_updated(level, [5, 64, 0]));
-        assert_eq!(game.world.modified, dirty_before);
+        assert_eq!(game.world.modified.clone(), dirty_before);
         assert_eq!(game.world.block(5, 64, 0), block_before);
-        use mod_api::prelude::*;
         let host: &mut dyn mod_api::ServerHost = &mut game;
         let aborted: Result<(), ()> = host.transaction(|host, _| {
             assert!(level.send_block_updated(host, [6, 64, 0]));
