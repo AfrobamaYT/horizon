@@ -18,10 +18,10 @@ Current owners below were inspected; they establish entry points, not complete m
 
 | Route | Verified file:line owner |
 | --- | --- |
-| Entity position / level | `crates/horizon-mod-api/src/host/entities.rs:123,143`; `crates/horizon-client/src/game/modding/native_entity_refs.rs:675,735` |
-| Entity clear_fire | `crates/horizon-mod-api/src/host/entities.rs:744`; `crates/horizon-client/src/game/modding/native_entity_state.rs:232` |
-| Player name / action_bar | `crates/horizon-mod-api/src/host/players.rs:54,302`; `crates/horizon-client/src/game/modding/native_server.rs:1152,1196` |
-| Level block reads | `crates/horizon-mod-api/src/host/levels.rs:190,211,217`; `crates/horizon-client/src/game/modding/native_level_refs.rs:433,518,530` |
+| Entity position / level | `crates/horizon-mod-vocab/src/host/entities.rs:123,143`; `crates/horizon-client/src/game/modding/native_entity_refs.rs:675,735` |
+| Entity clear_fire | `crates/horizon-mod-vocab/src/host/entities.rs:744`; `crates/horizon-client/src/game/modding/native_entity_state.rs:232` |
+| Player name / action_bar | `crates/horizon-mod-vocab/src/host/players.rs:54,302`; `crates/horizon-client/src/game/modding/native_server.rs:1152,1196` |
+| Level block reads | `crates/horizon-mod-vocab/src/host/levels.rs:190,211,217`; `crates/horizon-client/src/game/modding/native_level_refs.rs:433,518,530` |
 | Lifecycle lookup | `crates/horizon-client/src/join_seq/residency/table.rs:24` defines Found, Taken, Missing |
 
 Vanilla 26.3 inspection via `/workspace/horizon/tools/rea_vanilla.py method net.minecraft.world.entity.Entity isRemoved` shows removal is tested by a non-null removal reason. It does not define Rust retained-handle errors or verify all read/write routes. This proposal changes Horizon lifetime reporting, not vanilla gameplay. The issue asserts no NeoForge counterpart. The public [26.3 Entity Javadoc](https://aldak.netlify.app/javadoc/26.3.x/net/minecraft/world/entity/Entity.html) was inaccessible; NeoForge 26.3 lifetime behavior is unverified. Require public documentation before adopting any claimed counterpart; no NeoForge source or patches were consulted.

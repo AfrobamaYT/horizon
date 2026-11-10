@@ -672,6 +672,9 @@ pub(super) fn emit<'a>(
             (Contract::Replace, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
+            (Contract::Collect, Some(out)) if matches!(name, "blocks" | "items") => method_source.push_str(&format!(
+                "///\n/// Each mod receives its own empty `{event}.{out}` batch. Declared identifiers must\n/// belong to that mod's manifest-owned namespaces; unowned identifiers refuse registration.\n"
+            )),
             (Contract::Collect, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Every {callee} gets `{event}.{out}` in order and may add, change or remove {out}.\n"
             )),
@@ -693,7 +696,15 @@ pub(super) fn emit<'a>(
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
-        let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
+        let build = format!(
+            "let {}{event} = {event_type} {{ {} }};",
+            if matches!(name, "blocks" | "items") {
+                ""
+            } else {
+                "mut "
+            },
+            inits.join(", "),
+        );
         // A trait mod's call is marked with the mod for a panic to name.
         let each = match &hook.owner {
             Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
@@ -731,6 +742,12 @@ pub(super) fn emit<'a>(
             mod_item.clone()
         };
         let (lookup, calls) = match &scoped {
+            None if matches!(name, "blocks" | "items") => (
+                String::new(),
+                format!(
+                    "for (mod_id, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ let mut local = Vec::new(); {{ let mut {event} = {event_type} {{ {name}: &mut local }}; {mod_item}.{name}(context, &mut {event}); }} for declaration in &mut local {{ match super::parts::owned_declaration_id(mod_id, &declaration.id) {{ Ok(id) => declaration.id = id, Err(reason) => context.refuse_declaration(reason), }} }} {event}.{name}.extend(local); }}"
+                ),
+            ),
             None if name == "setting_changed" => (
                 String::new(),
                 format!(
