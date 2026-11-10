@@ -16,13 +16,14 @@ pub(super) fn prepare(
         let member = &members[index];
         let mut manifest = member.manifest.clone();
         if !manifest.contains_key("wasm") {
+            // Inject validation requires a code target; the real wasm pins are written after staging.
             manifest["wasm"]["sha512"] = toml_edit::value("0".repeat(128));
             manifest["wasm"]["toolchain"] = toml_edit::value("pending");
         }
         let parsed = horizon_mod_package::Manifest::parse(&manifest.to_string())?;
         let mut registration = String::new();
         let is_mod = |at: &str| parsed.mod_point_dependency(at).is_some();
-        for injection in parsed.inject.iter().filter(|i| is_mod(&i.at)) {
+        for (index, injection) in parsed.inject.iter().filter(|i| is_mod(&i.at)).enumerate() {
             let owner = libraries
                 .iter()
                 .position(|p| p.owns(&injection.at))
@@ -65,7 +66,8 @@ pub(super) fn prepare(
             } else {
                 format!("crate::{}", injection.with)
             };
-            registration.push_str(&format!("if !{}::__horizon_points::register_{}_{}({:?}, {}, {:?}, {}, {}) {{ return 0; }}\n", library.krate, access, routed.place, parsed.id, injection.priority, injection.id, injection.kind == Kind::Replace, listener));
+            let refused = index + 1;
+            registration.push_str(&format!("if !{}::__horizon_points::register_{}_{}({:?}, {}, {:?}, {}, {}) {{ return {refused}; }}\n", library.krate, access, routed.place, parsed.id, injection.priority, injection.id, injection.kind == Kind::Replace, listener));
         }
         // Engine listeners keep their existing generated codecs and registration path.
         if let Some(array) = manifest
@@ -81,7 +83,7 @@ pub(super) fn prepare(
         let (registrations, names) = registrations(&manifest, catalog)?;
         members[index].registrations = registrations;
         members[index].points = names;
-        output.push(format!("\n#[cfg(target_arch = \"wasm32\")]\n#[unsafe(no_mangle)]\npub fn horizon_mod_points_register() -> u32 {{ {registration} 1 }}\n#[cfg(target_arch = \"wasm32\")]\n#[unsafe(no_mangle)]\npub fn horizon_mod_points_seal() {{ crate::__horizon_points::seal(); }}\n"));
+        output.push(format!("\n#[cfg(target_arch = \"wasm32\")]\n#[unsafe(no_mangle)]\npub fn horizon_mod_points_register() -> u32 {{ {registration} 0 }}\n#[cfg(target_arch = \"wasm32\")]\n#[unsafe(no_mangle)]\npub fn horizon_mod_points_seal() {{ crate::__horizon_points::seal(); }}\n"));
     }
     Ok(output)
 }

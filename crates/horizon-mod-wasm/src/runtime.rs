@@ -438,6 +438,7 @@ impl WasmMod {
     }
     pub(crate) fn instantiate(
         engine: &Engine,
+        manifests: &[(&str, &horizon_mod_package::Manifest)],
         members: &[Member<'_>],
     ) -> Result<Vec<Self>, Refusal> {
         let mut store = Store::new(engine, State::default());
@@ -508,19 +509,37 @@ impl WasmMod {
         }
         // Register through the library's exported bridge, then seal every member's private
         // registry. No hook or mod initialization runs until the entire group is ready.
-        for (_, instance) in group.members.clone() {
+        for (name, instance) in group.members.clone() {
             if instance
                 .get_func(&mut group.store, "horizon_mod_points_register")
                 .is_some()
             {
-                let accepted = instance
+                let refused = instance
                     .get_typed_func::<(), u32>(&mut group.store, "horizon_mod_points_register")
                     .and_then(|function| function.call(&mut group.store, ()))
                     .map_err(|e| Refusal::Runtime(format!("mod point registration: {e:#}")))?;
-                if accepted != 1 {
-                    return Err(Refusal::Runtime(
-                        "mod point registration refused by library registry".into(),
-                    ));
+                if refused != 0 {
+                    let injection = manifests
+                        .iter()
+                        .find(|(member, _)| *member == name)
+                        .and_then(|(_, manifest)| {
+                            manifest
+                                .inject
+                                .iter()
+                                .filter(|injection| {
+                                    manifest.mod_point_dependency(&injection.at).is_some()
+                                })
+                                .nth((refused - 1) as usize)
+                                .map(|injection| format!("{}:{}", manifest.id, injection.id))
+                        })
+                        .ok_or_else(|| {
+                            Refusal::Runtime(format!(
+                                "{name}: invalid mod point registration refusal index {refused}"
+                            ))
+                        })?;
+                    return Err(Refusal::Runtime(format!(
+                        "{injection}: refused by library registry"
+                    )));
                 }
             }
         }

@@ -526,7 +526,12 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             name,
             module: &packages[i].module,
         }));
-        let result = WasmMod::instantiate(&engine, &members).and_then(|mods| {
+        let manifests: Vec<_> = indices
+            .iter()
+            .zip(&names)
+            .map(|(&i, name)| (name.as_str(), &packages[i].manifest))
+            .collect();
+        let result = WasmMod::instantiate(&engine, &manifests, &members).and_then(|mods| {
             if mods.len() != indices.len() {
                 return Err(Refusal::Runtime("missing mod boundary exports".into()));
             }
