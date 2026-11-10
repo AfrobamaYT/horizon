@@ -4,6 +4,13 @@ use super::*;
 /// No level means no event; failed ticks never emit the post event.
 impl Game<'_> {
     pub(in crate::game) fn tick_remote_level(&mut self) -> Result<()> {
+        self.tick_remote_level_with(Self::tick_remote_level_body)
+    }
+
+    pub(in crate::game) fn tick_remote_level_with(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<()> {
         let level = (mod_api::__private::listened(mod_api::HookId::LevelTickPre)
             || mod_api::__private::listened(mod_api::HookId::LevelTickPost))
         .then(|| self.native_client_level())
@@ -13,6 +20,18 @@ impl Game<'_> {
         {
             self.native_level_tick_pre(level);
         }
+        let result = body(self);
+        // `ClientLevel.tick`'s RETURN, which a failed tick does not reach.
+        if result.is_ok()
+            && let Some(level) = level
+            && mod_api::__private::listened(mod_api::HookId::LevelTickPost)
+        {
+            self.native_level_tick_post(level);
+        }
+        result
+    }
+
+    fn tick_remote_level_body(&mut self) -> Result<()> {
         self.ticks += 1;
         self.repro_tick();
         // Hud.tick ends with ChatComponent.tick.
@@ -61,14 +80,6 @@ impl Game<'_> {
         // Window callbacks only queue clicks, so an interaction cannot leak
         // between CLIENT_TICK_END and a later pong.
         self.remote_handle_input();
-        let result = self.tick_remote_player(running, hold);
-        // `ClientLevel.tick`'s RETURN, which a failed tick does not reach.
-        if result.is_ok()
-            && let Some(level) = level
-            && mod_api::__private::listened(mod_api::HookId::LevelTickPost)
-        {
-            self.native_level_tick_post(level);
-        }
-        result
+        self.tick_remote_player(running, hold)
     }
 }
