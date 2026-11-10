@@ -678,6 +678,30 @@ impl ModelPart {
         self.load_pose(self.initial_pose);
     }
 
+    /// The path, by child index, to the first part named `name` in a depth-first search
+    /// (`ModelPart.getAnyDescendantWithName`: each part's own children before its
+    /// grandchildren). `None` when no part has that name.
+    pub(crate) fn descendant_path(&self, name: &str) -> Option<Vec<u32>> {
+        if let Some(index) = self.children.iter().position(|(child, _)| child == name) {
+            return Some(vec![index as u32]);
+        }
+        self.children
+            .iter()
+            .enumerate()
+            .find_map(|(index, (_, child))| {
+                let mut path = child.descendant_path(name)?;
+                path.insert(0, index as u32);
+                Some(path)
+            })
+    }
+    /// The part at `path`, child index by child index.
+    pub(crate) fn descendant_mut(&mut self, path: &[u32]) -> Option<&mut ModelPart> {
+        let mut part = self;
+        for &index in path {
+            part = &mut part.children.get_mut(index as usize)?.1;
+        }
+        Some(part)
+    }
     /// Puts it and every part under it back at their initial poses, as
     /// `Model.resetPose` does before each frame's `setupAnim`.
     pub fn reset_all_poses(&mut self) {

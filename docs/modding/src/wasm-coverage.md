@@ -928,6 +928,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientSession::client_language` | crosses | Wire call |
 | `ClientSession::client_frame_stats` | crosses | Wire call |
 | `RenderAssets::model` | crosses | Wire call |
+| `RenderAssets::animation` | crosses | Wire call |
 | `InstanceGroups::create_group` | crosses | Wire call |
 | `Tags::key` | crosses | Wire call |
 | `Tags::is_in_tag` | crosses | Wire call |
