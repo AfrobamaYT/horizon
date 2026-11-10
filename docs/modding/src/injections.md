@@ -30,11 +30,21 @@ There are two access tiers, and they never mix:
   a `mod.wasm` declaring internals or an internals injection is refused at load:
   "internals access is native-only".
 
-## Adding a pinned declaration
+## Writing a declaration
+
+An `[[inject]]` needs `id`, `at`, `kind` and `with` (plus `call`, `nth` and `ctx` for a call kind,
+copied from the pinned `points.json`). `hash` is optional pinning. Without it, the build takes the
+function's fingerprint from the catalog of the game `[native] horizon` pins, which fixes every
+signature exactly, and records it in the build's `native-mods.json`. With it, the build checks it
+as written and refuses a stale one with `E_INJECT_CHANGED`. The same holds for each `internals`
+entry's `hash` (`E_INTERNAL_CHANGED`). Moving the pin with `cargo horizon-mod update` compares the
+old and new games for every declaration without a hash: an inject whose function changed refuses the
+update with `E_INJECT_CHANGED` until you pass `--accept <inject id>`, as a stale hash refuses the
+build, and internals without a hash are reported and stay without one.
 
 Run `cargo horizon-mod inject add <at> --kind <kind> --with <listener>` in a native mod's folder.
 The tool appends `[[inject]]`, preserving comments, formatting and permissions. A symlinked
-manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`.
+manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`, pinning it.
 `--with` supplies both listener and unique inject id (default `on_inject`); implement it separately.
 Access defaults to `api`; edit it to `internals` when needed. The tool prints each tier's availability
 at the place, such as `api: refused, argument 2 `batch` (`&mut HudBatch`) has no API type yet` and
@@ -47,7 +57,8 @@ duplicate ids, or call flags on function kinds leave the manifest untouched.
 
 ## Refreshing pinned declarations
 
-`cargo horizon-mod inject update` checks every declaration against the current game's catalogs;
+`cargo horizon-mod inject update` checks every declaration against the current game's catalogs (a
+declaration without a hash has none to refresh);
 it does not change `[native].horizon` (use top-level `update` to change that pin).
 A unique call context that moved reports `E_INJECT_MOVED` and updates only `nth`.
 Missing targets, missing contexts and ambiguous contexts are never retargeted.
@@ -127,7 +138,7 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites are refused; internals `replace` and extension fields are also refused. Locals use the native source route described below.
+API call sites and internals `replace` are refused. Mutable locals and fields use the native source routes described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -137,7 +148,7 @@ Apply these rules in order and stop at the first that fits.
 
 1. A hook or a Part method exists for the moment: implement it. **No injection.**
 2. No hook: an API point declaration. Use `[[inject]]` with `at`, lowercase `kind = "head"` or
-   `"return"`, a crate-root `with` function, and the catalog's `hash`. Add `horizon-mod-points` beside
+   `"return"` and a crate-root `with` function (`hash` is optional pinning). Add `horizon-mod-points` beside
    `horizon-mod-api`; the function takes the side's host and the point's public record. Keep its body
    API-only so the same call can become a hook.
 3. You need game internals: declare them and use `access = "internals"` with the generated
@@ -147,9 +158,11 @@ Apply these rules in order and stop at the first that fits.
 | Field | Rule |
 | --- | --- |
 | `id` | unique, nonempty |
-| `at`, `hash` | canonical function path and its tool-written signature hash |
-| `kind`, `with` | lowercase kind and a crate-root callback function |
+| `at` | canonical function or target struct path |
+| `hash` | optional at a game function or struct: the tool-written signature hash, pinning it; absent, the pinned game's. Required at another mod's point |
+| `kind`, `with` | lowercase kind and a crate-root callback function; `field` uses `with` as its member name |
 | `access` | `api` (default) or `internals` |
+| `type` | required Rust type for `field` and `modify_local`; forbidden for other kinds |
 | `priority` | descending; defaults to 0 |
 | `call`, `nth`, `ctx` | exact canonical callee, occurrence and statement context for a call kind |
 
@@ -433,10 +446,24 @@ used by normal builds or published prebuilt games. The source must be cached or 
 manifest or falling back to a different pin. Any compiler or catalog error also leaves the
 manifest alone. Discovery checks the mod's library on the current host with default features;
 configuration-gated catalog entries are still refused. Mods with source-spliced helper files
-or module injections are refused with `E_INTERNAL_SOURCE_INJECTION`: declare their internals
+or source listeners are refused with `E_INTERNAL_SOURCE_INJECTION`: declare their internals
 explicitly with `internals add` instead. This invocation stages one mod project; required mod
 dependencies that are not in that project are refused by the dependency resolver, not silently
 omitted.
+
+### Discovering module items
+
+`internals add`, `inject add` and `internals sync` discover items in the mod's own
+`[[native.module]]` tables. Module discovery downloads the pinned game source and uses the
+launcher's managed Rust toolchain and pinned horizon-mixins, with the same module application
+as a native source build. Install `horizon-launcher` on PATH or set `HORIZON_LAUNCHER`.
+The cargo tools request the catalog pair using `native-build --catalog --trust-native-code`.
+The launcher applies only this mod's modules to a fresh source copy before discovery staging;
+it never applies modules to an already staged tree. Each invocation regenerates module catalogs,
+so editing a module cannot reuse stale fingerprints. Paths refer to the destination game crate,
+for example `horizon_client::game::ported_level::PortedGame::tick`, including in `with` callback declarations.
+Mods without modules retain the pinned prebuilt catalog path for the cargo add commands.
+Compiler discovery still refuses source listeners that require source rewriting.
 
 `cargo horizon-mod internals add <path>` remains useful for those explicit declarations and
 writes the path and hash from the pinned game's `internals.json`; don't invent hashes. When several member kinds share a path (such as a field
@@ -502,8 +529,7 @@ call sites. Only reviewed call entries in `crates/horizon-mod-api-gen/slots/<mod
 horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 | <ctx from points.json>
 ```
 
-Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (reserved for extension
-fields; not consumed yet). Files support `#` comments; identical declarations merge, and conflicting
+Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (a type listing; field declarations are source-only). Files support `#` comments; identical declarations merge, and conflicting
 contexts name both files. The stage reads their sorted union, evaluates the receiver once, and rewrites
 only the selected call expression in its copy of the game.
 
@@ -577,7 +603,7 @@ These call kinds are not available to wasm mods.
 
 `modify_local` requires `access = "internals"` and a rebuild from source. It uses the
 same pinned `call`, `nth` and `ctx` identity as other call-site injections, with three
-required fields that every other kind rejects:
+required fields. `local` and `position` belong only to this kind; `type` is also used by `field`:
 
 ```toml
 [[inject]]
@@ -618,3 +644,45 @@ This may refuse bindings that Rust's borrow checker could otherwise accept.
 API access and wasm permanently refuse mutable locals; use native internals or request
 a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when
 no mod declares a local injection, so an unused local injection has zero runtime cost.
+
+### Transient native fields
+
+`kind = "field"` adds a real public Rust field during a native source rebuild:
+
+```toml
+[[inject]]
+id = "count"
+at = "horizon_client::game::Game"
+hash = "<target struct hash from internals.json>"
+kind = "field"
+access = "internals"
+with = "count"
+type = "u32"
+```
+
+The emitted member is `<mod_id>__<with>` (a mod id starting with a digit gets a leading underscore).
+Declare the target through the existing internals facade and access the member directly,
+for example `game.example__count`. A declaration colliding with an engine field is refused.
+There is no listener and no runtime registration for this kind.
+
+The field type must implement `Default` and, when the owner clones, `Clone`. Rust checks
+these bounds during the source build. Types must already be reachable from the target engine
+crate: standard-library types and visible engine types, using canonical engine paths.
+Mod-defined types are refused by name; use attachments for them.
+
+Struct literals initialize the member with `Default::default()`; struct update expressions
+retain the member from their base. Derived Default and Clone include the member automatically.
+Manual Default constructors initialize it, and manual Clone and clone_from copy it from the source.
+Exhaustive patterns, macro constructions, explicit representation layouts and unsupported codec
+derives refuse by target name rather than guessing how to extend them. Serde derives receive
+`#[serde(skip)]`; Wire and unknown derives refuse. Explicit save and sync field lists are untouched.
+The field is never saved or synced. Use attachments for persistence or synchronization.
+
+API access and wasm permanently refuse this kind and point to attachments. No declarations means
+no rewrite and zero runtime cost. A declared field adds its size (and layout alignment) to every
+instance; Default and Clone perform the field type's normal operations.
+
+Injected mod fields must not change engine equality, ordering or hashing. Targets deriving
+`PartialEq`, `Eq`, `PartialOrd`, `Ord` or `Hash` are currently refused with `E_INJECT_FIELD`;
+a neutral comparison wrapper is follow-up work. Hand-written comparison implementations
+ignore the injected field. `Debug`, `Clone` and `Default` keep their normal field behavior.

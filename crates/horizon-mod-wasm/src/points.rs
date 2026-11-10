@@ -190,7 +190,7 @@ mod tests {
             with: "own".into(),
             access: Access::Api,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: None,
             nth: None,
             ctx: None,

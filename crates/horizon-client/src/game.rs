@@ -10019,6 +10019,7 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let env = Env {
+            crafting_remainder: Some(self),
             player: self
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
@@ -10332,11 +10333,6 @@ impl Game<'_> {
                 let taken = result.clone();
                 let cells = self.craft_size * self.craft_size;
                 let ingredients = self.craft_grid[..cells].to_vec();
-                let remainders = world_recipes!(self).remainders(
-                    &recipe,
-                    &self.craft_grid[..cells],
-                    self.craft_size,
-                );
                 if shift {
                     if self.add_stack_to_inventory(result).is_some() {
                         break;
@@ -10353,6 +10349,7 @@ impl Game<'_> {
                         _ => return,
                     }
                 }
+                let remainders = self.craft_grid_remainders(&recipe);
                 for cell in self.craft_grid.iter_mut() {
                     if let Some(s) = cell {
                         s.count -= 1;
@@ -17227,17 +17224,7 @@ fn load_world_rest(
         let items = startup::time("rest.items", || {
             Items::load(root, registry, facts, overlay, resources.item_defaults())
         })?;
-        mod_api::__private::resolve_items(items.registry_order.iter().map(|id| &**id)).map_err(
-            |errors| {
-                errors
-                    .into_iter()
-                    .map(|error| {
-                        format!("mod {} requested unknown item {}", error.mod_id, error.id)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            },
-        )?;
+        api_values::resolve_item_registry(&items)?;
         log::info!("load items: {:.2}s", started.elapsed().as_secs_f32());
         progress.set(7);
         // The recipe tables, the stations and the recipe book read one folder:
