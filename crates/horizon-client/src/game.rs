@@ -2619,8 +2619,6 @@ struct Game<'a> {
     gpu_passes: bool,
     screen: Screen,
     screen_state: screen_build::ScreenState,
-    /// The layout the last frame drew the inventory's effect panels with.
-    effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
     /// What `window_resize` last reported: the physical size and the GUI settings behind the scaled size.
     resize_state: Option<ResizeState>,
@@ -16449,7 +16447,6 @@ impl<'a> Game<'a> {
             gpu_passes: false,
             screen: Screen::Playing,
             screen_state: screen_build::ScreenState::default(),
-            effects_layout: std::cell::Cell::new(None),
             window: None,
             resize_state: None,
             renderer: None,
