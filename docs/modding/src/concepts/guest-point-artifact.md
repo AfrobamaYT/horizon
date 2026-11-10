@@ -7,6 +7,10 @@ replace repeated discovery only when it carries the complete validated point,
 private-type and site input. Keep the full-source generator as an independent
 check. A supplied `--catalog` alone never authorizes this route.
 
+Measure actual-mod cold builds after #2596's interface cache first. Do not
+build or ship an artifact on an estimate; proceed only after the measured
+post-cache baseline demonstrates worthwhile remaining work.
+
 ## What remains after the interface cache
 
 [#2552](https://github.com/arismoko/horizon/pull/2552) and
@@ -65,7 +69,9 @@ the independent check bypasses artifact loading and the disposable interface cac
 
 The authoritative identity is a canonical manifest produced alongside the SDK,
 anchored in the chosen engine distribution or locally validated source tree,
-not an engine ID asserted inside mod input. Bind:
+not an engine ID asserted inside mod input. The trusted manifest comes from
+the Nightly build and is signed with the same key as that build; verify that
+signature before trusting artifact digests. Bind:
 
 - Exact engine build and staged-source identity, including private staging plans,
   source bytes and normalized repository-relative paths; directory membership,
@@ -124,6 +130,9 @@ Reconcile their final ownership before code work. The interface-cache file and
 point build script are not touched by those reviewed diffs. This note reserves
 no implementation files.
 
+Byte-identical module identity is the default admission policy. Refuse a
+mismatch with a diagnostic naming its reason and the differing identity field;
+never silently accept it on an estimate of equivalence.
 Identical effective inputs must yield byte-identical generated definitions,
 point/site IDs, layout values and module identity between routes and across
 repeated runs. Preserve current path remapping and compiler metadata handling
