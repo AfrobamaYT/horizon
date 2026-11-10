@@ -131,7 +131,7 @@ fn pad_smooth_camera_binding_toggles_the_cinematic_camera() {
             .controller
             .bind("key.smoothCamera", Some(Button::Select));
         assert!(!game.smooth_camera);
-        pad_press(game, Button::Select, "key.smoothCamera");
+        game.pad_action("key.smoothCamera", true).unwrap();
         assert!(game.smooth_camera, "as its key does in play");
     });
 }
@@ -207,7 +207,9 @@ fn pad_number_actions_select_the_hotbar_as_their_keys_do() {
         game.settings
             .controller
             .bind("key.hotbar.3", Some(Button::DPadUp));
-        pad_press(game, Button::DPadUp, "key.hotbar.3");
+        // This tests the one-shot number action, not all actions sharing D-pad up
+        // (the default chat binding would open a screen before the number action).
+        game.pad_action("key.hotbar.3", true).unwrap();
         assert_eq!(game.hotbar_presses, [2]);
     });
 }
