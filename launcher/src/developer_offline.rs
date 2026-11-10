@@ -10,17 +10,24 @@ pub fn enabled(tag: &str) -> bool {
     if std::env::var_os(ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
         return false;
     }
-    let base = crate::native_mods::about(tag)
-        .map(|a| a.base)
+    let native = crate::native_mods::about(tag);
+    let base = native
+        .as_ref()
+        .map(|a| a.base.clone())
         .or_else(|| crate::build_import::about(tag).map(|a| a.base))
         .unwrap_or_else(|| tag.to_owned());
-    eligible(&base, &crate::backend::version_dir(&base))
+    eligible(
+        &base,
+        &crate::backend::version_dir(&base),
+        native.as_ref().map(|a| a.horizon.as_str()),
+    )
 }
 
-fn eligible(base: &str, directory: &std::path::Path) -> bool {
+fn eligible(base: &str, directory: &std::path::Path, native_revision: Option<&str>) -> bool {
     developer_install::is_developer(base)
         && directory.join(".installed").is_file()
-        && developer_install::revision_in(directory).is_ok()
+        && developer_install::revision_in(directory)
+            .is_ok_and(|revision| native_revision.is_none_or(|expected| expected == revision))
 }
 
 pub const REBUILD: &str = "This game cannot enforce offline developer single-player. Rebuild and reinstall the developer game and its native mods.";
@@ -159,20 +166,22 @@ mod tests {
     fn persisted_provenance_not_just_a_prefix() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path();
-        assert!(!eligible("developer-local", dir));
+        assert!(!eligible("developer-local", dir, None));
         std::fs::write(dir.join(".installed"), "").unwrap();
         for record in ["{}", "not json", r#"{"revision":"wrong"}"#] {
             std::fs::write(dir.join("developer.json"), record).unwrap();
-            assert!(!eligible("developer-local", dir));
+            assert!(!eligible("developer-local", dir, None));
         }
         std::fs::write(
             dir.join("developer.json"),
             serde_json::json!({"revision":"a".repeat(40)}).to_string(),
         )
         .unwrap();
-        assert!(eligible("developer-local", dir));
+        assert!(eligible("developer-local", dir, None));
+        assert!(eligible("developer-local", dir, Some(&"a".repeat(40))));
+        assert!(!eligible("developer-local", dir, Some(&"b".repeat(40))));
         for base in ["v2026.11.10", "nightly-abcdef", "native-signed"] {
-            assert!(!eligible(base, dir));
+            assert!(!eligible(base, dir, None));
         }
     }
     #[test]
