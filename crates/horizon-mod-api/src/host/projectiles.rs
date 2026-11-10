@@ -12,7 +12,10 @@ pub trait ProjectilesServerHost {
     /// Spread draws x, y, z triangular noise from the new projectile's own random.
     /// Does not consume the stack or apply item-use cooldowns or statistics.
     /// None for an unavailable owner, unsupported type, invalid stack or non-finite
-    /// shot parameter. No random is drawn and nothing spawns on those refusals.
+    /// shot parameter. Also refuses a stack whose enchantments carry a nonempty
+    /// `projectile_spawned` component: the engine does not yet implement those
+    /// generic post-insertion effects. No random is drawn and nothing spawns on
+    /// those refusals. The original stack is unchanged; carried count is one.
     #[access(WorldOnly)]
     fn spawn_projectile_from_rotation(
         &mut self,

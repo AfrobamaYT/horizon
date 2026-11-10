@@ -1,5 +1,6 @@
 //! Owner launch boundary regression with vanilla's deterministic sequence.
-use super::super::native_entity_refs::tests::with_game;
+#![cfg(test)]
+use crate::game::native_entity_refs::tests::with_game;
 use horizon_client::{items::ItemStack, mobs::Mob};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use mod_api::Identifier;
@@ -22,7 +23,8 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
         let owner = game.living(source).unwrap();
         game.entity_uuid(source).unwrap();
         let mut level_before = game.world.random.clone();
-        let stack = ItemStack::new("minecraft:snowball", 1);
+        let stack = ItemStack::new("minecraft:snowball", 64);
+        let eye = game.entity_eye_position(source).unwrap();
         let entity_type = Identifier::parse("minecraft:snowball").unwrap();
         // This thread's next unique seed is 1234 (odd multiplier inverse),
         // independent of world RNG and any draws during resource loading.
@@ -37,6 +39,9 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
             .iter()
             .find(|p| p.id == shot.entity().id())
             .unwrap();
+        assert_eq!(projectile.item.as_ref().unwrap().count, 1);
+        assert_eq!(stack.count, 64);
+        assert_eq!(projectile.position.y, eye[1] - 0.10000000149011612);
         assert!((projectile.velocity.x - 0.19212421880232217).abs() < 1e-12);
         assert!((projectile.velocity.y - 0.3103198363925326).abs() < 1e-12);
         assert!((projectile.velocity.z - 1.1034130508130342).abs() < 1e-12);
@@ -53,6 +58,79 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
             game.spawn_projectile_from_rotation(owner, &unknown, &stack, 0.0, 1.5, 1.0)
                 .is_none()
         );
+        let mut enchanted = stack.clone();
+        enchanted.enchant("minecraft:flame", 1);
+        let mut before = game.world.random.clone();
+        assert!(
+            game.spawn_projectile_from_rotation(owner, &entity_type, &enchanted, 0.0, 1.5, 1.0)
+                .is_none()
+        );
+        assert_eq!(game.world.random.next_long(), before.next_long());
         assert_eq!(game.creatures.projectiles.len(), count);
+        let potion = ItemStack::new("minecraft:splash_potion", 16);
+        let potion_type = Identifier::parse("minecraft:splash_potion").unwrap();
+        let shot = game
+            .spawn_projectile_from_rotation(owner, &potion_type, &potion, 0.0, 1.5, 1.0)
+            .unwrap();
+        let projectile = game
+            .creatures
+            .projectiles
+            .iter()
+            .find(|p| p.id == shot.entity().id())
+            .unwrap();
+        match &projectile.kind {
+            horizon_client::projectiles::ProjectileKind::Potion(stack, false) => {
+                assert_eq!(stack.count, 1)
+            }
+            _ => panic!("expected splash potion payload"),
+        }
+        assert_eq!(potion.count, 16);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn owner_launch_reports_explicit_guest_to_launch_listeners() {
+    use mod_api::{Hooks, ModEntry, ProjectileLaunchEvent, ServerHost};
+    use std::sync::{Arc, Mutex};
+    struct Observe(Arc<Mutex<Vec<(Option<u128>, String, Option<u128>)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Observe {
+        fn projectile_launch(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut ProjectileLaunchEvent<'_>,
+        ) {
+            let projectile = host.projectile(host.entity(event.entity).unwrap()).unwrap();
+            let owner = projectile.owner(host).unwrap();
+            let uuid = owner.uuid(host);
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.player, event.name.to_owned(), uuid));
+        }
+    }
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "observe",
+        Box::new(Observe(observed.clone())),
+    )];
+    mod_api::testing::with_mods(mods.into(), || {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            let source = game.entity(12).unwrap();
+            let owner = game.living(source).unwrap();
+            let previous_actor = game.lan_acting;
+            let stack = ItemStack::new("minecraft:snowball", 1);
+            let kind = Identifier::parse("minecraft:snowball").unwrap();
+            let shot = game
+                .spawn_projectile_from_rotation(owner, &kind, &stack, 0.0, 1.5, 1.0)
+                .unwrap();
+            assert_eq!(game.projectile_owner(shot), Some(source));
+            assert_eq!(game.lan_acting, previous_actor);
+            assert_eq!(
+                *observed.lock().unwrap(),
+                [(Some(12), "guest12".to_owned(), Some(12))]
+            );
+        });
     });
 }

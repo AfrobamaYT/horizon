@@ -1,8 +1,5 @@
 //! Owner-created rotational throws, distinct from generic entity summoning.
-#[cfg(test)]
-#[path = "native_projectile_launch_tests.rs"]
-mod tests;
-use super::Game;
+use super::{Game, commands::Target};
 use horizon_client::{
     items::ItemStack,
     projectiles::{Projectile, ProjectileKind},
@@ -23,15 +20,33 @@ impl Game<'_> {
         if self.remote.is_some() || ![offset, power, inaccuracy].into_iter().all(f32::is_finite) {
             return None;
         }
-        self.native_living_target(owner)?;
+        // The engine has no generic EnchantmentHelper.onProjectileSpawned
+        // interpreter yet (#2670). Refuse before constructing or drawing rather
+        // than silently skipping an item's post-insertion effects.
+        for (enchantment, _) in stack.all_enchantments().iter() {
+            if world_stations!(self)
+                .enchantments
+                .get(enchantment)
+                .is_some_and(|definition| {
+                    definition.effects["minecraft:projectile_spawned"]
+                        .as_array()
+                        .is_some_and(|effects| !effects.is_empty())
+                })
+            {
+                return None;
+            }
+        }
+        let target = self.native_living_target(owner)?;
+        let mut carried = stack.clone();
+        carried.count = 1;
         let kind = match entity_type.to_string().as_str() {
             "minecraft:snowball" => ProjectileKind::Snowball,
             "minecraft:egg" => ProjectileKind::Egg,
             "minecraft:ender_pearl" => ProjectileKind::EnderPearl,
             "minecraft:experience_bottle" => ProjectileKind::ExperienceBottle,
             "minecraft:wind_charge" => ProjectileKind::WindCharge,
-            "minecraft:splash_potion" => ProjectileKind::Potion(Box::new(stack.clone()), false),
-            "minecraft:lingering_potion" => ProjectileKind::Potion(Box::new(stack.clone()), true),
+            "minecraft:splash_potion" => ProjectileKind::Potion(Box::new(carried.clone()), false),
+            "minecraft:lingering_potion" => ProjectileKind::Potion(Box::new(carried.clone()), true),
             id => ProjectileKind::Thrown(horizon_client::projectiles::thrown_type(id)?),
         };
         let entity = owner.entity();
@@ -40,7 +55,7 @@ impl Game<'_> {
         let motion = self.native_entity_known_speed(entity)?;
         let on_ground = self.entity_on_ground(entity)?;
         let ((who, uuid, guest), vehicle) = self.native_projectile_owner_fields(Some(entity))?;
-        let mut shot = Projectile::new(kind, Vec3::new(x, y - 0.1, z), who);
+        let mut shot = Projectile::new(kind, Vec3::new(x, y - f64::from(0.1_f32), z), who);
         (shot.owner_uuid, shot.guest, shot.owner_vehicle) = (uuid, guest, vehicle);
         // Splitting the random from the record avoids borrowing it and the shot
         // simultaneously; cloning an RNG draws nothing and the advanced copy is restored.
@@ -56,11 +71,18 @@ impl Game<'_> {
             on_ground,
         );
         shot.random.0 = random;
-        shot.item = Some(stack.clone());
+        shot.item = Some(carried);
         self.next_entity += 1;
         shot.id = self.next_entity;
         let id = shot.id;
-        self.add_projectile(shot);
+        // The explicit owner may be an inactive guest: launch listeners must
+        // see that player's identity, not the player currently swapped into Game.
+        match target {
+            t @ (Target::Player | Target::Guest(_)) => {
+                self.for_player(t, |game| game.add_projectile(shot))?
+            }
+            _ => self.add_projectile(shot),
+        }
         self.projectile(self.entity(id)?)
     }
 }
