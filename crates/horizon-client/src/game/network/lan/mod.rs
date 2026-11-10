@@ -1608,19 +1608,12 @@ impl Game<'_> {
         ));
         Ok(())
     }
-    /// Start the network side and the play-state hub: for the LAN (with the
-    /// host's own profile reserved) or for a dedicated server (no host).
-    pub(super) fn lan_host(
+    pub(super) fn start_lan_hub(
         &mut self,
         settings: LanSettings,
         net: NetConfig,
         config: HubConfig,
     ) -> Result<()> {
-        if self.options.developer_single_player && net.listen {
-            return Err(
-                horizon_client::lang::get("horizon.developer_offline.single_player").into(),
-            );
-        }
         let mut sync = sync_data(
             &self.options.resources,
             &self.res.core.item_data,
