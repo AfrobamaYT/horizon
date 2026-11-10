@@ -61,16 +61,16 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | kind | mod crate's layer | Cargo.toml line | strand |
 |---|---|---|---|---|---|
-| horizon-client | horizon-mod-api | dev | platform | 197 | hooks |
-| horizon-client | horizon-mod-api | normal | platform | 23 | hooks |
-| horizon-client | horizon-mod-api-gen | build | platform | 14 | slots |
-| horizon-client | horizon-mod-api-macros | normal | platform | 25 | slots |
-| horizon-client | horizon-mod-package | normal | engine | 58 | loading |
-| horizon-client | horizon-mod-points | normal | platform | 24 | slots |
-| horizon-client | horizon-mod-render | normal | platform | 22 | content_render |
-| horizon-client | horizon-mod-runtime | dev | engine | 196 | content_render |
-| horizon-client | horizon-mod-runtime | normal | engine | 21 | content_render |
-| horizon-client | horizon-mod-wasm | normal | platform | 26 | loading |
+| horizon-client | horizon-mod-api | dev | platform | 198 | hooks |
+| horizon-client | horizon-mod-api | normal | platform | 24 | hooks |
+| horizon-client | horizon-mod-api-gen | build | platform | 15 | slots |
+| horizon-client | horizon-mod-api-macros | normal | platform | 26 | slots |
+| horizon-client | horizon-mod-package | normal | engine | 59 | loading |
+| horizon-client | horizon-mod-points | normal | platform | 25 | slots |
+| horizon-client | horizon-mod-render | normal | platform | 23 | content_render |
+| horizon-client | horizon-mod-runtime | dev | engine | 197 | content_render |
+| horizon-client | horizon-mod-runtime | normal | engine | 22 | content_render |
+| horizon-client | horizon-mod-wasm | normal | platform | 27 | loading |
 | horizon-client-lib | horizon-mod-api | dev | platform | 139 | hooks |
 | horizon-client-lib | horizon-mod-api | normal | platform | 18 | hooks |
 | horizon-client-lib | horizon-mod-package | normal | engine | 52 | loading |

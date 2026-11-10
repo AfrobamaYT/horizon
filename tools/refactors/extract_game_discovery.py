@@ -14,11 +14,14 @@ def extracted(text):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--verify', action='store_true')
+parser.add_argument('--moved-commit', help='Verify the pure move commit, before boundary fixes')
 args = parser.parse_args()
 if args.verify:
     import subprocess
     original = subprocess.check_output(['git', 'show', '9e229a047d:crates/horizon-mod-api-gen/src/game_modules.rs'], cwd=root, text=True)
-    assert target.read_text().endswith(extracted(original))
+    moved = (subprocess.check_output(['git', 'show', f'{args.moved_commit}:crates/horizon-game-discovery/src/lib.rs'], cwd=root, text=True)
+             if args.moved_commit else target.read_text())
+    assert moved.endswith(extracted(original))
 else:
     text = source.read_text()
     block = extracted(text)

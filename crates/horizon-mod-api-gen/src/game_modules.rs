@@ -1,10 +1,12 @@
 //! Physical game areas share one logical module scope; compiler and source tools use this list.
 use crate::catalog::Catalog;
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{fs, path::Path};
 
 pub(crate) const INCLUDE: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));";
 
-use horizon_game_discovery::declarations;
+pub(crate) fn declarations(game: &Path) -> Result<String, String> {
+    horizon_game_discovery::declarations(game, &["native_hooks", "host"])
+}
 
 pub(crate) fn lan_action_modules(directory: &Path) -> Result<String, String> {
     let mut declarations = String::new();

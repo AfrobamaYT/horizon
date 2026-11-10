@@ -1,14 +1,20 @@
 //! Directory-derived game module declarations.
+#![forbid(unsafe_code)]
+
 use std::{collections::BTreeMap, fs, path::Path};
 
-pub(crate) fn declarations(game: &Path) -> Result<String, String> {
+/// Discover area-root modules in deterministic filename order, preserving their logical scope.
+/// `explicit` lists root files or directories declared separately by the caller. Every other
+/// directory needs a `.game-area` marker. Headers select visibility, cfg and an optional logical
+/// name; `_tests` modules default to `cfg(test)`, unless their cfg header says `always`.
+pub fn declarations(game: &Path, explicit: &[&str]) -> Result<String, String> {
     let mut modules = BTreeMap::new();
     for entry in fs::read_dir(game).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path();
         if path.extension().is_some_and(|ext| ext == "rs") {
             if path
-                .file_name()
-                .is_some_and(|name| name == "native_hooks.rs")
+                .file_stem()
+                .is_some_and(|name| explicit.iter().any(|item| name == *item))
             {
                 continue;
             }
@@ -21,13 +27,13 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
             if path.is_dir()
                 && path
                     .file_name()
-                    .is_none_or(|name| name != "native_hooks" && name != "host")
+                    .is_none_or(|name| !explicit.iter().any(|item| name == *item))
             {
                 return Err(format!("{}: missing .game-area marker", path.display()));
             }
             continue;
         }
-        let mut roots: Vec<_> = Catalog::modules(&path)
+        let mut roots: Vec<_> = module_files(&path)
             .map_err(|e| e.to_string())?
             .into_iter()
             .map(|name| (name.clone(), path.join(format!("{name}.rs"))))
@@ -53,25 +59,25 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
                     file.display()
                 ));
             }
-            let cfg = if name == "friends" {
-                "#[cfg(feature = \"friends\")]\n"
-            } else if name == "friends_off" {
-                "#[cfg(not(feature = \"friends\"))]\n"
-            } else if name.ends_with("_tests")
-                && !source
-                    .lines()
-                    .any(|line| line == "// game-module-cfg: always")
-            {
-                "#[cfg(test)]\n"
-            } else {
-                ""
+            let condition = source
+                .lines()
+                .find_map(|line| line.strip_prefix("// game-module-cfg: "));
+            let cfg = match condition {
+                Some("always") => String::new(),
+                Some(condition) => {
+                    syn::parse_str::<syn::Meta>(condition)
+                        .map_err(|e| format!("{}: invalid game module cfg: {e}", file.display()))?;
+                    format!("#[cfg({condition})]\n")
+                }
+                None if name.ends_with("_tests") => "#[cfg(test)]\n".to_owned(),
+                None => String::new(),
             };
             let absolute = file.canonicalize().map_err(|e| e.to_string())?;
-            let declaration_name = if name == "friends_off" {
-                "friends".to_owned()
-            } else {
-                name.clone()
-            };
+            let declaration_name = source
+                .lines()
+                .find_map(|line| line.strip_prefix("// game-module-name: "))
+                .unwrap_or(&name);
+            syn::parse_str::<syn::Ident>(declaration_name).map_err(|e| e.to_string())?;
             let declaration = format!(
                 "{cfg}#[path = {:?}]\n{visibility} mod {declaration_name};\n",
                 absolute.to_string_lossy()
@@ -84,3 +90,70 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
     Ok(modules.into_values().collect())
 }
 
+fn module_files(directory: &Path) -> Result<Vec<String>, String> {
+    let mut names = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            if name != "mod" {
+                syn::parse_str::<syn::Ident>(&name).map_err(|e| e.to_string())?;
+                names.push(name);
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_headers_and_explicit_roots_preserve_the_module_contract() {
+        let root = std::env::temp_dir().join(format!("engine-discovery-{}", std::process::id()));
+        let area = root.join("runtime");
+        fs::create_dir_all(&area).unwrap();
+        fs::write(area.join(".game-area"), "").unwrap();
+        fs::write(root.join("separate.rs"), "").unwrap();
+        fs::write(area.join("service.rs"), "// game-module-cfg: all(feature = \"network\", not(test))\n// game-module-name: transport\n// game-module-visibility: pub(crate)\n").unwrap();
+        fs::write(area.join("probe_tests.rs"), "").unwrap();
+        fs::write(area.join("shared_tests.rs"), "// game-module-cfg: always\n").unwrap();
+        let code = declarations(&root, &["separate"]).unwrap();
+        assert!(code.contains("#[cfg(all(feature = \"network\", not(test)))]"));
+        assert!(code.contains("pub(crate) mod transport;"));
+        let parsed = syn::parse_file(&code).unwrap();
+        let attributes: Vec<_> = parsed
+            .items
+            .iter()
+            .map(|item| match item {
+                syn::Item::Mod(item) => (
+                    item.ident.to_string(),
+                    item.attrs.iter().any(|attr| attr.path().is_ident("cfg")),
+                ),
+                _ => panic!("unexpected item"),
+            })
+            .collect();
+        assert_eq!(
+            attributes,
+            [
+                ("probe_tests".into(), true),
+                ("transport".into(), true),
+                ("shared_tests".into(), false)
+            ]
+        );
+        assert!(
+            declarations(&root, &[])
+                .unwrap_err()
+                .contains("area folder")
+        );
+        fs::write(area.join("service.rs"), "// game-module-cfg: !\n").unwrap();
+        assert!(
+            declarations(&root, &["separate"])
+                .unwrap_err()
+                .contains("invalid game module cfg")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
