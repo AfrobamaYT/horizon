@@ -629,6 +629,10 @@ fn every_api_mapping_has_the_expected_target() {
         ("Capabilities.Energy.ENTITY", "mod_api::ENTITY_ENERGY"),
         ("Capabilities.Energy.ITEM", "mod_api::ITEM_ENERGY"),
     ] {
-        assert_eq!(catalog.status(event).0, Status::Api(target), "{event}");
+        assert_eq!(
+            catalog.status(event).0,
+            Status::Api(target.to_owned()),
+            "{event}"
+        );
     }
 }
