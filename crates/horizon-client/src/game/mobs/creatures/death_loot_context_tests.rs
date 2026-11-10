@@ -32,6 +32,13 @@ impl mod_api::Hooks for Probe {
             .entity(source.causing as u32)
             .and_then(|entity| host.living(entity))
             .and_then(|living| living.hand_item(host, mod_api::Hand::Main));
+        if source.causing == 12 {
+            assert_eq!(
+                hand.as_ref().map(|s| s.damage()),
+                Some(31),
+                "later listeners read the earlier loot listener's hand edit"
+            );
+        }
         self.0.lock().unwrap().push((
             source.damage_type.into(),
             source.causing,
@@ -208,7 +215,7 @@ impl mod_api::Hooks for ChangeKillerHand {
                     mod_api::Hand::Main,
                     Some({
                         let mut later = self.0.clone();
-                        later.set_count(4).unwrap();
+                        later.set_damage(31);
                         later
                     })
                 )
@@ -232,12 +239,10 @@ fn death_loot_killer_is_not_the_acting_guest() {
         .unwrap();
         game.server_loot.set(Some(Arc::new(loot)));
         game.build_registries();
-        // A stackable held item lets the later listener change the count legally.
-        let mut hand = ItemStack::new("minecraft:stone", 12);
+        let mut hand = ItemStack::new("minecraft:diamond_sword", 1);
         hand.damage = 19;
         hand.enchant("minecraft:looting", 2);
         let mut changed = hand.clone();
-        changed.count = 3;
         changed.damage = 27;
         let expected = changed.try_into_api().unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -274,8 +279,8 @@ fn death_loot_killer_is_not_the_acting_guest() {
         assert_eq!(
             *seen.lock().unwrap(),
             [
-                ("minecraft:player_attack".into(), 12, 12, Some(4)),
-                ("minecraft:player_attack".into(), 12, 12, Some(4))
+                ("minecraft:player_attack".into(), 12, 12, Some(1)),
+                ("minecraft:player_attack".into(), 12, 12, Some(1))
             ]
         );
     });
