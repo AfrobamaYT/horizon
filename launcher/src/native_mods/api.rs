@@ -324,7 +324,7 @@ impl<'a> Project<'a> {
                         }
                         if value.get("git").is_some()
                             && (value.get("git").and_then(toml::Value::as_str)
-                                != Some("https://github.com/arismoko/horizon")
+                                != Some(horizon_addresses::NATIVE_MOD_SDK_SOURCE)
                                 || value.get("rev").and_then(toml::Value::as_str)
                                     != Some(bundle.native().horizon.as_str()))
                         {

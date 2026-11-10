@@ -99,7 +99,7 @@ pub(super) fn rewrite_dependencies(
             let get = |field| dep.get(field).and_then(toml::Value::as_str);
             let package = get("package").unwrap_or(key);
             if api::PACKAGES.iter().any(|(name, _)| *name == package) {
-                if get("git") != Some("https://github.com/arismoko/horizon")
+                if get("git") != Some(horizon_addresses::NATIVE_MOD_SDK_SOURCE)
                     || get("rev") != Some(bundle.native().horizon.as_str())
                     || [
                         "branch",

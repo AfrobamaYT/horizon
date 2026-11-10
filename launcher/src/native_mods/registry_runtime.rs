@@ -166,7 +166,10 @@ mod tests {
     fn runtime_outputs_exclude_host_tools_and_preserve_native_aliases() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("target");
+        // read_dir returns canonical-prefixed paths on Windows. Match that representation
+        // without canonicalizing individual files, which would erase Unix aliases.
         fs::create_dir(&target).unwrap();
+        let target = target.canonicalize().unwrap();
         let library = target.join("libnative.so.1");
         fs::write(&library, b"native").unwrap();
         #[cfg(unix)]
