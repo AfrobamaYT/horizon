@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Resource tables consulted at the load boundary, never while drawing tabs.
 pub trait DisplayResources {
+    fn book(&self, key: &mod_api::item::recipe_book::RecipeBookTypeKey) -> bool;
     fn item(&self, id: &str) -> bool;
     fn stack(&self, stack: &mod_api::ItemStack) -> bool;
     fn tag(&self, id: &str) -> bool;
@@ -45,15 +46,13 @@ impl ModBookIndex {
         let mut search_owners = BTreeMap::new();
         let mut recipe_ids = BTreeSet::new();
         for category in declarations {
-            for id in [
-                &category.id,
-                &category.recipe_type,
-                &category.book,
-                &category.search_group,
-            ] {
+            for id in [&category.id, &category.recipe_type, &category.search_group] {
                 if !super::custom_books::valid_book_id(id) || id.starts_with("minecraft:") {
                     return Err(DisplayLoadError::InvalidId(id.clone()));
                 }
+            }
+            if !resources.book(&category.book) {
+                return Err(unknown("book", category.book.as_str()));
             }
             if !super::custom_books::valid_book_id(&category.target_menu) {
                 return Err(DisplayLoadError::InvalidId(category.target_menu));
@@ -67,22 +66,29 @@ impl ModBookIndex {
             if index.categories.contains_key(&category.id) {
                 return Err(DisplayLoadError::DuplicateCategory(category.id));
             }
-            if let Some(owner) =
-                search_owners.insert(category.search_group.clone(), category.book.clone())
+            if let Some(owner) = search_owners.insert(
+                category.search_group.clone(),
+                category.book.as_str().to_owned(),
+            ) && owner != category.book.as_str()
             {
-                if owner != category.book {
-                    return Err(DisplayLoadError::ConflictingBook(category.book));
-                }
+                return Err(DisplayLoadError::ConflictingBook(
+                    category.book.as_str().to_owned(),
+                ));
             }
-            let book = index.books.entry(category.book.clone()).or_insert_with(|| {
-                (
-                    category.target_menu.clone(),
-                    category.search_group.clone(),
-                    Vec::new(),
-                )
-            });
+            let book = index
+                .books
+                .entry(category.book.as_str().to_owned())
+                .or_insert_with(|| {
+                    (
+                        category.target_menu.clone(),
+                        category.search_group.clone(),
+                        Vec::new(),
+                    )
+                });
             if book.0 != category.target_menu || book.1 != category.search_group {
-                return Err(DisplayLoadError::ConflictingBook(category.book));
+                return Err(DisplayLoadError::ConflictingBook(
+                    category.book.as_str().to_owned(),
+                ));
             }
             for recipe in &category.displays {
                 if !resources.recipe(&recipe.recipe, &category.recipe_type) {

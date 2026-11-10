@@ -178,8 +178,8 @@ books remain isolated and vanilla books have no mod search members.
 
 This is display/index infrastructure, **not screen integration**. Existing
 screens do not yet render these declarations. A declaration's `book` is a
-minimal namespaced identity intended to converge with #2415's registered
-`RecipeBookTypeKey`; it does not register a book or create settings. Enabling
+registered `RecipeBookTypeKey` from #2415; it does not implicitly register
+a book or create settings. The index checks the key against the frozen registry. Enabling
 custom book screens still requires the registration and negotiated settings
 route described above. No vanilla book ordinal or packet meaning changes.
 

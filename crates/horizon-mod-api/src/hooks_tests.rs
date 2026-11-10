@@ -241,7 +241,9 @@ fn recipe_book_categories_accept_mod_declarations() {
                 recipe_type: "mymod:crusher".into(),
                 icon: "minecraft:stone".into(),
                 target_menu: "mymod:crusher".into(),
-                book: "mymod:crusher".into(),
+                book: crate::item::recipe_book::RecipeBookTypeKey {
+                    id: "mymod:crusher".into(),
+                },
                 search_group: "mymod:search".into(),
                 displays: Vec::new(),
             });

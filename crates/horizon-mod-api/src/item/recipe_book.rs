@@ -4,8 +4,8 @@ mod display;
 #[allow(unused_imports)]
 use crate::*;
 pub use display::{RecipeBookDisplay, RecipeBookDisplayEntry, RecipeSlotDisplay};
-/// A native mod's book category for one custom recipe type.
-#[derive(Clone, Debug)]
+/// A mod's book category and displays for one custom recipe type.
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct RecipeBookCategory {
@@ -17,9 +17,9 @@ pub struct RecipeBookCategory {
     pub icon: String,
     /// The menu whose screen owns this category.
     pub target_menu: String,
-    /// Namespaced book identity, separate from category identity and settings.
-    /// Converges with the registered book keys in #2415; this does not register a book.
-    pub book: String,
+    /// Registered book identity, separate from category identity and settings.
+    /// Declaring a category does not itself register a book or change its flags.
+    pub book: RecipeBookTypeKey,
     /// Search category aggregating exactly this book's categories.
     pub search_group: String,
     /// Recipe-type supplied displays, rebuilt with this declaration on reload.

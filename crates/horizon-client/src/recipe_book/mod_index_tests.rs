@@ -1,6 +1,9 @@
 use super::*;
 struct Resources;
 impl DisplayResources for Resources {
+    fn book(&self, key: &mod_api::item::recipe_book::RecipeBookTypeKey) -> bool {
+        matches!(key.as_str(), "demo:pot" | "demo:oven")
+    }
     fn item(&self, id: &str) -> bool {
         id == "minecraft:stone"
     }
@@ -29,7 +32,13 @@ fn category(book: &str, id: &str) -> RecipeBookCategory {
         recipe_type: "demo:cooking".into(),
         icon: "minecraft:stone".into(),
         target_menu: book.into(),
-        book: book.into(),
+        book: {
+            // The key is opaque outside registration. Decode its owned id as a fixture;
+            // Resources models the frozen registry consulted by the load boundary.
+            let mut wire = mod_api::wire::Writer::new();
+            wire.put(&book.to_owned());
+            mod_api::wire::Reader::decode(wire.bytes()).unwrap()
+        },
         search_group: format!("{book}_search"),
         displays: Vec::new(),
     }
