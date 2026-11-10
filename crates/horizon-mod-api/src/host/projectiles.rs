@@ -7,7 +7,8 @@ pub trait ProjectilesServerHost {
     /// Side: server. `Projectile.spawnProjectileFromRotation` for a thrown item
     /// projectile: snowball, egg, pearl, potion, experience bottle, wind charge,
     /// or a registered mod thrown type. Constructs at the owner's eyes minus
-    /// 0.1 blocks, sets ownership before shooting, inherits known movement
+    /// 0.1F blocks (wind charges use eye height directly), sets ownership before
+    /// shooting, inherits known movement
     /// (vertical only while airborne), adds to the level and fires projectile_launch.
     /// Spread draws x, y, z triangular noise from the new projectile's own random.
     /// Does not consume the stack or apply item-use cooldowns or statistics.

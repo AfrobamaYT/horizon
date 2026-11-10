@@ -61,7 +61,14 @@ impl Game<'_> {
         let motion = self.native_entity_known_speed(entity)?;
         let on_ground = self.entity_on_ground(entity)?;
         let ((who, uuid, guest), vehicle) = self.native_projectile_owner_fields(Some(entity))?;
-        let mut shot = Projectile::new(kind, Vec3::new(x, y - f64::from(0.1_f32), z), who);
+        // WindChargeItem's factory uses eye height directly; the other
+        // supported factories use ThrowableItemProjectile's widened 0.1F offset.
+        let start_y = if matches!(&kind, ProjectileKind::WindCharge) {
+            y
+        } else {
+            y - f64::from(0.1_f32)
+        };
+        let mut shot = Projectile::new(kind, Vec3::new(x, start_y, z), who);
         (shot.owner_uuid, shot.guest, shot.owner_vehicle) = (uuid, guest, vehicle);
         // Splitting the random from the record avoids borrowing it and the shot
         // simultaneously; cloning an RNG draws nothing and the advanced copy is restored.

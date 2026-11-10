@@ -90,6 +90,12 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
             _ => panic!("expected splash potion payload"),
         }
         assert_eq!(potion.count, 16);
+        let wind = Identifier::parse("minecraft:wind_charge").unwrap();
+        let wind_stack = ItemStack::new("minecraft:wind_charge", 1);
+        let shot = game
+            .spawn_projectile_from_rotation(owner, &wind, &wind_stack, 0.0, 1.5, 1.0)
+            .unwrap();
+        assert_eq!(game.entity_position(shot.entity()).unwrap()[1], eye[1]);
     });
 }
 
