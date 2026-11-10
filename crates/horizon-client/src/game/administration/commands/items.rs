@@ -2656,7 +2656,9 @@ mod registered_slot_source_preservation_tests {
     #[ignore = "needs prepared resources and isolated homes/cwd"]
     fn loaded_snapshot_changes_only_on_existing_reload_with_pack_precedence() {
         let mut resources = None;
-        let (mut game, file) = scene(&mut resources, "slot-source-snapshot-world");
+        let directory = tempfile::tempdir().unwrap();
+        let world = directory.path().join("slot-source-snapshot-world");
+        let (mut game, file) = scene(&mut resources, world.to_str().unwrap());
         let before = game.block_entity_nbt([0, 100, 0]).unwrap();
         let clock = game.world.game_time;
         count(&mut game, 3); // Higher-priority pack overrides the same id.
