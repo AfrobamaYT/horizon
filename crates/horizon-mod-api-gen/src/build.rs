@@ -19,7 +19,7 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
-    track(root)?;
+    track(root, !matches!(&target, Target::Vocab))?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
@@ -36,14 +36,16 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             // engine's `GoalCx` in `mobs/part_goals.rs`.
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
-        Target::Api => {
-            write_if_changed(
-                out_dir.join(super::parts::OUTPUT),
-                super::parts::source(root)?,
-            )
-            .map_err(|e| e.to_string())?;
-            for (name, code) in super::exports::sources(root)? {
-                write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())?;
+        Target::Api | Target::Vocab => {
+            if matches!(target, Target::Vocab) {
+                write_if_changed(
+                    out_dir.join(super::parts::OUTPUT),
+                    super::parts::source(root)?,
+                )
+                .map_err(|e| e.to_string())?;
+                for (name, code) in super::exports::sources(root)? {
+                    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                }
             }
             let hooks = generated.hooks;
             let included = [
@@ -64,14 +66,22 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             for path in sources.iter().chain(&generated_wire.sources) {
                 crate::rerun_if_changed(&path.display());
             }
-            vec![
+            let outputs = vec![
                 (host::AREAS_OUTPUT, generated.areas),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("capability_providers_generated.rs", providers),
                 ("wire_generated.rs", generated_wire.wire),
                 ("wire_guest_generated.rs", generated_wire.guest),
-            ]
+            ];
+            outputs
+                .into_iter()
+                .filter(|(name, _)| match target {
+                    Target::Api => *name == "wire_guest_generated.rs",
+                    Target::Vocab => *name != "wire_guest_generated.rs",
+                    Target::Client => unreachable!(),
+                })
+                .collect()
         }
     };
     for (name, code) in outputs {
@@ -188,7 +198,7 @@ fn listed_render_slots_have_eligible_points() {
 /// The `mod_api` types with a `Wire` layout ([`super::wire`]), for point records.
 /// A source tree without the mod API (a generator fixture's) has none.
 pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
-    if !root.join("crates/horizon-mod-api/src/hooks").is_dir() {
+    if !root.join("crates/horizon-mod-vocab/src/hooks").is_dir() {
         return Ok(Default::default());
     }
     let generated = sources(root, super::FillMode::Require)?;
@@ -248,7 +258,7 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
     write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
 }
 
-pub(super) fn track(root: &Path) -> Result<(), String> {
+pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
         crate::rerun_if_changed(&path.display());
@@ -262,7 +272,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
         }
         Ok(())
     }
-    crate::rerun_if_changed(&root.join("crates/horizon-mod-api/src/lib.rs").display());
+    crate::rerun_if_changed(&root.join("crates/horizon-mod-vocab/src/lib.rs").display());
     for retired in super::catalog::RETIRED {
         // Only while present: Cargo reruns a build script on every build for a path that doesn't
         // exist. One that appears fails the next generation, and every fresh build, such as CI's.
@@ -273,9 +283,21 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
-    directory(&root.join("crates/horizon-mod-api/src/parts"), "rs", false)?;
-    directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
-    crate::rerun_if_changed(&root.join("crates/horizon-client/src/game.rs").display());
+    directory(
+        &root.join("crates/horizon-mod-vocab/src/parts"),
+        "rs",
+        false,
+    )?;
+    if all_game {
+        directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
+        crate::rerun_if_changed(&root.join("crates/horizon-client/src/game.rs").display());
+    } else {
+        directory(
+            &root.join("crates/horizon-client/src/game/native_hooks"),
+            "rs",
+            false,
+        )?;
+    }
     for hook in Catalog::load(root)?.hooks {
         if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;

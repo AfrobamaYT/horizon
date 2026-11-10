@@ -4,7 +4,7 @@
 (a logging Java plugin) and Horizon (a native trace mod), driven by `horizon-bots`.
 It compares observable events, cancellation and resulting state where covered.
 Hook → event mappings come from `paper = "..."` attributes in
-`crates/horizon-mod-api/src/hooks/`, not a second hand-maintained mapping.
+`crates/horizon-mod-vocab/src/hooks/`, not a second hand-maintained mapping.
 This is a porting aid, not a Bukkit compatibility layer or a replacement for
 the vanilla [parity harnesses](parity-workflow.md). It never edits ledger rows.
 
