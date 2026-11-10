@@ -142,6 +142,8 @@ mod weather;
 #[cfg(test)]
 mod growth_tests;
 #[cfg(test)]
+mod survive_tests;
+#[cfg(test)]
 mod tests;
 
 pub use bonemeal::{BonemealCheck, TemplateSettings};
@@ -708,6 +710,17 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _pos: BlockPos,
         _state: BlockStateId,
         _survives: &mut Option<bool>,
+    ) {
+    }
+    /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
+    /// and the plant `state` above it, before the plant answers `mayPlaceOn`.
+    /// An answer put in `sustains` is the result. The default does nothing.
+    fn before_can_sustain_plant(
+        &self,
+        _state: BlockStateId,
+        _ground: BlockStateId,
+        _ground_pos: BlockPos,
+        _sustains: &mut Option<bool>,
     ) {
     }
     /// `VegetationBlock.mayPlaceOn(ground, level, groundPos)` for the plant
