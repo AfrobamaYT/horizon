@@ -61,8 +61,11 @@ impl Game<'_> {
                 let Some(index) = self.dropped.iter().position(|item| item.id == id) else {
                     return false;
                 };
+                let immune = self
+                    .items()
+                    .resists_fire(&self.dropped[index].stack, "minecraft:in_fire");
                 let item = &mut self.dropped[index];
-                if item.fire_ticks > 0 {
+                if item.fire_ticks > 0 && !immune {
                     let at = [item.position.x, item.position.y, item.position.z];
                     let pitch = extinguish_pitch(&mut item.random);
                     self.audio.play_on(

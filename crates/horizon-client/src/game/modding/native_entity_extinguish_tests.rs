@@ -114,5 +114,17 @@ fn extinguish_fire_preserves_player_guest_stand_and_item_sound_routes() {
                 );
             }
         }
+        let entity = game.entity(23).unwrap();
+        let item = &mut game.dropped[0];
+        item.stack = ItemStack::new("minecraft:netherite_ingot", 1);
+        item.fire_ticks = 72;
+        item.random = LegacyRandom::new(1234);
+        *game.particles.random() = LegacyRandom::new(1234);
+        game.audio.capture = Some(Vec::new());
+        assert!(entity.extinguish_fire(game));
+        assert_eq!(game.dropped[0].fire_ticks, 0);
+        assert!(game.audio.capture.as_ref().unwrap().is_empty());
+        assert_eq!(game.dropped[0].random.next_float(), FIRST);
+        assert_eq!(game.particles.random().next_float(), FIRST);
     });
 }

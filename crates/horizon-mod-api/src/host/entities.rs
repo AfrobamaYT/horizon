@@ -741,7 +741,8 @@ pub trait EntitiesBackendMut {
     /// Side: server.
     /// `Entity.extinguishFire`: plays the ordinary extinguish sound when the
     /// entity is burning, then clears positive fire ticks. Fire-immune mobs
-    /// do not play a sound; negative fire-immunity countdowns are retained.
+    /// and fire-resistant dropped stacks do not play a sound; negative
+    /// fire-immunity countdowns are retained.
     /// Uses the engine's entity/cosmetic random and normal sound route.
     /// Supports players, guests, mobs, armor stands and dropped items. False
     /// for a stale or unsupported entity.

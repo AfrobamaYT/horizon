@@ -5,7 +5,8 @@ players, guests, mobs, armor stands and dropped items. If the entity is burning,
 it first emits `minecraft:entity.generic.extinguish_fire` at its feet with volume
 0.7 and vanilla's pitch from two ordered random float draws. It then clears
 positive remaining fire ticks, preserving a negative fire-immunity countdown.
-Fire-immune mob kinds do not count as burning, even when their timer is positive.
+Fire-immune mob kinds and dropped stacks resistant to in-fire damage do not
+count as burning, even when their timer is positive.
 
 The operation reuses the engine's mob sound outbox and entity random, and the
 player/armor-stand cosmetic random and captured sound route. Dropped items use
