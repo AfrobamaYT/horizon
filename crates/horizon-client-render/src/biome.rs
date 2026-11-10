@@ -404,6 +404,32 @@ impl Biomes {
             .get(usize::from(id))
             .map_or("minecraft:plains", |b| b.name.as_str())
     }
+    /// A biome's natural spawners by category, sorted by category name; None for a name this
+    /// table lacks.
+    pub fn spawners(&self, name: &str) -> Option<Vec<mod_api::world::biome::BiomeSpawners>> {
+        let info = self.list.get(usize::from(*self.index.get(name)?))?;
+        let mut categories: Vec<_> = info
+            .spawns
+            .iter()
+            .map(|(category, entries)| mod_api::world::biome::BiomeSpawners {
+                category: category.clone(),
+                entries: entries.clone(),
+            })
+            .collect();
+        categories.sort_by(|a, b| a.category.cmp(&b.category));
+        Some(categories)
+    }
+    /// Biome colours, with omitted water fog defaulted to 0x050533; not dimension-resolved.
+    /// Returns None for a name this table lacks.
+    pub fn effects(&self, name: &str) -> Option<mod_api::world::biome::BiomeEffects> {
+        let info = self.list.get(usize::from(*self.index.get(name)?))?;
+        Some(mod_api::world::biome::BiomeEffects {
+            sky: info.sky,
+            fog: info.fog,
+            water: info.water,
+            water_fog: info.water_fog,
+        })
+    }
     pub fn grass(&self, id: u16, x: f64, z: f64) -> u32 {
         let b = self.get(id);
         match b.modifier {
@@ -800,5 +826,101 @@ mod source_tests {
         )]));
         assert_eq!(colormap(&source, "grass").unwrap(), [0x0c2238]);
         assert!(colormap(&source, "missing").is_err());
+    }
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+    use mod_api::world::biome::{BiomeEffects, SpawnEntry};
+    use serde_json::json;
+
+    fn table() -> Biomes {
+        Biomes::from_jsons(&[
+            (
+                "minecraft:plains",
+                json!({
+                    "effects": {"water_color": 0x3F76E4},
+                    "attributes": {
+                        "minecraft:gameplay/natural_mob_spawns": {"spawns_by_category": {
+                            "monster": [
+                                {"type": "minecraft:zombie", "weight": 95, "count": {"min_inclusive": 4, "max_inclusive": 4}},
+                                {"type": "minecraft:spider", "weight": 100, "count": 2}
+                            ],
+                            "creature": [{"type": "minecraft:horse", "weight": 5,
+                                "count": {"min_inclusive": 2, "max_inclusive": 6}}]
+                        }}
+                    }
+                }),
+            ),
+            (
+                "minecraft:the_void",
+                json!({
+                    "effects": {"water_color": 0x123456},
+                    "attributes": {
+                        "minecraft:visual/sky_color": "#78A7FF",
+                        "minecraft:visual/fog_color": 0xC0D8FF,
+                        "minecraft:visual/water_fog_color": 0x123456
+                    }
+                }),
+            ),
+        ])
+    }
+
+    #[test]
+    fn spawners_are_the_biome_files_by_category_name() {
+        let spawners = table().spawners("minecraft:plains").unwrap();
+        let entry = |entity: &str, weight, min, max, constant| SpawnEntry {
+            entity: entity.into(),
+            weight,
+            min,
+            max,
+            constant,
+        };
+        assert_eq!(
+            spawners
+                .iter()
+                .map(|s| s.category.as_str())
+                .collect::<Vec<_>>(),
+            ["creature", "monster"]
+        );
+        assert_eq!(
+            spawners[0].entries,
+            [entry("minecraft:horse", 5, 2, 6, false)]
+        );
+        assert_eq!(
+            spawners[1].entries,
+            [
+                entry("minecraft:zombie", 95, 4, 4, false),
+                entry("minecraft:spider", 100, 2, 2, true)
+            ]
+        );
+        // A biome with no natural spawns has an empty list; an unknown one has none.
+        assert_eq!(table().spawners("minecraft:the_void"), Some(Vec::new()));
+        assert_eq!(table().spawners("minecraft:nowhere"), None);
+    }
+
+    #[test]
+    fn effects_are_the_biome_files_own_colours() {
+        assert_eq!(
+            table().effects("minecraft:the_void"),
+            Some(BiomeEffects {
+                sky: Some(0x78A7FF),
+                fog: Some(0xC0D8FF),
+                water: 0x123456,
+                water_fog: 0x123456,
+            })
+        );
+        // A biome that leaves sky and fog out has none, and the default water fog.
+        assert_eq!(
+            table().effects("minecraft:plains"),
+            Some(BiomeEffects {
+                sky: None,
+                fog: None,
+                water: 0x3F76E4,
+                water_fog: 0x050533,
+            })
+        );
+        assert_eq!(table().effects("minecraft:nowhere"), None);
     }
 }

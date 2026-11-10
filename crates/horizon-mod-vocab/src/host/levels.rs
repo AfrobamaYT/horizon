@@ -80,6 +80,18 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
     /// Side: both.
+    /// A biome's natural spawners by category (`MobSpawnSettings.getMobs`), from the level's
+    /// biome table, data packs and biome modifiers included, categories sorted by name. None for a
+    /// stale handle or an unknown biome. This is the biome's own list; `potential_spawns` is
+    /// what a position gets after mods edit it. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_spawners(&self, level: LevelRef, biome: &str) -> Option<Vec<BiomeSpawners>>;
+    /// Side: both.
+    /// A biome's own sky, fog and water colours (`BiomeSpecialEffects`), from the level's biome
+    /// table. None for a stale handle or an unknown biome. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_effects(&self, level: LevelRef, biome: &str) -> Option<BiomeEffects>;
+    /// Side: both.
     /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
     /// from build height. Reads active and parked server levels or the client's current level.
     /// None for a stale or unavailable level. Does not load chunks.
