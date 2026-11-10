@@ -172,6 +172,17 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(result.stderr.count("E: File has unexpected size"), 3)
         self.assertIn("apt-get failed after 3 tries (exit 100)", result.stderr)
 
+    def test_lint_enforces_api_boundary_under_central_selection(self):
+        from test_ci_runners import jobs
+        lint = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["lint"]
+        self.assertIn("if: ${{ always() && !cancelled()", lint)
+        # Pin the executable contract, including the selection and source-only mode:
+        # deleting the step or making it unconditional must fail this test.
+        self.assertIn(
+            "      - name: Check mod API boundary\n"
+            "        if: needs.changes.outputs.rust_required != 'false'\n"
+            "        run: python3 tools/ci/check_api_boundary.py --source-only\n", lint)
+
     def test_workflow_wires_route_and_keeps_privileges_off_pool(self):
         from test_ci_runners import jobs
         workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
