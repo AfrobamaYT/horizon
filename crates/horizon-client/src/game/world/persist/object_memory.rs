@@ -306,6 +306,7 @@ impl Game<'_> {
             // to int before short narrowing; integer tags narrow directly.
             let fuse = tnt_fuse(&tag);
             self.tnts.push(crate::game::tnt::PrimedTnt {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
