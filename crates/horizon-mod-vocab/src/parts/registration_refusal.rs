@@ -19,8 +19,20 @@ pub fn take_registration_refusal(cx: &crate::RegistrationContext) -> Option<Stri
         .take()
 }
 
-
-
-
-
-
+#[cfg(test)]
+mod tests {
+    use crate::RegistrationContext;
+    #[test]
+    fn bounded_reasons_preserve_utf8_and_empty_is_a_refusal() {
+        for (reason, expected) in [
+            ("a".repeat(4095) + "é!", "a".repeat(4095)),
+            ("é".repeat(2048), "é".repeat(2048)),
+            (String::new(), String::new()),
+        ] {
+            let cx = RegistrationContext::new();
+            cx.refuse(&reason);
+            cx.refuse("not the first reason");
+            assert_eq!(*cx.self_refusal.lock().unwrap(), Some(expected));
+        }
+    }
+}

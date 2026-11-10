@@ -124,8 +124,6 @@ pub(crate) struct TagParts {
 #[path = "shared/registration_state.rs"]
 mod registration_state;
 pub(crate) use registration_state::Installed;
-pub use registration_state::PartRegistrar;
-
 
 pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::Requests {
     static EMPTY: LazyLock<horizon_mod_runtime::registry_keys::Requests> =

@@ -51,7 +51,13 @@ impl Schema {
                             let name = item.ident.to_string();
                             // Installed is the root Parts epoch, not another domain's
                             // unrelated installation wrapper with the same local name.
-                            if name == "Installed" && owner != "crate::parts::shared" {
+                            if name == "Installed"
+                                && !matches!(
+                                    owner.as_str(),
+                                    "crate::parts::shared"
+                                        | "crate::parts::shared::registration_state"
+                                )
+                            {
                                 continue;
                             }
                             // Only private storage, plus these supported opaque lookup owners,
@@ -62,8 +68,13 @@ impl Schema {
                                     "Attached" | "Parts" | "OwnProvider" | "TooltipAppenderPart"
                                 )
                             {
-                                let target = syn::parse_str(&format!("{owner}::{name}"))
-                                    .map_err(|e| e.to_string())?;
+                                let target_name = if name == "Installed" {
+                                    "crate::parts::shared::Installed".to_string()
+                                } else {
+                                    format!("{owner}::{name}")
+                                };
+                                let target =
+                                    syn::parse_str(&target_name).map_err(|e| e.to_string())?;
                                 if self.records.insert(name.clone(), (item, target)).is_some() {
                                     self.duplicates.insert(name);
                                 }

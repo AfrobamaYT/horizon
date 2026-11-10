@@ -38,6 +38,9 @@ pub(crate) fn with_registering_keys<T>(
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    pub(crate) menu_recipe_books:
+        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
+    pub(crate) self_refusal: Option<String>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
@@ -68,6 +71,8 @@ impl PartRegistrar {
     pub(crate) fn new(mod_id: &'static str) -> Self {
         let _ = crate::__private::initialize();
         Self {
+            menu_recipe_books: HashMap::new(),
+            self_refusal: None,
             recipe_book_types: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
@@ -182,11 +187,21 @@ pub(crate) fn register_all(
     }
     let _active = ActiveRegistration::enter();
     let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
-    let context = crate::RegistrationContext::new();
     for (index, hooks) in mod_vocab::__private::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mod_vocab::__private::parts_installation::mod_entry_id(&mods[index]);
         registrar.mod_index = index;
+        let context = crate::RegistrationContext::new();
+        let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
+        let reason = mod_vocab::__private::take_registration_refusal(&context)
+            .or_else(|| registrar.self_refusal.take());
+        if let Some(reason) = reason {
+            rollback(&mut registrar);
+            registrar.refused.push(format!(
+                "mod {} refused registration: {reason}",
+                mod_vocab::__private::parts_installation::mod_entry_id(&mods[index])
+            ));
+        }
     }
     registrar.expand_block_entity_parts();
     registrar.refuse_unknown_dimension_generators();
@@ -216,6 +231,7 @@ pub(crate) fn install_registrar(
     }
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let installed = Installed {
+        menu_recipe_books: registrar.menu_recipe_books,
         recipe_book_types: registrar.recipe_book_types,
         game_rule_slots,
         game_rules: registrar.game_rules,

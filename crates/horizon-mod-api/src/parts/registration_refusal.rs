@@ -6,10 +6,7 @@ impl RegistrationRefusalRegistrar for PartRegistrar {
         if self.self_refusal.is_none() {
             let context = crate::RegistrationContext::new();
             context.refuse(&reason);
-            self.self_refusal = context
-                .self_refusal
-                .into_inner()
-                .unwrap_or_else(|p| p.into_inner());
+            self.self_refusal = mod_vocab::__private::take_registration_refusal(&context);
         }
     }
 }
@@ -118,19 +115,4 @@ mod tests {
         assert!(!keys.declared_fluids.contains_key("broken:before"));
         assert!(!keys.declared_fluids.contains_key("foreign:after"));
     }
-
-    #[test]
-    fn bounded_reasons_preserve_utf8_and_empty_is_a_refusal() {
-        for (reason, expected) in [
-            ("a".repeat(4095) + "é!", "a".repeat(4095)),
-            ("é".repeat(2048), "é".repeat(2048)),
-            (String::new(), String::new()),
-        ] {
-            let cx = RegistrationContext::new();
-            cx.refuse(&reason);
-            cx.refuse("not the first reason");
-            assert_eq!(*cx.self_refusal.lock().unwrap(), Some(expected));
-        }
-    }
 }
-

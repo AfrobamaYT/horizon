@@ -13,7 +13,7 @@ impl MenusRegistrar for PartRegistrar {
         layout: crate::RecipeBookLayout,
     ) -> Result<(), String> {
         let result: Result<(), String> = (|| {
-            if installed().is_some() {
+            if mod_vocab::__private::parts_installation::parts_installed() {
                 return Err("registry is frozen".into());
             }
             let menu_id =
@@ -49,4 +49,3 @@ impl MenusRegistrar for PartRegistrar {
         self.attach(|p| &mut p.menus, kind, menu, part);
     }
 }
-
