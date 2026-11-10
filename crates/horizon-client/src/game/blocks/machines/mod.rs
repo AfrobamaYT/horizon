@@ -1021,66 +1021,24 @@ impl Game<'_> {
         self.hopper_try_move_items_with_state(pos, state);
     }
     fn hopper_try_move_items_with_state(&mut self, pos: Pos, state: BlockStateId) {
-        let Some(info) = self.pack.assets.registry.state(state) else {
+        let c = self.containers();
+        let enabled = c.prop(state, "enabled") != Some("false");
+        let Some(view) = c.view(pos, false) else {
             return;
         };
-        if info.properties.get("enabled").is_some_and(|v| v == "false") {
+        if self.hoppers.get(&pos).is_some_and(|h| h.cooldown > 0) || !enabled {
             return;
         }
-        if self.hoppers.get(&pos).is_some_and(|h| h.cooldown > 0) {
-            return;
-        }
-        let Some(BlockEntity::Chest(items)) = self.world.block_entities.get(&pos) else {
-            return;
-        };
-        if items.len() != HOPPER_SLOTS {
-            return;
-        }
-        let is_empty = items
-            .iter()
-            .all(|s| s.as_ref().is_none_or(|s| s.count == 0));
-        let has_empty_slot = items
-            .iter()
-            .any(|s| s.as_ref().is_none_or(|s| s.count == 0));
-
-        let above = (pos.0, pos.1 + 1, pos.2);
-        // Fast path for empty hopper with no source container and no item entities:
-        // if empty, cannot eject; if no container above, cannot suck container;
-        // if no dropped items nearby, cannot suck entities -> nothing can happen!
-        if is_empty
-            && self.world.block_entities.get(&above).is_none()
-            && self.carts.is_empty()
-            && self.boats.is_empty()
-            && (self.dropped.is_empty()
-                || self
-                    .item_columns
-                    .as_mut()
-                    .is_some_and(|c| !c.may_reach(&self.dropped, pos.0, pos.2)))
-            && self
-                .pack
-                .assets
-                .registry
-                .state(self.world.block(above.0, above.1, above.2))
-                .is_none_or(|s| s.name != "minecraft:composter")
-        {
-            return;
-        }
-
         self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
-        let view = View {
-            parts: vec![(pos, HOPPER_SLOTS)],
-            kind: Kind::Hopper,
-            container: None,
-        };
+        let c = self.containers();
         let mut changed = false;
-        if !is_empty {
+        if !c.is_empty(&view) {
             changed = self.hopper_eject(pos, &view);
         }
-        let is_full = !changed && !has_empty_slot && {
-            let c = self.containers();
-            (0..HOPPER_SLOTS).all(|i| c.get(&view, i).is_some_and(|s| s.count >= c.max_stack(s)))
-        };
-        if !is_full {
+        let c = self.containers();
+        let full =
+            (0..view.len()).all(|i| c.get(&view, i).is_some_and(|s| s.count == c.max_stack(s)));
+        if !full {
             changed |= self.hopper_suck(pos, &view);
         }
         if changed {
@@ -2105,6 +2063,109 @@ mod brewing_fuel_transfer_tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
     use horizon_client::brewing::BrewingStand;
+    use mod_api::HostTransaction;
+
+    struct PrepareProbe {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        fill: bool,
+    }
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for PrepareProbe {
+        fn prepare_hopper_transfer(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::PrepareHopperTransferEvent,
+        ) {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fill {
+                let level = host.level("minecraft:overworld").unwrap();
+                let items = level
+                    .capability(host, &mod_api::ITEMS, [8, 64, 8], None)
+                    .unwrap();
+                let stack = mod_api::ItemStack::new(
+                    mod_api::__private::item_key("minecraft:stone").unwrap(),
+                    1,
+                )
+                .unwrap();
+                let resource = mod_api::ItemResource::of(&stack);
+                host.transaction(|host, tx| {
+                    assert_eq!(items.insert(host, tx, 0, &resource, 1), 1);
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
+            }
+        }
+    }
+
+    fn check_prepare_transfer(fill: bool) {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "prepare_probe",
+            Box::new(PrepareProbe {
+                calls: calls.clone(),
+                fill,
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                let pos = (8, 64, 8);
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:hopper")
+                    .unwrap();
+                game.world.set(pos.0, pos.1, pos.2, state).unwrap();
+                game.world
+                    .block_entities
+                    .insert(pos, BlockEntity::Chest(vec![None; HOPPER_SLOTS]));
+                if fill {
+                    let chest = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:chest")
+                        .unwrap();
+                    game.world.set(8, 63, 8, chest).unwrap();
+                    game.world
+                        .block_entities
+                        .insert((8, 63, 8), BlockEntity::Chest(vec![None; 27]));
+                }
+                game.hopper_try_move_items(pos);
+                assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+                if fill {
+                    let containers = game.containers();
+                    let target = containers.view((8, 63, 8), false).unwrap();
+                    assert_eq!(
+                        containers.get(&target, 0).unwrap().item.as_ref(),
+                        "minecraft:stone"
+                    );
+                    assert_eq!(containers.get(&target, 0).unwrap().count, 1);
+                    assert!(containers.is_empty(&containers.view(pos, false).unwrap()));
+                    assert_eq!(game.hoppers[&pos].cooldown, 8);
+                }
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn empty_hopper_dispatches_prepare_transfer() {
+        check_prepare_transfer(false);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn prepare_transfer_inventory_write_is_ejected() {
+        check_prepare_transfer(true);
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
