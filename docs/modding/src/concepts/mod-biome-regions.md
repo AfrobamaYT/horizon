@@ -15,7 +15,7 @@ The same answer says NeoForge has no API for this: its biome modifiers change bi
 
 | Fact | Where |
 | --- | --- |
-| A level's biome source is one of fixed, checkerboard, multi-noise by preset, the End, or (scope 1) a mod's own points. | `BiomeSourceKind` in `crates/horizon-mod-api/src/world/dimension.rs` |
+| A level's biome source is one of fixed, checkerboard, multi-noise by preset, the End, or (scope 1) a mod's own points. | `BiomeSourceKind` in `crates/horizon-mod-vocab/src/world/dimension.rs` |
 | The game writes the level stem's `biome_source` JSON; the generator decodes it when a world is prepared. | `biome_source` in `game/modding/native_dimensions.rs`; `worldgen/biome_source/codec.rs` |
 | A multi-noise source is a list of `(ParameterPoint, biome)` searched for the nearest point to the six climate values and a zero offset. | `worldgen/climate/index.rs` (`ClimateIndex`, `ClimateSearch`) |
 | The Overworld's and the Nether's lists are named presets, not data a mod can extend. | `BiomeSourceKind::MultiNoise`, `biome_preset` |
