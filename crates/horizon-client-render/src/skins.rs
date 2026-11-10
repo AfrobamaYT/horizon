@@ -2290,7 +2290,9 @@ mod download_bound_tests {
         assert_eq!(d.resource_order.len(), d.resources.len());
         assert!(!d.resource_order.iter().any(|l| l == "patch/n/35"));
         // New packs start the count over.
-        d.set_resource_root(std::env::temp_dir());
+        d.set_resource_root(horizon_assets::resource_source::ResourceSource::directory(
+            std::env::temp_dir(),
+        ));
         assert!(d.resources.is_empty() && d.resource_order.is_empty());
     }
 }

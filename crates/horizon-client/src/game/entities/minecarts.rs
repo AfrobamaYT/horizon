@@ -3409,7 +3409,8 @@ mod tnt_impact_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_powered_rail_pushes_a_resting_cart_away_from_soul_sand() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let registry = game.pack.assets.registry;
         let rail = registry.default_state("minecraft:powered_rail").unwrap();
         let mut state = registry.state(rail).unwrap().clone();
@@ -3505,7 +3506,8 @@ mod tnt_impact_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_cart_resting_against_a_fence_keeps_toggling_the_plate_above_it() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let registry = game.pack.assets.registry;
         let stone = registry.default_state("minecraft:stone").unwrap();
         let fence = registry.default_state("minecraft:oak_fence").unwrap();

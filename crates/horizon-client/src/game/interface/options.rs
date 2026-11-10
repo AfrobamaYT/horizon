@@ -800,8 +800,8 @@ impl Game<'_> {
     /// joining or leaving a server needs no call of its own.
     pub(super) fn hold_fullbright(&mut self) {
         let held = fullbright_held(
-            self.remote.as_ref().map(|r| r.save_folder.is_some()),
-            self.studio_replay.is_some(),
+            self.remote.as_ref().map(|_| self.integrated.is_some()),
+            self.replay.driver.is_some(),
         );
         self.settings.fullbright_held = held;
         if let Some(r) = self.renderer.as_mut() {
@@ -811,9 +811,9 @@ impl Game<'_> {
 }
 
 /// Fullbright is held off on another's server, where it would light what the server shows
-/// dark (#3823): a connection with no save of this window's own (`Remote::save_folder`), as a
-/// multiplayer server or a LAN guest has. Single player, a LAN host, a splitscreen seat in
-/// P1's world and Replay Studio keep it. `connection`: none, or whether it plays a save.
+/// dark: a connection without this window's integrated server, as a multiplayer server
+/// or a LAN guest has. Single player, a LAN host and Replay Studio keep it.
+/// `connection`: none, or whether it plays on this window's integrated server.
 fn fullbright_held(connection: Option<bool>, studio: bool) -> bool {
     connection == Some(false) && !studio
 }

@@ -3015,14 +3015,15 @@ mod pot_hopper_insertion_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::native_machines::tests::server_game;
+    use crate::game::game_tests::tests::server_game;
 
     /// `ShelfBlockEntity.setChanged` (no arguments) posts `BLOCK_ACTIVATE`:
     /// a container writing a shelf's slot is a block activation.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_container_writing_a_shelf_posts_block_activate() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let key = (2, 4, 3);
         let state = game
             .pack

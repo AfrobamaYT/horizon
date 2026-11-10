@@ -2189,7 +2189,10 @@ mod icon_slot_tests {
     use super::*;
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            "/nonexistent/horizon-test-assets".into(),
+        ))
+        .unwrap()
     }
 
     /// `count` packs with an icon each, the pixels of icon `i` all `i`.

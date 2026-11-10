@@ -86,9 +86,6 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
-        // The playing jukeboxes, found at the first allay: no allay starts
-        // or stops one, and the block entities run into the thousands.
-        let mut jukeboxes: Option<Vec<(i32, i32, i32)>> = None;
         for i in 0..self.mobs.len() {
             if self.mobs[i].species() != Species::Allay
                 || !self.mobs[i].alive()

@@ -344,7 +344,7 @@ impl Game<'_> {
             attached_to: None,
             angled: false,
             item: stack.clone(),
-            random,
+            random: own.clone(),
             on_ground: false,
             has_been_shot: false,
             silent: false,
