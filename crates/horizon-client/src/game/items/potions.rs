@@ -2634,6 +2634,8 @@ impl Game<'_> {
         let height = (panels.len() as i32 - 1) * first.spacing + 32;
         Some([first.x as f32, first.y as f32, width as f32, height as f32])
     }
+    /// The room the effect panels lay out in (`EffectsInInventory`'s space):
+    /// the window's width, the container's origin and its image width.
     pub(super) fn effects_space(
         batch: &HudBatch,
         origin: [f32; 2],
@@ -2662,28 +2664,41 @@ impl Game<'_> {
     /// Vanilla's layout, as `native_screen_render_inventory_mob_effects`
     /// leaves it, for the panels and their exclusion rect. No fire with no
     /// effect to show or no room (vanilla returns first), nor with no mod
-    /// listening.
+    /// listening. The answer is taken once a frame: the display's change
+    /// builds twice in one frame (`apply_ui_settings` then `observe_screen`),
+    /// and the second build reuses the first one's answer.
     pub(super) fn inventory_effects_layout(
         &self,
         space: &inventory_effects::EffectsSpace,
         rect: [f32; 4],
     ) -> inventory_effects::EffectsLayout {
         let mut layout = inventory_effects::EffectsLayout::vanilla(space.available());
-        if !self.potions.effects.list.is_empty()
-            && space.available() >= 32
-            && mod_api::__private::listened(mod_api::HookId::ScreenRenderInventoryMobEffects)
+        if self.potions.effects.list.is_empty()
+            || space.available() < 32
+            || !mod_api::__private::listened(mod_api::HookId::ScreenRenderInventoryMobEffects)
         {
-            let view = self.screen_view_at(self.screen, rect);
-            let mut canceled = false;
-            self.native_screen_render_inventory_mob_effects(
-                &view,
-                space.available(),
-                &mut layout.compact,
-                &mut layout.offset,
-                &mut canceled,
-            );
-            layout.hidden = canceled;
+            return layout;
         }
+        if let Some(answer) =
+            self.screen_state
+                .build
+                .effects_answer(self.frames, self.screen, *space)
+        {
+            return answer;
+        }
+        let view = self.screen_view_at(self.screen, rect);
+        let mut canceled = false;
+        self.native_screen_render_inventory_mob_effects(
+            &view,
+            space.available(),
+            &mut layout.compact,
+            &mut layout.offset,
+            &mut canceled,
+        );
+        layout.hidden = canceled;
+        self.screen_state
+            .build
+            .keep_effects_answer(self.frames, self.screen, *space, layout);
         layout
     }
     /// Effects saved in level.dat (`Player.active_effects`).

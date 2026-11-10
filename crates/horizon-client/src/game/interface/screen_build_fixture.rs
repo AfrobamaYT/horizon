@@ -40,6 +40,9 @@ impl Game<'_> {
         Ok(())
     }
 
+    /// One case's screen state (`kind`, rows, recipe book, window, scale) and
+    /// the build that shows it: the panel, the origin, the slot boxes and the
+    /// slot each cursor point hovers, as `VanillaScreenBuildOracle` prints them.
     fn screen_build_case(&mut self, case: &Value) -> Result<Value> {
         let kind = case["kind"].as_str().ok_or("kind")?;
         let rows = case["rows"].as_u64().unwrap_or(3);

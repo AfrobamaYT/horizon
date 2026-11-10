@@ -8,7 +8,7 @@
 //! every slot's hover box are made once here, and the drawing, the hit tests
 //! and `screen_exclusion` read them instead of rebuilding them per call.
 
-use horizon_client::inventory_effects::EffectsLayout;
+use horizon_client::inventory_effects::{EffectsLayout, EffectsSpace};
 use horizon_client::window::GuiSize;
 use mod_api::ScreenView;
 
@@ -187,10 +187,25 @@ pub(super) struct ScreenState {
     pub(super) build: ScreenBuildState,
 }
 
+/// One frame's `RenderInventoryMobEffects` answer and what it was taken for.
+///
+/// The display's change builds twice in one frame (`apply_ui_settings` then
+/// `observe_screen`); the hook's contract is one dispatch a frame, so the
+/// second build reuses this answer instead of asking again.
+#[derive(Clone, Copy, PartialEq)]
+struct EffectsMemo {
+    frame: u64,
+    screen: Screen,
+    space: EffectsSpace,
+    answer: EffectsLayout,
+}
+
 /// The open screen's build and what it was made from.
 #[derive(Default)]
 pub(super) struct ScreenBuildState {
     current: Option<ScreenBuild>,
+    /// The frame's effects answer, while this frame asked for one.
+    effects: std::cell::Cell<Option<EffectsMemo>>,
     #[cfg(test)]
     builds: u32,
 }
@@ -199,6 +214,36 @@ impl ScreenBuildState {
     /// A fresh overlay instance must build even when its kind is unchanged.
     pub(super) fn reopened(&mut self) {
         self.current = None;
+    }
+
+    /// The answer this frame already took for `screen` in `space`, so a
+    /// second build of the same frame asks the mods nothing.
+    pub(super) fn effects_answer(
+        &self,
+        frame: u64,
+        screen: Screen,
+        space: EffectsSpace,
+    ) -> Option<EffectsLayout> {
+        self.effects
+            .get()
+            .filter(|memo| memo.frame == frame && memo.screen == screen && memo.space == space)
+            .map(|memo| memo.answer)
+    }
+
+    /// Keeps this frame's answer for a second build in the same frame.
+    pub(super) fn keep_effects_answer(
+        &self,
+        frame: u64,
+        screen: Screen,
+        space: EffectsSpace,
+        answer: EffectsLayout,
+    ) {
+        self.effects.set(Some(EffectsMemo {
+            frame,
+            screen,
+            space,
+            answer,
+        }));
     }
 
     /// Reconciles the build with what shows now: a different screen or a
@@ -583,5 +628,72 @@ mod tests {
         );
         state.sync(Screen::Creative, true, None, size, Some(layout));
         assert_eq!(state.builds, 1);
+    }
+
+    /// The display's change builds twice in one frame (`apply_ui_settings`
+    /// then `observe_screen`): the effects hook still fires once, and the next
+    /// frame fires it again. A mod's once-per-frame side effect stays once.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_effects_answer_is_taken_once_a_frame() {
+        use mod_api::{ClientHost, Hooks, ModEntry, ScreenRenderInventoryMobEffectsEvent};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        /// A mod listening to the effects hook, counting its dispatches.
+        struct Effects(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Effects {
+            /// Counts the dispatch the build asks for.
+            fn screen_render_inventory_mob_effects(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut ScreenRenderInventoryMobEffectsEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                mod_api::Flow::Continue
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "effects",
+            Box::new(Effects(Arc::clone(&calls))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+                game.screen = Screen::Inventory;
+                game.container = None;
+                game.craft_size = 2;
+                game.potions.effects.list = vec![horizon_client::effects::EffectInstance::new(
+                    "speed", 200, 0,
+                )];
+                game.frames = 11;
+                game.build_screen();
+                assert_eq!(
+                    calls.load(Ordering::Relaxed),
+                    1,
+                    "the frame's first build asks the mods"
+                );
+                game.build_screen();
+                assert_eq!(
+                    calls.load(Ordering::Relaxed),
+                    1,
+                    "a second build in the same frame reuses the answer"
+                );
+                game.frames = 12;
+                game.build_screen();
+                assert_eq!(
+                    calls.load(Ordering::Relaxed),
+                    2,
+                    "the next frame asks again"
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 2, "and only once");
+            });
+        });
     }
 }

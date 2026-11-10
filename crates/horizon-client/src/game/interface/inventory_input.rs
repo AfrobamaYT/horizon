@@ -387,6 +387,8 @@ impl Game<'_> {
         };
         [ox + shift, oy, width, height]
     }
+    /// The build's panel as `AbstractContainerScreen`'s `leftPos`/`topPos`/
+    /// `imageWidth`/`imageHeight`, the shape `hasClickedOutside` reads.
     fn image_of([left, top, width, height]: [f32; 4]) -> horizon_client::container_screen::Image {
         horizon_client::container_screen::Image {
             left: left as i32,

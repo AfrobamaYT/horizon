@@ -250,6 +250,10 @@ impl Game<'_> {
         if mod_screen_shown { None } else { stock }
     }
 
+    /// The slot under the cursor (`AbstractContainerScreen.getHoveredSlot`),
+    /// from the build's slot boxes rather than a fresh grid, so the hit test
+    /// is the one the frame draws with. None while the recipe book covers the
+    /// menu in a narrow window (`AbstractRecipeBookScreen.isHovering`).
     pub(super) fn slot_at(&self, batch: &HudBatch, x: f32, y: f32) -> Option<usize> {
         if self.book_covers_menu(batch.width) {
             return None;

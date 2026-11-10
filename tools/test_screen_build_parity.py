@@ -111,6 +111,9 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     chosen = cases()
     (work / 'cases.jsonl').write_text(''.join(json.dumps(c) + '\n' for c in chosen))
+    # A game that dies before writing its output must not pass on an old file.
+    for stale in ('native.jsonl', 'rust.jsonl'):
+        (work / stale).unlink(missing_ok=True)
     classes = work / 'classes'
     classes.mkdir(exist_ok=True)
     dependencies = os.pathsep.join(map(str, [jars['client'], *baking.client_libraries()]))
@@ -124,8 +127,10 @@ def main():
         env={**os.environ, 'CARGO_BUILD_JOBS': os.environ.get('CARGO_BUILD_JOBS', '3')})
     executable = lab.cargo_target() / ('fast/horizon-client.exe' if os.name == 'nt' else 'fast/horizon-client')
     with tempfile.TemporaryDirectory(prefix='game-', dir=work) as game_dir:
-        run_game([str(executable), '--resources', str(resources), '--game-dir', game_dir], cwd=work,
-                 env=lab.game_env(HORIZON_SCREEN_BUILD_FIXTURE=f'{work / "cases.jsonl"},{work / "rust.jsonl"}'))
+        done = run_game([str(executable), '--resources', str(resources), '--game-dir', game_dir], cwd=work,
+                        env=lab.game_env(HORIZON_SCREEN_BUILD_FIXTURE=f'{work / "cases.jsonl"},{work / "rust.jsonl"}'))
+        if done.returncode:
+            sys.exit(f'horizon-client fixture failed with exit code {done.returncode}')
     native = [json.loads(line) for line in (work / 'native.jsonl').read_text().splitlines()]
     rust = [json.loads(line) for line in (work / 'rust.jsonl').read_text().splitlines()]
     assert len(native) == len(rust) == len(chosen), (len(native), len(rust), len(chosen))
