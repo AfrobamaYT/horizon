@@ -567,12 +567,7 @@ fn particle_record_has_declared_field_bytes() {
             ),
             (
                 Some(vec!["example:item".to_owned()]),
-                Some((
-                    ItemKey::from_slot(0).unwrap(),
-                    7u32,
-                    None::<u32>,
-                    None::<Components>,
-                )),
+                ItemStack::new(ItemKey::from_slot(0).unwrap(), 7),
                 Some((11i32, 0.75f32)),
                 Some((
                     crate::client::particles::PositionSource::Entity {
