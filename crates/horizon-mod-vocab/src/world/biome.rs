@@ -53,3 +53,19 @@ pub struct BiomeEffects {
     /// A dimension may override this global default.
     pub water_fog: u32,
 }
+/// A biome's climate, as its worldgen file declares it (`Biome.ClimateSettings`):
+/// what `level_biome_properties` reads. The temperature is the biome's base one; the
+/// height and frozen-ocean adjustments of `Biome.getHeightAdjustedTemperature` are not applied.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct BiomeProperties {
+    /// `temperature`: the base temperature.
+    pub temperature: f32,
+    /// `downfall`.
+    pub downfall: f32,
+    /// `has_precipitation`: whether it rains or snows here at all.
+    pub has_precipitation: bool,
+    /// `temperature_modifier: frozen` (the frozen oceans).
+    pub frozen: bool,
+}

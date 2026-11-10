@@ -202,6 +202,16 @@ impl Game<'_> {
         Some(features.biome_in_tag(biome, tag.strip_prefix('#').unwrap_or(tag)))
     }
 
+    /// A biome's `Biome.ClimateSettings` from the world's biome table, data packs included.
+    pub(super) fn level_biome_properties(
+        &self,
+        level: LevelRef,
+        biome: &str,
+    ) -> Option<mod_api::BiomeProperties> {
+        self.native_level_read_world(level)?;
+        world_biomes!(self).properties(biome)
+    }
+
     /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
     pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
         Some(self.native_level_read_world(level)?.shape.logical_height)
@@ -874,6 +884,40 @@ mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, WorldEpoch};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_climate_literals() {
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            for (name, temperature, downfall, precipitation, frozen) in [
+                ("plains", 0.8, 0.4, true, false),
+                ("desert", 2.0, 0.0, false, false),
+                ("snowy_plains", 0.0, 0.5, true, false),
+                ("ocean", 0.5, 0.5, true, false),
+                ("frozen_ocean", 0.0, 0.5, true, true),
+            ] {
+                let actual = game
+                    .level_biome_properties(level, &format!("minecraft:{name}"))
+                    .unwrap();
+                assert_eq!(
+                    actual,
+                    mod_api::BiomeProperties {
+                        temperature,
+                        downfall,
+                        has_precipitation: precipitation,
+                        frozen
+                    },
+                    "{name}"
+                );
+            }
+            for id in ["minecraft:no_such_biome", "", "!malformed::id"] {
+                assert_eq!(game.level_biome_properties(level, id), None);
+            }
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
+            assert_eq!(game.level_biome_properties(stale, "minecraft:plains"), None);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
