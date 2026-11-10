@@ -55,4 +55,4 @@ other reads, invalid component input returns its boundary error.
 
 Action keybind IDs such as `key.jump` resolve through the client's current key
 binding to their assigned physical key display name, matching vanilla's `KeybindContents`.
-Physical key names resolve normally. Use the records to re-layout existing tooltip
+Physical key names resolve normally.

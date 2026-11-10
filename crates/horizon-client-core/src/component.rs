@@ -1094,6 +1094,10 @@ mod tests {
 
     #[test]
     fn keybind_components_decode_assigned_key_and_reflect_rebinding() {
+        let _guard = crate::key_display::TEST_BINDINGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::key_display::replace_action_bindings([("key.jump", "key.keyboard.space")]);
         let ((), _) = crate::lang::scoped(
             crate::lang::Language::of(
                 "en_us",
@@ -1115,7 +1119,7 @@ mod tests {
                 assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "None");
 
                 crate::key_display::reset_action_bindings();
-                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Space");
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Jump");
             },
         );
     }

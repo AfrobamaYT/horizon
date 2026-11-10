@@ -18,51 +18,6 @@ const SYMBOLS: [(&str, &str); 11] = [
     ("key.keyboard.slash", "/"),
 ];
 
-/// Default vanilla action bindings (`KeyMapping` defaults), mapping action IDs to their default keys.
-pub const DEFAULT_ACTIONS: [(&str, &str); 41] = [
-    ("key.attack", "key.mouse.left"),
-    ("key.use", "key.mouse.right"),
-    ("key.forward", "key.keyboard.w"),
-    ("key.left", "key.keyboard.a"),
-    ("key.back", "key.keyboard.s"),
-    ("key.right", "key.keyboard.d"),
-    ("key.jump", "key.keyboard.space"),
-    ("key.sneak", "key.keyboard.left.shift"),
-    ("key.sprint", "key.keyboard.left.control"),
-    ("key.drop", "key.keyboard.q"),
-    ("key.inventory", "key.keyboard.e"),
-    ("key.chat", "key.keyboard.t"),
-    ("key.playerlist", "key.keyboard.tab"),
-    ("key.pickItem", "key.mouse.middle"),
-    ("key.command", "key.keyboard.slash"),
-    ("key.friends", "key.keyboard.o"),
-    ("key.socialInteractions", "key.keyboard.p"),
-    ("key.toggleGui", "key.keyboard.f1"),
-    ("key.toggleSpectatorShaderEffects", "key.keyboard.f4"),
-    ("key.screenshot", "key.keyboard.f2"),
-    ("key.togglePerspective", "key.keyboard.f5"),
-    ("key.smoothCamera", "key.keyboard.unknown"),
-    ("key.fullscreen", "key.keyboard.f11"),
-    ("key.spectatorOutlines", "key.keyboard.unknown"),
-    ("key.spectatorHotbar", "key.mouse.middle"),
-    ("key.swapOffhand", "key.keyboard.f"),
-    ("key.saveToolbarActivator", "key.keyboard.c"),
-    ("key.loadToolbarActivator", "key.keyboard.x"),
-    ("key.advancements", "key.keyboard.l"),
-    ("key.quickActions", "key.keyboard.g"),
-    ("key.debug.overlay", "key.keyboard.f3"),
-    ("key.debug.modifier", "key.keyboard.f3"),
-    ("key.hotbar.1", "key.keyboard.1"),
-    ("key.hotbar.2", "key.keyboard.2"),
-    ("key.hotbar.3", "key.keyboard.3"),
-    ("key.hotbar.4", "key.keyboard.4"),
-    ("key.hotbar.5", "key.keyboard.5"),
-    ("key.hotbar.6", "key.keyboard.6"),
-    ("key.hotbar.7", "key.keyboard.7"),
-    ("key.hotbar.8", "key.keyboard.8"),
-    ("key.hotbar.9", "key.keyboard.9"),
-];
-
 /// What the player's keyboard layout writes on each key that writes
 /// something, by key name, as the window reported it (`learn_layout`).
 static LAYOUT: RwLock<BTreeMap<String, String>> = RwLock::new(BTreeMap::new());
@@ -75,6 +30,10 @@ static ACTIONS: RwLock<BTreeMap<String, String>> = RwLock::new(BTreeMap::new());
 type ActionResolver = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
 static RESOLVER: RwLock<Option<ActionResolver>> = RwLock::new(None);
 
+/// Serializes tests that read or change the process-wide binding state.
+#[cfg(test)]
+pub(crate) static TEST_BINDINGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Register or update an action key binding (`KeyMapping` assigned key).
 pub fn set_action_binding(action: &str, bound: &str) {
     if let Ok(mut actions) = ACTIONS.write() {
@@ -82,14 +41,16 @@ pub fn set_action_binding(action: &str, bound: &str) {
     }
 }
 
-/// Set multiple action bindings at once.
-pub fn set_action_bindings<I, K, V>(bindings: I)
+/// Replace every action binding at once (the active `KeyMapping` set), under one
+/// lock so a reader never sees a half-written table.
+pub fn replace_action_bindings<I, K, V>(bindings: I)
 where
     I: IntoIterator<Item = (K, V)>,
     K: AsRef<str>,
     V: AsRef<str>,
 {
     if let Ok(mut actions) = ACTIONS.write() {
+        actions.clear();
         for (a, b) in bindings {
             actions.insert(a.as_ref().to_owned(), b.as_ref().to_owned());
         }
@@ -139,9 +100,6 @@ fn resolve_action(key: &str) -> Option<String> {
     {
         return Some(bound.clone());
     }
-    if let Some((_, default_bound)) = DEFAULT_ACTIONS.iter().find(|(k, _)| *k == key) {
-        return Some((*default_bound).to_owned());
-    }
     None
 }
 
@@ -176,14 +134,8 @@ pub fn learn_layout(key: &str, text: &str) {
 /// resolves action keybinds (`key.jump`) through current client bindings,
 /// then formats physical keys using keyboard layout, symbols, or translations.
 pub fn display_name(key: &str) -> Text {
-    let mut target = key;
-    let first = resolve_action(target);
-    let second = first.as_deref().and_then(resolve_action);
-    if let Some(ref s) = second {
-        target = s.as_str();
-    } else if let Some(ref f) = first {
-        target = f.as_str();
-    }
+    let resolved = resolve_action(key);
+    let target = resolved.as_deref().unwrap_or(key);
 
     if let Some(label) = LAYOUT.read().ok().and_then(|l| l.get(target).cloned()) {
         return Text::literal(label);
@@ -240,6 +192,13 @@ mod tests {
 
     #[test]
     fn action_keybinds_resolve_through_client_bindings() {
+        let _guard = TEST_BINDINGS.lock().unwrap_or_else(|e| e.into_inner());
+        replace_action_bindings([
+            ("key.jump", "key.keyboard.space"),
+            ("key.forward", "key.keyboard.w"),
+            ("key.back", "key.keyboard.s"),
+            ("key.right", "key.keyboard.d"),
+        ]);
         let ((), _) = crate::lang::scoped(
             crate::lang::Language::of(
                 "en_us",
@@ -251,7 +210,7 @@ mod tests {
                 ],
             ),
             || {
-                // 1. Known action default binding resolves to assigned key (Space, not Jump)
+                // 1. A bound action shows its assigned key (Space, not Jump)
                 assert_eq!(display_name("key.jump").plain(), "Space");
                 assert_eq!(display_name("key.forward").plain(), "W");
                 assert_eq!(display_name("key.back").plain(), "S");
@@ -270,7 +229,7 @@ mod tests {
                 set_action_binding("key.drop", "key.keyboard.q");
                 assert_eq!(display_name("key.drop").plain(), "A");
 
-                // 5. Unknown-action fallback (unregistered action ID falls back to translating the identifier)
+                // 5. An action with no binding falls back to translating its ID
                 assert_eq!(
                     display_name("key.unregistered_custom_action").plain(),
                     "key.unregistered_custom_action"
@@ -298,16 +257,16 @@ mod tests {
                         ],
                     ),
                     || {
-                        reset_action_bindings();
+                        set_action_binding("key.jump", "key.keyboard.space");
                         assert_eq!(display_name("key.jump").plain(), "Espace");
                         set_action_binding("key.jump", "key.keyboard.unknown");
                         assert_eq!(display_name("key.jump").plain(), "Aucun");
                     },
                 );
 
-                // 8. Reset bindings restores defaults
+                // 8. With no bindings, the action translates (vanilla's default resolver)
                 reset_action_bindings();
-                assert_eq!(display_name("key.jump").plain(), "Space");
+                assert_eq!(display_name("key.jump").plain(), "Jump");
             },
         );
     }

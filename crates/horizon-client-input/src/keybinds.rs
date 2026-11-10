@@ -294,8 +294,8 @@ pub fn mouse_button(name: &str) -> Option<MouseButton> {
     })
 }
 pub use horizon_client_core::key_display::{
-    clear_action_bindings, clear_action_resolver, display_name, reset_action_bindings,
-    set_action_binding, set_action_bindings, set_action_resolver,
+    clear_action_bindings, clear_action_resolver, display_name, replace_action_bindings,
+    reset_action_bindings, set_action_binding, set_action_resolver,
 };
 
 /// A key event: what the layout writes on its key, without modifiers, names
@@ -362,14 +362,13 @@ impl KeyBinds {
     pub fn set(&mut self, name: &str, key: &str) {
         if let Some((n, _, _)) = all_mappings().find(|m| m.0 == name) {
             self.keys.insert(n, key.to_owned());
-            horizon_client_core::key_display::set_action_binding(n, key);
         }
     }
-    /// Sync the current key bindings to `horizon_client_core::key_display`.
+    /// Publish these bindings as the ones `keybind` text components show
+    /// (`KeybindResolver`). Only the active set calls this: on load and after
+    /// the options change it.
     pub fn sync_action_bindings(&self) {
-        horizon_client_core::key_display::set_action_bindings(
-            self.keys.iter().map(|(n, d)| (*n, d.as_str())),
-        );
+        replace_action_bindings(self.keys.iter().map(|(n, d)| (*n, d.as_str())));
     }
     /// The bindings `options.txt` holds: vanilla's mappings only.
     pub fn saved(&self) -> Vec<(&'static str, String)> {
@@ -387,7 +386,6 @@ impl KeyBinds {
     }
     pub fn reset_all(&mut self) {
         *self = Self::default();
-        self.sync_action_bindings();
     }
     /// Mappings sharing `name`'s key (KeyMapping.same), for conflict marks.
     pub fn conflicts(&self, name: &str) -> Vec<&'static str> {
@@ -663,12 +661,16 @@ mod tests {
     fn display_names() {
         assert_eq!(display_name("key.keyboard.w").plain(), "W");
         assert_eq!(display_name("key.keyboard.slash").plain(), "/");
-        assert_eq!(display_name("key.forward").plain(), "W");
-
+    }
+    #[test]
+    fn only_a_synced_set_changes_keybind_display() {
         let mut k = KeyBinds::default();
         k.set("key.forward", "key.keyboard.up");
+        k.sync_action_bindings();
         assert_eq!(display_name("key.forward").plain(), "key.keyboard.up");
-        k.set("key.forward", "key.keyboard.w");
-        assert_eq!(display_name("key.forward").plain(), "W");
+        let mut inactive = KeyBinds::default();
+        inactive.set("key.forward", "key.keyboard.x");
+        assert_eq!(display_name("key.forward").plain(), "key.keyboard.up");
+        clear_action_bindings();
     }
 }
