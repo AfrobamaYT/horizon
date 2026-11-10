@@ -63,6 +63,7 @@ if __name__ == "__main__":
     paths = changed_paths(args.base, args.head)
     print(f"required={str(needs(paths)).lower()}")
     sample = any(path in ROOT_RUST or path == "tools/ci/check_machine_sample.py"
-                 or path.startswith(("crates/horizon-mod-", "crates/horizon-core/"))
+                 or path.startswith(("crates/horizon-mod-", "crates/horizon-core/",
+                                     "crates/horizon-game-discovery/"))
                  for path in paths)
     print(f"sample={str(sample).lower()}")
