@@ -264,6 +264,11 @@ mod tests {
     ) -> Vec<i32> {
         use horizon_protocol::packets::{Empty, play::Serverbound as S};
         game.send(S::Punch(Empty));
+        receive_attacks(server)
+    }
+
+    fn receive_attacks(server: &mut horizon_protocol::connection::Connection) -> Vec<i32> {
+        use horizon_protocol::packets::play::Serverbound as S;
         let mut ids = Vec::new();
         loop {
             let (id, payload) = server.recv().unwrap();
@@ -400,7 +405,7 @@ mod tests {
                 let second = game.entity(32).unwrap();
                 *state.targets.lock().unwrap() = vec![entity, second, entity];
                 game.remote_start_attack();
-                assert_eq!(sent_attacks(game, &mut server), [31, 32]);
+                assert_eq!(receive_attacks(&mut server), [31, 32]);
                 state
                     .cancel
                     .store(true, std::sync::atomic::Ordering::Relaxed);
