@@ -31,6 +31,8 @@ impl AttachmentBatch {
     }
 }
 /// A typed snapshot whose iterator borrows values from its captured bindings.
+/// `get(holder)` returns an owned clone with an expected O(1) probe before decode.
+/// Missing or not yet synced holders return `Ok(None)`; no default is created.
 // no wire: borrows a live attachment index.
 pub type AttachmentQuery<'key, T> = runtime::AttachmentQuery<'key, AttachmentHolder, T>;
 
@@ -98,8 +100,8 @@ impl crate::wire::Wire for AttachmentBatch {
         let mut result = Vec::with_capacity(rows.len());
         let mut identities = std::collections::HashSet::with_capacity(rows.len());
         for (token, bytes) in rows {
-            let (holder, generation) = token.0.parts();
-            if !identities.insert((*holder, generation)) {
+            let (holder, _) = token.0.parts();
+            if !identities.insert(*holder) {
                 return Err(WireError::Invalid("duplicate attachment residency"));
             }
             let (tag, consumed) = nbt::read_network(&bytes, Limits::default())
@@ -181,6 +183,9 @@ mod tests {
         let row = query.iter().next().unwrap().unwrap();
         assert_eq!(row.holder, holder);
         assert_eq!(*row.value, 73);
+        assert_eq!(query.get(holder), Ok(Some(73)));
+        let empty = AttachmentBatch::from(runtime::AttachmentBatch::empty());
+        assert_eq!(empty.query(&CODED).unwrap().get(holder), Ok(None));
         let token = AttachmentWriteToken::from(row.write_token());
         assert_eq!(token.validate(&index.lock().unwrap()), Ok(()));
         index.lock().unwrap().unload(holder).into_result();
