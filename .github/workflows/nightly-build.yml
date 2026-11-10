@@ -302,16 +302,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ref="nightly/dry-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          status=$(curl --silent --show-error --request DELETE \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header 'Accept: application/vnd.github+json' \
-            --output "$RUNNER_TEMP/dry-ref-cleanup.json" --write-out '%{http_code}' \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/refs/heads/$ref")
-          case "$status" in
-            204|404) echo "Temporary ref $ref removed or already absent" ;;
-            *) echo "Temporary ref cleanup failed: HTTP $status"; exit 1 ;;
-          esac
+          # Re-run failed jobs increments the attempt without rerunning a successful pick.
+          # Earlier attempts of this same run have no remaining consumers either.
+          for ((attempt=1; attempt<=GITHUB_RUN_ATTEMPT; attempt++)); do
+            ref="nightly/dry-run-${GITHUB_RUN_ID}-${attempt}"
+            status=$(curl --silent --show-error --request DELETE \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Accept: application/vnd.github+json' \
+              --output "$RUNNER_TEMP/dry-ref-cleanup.json" --write-out '%{http_code}' \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/refs/heads/$ref")
+            case "$status" in
+              204|404) echo "Temporary ref $ref removed or already absent" ;;
+              *) echo "Temporary ref cleanup failed: HTTP $status"; exit 1 ;;
+            esac
+          done
 
   answer:
     # Tells the thread that asked for this build how it ended. A conflict `pick` already explained there.
