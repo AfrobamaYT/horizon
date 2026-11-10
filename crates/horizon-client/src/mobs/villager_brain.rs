@@ -853,22 +853,21 @@ fn poi_of_state(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> O
         None => state_poi(w, state),
     }
 }
+/// Vanilla's job sites, bed heads and bells, then the type a mod gave the state
+/// (`extend_poi_types`), Home and Meeting included.
 fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
     let name = &*w.facts.get(state).name;
     if name == "minecraft:bell" {
         return Some(Poi::Meeting);
     }
-    if name.ends_with("_bed") {
-        let part = w
-            .registry
-            .state(state)
-            .and_then(|s| s.properties.get("part"));
-        return runtime_bed_poi(name, part.map(String::as_str));
+    let state = w.registry.state(state)?;
+    let part = state.properties.get("part").map(String::as_str);
+    if let Some(home) = runtime_bed_poi(name, part) {
+        return Some(home);
     }
-    w.registry
-        .state(state)
-        .and_then(horizon_world::poi::saved_poi)
+    horizon_world::poi::saved_poi(state)
         .filter(|p| p.is_job())
+        .or_else(|| horizon_world::poi::extension(state))
 }
 fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
     // PoiTypes.BEDS contains the colored Blocks.BED collection, not STRAW_BED.
@@ -4796,6 +4795,57 @@ mod poi_classification_tests {
                 "{row}"
             );
         }
+    }
+
+    /// A block a mod added to `minecraft:home` (`extend_poi_types`) is the bed a
+    /// villager's search finds, although vanilla gives hay bales no POI.
+    #[test]
+    fn a_block_a_mod_added_to_home_is_a_bed_to_a_villager() {
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        assert!(crate::mobs::world::with_resource_test_world(
+            std::path::Path::new(&root),
+            &[],
+            true,
+            true,
+            |world, registry| {
+                let hay = registry.default_state("minecraft:hay_block").unwrap();
+                if !world.chunks.contains_key(&(0, 0)) {
+                    world.chunks.insert(
+                        (0, 0),
+                        std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                    );
+                }
+                world.set(0, 64, 0, hay).unwrap();
+                world
+                    .set(1, 64, 0, registry.default_state("minecraft:stone").unwrap())
+                    .unwrap();
+            },
+            |w, _| {
+                let hay_states = (0..w.registry.len())
+                    .filter_map(|i| {
+                        w.registry
+                            .state(horizon_world::registry::BlockStateId(i as u32))
+                    })
+                    .filter(|state| state.name == "minecraft:hay_block")
+                    .map(|state| horizon_world::poi::PoiExtension {
+                        state: state.clone(),
+                        poi: "minecraft:home".into(),
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(hay_states.len(), 3);
+                horizon_world::poi::with_extensions(hay_states, |refusals| {
+                    assert_eq!(refusals, Vec::<String>::new());
+                    assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Home));
+                    assert_eq!(poi_at(w, 1, 64, 0), None);
+                    let mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+                    assert!(poi_exists(&mob, w, [0, 64, 0], PoiFilter::Home));
+                    assert!(!poi_exists(&mob, w, [0, 64, 0], PoiFilter::Meeting));
+                    assert!(!poi_exists(&mob, w, [1, 64, 0], PoiFilter::Home));
+                });
+            },
+        ));
     }
 
     #[test]
