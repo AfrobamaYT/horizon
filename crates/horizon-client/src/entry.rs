@@ -76,6 +76,17 @@ pub fn main_with(
         }
     };
     horizon_threads::configure_allocator();
+    // horizon-extras (docs/forking.md): without the feature, no Horizon Settings or Mods page.
+    if !cfg!(feature = "horizon-extras") {
+        horizon_client::options_ui::HORIZON_EXTRAS
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    horizon_client::telemetry::mark_start();
+    // Opt-in telemetry keeps each crash report (docs/telemetry.md), whatever the mode.
+    crash::on_report(horizon_client::telemetry::keep_crash);
+    // Crates above the engine registered their hooks before this (horizon-official's `main`);
+    // none registers after this point.
+    horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
     let wasm = horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
@@ -227,6 +238,7 @@ pub fn main_with(
             game::exit_code::ERROR
         });
     }
+    horizon_hooks::engine::shutdown();
     logging::flush();
 }
 
