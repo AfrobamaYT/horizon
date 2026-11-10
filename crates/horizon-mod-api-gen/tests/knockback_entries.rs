@@ -50,7 +50,10 @@ fn delegated_knockback_entries_apply_both_heads_but_only_one_push() {
         let module = syn::Ident::new(module, proc_macro2::Span::call_site());
         modules.extend(quote!(mod #module { #file #records }));
     }
-    let directory = root.join("target/knockback-entry-fixture");
+    let directory = root.join(format!(
+        "target/knockback-entry-fixture-{}",
+        std::process::id()
+    ));
     fs::create_dir_all(directory.join("src")).unwrap();
     fs::write(directory.join("Cargo.toml"), format!(
         "[package]\nname = \"knockback-entry-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[workspace]\n[dependencies]\nmod_api = {{ package = \"horizon-mod-api\", path = {:?} }}\nmod_points = {{ package = \"horizon-mod-points\", path = {:?} }}\nhorizon-mod-api-macros = {{ path = {:?} }}\n",
@@ -69,7 +72,10 @@ fn delegated_knockback_entries_apply_both_heads_but_only_one_push() {
     let output = Command::new("cargo")
         .args(["run", "--quiet", "--offline", "--manifest-path"])
         .arg(directory.join("Cargo.toml"))
-        .env("CARGO_TARGET_DIR", directory.join("target"))
+        .env(
+            "CARGO_TARGET_DIR",
+            root.join("target/knockback-fixture-target"),
+        )
         .env("CARGO_INCREMENTAL", "0")
         .output()
         .unwrap();
@@ -78,4 +84,5 @@ fn delegated_knockback_entries_apply_both_heads_but_only_one_push() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    fs::remove_dir_all(directory).unwrap();
 }
