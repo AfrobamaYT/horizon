@@ -861,22 +861,47 @@ impl Mob {
     /// already validated target — what the write handle and a goal tick's
     /// `set_target` store:
     /// - `Fox.setTarget`: clearing the target ends its defending.
-    /// - `Enderman.setTarget`: a target opens the mouth (`DATA_CREEPY`) and
-    ///   stamps `targetChangeTime` (the daylight teleport waits 600 ticks from
-    ///   it); none closes the mouth and zeroes it. Its attack speed modifier
-    ///   follows the target itself ([`super::enderman::attacking_speed`]).
-    /// - `ZombifiedPiglin.setTarget`: a first target samples the first-anger
-    ///   sound delay and the alert interval; the AI step samples them, with
-    ///   the anger, on the tick it first sees the target, as for every other
-    ///   way the piglin gains one.
+    /// - `Enderman.setTarget` updates its synced flags and attacking modifier.
+    /// - `ZombifiedPiglin.setTarget` samples the sound and alert delays when
+    ///   acquiring a target from none, before storing the target.
     pub fn set_target(&mut self, target: Option<Who>) {
         match self.species() {
             Species::Fox if target.is_none() => {
                 super::fox::set_flag(self, super::fox::DEFENDING, false);
             }
             Species::Enderman => {
+                use super::finalize::{self, Attr, Op};
+                if self.extra.flag != target.is_some()
+                    && self.extra.flag2
+                    && let Some(at) = super::enderman::stare_sound(self)
+                {
+                    self.outbox.push(super::MobEvent::LocalSound("entity.enderman.stare", at, 2.5, 1.0));
+                }
                 self.extra.flag = target.is_some();
                 self.extra.counter = if target.is_some() { self.age as i32 } else { 0 };
+                if target.is_none() {
+                    self.extra.flag2 = false;
+                    finalize::remove_modifier(self, Attr::MovementSpeed, "minecraft:attacking");
+                } else if !finalize::has_modifier(self, Attr::MovementSpeed, "minecraft:attacking")
+                    && !finalize::has_transient_modifier(
+                        self,
+                        Attr::MovementSpeed,
+                        "minecraft:attacking",
+                    )
+                {
+                    finalize::add_transient_modifier(
+                        self,
+                        Attr::MovementSpeed,
+                        "minecraft:attacking",
+                        f64::from(0.15f32),
+                        Op::AddValue,
+                    );
+                }
+            }
+            Species::ZombifiedPiglin if self.ai.target.is_none() && target.is_some() => {
+                use horizon_core::random::RandomSource;
+                self.extra.counter = self.random.next_int_bound(21).unwrap_or(0);
+                self.extra.counter2 = 80 + self.random.next_int_bound(41).unwrap_or(0);
             }
             _ => {}
         }

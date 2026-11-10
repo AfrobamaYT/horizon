@@ -16,8 +16,9 @@ use horizon_world::registry::BlockStateId;
 /// The values `apply` takes from one SetEntityData packet, by vanilla's entry
 /// indices (Entity 0..=7, LivingEntity 8..=14, Mob 15, then the subclasses).
 /// `builtin` names the ids of built-in registries.
-fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_entity: i32) {
+fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_entity: i32) -> Option<[f64; 3]> {
     let species = m.species();
+    let mut stare_sound = None;
     let baby = super::lan::baby_index(species);
     if &*m.kind.id == "minecraft:player" {
         player_poses(m, values);
@@ -192,7 +193,13 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             (Species::Phantom, 16, Value::Int(size)) => phantom::set_size(m, *size),
             // Enderman.DATA_CREEPY (after DATA_CARRY_STATE): the open mouth
             // and raised head of an angry enderman.
-            (Species::Enderman, 17, Value::Bool(creepy)) => m.extra.flag = *creepy,
+            (Species::Enderman, 17, Value::Bool(creepy)) => {
+                m.extra.flag = *creepy;
+                if m.extra.flag2 {
+                    stare_sound = horizon_client::mobs::enderman::stare_sound(m);
+                }
+            }
+            (Species::Enderman, 18, Value::Bool(stared)) => m.extra.flag2 = *stared,
             // Warden.CLIENT_ANGER_LEVEL: the heartbeat's pace.
             (Species::Warden, 16, Value::Int(anger)) => {
                 if let Some(st) = m.extra.warden.as_mut() {
@@ -368,6 +375,7 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             _ => {}
         }
     }
+    stare_sound
 }
 
 /// A tropical fish's packed variant: the pattern's id (the size, then the
@@ -506,12 +514,15 @@ impl Game<'_> {
             _ => None,
         });
         if let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) {
-            apply(m, values, &r.builtin, r.entity_id);
+            let stare_sound = apply(m, values, &r.builtin, r.entity_id);
             apply_registry_data(m, values, &r.registries, self.world.game_time);
             if let Some(code) = bed
                 && m.species() == Species::Villager
             {
                 m.extra.ints[1] = code;
+            }
+            if let Some(at) = stare_sound {
+                self.audio.play_unshared("minecraft:entity.enderman.stare", Some(at), 2.5, 1.0);
             }
         }
     }
@@ -555,6 +566,7 @@ mod tests {
             "minecraft:witch" => Species::Witch,
             "minecraft:ravager" => Species::Ravager,
             "minecraft:zombie" => Species::Zombie,
+            "minecraft:enderman" => Species::Enderman,
             _ => panic!("unknown fixture species"),
         };
         // Metadata needs no AI or model. Avoid the resource loader, which also
@@ -611,6 +623,40 @@ mod tests {
     }
 
     #[test]
+    fn enderman_stare_metadata_requests_one_local_sound_with_cooldown() {
+        let mut mob = fixture_mob("minecraft:enderman");
+        let builtin = Builtin::default();
+        let apply = |mob: &mut Mob, values: &[(u8, i32, Value)]| {
+            super::apply(mob, values, &builtin, 99)
+        };
+        assert_eq!(apply(&mut mob, &[(18, s::BOOLEAN, Value::Bool(true))]), None);
+        assert_eq!(
+            apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]),
+            Some([0.0, 1.5, 0.0])
+        );
+        mob.age = 399;
+        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(false))]), None);
+        mob.age = 400;
+        assert_eq!(
+            apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]),
+            Some([0.0, 1.5, 0.0])
+        );
+        mob.age = 800;
+        mob.silent = true;
+        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(false))]), None);
+        mob.silent = false;
+        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]), None);
+        mob.age = 1200;
+        // Entries are assigned in packet order: a clear of creepy still sees
+        // the previous stared-at flag before the following clear of index 18.
+        assert!(apply(&mut mob, &[
+            (17, s::BOOLEAN, Value::Bool(false)),
+            (18, s::BOOLEAN, Value::Bool(false)),
+        ]).is_some());
+        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]), None);
+    }
+
+    #[test]
     fn air_and_frozen_metadata_reach_the_client() {
         for kind in ["cow", "cod", "dolphin", "axolotl"] {
             let mut mob = fixture_mob(&format!("minecraft:{kind}"));
@@ -622,7 +668,7 @@ mod tests {
             };
             assert_eq!(mob.air, max, "initial air: {kind}");
             for (air, frozen) in [(100, -3), (-20, 140), (max, 0)] {
-                super::apply(
+                let _ = super::apply(
                     &mut mob,
                     &[
                         (1, s::INT, Value::Int(air)),
@@ -694,7 +740,7 @@ mod tests {
                             sent.push((*index, *value));
                         }
                     }
-                    super::apply(&mut client, &data.values, &Builtin::default(), 99);
+                    let _ = super::apply(&mut client, &data.values, &Builtin::default(), 99);
                 }
             }
             sent.sort_unstable_by_key(|v| v.0);
@@ -773,7 +819,7 @@ mod tests {
         ] {
             let mut m = fixture_mob(&format!("minecraft:{kind}"));
             for on in [true, false, true, false] {
-                super::apply(
+                let _ = super::apply(
                     &mut m,
                     &[(16, s::BOOLEAN, Value::Bool(on))],
                     &Builtin::default(),
@@ -788,7 +834,7 @@ mod tests {
         }
         for kind in ["zombie", "cow"] {
             let mut m = fixture_mob(&format!("minecraft:{kind}"));
-            super::apply(
+            let _ = super::apply(
                 &mut m,
                 &[(16, s::BOOLEAN, Value::Bool(true))],
                 &Builtin::default(),
@@ -857,7 +903,7 @@ mod tests {
                             sent.push(*on);
                         }
                     }
-                    super::apply(&mut client, &data.values, &Builtin::default(), 99);
+                    let _ = super::apply(&mut client, &data.values, &Builtin::default(), 99);
                 }
             }
             trace.push((
@@ -946,7 +992,7 @@ mod tests {
     }
 
     fn apply(m: &mut Mob, values: &[(u8, i32, Value)]) {
-        super::apply(m, values, &builtin(), 99);
+        let _ = super::apply(m, values, &builtin(), 99);
     }
 
     fn mob(kind: &str) -> Option<Mob> {

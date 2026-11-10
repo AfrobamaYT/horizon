@@ -3297,6 +3297,29 @@ impl Game<'_> {
                         .or(self.lan_acting);
                     self.set_event_ai_target(mob, Some(target), player);
                 }
+                MobEvent::PiglinAlertTarget { mob, source, target } => {
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.mob_players.get(&source).copied())
+                        .or(self.lan_acting);
+                    let target_team = match target {
+                        Who::Mob(id) => self.mob_team(id),
+                        Who::Player => match player {
+                            Some(conn) => self.command_guest(conn)
+                                .and_then(|guest| self.score.board.players_team(&guest.name)),
+                            None => self.player_team(),
+                        },
+                    };
+                    if target == Who::Mob(mob)
+                        || horizon_client::scoreboard::teams_allied(self.mob_team(mob), target_team)
+                        || self.mobs.iter().find(|other| other.id == mob)
+                            .is_none_or(|other| other.ai.target.is_some())
+                    {
+                        continue;
+                    }
+                    self.set_event_ai_target(mob, Some(target), player);
+                }
                 MobEvent::HoglinAttackTarget { mob, target } => {
                     let places: Vec<(u32, horizon_core::geometry::Vec3)> = self
                         .mobs

@@ -1280,6 +1280,10 @@ pub(super) fn mob_meta(
                 meta.push((17, serializer::BOOLEAN, Value::Bool(true)));
             }
             defaults.push((17, serializer::BOOLEAN, Value::Bool(false)));
+            if e.flag2 {
+                meta.push((18, serializer::BOOLEAN, Value::Bool(true)));
+            }
+            defaults.push((18, serializer::BOOLEAN, Value::Bool(false)));
             defaults.push((16, serializer::OPTIONAL_BLOCK_STATE, Value::Id(0)));
         }
         // Zombie.DATA_DROWNED_CONVERSION_ID (after DATA_BABY_ID and
@@ -4869,6 +4873,33 @@ mod tests {
             meta.contains(&(16, serializer::BOOLEAN, Value::Bool(true))),
             "{meta:?}"
         );
+    }
+
+    /// `Enderman.setTarget` and `setBeingStaredAt` reach normal tracker data,
+    /// including defaults needed to send the clear.
+    #[test]
+    #[ignore = "needs prepared resources in .local/horizon-client/26.3"]
+    fn enderman_target_flags_are_tracked_and_cleared() {
+        let mut enderman = mob_of("minecraft:enderman").expect("prepared mob types");
+        let hub = meta_hub("EndermanTargetMetaTest");
+        let metadata = |m: &Mob| {
+            let (mut values, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(m, &hub, None, 0, &mut values, &mut defaults);
+            (values, defaults)
+        };
+        enderman.extra.flag2 = true;
+        enderman.set_target(Some(horizon_client::mobs::Who::Mob(2)));
+        let (values, defaults) = metadata(&enderman);
+        for index in [17, 18] {
+            assert!(values.contains(&(index, serializer::BOOLEAN, Value::Bool(true))));
+            assert!(defaults.contains(&(index, serializer::BOOLEAN, Value::Bool(false))));
+        }
+        enderman.set_target(None);
+        let (values, defaults) = metadata(&enderman);
+        for index in [17, 18] {
+            assert!(!values.iter().any(|entry| entry.0 == index));
+            assert!(defaults.contains(&(index, serializer::BOOLEAN, Value::Bool(false))));
+        }
     }
 
     /// What is stuck in a mob goes out through the tracker's metadata
