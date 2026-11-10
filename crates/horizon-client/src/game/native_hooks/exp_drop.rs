@@ -99,6 +99,7 @@ impl Game<'_> {
             };
         self.with_level(|_, level, _| {
             let pos = BlockPos::new(pos[0], pos[1], pos[2]);
+            // with_level rebuilds GameLevel with both fields None on every call.
             level.drop_entity = breaker;
             level.drop_breaker_at = Some(pos);
             level.block_dropped(pos, state, None, None, drops, None)

@@ -9,8 +9,8 @@ block entity, breaker entity handle and tool. The level host reads without writi
 `level.block_entity_data(entity)` reads the supplied entity's saved data without
 identity metadata and refuses stale handles. Answers are clamped to 0 through
 32,767. Player breaks supply the part's answer to the global `break_block`
-event's `exp_to_drop`; that event may override it. Silk Touch suppresses the
-award except for spawners. `block_drops` sees the resulting amount afterwards.
+event's `exp_to_drop`, after Silk Touch suppresses the starting amount (except
+for spawners). An explicit global override is applied as given. `block_drops` sees the resulting amount afterwards.
 Level and mob breaks use the shared resource-drop path. A canceled player break
 or a break that does not harvest produces no award.
 
@@ -28,4 +28,4 @@ no callback. Explosions retain their existing zero initial XP behavior.
 Both methods route through prepared per-block subscriptions. Unsubscribed
 blocks build no callback context. Callback panics follow the existing native
 hook unwinding behavior; the engine does not apply a returned XP answer after
-a panic. Reusing `ExplosionStart` for this notice is proposed for Ari's review.
+a panic.
