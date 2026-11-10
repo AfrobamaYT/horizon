@@ -10,6 +10,8 @@
 # Concepts
 
 - [Wire types](how-to/wire-types.md)
+- [Design: read-only typed loot context](concepts/loot-context-view.md)
+- [Block entity neighbour changes](concepts/block-entity-neighbors.md)
 
 <!-- Per-concept child chapters are discovered at build time; keep these aggregate links for published anchors. -->
 
