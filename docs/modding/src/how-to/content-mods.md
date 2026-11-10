@@ -576,6 +576,18 @@ so a mod's entity set may name its own new attribute. Values sanitize through th
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
 
+A code mod can declare a datapack registry of its own with `Registrar::declare_datapack_registry(path, sync,
+fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`; [#811](https://github.com/arismoko/horizon/issues/811)).
+`path` lands in the mod's namespace (`spell` of `example` is `example:spell`), and `fields` is a flat record
+schema: `Bool`, `Int { min, max }`, `Float { min, max }`, `Text { max_len }`, `Identifier` or `Reference { registry }`,
+each required or given a default. Entry `addon:fire` is `data/addon/example/spell/fire.json`
+(`DatapackRegistryDeclaration::entry_file`), the registry's namespace being a folder as NeoForge's modded
+registries have it. The game decodes entries against the schema without running mod code, so native and wasm
+mods get the same bounds: an undeclared key, a missing required key, a wrong type or an out-of-range value fails
+the entry, and a default never stands in for invalid data. The engine adds no entry-size or field-count limit
+of its own. Only both-side packages may declare registries. This slice declares and validates; loading the
+entries from packs, the duplicate check across mods and typed reads follow in the next parts of #811.
+
 A code mod can also use `Registrar::declare_entity_attributes(path, template, attributes)` during registration.
 That declaration starts from the vanilla template's attribute row, replacing the content row's overrides.
 Declared bases remain available to base-value reads, but computed values and spawn fields clamp them to each
@@ -717,6 +729,8 @@ Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one
 (`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
 accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
 
+**When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `horizon_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`horizon-client --dedicated`, [server.md](../../../server.md)), so it takes this path too; `horizon-server` only supervises it.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
@@ -733,6 +747,17 @@ load. Climate sets apply only to `biomes`, not `features`.
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
   "features": "zinc:ore_zinc", "step": "underground_ores" }
 ```
+
+A code mod declares the same modifiers without a file: `Registrar::declare_biome_modifier(path, modifier)` takes a
+`BiomeModifier` (its `biomes`, and an operation: `AddFeatures`, `RemoveFeatures`, `AddSpawns`, `RemoveSpawns`,
+`AddSpawnCosts` or `RemoveSpawnCosts`). `BiomeModifier::json` renders it as the file above, so a declared modifier and
+a shipped one are applied by the same code, in the same order (additions first, then removals, mods in dispatch
+order, declarations in registration order). An id outside the mod's namespace or that is not a file path, a repeated
+id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
+smallest group above its largest, and a spawn cost that is not finite refuse the mods at startup, naming the mod.
+Carver, climate and effects operations are not available: the game has no such modifier yet. Declared modifiers are
+read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
+arismoko/horizon#2732).
 
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
