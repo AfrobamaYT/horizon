@@ -8,7 +8,7 @@ Choose `access = "api"` for API-owned records, or `access = "internals"` for a d
 internals facade. API injections never rebuild the game: a missing prebuilt slot is refused, and source rebuilds and call-site injections require internals access or a hook request. Both use the same `[[inject]]` fields. Native internals listeners use a
 compiled slot when available; an unlisted function or supported call requires a source rebuild.
 The launcher generates the private horizon-mixins input; mods name a Rust `with` function,
-not a source payload file or expression selector.
+not a source payload file.
 
 An API point injection names a crate-root `with` function and listens at an admitted head or return
 slot ([shape rules](#which-functions-are-points)). The prebuilt game fills those slots at load with the
@@ -126,8 +126,9 @@ and are identical on listed and source routes; physical IDs and dispatch remain 
 The build log prints `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
 hash or missing target is refused, not silently redirected. Points order by descending priority,
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
-and inject id order. `modify_arg` is accepted on listed head slots but is a typed refusal on the
-source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
+and inject id order. To change a function's own arguments, use `head`: its listener gets every argument
+to change. To change a call's arguments, use `before_call`: its listener gets them mutably, evaluated,
+before the original runs. The old spellings `modify_arg` and `modify_call_arg` are refused, naming these.
 An API `replace` owns the function, as a mixin overwrite does: its function takes the head's inputs
 and returns the point's return type, which the caller gets, and the body never runs. At a point
 returning `()` it returns `()` and the cancel is forced. It runs after the point's other API head
@@ -138,7 +139,28 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites and internals `replace` are refused. Mutable locals and fields use the native source routes described below.
+
+An internals `replace` (native only; wasm refuses it at load with the internals refusal) has the same
+contract through the point's raw form. Its function takes the real receiver and the raw record,
+`&mut` to every argument in its engine type, and returns the function's own return type, `()` at a
+unit point, where the cancel is forced:
+
+```rust,ignore
+pub fn own_tick(game: &mut internals::game::Game<'_>, raw: &mut internals::raw::__TickRaw<'_>) {
+    // the body of `Game::tick` never runs; this does instead
+}
+```
+
+A free or associated function has no receiver: the function takes the raw record alone. It runs after
+every API and internals head listener at the point, whatever its priority: they may change its
+arguments, and an internals head that sets `result` or `cancel` before it is overruled by it. One
+replace owns a point whatever the tier: an API and an internals replace, or two internals ones, at the
+same point refuse the second at registration, naming both mods. A replacing mod that stops or is
+disabled hands the function back. The point must be listed with a raw form whose record carries the
+outcome: a borrowed return (no raw `result`) and a `Result<(), E>` (whose cancel answers `Ok(())`)
+refuse it at load, naming the point and type, and an unlisted function refuses it naming the slot row
+to add. The launcher emits it as `mod_points::replace!(internals …)`.
+API call sites are refused. Locals and fields use the native source routes described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -584,6 +606,256 @@ A listed stale call never falls back to source. Use the function hash and statem
 not a site's physical fingerprint, as the declaration identity. `wrap_if` needs unit output.
 These call kinds are not available to wasm mods.
 
+## From mixins and legacy kinds
+
+Each Mixin injector, and each kind of the removed `[[native.injection]]` helper form, has one
+`[[inject]]` form. Two rules come first:
+
+- **A hook function is not a point: implement the hook.** Where the catalog has a hook for the
+  moment, a mixin there becomes a `mod_api::Hooks` method, not an injection. `native_*` functions are
+  left out of points on purpose.
+- **Mixins are internals.** Call-site kinds, internals `replace` and the raw listeners need
+  `access = "internals"` and are native only: a `mod.wasm` declaring them is refused at load. Only
+  `head`, `return` and `replace` have an `access = "api"` form.
+
+`at`, `hash`, `call`, `nth` and `ctx` in the examples are written by `cargo horizon-mod inject add`.
+Each callback's types come from the mod's facade (`internals::raw`).
+
+| Mixin injector | Legacy kind | `[[inject]]` form | Example |
+| --- | --- | --- | --- |
+| `@Inject(at = @At("HEAD"))` | `HEAD` | `kind = "head"` | [head](#head) |
+| `@Inject(at = @At("RETURN"))`, `TAIL` | `RETURN` | `kind = "return"` | [return](#return) |
+| `@Inject(at = @At("INVOKE"))` | `BEFORE_CALL` | `kind = "before_call"` | [before_call](#before_call) |
+| `@Inject(at = @At(value = "INVOKE", shift = AFTER))` | `AFTER_CALL` | `kind = "after_call"` | [after_call](#after_call) |
+| `@Inject(at = @At("INVOKE_ASSIGN"))` | `AFTER_ASSIGN` | `kind = "after_call"` (read), `"modify_value"` (change) | [after-assign](#after-assign) |
+| `@Overwrite` | `OVERWRITE` | `kind = "replace"` | [replace](#replace) |
+| `@ModifyArg` | `MODIFY_ARG` | `kind = "before_call"` | [one call argument](#one-call-argument) |
+| `@ModifyArgs` | `MODIFY_ARGS` | `kind = "before_call"` | [all call arguments](#all-call-arguments) |
+| `@ModifyVariable` on a parameter | `MODIFY_VARIABLE` | `kind = "head"` | [a parameter](#a-parameter) |
+| `@ModifyVariable` on a local | `MODIFY_VARIABLE` | `kind = "modify_local"` | [a local](#a-local) |
+| `@ModifyConstant` | `MODIFY_CONSTANT` | `kind = "expression"` | [constants and field reads](#constants-and-field-reads) |
+| `@ModifyExpressionValue` on a call | `MODIFY_EXPRESSION_VALUE` | `kind = "modify_value"` | [modify_value](#modify_value) |
+| `@ModifyExpressionValue` on a field read | `MODIFY_EXPRESSION_VALUE` | `kind = "expression"` | [constants and field reads](#constants-and-field-reads) |
+| `@WrapOperation`, `@Redirect` | `WRAP_OPERATION` | `kind = "wrap_call"` | [wrap_call](#wrap_call) |
+| `@WrapWithCondition` | `WrapWithCondition` | `kind = "wrap_if"` | [wrap_if](#wrap_if) |
+| `@Unique` fields | state fields | `kind = "field"` (pending: #2582) | [state](#state) |
+| support classes | support modules | `[[native.module]]` | [support classes](#support-classes) |
+| `@Shadow`, `@Accessor`, `@Invoker` | `bindings` | declared `internals` | [bindings](#bindings) |
+
+"Pending" kinds parse, and are refused with a typed `E_INJECT_NO_SLOT` reason until the PR named
+lands.
+
+The call kinds below share one site; this declaration is written for each (only `kind` and `with`
+change):
+
+```toml
+[[inject]]
+id = "autosave"
+at = "horizon_client::game::Game<'_>::next_autosave_interval"
+kind = "before_call"
+with = "autosave"
+access = "internals"
+hash = "<function hash>"
+call = "horizon_client::game::autosave_interval"
+nth = 0
+ctx = "<statement context>"
+```
+
+The site's aliases are named from the callee (here `__…AutosaveIntervalReceiver`, `…Args`, `…Output`);
+the examples shorten them to `Receiver`, `Args` and `Output`.
+
+### head
+
+Runs before the body, with every argument. The API form gets the side's host and the point's record;
+the internals form gets the receiver and the raw record. Setting `cancel` (or `result`) skips the body.
+
+```toml
+[[inject]]
+id = "tick"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "tick"
+hash = "<function hash>"
+```
+
+```rust,ignore
+pub fn tick(host: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
+    my_mod::count(host);
+}
+```
+
+### return
+
+Runs after the body with the value returned, which it may change (`args.result` in the API form, the
+value itself in the raw form). `kind = "return"`, otherwise as [head](#head):
+
+```rust,ignore
+pub fn wrap(args: &mut mod_points::GameCommandsWrapDegreesArgs) {
+    if let Some(angle) = &mut args.result {
+        *angle = angle.round();
+    }
+}
+```
+
+### before_call
+
+Runs just before the call, after its arguments are evaluated, with the receiver and the arguments
+mutably:
+
+```rust,ignore
+pub fn autosave(receiver: Receiver<'_, '_>, args: &mut Args) {
+    my_mod::note_rate(args.rate);
+}
+```
+
+### after_call
+
+Runs just after the call with its result, which the caller still gets unchanged (`kind = "after_call"`):
+
+```rust,ignore
+pub fn autosave(receiver: Receiver<'_, '_>, value: &Output) {
+    my_mod::record_interval(*value);
+}
+```
+
+### after-assign
+
+`INVOKE_ASSIGN` fires right after the call's value is stored into a local. In Rust,
+`let interval = autosave_interval(…);` moves the value into the binding with nothing in between, so
+[after_call](#after_call) sees exactly the value assigned, and [modify_value](#modify_value) changes
+what is assigned. Other locals in scope are [modify_local](#a-local)'s.
+
+### modify_value
+
+Takes the call's result by value and returns the one the caller gets (`kind = "modify_value"`):
+
+```rust,ignore
+pub fn autosave(receiver: Receiver<'_, '_>, value: Output) -> Output {
+    value * 2
+}
+```
+
+### replace
+
+Owns the function: the body never runs, and the function's value is the listener's. One replace per
+point, whatever the tier. The API form takes the record and returns the record's `result` type;
+the internals form takes the receiver and raw record and returns the function's own type:
+
+```toml
+[[inject]]
+id = "average"
+at = "horizon_client::game::blocks::beacon::average"
+kind = "replace"
+with = "average"
+access = "internals"
+hash = "<function hash>"
+```
+
+```rust,ignore
+pub fn average(raw: &mut internals::raw::__GameBeaconAverageRaw<'_, u32, u32, u32>) -> u32 {
+    (*raw.a).max(*raw.b)
+}
+```
+
+Unlike a mixin `@WrapOperation`, a replace has no `original` to continue into: the body is gone for
+as long as it owns the point. Calling the replaced function from the listener doesn't reach the
+body; it enters the point again, runs the replace again and recurses until the stack overflows. Copy
+the part of the body you need into the listener instead.
+
+### one call argument
+
+`@ModifyArg` changes one argument of a call: a [before_call](#before_call) writing that field.
+
+```rust,ignore
+pub fn autosave(receiver: Receiver<'_, '_>, args: &mut Args) {
+    args.rate = args.rate.max(20.0);
+}
+```
+
+### all call arguments
+
+`@ModifyArgs` gets them all: the same [before_call](#before_call), writing any of `args`' fields
+(`autosave_interval` has one, `rate`).
+
+```rust,ignore
+pub fn autosave(receiver: Receiver<'_, '_>, args: &mut Args) {
+    args.rate *= 2.0; // and any other field of `args`
+}
+```
+
+### a parameter
+
+`@ModifyVariable` on a parameter at the head is a [head](#head) listener writing that argument:
+
+```rust,ignore
+pub fn turn_angle(args: &mut mod_points::GameCommandsWrapDegreesArgs) {
+    args.angle += 180.0;
+}
+```
+
+### a local
+
+`@ModifyVariable` on a local is `kind = "modify_local"`: the listener gets the binding itself, before
+or after a selected call ([mutable locals](#mutable-locals-native-source-rebuild-only)).
+
+### constants and field reads
+
+`@ModifyConstant`, and `@ModifyExpressionValue` on a field read, are `kind = "expression"`: the
+listener takes the selected value and returns the one used
+([expressions](#expressions-native-source-rebuild-only)).
+
+### wrap_call
+
+Wraps the call: the listener decides whether and how often the original runs, and with which
+arguments (`kind = "wrap_call"`):
+
+```rust,ignore
+pub fn autosave(
+    receiver: Receiver<'_, '_>,
+    args: &mut Args,
+    original: &mut dyn FnMut(Receiver<'_, '_>, &mut Args) -> Output,
+) -> Output {
+    if my_mod::paused() { 0 } else { original(receiver, args) }
+}
+```
+
+### wrap_if
+
+Runs the call only when the listener returns `true` (`kind = "wrap_if"`). The call must return `()`,
+so this one sits at a unit call, not at `autosave_interval`:
+
+```rust,ignore
+pub fn play(receiver: Receiver<'_, '_>, args: &Args) -> bool {
+    !my_mod::muted()
+}
+```
+
+### state
+
+A `@Unique` field becomes `kind = "field"`, an extension field on a listed type. It lands with
+#2582; until then it is refused with a typed reason. For data a mod keeps on game objects today,
+use attachments.
+
+### support classes
+
+Helper classes a mixin calls become a [`[[native.module]]`](#support-modules) table: whole Rust items
+emitted into a game crate, native only.
+
+### bindings
+
+`@Shadow`, `@Accessor` and `@Invoker` reach private members. Declare them as
+[internals](#raw-listeners-and-declared-internals) and name them through the facade:
+
+```toml
+internals = [{ path = "horizon_client::game::Game", hash = "<written by the tool>" }]
+```
+
+```rust,ignore
+pub fn tick(game: &mut internals::game::Game<'_>, raw: &mut internals::raw::__TickRaw<'_>) {
+    my_mod::observe(&game.world_root); // a field of the declared type, reached directly
+}
+```
+
 ## Reference
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
@@ -686,3 +958,41 @@ Injected mod fields must not change engine equality, ordering or hashing. Target
 `PartialEq`, `Eq`, `PartialOrd`, `Ord` or `Hash` are currently refused with `E_INJECT_FIELD`;
 a neutral comparison wrapper is follow-up work. Hand-written comparison implementations
 ignore the injected field. `Debug`, `Clone` and `Default` keep their normal field behavior.
+### Expressions (native source rebuild only)
+
+`expression` replaces one value the function reads: a literal (`64.0`, `-1`, `"name"`), a
+constant's path (`MAX_REACH`) or a field read (`self.speed`). It requires
+`access = "internals"` and a rebuild from source, and takes `expr`, `type`, `nth` and `ctx`;
+`call`, `local` and `position` are refused:
+
+```toml
+[[inject]]
+id = "farther"
+at = "horizon_client::game::Game<'_>::reach"
+kind = "expression"
+access = "internals"
+with = "farther"
+hash = "<function hash>"
+expr = "64.0"
+type = "f64"
+nth = 0
+ctx = "<statement context>"
+```
+
+The callback `fn farther(value: f64) -> f64` gets the value the game would use and returns the
+one it uses instead; listeners chain in the usual priority order, and no Host is passed. `expr`
+is matched as Rust tokens, so spacing doesn't matter. `nth` counts the matching reads in the
+function from 0, in source order, and `ctx` pins the statement it sits in, as for call sites.
+Reads a value can't stand in for are not counted: an assignment's place, a borrow's operand
+(`&LIMIT`) and a method's receiver (`4u32.max(1)`), along with constant contexts and nested items.
+
+`type` is the value's Rust type: a copied scalar (`i8` … `u128`, `isize`, `usize`, `f32`, `f64`,
+`bool`, `char`) or `&'static str`. A suffixed literal whose suffix differs is refused before the
+build. An unsuffixed literal, a constant or a field takes the declared type as written; when the
+game uses another type there, the build fails with `E_INJECT_EXPRESSION_TYPE`, naming each mod
+and inject id that declared the site, the type, the expression and the function.
+
+When the function changes and `ctx` no longer matches, the refusal (`E_INJECT_LOST`) lists every
+matching read now in the function as `nth = …, ctx = "…"`, so the declaration can be fixed without
+staging the game. Mods declaring the same read with the same type share one site. API access and
+wasm permanently refuse it; use native internals or request a hook.

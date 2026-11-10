@@ -48,6 +48,8 @@
 - [Design: client extensions](concepts/client-extensions.md)
 - [Design: baked models and ModelData](concepts/baked-models.md)
 - [Design: inside-block contact shapes](concepts/inside-block-contact.md)
+- [Generated block class tags](concepts/block-class-tags.md)
+- [Villager secondary work blocks](concepts/villager-secondary-poi.md)
 - [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
