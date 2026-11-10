@@ -792,6 +792,10 @@ pub struct Screen {
     /// The mod draws its own background (`native_screen_draw`), so Horizon
     /// leaves out the plain panel and the slot frames.
     pub own_background: bool,
+    /// The registered recipe book hosted beside this menu. Its declarations must
+    /// target this menu; no panel is enabled until authoritative settings arrive.
+    /// Leaving this unset keeps the screen without a recipe book.
+    pub recipe_book: Option<crate::RecipeBookTypeKey>,
 }
 
 /// An item the panel shows (`panel_items`): its id
