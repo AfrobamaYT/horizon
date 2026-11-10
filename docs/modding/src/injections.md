@@ -126,7 +126,7 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites are refused; internals `replace`, locals and extension fields are also refused.
+API call sites are refused; internals `replace` and extension fields are also refused. Locals use the native source route described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -522,3 +522,49 @@ These call kinds are not available to wasm mods.
   and the record carries what the point passes.
 - `[[inject]]` has no binding or hook-version fields. Implement a catalog hook through `Hooks`;
   use the slot's generated callback signature for an injection.
+
+### Mutable locals (native source rebuild only)
+
+`modify_local` requires `access = "internals"` and a rebuild from source. It uses the
+same pinned `call`, `nth` and `ctx` identity as other call-site injections, with three
+required fields that every other kind rejects:
+
+```toml
+[[inject]]
+id = "adjust_count"
+at = "horizon_client::game::count"
+kind = "modify_local"
+access = "internals"
+with = "adjust_count"
+hash = "<function hash>"
+call = "horizon_client::game::sink"
+nth = 0
+ctx = "<statement context>"
+local = "n"
+type = "i32"
+position = "before" # or "after"
+```
+
+The callback `fn adjust_count(n: &mut i32)` receives the actual mutable binding.
+Before callbacks run before evaluating the call; after callbacks run after it returns,
+while preserving its result. There is no copy or deferred write-back. Listeners use
+the existing priority/mod/injection ordering at each position. They may mutate the
+value directly, with the same type and panic handling as native internals listeners.
+No Host is passed by this raw internals route.
+
+The initial implementation accepts direct call statements in the enclosing function
+block. It refuses nested expression positions whose scope or evaluation order cannot
+be proven. The binding must be a single mutable local with a matching explicit Rust
+type, or a directly initialized suffixed integer literal (such as `3i32`) or boolean
+literal. Unsuffixed integer literals are refused because their inferred type cannot
+be proven. The declaration must include an initializer; later assignments do not
+establish initialization for this analysis.
+Missing, shadowed, immutable, type-mismatched, moved or borrowed bindings are refused
+by name. Non-scalar uses before the position, references (including `ref`/`ref mut`
+patterns in let, match and if-let over expressions mentioning the local), closures
+and opaque macros are conservatively refused when their dataflow cannot be proven.
+This may refuse bindings that Rust's borrow checker could otherwise accept.
+
+API access and wasm permanently refuse mutable locals; use native internals or request
+a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when
+no mod declares a local injection, so an unused local injection has zero runtime cost.

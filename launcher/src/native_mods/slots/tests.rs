@@ -27,6 +27,9 @@ fn api_head_without_prebuilt_slot_is_refused() {
     let (mut manifest, mut catalog) = fixture();
     catalog.points.clear();
     manifest.inject.push(Inject {
+        local: None,
+        local_type: None,
+        position: None,
         id: "missing".into(),
         at: "game::run".into(),
         kind: Kind::Head,
@@ -75,6 +78,9 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                     | Kind::ModifyLocal
             );
             manifest.inject.push(Inject {
+                local: None,
+                local_type: None,
+                position: None,
                 id: "test".into(),
                 at: "game::run".into(),
                 kind,
@@ -86,10 +92,17 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 nth: call.then_some(0),
                 ctx: call.then(|| "context".into()),
             });
+            if kind == Kind::ModifyLocal && access == Access::Internals {
+                assert_eq!(
+                    routes(&catalog, &manifest).unwrap(),
+                    vec![Route::Source(NoSlotReason::LocalSourceOnly)]
+                );
+                continue;
+            }
             let pending = match (kind, access) {
                 (Kind::ModifyCallArg, Access::Api) => Some(NoSlotReason::ApiSitesUnsupported),
                 (Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
-                (Kind::ModifyLocal, _) => Some(NoSlotReason::LocalSlotsPending),
+                (Kind::ModifyLocal, Access::Api) => Some(NoSlotReason::LocalSourceOnly),
                 (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
                 (Kind::Expression, Access::Api) => Some(NoSlotReason::KindHasNoSlot),
                 (Kind::Expression, _) => Some(NoSlotReason::SourcePending),
@@ -156,6 +169,9 @@ fn an_api_listener_at_a_point_without_an_api_record_is_refused_naming_the_type()
     catalog.points[0].api_refusal =
         Some("argument 1 `batch` (`&mut HudBatch`) has no API type yet".into());
     let inject = |access| Inject {
+        local: None,
+        local_type: None,
+        position: None,
         id: "test".into(),
         at: "game::run".into(),
         kind: Kind::Head,
@@ -193,6 +209,9 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
         return_ty: "Frame<'_>".into(),
     });
     manifest.inject.push(Inject {
+        local: None,
+        local_type: None,
+        position: None,
         id: "own".into(),
         at: "game::run".into(),
         kind: Kind::Replace,
@@ -243,6 +262,9 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
 fn unified_route_checks_freshness_and_selects_native_function_source() {
     let (mut manifest, mut catalog) = fixture();
     manifest.inject.push(Inject {
+        local: None,
+        local_type: None,
+        position: None,
         id: "test".into(),
         at: "game::run".into(),
         kind: Kind::WrapIf,
@@ -293,6 +315,9 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
 fn unstaged_source_value_before_listed_wrap_if_does_not_panic() {
     let (mut manifest, catalog) = fixture();
     let mut entry = Inject {
+        local: None,
+        local_type: None,
+        position: None,
         id: "value".into(),
         at: "game::run".into(),
         kind: Kind::ModifyValue,

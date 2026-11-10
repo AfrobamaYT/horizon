@@ -3,6 +3,8 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(super) struct Site {
+    #[serde(default)]
+    pub local: Option<horizon_mod_api_gen::sites::Local>,
     pub name: String,
     pub target: String,
     pub call: String,
@@ -18,6 +20,7 @@ pub(super) struct Site {
 impl From<horizon_mod_api_gen::sites::Site> for Site {
     fn from(site: horizon_mod_api_gen::sites::Site) -> Self {
         Self {
+            local: site.local,
             name: site.name,
             target: site.target,
             call: site.call,
@@ -37,6 +40,9 @@ impl Site {
     }
 
     fn export(&self) -> String {
+        if self.local.is_some() {
+            return self.name.clone();
+        }
         horizon_mod_api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
     }
 
@@ -72,6 +78,7 @@ impl Site {
 pub(super) fn adapter(kind: horizon_mod_package::manifest::inject::Kind, f: &str) -> String {
     use horizon_mod_package::manifest::inject::Kind;
     match kind {
+        Kind::ModifyLocal => format!("|receiver, args, original| {{ {f}(receiver); original(receiver, args) }}"),
         Kind::BeforeCall | Kind::ModifyCallArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
         Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
         Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
