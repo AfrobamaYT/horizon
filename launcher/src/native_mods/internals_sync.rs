@@ -83,11 +83,11 @@ fn discover(folder: &Path, cache_root: &Path) -> Result<Vec<ListedInternal>, Err
             fs::remove_dir_all(&fresh).map_err(|e| e.to_string())?;
         }
         super::sync(&source, &fresh)?;
-        horizon_mod_api_gen::staging::stage(
+        horizon_platform::mod_build::api_gen::staging::stage(
             &fresh,
             &fresh.join(super::inject::POINTS),
             &fresh.join(internals::INTERNALS),
-            horizon_mod_api_gen::staging::Mode::Discovery,
+            horizon_platform::mod_build::api_gen::staging::Mode::Discovery,
         )?;
         fs::write(fresh.join(".discovery-ready"), "").map_err(|e| e.to_string())?;
         fs::rename(&fresh, &game).map_err(|e| e.to_string())?;

@@ -119,7 +119,7 @@ impl Catalog {
         let path = dir.join(INTERNALS);
         let listed = inject::catalog(&dir.join(inject::POINTS))?;
         let mut points = listed.points;
-        for point in horizon_mod_api_gen::points::source::read(dir)? {
+        for point in horizon_platform::mod_build::api_gen::points::source::read(dir)? {
             let name = point_shape::camel(&point.name);
             points.push(inject::ListedPoint {
                 name: point.name,
@@ -138,7 +138,7 @@ impl Catalog {
             });
         }
         let mut sites = listed.sites;
-        for site in horizon_mod_api_gen::sites::source::read(dir)? {
+        for site in horizon_platform::mod_build::api_gen::sites::source::read(dir)? {
             if sites.iter().any(|public| public.name == site.name) {
                 return Err(format!("E_SOURCE_COLLISION: {}", site.name));
             }

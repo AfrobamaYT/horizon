@@ -99,7 +99,7 @@ pub(super) fn stage(
     catalog_dir: &std::path::Path,
     mods: &[super::Bundle],
 ) -> Result<(), String> {
-    use horizon_mod_api_gen::{
+    use horizon_platform::mod_build::api_gen::{
         points::source::{self, Point},
         sites::{source as call_source, Declaration},
     };
@@ -196,7 +196,7 @@ pub(super) fn stage(
     let entries = if calls.is_empty() {
         Vec::new()
     } else {
-        horizon_mod_api_gen::internals_view::catalog(
+        horizon_platform::mod_build::api_gen::internals_view::catalog(
             &std::fs::read_to_string(catalog_dir.join(super::internals::INTERNALS))
                 .map_err(|error| error.to_string())?,
         )?
@@ -395,7 +395,7 @@ fn private_source_stage_exports_and_registers_priorities() {
 #[test]
 fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
     use super::{api, internals::Catalog, Bundle};
-    use horizon_mod_api_gen::sites::{source as calls, Declaration};
+    use horizon_platform::mod_build::api_gen::sites::{source as calls, Declaration};
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
         "../target/source-call-wrapper-{}",
         std::process::id()
@@ -418,7 +418,7 @@ fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
         {"path":target, "kind":"method", "signature":"impl Game { fn run(&mut self) -> u32 }", "hash":"fingerprint"},
         {"path":callee, "kind":"method", "signature":"impl Game { fn step(&mut self, value: u32) -> u32 }", "hash":"step"}
     ]).to_string();
-    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
+    let entries = horizon_platform::mod_build::api_gen::internals_view::catalog(&metadata).unwrap();
     let discovered = calls::stage(
         &root,
         &entries,

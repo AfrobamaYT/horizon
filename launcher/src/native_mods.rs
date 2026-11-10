@@ -1467,7 +1467,7 @@ fn prepare_mixins_source(source: &Path, prepared: &Path) -> Result<(), String> {
         fs::remove_dir_all(prepared).map_err(|e| format!("{}: {e}", prepared.display()))?;
     }
     let result = sync(source, prepared)
-        .and_then(|()| horizon_mod_api_gen::materialize_game_modules(prepared));
+        .and_then(|()| horizon_platform::mod_build::api_gen::materialize_game_modules(prepared));
     if result.is_err() {
         let _ = fs::remove_dir_all(prepared);
     }
@@ -2136,8 +2136,8 @@ fn pipeline(
         for name in [
             inject::POINTS,
             internals::INTERNALS,
-            horizon_mod_api_gen::points::source::FILE,
-            horizon_mod_api_gen::sites::source::FILE,
+            horizon_platform::mod_build::api_gen::points::source::FILE,
+            horizon_platform::mod_build::api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(&pending, &catalog_dir, error))?;

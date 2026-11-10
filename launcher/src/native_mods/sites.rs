@@ -15,8 +15,8 @@ pub(super) struct Site {
     pub output: String,
 }
 
-impl From<horizon_mod_api_gen::sites::Site> for Site {
-    fn from(site: horizon_mod_api_gen::sites::Site) -> Self {
+impl From<horizon_platform::mod_build::api_gen::sites::Site> for Site {
+    fn from(site: horizon_platform::mod_build::api_gen::sites::Site) -> Self {
         Self {
             name: site.name,
             target: site.target,
@@ -37,7 +37,7 @@ impl Site {
     }
 
     fn export(&self) -> String {
-        horizon_mod_api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
+        horizon_platform::mod_build::api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
     }
 
     pub(super) fn facade(
