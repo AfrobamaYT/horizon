@@ -95,36 +95,26 @@ impl Game<'_> {
             .enumerate()
             .map(|(i, m)| (m.id, i))
             .collect();
-        let mut riding: HashMap<u32, u32> = HashMap::new();
-        // If the vehicle already has a first rider that is still validly riding it, preserve it.
-        for m in &self.mobs {
-            if let Some(r) = m.extra.rider
-                && let Some(&j) = index.get(&r)
-                && self.mobs[j].extra.mount == Some(m.id)
-                && self.mobs[j].alive()
-                && !self.mobs[j].removed
-            {
-                riding.insert(m.id, r);
-            }
-        }
+        let mut riding: HashMap<u32, (i64, u32)> = HashMap::new();
         for i in 0..self.mobs.len() {
             let Some(v) = self.mobs[i].extra.mount else {
                 continue;
             };
             // Not a text display: a server's display mounts come through
             // `remote_set_passengers`, which seats them in `position_riders`.
-            let valid = self.mobs[i].alive()
-                && !self.mobs[i].removed
+            let valid = !self.mobs[i].removed
                 && (boats.contains(&v)
                     || carts.contains(&v)
                     || tnts.contains(&v)
                     || cushions.contains(&v)
                     || self.seat(v).is_some()
-                    || index
-                        .get(&v)
-                        .is_some_and(|&j| self.mobs[j].alive() && !self.mobs[j].removed));
+                    || index.get(&v).is_some_and(|&j| !self.mobs[j].removed));
             if valid {
-                riding.entry(v).or_insert(self.mobs[i].id);
+                let place = (self.mobs[i].extra.vehicle_order, self.mobs[i].id);
+                riding
+                    .entry(v)
+                    .and_modify(|first| *first = (*first).min(place))
+                    .or_insert(place);
             } else {
                 let m = &mut self.mobs[i];
                 m.extra.mount = None;
@@ -132,7 +122,7 @@ impl Game<'_> {
             }
         }
         for m in &mut self.mobs {
-            m.extra.rider = riding.get(&m.id).copied();
+            m.extra.rider = riding.get(&m.id).map(|&(_, id)| id);
         }
         self.position_riders();
     }

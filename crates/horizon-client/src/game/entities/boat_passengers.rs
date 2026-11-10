@@ -546,10 +546,19 @@ impl Game<'_> {
         let b = &self.boats[i];
         let (id, y) = (b.id, b.position.y);
         for rider in self.mob_passenger_ids(id) {
+            if self
+                .mob_object(rider)
+                .is_none_or(|m| m.removed || m.extra.mount != Some(id))
+            {
+                continue;
+            }
             if !self.native_mob_may_ride(rider, id, false) {
                 continue;
             }
-            let Some(m) = self.mob_object(rider).filter(|m| m.extra.mount == Some(id)) else {
+            let Some(m) = self
+                .mob_object(rider)
+                .filter(|m| !m.removed && m.extra.mount == Some(id))
+            else {
                 continue;
             };
             let at = if broken {

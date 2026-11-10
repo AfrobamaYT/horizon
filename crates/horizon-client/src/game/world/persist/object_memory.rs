@@ -617,7 +617,7 @@ impl Game<'_> {
         let (kind, name) = if let Some(mob) = self.mob_object(root) {
             (
                 VehicleTreeKind::Mob,
-                crate::game::native_hooks::mob_kind(mob),
+                horizon_client_core::identifier::normalize_id(&mob.kind.id)?,
             )
         } else if let Some(boat) = self.boats.iter().find(|boat| boat.id == root) {
             (VehicleTreeKind::Boat, boat.entity_type())
