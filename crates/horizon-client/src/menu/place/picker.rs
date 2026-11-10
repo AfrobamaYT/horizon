@@ -1,13 +1,11 @@
 //! Shared augmenting-path recipe assignment.
-use super::*;
-
 /// `StackedContents.RecipePicker`: augmenting paths over item-ingredient pairs.
-pub(super) struct Picker<'a> {
-    stacked: &'a mut Stacked,
-    ingredients: Vec<&'a Ingredient>,
+pub(in crate::menu) struct Picker<'a> {
+    amounts: &'a mut [i32],
+    ingredient_count: usize,
     /// Indices into the stacked keys of the items any ingredient accepts.
     items: Vec<usize>,
-    connection: Vec<bool>,
+    limits: Vec<i32>,
     assigned: Vec<bool>,
     satisfied: Vec<bool>,
     visited_ingredient: Vec<bool>,
@@ -16,30 +14,34 @@ pub(super) struct Picker<'a> {
 }
 
 impl<'a> Picker<'a> {
-    pub(super) fn new(stacked: &'a mut Stacked, ingredients: &[&'a Ingredient]) -> Self {
-        // getUniqueAvailableIngredientItems
-        let items: Vec<usize> = (0..stacked.keys.len())
-            .filter(|&i| {
-                stacked.amounts[i] > 0
-                    && ingredients
-                        .iter()
-                        .any(|g| g.items.contains(&*stacked.keys[i]))
-            })
-            .collect();
-        let (ni, nt) = (ingredients.len(), items.len());
-        let mut connection = vec![false; ni * nt];
-        for (g, ing) in ingredients.iter().enumerate() {
-            for (t, &key) in items.iter().enumerate() {
-                if ing.items.contains(&*stacked.keys[key]) {
-                    connection[t * ni + g] = true;
-                }
+    /// Compatibility and per-cell stack caps are computed once, before matching.
+    /// Candidate identities are caller-owned: item holders for vanilla, exact
+    /// component-equal stack classes for predicate-sensitive mod placement.
+    pub(in crate::menu) fn new(
+        amounts: &'a mut [i32],
+        ingredient_count: usize,
+        mut limit: impl FnMut(usize, usize) -> i32,
+    ) -> Self {
+        let mut items = Vec::new();
+        let mut limits = Vec::new();
+        for (candidate, count) in amounts.iter().enumerate() {
+            if *count <= 0 {
+                continue;
+            }
+            let row = (0..ingredient_count)
+                .map(|g| limit(candidate, g))
+                .collect::<Vec<_>>();
+            if row.iter().any(|cap| *cap > 0) {
+                items.push(candidate);
+                limits.extend(row);
             }
         }
+        let (ni, nt) = (ingredient_count, items.len());
         Self {
-            stacked,
-            ingredients: ingredients.to_vec(),
+            amounts,
+            ingredient_count,
             items,
-            connection,
+            limits,
             assigned: vec![false; ni * nt],
             satisfied: vec![false; ni],
             visited_ingredient: vec![false; ni],
@@ -47,33 +49,50 @@ impl<'a> Picker<'a> {
             path: Vec::new(),
         }
     }
+    fn upper_bound(&self) -> i32 {
+        (0..self.ingredient_count)
+            .map(|g| {
+                self.items
+                    .iter()
+                    .enumerate()
+                    .map(|(t, key)| self.amounts[*key].min(self.limits[self.at(t, g)]))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .min()
+            .unwrap_or(i32::MAX)
+    }
     fn at(&self, item: usize, ingredient: usize) -> usize {
-        item * self.ingredients.len() + ingredient
+        item * self.ingredient_count + ingredient
     }
     fn clear_visited(&mut self) {
         self.visited_ingredient.fill(false);
         self.visited_item.fill(false);
     }
-    pub(super) fn try_pick(&mut self, capacity: i32, mut output: Option<&mut Vec<Arc<str>>>) -> bool {
+    pub(in crate::menu) fn try_pick(
+        &mut self,
+        capacity: i32,
+        mut output: Option<&mut Vec<usize>>,
+    ) -> bool {
         if capacity <= 0 {
             return true;
         }
         let mut satisfied_count = 0;
         loop {
             let Some(path) = self.try_assigning_new_item(capacity) else {
-                let valid = satisfied_count == self.ingredients.len();
+                let valid = satisfied_count == self.ingredient_count;
                 let has_output = valid && output.is_some();
                 self.clear_visited();
                 self.satisfied.fill(false);
-                for g in 0..self.ingredients.len() {
+                for g in 0..self.ingredient_count {
                     for t in 0..self.items.len() {
                         let at = self.at(t, g);
                         if self.assigned[at] {
                             self.assigned[at] = false;
                             let key = self.items[t];
-                            self.stacked.amounts[key] += capacity;
+                            self.amounts[key] += capacity;
                             if has_output && let Some(out) = output.as_deref_mut() {
-                                out.push(self.stacked.keys[key].clone());
+                                out.push(key);
                             }
                             break;
                         }
@@ -82,7 +101,7 @@ impl<'a> Picker<'a> {
                 return valid;
             };
             let key = self.items[path[0]];
-            self.stacked.amounts[key] -= capacity;
+            self.amounts[key] -= capacity;
             self.satisfied[path[path.len() - 1]] = true;
             satisfied_count += 1;
             for i in 0..path.len() - 1 {
@@ -99,15 +118,15 @@ impl<'a> Picker<'a> {
     fn try_assigning_new_item(&mut self, capacity: i32) -> Option<Vec<usize>> {
         self.clear_visited();
         for t in 0..self.items.len() {
-            if self.stacked.amounts[self.items[t]] >= capacity
-                && let Some(path) = self.find_path(t)
+            if self.amounts[self.items[t]] >= capacity
+                && let Some(path) = self.find_path(t, capacity)
             {
                 return Some(path);
             }
         }
         None
     }
-    fn find_path(&mut self, start: usize) -> Option<Vec<usize>> {
+    fn find_path(&mut self, start: usize, capacity: i32) -> Option<Vec<usize>> {
         self.path.clear();
         self.visited_item[start] = true;
         self.path.push(start);
@@ -115,9 +134,12 @@ impl<'a> Picker<'a> {
             let len = self.path.len();
             if (len - 1) & 1 == 0 {
                 let item = self.path[len - 1];
-                for g in 0..self.ingredients.len() {
+                for g in 0..self.ingredient_count {
                     let at = self.at(item, g);
-                    if !self.visited_ingredient[g] && self.connection[at] && !self.assigned[at] {
+                    if !self.visited_ingredient[g]
+                        && self.limits[at] >= capacity
+                        && !self.assigned[at]
+                    {
                         self.visited_ingredient[g] = true;
                         self.path.push(g);
                         break;
@@ -142,12 +164,14 @@ impl<'a> Picker<'a> {
         }
         None
     }
-    pub(super) fn try_pick_all(&mut self, max_size: i32, output: Option<&mut Vec<Arc<str>>>) -> i32 {
+    pub(in crate::menu) fn try_pick_all(
+        &mut self,
+        max_size: i32,
+        output: Option<&mut Vec<usize>>,
+    ) -> i32 {
         let mut min = 0i32;
         // Java int arithmetic: an empty ingredient list overflows as vanilla does.
-        let mut max = max_size
-            .min(self.stacked.upper_bound(&self.ingredients))
-            .wrapping_add(1);
+        let mut max = max_size.min(self.upper_bound()).wrapping_add(1);
         loop {
             let mid = min.wrapping_add(max) / 2;
             if self.try_pick(mid, None) {
@@ -165,3 +189,44 @@ impl<'a> Picker<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn flexible_role_reassigns_its_only_restricted_candidate() {
+        let mut amounts = [1, 1];
+        let mut picker = Picker::new(&mut amounts, 2, |candidate, role| {
+            if candidate == 0 || role == 0 {
+                i32::MAX
+            } else {
+                0
+            }
+        });
+        let mut selected = Vec::new();
+        assert!(picker.try_pick(1, Some(&mut selected)));
+        assert_eq!(selected, vec![1, 0]);
+        assert_eq!(amounts, [1, 1]);
+    }
+    #[test]
+    fn same_item_component_classes_are_not_pooled_into_one_cell() {
+        let mut amounts = [1, 1];
+        let mut picker = Picker::new(&mut amounts, 1, |_, _| 64);
+        assert!(!picker.try_pick(2, None));
+        assert!(picker.try_pick(1, None));
+    }
+    #[test]
+    fn maximum_respects_candidate_specific_slot_caps() {
+        let mut amounts = [64, 64];
+        let mut picker = Picker::new(&mut amounts, 2, |candidate, role| {
+            if candidate == role {
+                if role == 0 { 5 } else { 64 }
+            } else {
+                0
+            }
+        });
+        let mut selected = Vec::new();
+        assert_eq!(picker.try_pick_all(64, Some(&mut selected)), 5);
+        assert_eq!(selected, vec![0, 1]);
+        assert_eq!(amounts, [64, 64]);
+    }
+}

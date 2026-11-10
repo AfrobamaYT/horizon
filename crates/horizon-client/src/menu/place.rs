@@ -84,27 +84,32 @@ impl Stacked {
     pub fn can_craft(&self, ingredients: &[&Ingredient]) -> bool {
         self.clone().try_pick(ingredients, 1, None)
     }
-    /// `getResultUpperBound`.
-    fn upper_bound(&self, ingredients: &[&Ingredient]) -> i32 {
-        let mut min = i32::MAX;
-        'ingredients: for ing in ingredients {
-            let mut max = 0;
-            for (key, &count) in self.keys.iter().zip(&self.amounts) {
-                if count > max {
-                    if ing.items.contains(&**key) {
-                        max = count;
-                    }
-                    if max >= min {
-                        continue 'ingredients;
-                    }
-                }
+    fn pick(
+        &mut self,
+        ingredients: &[&Ingredient],
+        amount: i32,
+        all: bool,
+        output: Option<&mut Vec<Arc<str>>>,
+    ) -> i32 {
+        let keys = &self.keys;
+        let mut picker = Picker::new(&mut self.amounts, ingredients.len(), |key, ingredient| {
+            if ingredients[ingredient].items.contains(&*keys[key]) {
+                i32::MAX
+            } else {
+                0
             }
-            min = max;
-            if min == 0 {
-                break;
-            }
+        });
+        let mut selected = Vec::new();
+        let target = output.as_ref().map(|_| &mut selected);
+        let result = if all {
+            picker.try_pick_all(amount, target)
+        } else {
+            i32::from(picker.try_pick(amount, target))
+        };
+        if let Some(output) = output {
+            output.extend(selected.into_iter().map(|index| keys[index].clone()));
         }
-        min
+        result
     }
     /// `tryPick` (`canCraft(recipe, amount, output)`).
     pub fn try_pick(
@@ -113,7 +118,7 @@ impl Stacked {
         amount: i32,
         output: Option<&mut Vec<Arc<str>>>,
     ) -> bool {
-        Picker::new(self, ingredients).try_pick(amount, output)
+        self.pick(ingredients, amount, false, output) != 0
     }
     /// `tryPickAll` (`getBiggestCraftableStack`).
     pub fn try_pick_all(
@@ -122,12 +127,12 @@ impl Stacked {
         max_size: i32,
         output: Option<&mut Vec<Arc<str>>>,
     ) -> i32 {
-        Picker::new(self, ingredients).try_pick_all(max_size, output)
+        self.pick(ingredients, max_size, true, output)
     }
 }
 
 #[path = "place/picker.rs"]
-mod picker;
+pub(super) mod picker;
 use picker::Picker;
 
 /// `RecipeBookMenu.PostPlaceAction`.
