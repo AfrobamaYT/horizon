@@ -13,3 +13,7 @@ horizon-mod-package = { path = "../horizon-mod-package", default-features = fals
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "horizon-client"
+path = "src/main.rs"
