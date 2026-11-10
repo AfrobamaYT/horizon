@@ -113,6 +113,10 @@ struct Buffer {
 }
 // Each index is reserved once with fetch_add. Only its reserving guard writes it; stop
 // reads only after all guards have left. Buffers are never reused within an epoch.
+#[allow(
+    unsafe_code,
+    reason = "Thread-owned buffers are read only after profiling drains."
+)]
 unsafe impl Sync for Buffer {}
 struct Pool {
     next_thread: AtomicUsize,
@@ -199,6 +203,10 @@ pub(crate) fn stop_report() -> Report {
         std::thread::yield_now();
     }
     // No validated entrant can access the old pool after disable/epoch change and drain.
+    #[allow(
+        unsafe_code,
+        reason = "The disabled and drained pool has one owning allocation."
+    )]
     let pool = unsafe { Box::from_raw(POOL.swap(std::ptr::null_mut(), SeqCst)) };
     let mut report = Report {
         dropped: pool.dropped.load(SeqCst),
@@ -211,6 +219,10 @@ pub(crate) fn stop_report() -> Report {
             .take(buffer.next.load(SeqCst).min(CALLS))
         {
             // All writers have finished, including guards unwound by panics.
+            #[allow(
+                unsafe_code,
+                reason = "Profiling has drained all writers before reading records."
+            )]
             if let Some(record) = unsafe { *record.get() } {
                 report.record(record);
             }
@@ -241,6 +253,10 @@ pub(crate) fn enter(call: ModCall) -> Option<Guard> {
         return None;
     }
     // ACTIVE pins this pool until the returned guard drops.
+    #[allow(
+        unsafe_code,
+        reason = "ACTIVE pins the pool until the guard is dropped."
+    )]
     let pool = unsafe { &*POOL.load(SeqCst) };
     let slot = SLOT.with(|s| {
         let (old_epoch, old_slot) = s.get();
@@ -262,6 +278,10 @@ pub(crate) fn enter(call: ModCall) -> Option<Guard> {
 impl Drop for Guard {
     fn drop(&mut self) {
         // This guard holds one ACTIVE reference, so stop cannot free the pool yet.
+        #[allow(
+            unsafe_code,
+            reason = "The guard retains an ACTIVE reference to the pool."
+        )]
         let pool = unsafe { &*self.pool };
         let ns = (pool.clock)().saturating_sub(self.began);
         let index = pool
@@ -270,6 +290,10 @@ impl Drop for Guard {
             .map(|b| (b, b.next.fetch_add(1, SeqCst)));
         if let Some((buffer, index)) = index.filter(|(_, i)| *i < CALLS) {
             // Unique reserved index, and stop waits for our ACTIVE decrement before reading.
+            #[allow(
+                unsafe_code,
+                reason = "Each writer owns its reserved record until ACTIVE is decremented."
+            )]
             unsafe {
                 *buffer.records[index].get() = Some(Record {
                     mod_id: self.call.id,

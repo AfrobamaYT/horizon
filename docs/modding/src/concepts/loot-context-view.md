@@ -12,14 +12,14 @@ Verified repository-relative owners:
 
 | Route | Owner |
 | --- | --- |
-| Existing API snapshot and nested Wire values | `crates/horizon-mod-api/src/world/snapshots.rs:104`, `:129`, `:140`, `:174`, `:187`, `:199` |
-| Condition/function catalog, authoritative server | `crates/horizon-mod-api/src/hooks/loot_condition.rs:9`, `loot_function.rs:10` |
+| Existing API snapshot and nested Wire values | `crates/horizon-mod-vocab/src/world/snapshots.rs:104`, `:129`, `:140`, `:174`, `:187`, `:199` |
+| Condition/function catalog, authoritative server | `crates/horizon-mod-vocab/src/hooks/loot_condition.rs:9`, `loot_function.rs:10` |
 | Guarded conversion and dispatch, immutable context | `crates/horizon-client/src/game/modding/api_values/loot_values.rs:7`, `:24`, `:174` |
 | Engine callbacks and borrowed context | `crates/horizon-world/src/loot.rs:89`, `:103`, `:120`; forwarding `crates/horizon-world/src/native_load_hooks.rs:40`, `:51` |
 | World evaluator: custom condition, context capture, custom function | `crates/horizon-world/src/loot.rs:1583`, `:1613`, `:2107` |
 | Items evaluator: context capture, custom condition/function | `crates/horizon-items/src/items.rs:2049`, `:2234`, `:2627` |
 | Place scope shared by both evaluators | `crates/horizon-world/src/loot.rs:187`, `:200` |
-| Existing typed block value | `crates/horizon-mod-api/src/block/block_state.rs:9` |
+| Existing typed block value | `crates/horizon-mod-vocab/src/block/block_state.rs:9` |
 
 Both evaluator routes must carry the same typed slots through the common boundary. Blocks, containers, fishing and command-driven item rolls reach the items evaluator; entity drops and world loot reach the world evaluator. Caller-specific context must be carried explicitly, never reconstructed from whichever Game fields happen to be selected. Before implementation, enumerate gameplay producers and prove their parameter-set selection with fixtures; these evaluation owners do not establish complete producer coverage for interaction/enchantment contexts currently missing from the snapshot.
 

@@ -467,7 +467,7 @@ impl Game<'_> {
         self.server_items = None;
         self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
-        self.recipe_tables.books = None;
+        self.forget_book();
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
         // Before the players are sent the reloaded data below.
@@ -494,6 +494,7 @@ impl Game<'_> {
         self.adv.reset_tree();
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
+        self.build_screen();
     }
 
     pub(super) fn join_world_rest(&mut self) -> Result<()> {

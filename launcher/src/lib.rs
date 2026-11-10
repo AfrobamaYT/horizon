@@ -8,6 +8,7 @@ pub mod data_location;
 pub mod datapacks;
 pub mod desktop;
 pub mod desktop_seams;
+pub mod developer_install;
 pub mod export;
 #[cfg(unix)]
 pub mod game_app;
