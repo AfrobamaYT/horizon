@@ -219,8 +219,8 @@ pub enum DatapackGenerationExhausted {
 // no wire: the game holds it; a mod reads through handles
 // exhaustive: built only by [`DatapackRegistrySet::first`] and [`DatapackRegistrySet::reload`]
 pub struct DatapackRegistrySet {
-    session: u64,
-    generation: u64,
+    pub(super) session: u64,
+    pub(super) generation: u64,
     pub(super) registries: BTreeMap<String, BTreeMap<String, DatapackEntry>>,
 }
 

@@ -169,7 +169,10 @@ impl Game<'_> {
 
     /// The datapack registry set of this level's world session, when the level is the open one:
     /// the server's own, or on a client the one its server sent at the join.
-    fn level_datapack_set(&self, level: LevelRef) -> Option<std::sync::Arc<mod_api::DatapackRegistrySet>> {
+    fn level_datapack_set(
+        &self,
+        level: LevelRef,
+    ) -> Option<std::sync::Arc<mod_api::DatapackRegistrySet>> {
         (self.native_lifecycle.epoch() == Some(level.epoch())
             && level.dimension() == self.native_level_key())
         .then_some(())?;
