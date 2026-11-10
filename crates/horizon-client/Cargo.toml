@@ -22,7 +22,6 @@ horizon-mod-render = { path = "../horizon-mod-render" }
 horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-points = { path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
-horizon-mod-wasm = { path = "../horizon-mod-wasm" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }
 horizon-client-core = { path = "../horizon-client-core" }
