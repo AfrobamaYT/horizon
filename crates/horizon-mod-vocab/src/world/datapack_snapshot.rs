@@ -195,7 +195,7 @@ impl DatapackRegistrySet {
         snapshot: &DatapackSnapshot,
         candidate: DatapackCandidate,
     ) -> Option<Self> {
-        (snapshot.generation > self.generation).then(|| Self {
+        (snapshot.generation > self.generation).then_some(Self {
             session: self.session,
             generation: snapshot.generation,
             registries: candidate.registries,
