@@ -37,6 +37,13 @@ impl Game<'_> {
         self.stack_can_perform(stack, ability, &*stack.item == "minecraft:shears")
     }
 
+    /// Whether the held stack shears a mob (`minecraft:shears_harvest`): shears, or a stack whose
+    /// item parts let it.
+    pub(in crate::game) fn held_shears(&self) -> bool {
+        self.held()
+            .is_some_and(|stack| self.stack_shears(stack, ability::SHEARS_HARVEST))
+    }
+
     /// Whether `stack` carries the `blocks_attacks` component (its own, or its item's unless
     /// removed) as `getUseDuration` and the use animation read it, once the stack's item parts
     /// answered `minecraft:shield_block`.

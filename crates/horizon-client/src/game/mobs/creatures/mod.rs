@@ -16,7 +16,6 @@ mod residency;
 mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
-use super::item_abilities::ability;
 use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
@@ -6985,10 +6984,7 @@ impl Game<'_> {
             }
             return Ok(true);
         }
-        if self
-            .held()
-            .is_some_and(|stack| self.stack_shears(stack, ability::SHEARS_HARVEST))
-        {
+        if self.held_shears() {
             let mob = &self.mobs[index];
             let shearable = match mob.species() {
                 Species::Sheep => !mob.extra.sheared && !mob.is_baby(),
@@ -7044,10 +7040,7 @@ impl Game<'_> {
             .as_ref()
             .map(|h| h.item.to_string())
             .unwrap_or_default();
-        // Shears, or a stack whose item parts let it `shears_harvest`.
-        let shears = held
-            .as_ref()
-            .is_some_and(|stack| self.stack_shears(stack, ability::SHEARS_HARVEST));
+        let shears = self.held_shears();
         // Bucketable.bucketMobPickup: a water bucket scoops up a fish, a
         // tadpole or an axolotl, with the data its bucket carries.
         if item == "minecraft:water_bucket"
