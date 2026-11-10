@@ -59,6 +59,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "BlockTintSources",
     "ParticleProviders",
     "EnchantmentDamageEffects",
+    "CauldronFluidContents",
     "BlockAndTintGetter",
     "GroundLevel",
     "BlockMetadata",
