@@ -38,26 +38,44 @@ pub struct BiomeModifierSpawner {
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub enum BiomeModifierOperation {
-    /// `add_features`: append placed features (`mymod:ore`, or `#mymod:tag`) to one
-    /// generation step (`underground_ores`, ...).
-    AddFeatures { features: Vec<String>, step: String },
-    /// `remove_features`: take placed features out of these steps; no steps means every step.
-    RemoveFeatures {
+    /// `add_features`: append placed features to one generation step.
+    AddFeatures {
+        /// Placed feature ids (`mymod:ore`) or tags (`#mymod:tag`).
         features: Vec<String>,
+        /// The generation step (`underground_ores`, ...).
+        step: String,
+    },
+    /// `remove_features`: take placed features out of generation steps.
+    RemoveFeatures {
+        /// Placed feature ids or tags.
+        features: Vec<String>,
+        /// The steps to take them out of; none means every step.
         steps: Vec<String>,
     },
     /// `add_spawns`: append spawners to their entity types' spawn categories.
-    AddSpawns { spawners: Vec<BiomeModifierSpawner> },
+    AddSpawns {
+        /// The spawners to add.
+        spawners: Vec<BiomeModifierSpawner>,
+    },
     /// `remove_spawns`: take entity types out of every spawn category.
-    RemoveSpawns { entity_types: Vec<String> },
-    /// `add_spawn_costs`: set the spawn cost (`energy_budget`, `charge`) of entity types.
-    AddSpawnCosts {
+    RemoveSpawns {
+        /// Entity type ids or tags.
         entity_types: Vec<String>,
+    },
+    /// `add_spawn_costs`: set the spawn cost of entity types.
+    AddSpawnCosts {
+        /// Entity type ids or tags.
+        entity_types: Vec<String>,
+        /// The `energy_budget` of the cost.
         energy_budget: f64,
+        /// The `charge` of the cost.
         charge: f64,
     },
     /// `remove_spawn_costs`: take entity types out of `spawn_costs`.
-    RemoveSpawnCosts { entity_types: Vec<String> },
+    RemoveSpawnCosts {
+        /// Entity type ids or tags.
+        entity_types: Vec<String>,
+    },
 }
 
 /// A biome modifier: the biomes it applies to and what it does to them.
@@ -113,8 +131,8 @@ fn names_ok(names: &[String], tags: bool) -> Result<(), BiomeModifierError> {
     }
 }
 
-fn step_ok(step: &String) -> Result<(), BiomeModifierError> {
-    match STEPS.contains(&step.as_str()) {
+fn step_ok(step: &str) -> Result<(), BiomeModifierError> {
+    match STEPS.contains(&step) {
         true => Ok(()),
         false => Err(BiomeModifierError::UnknownStep),
     }
@@ -131,7 +149,7 @@ impl BiomeModifier {
             }
             BiomeModifierOperation::RemoveFeatures { features, steps } => {
                 names_ok(features, true)?;
-                steps.iter().try_for_each(step_ok)
+                steps.iter().map(String::as_str).try_for_each(step_ok)
             }
             BiomeModifierOperation::AddSpawns { spawners } => {
                 if spawners.is_empty() {
