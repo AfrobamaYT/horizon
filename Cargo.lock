@@ -2141,7 +2141,6 @@ dependencies = [
  "bytemuck",
  "glam",
  "horizon-core",
- "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
