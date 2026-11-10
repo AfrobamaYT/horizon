@@ -1143,6 +1143,13 @@ pub trait LevelsClientBackendMut {
     /// (`LevelRenderer.destroyBlockProgress`): stages 0..9 show a crack, any other stage removes
     /// it. Nothing is sent to the server or to other players, and a crack not updated for 400
     /// ticks goes away. False for a stale or foreign level or before login.
+    ///
+    /// ```compile_fail
+    /// use mod_api::{LevelRef, ServerHost};
+    /// fn wrong_side(level: LevelRef, host: &mut dyn ServerHost) {
+    ///     level.set_client_break_progress(host, -1, [0, 64, 0], 3);
+    /// }
+    /// ```
     #[access(WorldOnly)]
     fn level_set_client_break_progress(
         &mut self,
