@@ -2975,7 +2975,7 @@ registration path.
   messages stay in vanilla's place, as with NeoForge.
 
 - Right-clicking an entity, on the server for every player: `native_entity_interact` hears a right click on
-  an entity (its id and type, and the stack in the hand) where `Player.interactOn` starts, once per hand. A mod that claims
+  an entity (its id and type, the typed `Hand::Main` or `Hand::Off`, and the stack in that hand) where `Player.interactOn` starts, once per hand. A mod that claims
   it swings the hand instead of the entity's and the item's own interaction.
 
 - Left-clicking a block, on the server for every player: `native_left_click_block` hears the start of a dig
