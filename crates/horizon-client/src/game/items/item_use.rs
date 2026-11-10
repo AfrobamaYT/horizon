@@ -71,10 +71,13 @@ impl Game<'_> {
         let mut animation = fixed.unwrap_or_else(|| {
             if let Some(consumable) = stack.consumable(info) {
                 consumable.animation
-            } else if data.is_some_and(|d| d.other("minecraft:blocks_attacks").is_some())
-                || (data.is_none_or(|d| d.other("!minecraft:blocks_attacks").is_none())
-                    && info.is_some_and(|i| i.blocks_attacks.is_some()))
-            {
+            } else if self.stack_can_perform(
+                stack,
+                super::item_abilities::ability::SHIELD_BLOCK,
+                data.is_some_and(|d| d.other("minecraft:blocks_attacks").is_some())
+                    || (data.is_none_or(|d| d.other("!minecraft:blocks_attacks").is_none())
+                        && info.is_some_and(|i| i.blocks_attacks.is_some())),
+            ) {
                 UseAnimation::Block
             } else if kinetic.is_some() {
                 UseAnimation::Spear
@@ -139,7 +142,7 @@ impl Game<'_> {
                 } else if let Some(consumable) = stack.consumable(info) {
                     consumable.ticks()
                 } else if patched_blocks
-                    || stack.carries_component(info, "minecraft:blocks_attacks")
+                    || self.stack_carries_blocks_attacks(stack, info)
                     || stack.carries_component(info, "minecraft:kinetic_weapon")
                 {
                     72_000
@@ -159,7 +162,7 @@ impl Game<'_> {
         !stack.item.starts_with("minecraft:")
             && info.is_some()
             && stack.consumable(info).is_none()
-            && !stack.carries_component(info, "minecraft:blocks_attacks")
+            && !self.stack_carries_blocks_attacks(stack, info)
             && !stack.carries_component(info, "minecraft:kinetic_weapon")
             && self.use_duration(stack) > 0
     }
