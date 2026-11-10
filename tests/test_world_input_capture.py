@@ -55,9 +55,12 @@ class WorldInputCaptureTests(unittest.TestCase):
         ready = remote[remote.index("    fn tick_client_load("):]
         self.assertLess(ready.index("r.loaded_sent = true"),
                         ready.index("self.capture_loaded_world()"))
-        level = remote[remote.index("    fn tick_remote_level("):]
+        self.assertIn("self.tick_remote_player(running, hold)", method(remote, "tick_remote_level"))
+        level = method(remote, "tick_remote_player")
         self.assertLess(level.index("self.tick_client_load()"),
-                        level.index("let stick = self.input_move()"))
+                        level.index("self.tick_local_player("))
+        # The extracted local-player pass owns the movement input now.
+        self.assertIn("let stick = self.pad_move()", method(remote, "tick_local_player"))
 
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_capture_lifecycle(self):
