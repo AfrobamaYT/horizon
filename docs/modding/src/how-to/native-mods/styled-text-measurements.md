@@ -35,3 +35,9 @@ plain characters, not serialized JSON or translation keys. Styles do not add
 characters; literal legacy `§` formatting codes remain in the string, unlike the
 font's formatted rendering. Invalid components return the same boundary errors
 as the other text reads. Do not cache resolved strings across language changes.
+
+The shared decoder currently resolves action keybind IDs such as `key.jump` to
+translated action captions rather than the currently assigned key. Physical key
+names resolve normally. This existing limitation also affects measurements;
+canonical action-binding parity is tracked in
+[#2718](https://github.com/arismoko/horizon/issues/2718).

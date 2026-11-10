@@ -11,6 +11,9 @@ pub trait ClientTextClientHost {
     /// Styles do not contribute characters; literal legacy formatting codes remain
     /// in the string, as in vanilla. Available outside drawing, including client
     /// setup, on native and wasm. Invalid components return their boundary error.
+    /// Currently the shared decoder translates action IDs such as `key.jump` to
+    /// action captions, not their rebound keys; action-binding parity is tracked
+    /// in [#2718](https://github.com/arismoko/horizon/issues/2718).
     #[access(ClientSetup)]
     fn text_string(&self, text: &Text) -> Result<String, TextFormError>;
 
