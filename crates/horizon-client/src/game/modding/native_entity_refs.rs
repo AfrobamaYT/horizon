@@ -12,11 +12,11 @@
 pub(in crate::game) mod dragon_parts_table;
 #[path = "native_entity_refs/dragon_query.rs"]
 mod dragon_query;
-#[path = "native_entity_refs/save_lending.rs"]
-mod save_lending;
 #[cfg(test)]
 #[path = "native_entity_refs/roll_loot_tests.rs"]
 mod roll_loot_tests;
+#[path = "native_entity_refs/save_lending.rs"]
+mod save_lending;
 use super::{
     Game,
     commands::Target,
