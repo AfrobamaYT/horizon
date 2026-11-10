@@ -131,7 +131,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 506 | 2791 | 5080 |
+| horizon-client | horizon-mod-api | 508 | 2797 | 5093 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 28 | 86 | 87 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
@@ -152,7 +152,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 178 | 1436 | 2208 |
+| game/modding | 179 | 1436 | 2210 |
 | game/native_hooks | 120 | 455 | 522 |
 | client (non-game) | 85 | 407 | 310 |
 | game/interface | 48 | 150 | 485 |
@@ -162,9 +162,9 @@ Counts are source references (one per `use` leaf or path), split into production
 | horizon-client-render | 45 | 203 | 148 |
 | game/world | 23 | 81 | 257 |
 | game/entities | 28 | 45 | 280 |
-| game/items | 18 | 72 | 164 |
+| game/items | 19 | 77 | 175 |
 | game/runtime | 9 | 32 | 132 |
-| game.rs | 1 | 131 | 0 |
+| game.rs | 1 | 132 | 0 |
 | game/administration | 10 | 18 | 44 |
 | game/host | 3 | 45 | 0 |
 | horizon-items | 2 | 2 | 3 |
@@ -174,12 +174,12 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 254 | 771 | 78 |
-| host | 111 | 428 | 81 |
+| loading | 254 | 772 | 78 |
+| host | 111 | 429 | 81 |
 | slots | 8 | 0 | 0 |
 | attachments | 166 | 293 | 50 |
 | content_render | 310 | 426 | 179 |
-| hooks | 2669 | 3766 | 1503 |
+| hooks | 2675 | 3777 | 1503 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -188,16 +188,16 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 | highest tier | files |
 |---|---|
 | dispatch | 20 |
-| value | 148 |
+| value | 149 |
 | more | 48 |
 
-- **dispatch** items, by files using them: `__private::listened` (64), `HookId` (8), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1)
+- **dispatch** items, by files using them: `__private::listened` (65), `HookId` (8), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1)
 
-- **value** items, by files using them: `Identifier` (17), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (8), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `RecipeBookDisplay` (4), `RecipeSlotDisplay` (4), `Transaction` (4), `__private::item_listens` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3)
+- **value** items, by files using them: `Identifier` (17), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (9), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `RecipeBookDisplay` (4), `RecipeSlotDisplay` (4), `Transaction` (4), `__private::item_listens` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3)
 
 - **more** items, by files using them: `__private::mods` (20), `__private::game::*` (8), `__private::ModPhase::Registration` (5), `__private::PhaseOwner::scope` (5), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext` (3), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `__private::game::RegistrationContextNew` (3), `HostSide` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::player_ref` (2), `__private::item_key_id` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `ModEntry` (1), `Registrar` (1)
 
-Outside the host areas, 2687 `mod_api` references are in test code; 250 of them name `testing`, `part_tests` or `with_test_packages`.
+Outside the host areas, 2698 `mod_api` references are in test code; 251 of them name `testing`, `part_tests` or `with_test_packages`.
 
 ### The host areas by strand (files under game/modding/ and game/native_hooks/)
 
@@ -210,7 +210,7 @@ Outside the host areas, 2687 `mod_api` references are in test code; 250 of them 
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (stays in the engine) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
 | content_render (phase 5) | 6 | 2749 | 6 | 1 | 46 | 46 | 19 |
-| hooks (phase 6, not built) | 444 | 105942 | 400 | 19 | 587 | 1741 | 241 |
+| hooks (phase 6, not built) | 446 | 106338 | 401 | 19 | 588 | 1751 | 242 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
