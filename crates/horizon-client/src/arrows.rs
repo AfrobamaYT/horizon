@@ -1156,7 +1156,6 @@ impl Ticker<'_, '_, '_, '_> {
         let (fire_ticks, extinguished) =
             scene.apply_block_effects(from, to, self.st.fire_ticks, |state, p, precise| {
                 let name = &*scene.facts.get(state).name;
-                let _ = (state, precise);
                 if name == "minecraft:bubble_column" && precise {
                     self.bubble_column(state, p);
                 }
