@@ -12,6 +12,7 @@ pub struct NativeClientHooks {
     pub menu_still_valid: fn(&LoopContext, u128, &str, [i32; 3], [f64; 3], &mut bool),
     pub menu_still_valid_listens: fn(&str) -> bool,
     pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
+    pub can_equip: fn(&LoopContext, &ItemStack, &str, u32, &str, &mut bool),
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
     pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
     pub farmland_trample: fn(&LoopContext, u32, [i32; 3], u32, f64, &mut bool),
@@ -80,6 +81,19 @@ pub(crate) fn menu_still_valid_listens(menu: &str) -> bool {
     HOOKS
         .get()
         .is_some_and(|hooks| (hooks.menu_still_valid_listens)(menu))
+}
+
+pub(crate) fn can_equip(
+    context: &LoopContext,
+    stack: &ItemStack,
+    slot: &str,
+    entity: u32,
+    kind: &str,
+    can_equip: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.can_equip)(context, stack, slot, entity, kind, can_equip);
+    }
 }
 
 pub(crate) fn item_stacked_on_other(
