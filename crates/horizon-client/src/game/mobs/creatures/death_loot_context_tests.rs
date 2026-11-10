@@ -70,6 +70,8 @@ fn death_loot_uses_call_scoped_source_and_hand() {
             game.player =
                 Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             crate::game::native_entity_refs::tests::bind_local_player(game, 11, 123);
+            // Reserve the fixture's explicit IDs before spawning experience orbs.
+            game.next_entity = 1000;
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:iron_sword", 2));
             for (id, environmental) in [(68, false), (69, true)] {
                 let mut victim = Mob::new(id, ty.clone(), Vec3::ZERO, 0.0);
@@ -221,6 +223,7 @@ fn death_loot_killer_is_not_the_acting_guest() {
     use crate::game::native_guest_turn_tests::with_guests;
     use horizon_client::mobs::Damage;
     with_guests(|game| {
+        game.next_entity = 1000;
         let loot = horizon_world::loot::LootData::load(
             &game.options.resources,
             &Default::default(),
@@ -229,7 +232,8 @@ fn death_loot_killer_is_not_the_acting_guest() {
         .unwrap();
         game.server_loot.set(Some(Arc::new(loot)));
         game.build_registries();
-        let mut hand = ItemStack::new("minecraft:diamond_sword", 12);
+        // A stackable held item lets the later listener change the count legally.
+        let mut hand = ItemStack::new("minecraft:stone", 12);
         hand.damage = 19;
         hand.enchant("minecraft:looting", 2);
         let mut changed = hand.clone();

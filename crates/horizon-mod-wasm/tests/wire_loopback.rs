@@ -889,6 +889,7 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
+    use mod_api::__private::game::BackendRefOf;
     struct World;
     impl mod_api::Host for World {
         fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
@@ -908,6 +909,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
     }
     impl mod_api::Backend for World {}
     mod_api::impl_backend_areas!(World, except(living));
+    impl mod_api::prelude::LivingClientBackend for World {}
     impl mod_api::prelude::LivingBackend for World {
         fn living_hand_item(
             &self,
