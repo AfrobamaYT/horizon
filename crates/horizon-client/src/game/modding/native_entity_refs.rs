@@ -1522,28 +1522,57 @@ pub(super) mod tests {
         });
     }
 
+    /// The restitution an entity landing on a block reads is asked of the block's parts in the
+    /// entity's level, on the side that ticks it, with the entity and the block's position; a
+    /// block without a part is not asked, and a non-finite answer is ignored.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_block_part_changes_the_bounce_restitution_an_entity_reads() {
-        use horizon_world::native_load_context::LoopSide;
+        use horizon_client::block_contact::{Contact, bounce_restitution};
+        use horizon_core::position::BlockPos;
 
-        mod_api::__private::part_tests::restitution_game_thread();
-        crate::entry::install_client_hooks();
+        let heard = mod_api::__private::part_tests::restitution_game_thread();
+        crate::game::native_hooks::install_block_contact_hooks();
         with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             let registry = game.pack.assets.registry;
-            let context = crate::game::test_server_load().loop_context(LoopSide::Server, []);
-            let read = |name: &str, own: f32| {
-                let state = registry.default_state(name).unwrap();
-                horizon_client::motion::modded_bounce_restitution(&context, state, own)
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let (glass, stone, slime) = (
+                state("minecraft:glass"),
+                state("minecraft:stone"),
+                state("minecraft:slime_block"),
+            );
+            let pos = BlockPos::new(3, 64, 5);
+            let mut read = |block, own, client_side| {
+                game.world.set(pos.x, pos.y, pos.z, block).unwrap();
+                let contact = Contact {
+                    entity: 7,
+                    kind: "minecraft:pig",
+                    state: block,
+                    position: pos,
+                };
+                let level = horizon_client::health::DamageLevel::of(
+                    &mut game.world,
+                    registry,
+                    None,
+                    Some(&game.pack.block_registries),
+                    &game.damage_hooks,
+                );
+                bounce_restitution(&mut level.on_client(client_side), contact, own)
             };
-            // Glass's part sets 0.5 whatever the block's own value was.
-            assert_eq!(read("minecraft:glass", 0.0), 0.5);
-            assert_eq!(read("minecraft:glass", 1.0), 0.5);
-            // A block with no part keeps its own: slime bounces fully, stone not at all.
-            assert_eq!(read("minecraft:slime_block", 1.0), 1.0);
-            assert_eq!(read("minecraft:red_bed", 0.75), 0.75);
+            // Glass's part answers whatever the block's own value: 0.5 on a server, 0.25 on a
+            // client predicting its own bounce.
+            assert_eq!(read(glass, 0.0, false), 0.5);
+            assert_eq!(read(glass, 1.0, true), 0.25);
+            // A block with no part keeps its own: slime bounces fully.
+            assert_eq!(read(slime, 1.0, false), 1.0);
             // Stone's part answers not a number, which is ignored.
-            assert_eq!(read("minecraft:stone", 0.0), 0.0);
+            assert_eq!(read(stone, 0.0, false), 0.0);
+            let pig = |client| (client, 7, "minecraft:pig".to_owned(), pos, true);
+            assert_eq!(*heard.lock().unwrap(), [pig(false), pig(true)]);
         });
     }
 

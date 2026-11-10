@@ -293,17 +293,6 @@ pub(crate) fn install_client_hooks() {
             let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_block_speed_factor(&context, state, factor);
         },
-        bounce_restitution: |context, state, factor| {
-            if !mod_api::__private::block_listens(
-                mod_api::HookId::BounceRestitution,
-                "bounce_restitution",
-                state,
-            ) {
-                return;
-            }
-            let context = mod_api::OwningLoop::new(context);
-            mod_api::dispatch_bounce_restitution(&context, state, factor);
-        },
         player_stays_on_ground_surface: |context, entity, staying| {
             let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_player_stays_on_ground_surface(&context, entity, staying);

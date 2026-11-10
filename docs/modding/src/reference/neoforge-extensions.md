@@ -114,7 +114,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isEmpty(state)` | Missing | — | Air/replaceable facts exist (`block_states().replaceable`), but no `isEmpty` answer for a state. |
 | `getBubbleColumnDirection(state)` | Missing | — | Bubble-column rules are engine-owned. |
 | `shouldHideAdjacentFluidFace(state, direction, fluid)` | Missing | — | Fluid-face culling is engine-owned. |
-| `getBounceRestitution(level, pos, state, entity)` | Covered | `BlockPart::bounce_restitution` (`hooks/bounce_restitution.rs`) | The factor of the state, read for the player and the mobs on both sides; no position or entity argument, and dropped items keep their own slime rule. `BlockPart::bounce_on` still edits the movement after the bounce. |
+| `getBounceRestitution(level, pos, state, entity)` | Covered | `BlockPart::bounce_restitution` (`hooks/bounce_restitution.rs`) | Asked for the player and the mobs on both sides, with the entity's level as a read-only `LevelSide` host, the entity, its type and the block's position. Dropped items keep their own slime rule. `BlockPart::bounce_on` still edits the movement after the bounce. |
 | `getRelocability(level, pos, state)` | Missing | — | No relocation query (pistons, structure blocks). |
 | `canBeConnectedTo(state, direction, neighborBlock)` | Partial | `BlockPart::connects_to` (`hooks/connects_to.rs`) | Asks the connecting fence, wall, bars or pane (your block), not the block being connected to: a modded target cannot answer for a vanilla fence, and only those shapes ask at all. |
 | `getModelData(state, level, pos)` | Missing | — | No `ModelData`; block-entity drawing takes a `block_entity_submit` part with its own model path. |
