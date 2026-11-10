@@ -278,6 +278,9 @@ jobs:
         if: steps.rust.outputs.required != 'false'
         id: server-lint
         run: cargo +stable clippy $JOBS --keep-going -p horizon-client --all-targets --no-default-features -- -D warnings
+      - name: The machine sample builds against this API
+        if: steps.rust.outputs.sample == 'true'
+        run: python3 tools/ci/check_machine_sample.py
       - name: The mod API builds for wasm32
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked

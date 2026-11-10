@@ -9,6 +9,7 @@ mod interface_cache_tests;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 pub use game_modules::materialize_game_modules;
+mod hook_targets;
 mod host;
 mod layout;
 mod named_hooks;
