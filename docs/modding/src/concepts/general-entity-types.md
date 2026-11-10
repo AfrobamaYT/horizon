@@ -44,7 +44,7 @@ Paths below are verified existing integration owners relative to this repository
 
 | Route | Existing file:line owner; required treatment |
 | --- | --- |
-| Part registration and dispatch | `crates/horizon-mod-api/src/parts/entities.rs:124` registers behavior; `:53` resolves a type's Parts. Resolve into slots at load. |
+| Part registration and dispatch | `crates/horizon-mod-vocab/src/parts/entities.rs:124` registers behavior; `:53` resolves a type's Parts. Resolve into slots at load. |
 | Mod spawning, including callers using level handles | `crates/horizon-client/src/game/modding/native_level_spawning.rs:15` owns level_spawn_mob. Add a general insertion path without pretending every entity is a mob. |
 | Natural/spawner policy | `crates/horizon-client/src/game/mobs/natural_spawning.rs:43` gates eligible chunks. General MISC types do not gain natural spawning implicitly. Explicit spawn adapters use the same insertion boundary. |
 | Identity, reads and queries | `crates/horizon-client/src/game/modding/native_entity_refs.rs:101` resolves targets, `:176` creates refs, `:245` queries entities. Extend all three to general rows; do not scan families for each lookup. |

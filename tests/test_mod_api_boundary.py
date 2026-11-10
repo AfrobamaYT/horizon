@@ -5,7 +5,7 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "crates/horizon-mod-api/src"
+API = ROOT / "crates/horizon-mod-vocab/src"
 def api_files():
     return [p for p in sorted(API.rglob("*.rs")) if p != API / "__private.rs" and not p.name.endswith("_tests.rs")]
 

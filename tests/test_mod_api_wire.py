@@ -33,6 +33,14 @@ class WireGuardFixtures(unittest.TestCase):
             api.write_text('#[derive(mod_api::Wire)] pub struct MissingType;')
             accepted = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
             self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            vocab = root / 'crates/horizon-mod-vocab/src/lib.rs'
+            vocab.parent.mkdir(parents=True)
+            vocab.write_text('pub struct MissingVocabularyForm;')
+            refused_vocab = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+            self.assertEqual(refused_vocab.returncode, 1)
+            self.assertIn('MissingVocabularyForm', refused_vocab.stdout)
+            vocab.write_text('#[derive(mod_api::Wire)] pub struct MissingVocabularyForm;')
+            self.assertEqual(repository_violations(root), [])
             api.write_text('mod checked; mod collision;')
             (api.parent / 'checked.rs').write_text(
                 '// no wire: checked manual codec\npub struct Shared;\nimpl Wire for Shared {}')

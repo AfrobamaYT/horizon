@@ -51,11 +51,6 @@ pub const HOST_LOG: u32 = 0xFFFF_FF03;
 #[doc(hidden)]
 pub use crate::WIRE_LAYOUT as LAYOUT;
 
-#[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
-// hidden: transport plumbing used by generated boundary code.
-#[doc(hidden)]
-pub use crate::wire::wire_guest as guest;
-
 /// Maximum static strings retained by either transport string table.
 // hidden: transport plumbing used by generated boundary code.
 #[doc(hidden)]
@@ -1662,10 +1657,6 @@ mod tests {
     }
 }
 
-// hidden: the guest side of the wasm boundary, used by generated code, not a mod's API
-#[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
-#[doc(hidden)]
-pub mod wire_guest;
 pub(crate) mod wire_handlers;
 pub(crate) mod wire_slots;
 pub(crate) mod wire_types;

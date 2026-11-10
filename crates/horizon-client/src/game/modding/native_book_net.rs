@@ -74,6 +74,7 @@ impl Game<'_> {
         self.native_net.book_request = 0;
         self.native_net.book_ready = false;
         self.native_net.book_retry_at = None;
+        self.build_screen();
     }
     pub(super) fn is_book_or_mod_channel(&self, channel: &str) -> bool {
         channel == CHANNEL
@@ -279,6 +280,7 @@ impl Game<'_> {
             self.native_net.book_retry_at.get_or_insert_with(|| {
                 std::time::Instant::now() + std::time::Duration::from_secs(1)
             });
+            self.build_screen();
             return;
         }
         if message == Message::Ready {
@@ -310,6 +312,8 @@ impl Game<'_> {
                 data,
             }));
         }
+        // Both accepted settings and readiness loss change the visible panel.
+        self.build_screen();
         if self.native_net.book_view.ready {
             self.native_net.book_retry_at = None;
         }
