@@ -558,6 +558,9 @@ own draws from the projectile's random. `ignite`, `apply_impulse`, `play_sound` 
 projectile, as in vanilla. A stack with any other `projectile_spawned` effect (blocks,
 damage, explosions, particles, summons, functions, item damage) is refused until the
 engine applies it too (#2670), so this operation never silently discards one.
+Owner launch also refuses unsupported requirement contexts (including entity flags),
+and invalid clamped level-value ranges before insertion. Supported requirements
+are entity type predicates, random chance, and their boolean combinations.
 
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
