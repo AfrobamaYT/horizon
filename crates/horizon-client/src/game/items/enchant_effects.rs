@@ -84,15 +84,29 @@ pub(super) fn look_impulse(effect: &Value, level: u32, yaw: f32, pitch: f32) -> 
     let vec3 = |key: &str| [0, 1, 2].map(|i| effect[key][i].as_f64().unwrap_or(0.0));
     let (d, scale) = (vec3("direction"), vec3("coordinate_scale"));
     let magnitude = f64::from(level_value(&effect["magnitude"], level));
-    let (yaw, pitch) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
-    let (y1, z1) = (
-        d[1] * pitch.cos() - d[2] * pitch.sin(),
-        d[1] * pitch.sin() + d[2] * pitch.cos(),
-    );
+    // JOML Quaternionf.rotationY(...).rotateX(...).transform(Vector3d):
+    // quaternion and matrix coefficients round to float before multiplying
+    // the double direction. Do not replace this with double Euler rotation.
+    let half_y = (-yaw * (std::f32::consts::PI / 180.0)) * 0.5;
+    let half_x = (pitch * (std::f32::consts::PI / 180.0)) * 0.5;
+    let sy = f64::from(half_y).sin() as f32;
+    let sx = f64::from(half_x).sin() as f32;
+    let cy = horizon_assets::math::cos_from_sin(sy, half_y);
+    let cx = horizon_assets::math::cos_from_sin(sx, half_x);
+    let (x, y, z, w) = (cy * sx, sy * cx, -sy * sx, cy * cx);
+    let (xx, yy, zz) = (x * x, y * y, z * z);
+    let (xy, xz, yz, xw, yw, zw) = (x * y, x * z, y * z, x * w, y * w, z * w);
+    let matrix = [
+        [1.0 - 2.0 * (yy + zz), 2.0 * (xy - zw), 2.0 * (xz + yw)],
+        [2.0 * (xy + zw), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - xw)],
+        [2.0 * (xz - yw), 2.0 * (yz + xw), 1.0 - 2.0 * (xx + yy)],
+    ];
+    let result = matrix
+        .map(|row| f64::from(row[0]) * d[0] + f64::from(row[1]) * d[1] + f64::from(row[2]) * d[2]);
     Vec3::new(
-        (d[0] * yaw.cos() - z1 * yaw.sin()) * scale[0] * magnitude,
-        y1 * scale[1] * magnitude,
-        (d[0] * yaw.sin() + z1 * yaw.cos()) * scale[2] * magnitude,
+        result[0] * scale[0] * magnitude,
+        result[1] * scale[1] * magnitude,
+        result[2] * scale[2] * magnitude,
     )
 }
 /// `Player.getDestroySpeed` multiplies by `BLOCK_BREAK_SPEED`; a player
@@ -1803,5 +1817,19 @@ mod tests {
         assert_eq!(out, (None, None));
         assert_eq!(l_rng.next_long(), expected_level.next_long());
         assert_eq!(w_rng.next_long(), expected_wearer.next_long());
+    }
+}
+
+#[cfg(test)]
+mod impulse_rounding_tests {
+    #[test]
+    fn impulse_matches_pinned_joml_components() {
+        let effect =
+            serde_json::json!({"direction":[0,0,1],"coordinate_scale":[1,1,1],"magnitude":1});
+        let v = super::look_impulse(&effect, 1, 45.0, 30.0);
+        assert_eq!(
+            [v.x, v.y, v.z],
+            [-0.6123724579811096, -0.4999999701976776, 0.6123723983764648]
+        );
     }
 }
