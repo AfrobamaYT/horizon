@@ -28,7 +28,10 @@ impl Connection {
         now: Instant,
     ) -> Option<Reply> {
         if !self.budget.accept(now) {
-            return None;
+            return self.capability.then_some(Reply {
+                message: Message::Busy,
+                changed: None,
+            });
         }
         let message = settings_codec::decode(data)?;
         let mut changed = None;
@@ -145,11 +148,12 @@ mod tests {
             );
         }
         for _ in 0..100 {
-            assert!(
-                connection
-                    .receive(&resnapshot, &mut books, || registered.clone(), || 8, now)
-                    .is_none()
-            );
+            let reply = connection
+                .receive(&resnapshot, &mut books, || registered.clone(), || 8, now)
+                .unwrap();
+            assert_eq!(reply.message, Message::Busy);
+            assert!(reply.changed.is_none());
+            assert_eq!(encode(&reply.message).unwrap(), vec![7]);
         }
         assert!(
             connection

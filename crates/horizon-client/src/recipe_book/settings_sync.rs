@@ -8,6 +8,7 @@ pub const MAX_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
+    Busy,
     Hello,
     Ready,
     Offer(Vec<String>),

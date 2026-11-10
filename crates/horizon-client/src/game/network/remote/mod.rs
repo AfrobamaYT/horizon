@@ -6755,7 +6755,7 @@ impl Game<'_> {
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.
         self.tick_own_rockets();
-        self.native_net.to_server = 0;
+        self.tick_book_snapshot_retry();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();

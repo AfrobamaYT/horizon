@@ -19,6 +19,7 @@ pub fn encode(message: &Message) -> Option<Vec<u8>> {
         out.extend([u8::from(flags.open), u8::from(flags.filtering)]);
     }
     match message {
+        Message::Busy => out.push(7),
         Message::Hello => out.extend([5, 1]),
         Message::Ready => out.extend([6, 1]),
         Message::Offer(keys) => {
@@ -176,6 +177,7 @@ pub fn decode(data: &[u8]) -> Option<Message> {
             }
         }
         4 => Message::Resnapshot,
+        7 => Message::Busy,
         5 | 6 => {
             if r.byte()? != 1 {
                 return None;

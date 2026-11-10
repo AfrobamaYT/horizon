@@ -234,3 +234,10 @@ change. There is no per-tick mod scan or new tick allocation. A connection's
 request replay guard and rate allowance survive rejected requests and repeat
 offers. Disconnect removes the connection authority and clears pending client
 intent; the saved server map remains independent of the client view.
+
+The response budget covers every payload, including malformed input and
+snapshot requests. Once exhausted, a negotiated peer receives a one-byte busy
+control reply instead of another large snapshot. The client disables the custom
+view and coalesces a retry after one second; a busy response schedules the next
+retry, and a successful authoritative snapshot cancels it. This bounds response
+amplification without leaving a lost resnapshot or pending UI intent unresolved.

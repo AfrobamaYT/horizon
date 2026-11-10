@@ -20,6 +20,28 @@ fn registered() -> BTreeSet<String> {
         .collect()
 }
 impl Game<'_> {
+    pub(super) fn tick_book_snapshot_retry(&mut self) {
+        self.native_net.to_server = 0;
+        if self
+            .native_net
+            .book_retry_at
+            .is_some_and(|at| std::time::Instant::now() >= at)
+        {
+            let message = if self.native_net.book_view.epoch.is_none() {
+                Message::Offer(registered().into_iter().collect())
+            } else {
+                Message::Resnapshot
+            };
+            self.native_net.book_retry_at = None;
+            if let Some(data) = settings_codec::encode(&message) {
+                self.send(S::CustomPayload(CustomPayload {
+                    channel: CHANNEL.into(),
+                    data,
+                }));
+            }
+        }
+    }
+
     pub(super) fn sync_replaced_book_settings(&mut self, uuid: u128) {
         let Some(host) = self.lan.as_ref() else {
             return;
@@ -51,6 +73,7 @@ impl Game<'_> {
         self.native_net.book_view = Default::default();
         self.native_net.book_request = 0;
         self.native_net.book_ready = false;
+        self.native_net.book_retry_at = None;
     }
     pub(super) fn is_book_or_mod_channel(&self, channel: &str) -> bool {
         channel == CHANNEL || channel == horizon_protocol::mod_net::CHANNEL
@@ -241,6 +264,13 @@ impl Game<'_> {
         let Some(message) = settings_codec::decode(data) else {
             return;
         };
+        if message == Message::Busy && self.native_net.book_ready {
+            self.native_net.book_view.ready = false;
+            self.native_net.book_retry_at.get_or_insert_with(|| {
+                std::time::Instant::now() + std::time::Duration::from_secs(1)
+            });
+            return;
+        }
         if message == Message::Ready {
             if self.native_net.book_ready {
                 return;
@@ -269,6 +299,9 @@ impl Game<'_> {
                 channel: CHANNEL.into(),
                 data,
             }));
+        }
+        if self.native_net.book_view.ready {
+            self.native_net.book_retry_at = None;
         }
     }
 }

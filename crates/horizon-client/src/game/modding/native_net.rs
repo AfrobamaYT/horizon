@@ -27,6 +27,7 @@ pub(super) struct NativeNet {
     pub(super) book_view: horizon_client::recipe_book::settings_sync::ClientView,
     pub(super) book_request: u64,
     pub(super) book_ready: bool,
+    pub(super) book_retry_at: Option<std::time::Instant>,
     from_players: Vec<(u128, Message)>,
     from_counts: HashMap<u128, u32>,
     to_players: Vec<(u128, Vec<u8>)>,
