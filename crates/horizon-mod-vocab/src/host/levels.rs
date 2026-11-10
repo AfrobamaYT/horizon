@@ -74,6 +74,19 @@ pub trait LevelsBackend {
     /// stale handle or an unloaded selected noise column. Never generates or loads chunks.
     #[access(WorldOnly)]
     fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: both.
+    /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
+    /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool; for a block it has no
+    /// rule for, the tool's default mining speed), before the player's enchantments, attributes, water, ground and
+    /// `player_break_speed` hooks, which `player_break_speed` itself hears. None for a stale
+    /// handle or an unloaded or out-of-height position. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32>;
     /// Side: client.
     /// The biome in the client's current level (`LevelReader.getBiome`). None before
     /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.
@@ -889,6 +902,15 @@ pub trait LevelsBackendMut {
         progress: i32,
     ) -> bool;
     /// Side: server.
+    /// Tell the clients the block at `pos` changed (`Level.sendBlockUpdated`): its state and
+    /// block entity data are sent again at the end of the tick, without writing anything, for
+    /// a mod that changed what a block shows by other means than a block write. False, with
+    /// nothing queued, for a stale or parked handle, a client, and an unloaded or out-of-height
+    /// position. True with no player to notify (no one is in the level) when the position is
+    /// valid: the chunk is marked changed and nothing is sent.
+    #[access(WorldOnly)]
+    fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
     /// `ServerLevel.playSound(null, ...)` does, under `source`'s volume
@@ -1110,4 +1132,23 @@ pub trait LevelsBackendMut {
     /// client, an unknown biome and an unchanged cell.
     #[access(WorldOnly)]
     fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool;
+}
+/// The handles' client writes of the `levels` area, implemented by the game and reached through [`ClientBackendMut`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
+#[doc(hidden)]
+#[horizon_mod_api_macros::host_area]
+pub trait LevelsClientBackendMut {
+    /// Side: client.
+    /// Show or clear the crack of `breaker` on the block at `pos` in this client's own view
+    /// (`LevelRenderer.destroyBlockProgress`): stages 0..9 show a crack, any other stage removes
+    /// it. Nothing is sent to the server or to other players, and a crack not updated for 400
+    /// ticks goes away. False for a stale or foreign level or before login.
+    #[access(WorldOnly)]
+    fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool;
 }
