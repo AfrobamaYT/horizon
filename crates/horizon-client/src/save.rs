@@ -5897,6 +5897,52 @@ mod tests {
         );
     }
 
+    /// A block a mod added to `minecraft:home` (`extend_poi_types`) saves as a
+    /// home record, as a bed head does.
+    #[test]
+    fn states_a_mod_added_to_a_poi_type_save_as_its_records() {
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        let assets = crate::assets::Assets::load(&PathBuf::from(root)).expect("assets");
+        let hay_states: Vec<_> = (0..assets.registry.len())
+            .filter_map(|i| assets.registry.state(BlockStateId(i as u32)))
+            .filter(|state| state.name == "minecraft:hay_block")
+            .map(|state| horizon_world::poi::PoiExtension {
+                state: state.clone(),
+                poi: "minecraft:home".into(),
+            })
+            .collect();
+        assert_eq!(hay_states.len(), 3);
+        assert_eq!(horizon_world::poi::extend(hay_states), Vec::<String>::new());
+        let tables = SaveTables::new(&assets);
+        let hay = assets
+            .registry
+            .default_state("minecraft:hay_block")
+            .unwrap();
+        assert_eq!(tables.poi[hay.0 as usize], Some(("minecraft:home", 1)));
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        assert_eq!(tables.poi[stone.0 as usize], None);
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(3, 70, 3, hay.0);
+        chunk.set(4, 70, 3, stone.0);
+        let saved = encode_poi(&chunk, &tables).expect("records");
+        let Some(Tag::Compound(sections)) = saved.tag.get("Sections") else {
+            panic!("no sections");
+        };
+        let Some(Tag::List(records)) = sections[&"4".into()].get("Records") else {
+            panic!("no records");
+        };
+        let records: Vec<_> = records
+            .iter()
+            .map(|r| (text(r.get("type")).unwrap(), r.get("pos").cloned()))
+            .collect();
+        assert_eq!(
+            records,
+            [("minecraft:home".into(), Some(Tag::IntArray(vec![3, 70, 3])))]
+        );
+    }
+
     #[test]
     fn a_chunk_that_loses_its_last_poi_saves_empty_sections() {
         let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
