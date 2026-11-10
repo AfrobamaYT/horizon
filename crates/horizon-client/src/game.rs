@@ -246,7 +246,7 @@ pub(crate) struct Options {
     /// `--world-frames N`: exit after N frames drawn in the world (smoke runs; the world may load slowly).
     world_frames: Option<u64>,
     screenshot_after: Option<u64>,
-    timeout: Duration,
+    timeout: Option<Duration>,
     report: Option<PathBuf>,
     world: Option<String>,
     look: Option<(f32, f32)>,
@@ -382,7 +382,6 @@ impl Options {
             std::env::var_os("HORIZON_HOME").as_deref(),
         )?)
     }
-
     fn from_launch(LaunchArguments { context, rest }: LaunchArguments) -> Result<Option<Self>> {
         let sibling = std::env::current_exe()?
             .parent()
@@ -406,7 +405,7 @@ impl Options {
             split_in_main_window: false,
             world_frames: None,
             screenshot_after: None,
-            timeout: Duration::from_secs(120),
+            timeout: None,
             report: None,
             world: None,
             look: None,
@@ -508,10 +507,11 @@ impl Options {
                             "--frames" => o.frames = Some(value.parse()?),
                             "--world-frames" => {
                                 o.world_frames = Some(value.parse()?);
-                                // A frame-limited run in every other respect; --timeout-seconds still applies.
                                 o.frames.get_or_insert(u64::MAX);
                             }
-                            "--timeout-seconds" => o.timeout = Duration::from_secs(value.parse()?),
+                            "--timeout-seconds" => {
+                                o.timeout = Some(Duration::from_secs(value.parse()?))
+                            }
                             "--smoke-report" => o.report = Some(value.into()),
                             "--screenshot-after" => o.screenshot_after = Some(value.parse()?),
                             "--width" => o.window_size[0] = value.parse::<u32>()?.max(1),
