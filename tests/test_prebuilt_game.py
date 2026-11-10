@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import struct
 import tempfile
 import unittest
@@ -9,6 +10,17 @@ from tools import prebuilt_game
 
 
 class AllocatorSelectionTests(unittest.TestCase):
+    def test_staging_api_version_comes_from_the_package_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "crates/horizon-mod-package/src/manifest.rs"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('pub const API: &str = "7.3";\n')
+            self.assertEqual(prebuilt_game.api_version(root), "7.3")
+            manifest.write_text('pub const OTHER: &str = "7.3";\n')
+            with self.assertRaisesRegex(ValueError, "manifest API"):
+                prebuilt_game.api_version(root)
+
     def test_windows_archives_use_the_system_allocator(self):
         self.assertEqual(prebuilt_game.cargo_features(False, "win32"), ["--features", "system-allocator"])
         self.assertEqual(prebuilt_game.cargo_features(True, "win32"),
@@ -90,12 +102,21 @@ class PrebuiltContentsTests(unittest.TestCase):
             prebuilt_game.extern_args(root, "horizon_mod_package")
 
     def test_compiler_outputs_pass(self):
-        prebuilt_game.check(self.folder(
+        root = self.folder(
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",
-            "native/libwindows.0.52.0.a", "points.json", "internals.json",
+            "native/libwindows.0.52.0.a", "points.json", "internals.json", "mod-catalog.json",
             "deps/libserde_derive-2.so", "deps/libhorizon_client.dll.a", "deps/libhorizon_mod_wasm.so",
             "deps/horizon_mod_wasm.dll", "deps/libhorizon_mod_wasm.dylib",
-        ))
+        )
+        (root / prebuilt_game.IDENTITY).write_text(json.dumps({"files": {
+            prebuilt_game.CATALOG: prebuilt_game.sha256(root / prebuilt_game.CATALOG)}}))
+        prebuilt_game.check(root)
+        (root / prebuilt_game.CATALOG).write_text("changed")
+        with self.assertRaisesRegex(SystemExit, "catalog"):
+            prebuilt_game.check(root)
+        (root / prebuilt_game.CATALOG).unlink()
+        with self.assertRaisesRegex(SystemExit, "catalog"):
+            prebuilt_game.check(root)
 
     def test_anything_else_is_refused(self):
         for stray in ("assets/minecraft/lang/en_us.json", "deps/Cargo.lock", "deps/client.jar", "deps/libmod_api-3.rlib", "native/libfoo.so", "deps/internals.json", "notes.txt"):
