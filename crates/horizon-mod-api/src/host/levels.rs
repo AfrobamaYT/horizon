@@ -878,6 +878,35 @@ pub trait LevelsBackendMut {
         entity: Option<EntityRef>,
     ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
     /// Side: server.
+    /// The entry ids (`addon:fire`) of a datapack registry a mod declared
+    /// (`declare_datapack_registry`), sorted, as this world session last loaded them. None for a
+    /// stale or parked level, a client, and a registry no mod declared. Reads nothing from disk.
+    #[access(WorldOnly)]
+    fn level_datapack_entries(&self, level: LevelRef, registry: &str) -> Option<Vec<String>>;
+    /// Side: server.
+    /// A handle to `entry` of `registry` at the generation now loaded. A handle kept across a
+    /// reload fails its next read with `StaleGeneration`, one from an earlier world session with
+    /// `WrongSession`. A stale or parked level, a client and a registry no mod declared are
+    /// `UnknownRegistry`; an entry no pack defines is `MissingEntry`.
+    #[access(WorldOnly)]
+    fn level_datapack_handle(
+        &self,
+        level: LevelRef,
+        registry: &str,
+        entry: &str,
+    ) -> Result<DatapackHandle, DatapackReadError>;
+    /// Side: server.
+    /// The decoded fields of the entry a handle names, in the registry's schema order, as plain
+    /// values: a copy, which carries no authority after the read. The handle is checked first
+    /// (session, then generation), then the entry; the errors are those of
+    /// [`level_datapack_handle`](Self::level_datapack_handle).
+    #[access(WorldOnly)]
+    fn level_datapack_read(
+        &self,
+        level: LevelRef,
+        handle: &DatapackHandle,
+    ) -> Result<Vec<(String, DatapackValue)>, DatapackReadError>;
+    /// Side: server.
     /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
     /// any other stage removes it. A machine uses a stable negative breaker id.
     #[access(WorldOnly)]
