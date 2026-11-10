@@ -13,15 +13,15 @@ mod tests {
     impl Hooks for Moments {
         fn level_tick_pre(&self, host: HostSide, event: &mut LevelTickPreEvent) {
             let time = match host {
-                HostSide::Client(h) => h.level_game_time(event.level),
-                HostSide::Server(h) => h.level_game_time(event.level),
+                HostSide::Client(h) => event.level.game_time(h),
+                HostSide::Server(h) => event.level.game_time(h),
             };
             self.0.lock().unwrap().push(("pre", event.level, time));
         }
         fn level_tick_post(&self, host: HostSide, event: &mut LevelTickPostEvent) {
             let time = match host {
-                HostSide::Client(h) => h.level_game_time(event.level),
-                HostSide::Server(h) => h.level_game_time(event.level),
+                HostSide::Client(h) => event.level.game_time(h),
+                HostSide::Server(h) => event.level.game_time(h),
             };
             self.0.lock().unwrap().push(("post", event.level, time));
         }
