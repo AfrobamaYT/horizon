@@ -230,7 +230,7 @@ impl Game<'_> {
         stack: &functions::PackStack,
         reload: bool,
         root: &std::path::Path,
-        data_switched: bool,
+        _data_switched: bool,
     ) -> Result<(Option<WorldTables>, horizon_client::health::HealthResources)> {
         let phase = self.mod_phase.clone();
         let _reload = phase
