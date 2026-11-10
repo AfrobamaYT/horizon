@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "incremental",
   "installed": "naka-install",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "mga bagay",
   "its MCP settings (a stdio server)": "ang mga setting ng MCP nito (isang stdio server)",
   "just now": "ngayon lang",
@@ -1228,7 +1227,6 @@
   "optimization": "pag-optimize",
   "played by {names}": "nilalaro ni {names}",
   "realistic": "makatotohanan",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "tumatakbo {command} pagkatapos",
   "runs {command} first": "tumatakbo {command} muna",
   "simplistic": "simple",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "Hindi naka-install ang {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json sa isang proyekto)",
   "← All servers": "← Lahat ng mga server",
-  "← Newer": "← Mas bago"
+  "← Newer": "← Mas bago",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "növekményes",
   "installed": "telepítve",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "tételeket",
   "its MCP settings (a stdio server)": "az MCP beállításai (egy stdio szerver)",
   "just now": "az imént",
@@ -1228,7 +1227,6 @@
   "optimization": "optimalizálás",
   "played by {names}": "játszotta {names}",
   "realistic": "reális",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "után fut {command}",
   "runs {command} first": "először fut {command}",
   "simplistic": "leegyszerűsítő",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version} nincs telepítve",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vagy .mcp.json egy projektben)",
   "← All servers": "← Minden szerver",
-  "← Newer": "← Újabb"
+  "← Newer": "← Újabb",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

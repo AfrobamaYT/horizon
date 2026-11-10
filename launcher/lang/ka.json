@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "დამატებითი",
   "installed": "დაყენებული",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "ნივთები",
   "its MCP settings (a stdio server)": "მისი MCP პარამეტრები (stdio სერვერი)",
   "just now": "ახლახან",
@@ -1228,7 +1227,6 @@
   "optimization": "ოპტიმიზაცია",
   "played by {names}": "ითამაშა {names}",
   "realistic": "რეალისტური",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "გადის {command} შემდეგ",
   "runs {command} first": "გადის {command} ჯერ",
   "simplistic": "გამარტივებული",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version} არ არის დაინსტალირებული",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ან .mcp.json პროექტში)",
   "← All servers": "← ყველა სერვერი",
-  "← Newer": "← უფრო ახალი"
+  "← Newer": "← უფრო ახალი",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

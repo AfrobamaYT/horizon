@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "เฉพาะส่วนที่เปลี่ยน",
   "installed": "ติดตั้งแล้ว",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "ไอเท็ม",
   "its MCP settings (a stdio server)": "การตั้งค่า MCP ของโปรแกรม (เซิร์ฟเวอร์ stdio)",
   "just now": "เมื่อสักครู่",
@@ -1228,7 +1227,6 @@
   "optimization": "การเพิ่มประสิทธิภาพ",
   "played by {names}": "เล่นโดย {names}",
   "realistic": "เหมือนจริง",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "รัน {command} ทีหลัง",
   "runs {command} first": "รัน {command} ก่อน",
   "simplistic": "เรียบง่าย",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version} ยังไม่ได้ติดตั้ง",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (หรือ .mcp.json ในโปรเจ็กต์)",
   "← All servers": "← เซิร์ฟเวอร์ทั้งหมด",
-  "← Newer": "← ใหม่กว่า"
+  "← Newer": "← ใหม่กว่า",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

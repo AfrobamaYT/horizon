@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "mmụba",
   "installed": "arụnyere",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "ihe",
   "its MCP settings (a stdio server)": "ntọala MCP ya (ihe nkesa stdio)",
   "just now": "ugbu a",
@@ -1228,7 +1227,6 @@
   "optimization": "njikarịcha",
   "played by {names}": "nke {names} na-egwuri egwu",
   "realistic": "ezi uche",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "na-agba {command} mgbe",
   "runs {command} first": "na-agba ọsọ {command} mbụ",
   "simplistic": "dị mfe",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "Awụnyeghị {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ma ọ bụ .mcp.json na oru ngo)",
   "← All servers": "← Sava niile",
-  "← Newer": "← Ọhụrụ"
+  "← Newer": "← Ọhụrụ",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

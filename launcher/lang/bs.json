@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "inkrementalno",
   "installed": "instaliran",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "stavke",
   "its MCP settings (a stdio server)": "njegove MCP postavke (stdio server)",
   "just now": "upravo sada",
@@ -1228,7 +1227,6 @@
   "optimization": "optimizacija",
   "played by {names}": "igra {names}",
   "realistic": "realističan",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "pokreće {command} nakon",
   "runs {command} first": "pokreće {command} prvo",
   "simplistic": "pojednostavljeno",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version} nije instaliran",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ili .mcp.json u projektu)",
   "← All servers": "← Svi serveri",
-  "← Newer": "← Novije"
+  "← Newer": "← Novije",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

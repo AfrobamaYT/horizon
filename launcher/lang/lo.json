@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "ເພີ່ມຂຶ້ນ",
   "installed": "ຕິດຕັ້ງ",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "ລາຍການ",
   "its MCP settings (a stdio server)": "ການຕັ້ງຄ່າ MCP ຂອງມັນ (ເຄື່ອງແມ່ຂ່າຍ stdio)",
   "just now": "ຫາກໍ່ນີ້",
@@ -1228,7 +1227,6 @@
   "optimization": "ການເພີ່ມປະສິດທິພາບ",
   "played by {names}": "ຫຼິ້ນໂດຍ {names}",
   "realistic": "ຈິງ",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "ແລ່ນ {command} ຫຼັງຈາກ",
   "runs {command} first": "ແລ່ນ {command} ທຳອິດ",
   "simplistic": "ງ່າຍດາຍ",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version} ບໍ່ໄດ້ຕິດຕັ້ງ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ຫຼື .mcp.json ໃນໂຄງການ)",
   "← All servers": "← ເຊີບເວີທັງໝົດ",
-  "← Newer": "← ໃໝ່ກວ່າ"
+  "← Newer": "← ໃໝ່ກວ່າ",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

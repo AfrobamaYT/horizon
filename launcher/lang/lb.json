@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "inkrementell",
   "installed": "installéiert",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "Artikelen",
   "its MCP settings (a stdio server)": "seng MCP Astellunge (e stdio Server)",
   "just now": "grad elo",
@@ -1228,7 +1227,6 @@
   "optimization": "Optimisatioun",
   "played by {names}": "gespillt vum {names}",
   "realistic": "realistesch",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "leeft {command} no",
   "runs {command} first": "leeft {command} éischt",
   "simplistic": "vereinfacht",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version} ass net installéiert",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (oder .mcp.json an engem Projet)",
   "← All servers": "← All Server",
-  "← Newer": "← Méi nei"
+  "← Newer": "← Méi nei",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }

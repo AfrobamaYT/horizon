@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "증분",
   "installed": "설치됨",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "아이템",
   "its MCP settings (a stdio server)": "MCP 설정(stdio 서버)",
   "just now": "방금",
@@ -1228,7 +1227,6 @@
   "optimization": "최적화",
   "played by {names}": "{names}에서 사용",
   "realistic": "현실적",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "완료 후 {command} 실행",
   "runs {command} first": "먼저 {command} 실행",
   "simplistic": "심플함",
@@ -1359,5 +1357,8 @@
   "{version} is not installed": "{version}이(가) 설치되지 않았습니다.",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (또는 프로젝트 내 .mcp.json)",
   "← All servers": "← 모든 서버",
-  "← Newer": "← 최신"
+  "← Newer": "← 최신",
+  "replace needs a return its record carries": "replace needs a return its record carries",
+  "expression requires native internals source rebuilding; use internals, or request a hook": "expression requires native internals source rebuilding; use internals, or request a hook",
+  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there."
 }
