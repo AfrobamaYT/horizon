@@ -2,6 +2,13 @@
 //! resources' background load, and the world's own content tables.
 use super::*;
 
+/// A new id for a world session's published datapack registries: a handle from an earlier
+/// session fails with `WrongSession` against the next one.
+fn next_datapack_session() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Game<'_> {
     /// The server's data-pack enchantments, or the local world's registry.
     pub(super) fn item_enchantments(&self) -> &Arc<horizon_client::enchant::Enchantments> {
@@ -322,9 +329,9 @@ impl Game<'_> {
             })
             .collect();
         let datapack_candidate = self.datapack_candidate(stack, &conditions)?;
+        self.mods.datapack_candidate = datapack_candidate;
         Ok((
             Some(WorldTables {
-                datapack_candidate,
                 conditions,
                 suffocation,
                 files,
@@ -389,15 +396,28 @@ impl Game<'_> {
                 .into()
             })
     }
+    /// A world open's tables, and the first generation of the registries the mods declared.
+    pub(super) fn open_world_tables(
+        &mut self,
+        stack: &functions::PackStack,
+        root: &std::path::Path,
+    ) -> Result<()> {
+        (self.world_tables, self.health_resources) =
+            self.build_world_tables(stack, false, root, self.mods.data_switched)?;
+        self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
+            mod_api::DatapackRegistrySet::first(candidate, next_datapack_session())
+        });
+        Ok(())
+    }
     /// Publish a reload's candidate as the next generation of this world session's registries;
     /// the previous set stays when the generation counter has run out, and nothing is
     /// published when no mod declared a registry.
     fn reload_datapack_registries(&mut self, candidate: Option<mod_api::DatapackCandidate>) {
         let Some(candidate) = candidate else {
-            self.datapack_registries = None;
+            self.mods.datapack_registries = None;
             return;
         };
-        self.datapack_registries = match self.datapack_registries.take() {
+        self.mods.datapack_registries = match self.mods.datapack_registries.take() {
             Some(old) => match old.reload(candidate) {
                 Ok(next) => Some(next),
                 Err(error) => {
@@ -422,6 +442,7 @@ impl Game<'_> {
             health,
             parts,
             wire,
+            datapack_candidate,
         } = prepared;
         lan::forget_server_sources();
         if let Some(tables) = &tables
@@ -438,12 +459,8 @@ impl Game<'_> {
                 sources.clone(),
             );
         }
-        let mut tables = tables;
-        let candidate = tables
-            .as_mut()
-            .and_then(|tables| tables.datapack_candidate.take());
         self.world_tables = tables;
-        self.reload_datapack_registries(candidate);
+        self.reload_datapack_registries(datapack_candidate);
         self.refresh_recipe_property_context();
         self.structure_spawns = structure_spawns;
         self.health_resources = health;
@@ -597,6 +614,7 @@ impl Game<'_> {
         data_switched: bool,
     ) -> Result<PreparedWorldReload> {
         let (tables, health) = self.build_world_tables(stack, true, root, data_switched)?;
+        let datapack_candidate = self.mods.datapack_candidate.take();
         let items = tables
             .as_ref()
             .map_or_else(|| self.res.items(), |tables| &tables.items);
@@ -628,6 +646,7 @@ impl Game<'_> {
             health,
             parts,
             wire,
+            datapack_candidate,
         })
     }
 
