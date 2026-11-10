@@ -210,14 +210,6 @@ impl Game<'_> {
                 };
                 let mut survived_hit = false;
                 let killed = match self.mobs.iter_mut().find(|m| m.id == id) {
-                    // `WitherBoss.hurtServer`: nothing from a wither friend.
-                    Some(m)
-                        if owner_species.is_some_and(|o| {
-                            horizon_client::mobs::wither::shielded_from(m.species(), o)
-                        }) =>
-                    {
-                        false
-                    }
                     Some(m) => {
                         let hit = m.damage(
                             crate::game::entity::damage_level_of!(self, scoped),

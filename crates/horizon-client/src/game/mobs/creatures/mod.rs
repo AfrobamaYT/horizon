@@ -4605,11 +4605,6 @@ impl Game<'_> {
         let post_attack_if_alive = std::mem::take(&mut self.combat.post_attack_if_alive);
         let rocket = std::mem::take(&mut self.combat.rocket_hit);
         let melee = self.combat.melee_mob.take();
-        // ServerPlayer.canHarmPlayer refused another player's projectile.
-        if self.creative || self.combat.refuse_player_hit {
-            self.combat.forget_noted(false);
-            return false;
-        }
         // A projectile entity dealt it: `#is_projectile`, or a firework
         // rocket (its `fireworks` type is not in the tag).
         let projectile = rocket
@@ -4818,8 +4813,7 @@ impl Game<'_> {
     pub(in crate::game) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
         let mut canceled = false;
         let attack = self.current_attack();
-        if !self.creative
-            && self.player.is_some()
+        if self.player.is_some()
             && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = self.hurt_player_equipment(id, amount, None, false, 0, false, &attack)
         {
@@ -6528,24 +6522,22 @@ impl Game<'_> {
             (ProjectileKind::SmallFireball, hit) => match hit {
                 Hit::Entity { who, .. } => match who {
                     Who::Player => {
-                        if !self.creative {
-                            // SmallFireball.onHitEntity: remember the fire, ignite,
-                            // and restore it when the hurt is refused (a raised shield).
-                            let remaining = self.player.as_ref().map(|p| p.fire_ticks);
-                            if let Some(p) = self.player.as_mut() {
-                                p.ignite_for_ticks(100)?;
-                            }
-                            let hurt = self.mob_hits_player(
-                                5.0,
-                                [p.previous.x, p.previous.y, p.previous.z],
-                                "minecraft:fireball",
-                            );
-                            if !hurt
-                                && let Some(remaining) = remaining
-                                && let Some(pl) = self.player.as_mut()
-                            {
-                                pl.set_remaining_fire_ticks(remaining);
-                            }
+                        // SmallFireball.onHitEntity: remember the fire, ignite,
+                        // and restore it when the hurt is refused (a raised shield).
+                        let remaining = self.player.as_ref().map(|p| p.fire_ticks);
+                        if let Some(p) = self.player.as_mut() {
+                            p.ignite_for_ticks(100)?;
+                        }
+                        let hurt = self.mob_hits_player(
+                            5.0,
+                            [p.previous.x, p.previous.y, p.previous.z],
+                            "minecraft:fireball",
+                        );
+                        if !hurt
+                            && let Some(remaining) = remaining
+                            && let Some(pl) = self.player.as_mut()
+                        {
+                            pl.set_remaining_fire_ticks(remaining);
                         }
                     }
                     Who::Mob(id) => {
@@ -6745,13 +6737,11 @@ impl Game<'_> {
             (ProjectileKind::ShulkerBullet { .. }, Hit::Entity { who, .. }) => match who {
                 Who::Player => {
                     // Only a hit that hurt (`wasHurt`) brings the levitation.
-                    if !self.creative
-                        && self.mob_hits_player(
-                            4.0,
-                            [p.previous.x, p.previous.y, p.previous.z],
-                            "minecraft:mob_projectile",
-                        )
-                    {
+                    if self.mob_hits_player(
+                        4.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:mob_projectile",
+                    ) {
                         self.give_player_effect("minecraft:levitation", 200, 0);
                     }
                 }
