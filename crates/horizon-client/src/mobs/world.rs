@@ -603,6 +603,12 @@ impl MobWorld<'_> {
             }
         }
     }
+    /// A passenger edge can name an object refused level residency.
+    /// Keep this separate from combat and spatial lookup through `seen`.
+    pub fn passenger_object(&self, id: u32) -> Option<&Seen> {
+        self.seen(id)
+            .or_else(|| self.passenger_objects.iter().find(|s| s.id == id))
+    }
     pub fn seen(&self, id: u32) -> Option<&Seen> {
         match self.others_index {
             Some(index) => index
@@ -789,6 +795,7 @@ pub(crate) fn with_resource_test_world(
         who_lookup: None,
         others_grid: None,
         others_index: None,
+        passenger_objects: &[],
         others_villagers: None,
         others_solid: None,
         daylight: true,
