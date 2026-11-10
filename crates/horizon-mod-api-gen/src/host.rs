@@ -647,7 +647,7 @@ fn boundary_arguments(
         };
         let value = if contains_value(&arg.ty, &["ParticleOptions"]) {
             format!(
-                "match {name}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
+                "match {name}.try_into_engine(self.items()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
             )
         } else if text || checked_write {
             format!("{conversion}?")
