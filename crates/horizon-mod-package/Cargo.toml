@@ -57,6 +57,7 @@ prebuilt = ["dep:cap-std", "dep:flate2", "dep:tar"]
 index = ["dep:minisign-verify", "dep:horizon-shader-api"]
 
 [dev-dependencies]
+horizon-mod-api = { path = "../horizon-mod-api" }
 wat = "1"
 tempfile = "3.27.0"
 
