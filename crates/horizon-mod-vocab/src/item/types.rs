@@ -125,7 +125,7 @@ pub struct LootDrops<'a> {
     /// 0 means absent or unknown, as on the other damage hooks.
     pub damage_source: Option<crate::entity::health::HurtSource<'a>>,
     /// What broke the block (`LootContextParams.TOOL`), or the killing entity's
-    /// held stack captured at death, before loot listeners run. None when no
+    /// held stack captured at death, before death or loot listeners run. None when no
     /// tool or killer hand is available; never read from later inventory state.
     pub tool: Option<&'a ItemStack>,
     /// The radius of the explosion that broke the block.

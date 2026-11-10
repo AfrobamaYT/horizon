@@ -99,38 +99,6 @@ fn death_loot_uses_call_scoped_source_and_hand() {
                 victim.last_damage = Some((damage, 0));
                 game.mob_died(&victim);
             }
-            // A changed inventory must not replace the full invocation snapshot.
-            let mut victim = Mob::new(74, ty.clone(), Vec3::ZERO, 0.0);
-            let mut damage = Damage::of(DamageKind::MobAttack);
-            damage.attacker = Some(Who::Mob(41));
-            victim.last_damage = Some((damage, 0));
-            let mut original = ItemStack::new("minecraft:diamond_sword", 3);
-            original.damage = 19;
-            original.enchant("minecraft:looting", 2);
-            game.mobs
-                .iter_mut()
-                .find(|m| m.id == 41)
-                .unwrap()
-                .extra
-                .set_main_hand_stack(Some(original.clone()));
-            let captured = game.death_killer_hand(&victim, None);
-            assert_eq!(captured, Some(original));
-            game.mobs
-                .iter_mut()
-                .find(|m| m.id == 41)
-                .unwrap()
-                .extra
-                .set_main_hand_stack(None);
-            game.drop_death_loot(
-                &mut victim,
-                None,
-                false,
-                horizon_world::loot::LootEntity::default(),
-                captured,
-                false,
-                [0.0; 3],
-                Some(("minecraft:mob_attack", 41)),
-            );
             // Predicate attempts cannot become the source of a later unrelated death.
             for (id, refused) in [(76, false), (77, true)] {
                 let mut victim = Mob::new(id, ty.clone(), Vec3::ZERO, 0.0);
@@ -188,7 +156,6 @@ fn death_loot_uses_call_scoped_source_and_hand() {
                 ("minecraft:mob_attack".into(), 41, 41, Some(7)),
                 ("minecraft:arrow".into(), 41, 0, Some(7)),
                 ("minecraft:fall".into(), 0, 0, None),
-                ("minecraft:mob_attack".into(), 41, 41, Some(3)),
                 ("minecraft:fall".into(), 0, 0, None),
                 ("minecraft:fall".into(), 0, 0, None),
                 ("minecraft:arrow".into(), 41, 0, None),
@@ -196,6 +163,29 @@ fn death_loot_uses_call_scoped_source_and_hand() {
             ]
         );
     });
+}
+
+struct ChangeKillerHand(mod_api::ItemStack);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for ChangeKillerHand {
+    fn living_death(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::LivingDeathEvent<'_>,
+    ) -> mod_api::Flow {
+        assert!(
+            host.commands()
+                .run_command("item replace entity guest12 weapon.mainhand with minecraft:stone")
+        );
+        mod_api::Flow::Continue
+    }
+    fn loot_drops(&self, _: &mut dyn mod_api::ServerHost, event: &mut mod_api::LootDropsEvent<'_>) {
+        assert_eq!(
+            event.context.tool,
+            Some(&self.0),
+            "the complete original stack survives a real death callback hand change"
+        );
+    }
 }
 
 #[test]
@@ -211,15 +201,16 @@ fn death_loot_killer_is_not_the_acting_guest() {
         )
         .unwrap();
         game.server_loot.set(Some(Arc::new(loot)));
-        game.as_guest(12, |g| {
-            g.inventory[g.selected] = Some(ItemStack::new("minecraft:diamond_sword", 12));
-        })
-        .unwrap();
+        game.build_registries();
+        let mut hand = ItemStack::new("minecraft:diamond_sword", 12);
+        hand.damage = 19;
+        hand.enchant("minecraft:looting", 2);
+        let expected = hand.try_into_api().unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods = vec![mod_api::ModEntry::new(
-            "guest_death_loot_probe",
-            Box::new(Probe(seen.clone())),
-        )]
+        let mods = vec![
+            mod_api::ModEntry::new("change_hand", Box::new(ChangeKillerHand(expected))),
+            mod_api::ModEntry::new("guest_death_loot_probe", Box::new(Probe(seen.clone()))),
+        ]
         .into();
         mod_api::testing::with_mods(mods, || {
             let ty = game
@@ -229,6 +220,10 @@ fn death_loot_killer_is_not_the_acting_guest() {
                 .unwrap()
                 .clone();
             for (id, acting) in [(80, Some(13)), (81, None)] {
+                game.as_guest(12, |g| {
+                    g.inventory[g.selected] = Some(hand.clone());
+                })
+                .unwrap();
                 let mut victim = Mob::new(id, ty.clone(), Vec3::ZERO, 0.0);
                 victim.ai.last_hurt_by_player = 100;
                 victim.last_damage = Some((Damage::player([0.0; 3]), 0));

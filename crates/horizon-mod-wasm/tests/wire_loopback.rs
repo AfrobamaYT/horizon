@@ -10,6 +10,9 @@ mod boundary {
 }
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
+thread_local! {
+    static EXPECTED_LOOT_HAND: std::cell::RefCell<Option<mod_api::ItemStack>> = const { std::cell::RefCell::new(None) };
+}
 #[derive(Clone)]
 struct WasmMod {
     group: u8,
@@ -282,8 +285,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 ("minecraft:arrow", 41, 73)
             );
             assert_eq!(source.position, Some([1.0, 2.0, 3.0]));
-            assert_eq!(event.context.tool.unwrap().count(), 7);
-            assert_eq!(event.context.tool.unwrap().damage(), 19);
+            EXPECTED_LOOT_HAND.with(|expected| {
+                assert_eq!(
+                    event.context.tool,
+                    expected.borrow().as_ref(),
+                    "the complete nonplain stack crosses the generated boundary"
+                )
+            });
             event.drops.clear();
         }
         fn item_stacked_on_other(
@@ -879,6 +887,15 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
     let table = "t".repeat(300);
     let mut hand = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 7).unwrap();
     hand.set_damage(19);
+    hand.set_components(
+        [(
+            "minecraft:custom_data".into(),
+            mod_api::Tag::Compound([("marker".into(), mod_api::Tag::Int(73))].into()),
+        )]
+        .into(),
+    )
+    .unwrap();
+    EXPECTED_LOOT_HAND.with(|expected| *expected.borrow_mut() = Some(hand.clone()));
     let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
         damage_source: Some(mod_api::HurtSource {
             damage_type: "minecraft:arrow",
