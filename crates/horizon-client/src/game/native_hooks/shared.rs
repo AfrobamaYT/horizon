@@ -247,7 +247,11 @@ impl Game<'_> {
         self.observe_screen();
         let decision = {
             let none = self.screen_change_view(Screen::Playing);
-            let from = self.screen_state.observed.as_ref().filter(|old| old.overlay);
+            let from = self
+                .screen_state
+                .observed
+                .as_ref()
+                .filter(|old| old.overlay);
             let from = from.map(ObservedScreen::view);
             let to = screen_view_with_id(&none, id);
             self.decide_screen(from.as_ref().unwrap_or(&none), &to, from.is_some())
@@ -367,7 +371,11 @@ impl Game<'_> {
         self.observe_change(now);
         let none = self.screen_change_view(Screen::Playing);
         // The title's screen or an overlay; a `Screen` told its own change.
-        let from = self.screen_state.observed.as_ref().filter(|old| old.overlay);
+        let from = self
+            .screen_state
+            .observed
+            .as_ref()
+            .filter(|old| old.overlay);
         let from = match (from, self.title.as_ref()) {
             (Some(old), _) => Some(old.view()),
             // No renderer yet (startup, a test): the title is still known.
@@ -409,7 +417,11 @@ impl Game<'_> {
             _ => true,
         };
         if changed {
-            let old = self.screen_state.observed.as_ref().filter(|old| old.overlay);
+            let old = self
+                .screen_state
+                .observed
+                .as_ref()
+                .filter(|old| old.overlay);
             let opens = current.as_ref().is_some_and(|new| new.overlay)
                 || (current.is_none() && old.is_some());
             if old.is_some() || opens {
