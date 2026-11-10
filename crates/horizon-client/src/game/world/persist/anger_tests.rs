@@ -55,8 +55,12 @@ fn h13076_loaded_anger_end_time_is_kept() {
         for (id, end) in [(past, 1), (zero, 0), (future, 999_999)] {
             assert_eq!(saved(game, id), Some(Tag::Long(end)), "unticked");
         }
-        // Then real ticks.
-        for _ in 0..2 {
+        // Real ticks separated by another unticked gap require post-tick settlement
+        // to stamp the completed tick before the next resume.
+        for step in 0..2 {
+            if step == 1 {
+                game.world.game_time += 5;
+            }
             game.world.game_time += 1;
             game.update_chunk_tickets();
             assert!(game.entity_ticking_area()(6, 4));
