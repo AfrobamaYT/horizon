@@ -2499,6 +2499,7 @@ impl Addition {
 const BIOMES: &str = "worldgen/biomes.json";
 const FEATURE_TAGS: &str = "worldgen/feature_tags.json";
 const PLACED_FEATURES: &str = "worldgen/placed_features.json";
+const CARVERS: &str = "worldgen/carvers.json";
 
 /// Rewrites the biome bundle with the mods' biome modifiers. `biome_tags`
 /// and `placed` are the bundles as the mods left them (`None`: the base's).
@@ -2537,7 +2538,9 @@ fn place_in_biomes(
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
     let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
+    let carver_ids = biomes::carver_ids(&base.join(CARVERS))?;
     let mut saved = SavedModifiers {
+        carver_ids,
         enabled_mods,
         modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
         unmodified: BTreeMap::new(),
@@ -2555,8 +2558,7 @@ fn place_in_biomes(
             overlay.write(&file, text.as_bytes())?;
         }
     }
-    overlay.write(MODIFIERS, &serde_json::to_vec(&saved)?)?;
-    overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
+    biomes::write_state(overlay, &saved, &doc, modifiers)
 }
 
 /// Registry metadata shared by both modifier loaders, after tag overlays are merged.
@@ -2646,6 +2648,9 @@ struct SavedModifiers {
     feature_tags: BTreeMap<String, String>,
     entity_categories: BTreeMap<String, String>,
     entity_tags: BTreeMap<String, String>,
+    /// The configured carvers of the root (a world's packs' carvers are not among them).
+    #[serde(default)]
+    carver_ids: BTreeSet<String>,
 }
 
 impl SavedModifiers {
@@ -2664,24 +2669,18 @@ impl SavedModifiers {
             _ => return Err(format!("{BIOMES}: not an object").into()),
         };
         let entity_ids: BTreeSet<String> = self.entity_categories.keys().cloned().collect();
+        let registries = biomes::Registries::of(
+            &biome_ids,
+            biome_tags,
+            placed,
+            &self.feature_tags,
+            (&entity_ids, &self.entity_tags),
+            &self.carver_ids,
+        );
         biomes::apply(
             doc,
             modifiers,
-            &biomes::Registry {
-                what: "biome",
-                ids: &biome_ids,
-                tags: biome_tags,
-            },
-            &biomes::Registry {
-                what: "placed feature",
-                ids: placed,
-                tags: &self.feature_tags,
-            },
-            &biomes::Registry {
-                what: "entity type",
-                ids: &entity_ids,
-                tags: &self.entity_tags,
-            },
+            &registries,
             &self.entity_categories,
             warnings,
         )
@@ -2693,16 +2692,14 @@ impl SavedModifiers {
 /// pack is in, to the final biomes and tags: a pack's file for a biome
 /// (Terralith's `minecraft:plains`) keeps the mods' features and spawns, and
 /// a pack's biome its tags put under a modifier's selector gets them too.
-/// `None` when the root's biomes stand: no modifiers, or packs that bring no
-/// biome and no biome tag.
+/// `None` when the root's biomes stand: no modifiers, or nothing declared and packs that bring
+/// no biome and no tag. `declared` are mods' code modifiers (mod, file, text), applied last.
 pub fn biome_modifiers_over_packs(
     root: &Path,
     packs: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    declared: &[[String; 3]],
 ) -> Result<Option<horizon_world::worldgen::overrides::WorldgenOverrides>> {
-    if packs.entries("biomes").next().is_none() && packs.tags("biome_tags").next().is_none() {
-        return Ok(None);
-    }
-    let Ok(bytes) = fs::read(root.join(MODIFIERS)) else {
+    let Some(bytes) = biomes::saved_bytes(root, packs, declared) else {
         return Ok(None);
     };
     let saved: SavedModifiers =
@@ -2715,7 +2712,7 @@ pub fn biome_modifiers_over_packs(
     };
     let mut warnings = Vec::new();
     let mut modifiers = Vec::new();
-    for [m, file, text] in &saved.modifiers {
+    for [m, file, text] in saved.modifiers.iter().chain(declared) {
         modifiers.extend(biomes::Modifier::read(m, file, text, &mut warnings)?);
     }
     // What the generator reads without the modifiers over the packs.
@@ -3419,7 +3416,7 @@ pub fn build(
             placed_doc = Some(doc);
         }
     }
-    if !modifiers.is_empty() {
+    if !modifiers.is_empty() || (!mods.is_empty() && base.join(BIOMES).exists()) {
         place_in_biomes(
             base,
             &overlay,

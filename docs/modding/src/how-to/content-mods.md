@@ -729,6 +729,35 @@ Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one
 (`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
 accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
 
+Carver modifiers edit the biome's `carvers`: `add_carvers` appends `carvers` (an id or a list of ids) that it lacks, and
+`remove_carvers` takes them out. They read the root's `worldgen/carvers.json` for the ids that exist, so a carver a
+data pack adds is not known to them, and carver tags are not read. NeoForge's docs call these legacy carvers: noise
+caves are not carvers.
+
+NeoForge calls a modifier once in each of five phases (`BEFORE_EVERYTHING`, `ADD`, `REMOVE`, `MODIFY`,
+`AFTER_EVERYTHING`, in that order; its public biome modifier documentation). Horizon applies every addition, then every
+removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own modifier types only add and remove;
+`MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
+type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
+(`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
+`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "#minecraft:is_forest",
+  "temperature": 0.3,
+  "has_precipitation": true,
+  "effects": { "sky_color": 12632319, "grass_color": "#80a0ff" }
+}
+```
+
+What the file leaves out stays. A colour is an integer 0 to 0xFFFFFF or `#rrggbb`; the biome keeps `#rrggbb`, with the
+sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 26.3 keeps them. A value of the wrong
+type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
+modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
+here, so the API names no phase for them.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
@@ -746,11 +775,24 @@ load. Climate sets apply only to `biomes`, not `features`.
   "features": "zinc:ore_zinc", "step": "underground_ores" }
 ```
 
+A code mod declares the same modifiers without a file: `Registrar::declare_biome_modifier(path, modifier)` takes a
+`BiomeModifier` (its `biomes`, and an operation: `AddFeatures`, `RemoveFeatures`, `AddSpawns`, `RemoveSpawns`,
+`AddSpawnCosts`, `RemoveSpawnCosts`, `AddCarvers`, `RemoveCarvers` or `ModifyBiome`, whose `Option` fields are the
+values above). `BiomeModifier::json` renders it as the file above, so a declared modifier and
+a shipped one are applied by the same code, in the same order (additions first, then removals, then modifications, mods in dispatch
+order, declarations in registration order). An id outside the mod's namespace or that is not a file path, a repeated
+id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
+smallest group above its largest, a spawn cost that is not finite, a climate number that is not finite, a colour above
+0xFFFFFF and a temperature modifier other than `none` or `frozen` refuse the mods at startup, naming the mod.
+Declared modifiers are
+read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
+arismoko/horizon#2732).
+
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
 naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
-`#c:` convention tag), or of a type not read yet (`add_carvers`, a mod's own serializer), is skipped with a warning
+`#c:` convention tag), or of a type not read yet (a mod's own serializer), is skipped with a warning
 naming the mod and file; the mods still load. A malformed modifier of a type
 that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
 content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
