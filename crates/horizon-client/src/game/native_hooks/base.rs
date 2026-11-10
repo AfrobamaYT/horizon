@@ -4297,26 +4297,6 @@ impl Game<'_> {
     ) {
         self.fire_loot_drops(context, drops);
     }
-    /// The item `item` of a server player is about to lose `amount` points of
-    /// durability (`ItemStack.hurtAndBreak`; Bukkit's `PlayerItemDamageEvent`):
-    /// the tool that mines or hits, the armour that takes a hit, a shield, a
-    /// rod, an elytra. `amount` is what is left after Unbreaking; change it
-    /// (0 or less leaves the item whole) or set `cancel` for no wear at all. It
-    /// is not heard for a creative player's tools (they take no wear) nor when
-    /// Unbreaking already saved the item, nor for the wear of a mob's armour or
-    /// of a tool a dispenser uses, nor the host of a LAN world. The player's
-    /// state is swapped in, so `native_acting_player`, `native_tell` and the
-    /// item helpers reach them. Once for each wear, on a server.
-    pub(in crate::game) fn native_item_damaged(
-        &mut self,
-        player: u128,
-        name: &str,
-        item: &str,
-        amount: &mut i32,
-        cancel: &mut bool,
-    ) {
-        self.fire_item_damaged(player, name, item, amount, cancel);
-    }
     /// `player` is about to take `count` of `item` from the ground
     /// (`ItemEntity.playerTouch`). Set `canceled` to leave it there: the
     /// stack isn't offered again for 10 ticks. Server-side.
