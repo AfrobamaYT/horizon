@@ -649,6 +649,10 @@ pub(super) fn compile(
             "horizon_mod_package={}",
             library(&deps, "horizon_mod_package")?.display()
         ));
+    cmd.arg("--extern").arg(format!(
+        "horizon_mod_host={}",
+        library(&deps, "horizon_mod_host")?.display()
+    ));
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();
         cmd.arg("--extern")
@@ -681,7 +685,7 @@ pub(super) fn compile(
 /// The game's own dynamic libraries, which the executable loads from beside itself: the game and
 /// the wasm mod runtime it links (`tools/prebuilt_game.py` checks the archive holds both).
 fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
-    ["horizon_client", "horizon_mod_wasm"]
+    ["horizon_client", "horizon_mod_wasm", "horizon_mod_host"]
         .into_iter()
         .map(|krate| {
             let path = library(deps, krate)?;
@@ -710,6 +714,8 @@ mod tests {
         // Metadata alone has no code to load: the archive is incomplete.
         assert!(game_dylibs(&deps).is_err());
         fs::write(deps.join(format!("libhorizon_mod_wasm.{ext}")), b"").unwrap();
+        assert!(game_dylibs(&deps).is_err());
+        fs::write(deps.join(format!("libhorizon_mod_host.{ext}")), b"").unwrap();
         let names: Vec<_> = game_dylibs(&deps)
             .unwrap()
             .iter()
@@ -719,7 +725,8 @@ mod tests {
             names,
             [
                 format!("libhorizon_client.{ext}"),
-                format!("libhorizon_mod_wasm.{ext}")
+                format!("libhorizon_mod_wasm.{ext}"),
+                format!("libhorizon_mod_host.{ext}")
             ]
         );
         fs::remove_dir_all(deps).unwrap();

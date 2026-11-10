@@ -33,7 +33,7 @@ class PrebuiltContentsTests(unittest.TestCase):
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",
             "native/libwindows.0.52.0.a", "points.json", "internals.json",
             "deps/libserde_derive-2.so", "deps/libhorizon_client.dll.a", "deps/libhorizon_mod_wasm.so",
-            "deps/horizon_mod_wasm.dll", "deps/libhorizon_mod_wasm.dylib",
+            "deps/horizon_mod_wasm.dll", "deps/libhorizon_mod_wasm.dylib", "deps/libhorizon_mod_host.so",
         ))
 
     def test_anything_else_is_refused(self):
@@ -45,6 +45,10 @@ class PrebuiltContentsTests(unittest.TestCase):
         for present, missing in (("horizon_client", "horizon-mod-wasm"), ("horizon_mod_wasm", "horizon-client")):
             with self.subTest(present), self.assertRaisesRegex(SystemExit, missing):
                 prebuilt_game.check(self.folder(f"deps/lib{present}.so"))
+
+    def test_engine_and_wasm_without_host_are_refused(self):
+        with self.assertRaisesRegex(SystemExit, "horizon-mod-host"):
+            prebuilt_game.check(self.folder("deps/libhorizon_client.so", "deps/libhorizon_mod_wasm.so"))
 
     def dll(self, root: Path, name: str, count: int, pe64: bool = True) -> None:
         # One PE section: RVA 0x1000 maps to raw offset 0x200, holding the export directory.
