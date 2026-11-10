@@ -9,12 +9,11 @@ use std::{
     path::PathBuf,
     sync::OnceLock,
 };
-struct Fixture {
-    registry: BlockRegistry,
-    behaviours: Behaviours,
+pub(super) struct Fixture {
+    pub(super) registry: BlockRegistry,
+    pub(super) behaviours: Behaviours,
 }
-
-fn fixture() -> Option<&'static Fixture> {
+pub(super) fn fixture() -> Option<&'static Fixture> {
     static FIXTURE: OnceLock<Option<Fixture>> = OnceLock::new();
     FIXTURE
         .get_or_init(|| {
@@ -38,7 +37,6 @@ fn fixture() -> Option<&'static Fixture> {
         })
         .as_ref()
 }
-
 pub(crate) struct TestLevel {
     blocks: HashMap<BlockPos, BlockStateId>,
     air: BlockStateId,
@@ -94,7 +92,7 @@ pub(crate) struct TestLevel {
     pub opened: HashSet<BlockPos>,
 }
 impl TestLevel {
-    fn new(b: &Behaviours) -> Self {
+    pub(super) fn new(b: &Behaviours) -> Self {
         Self {
             blocks: HashMap::new(),
             air: b.air(),
@@ -127,6 +125,7 @@ impl TestLevel {
         }
     }
 }
+impl crate::level::BlockEntityNeighbors for TestLevel {}
 impl LevelAccess for TestLevel {
     fn should_tick_blocks_at(&self, _chunk: ChunkPos) -> bool {
         self.block_events_ready
@@ -303,7 +302,6 @@ impl LevelAccess for TestLevel {
         !self.refuse_portals
     }
 }
-
 struct World<'f> {
     f: &'f Fixture,
     level: TestLevel,
@@ -403,7 +401,6 @@ impl<'f> World<'f> {
         }
     }
 }
-
 macro_rules! world {
     () => {{
         let Some(f) = fixture() else {
@@ -412,11 +409,9 @@ macro_rules! world {
         World::new(f)
     }};
 }
-
 #[test]
 fn block_observation_follows_successful_commits_only() {
     use std::cell::RefCell;
-
     #[derive(Debug, PartialEq)]
     enum Observation {
         Block(BlockPos, BlockStateId, BlockStateId),
@@ -427,6 +422,7 @@ fn block_observation_follows_successful_commits_only() {
         loaded: bool,
         seen: RefCell<Vec<Observation>>,
     }
+    impl crate::level::BlockEntityNeighbors for Observer {}
     impl LevelAccess for Observer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -494,15 +490,14 @@ fn block_observation_follows_successful_commits_only() {
         Observation::Block(pos, stone, b.air())
     );
 }
-
 #[test]
 fn neighbor_observation_follows_dispatch_order() {
     use std::cell::RefCell;
-
     struct Observer {
         inner: TestLevel,
         seen: RefCell<Vec<(BlockPos, BlockStateId, BlockId, bool)>>,
     }
+    impl crate::level::BlockEntityNeighbors for Observer {}
     impl LevelAccess for Observer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -561,7 +556,6 @@ fn neighbor_observation_follows_dispatch_order() {
         Some(&(BlockPos::new(3, 4, 5), b.air(), changed, true))
     );
 }
-
 /// A level that hears every `neighborChanged`, and answers `affectNeighborsAfterRemoval` for a
 /// mod's part with three requests when `asks`.
 struct Asker {
@@ -569,6 +563,7 @@ struct Asker {
     seen: std::cell::RefCell<Vec<BlockPos>>,
     asks: bool,
 }
+impl crate::level::BlockEntityNeighbors for Asker {}
 impl LevelAccess for Asker {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.inner.block_state(pos)
@@ -611,7 +606,6 @@ impl LevelAccess for Asker {
         }
     }
 }
-
 /// The positions told of a neighbour change when `state` is removed from the origin.
 fn removal_notices(f: &Fixture, state: BlockStateId, asks: bool) -> Vec<BlockPos> {
     let b = &f.behaviours;
@@ -686,6 +680,7 @@ fn block_update_notifications_follow_client_and_invisible_flags() {
         client: bool,
         notifications: usize,
     }
+    impl crate::level::BlockEntityNeighbors for Level {}
     impl LevelAccess for Level {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -772,6 +767,7 @@ fn random_tick_hook_can_change_the_block_and_skip_its_own_tick() {
         /// Moves on with every write, as `World::revision` does.
         revision: u64,
     }
+    impl crate::level::BlockEntityNeighbors for Grower {}
     impl LevelAccess for Grower {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -902,6 +898,7 @@ fn tick_block_hook_can_change_the_block_and_skip_its_own_tick() {
         /// Moves on with every write, as `World::revision` does.
         revision: u64,
     }
+    impl crate::level::BlockEntityNeighbors for Ticked {}
     impl LevelAccess for Ticked {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -3857,6 +3854,7 @@ fn update_shape_hook_can_answer_for_the_block() {
         /// The `state` each call was given.
         states: RefCell<Vec<BlockStateId>>,
     }
+    impl crate::level::BlockEntityNeighbors for Shaper {}
     impl LevelAccess for Shaper {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -4016,6 +4014,7 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
         answer: Option<Option<BlockStateId>>,
         asked: RefCell<Vec<Asked>>,
     }
+    impl crate::level::BlockEntityNeighbors for Placer {}
     impl LevelAccess for Placer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -4232,6 +4231,7 @@ fn survive_hooks_answer_for_the_block() {
         survive: Option<(BlockId, bool)>,
         asked: Cell<usize>,
     }
+    impl crate::level::BlockEntityNeighbors for Rules {}
     impl LevelAccess for Rules {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)

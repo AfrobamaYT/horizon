@@ -46,6 +46,7 @@
 //! use horizon_world::level::{self, Behaviours, LevelAccess, LevelEvent, PlaceContext, Ticks, flags};
 //!
 //! struct GameLevel { chunks: Chunks, random: LegacyRandom, time: i64, events: Vec<LevelEvent> }
+//! impl level::BlockEntityNeighbors for GameLevel {}
 //! impl LevelAccess for GameLevel {
 //!     fn block_state(&self, pos: BlockPos) -> BlockStateId { self.chunks.get(pos) }
 //!     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
@@ -397,8 +398,11 @@ pub enum Spread {
     Fire,
 }
 
+mod block_entity_neighbors;
+pub use block_entity_neighbors::BlockEntityNeighbors;
+
 /// The world as seen by block behaviour. Implemented by the game and tests.
-pub trait LevelAccess {
+pub trait LevelAccess: BlockEntityNeighbors {
     /// `WorldBorder.isWithinBounds(BlockPos)` for block movement.
     fn within_world_border(&self, _pos: BlockPos) -> bool {
         true
@@ -1773,3 +1777,6 @@ mod dimension_key_tests {
         assert_eq!(vanilla_sea_level(custom), 63);
     }
 }
+
+#[cfg(test)]
+mod block_entity_neighbor_tests;
