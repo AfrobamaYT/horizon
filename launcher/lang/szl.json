@@ -1359,5 +1359,7 @@
   "{version} is not installed": "{version} niy ma zainstalowane",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.jsōn (abo .mcp.jsōn w projektie)",
   "← All servers": "← Wszyske serwery",
-  "← Newer": "← Nowszy"
+  "← Newer": "← Nowszy",
+  "local slots pending (I5)": "local slots pending (I5)",
+  "wasm sites pending": "wasm sites pending"
 }

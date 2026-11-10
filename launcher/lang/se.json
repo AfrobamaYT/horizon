@@ -1359,5 +1359,7 @@
   "{version} is not installed": "{version} ii leat installerejuvvon",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (dahje .mcp.json prošeavttas)",
   "← All servers": "← Buot bálvaleaddjit",
-  "← Newer": "← Ođđaseabbo"
+  "← Newer": "← Ođđaseabbo",
+  "local slots pending (I5)": "local slots pending (I5)",
+  "wasm sites pending": "wasm sites pending"
 }

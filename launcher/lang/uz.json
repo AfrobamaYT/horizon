@@ -1359,5 +1359,7 @@
   "{version} is not installed": "{version} oʻrnatilmagan",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (yoki loyihada .mcp.json)",
   "← All servers": "← Barcha serverlar",
-  "← Newer": "← Yangiroq"
+  "← Newer": "← Yangiroq",
+  "local slots pending (I5)": "local slots pending (I5)",
+  "wasm sites pending": "wasm sites pending"
 }

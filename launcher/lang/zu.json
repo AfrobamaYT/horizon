@@ -1359,5 +1359,7 @@
   "{version} is not installed": "{version} ayifakiwe",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (noma .mcp.json kuphrojekthi)",
   "← All servers": "← Wonke amaseva",
-  "← Newer": "← Okusha"
+  "← Newer": "← Okusha",
+  "local slots pending (I5)": "local slots pending (I5)",
+  "wasm sites pending": "wasm sites pending"
 }
