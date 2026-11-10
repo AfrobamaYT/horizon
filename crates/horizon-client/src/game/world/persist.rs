@@ -3881,18 +3881,10 @@ mod h262_enderman_absolute_anger_tests {
         game.build_registries();
         game.set_allow_commands(true);
 
-        // Entity ticking needs the full two-column neighborhood around (0, 0),
-        // not only the four columns used by the floor and spawn positions.
-        for x in -2..=2 {
-            for z in -2..=2 {
-                game.world
-                    .chunks
-                    .insert((x, z), Arc::new(Chunk::empty(x, z)));
-                game.block_ticks
-                    .add_empty_chunk(ChunkPos::new(x, z))
-                    .unwrap();
-            }
-        }
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            &mut game,
+            ChunkPos::new(0, 0),
+        );
         assert!(game.run_command("difficulty normal"));
         assert!(game.run_command("forceload add 0 0"));
         game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
