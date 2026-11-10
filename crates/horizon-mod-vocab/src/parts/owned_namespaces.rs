@@ -1,15 +1,14 @@
-use super::*;
-
 /// The package inventory carries the same namespace set as content files and
 /// the package loader's collision fence. A package always owns its own ID.
-pub(crate) fn owns_namespace(owner: &str, namespace: &str) -> bool {
+pub fn owns_namespace(owner: &str, namespace: &str) -> bool {
     owner == namespace
         || crate::LoadedMods::new()
             .get(owner)
             .is_some_and(|package| package.namespaces().any(|owned| owned == namespace))
 }
 
-pub(crate) fn owned_declaration_id(owner: &str, name: &str) -> Result<String, String> {
+/// Validate and qualify a declaration using the package namespace inventory.
+pub fn owned_declaration_id(owner: &str, name: &str) -> Result<String, String> {
     let id = if name.contains(':') {
         name.to_owned()
     } else {
@@ -25,8 +24,6 @@ pub(crate) fn owned_declaration_id(owner: &str, name: &str) -> Result<String, St
     }
     Ok(id)
 }
-
-
 
 impl crate::RegistrationContext {
     pub(crate) fn refuse_declaration(&self, reason: String) {
@@ -50,5 +47,3 @@ pub fn take_declaration_refusals(context: &crate::RegistrationContext) -> Vec<St
             .unwrap_or_else(|p| p.into_inner()),
     )
 }
-
-

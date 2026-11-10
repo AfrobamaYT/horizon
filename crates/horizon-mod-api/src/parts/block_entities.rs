@@ -58,8 +58,19 @@ pub mod tests {
             fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
                 let later = r.block_entity_type_key("owner:press");
                 assert_eq!(later, r.block_entity_type_key("owner:press"));
-                assert_eq!(BlockEntityTypeKey::from_slot(later.0), Ok(later));
-                assert!(BlockEntityTypeKey::from_slot(later.0 + 1).is_err());
+                assert_eq!(
+                    mod_vocab::__private::parts_installation::validate_block_entity_type_key(
+                        mod_vocab::__private::parts_installation::block_entity_type_key_slot(later)
+                    ),
+                    Ok(later)
+                );
+                assert!(
+                    mod_vocab::__private::parts_installation::validate_block_entity_type_key(
+                        mod_vocab::__private::parts_installation::block_entity_type_key_slot(later)
+                            + 1
+                    )
+                    .is_err()
+                );
                 self.0.lock().unwrap().push(later);
             }
         }
@@ -86,7 +97,7 @@ pub mod tests {
         assert_eq!(
             {
                 let types = &types(&["minecraft:chest"]);
-                crate::content::registry_keys::resolve_block_entity_types(
+                mod_vocab::__private::resolve_block_entity_types(
                     types.iter().map(String::as_str),
                     |id| types.iter().position(|name| name == id),
                 )
@@ -99,7 +110,7 @@ pub mod tests {
         );
         {
             let types = &types(&["minecraft:chest", "owner:press", "minecraft:furnace"]);
-            crate::content::registry_keys::resolve_block_entity_types(
+            mod_vocab::__private::resolve_block_entity_types(
                 types.iter().map(String::as_str),
                 |id| types.iter().position(|name| name == id),
             )
@@ -109,22 +120,29 @@ pub mod tests {
         assert_eq!(keys[0], keys[1]);
         assert_ne!(keys[0], keys[2]);
         assert_eq!(
-            crate::content::registry_keys::block_entity_type_key("owner:press"),
+            mod_vocab::__private::block_entity_type_key("owner:press"),
             Some(keys[0])
         );
         assert_eq!(
-            crate::content::registry_keys::block_entity_type_name(keys[2]),
+            mod_vocab::__private::block_entity_type_name(keys[2]),
             Some("minecraft:chest")
         );
-        let furnace =
-            crate::content::registry_keys::block_entity_type_key("minecraft:furnace").unwrap();
+        let furnace = mod_vocab::__private::block_entity_type_key("minecraft:furnace").unwrap();
         assert_ne!(furnace, keys[2]);
-        assert_eq!(BlockEntityTypeKey::from_slot(furnace.0), Ok(furnace));
-        assert!(BlockEntityTypeKey::from_slot(u32::MAX).is_err());
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_block_entity_type_key(
+                mod_vocab::__private::parts_installation::block_entity_type_key_slot(furnace)
+            ),
+            Ok(furnace)
+        );
+        assert!(
+            mod_vocab::__private::parts_installation::validate_block_entity_type_key(u32::MAX)
+                .is_err()
+        );
         struct Table;
         impl mod_api::prelude::KeysBackend for Table {
             fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
-                crate::content::registry_keys::block_entity_type_name(key)
+                mod_vocab::__private::block_entity_type_name(key)
                     .unwrap()
                     .to_owned()
             }
@@ -133,7 +151,7 @@ pub mod tests {
         mod_api::impl_backend_areas!(Table, except(keys));
         impl Host for Table {
             fn backend(&self) -> Option<BackendRef<'_>> {
-                Some(BackendRef::of(self))
+                Some(mod_vocab::__private::parts_installation::backend_ref(self))
             }
         }
         mod_api::impl_host_areas!(Table);
@@ -310,10 +328,10 @@ impl BlockEntitiesRegistrar for PartRegistrar {
             .block_entity_types
             .request(self.mod_id, id)
         {
-            Ok(slot) => crate::BlockEntityTypeKey(slot),
+            Ok(slot) => mod_vocab::__private::parts_installation::block_entity_type_key(slot),
             Err(error) => {
                 self.refused.push(error);
-                crate::BlockEntityTypeKey(u32::MAX)
+                mod_vocab::__private::parts_installation::block_entity_type_key(u32::MAX)
             }
         }
     }
@@ -327,12 +345,12 @@ impl BlockEntitiesRegistrar for PartRegistrar {
             Ok(id) => id,
             Err(reason) => {
                 self.refused.push(reason);
-                return crate::BlockEntityTypeKey(u32::MAX);
+                return mod_vocab::__private::parts_installation::block_entity_type_key(u32::MAX);
             }
         };
         let key = self.block_entity_type_key(&id);
         self.block_entity_types
-            .push(BlockEntityTypeDecl { id, blocks });
+            .push(mod_vocab::__private::parts_installation::block_entity_declaration(id, blocks));
         key
     }
 
@@ -346,7 +364,7 @@ impl BlockEntitiesRegistrar for PartRegistrar {
             .registry_keys
             .borrow()
             .block_entity_types
-            .id(key.0)
+            .id(mod_vocab::__private::parts_installation::block_entity_type_key_slot(*key))
             .map(str::to_owned)
             .unwrap_or_default();
         if id.starts_with("minecraft:") {
@@ -375,10 +393,10 @@ impl BlockEntitiesRegistrar for PartRegistrar {
             ProviderTarget::BlockEntity(kind),
             before_game,
             {
-                let handler = provider.handler();
+                let handler =
+                    mod_vocab::__private::parts_installation::block_provider_handler(&provider);
                 (provider, handler)
             },
         );
     }
 }
-

@@ -1,5 +1,4 @@
 use super::*;
-use horizon_core::level_id::valid_level_id;
 
 /// The dimensions registered at startup, for the executable to hand to the engine.
 pub(crate) fn installed_dimension_list() -> &'static [crate::world::dimension::DimensionInfo] {
@@ -11,15 +10,6 @@ pub(crate) fn installed_chunk_generator_list()
 -> &'static [crate::world::chunk_generator::ChunkGeneratorInfo] {
     installed().map_or(&[], |installed| installed.chunk_generators.as_slice())
 }
-
-/// The levels every world has, which no mod's can be.
-const VANILLA_DIMENSIONS: [&str; 3] = [
-    "minecraft:overworld",
-    "minecraft:the_nether",
-    "minecraft:the_end",
-];
-
-
 
 impl dyn Registrar + '_ {
     /// Register dimension `name` (`pocket` or `mymod:pocket`) once at startup:
@@ -64,5 +54,3 @@ pub trait DimensionsRegistrar {
         );
     }
 }
-
-

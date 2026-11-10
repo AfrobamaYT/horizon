@@ -37,6 +37,13 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api | Target::Vocab => {
+            if matches!(target, Target::Api) {
+                write_if_changed(
+                    out_dir.join("parts_registration_modules.rs"),
+                    super::parts::registration_source(root)?,
+                )
+                .map_err(|e| e.to_string())?;
+            }
             if matches!(target, Target::Vocab) {
                 write_if_changed(
                     out_dir.join(super::parts::OUTPUT),

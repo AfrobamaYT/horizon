@@ -16,18 +16,21 @@ fn client_only_attribute_does_not_shift_both_side_registry() {
             )
         })
         .collect::<Vec<_>>();
-    TEST_PACKAGES.set(Some(packages.into()));
-    let mut alpha = PartRegistrar::new("alpha");
-    let mut zeta = PartRegistrar::new("zeta");
-    assert_eq!(
-        alpha.declare_attribute("decoration", 0.0, 0.0, 1.0, false, Sentiment::Neutral),
-        Err(crate::AttributeRegistrationError::WrongSide)
-    );
-    assert!(
-        zeta.declare_attribute("mana", 0.0, 0.0, 1.0, true, Sentiment::Positive)
-            .is_ok()
-    );
-    assert!(alpha.attributes.is_empty());
-    assert_eq!(zeta.attributes[0].id, "zeta:mana");
-    TEST_PACKAGES.set(None);
+    crate::load_state::with_test_package_inventory(packages, || {
+        let mut alpha = PartRegistrar::new("alpha");
+        let mut zeta = PartRegistrar::new("zeta");
+        assert_eq!(
+            alpha.declare_attribute("decoration", 0.0, 0.0, 1.0, false, Sentiment::Neutral),
+            Err(crate::AttributeRegistrationError::WrongSide)
+        );
+        assert!(
+            zeta.declare_attribute("mana", 0.0, 0.0, 1.0, true, Sentiment::Positive)
+                .is_ok()
+        );
+        assert!(alpha.attributes.is_empty());
+        assert_eq!(zeta.attributes[0].id, "zeta:mana");
+    });
 }
+
+#[cfg(test)]
+use super::*;

@@ -1,4 +1,7 @@
 #[cfg(test)]
+use super::*;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -29,6 +32,7 @@ mod tests {
             let replaced = registry_installation_identity();
             assert_eq!(initial.0, replaced.0);
             assert_ne!(initial.1, replaced.1);
+            let active = crate::parts::ActiveRegistration::enter();
             let previous = crate::parts::REGISTERING_KEYS.with_borrow_mut(|keys| {
                 keys.replace(std::rc::Rc::new(
                     std::cell::RefCell::new(Default::default()),
@@ -36,6 +40,7 @@ mod tests {
             });
             assert!(registry_installation_identity().1.is_none());
             crate::parts::REGISTERING_KEYS.with_borrow_mut(|keys| *keys = previous);
+            drop(active);
             assert_eq!(registry_installation_identity(), replaced);
         });
     }

@@ -1,5 +1,4 @@
 //! Custom book identities, independent of recipe categories and vanilla ordinals.
-use super::*;
 
 use crate::item::recipe_book::RecipeBookTypeKey;
 
@@ -11,7 +10,3 @@ pub trait RecipeBooksRegistrar {
     /// The registry freezes when registration ends, before player state is loaded.
     fn recipe_book_type(&mut self, id: &str) -> Result<RecipeBookTypeKey, String>;
 }
-
-
-
-

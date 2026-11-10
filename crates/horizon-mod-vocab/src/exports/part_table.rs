@@ -1,8 +1,4 @@
 mod parts;
-#[cfg(test)]
-pub(crate) use parts::install_parts;
-#[cfg(test)]
-pub(crate) use parts::mark_game_thread;
 pub use parts::{
     Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
     CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,

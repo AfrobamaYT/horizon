@@ -19,23 +19,15 @@ impl ArmPosesRegistrar for PartRegistrar {
                 "{} registered invalid or duplicate arm pose {name:?}",
                 self.mod_id
             ));
-            return crate::CustomArmPose {
-                slot: u32::MAX,
-                both: false,
-                offhand: false,
-            };
+            return mod_vocab::__private::parts_installation::arm_pose(u32::MAX, false, false);
         }
         let slot = self.arm_poses.len() as u32;
-        self.arm_poses.push(crate::client::arm_pose::PoseInfo {
+        self.arm_poses.push(PoseInfo {
             id: name.into(),
             both: uses_both_arms,
             offhand: affects_offhand,
         });
-        crate::CustomArmPose {
-            slot,
-            both: uses_both_arms,
-            offhand: affects_offhand,
-        }
+        mod_vocab::__private::parts_installation::arm_pose(slot, uses_both_arms, affects_offhand)
     }
 }
 
@@ -69,11 +61,9 @@ mod tests {
     #[test]
     fn custom_pose_and_angles_cross_as_derived_wire_values() {
         use crate::wire::{Reader, Writer};
-        let pose = crate::ArmPose::Custom(crate::CustomArmPose {
-            slot: 37,
-            both: true,
-            offhand: false,
-        });
+        let pose = crate::ArmPose::Custom(mod_vocab::__private::parts_installation::arm_pose(
+            37, true, false,
+        ));
         let angles = crate::ArmAngles {
             right: [-0.71, 0.42, 0.63],
             left: [1.2, -0.3, 2.1],
@@ -81,7 +71,7 @@ mod tests {
         let mut output = Writer::new();
         output.put(&pose);
         output.put(&angles);
-        let _absent_guest_table = crate::client::arm_pose::test_table(Vec::new());
+        let _absent_guest_table = mod_vocab::__private::parts_installation::empty_pose_table();
         let mut input = Reader::new(output.bytes());
         let transported = input.take::<crate::ArmPose>().unwrap();
         assert_eq!(transported, pose);
@@ -92,13 +82,9 @@ mod tests {
         // Decoding preserves data; admission into the engine, not the codec,
         // checks membership in the load-owned registration table.
         assert!(
-            crate::CustomArmPose {
-                slot: u32::MAX,
-                both: false,
-                offhand: false
-            }
-            .flags()
-            .is_none()
+            mod_vocab::__private::parts_installation::arm_pose(u32::MAX, false, false)
+                .flags()
+                .is_none()
         );
     }
 
@@ -131,4 +117,3 @@ mod tests {
         );
     }
 }
-

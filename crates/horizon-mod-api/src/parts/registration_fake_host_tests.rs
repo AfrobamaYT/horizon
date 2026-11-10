@@ -1,4 +1,10 @@
 #[cfg(test)]
+use super::*;
+
+#[cfg(test)]
+use crate::testing::{FakeHost, FakeTank};
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::prelude::ItemsHost;
@@ -6,30 +12,33 @@ mod tests {
 
     fn water(amount: u32) -> FluidStack {
         FluidStack::new(
-            crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
+            mod_vocab::__private::fluid_key("minecraft:water").unwrap(),
             amount,
         )
     }
 
     #[test]
     fn a_fluid_moves_between_tanks_of_the_same_fluid_and_an_abort_puts_both_back() {
-        crate::parts::tests::game_thread();
+        crate::__private::part_tests::game_thread();
         let mut host = FakeHost::new();
         let level = host.level.level();
-        host.level.block_entity([0, 64, 0]).tanks = vec![FakeTank {
-            held: Some(water(800)),
-            capacity: 1000,
+        host.level.block_entity([0, 64, 0]).tanks = vec![{
+            let mut tank = FakeTank::new(1000);
+            tank.held = Some(water(800));
+            tank
         }];
-        host.level.block_entity([1, 64, 0]).tanks = vec![FakeTank {
-            held: Some(water(700)),
-            capacity: 1000,
+        host.level.block_entity([1, 64, 0]).tanks = vec![{
+            let mut tank = FakeTank::new(1000);
+            tank.held = Some(water(700));
+            tank
         }];
-        host.level.block_entity([2, 64, 0]).tanks = vec![FakeTank {
-            held: Some(FluidStack::new(
-                crate::content::registry_keys::fluid_key("minecraft:lava").unwrap(),
+        host.level.block_entity([2, 64, 0]).tanks = vec![{
+            let mut tank = FakeTank::new(1000);
+            tank.held = Some(FluidStack::new(
+                mod_vocab::__private::fluid_key("minecraft:lava").unwrap(),
                 100,
-            )),
-            capacity: 1000,
+            ));
+            tank
         }];
         let server: &mut dyn ServerHost = &mut host;
         let tank = |host: &mut dyn ServerHost, x| {

@@ -4,7 +4,7 @@ use super::*;
 impl RecipeBooksRegistrar for PartRegistrar {
     fn recipe_book_type(&mut self, id: &str) -> Result<RecipeBookTypeKey, String> {
         let result = (|| {
-            if installed().is_some() {
+            if mod_vocab::__private::parts_installation::parts_installed() {
                 return Err("registry is frozen".to_owned());
             }
             let (namespace, path) = id.split_once(':').ok_or("explicit namespace required")?;
@@ -35,7 +35,9 @@ impl RecipeBooksRegistrar for PartRegistrar {
                 return Err("registry exceeds 1024 custom books".into());
             }
             self.recipe_book_types.insert(id.into(), self.mod_id.into());
-            Ok(RecipeBookTypeKey { id: id.into() })
+            Ok(mod_vocab::__private::parts_installation::recipe_book_type(
+                id.into(),
+            ))
         })();
         result.map_err(|reason: String| {
             let message = format!("mod {} recipe book {id:?}: {reason}", self.mod_id);
@@ -109,4 +111,3 @@ mod tests {
         assert_eq!(registrar.recipe_book_types.len(), 1024);
     }
 }
-

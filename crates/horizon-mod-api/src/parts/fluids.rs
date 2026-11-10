@@ -16,20 +16,22 @@ pub mod tests {
     fn world_fluid_declarations_refuse_generated_names() {
         for (first, second) in [("oil", "flowing_oil"), ("flowing_oil", "oil")] {
             let mut registrar = super::PartRegistrar::new("maker");
-            let options = crate::WorldFluid {
-                tick_delay: 20,
-                drop_off: 2,
-                slope_find_distance: 3,
-                source_conversion: true,
-                bucket: false,
+            let options = {
+                let mut value: crate::WorldFluid = Default::default();
+                value.tick_delay = 20;
+                value.drop_off = 2;
+                value.slope_find_distance = 3;
+                value.source_conversion = true;
+                value.bucket = false;
+                value
             };
             assert_ne!(
                 registrar.declare_world_fluid(first, options),
-                crate::FluidKey(u32::MAX)
+                mod_vocab::__private::parts_installation::fluid_key(u32::MAX)
             );
             assert_eq!(
                 registrar.declare_world_fluid(second, options),
-                crate::FluidKey(u32::MAX)
+                mod_vocab::__private::parts_installation::fluid_key(u32::MAX)
             );
             assert_eq!(registrar.world_fluids.len(), 1);
             let world = registrar.world_fluids[0].1;
@@ -59,7 +61,7 @@ pub mod tests {
 
     #[test]
     pub(crate) fn fluid_keys_resolve_declarations_after_requests_and_reject_unknown() {
-        use crate::content::registry_keys::{fluid_id, fluid_key, resolve_fluids};
+        use mod_vocab::__private::{fluid_id, fluid_key, resolve_fluids};
         struct Request;
         #[mod_api::__subscriptions]
         impl Hooks for Request {
@@ -80,15 +82,15 @@ pub mod tests {
             ModEntry::new("maker", Box::new(Declare)),
         ]
         .into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let error = resolve_fluids(&[], &[]).unwrap_err();
         assert_eq!(
             error,
-            vec![crate::UnknownFluid {
-                mod_id: "reader",
-                id: "minecraft:water".to_owned()
-            }]
+            vec![mod_vocab::__private::parts_installation::unknown_fluid(
+                "reader",
+                "minecraft:water".to_owned()
+            )]
         );
         resolve_fluids(&["minecraft:water", "minecraft:lava"], &[]).unwrap();
         let chocolate = fluid_key("maker:chocolate").unwrap();
@@ -96,24 +98,30 @@ pub mod tests {
         for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {
             let key = fluid_key(name).unwrap();
             assert_eq!(
-                crate::content::registry_keys::fluid_key_utf16(
-                    &name.encode_utf16().collect::<Vec<_>>()
-                ),
+                mod_vocab::__private::fluid_key_utf16(&name.encode_utf16().collect::<Vec<_>>()),
                 Some(key)
             );
             assert_eq!(fluid_id(key), Some(name));
         }
         for path in ["water", "lava"] {
             assert_eq!(
-                crate::content::registry_keys::fluid_key_utf16(
-                    &path.encode_utf16().collect::<Vec<_>>()
-                ),
+                mod_vocab::__private::fluid_key_utf16(&path.encode_utf16().collect::<Vec<_>>()),
                 fluid_key(path)
             );
         }
-        assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_fluid_key(
+                mod_vocab::__private::parts_installation::fluid_key_slot(chocolate)
+            ),
+            Ok(chocolate)
+        );
         assert!(fluid_key("missing:fluid").is_none());
-        assert_eq!(fluid_id(FluidKey(u32::MAX)), None);
+        assert_eq!(
+            fluid_id(mod_vocab::__private::parts_installation::fluid_key(
+                u32::MAX
+            )),
+            None
+        );
     }
     /// A mod's tank: the game's tank at its position, reached from every side but its top, and
     /// misanswering as `lie` says.
@@ -270,11 +278,10 @@ pub mod tests {
     }
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesBackend for TankWorld {
-        fn block_entity_kind(
-            &self,
-            BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<BlockEntityTypeKey> {
-            self.types.get(&pos).map(|id| type_key(id))
+        fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
+            self.types
+                .get(&mod_vocab::__private::game::Fields::fields(&entity).position)
+                .map(|id| type_key(id))
         }
     }
     #[cfg(test)]
@@ -378,7 +385,7 @@ pub mod tests {
     #[cfg(test)]
     impl Host for TankWorld {
         fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_ref(self))
         }
     }
     #[cfg(test)]
@@ -386,7 +393,9 @@ pub mod tests {
     #[cfg(test)]
     impl ServerHost for TankWorld {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_mut_ref(
+                self,
+            ))
         }
     }
     #[cfg(test)]
@@ -412,7 +421,7 @@ pub mod tests {
         FluidStack {
             components: Some(Box::new(crate::Components::from(components))),
             ..FluidStack::new(
-                crate::content::registry_keys::fluid_key("test:potion").unwrap(),
+                mod_vocab::__private::fluid_key("test:potion").unwrap(),
                 amount,
             )
         }
@@ -436,10 +445,7 @@ pub mod tests {
         // The same fluid with other components, or another fluid, doesn't go in.
         for other in [
             potion(500, "minecraft:poison"),
-            FluidStack::new(
-                crate::content::registry_keys::fluid_key("test:potion").unwrap(),
-                500,
-            ),
+            FluidStack::new(mod_vocab::__private::fluid_key("test:potion").unwrap(), 500),
         ] {
             world.tank(SOURCE, Some(other.clone()), true);
             assert_eq!(world.moved((SOURCE, None), (TANK, None), 4000), Ok(0));
@@ -448,7 +454,7 @@ pub mod tests {
         }
         // A drain-only tank has no capacity, and nothing moves.
         let water = FluidStack::new(
-            crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
+            mod_vocab::__private::fluid_key("minecraft:water").unwrap(),
             1000,
         );
         world.tank(SOURCE, Some(water.clone()), true);
@@ -465,7 +471,7 @@ pub mod tests {
         game_thread();
         let water = |amount| {
             FluidStack::new(
-                crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
+                mod_vocab::__private::fluid_key("minecraft:water").unwrap(),
                 amount,
             )
         };
@@ -519,7 +525,7 @@ pub mod tests {
         game_thread();
         let water = |amount| {
             Some(FluidStack::new(
-                crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
+                mod_vocab::__private::fluid_key("minecraft:water").unwrap(),
                 amount,
             ))
         };
@@ -544,7 +550,13 @@ pub mod tests {
                 Ok(first + second)
             });
             let owner = "doubler".to_owned();
-            assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
+            assert_eq!(
+                moved,
+                Err(mod_vocab::__private::parts_installation::overanswered(
+                    owner
+                )),
+                "{liar}"
+            );
             let held = [SOURCE, OTHER, TANK].map(|pos| world.held(pos));
             assert_eq!(held, [water(1000), water(1000), None], "{liar}");
         }
@@ -577,10 +589,10 @@ impl FluidsRegistrar for PartRegistrar {
             .fluids
             .request(self.mod_id, id)
         {
-            Ok(slot) => crate::FluidKey(slot),
+            Ok(slot) => mod_vocab::__private::parts_installation::fluid_key(slot),
             Err(error) => {
                 self.refused.push(error);
-                crate::FluidKey(u32::MAX)
+                mod_vocab::__private::parts_installation::fluid_key(u32::MAX)
             }
         }
     }
@@ -590,7 +602,7 @@ impl FluidsRegistrar for PartRegistrar {
             Ok(id) => id,
             Err(reason) => {
                 self.refused.push(reason);
-                return crate::FluidKey(u32::MAX);
+                return mod_vocab::__private::parts_installation::fluid_key(u32::MAX);
             }
         };
         self.insert_declared_fluid(id)
@@ -601,7 +613,7 @@ impl FluidsRegistrar for PartRegistrar {
             Ok(id) => id,
             Err(reason) => {
                 self.refused.push(reason);
-                return crate::FluidKey(u32::MAX);
+                return mod_vocab::__private::parts_installation::fluid_key(u32::MAX);
             }
         };
         let (namespace, path) = id.split_once(':').expect("validated declaration id");
@@ -614,17 +626,17 @@ impl FluidsRegistrar for PartRegistrar {
         }) {
             self.refused
                 .push(format!("world fluid {id}: name declared twice"));
-            return crate::FluidKey(u32::MAX);
+            return mod_vocab::__private::parts_installation::fluid_key(u32::MAX);
         }
         if let Err(error) = fluid.check() {
             self.refused.push(format!(
                 "mod {}: world fluid {path:?}: {error}",
                 self.mod_id
             ));
-            return crate::FluidKey(u32::MAX);
+            return mod_vocab::__private::parts_installation::fluid_key(u32::MAX);
         }
         let key = self.insert_declared_fluid(id.clone());
-        if key != crate::FluidKey(u32::MAX) {
+        if key != mod_vocab::__private::parts_installation::fluid_key(u32::MAX) {
             self.registry_keys
                 .borrow_mut()
                 .declared_fluids
@@ -639,4 +651,3 @@ impl FluidsRegistrar for PartRegistrar {
         self.attach(|p| &mut p.fluids, kind, fluid, part);
     }
 }
-

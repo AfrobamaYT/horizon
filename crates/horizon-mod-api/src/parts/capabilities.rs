@@ -30,7 +30,7 @@ impl PartRegistrar {
                     .registry_keys
                     .borrow()
                     .block_entity_types
-                    .id(kind.0)
+                    .id(mod_vocab::__private::parts_installation::block_entity_type_key_slot(*kind))
                     .map(str::to_owned);
                 let Some(id) = block_entity_id.as_deref() else {
                     return;
@@ -103,9 +103,11 @@ pub mod tests {
     pub(crate) fn pipe_world() -> FakeHost {
         let mut host = FakeHost::new();
         host.level.block_entity(PIPE).of_type("test:pipe");
-        host.level.block_entity(CHEST).items = Some(FakeContainer {
-            slots: vec![None],
-            limit: 1,
+        host.level.block_entity(CHEST).items = Some({
+            let mut value = FakeContainer::new(0);
+            value.slots = vec![None];
+            value.limit = 1;
+            value
         });
         host
     }
@@ -443,7 +445,7 @@ pub mod tests {
             ModEntry::new("later", Box::new(Later)),
         ]
         .into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
 
@@ -501,7 +503,7 @@ pub mod tests {
                 .size(&mut ordered_world()),
             3
         );
-        assert!(crate::set_mod_enabled("doubler", false));
+        assert!(crate::__private::set_mod_enabled("doubler", false));
         check(Some(99), 27, Some(99));
         assert_eq!(
             block_before_disable
@@ -512,11 +514,11 @@ pub mod tests {
         );
         let entity = entity_before_disable.ask(&mut player, false).unwrap();
         assert_eq!(entity.size(&mut player), 99);
-        assert!(crate::set_mod_enabled("later", false));
+        assert!(crate::__private::set_mod_enabled("later", false));
         check(None, 27, None);
-        assert!(crate::set_mod_enabled("later", true));
+        assert!(crate::__private::set_mod_enabled("later", true));
         check(Some(99), 27, Some(99));
-        assert!(crate::set_mod_enabled("doubler", true));
+        assert!(crate::__private::set_mod_enabled("doubler", true));
         assert_eq!(
             here()
                 .capability(&mut ordered_world(), &ITEMS, [7, 64, 0], None)
@@ -543,7 +545,7 @@ pub mod tests {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 let ordered = r.block_entity_type_key("test:ordered");
                 r.block_entity_capability(&ITEMS, &ordered, |_, _| {
-                    assert!(crate::set_mod_enabled("switch", false));
+                    assert!(crate::__private::set_mod_enabled("switch", false));
                     None
                 });
                 r.block_entity_capability(&ITEMS, &ordered, |_, _| {
@@ -564,7 +566,7 @@ pub mod tests {
             ModEntry::new("later", Box::new(Later)),
         ]
         .into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
         let found = here()
@@ -582,7 +584,10 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut ordered_world();
         let answer = |host: &mut dyn ServerHost, x| {
             let found = here().capability(host, &ITEMS, [x, 64, 0], None).unwrap();
-            (found.owner.is_some(), found.size(host))
+            (
+                mod_vocab::__private::parts_installation::capability_is_owned(&found),
+                found.size(host),
+            )
         };
         // No game slots: the first mod provider that answers; the one before it declined.
         assert_eq!(answer(host, 7), (true, 1));
@@ -636,23 +641,18 @@ pub mod tests {
             let mut host = HeldItem(stack("test:ordered_item", count, damage));
             let host: &mut dyn ServerHost = &mut host;
             let found = HAND.capability(host, &ITEM_ITEMS).unwrap();
-            (found.owner.is_some(), found.size(host))
+            (
+                mod_vocab::__private::parts_installation::capability_is_owned(&found),
+                found.size(host),
+            )
         };
         assert_eq!(item(0, 1), (true, 1));
         assert_eq!(item(1, 1), (false, 27));
         assert_eq!(item(1, 2), (true, 3));
     }
-
-    #[test]
-    pub(crate) fn with_no_parts_the_block_entity_is_never_named() {
-        let parts = Parts::default();
-        let named = std::cell::Cell::new(false);
-        let id = || {
-            named.set(true);
-            Some("test:press")
-        };
-        assert!(parts.block_entity(id).is_empty());
-        assert!(!named.get(), "an empty table resolved the block's name");
-    }
 }
 
+pub(crate) enum ProviderTarget<'a> {
+    BlockEntity(&'a crate::BlockEntityTypeKey),
+    Id(&'a str),
+}

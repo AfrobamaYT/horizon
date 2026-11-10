@@ -7,14 +7,22 @@ mod block_tests {
     #[crate::__subscriptions]
     impl Hooks for Requests {
         fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
-            assert_eq!(registrar.block_key("stone").0, 0);
+            assert_eq!(
+                mod_vocab::__private::parts_installation::block_key_slot(
+                    registrar.block_key("stone")
+                ),
+                0
+            );
         }
     }
 
     #[test]
     fn completed_blocks_preserve_slots_and_bind_unrequested_states() {
-        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
-            .unwrap();
+        crate::__private::part_tests::install_parts_fixture(&[ModEntry::new(
+            "test",
+            Box::new(Requests),
+        )])
+        .unwrap();
         let definition = |_: &str| {
             horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&Default::default()], 0)
                 .map_err(|error| format!("{error:?}"))
@@ -39,13 +47,30 @@ mod block_tests {
         resolve_block_keys(names, definition).unwrap();
         let stone = block_key("minecraft:stone").unwrap();
         let air = block_key("minecraft:air").unwrap();
-        assert_eq!(stone, BlockKey(0));
-        assert_eq!(air, BlockKey(1));
-        assert_eq!(BlockKey::from_slot(air.0), Ok(air));
-        assert_eq!(block_key("minecraft:birch_log"), Some(BlockKey(2)));
-        assert_eq!(block_key("minecraft:zombie_head"), Some(BlockKey(3)));
-        assert_eq!(block_key("test:machine"), Some(BlockKey(4)));
-        assert!(BlockKey::from_slot(5).is_err());
+        assert_eq!(
+            stone,
+            mod_vocab::__private::parts_installation::block_key(0)
+        );
+        assert_eq!(air, mod_vocab::__private::parts_installation::block_key(1));
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_block_key(
+                mod_vocab::__private::parts_installation::block_key_slot(air)
+            ),
+            Ok(air)
+        );
+        assert_eq!(
+            block_key("minecraft:birch_log"),
+            Some(mod_vocab::__private::parts_installation::block_key(2))
+        );
+        assert_eq!(
+            block_key("minecraft:zombie_head"),
+            Some(mod_vocab::__private::parts_installation::block_key(3))
+        );
+        assert_eq!(
+            block_key("test:machine"),
+            Some(mod_vocab::__private::parts_installation::block_key(4))
+        );
+        assert!(mod_vocab::__private::parts_installation::validate_block_key(5).is_err());
         for name in [
             "",
             "missing:block",
@@ -70,8 +95,11 @@ mod block_tests {
             ]
         );
         // Reversing the registry's enumeration cannot change any completed key.
-        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
-            .unwrap();
+        crate::__private::part_tests::install_parts_fixture(&[ModEntry::new(
+            "test",
+            Box::new(Requests),
+        )])
+        .unwrap();
         resolve_block_keys(names.into_iter().rev(), definition).unwrap();
         for (name, slot) in [
             ("minecraft:stone", 0),
@@ -80,12 +108,23 @@ mod block_tests {
             ("minecraft:zombie_head", 3),
             ("test:machine", 4),
         ] {
-            assert_eq!(block_key(name), Some(BlockKey(slot)));
+            assert_eq!(
+                block_key(name),
+                Some(mod_vocab::__private::parts_installation::block_key(slot))
+            );
         }
         // Replacing Parts replaces the load-owned identities, not a second global registry.
-        crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        crate::__private::install_parts(&[], &crate::__private::part_tests::rule_schema(), |_| {
+            false
+        })
+        .unwrap();
         assert!(block_key("minecraft:air").is_none());
-        assert!(BlockKey::from_slot(air.0).is_err());
+        assert!(
+            mod_vocab::__private::parts_installation::validate_block_key(
+                mod_vocab::__private::parts_installation::block_key_slot(air)
+            )
+            .is_err()
+        );
     }
 }
 #[cfg(test)]
@@ -102,8 +141,11 @@ mod key_order_tests {
 
     #[test]
     fn registry_order_puts_vanilla_first_and_mods_after_them() {
-        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
-            .unwrap();
+        crate::__private::part_tests::install_parts_fixture(&[ModEntry::new(
+            "test",
+            Box::new(Requests),
+        )])
+        .unwrap();
         super::resolve_block_keys(
             [
                 "minecraft:air",
@@ -122,7 +164,7 @@ mod key_order_tests {
         .unwrap();
         let ordered: Vec<_> = super::block_keys()
             .into_iter()
-            .filter_map(|key| super::block_id(key))
+            .filter_map(|key| mod_vocab::__private::parts_installation::block_id(key))
             .collect();
         assert_eq!(
             ordered,
@@ -147,8 +189,15 @@ mod ordered_key_tests {
             .collect();
         assert_eq!(ordered, ["minecraft:pig", "minecraft:zombie", "test:probe"]);
         let first = super::entity_type_keys()[0];
-        assert_eq!(super::EntityTypeKey::from_slot(first.0), Ok(first));
-        assert!(super::EntityTypeKey::from_slot(u32::MAX).is_err());
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_entity_type_key(
+                mod_vocab::__private::parts_installation::entity_type_key_slot(first)
+            ),
+            Ok(first)
+        );
+        assert!(
+            mod_vocab::__private::parts_installation::validate_entity_type_key(u32::MAX).is_err()
+        );
         // A second load of the same registry keeps every key and the order.
         super::resolve_entity_types(["minecraft:pig", "minecraft:zombie", "test:probe"]).unwrap();
         assert_eq!(super::entity_type_keys(), super::entity_type_keys());
@@ -184,27 +233,40 @@ mod item_tests {
     #[crate::__subscriptions]
     impl Hooks for Requests {
         fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
-            assert_eq!(registrar.item_key("stick").0, 0);
+            assert_eq!(
+                mod_vocab::__private::parts_installation::item_key_slot(
+                    registrar.item_key("stick")
+                ),
+                0
+            );
         }
     }
 
     #[test]
     fn completed_items_preserve_forward_slots_and_refuse_unresolved_requests() {
-        crate::install_parts(
+        crate::__private::install_parts(
             &[ModEntry::new("test", Box::new(Requests))],
-            &crate::parts::tests::rule_schema(),
+            &crate::__private::part_tests::rule_schema(),
             |_| false,
         )
         .unwrap();
         assert!(resolve_items(["minecraft:stone"]).is_err());
         assert!(item_key("minecraft:stone").is_none());
         resolve_items(["minecraft:stone", "minecraft:stick", "minecraft:apple"]).unwrap();
-        assert_eq!(item_key("minecraft:stick"), Some(ItemKey(0)));
+        assert_eq!(
+            item_key("minecraft:stick"),
+            Some(mod_vocab::__private::parts_installation::item_key(0))
+        );
         let apple = item_key("minecraft:apple").unwrap();
-        assert_ne!(apple, ItemKey(0));
-        assert_eq!(ItemKey::from_slot(apple.0), Ok(apple));
+        assert_ne!(apple, mod_vocab::__private::parts_installation::item_key(0));
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_item_key(
+                mod_vocab::__private::parts_installation::item_key_slot(apple)
+            ),
+            Ok(apple)
+        );
         assert_eq!(item_id(apple), Some("minecraft:apple"));
-        assert!(ItemKey::from_slot(3).is_err());
+        assert!(mod_vocab::__private::parts_installation::validate_item_key(3).is_err());
     }
 }
 #[cfg(test)]
@@ -217,9 +279,19 @@ mod hot_call_key_tests {
         let _: fn(&mut dyn ClientHost, ItemKey, u32) -> Result<(), String> = |h, k, n| h.give(k, n);
         let _: fn(&dyn ClientHost, &str, ItemKey) -> bool = |h, e, k| h.enchantment_supports(e, k);
         crate::testing::with_mods(Vec::new().into(), || {
-            assert!(ItemKey::from_slot(u32::MAX).is_err());
-            assert_eq!(__private::item_key_id(ItemKey(u32::MAX)), None);
-            assert_eq!(__private::block_key_id(BlockKey(u32::MAX)), None);
+            assert!(mod_vocab::__private::parts_installation::validate_item_key(u32::MAX).is_err());
+            assert_eq!(
+                __private::item_key_id(mod_vocab::__private::parts_installation::item_key(
+                    u32::MAX
+                )),
+                None
+            );
+            assert_eq!(
+                __private::block_key_id(mod_vocab::__private::parts_installation::block_key(
+                    u32::MAX
+                )),
+                None
+            );
         });
     }
 }
@@ -227,7 +299,7 @@ mod hot_call_key_tests {
 mod fluid_mapping_tests {
     #[test]
     fn world_fluid_order_is_supplied_by_engine_not_key_order() {
-        crate::parts::tests::install_parts_fixture(&[]).unwrap();
+        crate::__private::part_tests::install_parts_fixture(&[]).unwrap();
         super::resolve_fluids(
             &["minecraft:lava", "minecraft:empty", "minecraft:water"],
             &["minecraft:empty", "minecraft:water", "minecraft:lava"],
@@ -243,3 +315,9 @@ mod fluid_mapping_tests {
         assert!(super::world_fluid_key(3).is_none());
     }
 }
+
+#[cfg(test)]
+use super::*;
+
+#[cfg(test)]
+use mod_vocab::__private::parts_installation::{block_id, item_id};

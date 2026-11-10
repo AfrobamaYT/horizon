@@ -44,7 +44,6 @@ pub fn entity_attribute_modifications() -> &'static [EntityAttributeModification
     installed().map_or(&[], |installed| &installed.entity_attribute_modifications)
 }
 
-
 /// Registrar operations for entity attributes.
 pub trait EntityAttributesRegistrar {
     /// Declare the initial attribute set of the mod's entity type `path`
@@ -93,25 +92,4 @@ pub trait EntityAttributesRegistrar {
         entity: &str,
         attributes: Vec<(String, Option<f64>)>,
     ) -> Result<(), crate::EntityAttributeError>;
-}
-
-
-
-/// Refuses a set that names an attribute twice or has a non-finite base.
-fn check_attribute_set<B>(
-    attributes: &[(String, B)],
-    base: impl Fn(&B) -> Option<f64>,
-) -> Result<(), crate::EntityAttributeError> {
-    for (index, (attribute, value)) in attributes.iter().enumerate() {
-        if base(value).is_some_and(|base| !base.is_finite()) {
-            return Err(crate::EntityAttributeError::NotFinite);
-        }
-        if attributes[..index]
-            .iter()
-            .any(|(other, _)| other == attribute)
-        {
-            return Err(crate::EntityAttributeError::DuplicateAttribute);
-        }
-    }
-    Ok(())
 }

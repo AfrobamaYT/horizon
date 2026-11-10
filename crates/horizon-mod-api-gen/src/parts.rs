@@ -87,6 +87,42 @@ pub(crate) fn source(root: &Path) -> Result<String, String> {
     Ok(modules)
 }
 
+/// Discover concrete authoring modules independently from the vocabulary's area traits.
+pub(crate) fn registration_source(root: &Path) -> Result<String, String> {
+    let dir = root.join("crates/horizon-mod-api/src/parts");
+    if !dir.exists() {
+        return Ok(String::new());
+    }
+    let mut modules = String::new();
+    let mut fixtures = String::new();
+    for kind in Catalog::modules(&dir).map_err(|e| e.to_string())? {
+        if kind == "mod" {
+            continue;
+        }
+        let path = dir.join(format!("{kind}.rs"));
+        let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+        modules.push_str(&format!(
+            "#[path = {:?}] mod {kind};\n",
+            path.to_string_lossy()
+        ));
+        modules.push_str(&reexport(&file.items, &kind));
+        for item in &file.items {
+            if let Item::Mod(module) = item
+                && module.ident == "tests"
+                && !matches!(module.vis, Visibility::Inherited)
+                && let Some((_, items)) = &module.content
+            {
+                fixtures.push_str(&reexport(items, &format!("super::{kind}::tests")));
+            }
+        }
+    }
+    modules.push_str(&format!(
+        "#[cfg(any(test, feature = \"testing\"))] pub mod tests {{ {fixtures} }}\n"
+    ));
+    Ok(modules)
+}
+
 /// Export just the discovered area traits; runtime-only Parts remain private.
 pub(crate) fn trait_exports(root: &Path) -> Result<String, String> {
     let file = syn::parse_file(&source(root)?).map_err(|e| e.to_string())?;

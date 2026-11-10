@@ -123,6 +123,8 @@ pub(crate) fn ensure_installed() -> Result<(), &'static str> {
     *INSTALLED.get_or_init(|| {
         mod_vocab::dispatch_scope::install(mod_vocab::dispatch_scope::Backend {
             unresolved_fluids: crate::fluid_state::ACCESS,
+            registration: &crate::parts::REGISTRATION_ACCESS,
+            diagnostics: &crate::parts::DIAGNOSTICS,
             enter: enter_native,
             leave: leave_native,
             profiler_enabled: &crate::__private::profiler::ENABLED,

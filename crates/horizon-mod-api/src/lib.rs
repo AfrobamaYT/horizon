@@ -37,3 +37,7 @@ mod load_state;
 pub use load_state::install_guest_packages;
 
 mod fluid_state;
+mod parts;
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;

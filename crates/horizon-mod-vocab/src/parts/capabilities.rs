@@ -1,11 +1,6 @@
 use super::*;
 pub(crate) type Capabilities<P> = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart<P>>>>;
 
-pub(crate) enum ProviderTarget<'a> {
-    BlockEntity(&'a crate::BlockEntityTypeKey),
-    Id(&'a str),
-}
-
 /// A capability provider a mod registered: a [`BlockProviderOf`], [`ItemProviderOf`] or
 /// [`EntityProviderOf`].
 #[derive(Clone)]
@@ -115,9 +110,6 @@ pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized>(
         false => Answer::Nobody,
     }
 }
-
-
-
 
 /// CapabilityProviders operations for capabilities.
 // hidden: per-kind lookup implementation, exposed for generated provider bindings

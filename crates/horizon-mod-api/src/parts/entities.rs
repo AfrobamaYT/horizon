@@ -32,7 +32,7 @@ pub mod tests {
                 r.entity_part("minecraft:zombie", Once);
             }
         }
-        let errors = install_parts(
+        let errors = crate::parts::install_parts(
             &[ModEntry::new("test", Box::new(Invalid))],
             &crate::parts::tests::rule_schema(),
             |_| false,
@@ -86,7 +86,7 @@ pub mod tests {
         fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
             (self.amount(host, 0) > 0).then(|| {
                 FluidResource::of(&FluidStack::new(
-                    crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
+                    mod_vocab::__private::fluid_key("minecraft:water").unwrap(),
                     1,
                 ))
             })
@@ -101,7 +101,7 @@ pub mod tests {
             if index == 0
                 && resource
                     == &FluidResource::of(&FluidStack::new(
-                        crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
+                        mod_vocab::__private::fluid_key("minecraft:water").unwrap(),
                         1,
                     ))
             {
@@ -166,10 +166,10 @@ impl EntitiesRegistrar for PartRegistrar {
             ProviderTarget::Id(kind),
             before_game,
             {
-                let handler = provider.handler();
+                let handler =
+                    mod_vocab::__private::parts_installation::entity_provider_handler(&provider);
                 (provider, handler)
             },
         );
     }
 }
-

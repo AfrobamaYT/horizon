@@ -11,6 +11,8 @@ static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 /// Platform callbacks, installed once before dispatch starts.
 #[doc(hidden)]
 pub struct Backend {
+    pub registration: &'static crate::__private::RegistrationAccess,
+    pub diagnostics: &'static Diagnostics,
     pub unresolved_fluids: crate::__private::UnresolvedFluidAccess,
     pub enter: fn(ModGuardFactory, ModCall) -> ModGuard,
     pub leave: fn(State),
@@ -27,6 +29,14 @@ pub struct Backend {
     pub set_phase: fn(crate::__private::PhaseState),
     pub packages: fn() -> std::sync::Arc<[crate::PackageInfo]>,
     pub registration_data: fn() -> Option<crate::__private::RegistrationData>,
+}
+
+// no wire: platform-owned diagnostic caches are observed through native callbacks.
+/// Cold diagnostic deduplication, owned by the platform rather than vocabulary lookups.
+#[doc(hidden)]
+pub struct Diagnostics {
+    pub first_broken_warning: fn(&str) -> bool,
+    pub first_off_thread_warning: fn() -> bool,
 }
 
 /// Plain per-call instrumentation data. The platform must validate the pool

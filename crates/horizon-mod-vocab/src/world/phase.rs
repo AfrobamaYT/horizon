@@ -862,34 +862,7 @@ pub(crate) fn with_test_package_inventory<R>(
 }
 
 #[cfg(test)]
-#[derive(Default)]
-pub(crate) struct TestReader {
-    pub registries: std::collections::BTreeMap<String, Arc<[String]>>,
-    pub tags: Arc<[(String, Arc<[String]>)]>,
-}
-#[cfg(test)]
-impl LoadReader for TestReader {
-    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
-        self.registries.get(name).cloned()
-    }
-    fn fluid_tags(&self) -> Arc<[(String, Arc<[String]>)]> {
-        self.tags.clone()
-    }
-    fn setting(&self, _: &str, _: &str) -> Option<String> {
-        None
-    }
-}
-#[cfg(test)]
-impl LoopReader for TestReader {
-    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
-        self.registries.get(name).cloned()
-    }
-    fn setting(&self, _: &str, _: &str) -> Option<String> {
-        None
-    }
-}
-
-
+pub(crate) use crate::testing::TestReader;
 
 #[test]
 fn phase_authority_advances_without_a_platform_backend() {

@@ -14,12 +14,10 @@ pub fn registry_installation_identity() -> (usize, Option<usize>) {
     } else {
         mods.as_ptr() as usize
     };
-    let parts = if crate::parts::REGISTERING_KEYS.with_borrow(Option::is_some) {
+    let parts = if crate::parts::registration_in_scope() {
         None
     } else {
         crate::parts::installed().map(|parts| parts as *const _ as usize)
     };
     (mods, parts)
 }
-
-

@@ -51,21 +51,22 @@ pub struct PartRegistrar {
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
-    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
+    pub(crate) attributes: Vec<AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
-    pub(crate) arm_poses: Vec<crate::client::arm_pose::PoseInfo>,
-    pub(crate) structure_types: Vec<crate::world::structure_type::StructureTypeInfo>,
-    pub(crate) dimensions: Vec<crate::world::dimension::DimensionInfo>,
+    pub(crate) arm_poses: Vec<PoseInfo>,
+    pub(crate) structure_types: Vec<StructureTypeInfo>,
+    pub(crate) dimensions: Vec<DimensionInfo>,
     pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
-    pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
+    pub(crate) chunk_generators: Vec<ChunkGeneratorInfo>,
     pub(crate) refused: Vec<String>,
 }
 
 impl PartRegistrar {
     pub(crate) fn new(mod_id: &'static str) -> Self {
+        let _ = crate::__private::initialize();
         Self {
             recipe_book_types: HashMap::new(),
             game_rule_categories: Vec::new(),
@@ -169,7 +170,9 @@ pub(crate) fn register_all(
     mods: &[ModEntry],
     dimension_shape: fn(&crate::DimensionSettings) -> bool,
 ) -> PartRegistrar {
-    let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| entry.id));
+    let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| {
+        mod_vocab::__private::parts_installation::mod_entry_id(entry)
+    }));
     registrar.dimension_shape = dimension_shape;
     struct RestoreKeys(Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>);
     impl Drop for RestoreKeys {
@@ -177,10 +180,11 @@ pub(crate) fn register_all(
             REGISTERING_KEYS.set(self.0.take());
         }
     }
+    let _active = ActiveRegistration::enter();
     let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
     let context = crate::RegistrationContext::new();
-    for (index, hooks) in crate::entered_registration(mods, "register").enumerate() {
-        registrar.mod_id = mods[index].id;
+    for (index, hooks) in mod_vocab::__private::entered_registration(mods, "register").enumerate() {
+        registrar.mod_id = mod_vocab::__private::parts_installation::mod_entry_id(&mods[index]);
         registrar.mod_index = index;
         hooks.register(&mut registrar, &context);
     }
@@ -193,7 +197,7 @@ pub(crate) fn register_all(
 /// the error lists every part refused, naming its mods.
 pub fn install_parts(
     mods: &[ModEntry],
-    schema: &crate::content::declarations::RuleSchema<'_>,
+    schema: &mod_vocab::__private::RuleSchema<'_>,
     dimension_shape: fn(&crate::DimensionSettings) -> bool,
 ) -> Result<(), Vec<String>> {
     install_registrar(register_all(mods, dimension_shape), schema)
@@ -201,7 +205,7 @@ pub fn install_parts(
 
 pub(crate) fn install_registrar(
     mut registrar: PartRegistrar,
-    schema: &crate::content::declarations::RuleSchema<'_>,
+    schema: &mod_vocab::__private::RuleSchema<'_>,
 ) -> Result<(), Vec<String>> {
     let slots = schema.validate(&registrar.game_rule_categories, &registrar.game_rules);
     if let Err(errors) = &slots {
@@ -211,7 +215,7 @@ pub(crate) fn install_registrar(
         return Err(registrar.refused);
     }
     let game_rule_slots = slots.expect("every schema refusal was collected");
-    let mut installed = Installed {
+    let installed = Installed {
         recipe_book_types: registrar.recipe_book_types,
         game_rule_slots,
         game_rules: registrar.game_rules,
@@ -238,29 +242,9 @@ pub(crate) fn install_registrar(
         structure_types: registrar.structure_types,
         dimensions: registrar.dimensions,
         chunk_generators: registrar.chunk_generators,
-        hook_bits: Vec::new(),
-        tag_hook_bits: vec![false; HOOK_COUNT],
     };
-    installed.keys.index_hooks();
-    installed.hook_bits = installed.keys.hooks.iter().map(Option::is_some).collect();
-    for (_, part) in &installed.tags.blocks {
-        for hook in part.part.block_subscribed().iter().flatten() {
-            installed.hook_bits[*hook as usize] = true;
-            installed.tag_hook_bits[*hook as usize] = true;
-        }
-    }
-    for (_, part) in &installed.tags.items {
-        for hook in part.part.item_subscribed().iter().flatten() {
-            installed.hook_bits[*hook as usize] = true;
-            installed.tag_hook_bits[*hook as usize] = true;
-        }
-    }
-    #[cfg(any(test, feature = "testing"))]
-    TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
-    #[cfg(not(any(test, feature = "testing")))]
-    if INSTALLED.set(installed).is_err() {
-        log::warn!("Mod parts already installed; keeping the first table");
-    }
+    mod_vocab::__private::parts_installation::install(installed);
+
     Ok(())
 }
 
@@ -294,17 +278,17 @@ pub mod tests {
     /// its installed test mods and Parts. Production mods request only the entries they use.
     pub fn register_game_keys(
         ids: impl IntoIterator<Item = String>,
-        schema: &crate::content::declarations::RuleSchema<'_>,
+        schema: &mod_vocab::__private::RuleSchema<'_>,
         dimension_shape: fn(&crate::DimensionSettings) -> bool,
     ) {
-        let mut registrar = super::register_all(crate::mods(), dimension_shape);
+        let mut registrar = super::register_all(crate::__private::mods(), dimension_shape);
         registrar.mod_id = "horizon";
         registrar.declare_fluid("definition_test");
         for id in ids {
             registrar.block_key(&id);
         }
         super::install_registrar(registrar, schema).unwrap();
-        crate::content::registry_keys::resolve_fluids(
+        mod_vocab::__private::resolve_fluids(
             &[
                 "minecraft:empty",
                 "minecraft:water",
@@ -331,13 +315,8 @@ pub mod tests {
         } else {
             format!("minecraft:{id}")
         };
-        BlockKey(
-            *super::requested_keys()
-                .blocks
-                .slots
-                .get(&canonical)
-                .expect("fixture requested this block"),
-        )
+        mod_vocab::__private::parts_installation::requested_block_key(&canonical)
+            .expect("fixture requested this block")
     }
 
     /// A registered effect exposed by the real load-owned mapping, also for unrequested vanilla entries.
@@ -347,26 +326,14 @@ pub mod tests {
         } else {
             format!("minecraft:{id}")
         };
-        EffectKey(
-            *super::resolved_effects()
-                .get()
-                .expect("fixture resolved effects")
-                .names
-                .slots
-                .get(&canonical)
-                .expect("fixture registered this effect"),
-        )
+        mod_vocab::__private::parts_installation::resolved_effect_key(&canonical)
+            .expect("fixture registered this effect")
     }
 
     #[cfg(test)]
     pub(crate) fn type_key(id: &str) -> BlockEntityTypeKey {
-        BlockEntityTypeKey(
-            *super::requested_keys()
-                .block_entity_types
-                .slots
-                .get(id)
-                .expect("fixture requested this type"),
-        )
+        mod_vocab::__private::parts_installation::requested_block_entity_type_key(id)
+            .expect("fixture requested this type")
     }
 
     /// The level the test worlds are.
@@ -376,11 +343,7 @@ pub mod tests {
 
     /// The block at `pos` in [`here`], through `side`.
     pub(crate) fn on(pos: [i32; 3], side: Option<Direction>) -> BlockSide {
-        BlockSide {
-            level: here(),
-            pos,
-            side,
-        }
+        mod_vocab::__private::parts_installation::block_side(here(), pos, side)
     }
 
     #[test]
@@ -400,16 +363,12 @@ pub mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::content::registry_keys::resolve_block_keys(
-                std::iter::empty(),
-                |_| unreachable!()
-            )
-            .unwrap_err(),
+            mod_vocab::__private::resolve_block_keys(std::iter::empty(), |_| unreachable!())
+                .unwrap_err(),
             ["mod lookup requested unknown block absent:block"]
         );
         assert_eq!(
-            crate::content::registry_keys::resolve_effects(std::iter::empty(), |_| None)
-                .unwrap_err(),
+            mod_vocab::__private::resolve_effects(std::iter::empty(), |_| None).unwrap_err(),
             ["mod lookup requested unknown effect absent:effect"]
         );
     }
@@ -589,7 +548,8 @@ pub mod tests {
         }
         fn state_block(&self, state: BlockState) -> Option<&str> {
             let metadata = crate::__private::block_definitions()?;
-            let slot = state.block().0 as usize;
+            let slot =
+                mod_vocab::__private::parts_installation::block_key_slot(state.block()) as usize;
             if u32::from(state.ordinal()) >= metadata.definitions.get(slot)?.state_count() {
                 return None;
             }
@@ -630,9 +590,9 @@ pub mod tests {
             ModEntry::new("test", Box::new(FixtureContent)),
         ]
         .into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::content::registry_keys::resolve_fluids(
+        mod_vocab::__private::resolve_fluids(
             &[
                 "minecraft:water",
                 "minecraft:lava",
@@ -643,7 +603,7 @@ pub mod tests {
             &[],
         )
         .unwrap();
-        crate::content::registry_keys::resolve_block_keys(
+        mod_vocab::__private::resolve_block_keys(
             [
                 "minecraft:air",
                 "minecraft:granite",
@@ -673,4 +633,3 @@ pub mod tests {
         TakesMore,
     }
 }
-

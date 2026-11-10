@@ -47,16 +47,6 @@ impl HookParts {
     }
 }
 
-impl Parts {
-    #[cfg(test)]
-    pub(crate) fn block_entity<'k>(
-        &self,
-        id: impl FnOnce() -> Option<&'k str>,
-    ) -> &[Attached<dyn BlockEntityPart>] {
-        attached(&self.block_entities, id)
-    }
-}
-
 /// The providers mods registered for capability `key` and the type of the block entity at
 /// `at`, for the game's own lookups (a hopper's): none where no mod registered one, so a
 /// vanilla container's lookup costs one table check and allocates nothing, and the game needn't
@@ -159,10 +149,6 @@ impl dyn Registrar + '_ {
     }
 }
 
-
-
-
-
 /// Registrar operations for block entities.
 pub trait BlockEntitiesRegistrar {
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
@@ -194,8 +180,6 @@ pub trait BlockEntitiesRegistrar {
         provider: BlockProviderOf,
     );
 }
-
-
 
 /// CapabilityProviders operations for block entities.
 // hidden: per-kind lookup implementation, exposed for generated provider bindings

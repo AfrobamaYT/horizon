@@ -15,16 +15,20 @@ fn resolved() -> &'static OnceLock<Particles> {
 impl ParticleKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|registering| {
-            let names = match registering {
-                Some(requests) => &requests.particles,
-                None => resolved()
-                    .get()
-                    .map_or(&crate::parts::requested_keys().particles, |p| &p.names),
-            };
-            names.id(slot).ok_or("unknown ParticleKey slot")?;
-            Ok(Self(slot))
-        })
+        let known = crate::parts::registration_membership(
+            crate::parts::RegistrationKeyKind::Particle,
+            slot,
+        )
+        .unwrap_or_else(|| {
+            resolved()
+                .get()
+                .map_or(&crate::parts::requested_keys().particles, |p| &p.names)
+                .id(slot)
+                .is_some()
+        });
+        known
+            .then_some(Self(slot))
+            .ok_or("unknown ParticleKey slot")
     }
 }
 
@@ -85,5 +89,3 @@ pub fn particle_kind(key: ParticleKey) -> Option<ParticleKind> {
 pub fn particle_name(key: ParticleKey) -> Option<&'static str> {
     resolved().get()?.names.id(key.0)
 }
-
-

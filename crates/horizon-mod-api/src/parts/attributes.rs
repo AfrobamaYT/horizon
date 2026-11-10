@@ -19,7 +19,7 @@ impl AttributesRegistrar for PartRegistrar {
             }
         };
         let result = (|| {
-            if crate::world::phase::LoadedMods::new()
+            if mod_vocab::__private::parts_installation::loaded_mods()
                 .get(self.mod_id)
                 .is_some_and(|package| package.side() != crate::Side::Both)
             {
@@ -151,4 +151,3 @@ mod tests {
         Sentiment::default()
     }
 }
-

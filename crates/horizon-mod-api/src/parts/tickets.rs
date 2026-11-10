@@ -3,9 +3,7 @@ use super::*;
 
 /// The ticket controllers `mods` register, for a test's mods.
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn registered_controllers(
-    mods: &[ModEntry],
-) -> (Vec<ControllerInfo>, Vec<crate::client::arm_pose::PoseInfo>) {
+pub(crate) fn registered_controllers(mods: &[ModEntry]) -> (Vec<ControllerInfo>, Vec<PoseInfo>) {
     let registered = register_all(mods, |_| false);
     (registered.controllers, registered.arm_poses)
 }
@@ -47,7 +45,7 @@ pub mod tests {
         let mut registrar = PartRegistrar::new("first");
         registrar.register_ticket_controller("quarry", true);
         install_registrar(registrar, &crate::parts::tests::rule_schema()).unwrap();
-        let controllers = installed_controllers();
+        let controllers = mod_vocab::__private::parts_installation::testing_controllers();
         assert_eq!(controllers.len(), 1);
         assert_eq!(&*controllers[0].id, "first:quarry");
         assert!(controllers[0].validates);
@@ -73,7 +71,7 @@ pub mod tests {
 
 impl TicketsRegistrar for PartRegistrar {
     fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController {
-        ticket_controller::register(
+        register(
             &mut self.controllers,
             &mut self.refused,
             self.mod_id,
@@ -83,3 +81,36 @@ impl TicketsRegistrar for PartRegistrar {
     }
 }
 
+/// Adds controller `name` of mod `mod_id` to `table`. A name in another mod's namespace, an empty
+/// one and a repeated id are written to `refused` and give a handle no table resolves.
+pub(crate) fn register(
+    table: &mut Vec<ControllerInfo>,
+    refused: &mut Vec<String>,
+    mod_id: &'static str,
+    name: &str,
+    validates: bool,
+) -> TicketController {
+    let id = match owned_declaration_id(mod_id, name) {
+        Ok(id) => id,
+        Err(reason) => {
+            refused.push(reason);
+            return mod_vocab::__private::parts_installation::ticket_controller(u32::MAX);
+        }
+    };
+    let refusal = {
+        table
+            .iter()
+            .any(|info| *info.id == *id)
+            .then(|| format!("{mod_id} registered ticket controller {id} twice"))
+    };
+    if let Some(refusal) = refusal {
+        refused.push(refusal);
+        return mod_vocab::__private::parts_installation::ticket_controller(u32::MAX);
+    }
+    table.push(ControllerInfo {
+        id: id.into(),
+        mod_id,
+        validates,
+    });
+    mod_vocab::__private::parts_installation::ticket_controller((table.len() - 1) as u32)
+}

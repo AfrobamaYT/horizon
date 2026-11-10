@@ -49,8 +49,6 @@ impl<P: ?Sized> Clone for Attached<P> {
     }
 }
 
-
-
 // no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
 /// Every mod's parts, by the id of the thing they are attached to, in dispatch order.
 #[derive(Clone, Default)]
@@ -161,10 +159,6 @@ pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::R
     installed().map_or(&EMPTY, |installed| &installed.registry_keys)
 }
 
-
-
-
-
 pub(crate) static INSTALLED: OnceLock<Installed> = OnceLock::new();
 #[cfg(any(test, feature = "testing"))]
 thread_local! {
@@ -176,7 +170,6 @@ thread_local! {
     pub(crate) static TEST_PART_LOOKUPS: Cell<usize> = const { Cell::new(0) };
 }
 pub(crate) static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
-pub(crate) static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// The validity context travels with the owning game's lookup table.
 pub(crate) struct GamePartsLookup {
@@ -463,7 +456,7 @@ impl Parts {
     pub(crate) fn for_hook(&self, hook: HookId) -> Option<&HookParts> {
         self.hooks.get(hook as usize).and_then(Option::as_ref)
     }
-    fn index_hooks(&mut self) {
+    pub(super) fn index_hooks(&mut self) {
         self.hooks = vec![None; HOOK_COUNT];
         macro_rules! index {
             ($field:ident, $method:ident) => {
@@ -516,17 +509,6 @@ pub(crate) fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
-
-
-
-
-
-
-
-
-
-
-
 #[cfg(test)]
 mod lookup_context_tests {
     use super::*;
@@ -566,6 +548,44 @@ mod lookup_context_tests {
         clear_game_parts();
         assert!(second.load(Ordering::Relaxed));
     }
+    #[test]
+    fn unsubscribed_scoped_dispatch_never_looks_up_parts() {
+        struct Level;
+        impl crate::LevelHost for Level {}
+        struct Hook;
+        #[mod_api::__subscriptions]
+        impl crate::Hooks for Hook {}
+        crate::testing::with_dispatch(
+            vec![crate::ModEntry::new("probe", Box::new(Hook))].into(),
+            || {
+                super::super::install_input(super::super::installation::InstalledInput::default());
+                TEST_PART_LOOKUPS.set(0);
+                let state =
+                    crate::BlockState::from(crate::BlockStateRecord::new(crate::BlockKey(0), 0));
+                let mut answer = false;
+                crate::dispatch_should_check_weak_power(
+                    &Level,
+                    crate::LevelDimension::Overworld,
+                    crate::BlockPos::new(0, 64, 0),
+                    state,
+                    crate::Direction::East,
+                    &mut answer,
+                );
+                assert_eq!(TEST_PART_LOOKUPS.get(), 0);
+                assert!(!answer);
+            },
+        );
+    }
+
+    #[test]
+    fn with_no_parts_the_block_entity_is_never_named() {
+        let parts = HookParts::default();
+        let named = std::cell::Cell::new(false);
+        let id = || {
+            named.set(true);
+            Some("test:press")
+        };
+        assert!(parts.block_entity(id).is_empty());
+        assert!(!named.get(), "an empty table resolved the block's name");
+    }
 }
-
-

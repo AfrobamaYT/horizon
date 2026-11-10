@@ -50,8 +50,8 @@ pub use item::types::{
 pub(crate) use runtime::TEST_MODS;
 pub use runtime::{Flow, ModEntry, Mods, subscribed_by};
 pub(crate) use runtime::{
-    entered, entered_parts, entered_registration, entered_with_id, install, listened, mark_mod,
-    mod_index_on, mods, set_mod_enabled,
+    entered, entered_parts, entered_with_id, install, listened, mark_mod, mod_index_on, mods,
+    set_mod_enabled,
 };
 pub use world::types::{
     BiomeSearch, BiomeSearchResult, BlockSoundType, BoolGameRuleKey, ChunkRef, ChunkStatus,
@@ -66,7 +66,6 @@ pub use world::types::{
 };
 #[doc(hidden)]
 pub(crate) mod built;
-
 
 pub use entity::types::Sentiment;
 pub(crate) use runtime::{enter_listener, listening, receives_cancelled};

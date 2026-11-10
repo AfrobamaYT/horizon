@@ -90,7 +90,7 @@ pub mod tests {
             Box::new(Modes),
         )])
         .unwrap();
-        let installed = super::installed_command_arguments();
+        let installed = mod_vocab::__private::parts_installation::testing_command_arguments();
         assert_eq!(installed.len(), 1);
         assert_eq!(&*installed[0].id, "test:mode");
         assert_eq!(installed[0].argument.parse("fast"), Ok("fast".to_owned()));
@@ -110,4 +110,3 @@ pub mod tests {
         assert!(errors[2].contains("invalid identifier \"test:\""));
     }
 }
-

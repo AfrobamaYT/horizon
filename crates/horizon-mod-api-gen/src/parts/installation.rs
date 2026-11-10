@@ -212,6 +212,8 @@ impl Schema {
             let mut fields = Vec::new();
             let mut conversions = Vec::new();
             let mut clones = Vec::new();
+            let mut reattached = Vec::new();
+            let mut reverse = Vec::new();
             for field in &record.fields {
                 let field_name = field
                     .ident
@@ -233,6 +235,18 @@ impl Schema {
                         "bool" | "char" | "usize" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" |
                         "i8" | "i16" | "i32" | "i64" | "i128" | "f32" | "f64"
                     ));
+                reverse.push(if copied {
+                    quote!(#field_name: input.#field_name)
+                } else {
+                    quote!(#field_name: input.#field_name.clone())
+                });
+                reattached.push(if field_name == "part" {
+                    quote!(part)
+                } else if copied {
+                    quote!(#field_name: self.#field_name)
+                } else {
+                    quote!(#field_name: self.#field_name.clone())
+                });
                 clones.push(if copied {
                     quote!(#field_name: self.#field_name)
                 } else {
@@ -264,9 +278,34 @@ impl Schema {
                     fn from(input: #input_name #ty_generics) -> Self { Self { #(#conversions,)* } }
                 }
             });
+            // Narrow testing read views reuse these leaf conversions without exposing Installed.
+            if !matches!(name.as_str(), "Parts" | "TagParts" | "Installed")
+                && record.fields.iter().all(|field| !self.changed(&field.ty))
+            {
+                let mut reverse_generics = generics.clone();
+                for field in &record.fields {
+                    let ty = &field.ty;
+                    reverse_generics
+                        .make_where_clause()
+                        .predicates
+                        .push(syn::parse_quote!(#ty: Clone));
+                }
+                let (reverse_impl, _, reverse_where) = reverse_generics.split_for_impl();
+                output.extend(quote! {
+                    impl #reverse_impl From<&#target #ty_generics> for #input_name #ty_generics #reverse_where {
+                        fn from(input: &#target #ty_generics) -> Self { Self { #(#reverse,)* } }
+                    }
+                });
+            }
             // Deriving Clone would incorrectly impose P: Clone on Arc<P>.
             if name == "Attached" {
                 output.extend(quote! {
+                    impl #impl_generics #input_name #ty_generics #where_clause {
+                        /// Retain ownership metadata when expanding one Part into another view.
+                        pub fn with_part<Q: ?Sized>(&self, part: Arc<Q>) -> AttachedInput<Q> {
+                            AttachedInput { #(#reattached,)* }
+                        }
+                    }
                     impl #impl_generics Clone for #input_name #ty_generics #where_clause {
                         fn clone(&self) -> Self { Self { #(#clones,)* } }
                     }
@@ -341,13 +380,46 @@ pub(super) fn source(root: &Path) -> Result<String, String> {
         return Err(format!("ambiguous private storage record {name}"));
     }
     let records = schema.emit()?;
+    let directory = root.join("crates/horizon-mod-vocab/src/parts/installation_tokens");
+    let mut factories = TokenStream::new();
+    if directory.exists() {
+        crate::rerun_if_changed(&directory.display());
+        for name in crate::catalog::Catalog::modules(&directory).map_err(|e| e.to_string())? {
+            let path = directory
+                .join(format!("{name}.rs"))
+                .to_string_lossy()
+                .into_owned();
+            let module = format_ident!("token_{name}");
+            factories.extend(quote! { #[path = #path] mod #module; pub use #module::*; });
+        }
+    }
+    let aliases = schema
+        .selected
+        .iter()
+        .map(|name| {
+            let input = format_ident!("{name}Input");
+            let original = format_ident!("{name}");
+            quote!(#input as #original)
+        })
+        .collect::<Vec<_>>();
     let parsed = syn::parse2(quote! {
         /// Implementation-only owned inputs; not a supported mod construction surface.
         #[doc(hidden)]
         pub mod installation {
             use super::*;
             #[allow(unused_imports)] use crate::*;
+            pub use super::registration_access::{install_input as install, parts_installed};
             #records
+            #factories
+        }
+        /// Imports for the concrete authoring half, generated from the same storage graph.
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! __mod_parts_authoring_imports {
+            () => {
+                use $crate::*;
+                use $crate::__private::parts_installation::{#(#aliases),*};
+            };
         }
     })
     .map_err(|e| e.to_string())?;
@@ -399,6 +471,12 @@ mod tests {
                 use std::{{collections::HashMap, sync::Arc}};
                 pub(crate) mod shared {{ {storage} }}
                 use shared::*;
+                mod registration_access {{
+                    pub fn parts_installed() -> bool {{ false }}
+                    pub fn install_input(input: super::installation::InstalledInput) {{
+                        let _: super::shared::Installed = input.into();
+                    }}
+                }}
                 {generated}
             }}
             pub use parts::installation;

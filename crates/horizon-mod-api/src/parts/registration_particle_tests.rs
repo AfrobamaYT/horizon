@@ -1,4 +1,7 @@
 #[cfg(test)]
+use super::*;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -10,7 +13,8 @@ mod tests {
             .particles
             .request("test", "test:spark")
             .unwrap();
-        crate::parts::install_registrar(registrar, &crate::parts::tests::rule_schema()).unwrap();
+        crate::parts::install_registrar(registrar, &crate::__private::part_tests::rule_schema())
+            .unwrap();
         let id = crate::Identifier::parse_namespaced("test:spark").unwrap();
         assert!(
             resolve_particles(["minecraft:smoke"], |_| Some(ParticleKind::Vanilla(7))).is_err()
@@ -33,8 +37,13 @@ mod tests {
             particle_key(&crate::Identifier::parse_namespaced("minecraft:smoke").unwrap()).unwrap();
         assert_eq!(particle_kind(smoke), Some(ParticleKind::Vanilla(7)));
         assert_eq!(calls.get(), 2);
-        assert_eq!(ParticleKey::from_slot(key.0), Ok(key));
-        assert!(ParticleKey::from_slot(u32::MAX).is_err());
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_particle_key(
+                mod_vocab::__private::parts_installation::particle_key_slot(key)
+            ),
+            Ok(key)
+        );
+        assert!(mod_vocab::__private::parts_installation::validate_particle_key(u32::MAX).is_err());
         assert!(resolve_particles(["test:spark"], |_| Some(ParticleKind::Custom)).is_err());
         assert_eq!(particle_kind(smoke), Some(ParticleKind::Vanilla(7)));
         assert_eq!(calls.get(), 2);

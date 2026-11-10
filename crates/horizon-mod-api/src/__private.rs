@@ -1,4 +1,17 @@
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub use crate::parts::tests as part_tests;
 pub use mod_vocab::__private::*;
+
+/// Validate registrations above the engine, deriving lookup indexes below it.
+pub fn install_parts(
+    mods: &[crate::ModEntry],
+    schema: &RuleSchema<'_>,
+    dimension_shape: fn(&crate::DimensionSettings) -> bool,
+) -> Result<(), Vec<String>> {
+    initialize().map_err(|reason| vec![reason.to_owned()])?;
+    crate::parts::install_parts(mods, schema, dimension_shape)
+}
 #[path = "profiler.rs"]
 pub mod profiler;
 

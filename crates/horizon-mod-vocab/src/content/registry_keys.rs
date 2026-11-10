@@ -5,49 +5,44 @@ use crate::{
 };
 
 impl BlockKey {
-    /// Validate an incoming slot against declarations, not a world's resolved mappings.
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|registering| {
-            registering
-                .map(|requests| &requests.blocks)
-                .unwrap_or_else(|| block_names())
-                .id(slot)
-                .ok_or("unknown BlockKey slot")?;
-            Ok(Self(slot))
-        })
+        let known =
+            crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Block, slot)
+                .unwrap_or_else(|| (block_names()).id(slot).is_some());
+        known.then_some(Self(slot)).ok_or("unknown BlockKey slot")
     }
 }
 
 impl FluidKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|registering| {
-            let names = match registering {
-                Some(requests) => &requests.fluids,
-                None => crate::parts::resolved_fluids()
-                    .get()
-                    .unwrap_or(&crate::parts::requested_keys().fluids),
-            };
-            names.id(slot).ok_or("unknown FluidKey slot")?;
-            Ok(Self(slot))
-        })
+        let known =
+            crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Fluid, slot)
+                .unwrap_or_else(|| {
+                    (crate::parts::resolved_fluids()
+                        .get()
+                        .unwrap_or(&crate::parts::requested_keys().fluids))
+                    .id(slot)
+                    .is_some()
+                });
+        known.then_some(Self(slot)).ok_or("unknown FluidKey slot")
     }
 }
 
 impl ItemKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|registering| {
-            let names = match registering {
-                Some(requests) => &requests.items,
-                None => resolved_items()
-                    .get()
-                    .unwrap_or(&crate::parts::requested_keys().items),
-            };
-            names.id(slot).ok_or("unknown ItemKey slot")?;
-            Ok(Self(slot))
-        })
+        let known =
+            crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Item, slot)
+                .unwrap_or_else(|| {
+                    (resolved_items()
+                        .get()
+                        .unwrap_or(&crate::parts::requested_keys().items))
+                    .id(slot)
+                    .is_some()
+                });
+        known.then_some(Self(slot)).ok_or("unknown ItemKey slot")
     }
 }
 
@@ -285,37 +280,40 @@ pub fn enchantment_key_id(key: EnchantmentKey) -> Option<String> {
 }
 
 impl EffectKey {
-    /// Resolved effects also expose registry entries no mod explicitly requested.
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|registering| {
-            let names = match registering {
-                Some(requests) => &requests.effects,
-                None => crate::parts::resolved_effects()
-                    .get()
-                    .map_or(&crate::parts::requested_keys().effects, |effects| {
-                        &effects.names
-                    }),
-            };
-            names.id(slot).ok_or("unknown EffectKey slot")?;
-            Ok(Self(slot))
-        })
+        let known =
+            crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Effect, slot)
+                .unwrap_or_else(|| {
+                    (crate::parts::resolved_effects()
+                        .get()
+                        .map_or(&crate::parts::requested_keys().effects, |effects| {
+                            &effects.names
+                        }))
+                    .id(slot)
+                    .is_some()
+                });
+        known.then_some(Self(slot)).ok_or("unknown EffectKey slot")
     }
 }
 
 impl BlockEntityTypeKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|registering| {
-            let names = match registering {
-                Some(requests) => &requests.block_entity_types,
-                None => crate::parts::resolved_block_entity_types()
-                    .get()
-                    .unwrap_or(&crate::parts::requested_keys().block_entity_types),
-            };
-            names.id(slot).ok_or("unknown BlockEntityTypeKey slot")?;
-            Ok(Self(slot))
-        })
+        let known = crate::parts::registration_membership(
+            crate::parts::RegistrationKeyKind::BlockEntityType,
+            slot,
+        )
+        .unwrap_or_else(|| {
+            (crate::parts::resolved_block_entity_types()
+                .get()
+                .unwrap_or(&crate::parts::requested_keys().block_entity_types))
+            .id(slot)
+            .is_some()
+        });
+        known
+            .then_some(Self(slot))
+            .ok_or("unknown BlockEntityTypeKey slot")
     }
 }
 
@@ -468,13 +466,9 @@ pub fn block_entity_type_name(key: BlockEntityTypeKey) -> Option<&'static str> {
 }
 
 pub(crate) fn block_entity_type_display_name(key: BlockEntityTypeKey) -> String {
-    crate::parts::with_registering_keys(|registering| {
-        registering
-            .and_then(|r| r.block_entity_types.id(key.0))
-            .or_else(|| block_entity_type_name(key))
-            .unwrap_or("<invalid>")
-            .to_owned()
-    })
+    crate::parts::registration_name(crate::parts::RegistrationKeyKind::BlockEntityType, key.0)
+        .or_else(|| block_entity_type_name(key).map(str::to_owned))
+        .unwrap_or_else(|| "<invalid>".into())
 }
 
 /// Resolve requested effects once, after every mod's content has been registered.
@@ -548,24 +542,11 @@ pub fn effect_key_by_index(index: usize) -> Option<EffectKey> {
 impl crate::BoolGameRuleKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|keys| {
-            keys.unwrap_or(crate::parts::requested_keys())
-                .game_rules
-                .id(slot)
-                .ok_or("unknown bool rule slot")?;
-            Ok(Self(slot))
-        })
+        let known = crate::parts::registration_membership(
+            crate::parts::RegistrationKeyKind::GameRule,
+            slot,
+        )
+        .unwrap_or_else(|| crate::parts::requested_keys().game_rules.id(slot).is_some());
+        known.then_some(Self(slot)).ok_or("unknown bool rule slot")
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-

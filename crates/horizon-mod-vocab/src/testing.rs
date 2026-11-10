@@ -1,5 +1,5 @@
 //! Test support, enabled by the `testing` feature: scoped trait-mod installation
-//! ([`with_mods`]), and [`FakeHost`], a host built from small fakes so that a mod's tests run
+//! ([`with_dispatch`]), and [`FakeHost`], a host built from small fakes so that a mod's tests run
 //! without starting the game.
 //!
 //! ```
@@ -61,19 +61,16 @@ const FAKE_EPOCH: u64 = 1;
 ///
 /// The test allocation is leaked because dispatch exposes a static slice. Nested scopes and
 /// panic unwinding restore the preceding list; other threads are unaffected.
-pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
+#[doc(hidden)]
+pub fn with_dispatch<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
     struct Restore(Option<&'static Installed>);
     impl Drop for Restore {
         fn drop(&mut self) {
             TEST_MODS.set(self.0);
         }
     }
-    let (controllers, poses) = crate::parts::registered_controllers(&mods);
-    let controllers: &'static [_] = Box::leak(controllers.into_boxed_slice());
-    let _poses = crate::client::arm_pose::test_table(poses);
     let installed = Box::leak(Box::new(Installed::new(mods)));
     let _restore = Restore(TEST_MODS.replace(Some(installed)));
-    let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
     f()
 }
 
@@ -504,4 +501,43 @@ crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, 
 
 impl crate::prelude::PlayersClientBackend for FakeHost {}
 
+/// Scope the controller lookup rows prepared by the API-owned registration fixture.
+#[doc(hidden)]
+pub fn with_controller_tables<R>(
+    controllers: Vec<crate::__private::parts_installation::ControllerInfoInput>,
+    poses: Vec<crate::__private::parts_installation::PoseInfoInput>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let controllers: Vec<ControllerInfo> = controllers.into_iter().map(Into::into).collect();
+    let controllers: &'static [_] = Box::leak(controllers.into_boxed_slice());
+    let _poses = crate::client::arm_pose::test_table(poses.into_iter().map(Into::into).collect());
+    let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
+    f()
+}
 
+// no wire: read-only in-process phase fixture metadata.
+#[derive(Default)]
+#[doc(hidden)]
+pub struct TestReader {
+    pub registries: std::collections::BTreeMap<String, std::sync::Arc<[String]>>,
+    pub tags: std::sync::Arc<[(String, std::sync::Arc<[String]>)]>,
+}
+impl crate::LoadReader for TestReader {
+    fn registry(&self, name: &str) -> Option<std::sync::Arc<[String]>> {
+        self.registries.get(name).cloned()
+    }
+    fn fluid_tags(&self) -> std::sync::Arc<[(String, std::sync::Arc<[String]>)]> {
+        self.tags.clone()
+    }
+    fn setting(&self, _: &str, _: &str) -> Option<String> {
+        None
+    }
+}
+impl crate::LoopReader for TestReader {
+    fn registry(&self, name: &str) -> Option<std::sync::Arc<[String]>> {
+        self.registries.get(name).cloned()
+    }
+    fn setting(&self, _: &str, _: &str) -> Option<String> {
+        None
+    }
+}

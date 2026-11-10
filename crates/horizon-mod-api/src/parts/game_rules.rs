@@ -116,8 +116,18 @@ pub mod tests {
             .unwrap();
         good.game_rule_category("machines").unwrap();
         super::install_registrar(good, &crate::parts::tests::rule_schema()).unwrap();
-        assert!(crate::BoolGameRuleKey::from_slot(key.0).is_ok());
-        assert!(crate::BoolGameRuleKey::from_slot(key.0 + 1).is_err());
+        assert!(
+            mod_vocab::__private::parts_installation::validate_bool_game_rule_key(
+                mod_vocab::__private::parts_installation::bool_game_rule_key_slot(key)
+            )
+            .is_ok()
+        );
+        assert!(
+            mod_vocab::__private::parts_installation::validate_bool_game_rule_key(
+                mod_vocab::__private::parts_installation::bool_game_rule_key_slot(key) + 1
+            )
+            .is_err()
+        );
         assert!(super::game_rule_bool_slot(key).is_some());
     }
 
@@ -183,12 +193,14 @@ impl GameRulesRegistrar for PartRegistrar {
                 .game_rules
                 .request(self.mod_id, &id)
                 .map_err(|_| crate::GameRuleError::InvalidId)?;
-            self.game_rules.push(crate::GameRuleDecl {
-                name: id,
-                category: category.into(),
-                default,
-            });
-            Ok(crate::BoolGameRuleKey(slot))
+            self.game_rules.push(
+                mod_vocab::__private::parts_installation::game_rule_declaration(
+                    id,
+                    category.into(),
+                    default,
+                ),
+            );
+            Ok(mod_vocab::__private::parts_installation::bool_game_rule_key(slot))
         })();
         if let Err(error) = &result {
             self.refused
@@ -197,4 +209,3 @@ impl GameRulesRegistrar for PartRegistrar {
         result
     }
 }
-

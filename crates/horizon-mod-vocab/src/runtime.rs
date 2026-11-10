@@ -152,7 +152,10 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
-pub(crate) fn entered_registration<'a>(mods: &'a [ModEntry], hook: &'static str) -> Entered<'a> {
+pub fn entered_registration<'a>(
+    mods: &'a [ModEntry],
+    hook: &'static str,
+) -> impl Iterator<Item = &'a dyn Hooks> + 'a {
     Entered {
         mods: mods.iter(),
         hook,

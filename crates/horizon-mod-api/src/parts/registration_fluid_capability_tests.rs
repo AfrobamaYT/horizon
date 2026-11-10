@@ -1,7 +1,10 @@
 #[cfg(test)]
+use super::*;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::phase::TestReader;
+    use crate::testing::TestReader;
     use crate::{DataLoadOrigin, OwningLoad};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -11,8 +14,11 @@ mod tests {
     /// flowing fluid too.
     fn load() -> TestReader {
         crate::__private::install(Default::default());
-        crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::content::registry_keys::resolve_fluids(
+        crate::__private::install_parts(&[], &crate::__private::part_tests::rule_schema(), |_| {
+            false
+        })
+        .unwrap();
+        mod_vocab::__private::resolve_fluids(
             &[
                 "minecraft:empty",
                 "minecraft:water",
@@ -51,10 +57,7 @@ mod tests {
         .ok()
     }
     fn stack(fluid: &str, amount: u32) -> FluidStack {
-        FluidStack::new(
-            crate::content::registry_keys::fluid_key(fluid).unwrap(),
-            amount,
-        )
+        FluidStack::new(mod_vocab::__private::fluid_key(fluid).unwrap(), amount)
     }
 
     #[test]

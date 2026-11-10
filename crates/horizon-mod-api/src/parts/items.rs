@@ -17,9 +17,11 @@ pub mod tests {
     /// Two three-slot game chests, `FROM`, holding `from`, and an empty `INTO`.
     pub(crate) fn two_chests(from: [Option<ItemStack>; 3]) -> FakeHost {
         let mut host = FakeHost::new();
-        host.level.block_entity(FROM).items = Some(FakeContainer {
-            slots: from.into(),
-            limit: 64,
+        host.level.block_entity(FROM).items = Some({
+            let mut value = FakeContainer::new(0);
+            value.slots = from.into();
+            value.limit = 64;
+            value
         });
         host.level.block_entity(INTO).with_items(3);
         host
@@ -80,7 +82,6 @@ pub mod tests {
 
     use super::*;
     use crate::parts::tests::*;
-    use crate::*;
 
     #[test]
     pub(crate) fn item_keys_validate_forward_references_and_reused_slots() {
@@ -92,14 +93,24 @@ pub mod tests {
                 let vanilla = r.item_key("stick");
                 assert_eq!(vanilla, r.item_key("minecraft:stick"));
                 let later = r.item_key("later:widget");
-                assert_eq!(crate::ItemKey::from_slot(vanilla.0), Ok(vanilla));
-                assert!(crate::ItemKey::from_slot(later.0 + 1).is_err());
+                assert_eq!(
+                    mod_vocab::__private::parts_installation::validate_item_key(
+                        mod_vocab::__private::parts_installation::item_key_slot(vanilla)
+                    ),
+                    Ok(vanilla)
+                );
+                assert!(
+                    mod_vocab::__private::parts_installation::validate_item_key(
+                        mod_vocab::__private::parts_installation::item_key_slot(later) + 1
+                    )
+                    .is_err()
+                );
                 *self.0.lock().unwrap() = vec![vanilla, later];
             }
         }
         let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mods: Mods = vec![ModEntry::new("requester", Box::new(Keys(keys.clone())))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let check = |known: &dyn Fn(&str) -> bool| {
             resolve_parts(
@@ -114,11 +125,11 @@ pub mod tests {
         check(&|id| ["minecraft:stick", "later:widget"].contains(&id)).unwrap();
         let keys = keys.lock().unwrap();
         assert_eq!(
-            crate::content::registry_keys::item_id(keys[0]),
+            mod_vocab::__private::parts_installation::item_id(keys[0]),
             Some("minecraft:stick")
         );
         assert_eq!(
-            crate::content::registry_keys::item_id(keys[1]),
+            mod_vocab::__private::parts_installation::item_id(keys[1]),
             Some("later:widget")
         );
         let super::ResolvePartsError::ItemKeys(errors) =
@@ -128,10 +139,10 @@ pub mod tests {
         };
         assert_eq!(
             errors,
-            [super::ItemKeyError {
-                mod_id: "requester",
-                id: "later:widget".into()
-            }]
+            [mod_vocab::__private::parts_installation::item_key_error(
+                "requester",
+                "later:widget".into()
+            )]
         );
     }
 
@@ -230,10 +241,10 @@ pub mod tests {
     }
 
     pub(crate) fn fixture_item_key(id: &str) -> ItemKey {
-        if super::super::installed().is_none() {
+        if !mod_vocab::__private::parts_installation::parts_installed() {
             install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         }
-        crate::content::registry_keys::resolve_items([
+        mod_vocab::__private::resolve_items([
             "minecraft:stick",
             "minecraft:iron_helmet",
             "minecraft:iron_sword",
@@ -261,7 +272,7 @@ pub mod tests {
             "test:robot",
         ])
         .unwrap();
-        crate::content::registry_keys::item_key(id).expect("explicit fixture item")
+        mod_vocab::__private::item_key(id).expect("explicit fixture item")
     }
 
     pub(crate) fn stack(item: &str, count: u32, damage: u32) -> ItemStack {
@@ -616,7 +627,7 @@ pub mod tests {
         stacks
             .into_iter()
             .map(
-                |s| match crate::content::registry_keys::item_id(s.item()).unwrap() {
+                |s| match mod_vocab::__private::parts_installation::item_id(s.item()).unwrap() {
                     "test:pouch" | "test:bag" => s.count() * (1 + s.damage()),
                     _ => s.count(),
                 },
@@ -766,7 +777,7 @@ pub mod tests {
     #[cfg(test)]
     impl Host for Shelf {
         fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_ref(self))
         }
     }
     #[cfg(test)]
@@ -774,7 +785,9 @@ pub mod tests {
     #[cfg(test)]
     impl ServerHost for Shelf {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_mut_ref(
+                self,
+            ))
         }
     }
     #[cfg(test)]
@@ -1092,19 +1105,25 @@ pub mod tests {
         let mut world = two_chests([Some(stack("minecraft:stick", 5, 0)), None, None]);
         let host: &mut dyn ServerHost = &mut world;
         let from = here().capability(host, &ITEMS, FROM, None).unwrap();
-        let liar: Capability<dyn ResourceHandler<ItemResource>> = Capability {
-            handler: Box::new(TakesMore),
-            owner: Some("doubler"),
-        };
+        let liar: Capability<dyn ResourceHandler<ItemResource>> =
+            mod_vocab::__private::parts_installation::test_capability(
+                Box::new(TakesMore),
+                Some("doubler"),
+            );
         let moved =
             host.transaction(|host, tx| move_resources(host, &from, &liar, |_| true, 64, tx));
         let owner = "doubler".to_owned();
-        assert_eq!(moved, Err(Overanswered { owner }));
+        assert_eq!(
+            moved,
+            Err(mod_vocab::__private::parts_installation::overanswered(
+                owner
+            ))
+        );
         assert_eq!(
             chest(&mut world, FROM).slots[0],
             Some(stack("minecraft:stick", 5, 0))
         );
-        assert!(crate::block::item_place::warned_about("doubler"));
+        assert!(crate::parts::warned_about("doubler"));
     }
 
     #[test]
@@ -1352,7 +1371,7 @@ pub mod tests {
         let bread = stack("minecraft:bread", 3, 0);
         assert_eq!(exchange(&mut shelf_, &shelf_slot(0), bread.clone()), 3);
         assert_eq!(shelf_.slots, [Some(bread), None, None]);
-        assert!(!crate::block::item_place::warned_about("the game"));
+        assert!(!crate::parts::warned_about("the game"));
 
         // A transfer amount is not a resident stack: 128 offered, one accepted,
         // and a 127-item remainder are valid even though this slot's maximum is 64.
@@ -1393,7 +1412,7 @@ pub mod tests {
         // Offered 2 apples, it keeps none and answers 7 taken: undone, and the slot stays empty.
         assert_eq!(insert(&mut shelf_, &shelf_slot(1), apples(2)), 0);
         assert_eq!(shelf_.slots, [Some(apples(10)), None, None]);
-        assert!(crate::block::item_place::warned_about("doubler"));
+        assert!(crate::parts::warned_about("doubler"));
     }
 
     #[test]
@@ -1648,7 +1667,7 @@ pub mod tests {
             })
             .unwrap();
             assert!(player_of(&p).given.is_empty());
-            assert!(crate::block::item_place::warned_about("doubler"));
+            assert!(crate::parts::warned_about("doubler"));
         }
     }
 
@@ -1686,13 +1705,13 @@ pub mod tests {
             insert(&mut player, &charm, stack("minecraft:stick", 3, 0)),
             3
         );
-        assert!(crate::set_mod_enabled("chemist", false));
+        assert!(crate::__private::set_mod_enabled("chemist", false));
         assert_eq!(
             charm.amount(&mut player),
             3,
             "another mod's flag is independent"
         );
-        assert!(crate::set_mod_enabled("doubler", false));
+        assert!(crate::__private::set_mod_enabled("doubler", false));
         assert!(charm.stack(&mut player).is_none());
         assert_eq!(insert(&mut player, &charm, stick()), 0);
         let resource = ItemResource::of(&stick());
@@ -1705,7 +1724,7 @@ pub mod tests {
             3,
             "disabled writes leave the place unchanged"
         );
-        assert!(crate::set_mod_enabled("doubler", true));
+        assert!(crate::__private::set_mod_enabled("doubler", true));
         assert_eq!(charm.amount(&mut player), 3);
         assert_eq!(insert(&mut player, &charm, stick()), 1);
         assert_eq!(
@@ -1742,7 +1761,7 @@ pub mod tests {
     #[cfg(test)]
     impl Host for HeldItem {
         fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_ref(self))
         }
     }
     #[cfg(test)]
@@ -1750,7 +1769,9 @@ pub mod tests {
     #[cfg(test)]
     impl ServerHost for HeldItem {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_mut_ref(
+                self,
+            ))
         }
     }
     #[cfg(test)]
@@ -1765,10 +1786,10 @@ impl ItemsRegistrar for PartRegistrar {
             .items
             .request(self.mod_id, id)
         {
-            Ok(slot) => crate::ItemKey(slot),
+            Ok(slot) => mod_vocab::__private::parts_installation::item_key(slot),
             Err(error) => {
                 self.refused.push(error);
-                crate::ItemKey(u32::MAX)
+                mod_vocab::__private::parts_installation::item_key(u32::MAX)
             }
         }
     }
@@ -1783,12 +1804,15 @@ impl ItemsRegistrar for PartRegistrar {
             .registry_keys
             .borrow()
             .items
-            .id(item.0)
+            .id(mod_vocab::__private::parts_installation::item_key_slot(
+                item,
+            ))
             .map(str::to_owned);
         let Some(id) = id else {
             self.refused.push(format!(
                 "mod {}: invalid item key slot {}",
-                self.mod_id, item.0
+                self.mod_id,
+                mod_vocab::__private::parts_installation::item_key_slot(item)
             ));
             return;
         };
@@ -1813,7 +1837,8 @@ impl ItemsRegistrar for PartRegistrar {
             ProviderTarget::Id(item),
             before_game,
             {
-                let handler = provider.handler();
+                let handler =
+                    mod_vocab::__private::parts_installation::item_provider_handler(&provider);
                 (provider, handler)
             },
         );
@@ -1861,7 +1886,7 @@ impl ItemsRegistrar for PartRegistrar {
             match &placement {
                 crate::TooltipPlacement::Before(anchor)
                 | crate::TooltipPlacement::After(anchor)
-                    if !crate::TOOLTIP_DETAILS.contains(&anchor.as_str()) =>
+                    if !TOOLTIP_DETAILS.contains(&anchor.as_str()) =>
                 {
                     Some(format!(
                         "{} anchors a tooltip appender for {component:?} to {anchor:?}, which is not a component detail Horizon lists",
@@ -1885,3 +1910,30 @@ impl ItemsRegistrar for PartRegistrar {
     }
 }
 
+/// The component details a tooltip lists, in the order the game lists them after the item's own
+/// lines. `TooltipPlacement::Before` and `After` name one of these.
+pub(crate) const TOOLTIP_DETAILS: &[&str] = &[
+    "minecraft:tropical_fish/pattern",
+    "minecraft:instrument",
+    "minecraft:map_id",
+    "minecraft:bees",
+    "minecraft:container",
+    "minecraft:banner_patterns",
+    "minecraft:written_book_content",
+    "minecraft:charged_projectiles",
+    "minecraft:fireworks",
+    "minecraft:potion_contents",
+    "minecraft:jukebox_playable",
+    "minecraft:trim",
+    "minecraft:stored_enchantments",
+    "minecraft:enchantments",
+    "minecraft:dyed_color",
+    "minecraft:lore",
+    "minecraft:attribute_modifiers",
+    "minecraft:unbreakable",
+    "minecraft:ominous_bottle_amplifier",
+    "minecraft:suspicious_stew_effects",
+    "minecraft:block_state",
+    "minecraft:entity_data",
+    "minecraft:block_entity_data",
+];

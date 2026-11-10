@@ -1,4 +1,7 @@
 #[cfg(test)]
+use super::*;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Backend, BackendRef, Host, HostBlockStates};
@@ -34,7 +37,7 @@ mod tests {
     }
     impl Host for MetadataHost {
         fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
+            Some(mod_vocab::__private::parts_installation::backend_ref(self))
         }
     }
     crate::impl_host_areas!(MetadataHost);
@@ -44,7 +47,7 @@ mod tests {
 
     #[test]
     fn metadata_service_reads_edits_and_refuses_invalid_transport() {
-        crate::parts::tests::install_parts_fixture(&[]).unwrap();
+        crate::__private::part_tests::install_parts_fixture(&[]).unwrap();
         let states = [
             std::collections::BTreeMap::from([("lit".into(), "false".into())]),
             std::collections::BTreeMap::from([("lit".into(), "true".into())]),
@@ -62,7 +65,7 @@ mod tests {
         let block = crate::__private::block_key("probe:lamp").unwrap();
         assert_eq!(metadata.name(block), Ok("probe:lamp"));
         assert_eq!(
-            metadata.name(BlockKey(999)),
+            metadata.name(mod_vocab::__private::parts_installation::block_key(999)),
             Err(BlockStateError::UnknownBlock)
         );
         assert_eq!(
@@ -95,7 +98,9 @@ mod tests {
             ["false", "true"]
         );
         assert_eq!(
-            crate::__private::block_state_range(BlockKey(999)),
+            crate::__private::block_state_range(
+                mod_vocab::__private::parts_installation::block_key(999)
+            ),
             Err(BlockStateError::UnknownBlock)
         );
         assert_eq!(
@@ -116,7 +121,10 @@ mod tests {
             Err(BlockStateError::UnknownState)
         );
         assert_eq!(
-            metadata.property(BlockStateRecord::new(BlockKey(999), 0), "lit"),
+            metadata.property(
+                BlockStateRecord::new(mod_vocab::__private::parts_installation::block_key(999), 0),
+                "lit"
+            ),
             Err(BlockStateError::UnknownBlock)
         );
         assert_eq!(

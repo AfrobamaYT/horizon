@@ -86,7 +86,6 @@ impl StructuresRegistrar for PartRegistrar {
             return;
         }
         self.structure_types
-            .push(crate::world::structure_type::StructureTypeInfo { id: id.into(), ty });
+            .push(StructureTypeInfo { id: id.into(), ty });
     }
 }
-

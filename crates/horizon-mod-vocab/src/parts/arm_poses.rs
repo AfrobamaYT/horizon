@@ -1,5 +1,3 @@
-use super::*;
-
 /// Client humanoid pose registrations, shared by native and wasm mods.
 pub trait ArmPosesRegistrar {
     /// Register a pose once in `Hooks::register`, keeping the returned token for
@@ -13,7 +11,3 @@ pub trait ArmPosesRegistrar {
         affects_offhand: bool,
     ) -> crate::CustomArmPose;
 }
-
-
-
-

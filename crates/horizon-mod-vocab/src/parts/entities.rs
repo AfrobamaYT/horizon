@@ -40,7 +40,9 @@ pub fn entity_parts() -> PartsRef {
     if !game_thread {
         let thread = std::thread::current();
         let thread = thread.name().unwrap_or("unnamed");
-        if !OFF_THREAD_WARNED.swap(true, Ordering::Relaxed) {
+        if crate::dispatch_scope::backend()
+            .is_none_or(|backend| (backend.diagnostics.first_off_thread_warning)())
+        {
             log::warn!(
                 "Native entity parts asked off a game thread ({thread}): a mob built there keeps no mod goals"
             );
@@ -162,8 +164,6 @@ impl dyn Registrar + '_ {
     }
 }
 
-
-
 /// Registrar operations for entities.
 pub trait EntitiesRegistrar {
     /// Attach `part`, of kind `kind`, to the entity type `entity`
@@ -187,8 +187,6 @@ pub trait EntitiesRegistrar {
         provider: EntityProviderOf,
     );
 }
-
-
 
 /// CapabilityProviders operations for entities.
 // hidden: per-kind lookup implementation, exposed for generated provider bindings

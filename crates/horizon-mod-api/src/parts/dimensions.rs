@@ -1,5 +1,6 @@
 //! Concrete authoring extracted verbatim from the vocabulary layer.
 use super::*;
+use horizon_core::level_id::valid_level_id;
 
 impl PartRegistrar {
     /// Refuses a dimension whose generator no one provides. After every mod has
@@ -7,7 +8,7 @@ impl PartRegistrar {
     pub(crate) fn refuse_unknown_dimension_generators(&mut self) {
         for dimension in &self.dimensions {
             let generator = &dimension.settings.generator;
-            if generator != crate::world::dimension::NOISE_GENERATOR
+            if generator != mod_vocab::__private::NOISE_GENERATOR
                 && !self.chunk_generators.iter().any(|g| *g.id == **generator)
             {
                 self.refused.push(format!(
@@ -62,12 +63,11 @@ impl DimensionsRegistrar for PartRegistrar {
             self.refused.push(refusal);
             return;
         }
-        self.dimensions
-            .push(crate::world::dimension::DimensionInfo {
-                mod_id: self.mod_id,
-                id: id.into(),
-                settings,
-            });
+        self.dimensions.push(DimensionInfo {
+            mod_id: self.mod_id,
+            id: id.into(),
+            settings,
+        });
     }
     fn add_chunk_generator(&mut self, name: &str, generator: Arc<dyn crate::ChunkGenerator>) {
         let id = match self.owned_declaration_id(name) {
@@ -83,7 +83,7 @@ impl DimensionsRegistrar for PartRegistrar {
                  digits and _ . - with / between segments, none empty, `.` or `..`",
                 self.mod_id
             ))
-        } else if id == crate::world::dimension::NOISE_GENERATOR {
+        } else if id == mod_vocab::__private::NOISE_GENERATOR {
             Some(format!(
                 "{} registered chunk generator {id}, which is the game's own",
                 self.mod_id
@@ -98,11 +98,16 @@ impl DimensionsRegistrar for PartRegistrar {
             self.refused.push(refusal);
             return;
         }
-        self.chunk_generators
-            .push(crate::world::chunk_generator::ChunkGeneratorInfo {
-                id: id.into(),
-                generator,
-            });
+        self.chunk_generators.push(ChunkGeneratorInfo {
+            id: id.into(),
+            generator,
+        });
     }
 }
 
+/// The levels every world has, which no mod's can be.
+const VANILLA_DIMENSIONS: [&str; 3] = [
+    "minecraft:overworld",
+    "minecraft:the_nether",
+    "minecraft:the_end",
+];

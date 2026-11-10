@@ -6,7 +6,10 @@ use super::*;
 pub mod tests {
     use super::*;
     #[cfg(test)]
-    use crate::parts::tests::*;
+    use super::{Attached, Parts};
+
+    #[cfg(test)]
+    use crate::parts::tests::{Level, game_thread};
     use crate::*;
 
     /// A comparator reading of 5 more than it was.
@@ -23,7 +26,7 @@ pub mod tests {
 
     #[test]
     pub(crate) fn registry_keys_resolve_reused_parts_and_rebind_without_changing_identity() {
-        use crate::content::registry_keys::block_id;
+        use mod_vocab::__private::parts_installation::block_id;
         struct Keys(Arc<std::sync::Mutex<Vec<BlockKey>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Keys {
@@ -32,9 +35,24 @@ pub mod tests {
                 let same = r.block_key("minecraft:stone");
                 let later = r.block_key("later:machine");
                 assert_eq!(vanilla, same);
-                assert_eq!(BlockKey::from_slot(vanilla.0), Ok(vanilla));
-                assert_eq!(BlockKey::from_slot(later.0), Ok(later));
-                assert!(BlockKey::from_slot(later.0 + 1).is_err());
+                assert_eq!(
+                    mod_vocab::__private::parts_installation::validate_block_key(
+                        mod_vocab::__private::parts_installation::block_key_slot(vanilla)
+                    ),
+                    Ok(vanilla)
+                );
+                assert_eq!(
+                    mod_vocab::__private::parts_installation::validate_block_key(
+                        mod_vocab::__private::parts_installation::block_key_slot(later)
+                    ),
+                    Ok(later)
+                );
+                assert!(
+                    mod_vocab::__private::parts_installation::validate_block_key(
+                        mod_vocab::__private::parts_installation::block_key_slot(later) + 1
+                    )
+                    .is_err()
+                );
                 r.block_part(vanilla, Gauge);
                 r.block_part(same, Connector);
                 r.block_part(later, Gauge);
@@ -47,22 +65,24 @@ pub mod tests {
             Box::new(Keys(requested.clone())),
         )]
         .into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
         let keys = requested.lock().unwrap().clone();
-        assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
-        assert!(BlockKey::from_slot(2).is_err());
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_block_key(
+                mod_vocab::__private::parts_installation::block_key_slot(keys[0])
+            ),
+            Ok(keys[0])
+        );
+        assert!(mod_vocab::__private::parts_installation::validate_block_key(2).is_err());
         // The final registry contains content declared after the requester's registration.
         let states = ["minecraft:stone", "later:machine", "later:machine"];
-        crate::content::registry_keys::resolve_block_keys(
-            ["minecraft:stone", "later:machine"],
-            |_| {
-                let properties = std::collections::BTreeMap::new();
-                horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
-                    .map_err(|error| format!("{error:?}"))
-            },
-        )
+        mod_vocab::__private::resolve_block_keys(["minecraft:stone", "later:machine"], |_| {
+            let properties = std::collections::BTreeMap::new();
+            horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
+                .map_err(|error| format!("{error:?}"))
+        })
         .unwrap();
         resolve_parts(
             &HashMap::new(),
@@ -81,8 +101,13 @@ pub mod tests {
         assert!(table.block_value(invalid).is_empty());
         assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
         assert_eq!(block_id(keys[2]), Some("later:machine"));
-        assert!(BlockKey::from_slot(u32::MAX).is_err());
-        assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
+        assert!(mod_vocab::__private::parts_installation::validate_block_key(u32::MAX).is_err());
+        assert_eq!(
+            mod_vocab::__private::parts_installation::validate_block_key(
+                mod_vocab::__private::parts_installation::block_key_slot(keys[0])
+            ),
+            Ok(keys[0])
+        );
         assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
     }
 
@@ -144,7 +169,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("signal_test", Box::new(SignalMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -172,7 +197,7 @@ pub mod tests {
         }
         let mods: crate::Mods =
             vec![ModEntry::new("weak_power_test", Box::new(WeakPowerMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -212,7 +237,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("path_test", Box::new(PathMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -245,7 +270,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("ladder_test", Box::new(LadderMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -274,7 +299,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("harvest_test", Box::new(HarvestMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -303,7 +328,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("soil_test", Box::new(SoilMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -331,7 +356,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("leaver_test", Box::new(LeaverMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -355,7 +380,7 @@ pub mod tests {
         }
         let mods: crate::Mods =
             vec![ModEntry::new("connection_test", Box::new(ConnectionMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -423,7 +448,7 @@ pub mod tests {
         }
         let mods: crate::Mods =
             vec![ModEntry::new("signal_reader_test", Box::new(ReaderMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -439,7 +464,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![ModEntry::new("redstone_test", Box::new(RedstoneMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
@@ -456,7 +481,7 @@ pub mod tests {
         .get(state as usize)
         .copied()
         .unwrap_or("test:gauge");
-        let key = crate::content::registry_keys::block_key(name).unwrap();
+        let key = mod_vocab::__private::block_key(name).unwrap();
         BlockState::from(BlockStateRecord::new(
             key,
             if state > 4 { u16::MAX } else { 0 },
@@ -481,7 +506,7 @@ pub mod tests {
     #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
     pub(crate) fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
-        crate::content::registry_keys::resolve_block_keys(
+        mod_vocab::__private::resolve_block_keys(
             [
                 "minecraft:air",
                 "minecraft:granite",
@@ -516,7 +541,7 @@ pub mod tests {
     #[test]
     fn prepared_key_routing_tracks_tag_reload() {
         game_thread();
-        crate::content::registry_keys::resolve_block_keys(
+        mod_vocab::__private::resolve_block_keys(
             [
                 "minecraft:air",
                 "test:gauge",
@@ -534,7 +559,7 @@ pub mod tests {
             },
         )
         .unwrap();
-        let other = crate::content::registry_keys::block_key("test:other").unwrap();
+        let other = mod_vocab::__private::block_key("test:other").unwrap();
         resolve(&["test:other"]).unwrap();
         assert!(block_key_listens(HookId::AnalogOutput, other));
         resolve(&[]).unwrap();
@@ -553,18 +578,26 @@ pub mod tests {
     pub(crate) fn tagged_dispatch_requires_its_own_world_table() {
         game_thread();
         resolve(&["test:gauge"]).unwrap();
-        let installed_parts = super::TEST_PARTS.get();
+        let scope = crate::testing::inherit_mods(move |_: &()| {
+            assert!(
+                mod_vocab::__private::parts_installation::check_parts(
+                    HookId::ShouldCheckWeakPower,
+                    "other"
+                )
+                .is_ok()
+            );
+            let error = mod_vocab::__private::parts_installation::check_parts(
+                HookId::AnalogOutput,
+                "analog_output",
+            )
+            .err()
+            .unwrap();
+            let panic = std::panic::catch_unwind(|| read(1)).unwrap_err();
+            (error, panic)
+        });
         let failure = std::thread::Builder::new()
             .name("part-worker".into())
-            .spawn(move || {
-                super::TEST_PARTS.set(installed_parts);
-                assert!(super::try_parts(HookId::ShouldCheckWeakPower, "other").is_ok());
-                let error = super::try_parts(HookId::AnalogOutput, "analog_output")
-                    .err()
-                    .unwrap();
-                let panic = std::panic::catch_unwind(|| read(1)).unwrap_err();
-                (error, panic)
-            })
+            .spawn(move || scope(&()))
             .unwrap()
             .join()
             .unwrap();
@@ -606,7 +639,6 @@ pub mod tests {
         // The block entity part's BlockPart override is indexed independently.
         assert_eq!(read(4), 41);
         assert!(!super::has_part_hook(HookId::ShouldCheckWeakPower));
-        super::TEST_PART_LOOKUPS.set(0);
         let mut check = false;
         dispatch_should_check_weak_power(
             &Level,
@@ -616,7 +648,6 @@ pub mod tests {
             Direction::East,
             &mut check,
         );
-        assert_eq!(super::TEST_PART_LOOKUPS.get(), 0);
         assert!(!check);
     }
 
@@ -701,7 +732,7 @@ pub mod tests {
         let resolved = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
-                crate::install(mods.clone());
+                crate::__private::install(mods.clone());
                 install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
@@ -709,7 +740,7 @@ pub mod tests {
                 (read(1), read(2))
             });
             let server = scope.spawn(|| {
-                crate::install(mods.clone());
+                crate::__private::install(mods.clone());
                 install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
@@ -754,18 +785,24 @@ pub mod tests {
             type_name: "Gauge",
             part: Arc::new(Gauge),
         };
-        let mut table = HashMap::from([("test:gauge".into(), vec![part(1)])]);
+        let table = HashMap::from([("test:gauge".into(), vec![part(1)])]);
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             HashSet::from(["test:gauge".to_owned()]),
         )]);
-        super::add_tagged(
-            &mut table,
-            &[("test:gauged".into(), part(0))],
+        let rows = mod_vocab::__private::parts_installation::merged_block_rows(
+            Parts {
+                blocks: table,
+                ..Default::default()
+            },
+            TagParts {
+                blocks: vec![("test:gauged".into(), part(0))],
+                ..Default::default()
+            },
             &tags,
-            "block",
+            "test:gauge",
         );
-        let kept: Vec<usize> = table["test:gauge"].iter().map(|a| a.mod_index).collect();
+        let kept: Vec<usize> = rows.iter().map(|a| a.mod_index).collect();
         assert_eq!(kept, [0]);
     }
 
@@ -779,11 +816,13 @@ pub mod tests {
             "test:gauged".to_owned(),
             HashSet::from(["test:gauge".to_owned()]),
         )]);
-        super::add_tagged(&mut r.parts.blocks, &r.tags.blocks, &tags, "block");
-        let order: Vec<&str> = r.parts.blocks["test:gauge"]
-            .iter()
-            .map(|a| a.type_name)
-            .collect();
+        let rows = mod_vocab::__private::parts_installation::merged_block_rows(
+            r.parts,
+            r.tags,
+            &tags,
+            "test:gauge",
+        );
+        let order: Vec<&str> = rows.iter().map(|a| a.type_name).collect();
         assert_eq!(order, [type_name::<TagGauge>(), type_name::<Gauge>()]);
     }
 
@@ -821,10 +860,10 @@ impl BlocksRegistrar for PartRegistrar {
             .blocks
             .request(self.mod_id, id)
         {
-            Ok(slot) => crate::BlockKey(slot),
+            Ok(slot) => mod_vocab::__private::parts_installation::block_key(slot),
             Err(error) => {
                 self.refused.push(error);
-                crate::BlockKey(u32::MAX)
+                mod_vocab::__private::parts_installation::block_key(u32::MAX)
             }
         }
     }
@@ -839,12 +878,15 @@ impl BlocksRegistrar for PartRegistrar {
             .registry_keys
             .borrow()
             .blocks
-            .id(block.0)
+            .id(mod_vocab::__private::parts_installation::block_key_slot(
+                block,
+            ))
             .map(str::to_owned);
         let Some(id) = id else {
             self.refused.push(format!(
                 "mod {}: invalid block key slot {}",
-                self.mod_id, block.0
+                self.mod_id,
+                mod_vocab::__private::parts_installation::block_key_slot(block)
             ));
             return;
         };
@@ -856,4 +898,3 @@ impl BlocksRegistrar for PartRegistrar {
         self.tags.blocks.extend(part);
     }
 }
-

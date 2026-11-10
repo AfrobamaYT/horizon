@@ -15,7 +15,7 @@ mod tests {
     use crate::*;
 
     fn with_porter(f: impl FnOnce()) {
-        crate::world::phase::with_test_package_inventory(
+        crate::load_state::with_test_package_inventory(
             vec![PackageInfo::new(
                 "porter".into(),
                 "1".into(),
@@ -36,27 +36,35 @@ mod tests {
             assert_eq!(r.owned_declaration_id("bare").unwrap(), "porter:bare");
             assert_eq!(r.owned_declaration_id("legacy:pot").unwrap(), "legacy:pot");
             let kind = r.declare_block_entity_type("legacy:pot", vec!["legacy:pot".into()]);
-            assert_ne!(kind, BlockEntityTypeKey(u32::MAX));
+            assert_ne!(
+                kind,
+                mod_vocab::__private::parts_installation::block_entity_type_key(u32::MAX)
+            );
             assert_eq!(r.block_entity_types[0].id, "legacy:pot");
             let fluid = r.declare_fluid("legacy:soup");
-            assert_ne!(fluid, FluidKey(u32::MAX));
+            assert_ne!(
+                fluid,
+                mod_vocab::__private::parts_installation::fluid_key(u32::MAX)
+            );
             assert!(
                 r.registry_keys
                     .borrow()
                     .declared_fluids
                     .contains_key("legacy:soup")
             );
-            let world_key = r.declare_world_fluid(
-                "legacy:broth",
-                WorldFluid {
-                    tick_delay: 20,
-                    drop_off: 2,
-                    slope_find_distance: 3,
-                    source_conversion: true,
-                    bucket: false,
-                },
+            let world_key = r.declare_world_fluid("legacy:broth", {
+                let mut value: WorldFluid = Default::default();
+                value.tick_delay = 20;
+                value.drop_off = 2;
+                value.slope_find_distance = 3;
+                value.source_conversion = true;
+                value.bucket = false;
+                value
+            });
+            assert_ne!(
+                world_key,
+                mod_vocab::__private::parts_installation::fluid_key(u32::MAX)
             );
-            assert_ne!(world_key, FluidKey(u32::MAX));
             assert_eq!(world_key, r.fluid_key("legacy:broth"));
             let keys = r.registry_keys.borrow();
             assert!(keys.declared_fluids.contains_key("legacy:broth"));
@@ -75,7 +83,7 @@ mod tests {
             assert!(r.refused.is_empty(), "{:?}", r.refused);
             assert_eq!(
                 r.declare_block_entity_type("unowned:pot", vec![]),
-                BlockEntityTypeKey(u32::MAX)
+                mod_vocab::__private::parts_installation::block_entity_type_key(u32::MAX)
             );
             let reason = r.refused.last().unwrap();
             assert!(
@@ -92,22 +100,25 @@ mod tests {
         #[crate::__subscriptions]
         impl Hooks for Declares {
             fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.push(Block {
-                    id: "legacy:pot".into(),
-                    template: "minecraft:stone".into(),
-                    ..Block::default()
+                event.blocks.push({
+                    let mut value: Block = Block::default();
+                    value.id = "legacy:pot".into();
+                    value.template = "minecraft:stone".into();
+                    value
                 });
-                event.blocks.push(Block {
-                    id: "unowned:pot".into(),
-                    template: "minecraft:stone".into(),
-                    ..Block::default()
+                event.blocks.push({
+                    let mut value: Block = Block::default();
+                    value.id = "unowned:pot".into();
+                    value.template = "minecraft:stone".into();
+                    value
                 });
             }
             fn items(&self, _: &RegistrationContext, event: &mut ItemsEvent<'_>) {
-                event.items.push(Item {
-                    id: "spoon".into(),
-                    template: "minecraft:stick".into(),
-                    ..Item::default()
+                event.items.push({
+                    let mut value: Item = Item::default();
+                    value.id = "spoon".into();
+                    value.template = "minecraft:stick".into();
+                    value
                 });
             }
         }
@@ -131,4 +142,3 @@ mod tests {
         });
     }
 }
-
