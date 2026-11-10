@@ -629,16 +629,24 @@ impl Game<'_> {
         };
         // Recovery enters the operation's own dimension and no other: a
         // transfer in the Nether recovers in the Nether even when the
-        // world opens in the Overworld, and a dimension the world does
-        // not hold refuses the load.
-        let target = crate::game::Dim::from_id(&dimension);
+        // world opens in the Overworld with the Nether not parked -
+        // enter_level opens an unheld level on demand. A dimension id
+        // the world cannot hold at all refuses the load.
+        let target = match dimension.as_str() {
+            "minecraft:overworld" => crate::game::Dim::Overworld,
+            "minecraft:the_nether" => crate::game::Dim::Nether,
+            "minecraft:the_end" => crate::game::Dim::End,
+            _ => match crate::game::Dim::extra(&dimension) {
+                Some(dim) => dim,
+                None => {
+                    return Err(format!(
+                        "world load refused: the pending carrier operation names                          {dimension}, which this world does not hold"
+                    )
+                    .into());
+                }
+            },
+        };
         let back = self.dim;
-        if target != back && !self.levels.parked.contains_key(&target) {
-            return Err(format!(
-                "world load refused: the pending carrier operation names {dimension},                  which this world does not hold"
-            )
-            .into());
-        }
         if target != back {
             self.enter_level(target).map_err(|e| {
                 format!("world load refused: carrier recovery could not enter {dimension}: {e}")
@@ -666,7 +674,9 @@ impl Game<'_> {
         if store.journal().in_progress.is_none() {
             return Ok(());
         }
-        let region = self.save.root.clone();
+        // SaveDir::root is the dimension folder; the regions live in its
+        // region/ child.
+        let region = self.save.root.join("region");
         let states = crate::carrier_store::RegistryStates::new(self.pack.assets.registry);
         crate::carrier_store::recover(&mut store, &region, &states, self.dim.id())
             .map(|_| ())
@@ -1033,6 +1043,124 @@ mod tests {
         });
     }
 
+    /// A Nether transfer that crashed after `prepared`, recovered by a
+    /// world opening in the Overworld with the Nether not parked: the
+    /// operation replays in the Nether, the Overworld is untouched and
+    /// the player stays where the world opened.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_nether_transfer_recovers_while_the_world_opens_in_the_overworld() {
+        let root = transfer_root("nether");
+        // Opening a second level on demand reads the data-fix tables of
+        // the prepared resources (HORIZON_RESOURCES is their root for
+        // that lookup; the test harness points its sibling variable at
+        // the same folder).
+        with_game(|game| {
+            game.world_root = root.clone();
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+
+            // The transfer happens in the Nether, opened on demand.
+            game.enter_level(crate::game::Dim::Nether).unwrap();
+            assert_eq!(game.dim, crate::game::Dim::Nether);
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/the_nether"),
+                horizon_client::save::LevelShape::NETHER,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.world.carrier_fences.fail_flush = true;
+            assert!(
+                game.carrier_assemble(11, &[BlockPos::new(4, 64, 4)])
+                    .is_err()
+            );
+
+            // The world reopens in the Overworld: recovery enters the
+            // Nether itself, replays there and returns.
+            game.world.carrier_fences.fail_flush = false;
+            game.enter_level(crate::game::Dim::Overworld).unwrap();
+            assert_eq!(game.dim, crate::game::Dim::Overworld);
+            game.carrier_recover_all_levels().unwrap();
+            assert_eq!(
+                game.dim,
+                crate::game::Dim::Overworld,
+                "the player stays in the level the world opened in"
+            );
+
+            // One owner: the items are in the carrier file, the Nether
+            // cell is air, and the Overworld never wrote a thing.
+            assert!(root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 11_u128))
+                .is_file());
+            assert!(!root.join("data/horizon_carrier_op_1.nbt").is_file());
+            let nether = root.join("dimensions/minecraft/the_nether");
+            let chunk = horizon_world::carrier::region_strict::read_chunk(
+                &nether.join("region"),
+                horizon_core::position::ChunkPos::new(0, 0),
+            )
+            .unwrap()
+            .expect("the nether chunk is on disk");
+            let data = horizon_world::chunk::ChunkData::new(chunk).unwrap();
+            assert_eq!(
+                data.block(horizon_core::position::BlockPos::new(4, 64, 4))
+                    .unwrap()
+                    .unwrap()
+                    .name,
+                "minecraft:air"
+            );
+            let overworld = root.join("dimensions/minecraft/overworld/region");
+            assert!(
+                !overworld.join("r.0.0.mca").exists(),
+                "the overworld's region is untouched"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A journal naming a dimension the world cannot hold refuses the
+    /// load with that name, and no level is touched.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_unknown_dimension_refuses_the_load_without_touching_levels() {
+        let root = transfer_root("nope");
+        with_game(|game| {
+            game.world_root = root.clone();
+            // A prepared operation whose journal names minecraft:nope.
+            let mut store = crate::carrier_store::Store::first_use(&root, true).unwrap();
+            store
+                .begin(
+                    crate::carrier_store::OpKind::Assemble,
+                    12,
+                    1,
+                    "minecraft:nope",
+                )
+                .unwrap();
+            drop(store);
+
+            let back = game.dim;
+            let refused = game.carrier_recover_all_levels();
+            match refused {
+                Err(error) => {
+                    let text = error.to_string();
+                    assert!(
+                        text.contains("minecraft:nope")
+                            && text.contains("which this world does not hold"),
+                        "{text}"
+                    );
+                }
+                Ok(()) => panic!("an unknown dimension must refuse the load"),
+            }
+            // No level was touched: the game still holds the level it
+            // opened in, with nothing parked.
+            assert_eq!(game.dim, back);
+            assert!(!game.world.carrier_fences.locks_carrier(12));
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A fresh throwaway world root with `data/` and a readable
     /// `level.dat`, named after the test.
     fn transfer_root(name: &str) -> std::path::PathBuf {
@@ -1047,12 +1175,17 @@ mod tests {
     }
 
     fn write_level_dat(root: &std::path::Path) {
+        // A current DataVersion inside Data keeps the world-gen reader
+        // out of the data fixers, whose tables the prepared test
+        // resources do not carry.
+        let mut data = horizon_core::nbt::Compound::new();
+        data.insert(
+            "DataVersion".into(),
+            horizon_core::nbt::Tag::Int(horizon_world::DATA_VERSION),
+        );
         crate::save::write_dat(
             &root.join("level.dat"),
-            horizon_core::nbt::Tag::compound([(
-                "Data",
-                horizon_core::nbt::Tag::Compound(Default::default()),
-            )]),
+            horizon_core::nbt::Tag::compound([("Data", horizon_core::nbt::Tag::Compound(data))]),
         )
         .unwrap();
     }
