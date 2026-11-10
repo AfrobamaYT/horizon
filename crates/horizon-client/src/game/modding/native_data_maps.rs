@@ -259,6 +259,33 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn data_map_read_refuses_lossy_payloads_instead_of_successful_substitutes() {
+        for value in [
+            json!({"nested": [null]}),
+            json!(9223372036854775809_u64),
+            json!(u64::MAX),
+        ] {
+            let maps = DataMaps {
+                maps: HashMap::from([(
+                    "minecraft:item",
+                    HashMap::from([(
+                        "test:map".to_owned(),
+                        BTreeMap::from([("minecraft:stone".to_owned(), value)]),
+                    )]),
+                )]),
+            };
+            assert_eq!(
+                maps.value("minecraft:item", "test:map", "minecraft:stone"),
+                Err(mod_api::DataMapError::Undecodable)
+            );
+            assert_eq!(
+                maps.value("minecraft:item", "test:map", "minecraft:air"),
+                Ok(None)
+            );
+        }
+    }
+
     fn tags(list: &[(&str, &[&str])]) -> HashMap<String, HashSet<String>> {
         list.iter()
             .map(|(tag, members)| {
