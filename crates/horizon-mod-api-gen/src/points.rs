@@ -509,7 +509,8 @@ impl Found<'_> {
     }
 
     /// Its point's name: a `Game` method's own name; else its path from the game module (`game_…`),
-    /// or in a lower crate from its crate's name less `horizon_`, snake-cased.
+    /// or in a lower crate from its crate's name less `horizon_`, snake-cased. The form is not
+    /// injective (`a::b_c` and `a_b::c` collide): `all_points` refuses two points of one name.
     fn name(&self) -> String {
         if self.on_game() {
             return unraw(&self.sig.ident);
@@ -1707,6 +1708,69 @@ mod tests {
         ] {
             assert!(!eligible(left_out), "{left_out}");
         }
+    }
+
+    /// Two functions whose paths snake-case to one name are refused at build, naming both:
+    /// `a::b_c` and `a_b::c` both give `game_a_b_c`.
+    #[test]
+    fn engine_points_with_one_snake_cased_name_are_refused_naming_both() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-points-clash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let put = |path: &str, text: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        put("crates/horizon-mod-api-gen/internals.txt", "");
+        put(
+            "crates/horizon-client/Cargo.toml",
+            "[package]
+name = 'horizon-client'
+",
+        );
+        put("crates/horizon-client/src/lib.rs", "mod game;
+");
+        put("crates/horizon-client/src/game.rs", "mod a;
+mod a_b;
+");
+        put("crates/horizon-client/src/game/a.rs", "fn b_c() {}
+");
+        put("crates/horizon-client/src/game/a_b.rs", "fn c() {}
+");
+        put(
+            "crates/horizon-mod-points/Cargo.toml",
+            "[package]
+name = 'horizon-mod-points'
+[dependencies]
+horizon-world = { path = '../horizon-world' }
+[build-dependencies]
+horizon-mod-api-gen = { path = '../horizon-mod-api-gen' }
+",
+        );
+        put(
+            "crates/horizon-world/Cargo.toml",
+            "[package]
+name = 'horizon-world'
+",
+        );
+        put(
+            "crates/horizon-mod-api-gen/Cargo.toml",
+            "[package]
+name = 'horizon-mod-api-gen'
+",
+        );
+        let error = points_with(&root, &WireTypes::new()).unwrap_err();
+        assert!(
+            error.contains("horizon_client::game::a::b_c")
+                && error.contains("horizon_client::game::a_b::c")
+                && error.contains("game_a_b_c"),
+            "{error}"
+        );
+        // Without the second function the same tree is accepted.
+        put("crates/horizon-client/src/game/a_b.rs", "");
+        assert!(points_with(&root, &WireTypes::new()).is_ok());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
