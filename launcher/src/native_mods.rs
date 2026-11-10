@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use horizon_mod_package::dependencies;
 
+mod admission;
 mod api;
 mod planning;
 pub use planning::routes;
@@ -2252,13 +2253,11 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
-        refuse_unlocked(&source, &wanted)?;
-        if has_api {
-            // Add path packages to Cargo.lock before the locked dependency check.
+        admission::resolve(&source, &wanted, has_api, || {
             let mut metadata = cargo(&rust, &fresh, "metadata");
             metadata.args(["--offline", "--format-version", "1"]);
-            run(metadata, "Resolving trait mod crates", |_| {})?;
-        }
+            run(metadata, "Resolving trait mod crates", |_| {})
+        })?;
         // Absolute: the compiler runs from elsewhere (`compile`).
         let stage = stage_dir(&real)?;
         sync(&fresh, &stage)?;

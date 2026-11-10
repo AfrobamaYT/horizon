@@ -392,16 +392,17 @@ pub(super) fn refused(
             "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's registry dependencies must be versions the game already locks: its crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.",
             &[("mod_id", mod_id), ("name", name), ("version", version)],
         );
-        let locked: Vec<&str> = horizon
-            .iter()
-            .filter(|l| l.name == name)
-            .map(|l| l.version.as_str())
-            .collect();
+        let locked = super::admission::versions(
+            horizon
+                .iter()
+                .filter(|l| l.name == name)
+                .map(|l| l.version.as_str()),
+        );
         if !locked.is_empty() {
             text.push(' ');
             text.push_str(&trf(
                 "Horizon locks {name} {versions}.",
-                &[("name", name), ("versions", &locked.join(", "))],
+                &[("name", name), ("versions", &locked)],
             ));
         }
         text
