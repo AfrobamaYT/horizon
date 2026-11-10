@@ -1,10 +1,5 @@
-// Dispatch fixtures isolate listener ordering; API tests cover property validation.
 #[cfg(test)]
-mod item {
-    pub(crate) mod crafting {
-        pub(crate) fn validate_recipe_properties<T>(_: &str, _: &[T], _: &mut Vec<T>) {}
-    }
-}
+include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_crate_root.rs"));
 
 #[cfg(test)]
 mod tests {
