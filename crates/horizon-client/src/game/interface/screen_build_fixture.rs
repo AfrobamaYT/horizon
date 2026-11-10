@@ -3,7 +3,7 @@
 //! opens each case's container screen state, builds its layout and prints the
 //! panel, the origin, the slot boxes and the slot a cursor point hovers, in
 //! the format of `VanillaScreenBuildOracle`.
-use super::{Game, Screen};
+use super::{Game, Screen, screen_build::ScreenLayout};
 use horizon_client::{
     Result,
     chunk::Chunk,
@@ -53,6 +53,46 @@ impl Game<'_> {
         ];
         let scale = case["scale"].as_u64().ok_or("scale")? as u32;
 
+        // The pause menu: the same layout the game builds on open and resize.
+        if kind == "pause" {
+            self.screen = Screen::Paused;
+            self.title = None;
+            let batch = HudBatch::new(
+                window,
+                GuiScale {
+                    requested: scale,
+                    unicode: false,
+                },
+            );
+            let gui = GuiSize::new(window, scale, false);
+            let layout = self.pause_layout(batch.width, batch.height);
+            self.screen_state.build.sync(
+                self.screen,
+                true,
+                None,
+                gui,
+                Some(ScreenLayout::Pause(layout)),
+            );
+            let Some(layout) = self.built_pause(batch.width, batch.height) else {
+                return Err("no build".into());
+            };
+            let buttons: Vec<Value> = layout
+                .buttons
+                .iter()
+                .map(|&(x, y, w, key, _, active)| {
+                    serde_json::json!([x as i32, y as i32, w as i32, key, active])
+                })
+                .collect();
+            let icons: Vec<Value> = layout
+                .icons
+                .iter()
+                .map(|&(x, y, sprite)| serde_json::json!([x as i32, y as i32, sprite]))
+                .collect();
+            return Ok(serde_json::json!({
+                "gui": [gui.scale, gui.size[0], gui.size[1]],
+                "pause": {"buttons": buttons, "icons": icons},
+            }));
+        }
         // The case's screen: a survival/creative container in the inventory
         // screen, with the block entity the menu shows.
         self.screen = Screen::Inventory;
@@ -127,9 +167,13 @@ impl Game<'_> {
         let layout = self.container_layout(&batch);
         // The frame's build, the way `observe_screen` makes it: the hit tests
         // and the panel readers below go through it.
-        self.screen_state
-            .build
-            .sync(self.screen, true, None, gui, Some(layout));
+        self.screen_state.build.sync(
+            self.screen,
+            true,
+            None,
+            gui,
+            Some(ScreenLayout::Container(layout)),
+        );
 
         let Some(layout) = self.built_container(&batch) else {
             return Err("no build".into());
