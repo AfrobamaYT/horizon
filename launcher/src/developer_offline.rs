@@ -29,19 +29,28 @@ pub fn require_capability(tag: &str) -> Result<(), String> {
         .arg("--launch-api")
         .output()
         .map_err(|_| tr(REBUILD).to_string())?;
-    let reply: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|_| tr(REBUILD).to_string())?;
-    if output.status.success()
-        && reply["options"].as_array().is_some_and(|options| {
-            options
-                .iter()
-                .any(|o| o["name"] == FLAG && o["value"].is_null())
-        })
-    {
+    if output.status.success() && supports_restriction(&output.stdout) {
         Ok(())
     } else {
         Err(tr(REBUILD).into())
     }
+}
+
+fn supports_restriction(bytes: &[u8]) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Api {
+        options: Vec<OptionFlag>,
+    }
+    #[derive(serde::Deserialize)]
+    struct OptionFlag {
+        name: String,
+        value: Option<String>,
+    }
+    serde_json::from_slice::<Api>(bytes).is_ok_and(|api| {
+        api.options
+            .iter()
+            .any(|o| o.name == FLAG && o.value.is_none())
+    })
 }
 
 pub fn mark(cmd: &mut Command) {
@@ -85,6 +94,20 @@ pub fn selected() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_and_malformed_capabilities_refuse() {
+        for reply in [
+            b"not json".as_slice(),
+            br#"{}"#,
+            br#"{"options":[]}"#,
+            br#"{"options":[{"name":"--developer-single-player","value":"VALUE"}]}"#,
+        ] {
+            assert!(!supports_restriction(reply));
+        }
+        assert!(supports_restriction(
+            br#"{"options":[{"name":"--developer-single-player","value":null}]}"#
+        ));
+    }
     #[test]
     fn persisted_provenance_not_just_a_prefix() {
         let root = tempfile::tempdir().unwrap();

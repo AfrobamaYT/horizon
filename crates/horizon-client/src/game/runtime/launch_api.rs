@@ -272,6 +272,33 @@ mod tests {
     }
 
     #[test]
+    fn developer_single_player_rejects_network_and_account_intents() {
+        let game = parse(&["--developer-single-player", "--world", "DeveloperProof"])
+            .unwrap()
+            .unwrap();
+        assert!(game.developer_single_player);
+        assert!(game.execution_role.is_client());
+        for args in [
+            vec!["--developer-single-player", "--server", "localhost"],
+            vec![
+                "--developer-single-player",
+                "--quickPlayMultiplayer",
+                "localhost",
+            ],
+            vec![
+                "--developer-single-player",
+                "--session-file",
+                "account.json",
+            ],
+            vec!["--developer-single-player", "--session-stdin"],
+            vec!["--developer-single-player", "--dedicated"],
+        ] {
+            assert!(parse(&args).is_err(), "{args:?}");
+        }
+        assert!(parse(&["--server", "localhost"]).is_ok());
+    }
+
+    #[test]
     fn game_uses_the_command_selection_context() {
         use horizon_mod_package::selection::{LaunchArguments, content_packages};
         use std::{collections::BTreeSet, fs, process::Command};
