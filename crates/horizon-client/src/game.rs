@@ -9,7 +9,6 @@ use loading_screen::{
 };
 use motion_ids::{motion_at, motion_block_entity};
 use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
-
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
 /// `stations` methods read the same tables, but taking `&self` blocks a
@@ -50,7 +49,6 @@ macro_rules! world_biomes {
         }
     };
 }
-
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOverlay<'_> {
     match world_tables {
@@ -760,6 +758,7 @@ struct GameLevel<'w> {
     cake_probe: bool,
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
+    api_level: Option<mod_api::LevelRef>,
     gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
         [i32; 3],
         horizon_client::block_entity_anim::EndGateway,
@@ -5635,6 +5634,7 @@ impl Game<'_> {
             cake_probe: false,
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
+            api_level: self.level(self.dim.id()),
             command_block_transition: None,
             gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),

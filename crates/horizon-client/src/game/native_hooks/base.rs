@@ -1,6 +1,5 @@
 use super::*;
 use mod_api::ModBlockEntity;
-
 impl GameLevel<'_> {
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
     /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
@@ -28,7 +27,6 @@ impl GameLevel<'_> {
     ) {
         self.fire_hopper_pickup_item(dimension, pos, item, count, cancel);
     }
-
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.
     #[inline(always)]
@@ -41,7 +39,6 @@ impl GameLevel<'_> {
     ) {
         self.fire_block_changed(dimension, pos, old, new);
     }
-
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
     /// level. Server-side.
@@ -3703,7 +3700,10 @@ impl Game<'_> {
         canceled: &mut bool,
         exp_to_drop: &mut Option<u32>,
     ) {
+        self.prepare_part_break_experience(pos, state, exp_to_drop);
+        let initial = *exp_to_drop;
         self.fire_break_block(pos, state, canceled, exp_to_drop);
+        *exp_to_drop = exp_to_drop.or(initial);
     }
     /// A player right clicks a block (NeoForge's
     /// `PlayerInteractEvent.RightClickBlock`): once per hand, where
