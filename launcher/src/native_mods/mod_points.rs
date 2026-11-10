@@ -29,9 +29,11 @@ impl Catalog {
             .into_iter()
             .filter(|bundle| bundle.manifest.native.is_some())
         {
-            let points =
-                horizon_platform::mod_build::api_gen::points::mod_crate::mod_points(&bundle.dir, &self.wire)
-                    .map_err(|error| format!("{}: {error}", bundle.manifest.id))?;
+            let points = horizon_platform::mod_build::api_gen::points::mod_crate::mod_points(
+                &bundle.dir,
+                &self.wire,
+            )
+            .map_err(|error| format!("{}: {error}", bundle.manifest.id))?;
             self.mods.push(ModLibrary {
                 id: bundle.manifest.id.clone(),
                 version: bundle.manifest.version.clone(),
@@ -177,7 +179,7 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use point_shape::catalog::Point;
+    use horizon_platform::mod_build::point_shape::catalog::Point;
 
     const MANIFEST: &str = "name = 'Mod'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '0000000000000000000000000000000000000000'\nmixins = '0000000000000000000000000000000000000000'\n";
 
