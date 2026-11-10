@@ -513,7 +513,7 @@ impl Game<'_> {
             + (feet[2] - center[2]).powi(2))
         .sqrt()
             / diameter;
-        if dist > 1.0 || p.health.dead_or_dying() {
+        if dist > 1.0 {
             return None;
         }
         // ServerPlayer.onExplosionHit: the blast that hit the player is theirs.
@@ -695,7 +695,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| host.hub.here(g) && g.loaded && !g.dead)
+                .filter(|g| host.hub.here(g))
                 .map(|g| g.conn)
                 .collect();
             for conn in guests {

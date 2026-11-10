@@ -11,7 +11,7 @@ use horizon_core::geometry::Vec3;
 use mod_api::{EntityInvulnerabilityCheckEvent, Hooks, LevelRandomHost};
 use std::sync::{Arc, Mutex};
 
-struct Probe(Arc<Mutex<Vec<bool>>>);
+struct Probe(Arc<Mutex<Vec<bool>>>, Arc<Mutex<Option<bool>>>);
 #[mod_api::__subscriptions]
 impl Hooks for Probe {
     fn entity_invulnerability_check(
@@ -20,6 +20,9 @@ impl Hooks for Probe {
         event: &mut EntityInvulnerabilityCheckEvent<'_>,
     ) {
         self.0.lock().unwrap().push(event.original_invulnerability);
+        if let Some(answer) = *self.1.lock().unwrap() {
+            event.invulnerable = answer;
+        }
     }
 }
 
@@ -33,9 +36,10 @@ fn fresh_player(game: &mut super::Game<'_>, mode: GameMode) {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn hit_attempts_reach_the_listener_once_including_refusals() {
     let heard = Arc::new(Mutex::new(Vec::new()));
+    let override_answer = Arc::new(Mutex::new(None));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "attempts",
-        Box::new(Probe(heard.clone())),
+        Box::new(Probe(heard.clone(), override_answer.clone())),
     )]
     .into();
     mod_api::testing::with_mods(mods, || {
@@ -52,6 +56,27 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             );
             assert!(!game.hurt_player_from(1.0, None, "minecraft:generic", Some(None), false));
             check(&[false], "player cooldown refusal");
+
+            fresh_player(game, GameMode::Survival);
+            game.player
+                .as_mut()
+                .unwrap()
+                .health
+                .permanently_invulnerable = true;
+            *override_answer.lock().unwrap() = Some(false);
+            assert!(game.hurt_player_from(2.0, None, "minecraft:generic", Some(None), false));
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 18.0);
+            check(
+                &[true],
+                "listener answer survives nested predicates and equipment continuations",
+            );
+            assert!(game.hurt_player_from(4.0, None, "minecraft:generic", Some(None), false));
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 16.0);
+            check(
+                &[true],
+                "a new attempt asks again rather than reusing the previous observation",
+            );
+            *override_answer.lock().unwrap() = None;
 
             fresh_player(game, GameMode::Creative);
             assert!(!game.hurt_player_from(2.0, None, "minecraft:generic", Some(None), false));
@@ -175,6 +200,37 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             )
             .unwrap();
             check(&[false], "creative explosion damage is attempted");
+            fresh_player(game, GameMode::Survival);
+            game.player
+                .as_mut()
+                .unwrap()
+                .set_health(0.0, false)
+                .unwrap();
+            game.explode(
+                None,
+                [0.0, 1.0, 0.0],
+                1.0,
+                super::explosion::ExplosionSource::default(),
+            )
+            .unwrap();
+            check(
+                &[false],
+                "resident dead player explosion is attempted before death refusal",
+            );
+            fresh_player(game, GameMode::Survival);
+            game.player.as_mut().unwrap().client_loaded = false;
+            game.explode(
+                None,
+                [0.0, 1.0, 0.0],
+                1.0,
+                super::explosion::ExplosionSource::default(),
+            )
+            .unwrap();
+            check(
+                &[false],
+                "resident unloaded player explosion is attempted before client-loaded refusal",
+            );
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
             fresh_player(game, GameMode::Spectator);
             game.explode(
                 None,
