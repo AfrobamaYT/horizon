@@ -227,6 +227,7 @@ pub fn rewrite(
                         call: selector,
                         ctx: contexts[index].clone(),
                         listener: format!("{}::{listener}", found.module),
+                        once: false,
                         record: format!("{}::{record}", found.module),
                         receiver: "()".into(),
                         args: vec![("value".into(), ty.to_token_stream().to_string())],
@@ -352,6 +353,7 @@ pub fn rewrite(
                         call: path,
                         ctx: contexts[index].clone(),
                         listener: format!("{}::{listener}", found.module),
+                        once: false,
                         record: format!("{}::{record}", found.module),
                         receiver: quote!(&mut #ty).to_string(),
                         args: vec![],
@@ -368,6 +370,7 @@ pub fn rewrite(
                     fields,
                     types,
                     output,
+                    once,
                 } = resolve(
                     expr, enclosing, found.sig, &lexical, entries, &rule, private,
                 )?;
@@ -465,17 +468,51 @@ pub fn rewrite(
                 } else {
                     quote!(for<'g>)
                 };
-                let raw = quote! {
-                    pub struct #record #lifetime { #(pub #fields: #types,)* }
-                    pub type #receiver_alias<'g, 'r> = #alias_type;
-                    pub type #output_alias = #output;
-                    pub type #listener = #listener_lifetimes fn(#receiver_type, &mut #record_type, &mut dyn FnMut(#receiver_type, &mut #record_type) -> #output) -> #output;
+                let original_type = format_ident!("__{name}Original");
+                let raw = if once {
+                    quote! {
+                        pub struct #record #lifetime { #(pub #fields: #types,)* }
+                        pub type #receiver_alias<'g, 'r> = #alias_type;
+                        pub type #output_alias = #output;
+                        /// A call-scoped, single-use forwarding capability for this source call.
+                        pub struct #original_type<'g, 'a, 'next> {
+                            next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output,
+                            scope: ::std::marker::PhantomData<(&'g (), &'a ())>,
+                        }
+                        impl<'g, 'a, 'next> #original_type<'g, 'a, 'next> {
+                            fn new(next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output) -> Self {
+                                Self { next, scope: ::std::marker::PhantomData }
+                            }
+                            /// Consume this capability and the argument record, forwarding exactly once.
+                            pub fn call(self, receiver: #receiver_type, args: #record_type) -> #output {
+                                (self.next)(receiver, args)
+                            }
+                        }
+                        pub type #listener = for<'g, 'a, 'next> fn(#receiver_type, #record_type, #original_type<'g, 'a, 'next>) -> #output;
+                    }
+                } else {
+                    quote! {
+                        pub struct #record #lifetime { #(pub #fields: #types,)* }
+                        pub type #receiver_alias<'g, 'r> = #alias_type;
+                        pub type #output_alias = #output;
+                        pub type #listener = #listener_lifetimes fn(#receiver_type, &mut #record_type, &mut dyn FnMut(#receiver_type, &mut #record_type) -> #output) -> #output;
+                    }
                 };
+                let dispatch = if once {
+                    quote!(
+                        ::horizon_mod_api_macros::site_once!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #original_type, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: #inferred_record| #original)
+                    )
+                } else {
+                    quote!(
+                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #inferred_record| #original)
+                    )
+                };
+                let mutable = (!once).then(|| quote!(mut));
                 let replacement = quote! {
                     if ::mod_points::__private::SITES[::mod_points::SiteId::#variant as usize].load(::std::sync::atomic::Ordering::Relaxed) {
                         #binding
-                        let mut #args = #record { #(#fields: #arguments,)* };
-                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #inferred_record| #original)
+                        let #mutable #args = #record { #(#fields: #arguments,)* };
+                        #dispatch
                     } else { #expr }
                 };
                 let nth = ordinal;
@@ -498,6 +535,7 @@ pub fn rewrite(
                     call: path,
                     ctx: contexts[index].clone(),
                     listener: format!("{}::{listener}", found.module),
+                    once,
                     record: format!("{}::{record}", found.module),
                     receiver: receiver_type.to_string(),
                     args: fields

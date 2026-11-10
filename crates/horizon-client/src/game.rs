@@ -7556,7 +7556,7 @@ impl Game<'_> {
                 }
                 return Ok(answer.consumes_action());
             }
-            self.native_use_item(&stack, &mut claimed);
+            self.use_item_in_hand(&stack, &mut claimed);
         }
         if claimed {
             self.swing_arm();
@@ -17487,7 +17487,7 @@ pub(crate) fn run_with(
         use mod_api::__private::game::RegistrationContextNew;
         let context = mod_api::RegistrationContext::new();
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
-        horizon_mod_wasm::initialize(&inventory);
+        crate::entry::initialize_code(&inventory);
     }
     mod_points::__private::seal();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;

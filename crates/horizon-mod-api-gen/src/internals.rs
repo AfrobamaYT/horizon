@@ -262,6 +262,12 @@ fn trait_signature(value: &syn::ItemTrait) -> syn::ItemTrait {
 pub(crate) fn shape_signature(item: &Item) -> Option<Item> {
     match item {
         Item::Trait(value) => Some(Item::Trait(trait_signature(value))),
+        Item::Type(value) => {
+            let mut value = value.clone();
+            value.attrs.clear();
+            value.vis = Visibility::Inherited;
+            Some(Item::Type(value))
+        }
         Item::Struct(value) => {
             let mut value = value.clone();
             value
@@ -1142,6 +1148,23 @@ impl Pass {
                         let cfg = configuration(&definition.cfg, attrs);
                         let key = (path.clone(), kind, cfg);
                         if kind == "type" {
+                            // Native source records expand local aliases rather than naming
+                            // a private alias from another extension-impl module.
+                            if !self.entries.contains_key(&key) {
+                                self.cfg = definition.cfg.clone();
+                                self.entry(
+                                    &definition.module,
+                                    &path,
+                                    kind,
+                                    attrs,
+                                    shape_signature(&definition.item).expect("alias shape"),
+                                    TypeUses::item(&definition.item),
+                                );
+                                self.entries
+                                    .get_mut(&key)
+                                    .expect("inserted alias")
+                                    .shape_only = true;
+                            }
                             if aliases.insert(key.clone()) {
                                 self.uses.entry(key).or_insert_with(|| {
                                     (definition.module.clone(), TypeUses::item(&definition.item))
@@ -1882,6 +1905,42 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
                 "{signature}"
             );
         }
+    }
+
+    #[test]
+    fn source_owned_call_expands_reachable_private_aliases() {
+        let fixture = shapes_fixture(
+            "fn take(pos: horizon_items::aliases::Pos, value: horizon_items::aliases::Stack) {} fn run(value: horizon_items::ItemStack) { take((1, 2, 3), value); }",
+        );
+        fixture.put(
+            "crates/horizon-items/src/items.rs",
+            "mod item_stack; mod kinds; pub mod aliases; pub use item_stack::ItemStack;",
+        );
+        fixture.put("crates/horizon-items/src/aliases.rs", "use super::ItemStack as StackItem; pub type Stack = StackItem; pub type Pos = (i32, i32, i32);");
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let request = crate::sites::Declaration {
+            expression: None,
+            local: None,
+            target: "horizon_client::game::run".into(),
+            selector: "horizon_client::game::take".into(),
+            ordinal: Some(0),
+            ctx: String::new(),
+            origin: "alias:call".into(),
+        };
+        let (_, sites) = crate::sites::rewrite::rewrite(
+            &fixture.game(),
+            "horizon_client::game",
+            &entries,
+            &[request],
+            true,
+        )
+        .unwrap();
+        assert!(sites[0].once);
+        assert_eq!(sites[0].args[0].1, "(i32 , i32 , i32 ,)");
+        assert_eq!(
+            sites[0].args[1].1,
+            ":: horizon_items :: item_stack :: ItemStack"
+        );
     }
 
     #[test]
