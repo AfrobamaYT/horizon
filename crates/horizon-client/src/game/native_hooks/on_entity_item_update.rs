@@ -1,4 +1,8 @@
+#[cfg(test)]
+thread_local! { static STACK_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 use super::*;
+use crate::game::native_ticks;
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
@@ -53,6 +57,8 @@ impl Game<'_> {
             return false;
         }
         let id = item.id;
+        #[cfg(test)]
+        STACK_CONVERSIONS.with(|count| count.set(count.get() + 1));
         let Ok(stack) = item.stack.try_into_api() else {
             return false;
         };
@@ -84,6 +90,8 @@ mod on_entity_item_update_tests {
     struct Update {
         item: &'static str,
         cancels: bool,
+        remove: bool,
+        mixed: bool,
         heard: Arc<Mutex<Vec<u32>>>,
     }
 
@@ -94,9 +102,25 @@ mod on_entity_item_update_tests {
             host: &mut dyn ServerHost,
             event: &mut OnEntityItemUpdateEvent<'_>,
         ) -> Flow {
+            ORDER.with(|order| {
+                order
+                    .borrow_mut()
+                    .push((event.item.entity().id(), "update"))
+            });
             self.heard.lock().unwrap().push(event.item.entity().id());
+            if self.remove {
+                assert!(
+                    event
+                        .item
+                        .entity()
+                        .remove(host, mod_api::RemovalReason::Discarded)
+                );
+                assert_eq!(event.item.entity().position(host), None);
+                assert!(!event.item.set_pickup_delay(host, 7));
+                return Flow::Continue;
+            }
             assert!(event.item.set_pickup_delay(host, 7));
-            if self.cancels {
+            if self.cancels && (!self.mixed || event.item.entity().id().is_multiple_of(2)) {
                 Flow::Cancel
             } else {
                 Flow::Continue
@@ -106,8 +130,32 @@ mod on_entity_item_update_tests {
 
     struct Mod(Vec<Update>);
 
+    thread_local! { static ORDER: std::cell::RefCell<Vec<(u32, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) }; }
+
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
+        fn entity_tick_listened(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::EntityTickListenedEvent,
+        ) {
+            event.listened = true;
+        }
+        fn entity_tick_pre(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::EntityTickPreEvent<'_>,
+        ) -> Flow {
+            ORDER.with(|order| order.borrow_mut().push((event.entity, "pre")));
+            Flow::Continue
+        }
+        fn entity_tick_post(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::EntityTickPostEvent<'_>,
+        ) {
+            ORDER.with(|order| order.borrow_mut().push((event.entity, "post")));
+        }
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             for part in &self.0 {
                 let key = r.item_key(part.item);
@@ -172,16 +220,37 @@ mod on_entity_item_update_tests {
         let iron = Update {
             item: "minecraft:iron_ingot",
             cancels: true,
+            remove: false,
+            mixed: false,
             heard: Default::default(),
         };
         let gold = Update {
             item: "minecraft:gold_ingot",
             cancels: false,
+            remove: false,
+            mixed: false,
             heard: Default::default(),
         };
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "item_update",
-            Box::new(Mod(vec![iron.clone(), gold.clone()])),
+            Box::new(Mod(vec![
+                iron.clone(),
+                gold.clone(),
+                Update {
+                    item: "minecraft:emerald",
+                    cancels: false,
+                    remove: true,
+                    mixed: false,
+                    heard: Default::default(),
+                },
+                Update {
+                    item: "minecraft:copper_ingot",
+                    cancels: true,
+                    remove: false,
+                    mixed: true,
+                    heard: Default::default(),
+                },
+            ])),
         )]
         .into();
         mod_api::testing::with_mods(mods.clone(), || {
@@ -199,7 +268,21 @@ mod on_entity_item_update_tests {
                 ];
                 let gold_id = rest(game, "minecraft:gold_ingot", 6.5, 10.5);
 
+                ORDER.with(|order| order.borrow_mut().clear());
+                STACK_CONVERSIONS.with(|count| count.set(0));
                 game.tick_items();
+                assert_eq!(STACK_CONVERSIONS.with(|count| count.get()), 3);
+                for id in irons.into_iter().chain([gold_id]) {
+                    assert_eq!(
+                        ORDER.with(|order| order
+                            .borrow()
+                            .iter()
+                            .filter(|(entity, _)| *entity == id)
+                            .map(|(_, phase)| *phase)
+                            .collect::<Vec<_>>()),
+                        ["pre", "update", "post"]
+                    );
+                }
                 for id in irons {
                     let held = game.dropped.iter().find(|item| item.id == id).unwrap();
                     // Nothing of the entity's own tick ran: not its age, nor its delay's
@@ -235,6 +318,28 @@ mod on_entity_item_update_tests {
                 expected.sort_unstable();
                 assert_eq!(heard, expected);
                 assert_eq!(*gold.heard.lock().unwrap(), vec![gold_id; 41]);
+                let removed = rest(game, "minecraft:emerald", 12.5, 12.5);
+                game.tick_items();
+                assert_eq!(
+                    ORDER.with(|order| order
+                        .borrow()
+                        .iter()
+                        .filter(|(id, _)| *id == removed)
+                        .map(|(_, phase)| *phase)
+                        .collect::<Vec<_>>()),
+                    ["pre", "update", "post"]
+                );
+                assert!(game.entity(removed).is_none());
+                game.native_removals_flush();
+                assert!(!game.dropped.iter().any(|item| item.id == removed));
+                let pair = [
+                    rest(game, "minecraft:copper_ingot", 8.5, 8.5),
+                    rest(game, "minecraft:copper_ingot", 8.7, 8.5),
+                ];
+                for _ in 0..80 {
+                    game.tick_items();
+                }
+                assert_eq!(counts(game, &pair), [2]);
             });
         });
     }
@@ -249,7 +354,9 @@ mod on_entity_item_update_tests {
                 rest(game, "minecraft:iron_ingot", 2.5, 2.5),
                 rest(game, "minecraft:iron_ingot", 2.7, 2.5),
             ];
+            STACK_CONVERSIONS.with(|count| count.set(0));
             game.tick_items();
+            assert_eq!(STACK_CONVERSIONS.with(|count| count.get()), 0);
             assert!(
                 game.dropped
                     .iter()
