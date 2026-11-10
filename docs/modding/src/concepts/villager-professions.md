@@ -222,6 +222,10 @@ These are required future tests, on native and wasm, not results of this docs ta
    contract after #2339 alignment and public NeoForge contract verification.
 2. Implement generated native/wasm registrar and typed POI resolution together;
    validate duplicates, references and unsupported capabilities before publication.
+   This server half may land as its own change, but main never accepts a
+   profession registration that no client can show: until the client half in
+   stage 4 lands, registration stays refused with a named reason, or both halves
+   land in the same rollup.
 3. Route all owners above through the load-owned table, including merchant handles,
    zombie saves and resource caches; preserve unresolved behavior.
 4. Implement negotiated snapshot activation and all metadata send/receive routes.
