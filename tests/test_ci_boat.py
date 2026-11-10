@@ -249,3 +249,27 @@ class BoatHealthTests(unittest.TestCase):
         for enabled, author, actor in [("off", "alice", "alice"), ("on", "bob", "alice"), ("on", "alice", "bob")]:
             self.assertEqual(boat.select_label(enabled, ["alice"], author, actor, [], NOW)[0], "ubuntu-latest")
         self.assertEqual(boat.select_label("on", ["alice"], "alice", "alice", [], NOW)[0], "boat-large")
+
+
+class RustupRetryTests(unittest.TestCase):
+    def run_script(self, failures):
+        script = Path(__file__).parents[1] / "tools/ci/rustup_install.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory)
+            count = bin_dir / "count"
+            (bin_dir / "rustup").write_text(f'#!/bin/sh\necho "$@" >> {count}\n[ $(wc -l < {count}) -gt {failures} ]\n')
+            (bin_dir / "sleep").write_text("#!/bin/sh\n")
+            for name in ("rustup", "sleep"):
+                (bin_dir / name).chmod(0o755)
+            result = subprocess.run(["bash", str(script), "stable", "--profile", "minimal"], capture_output=True, text=True,
+                                    env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+            return result.returncode, count.read_text().splitlines()
+
+    @unittest.skipIf(os.name == "nt", "a bash script for Linux runners")
+    def test_transient_failures_are_retried_then_bounded(self):
+        status, calls = self.run_script(failures=2)
+        self.assertEqual((status, len(calls)), (0, 3))
+        self.assertEqual(calls[0], "toolchain install stable --profile minimal")
+        status, calls = self.run_script(failures=10)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(len(calls), 4)

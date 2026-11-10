@@ -215,7 +215,7 @@ jobs:
             # Keep clippy-driver direct, but reuse sccache for ordinary dependency compilations.
             echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/clippy-cache.sh" >> "$GITHUB_ENV"
           fi
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
+          bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
         if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: toolchain
@@ -365,7 +365,7 @@ jobs:
             fi
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: steps.rust.outputs.required != 'false'
@@ -445,7 +445,7 @@ jobs:
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-          rustup toolchain install stable --profile minimal
+          bash tools/ci/rustup_install.sh stable --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -546,7 +546,7 @@ jobs:
             fi
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
         if: steps.launcher.outputs.required != 'false' && runner.environment == 'github-hosted'
         with:
@@ -583,7 +583,7 @@ jobs:
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-          rustup toolchain install stable --profile minimal
+          bash tools/ci/rustup_install.sh stable --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -628,7 +628,7 @@ jobs:
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-          rustup toolchain install stable --profile minimal
+          bash tools/ci/rustup_install.sh stable --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
