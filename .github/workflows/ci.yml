@@ -21,6 +21,9 @@ concurrency:
   # queued ~100 main runs on 2026-11-09; the release follows the newest finished main run (docs/release-flow.md).
   group: checks-${{ github.event.pull_request.number || (github.event_name == 'push' && 'main') || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
+  HORIZON_TELEMETRY_URL: "off"
 jobs:
   # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
   # and every merge to main starting this workflow, three jobs a run left the pool's queue tens of minutes deep.
@@ -99,7 +102,7 @@ jobs:
         if: steps.rust.outputs.required != 'false'
         run: |
           cargo +stable fmt --all -- --check
-          find crates/horizon-mod-api/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
+          find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
           rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
           cargo +stable clippy --workspace --all-targets -- -D warnings
@@ -209,17 +212,17 @@ jobs:
           $clang = Get-Command clang -ErrorAction Stop
           Write-Output "Using $($clang.Source)"
           & $clang.Source --version
-      - name: Build the game for native Windows ARM64
-        run: cargo build --release --locked --target aarch64-pc-windows-msvc -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+      - name: Build the game for native Windows ARM64 (the official game, as game-build.yml ships it)
+        run: cargo build --release --locked --target aarch64-pc-windows-msvc -p horizon-official --bin horizon-official -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
       - name: Check the game's PE machine
-        run: python tools/check_pe_arch.py arm64 target/aarch64-pc-windows-msvc/release/horizon-client.exe target/aarch64-pc-windows-msvc/release/horizon-ctl.exe target/aarch64-pc-windows-msvc/release/horizon-prepare.exe target/aarch64-pc-windows-msvc/release/horizon-server.exe
+        run: python tools/check_pe_arch.py arm64 target/aarch64-pc-windows-msvc/release/horizon-official.exe target/aarch64-pc-windows-msvc/release/horizon-ctl.exe target/aarch64-pc-windows-msvc/release/horizon-prepare.exe target/aarch64-pc-windows-msvc/release/horizon-server.exe
       - name: Check game DLL imports
-        run: python tools/check_imports.py target/aarch64-pc-windows-msvc/release/horizon-client.exe target/aarch64-pc-windows-msvc/release/horizon-ctl.exe target/aarch64-pc-windows-msvc/release/horizon-prepare.exe target/aarch64-pc-windows-msvc/release/horizon-server.exe
+        run: python tools/check_imports.py target/aarch64-pc-windows-msvc/release/horizon-official.exe target/aarch64-pc-windows-msvc/release/horizon-ctl.exe target/aarch64-pc-windows-msvc/release/horizon-prepare.exe target/aarch64-pc-windows-msvc/release/horizon-server.exe
       - name: Start every game executable
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $client = 'target/aarch64-pc-windows-msvc/release/horizon-client.exe'
+          $client = 'target/aarch64-pc-windows-msvc/release/horizon-official.exe'
           $output = & $client --help 2>&1
           if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '--resources') { throw 'horizon-client --help failed' }
           foreach ($binary in @('horizon-ctl.exe', 'horizon-prepare.exe', 'horizon-server.exe')) {

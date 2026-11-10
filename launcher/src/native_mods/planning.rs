@@ -51,6 +51,7 @@ pub(super) fn classify(
     } else {
         match prebuilt::planning_catalog(lease, &revision) {
             Ok(catalog) => {
+                let catalog = catalog.with_mods(projects.iter().map(|project| project.bundle))?;
                 for (id, route) in prebuilt::slot_routes(&catalog, &projects) {
                     if route != Route::Prebuilt {
                         let entry = result

@@ -3,10 +3,9 @@
 //! Written to `crash-reports/crash-<yyyy-MM-dd_HH.mm.ss>-client.txt` in the game folder when
 //! the main thread panics or `main` gets an error back. It stays a local file: the player
 //! reads it and shares it by hand.
-pub use mod_api::crash::{
-    ConvertedCall, ConvertedPackage, ConvertedPackageGuard, ConvertedPackages, NativeModCall,
-    NativeModGuard, clear_detail, current_converted_call, current_native_mod, enter_native_mod,
-    set_detail,
+pub use mod_api::content::crash::{
+    ConvertedCall, ConvertedPackage, ConvertedPackageGuard, ConvertedPackages, ModCall, ModGuard,
+    clear_detail, current_converted_call, current_native_mod, enter_native_mod, set_detail,
 };
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
@@ -14,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Local};
-use horizon_system::system::{command_output, machine_arch};
+use horizon_system::{command_output, machine_arch};
 
 static REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -28,7 +27,7 @@ thread_local! {
 /// `message`, with the native mod hook this thread is inside, if any, and the converted package
 /// the hook's runtime is executing.
 fn attributed(message: String) -> String {
-    let Some(call) = mod_api::crash::current_native_call() else {
+    let Some(call) = mod_api::content::crash::current_native_call() else {
         return message;
     };
     let part = call
@@ -39,7 +38,7 @@ fn attributed(message: String) -> String {
         "{message}\nin native mod {}, hook {}{part}",
         call.id, call.hook
     );
-    if let Some(scoped) = mod_api::crash::current_converted_call()
+    if let Some(scoped) = mod_api::content::crash::current_converted_call()
         && scoped.runtime == call.id
     {
         // `export` and `site` come from the runtime, and for wasm from module bytes: a name
@@ -208,7 +207,7 @@ fn arch_label(build: &str, machine: &str) -> String {
 }
 
 /// `PRETTY_NAME` of /etc/os-release and the kernel, or the system's own version string.
-fn operating_system() -> String {
+pub(crate) fn operating_system() -> String {
     let arch = arch_label(std::env::consts::ARCH, machine_arch());
     let version = if cfg!(target_os = "linux") {
         let name = read("/etc/os-release").and_then(|t| {
@@ -224,7 +223,7 @@ fn operating_system() -> String {
     } else if cfg!(target_os = "macos") {
         command_output("sw_vers", &["-productVersion"]).map(|v| format!("macOS {v}"))
     } else if cfg!(windows) {
-        horizon_system::system::windows_version()
+        horizon_system::windows_version()
     } else {
         None
     };
@@ -239,11 +238,11 @@ fn operating_system() -> String {
 pub fn cpu() -> String {
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get());
     let name = if cfg!(target_os = "linux") {
-        read("/proc/cpuinfo").and_then(|t| horizon_system::system::linux_cpu_name(&t))
+        read("/proc/cpuinfo").and_then(|t| horizon_system::linux_cpu_name(&t))
     } else if cfg!(target_os = "macos") {
         command_output("sysctl", &["-n", "machdep.cpu.brand_string"])
     } else if cfg!(windows) {
-        horizon_system::system::windows_cpu()
+        horizon_system::windows_cpu()
     } else {
         std::env::var("PROCESSOR_IDENTIFIER").ok()
     };
@@ -319,7 +318,7 @@ pub fn system_details(side: &str) -> Vec<(String, String)> {
         ("Memory".to_owned(), memory()),
     ];
     out.extend(
-        mod_api::crash::details()
+        mod_api::content::crash::details()
             .into_iter()
             .filter(|(k, _)| side != "server" || *k != "Render Settings")
             .map(|(k, v)| (k.to_owned(), v)),
@@ -342,6 +341,21 @@ fn thread_name(side: &str) -> String {
 /// promise to launchers (docs/api/launch.md), so it never changes within a line of that API.
 pub const SAVED_LINE: &str = "Horizon: crash report saved to ";
 
+/// What runs on each report before it is saved ([`on_report`]).
+pub type ReportHook = fn(&Path, &Report);
+
+static REPORT_HOOKS: std::sync::RwLock<Vec<ReportHook>> = std::sync::RwLock::new(Vec::new());
+
+/// Runs `hook` with every crash report, before it is saved: the game folder and the report. An
+/// extension point for what lives above the engine (Horizon's opt-in telemetry keeps the
+/// report). A hook runs inside the crash handler: it must not panic or block.
+pub fn on_report(hook: ReportHook) {
+    REPORT_HOOKS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(hook);
+}
+
 /// Writes the report and tells where it is; the log gets the error too.
 fn deliver(home: &Path, report: Report) -> Option<PathBuf> {
     if REPORTED.swap(true, Ordering::SeqCst) {
@@ -362,6 +376,13 @@ fn deliver(home: &Path, report: Report) -> Option<PathBuf> {
         ),
     );
     crate::logging::flush();
+    for hook in REPORT_HOOKS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+    {
+        hook(home, &report);
+    }
     // A player of a shared game folder (`--player-dir`) finds the report beside its own log.
     match report.save(crate::logging::player_dir_override().unwrap_or(home)) {
         Ok(path) => {
@@ -704,12 +725,12 @@ mod tests {
 
     #[test]
     fn a_panic_in_a_native_mods_hook_names_it() {
-        let outer = enter_native_mod(NativeModCall {
+        let outer = enter_native_mod(ModCall {
             id: "outer",
             hook: "render",
             part: None,
         });
-        let inner = enter_native_mod(NativeModCall {
+        let inner = enter_native_mod(ModCall {
             id: "b",
             hook: "tick",
             part: None,
@@ -719,7 +740,7 @@ mod tests {
         assert!(attributed("boom".into()).ends_with("\nin native mod outer, hook render"));
         drop(outer);
         assert_eq!(attributed("boom".into()), "boom");
-        let part = enter_native_mod(NativeModCall {
+        let part = enter_native_mod(ModCall {
             id: "c",
             hook: "analog_output",
             part: Some("c::Gauge"),
@@ -733,7 +754,7 @@ mod tests {
 
     #[test]
     fn a_panic_in_a_converted_package_names_the_runtime_package_export_and_site() {
-        let runtime = enter_native_mod(NativeModCall {
+        let runtime = enter_native_mod(ModCall {
             id: "portizon",
             hook: "client_tick_pre",
             part: None,
@@ -750,7 +771,7 @@ mod tests {
         ));
         // Another mod's hook inside the package keeps its own attribution: the runtime's
         // package is not named for a crash in somebody else's code.
-        let other = enter_native_mod(NativeModCall {
+        let other = enter_native_mod(ModCall {
             id: "other",
             hook: "tick",
             part: None,
@@ -773,7 +794,7 @@ mod tests {
 
     #[test]
     fn a_guest_export_cannot_forge_a_report_line() {
-        let runtime = enter_native_mod(NativeModCall {
+        let runtime = enter_native_mod(ModCall {
             id: "portizon",
             hook: "client_tick_pre",
             part: None,
@@ -820,7 +841,7 @@ mod tests {
                 *sink.lock().unwrap() = Some(panic_report(info, "client"));
             }
         }));
-        let _runtime = enter_native_mod(NativeModCall {
+        let _runtime = enter_native_mod(ModCall {
             id: "runtime",
             hook: "dispatch",
             part: None,
@@ -971,7 +992,7 @@ mod tests {
         let _ = std::panic::catch_unwind(|| panic!("the test crash"));
         // The same panic inside a native mod's hook, which the hook sees before the unwind.
         let _ = std::panic::catch_unwind(|| {
-            let _guard = enter_native_mod(NativeModCall {
+            let _guard = enter_native_mod(ModCall {
                 id: "a",
                 hook: "tick",
                 part: None,

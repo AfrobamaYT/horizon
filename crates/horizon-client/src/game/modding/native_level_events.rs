@@ -6,9 +6,8 @@
 //! level, a stale handle or a client returns false. Reaching a parked level, as `play_sound` and the
 //! reads do through `native_level_world`, is a follow-up.
 use super::{Game, GameLevel, native_explosions::NativeBlast};
-use horizon_client::sculk::Context;
 use horizon_world::level::{BlockEventData, LevelEvent};
-use mod_api::{BlockKey, LevelRef, NativeExplosionInteraction};
+use mod_api::{BlockKey, ExplosionInteraction, LevelRef};
 
 /// A position inside the world's horizontal and vertical bounds.
 fn in_bounds(at: [f64; 3]) -> bool {
@@ -70,18 +69,21 @@ impl Game<'_> {
         true
     }
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
-    /// `Level.gameEvent(null, event, at)` does: sculk sensors, shriekers,
-    /// wardens and allays in range hear it. False for an event vanilla
-    /// doesn't have.
-    pub(super) fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool {
+    /// `Level.gameEvent(event, at, context)`, with validated source and state.
+    pub(super) fn level_game_event(
+        &mut self,
+        level: LevelRef,
+        event: &str,
+        at: [f64; 3],
+        context: mod_api::GameEventContext,
+    ) -> bool {
         let Some(event) = horizon_client::sculk::intern(event) else {
             return false;
         };
         if !self.level_in_place(level) || !in_bounds(at) {
             return false;
         }
-        self.post_game_event(event, at, Context::default());
-        true
+        self.post_contextual_game_event(event, at, context)
     }
     /// Queues block event `a`, `b` for `block` at `pos` in the level in place
     /// (`ServerLevel.blockEvent`): `run_block_events` hands it to the block's
@@ -124,16 +126,16 @@ impl Game<'_> {
         center: [f64; 3],
         radius: f32,
         fire: bool,
-        interaction: NativeExplosionInteraction,
+        interaction: ExplosionInteraction,
     ) -> bool {
         if !self.level_in_place(level) {
             return false;
         }
         let blast = match interaction {
-            NativeExplosionInteraction::None => NativeBlast::Keep,
-            NativeExplosionInteraction::Block => NativeBlast::Block,
-            NativeExplosionInteraction::Tnt => NativeBlast::Tnt,
-            _ => unreachable!("NativeExplosionInteraction: unhandled variant"),
+            ExplosionInteraction::None => NativeBlast::Keep,
+            ExplosionInteraction::Block => NativeBlast::Block,
+            ExplosionInteraction::Tnt => NativeBlast::Tnt,
+            _ => unreachable!("ExplosionInteraction: unhandled variant"),
         };
         self.native_explode(level.dimension_id(), center, radius, fire, blast)
     }
@@ -206,13 +208,10 @@ mod tests {
     fn a_queued_block_event_runs_the_blocks_trigger_once() {
         use horizon_core::position::BlockPos;
         use mod_api::__private::part_tests::block_key;
-        use mod_api::{LevelRef, NativeWorldEpoch};
+        use mod_api::{LevelRef, WorldEpoch};
         super::super::native_entity_refs::tests::with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             game.world.chunks.insert(
                 (0, 0),

@@ -176,6 +176,7 @@ struct Server {
 impl Server {
     fn tick(&mut self, entities: &[EntityState]) {
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut self.world,
             entities,
             next_entity: &mut self.next_entity,
@@ -538,44 +539,24 @@ fn read_join_recipes(bot: &mut Bot, expected: (i32, i32), who: &str) -> Result<(
     for _ in 0..400 {
         let packet = bot.recv_play().map_err(|e| format!("{who}: {e}"))?;
         match packet {
-            C::Unknown(id, payload)
-                if id == horizon_protocol::ids::play::clientbound::UPDATE_RECIPES =>
-            {
-                let mut r = horizon_protocol::buf::Reader::new(&payload);
-                let mut furnace_input = None;
-                let mut stonecutting = Vec::new();
-                for _ in 0..r.varint().map_err(|e| e.to_string())? {
-                    let key = r.string(64).map_err(|e| e.to_string())?;
-                    let ids: Vec<i32> = (0..r.varint().map_err(|e| e.to_string())?)
-                        .map(|_| r.varint().unwrap_or(-1))
-                        .collect();
-                    if key == "minecraft:furnace_input" {
-                        furnace_input = Some(ids);
-                    }
-                }
-                let furnace_input = furnace_input.expect("furnace_input set");
+            C::UpdateRecipes(update) => {
+                let furnace_input = &update
+                    .properties
+                    .iter()
+                    .find(|(key, _)| key == "minecraft:furnace_input")
+                    .expect("furnace_input set")
+                    .1;
                 assert!(
                     furnace_input.contains(&raw_copper) && furnace_input.contains(&redstone),
                     "{who}: furnace_input holds the compound: first ids {:?}",
                     &furnace_input[..furnace_input.len().min(8)]
                 );
-                for _ in 0..r.varint().map_err(|e| e.to_string())? {
-                    if let horizon_protocol::packets::recipes::HolderSet::Items(ids) =
-                        horizon_protocol::packets::recipes::HolderSet::read(&mut r)
-                            .map_err(|e| e.to_string())?
-                    {
-                        stonecutting.push(ids);
-                    }
-                    // The result's ItemStackSlotDisplay: its type, the item,
-                    // the count and the two empty component lists.
-                    for _ in 0..5 {
-                        r.varint().map_err(|e| e.to_string())?;
-                    }
-                }
                 assert!(
-                    stonecutting
-                        .iter()
-                        .any(|ids| ids.contains(&raw_copper) && ids.contains(&redstone)),
+                    update.stonecutter.iter().any(|(input, _)| {
+                        matches!(input,
+                            horizon_protocol::packets::recipes::HolderSet::Items(ids)
+                            if ids.contains(&raw_copper) && ids.contains(&redstone))
+                    }),
                     "{who}: a stonecutting input holds the compound"
                 );
                 sets_ok = true;
@@ -1749,6 +1730,7 @@ fn a_respawned_guest_is_immune_until_its_client_loads_the_world() {
     let border = horizon_client::worldborder::WorldBorder::default();
     let at = [8.5, f64::from(MIN_Y + 5), 8.5];
     let ctx = TickCtx {
+        sea_level: 63,
         world: &mut s.world,
         entities: &[],
         next_entity: &mut s.next_entity,

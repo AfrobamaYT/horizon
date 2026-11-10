@@ -348,6 +348,7 @@ impl Game<'_> {
     }
     /// `LightningBolt.tick` for every bolt.
     pub(super) fn tick_bolts(&mut self) {
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut bolts = std::mem::take(&mut self.bolts);
         bolts.retain_mut(|b| {
             if b.life == 2 {
@@ -802,7 +803,7 @@ impl Game<'_> {
 impl Game<'_> {
     /// `EntityStruckByLightningEvent`, before `thunderHit` on entity `entity`
     /// from bolt `bolt`: false when a mod cancelled the hit. The entity still
-    /// counts as struck (`hitEntities`), as in NeoForge.
+    /// counts as struck (`hitEntities`).
     fn lightning_may_strike(&mut self, entity: u32, bolt: u32) -> bool {
         if !self.native_authoritative()
             || !mod_api::__private::listened(mod_api::HookId::EntityStruckByLightning)
@@ -1186,6 +1187,7 @@ mod tests {
                 step_sound: None,
                 food: Default::default(),
                 tempt: Default::default(),
+                passenger_attachments: Vec::new(),
             });
             let mut pig = Mob::new(1, kind, Vec3::ZERO, 45.0);
             if baby {

@@ -13,6 +13,14 @@ else (videos, Discord and other community material) lives elsewhere.
 suggest something. A pull request for a roadmap item carries its `roadmap:<id>` label; ideas go to the suggestion
 queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
 
+**Mod-related pull requests go to [arismoko/horizon](https://github.com/arismoko/horizon)**, the fork that carries the
+mod API and reviews and merges that work. That covers the mod API, native hooks and events for mods, native mods,
+content mods (`.hmod`), mixins, wasm mods, `cargo horizon-mod`, `horizon-mods`, mod builds and the registry, and
+their docs ([mods](docs/mods.md), [native mods](docs/native-mods.md)). Open the pull request there from your usual
+branch. Mod-related pull requests opened here are closed with a pointer to it. Engine extension points that Horizon's
+own crates register (the [layer split](docs/layers.md)), resource and shader pack formats, and gameplay fixes stay
+here.
+
 ## Build it
 
 - **Prerequisites:** Rust (stable), Python 3.10+, JDK 25, and on Linux the ALSA and udev headers
@@ -93,7 +101,7 @@ names its sources: the sections of that specification, the documentation pages a
   that downloads NVIDIA's files itself, on the player's machine. No NVIDIA binaries, headers or SDK files in the
   repository.
 - **The JVM bridge** (running Java mods) is only ever a separate, optional download, never installed or on by
-  default. The game may offer to turn it on when it finds a Java mod; the player decides.
+  default. The game may offer to turn it on when it finds a Java mod; the player decides. Promotion out of beta requires MSPT and RAM benchmarks against Java with the same mods ([horizon-rust/horizon#13914](https://github.com/horizon-rust/horizon/issues/13914)).
 
 ## Before asking for review
 
@@ -113,6 +121,10 @@ including examples. The dependency scope includes optional, platform, build and 
 library, binary, integration and doc tests without building unrelated example executables. Shared Cargo
 configuration and toolchain changes select the whole workspace; CI also keeps its workspace-wide checks.
 
+### Translations
+
+Most translations are machine-written and remain unreviewed until a speaker checks them. See [docs/translations.md](docs/translations.md). Never mark machine-written text as reviewed.
+
 ## Claim before you start
 
 Work is tracked in GitHub issues, and an issue that is assigned is taken (so is one with the `in progress` label:
@@ -123,6 +135,11 @@ claimed whole: claim one of the issues a tracker lists, or open one for the part
 
 A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
 5 days, with a comment: open a draft early. Agents claim the same way.
+
+You can hold at most 5 claimed issues that no open pull request of yours links. A sixth `/claim` is refused with a
+comment that gives the count; opening a pull request for one of them, or `/unclaim` on one, frees a slot. The
+repository's collaborators, and the trusted contributors listed in the repository variable `CLAIM_LIMIT_EXEMPT`, are
+not limited.
 
 When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
 it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.
@@ -177,3 +194,5 @@ new pushes, we add it again.
 
 [Discord](https://discord.gg/playhorizon) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
 for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).
+
+How Horizon is run, and how people join the Team or lead a group: [GOVERNANCE.md](GOVERNANCE.md).

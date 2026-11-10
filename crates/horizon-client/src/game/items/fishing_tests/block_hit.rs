@@ -6,7 +6,7 @@ use crate::game::*;
 use horizon_client::chunk::Chunk;
 use horizon_core::position::ChunkPos;
 
-fn game() -> Game<'static> {
+fn game<'a>(resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>) -> Game<'a> {
     let root = PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
@@ -28,7 +28,7 @@ fn game() -> Game<'static> {
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
     options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-    let res: &'static _ = Box::leak(Box::new(loaded.resources));
+    let res = resources.insert(loaded.resources);
     let mut game = Game::new(
         res,
         loaded.pack,
@@ -62,9 +62,9 @@ fn game() -> Game<'static> {
 /// A bobber at `from` flying east at 0.5 a tick, ticked until the custom
 /// statistic `stat` counts its first hit (or 20 ticks).
 fn cast_east(game: &mut Game<'_>, from: Vec3, stat: &str) {
-    let mut hook = Hook::remote(7, from);
+    let mut hook = Hook::remote(7, from, [0, 0, 0, 7]);
     hook.velocity = Vec3::new(0.5, 0.0, 0.0);
-    game.hook = Some(hook);
+    game.install_fishing_hook(hook);
     for _ in 0..20 {
         game.tick_fishing();
         if game.stats.get("custom", stat) > 0 {
@@ -85,7 +85,8 @@ fn property(game: &Game<'_>, at: [i32; 3], key: &str) -> Option<String> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_bobber_powers_a_target_block_and_counts_the_hit() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     assert!(game.run_command("setblock 4 64 2 minecraft:target"));
     // Nothing under its flight: the target is the first block it meets.
     assert!(game.run_command("fill 0 63 0 3 63 4 minecraft:air"));
@@ -104,7 +105,8 @@ fn a_bobber_powers_a_target_block_and_counts_the_hit() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_bobber_rings_a_floor_bell_on_its_side() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     assert!(game.run_command("setblock 4 64 5 minecraft:bell[attachment=floor,facing=east]"));
     // Struck on the west face (the bell's axis), low enough for isProperHit.
     cast_east(&mut game, Vec3::new(2.5, 64.6, 5.5), "minecraft:bell_ring");

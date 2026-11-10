@@ -651,7 +651,7 @@ impl Game<'_> {
                     x: xd,
                     z: zd,
                 };
-                let source = mod_api::health::HurtSource {
+                let source = mod_api::entity::health::HurtSource {
                     damage_type: "minecraft:player_attack",
                     causing: attack.attacker,
                     direct: attack.attacker,
@@ -697,7 +697,7 @@ impl Game<'_> {
                     self.native_kill_event(i);
                 }
                 let level = crate::game::entity::damage_level_of!(self, &attack);
-                self.mobs[i].knockback(level, 0.4, xd, zd, &source);
+                self.mobs[i].knockback(level, 0.4, xd, zd, &source, amount);
                 self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);
             }

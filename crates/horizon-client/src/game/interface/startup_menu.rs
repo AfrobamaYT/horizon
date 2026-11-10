@@ -53,6 +53,7 @@ pub(super) struct StartupMenu {
     pub reload_packs: bool,
     /// Browse mods' worker (`mod_browser`).
     mod_jobs: super::mod_browser::Jobs,
+    perf: horizon_client::telemetry::Session,
 }
 
 impl StartupMenu {
@@ -63,6 +64,7 @@ impl StartupMenu {
                 name: options.player_name(),
                 cookies: None,
                 lan: false,
+                realm: false,
             })
         } else {
             options
@@ -144,6 +146,7 @@ impl StartupMenu {
             None => game.title = None,
         }
         game.pending_entry = self.pending.take();
+        game.perf = std::mem::take(&mut self.perf);
         game.mod_jobs = std::mem::take(&mut self.mod_jobs);
         game.cursor = self.cursor;
         game.modifiers = self.modifiers;
@@ -245,15 +248,21 @@ impl StartupMenu {
                 creative,
                 create: Some(Box::new(options)),
             },
-            Action::Connect { address, lan } => PendingWorldEntry::Server {
+            Action::Connect {
+                address,
+                lan,
+                realm,
+            } => PendingWorldEntry::Server {
                 address,
                 name: player_name,
                 cookies: None,
                 lan,
+                realm,
             },
             _ => return,
         };
         self.pending = Some(entry);
+        self.perf.world_opening();
     }
 
     fn shortcut(&mut self, event: &KeyEvent) -> Option<clipboard::EditShortcut> {
@@ -702,7 +711,7 @@ impl Loading {
                 }
                 // Mods' settings pages open only in a running game.
                 // The HUD editor needs a world: its button is inactive here.
-                Event::NativeSettings(_) | Event::NativeButton(..) | Event::HudEditor => {}
+                Event::NativeSettings(_) | Event::NativeSetting(..) | Event::HudEditor => {}
                 // The startup menu runs before the game opens a control socket,
                 // and before its sound engine (no clicks, no volume previews,
                 // and no music tracks to list or play).
@@ -1323,9 +1332,13 @@ impl Loading {
                 self.menu.win = None;
             }
         } else if self.menu.options_open {
+            let output = self
+                .renderer
+                .as_ref()
+                .map_or(Default::default(), |r| r.output());
             self.menu
                 .options
-                .draw(&self.settings, batch, &gui.atlas, self.menu.cursor);
+                .draw(&self.settings, output, batch, &gui.atlas, self.menu.cursor);
         } else if let Some(title) = &mut self.menu.title {
             title.poll_backup();
             if std::mem::take(&mut title.onboarding_finished) {
@@ -1643,6 +1656,7 @@ mod tests {
             Action::Connect {
                 address: "localhost:25565".into(),
                 lan: true,
+                realm: false,
             },
             "Guest".into(),
         );

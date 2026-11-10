@@ -506,7 +506,7 @@ impl Game<'_> {
             e.pitch = o.pitch;
             e.head_yaw = o.yaw;
             if let Some(tag) = self.persist.raw.get(&o.id)
-                && let Some(item) = self.lan_display_data(tag, e)
+                && let Some(item) = self.lan_display_data_kept(o.id, tag, e)
                 && let Some((_, _, Value::Item(stack))) =
                     e.meta.iter_mut().find(|(index, _, _)| *index == 23)
             {
@@ -516,7 +516,80 @@ impl Game<'_> {
                     .and_then(|host| host.hub.stack(&Some(item)));
             }
         }
+        // Only this level's displays: the others are kept for their own level's pass.
+        KEPT_DISPLAYS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let Some(kept) = kept.get_mut(&self.dim) else {
+                return;
+            };
+            if kept.len() > self.others.len() + 64 {
+                let ids: horizon_client::fast_hash::FxHashSet<u32> =
+                    self.others.iter().map(|o| o.id).collect();
+                kept.retain(|id, _| ids.contains(id));
+            }
+        });
     }
+    /// [`Self::lan_display_data`] for the display `id`, built again only when
+    /// its compound changed: a server's holograms and menus are text displays
+    /// whose text, item and transformation were parsed again every tick.
+    fn lan_display_data_kept(
+        &self,
+        id: u32,
+        tag: &Tag,
+        e: &mut EntityState,
+    ) -> Option<horizon_client::items::ItemStack> {
+        if !matches!(
+            e.kind.as_str(),
+            "minecraft:text_display" | "minecraft:block_display" | "minecraft:item_display"
+        ) {
+            return self.lan_display_data(tag, e);
+        }
+        // Block states are read through the pack's registry: a kept build is
+        // only the same for the same one.
+        let registry = std::ptr::from_ref(self.pack.assets.registry) as usize;
+        KEPT_DISPLAYS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let kept = kept.entry(self.dim).or_default();
+            let same =
+                |k: &KeptDisplay| k.registry == registry && k.kind == e.kind && k.tag == *tag;
+            if let Some(k) = kept.get(&id).filter(|k| same(k)) {
+                e.meta.clone_from(&k.meta);
+                e.defaults.clone_from(&k.defaults);
+                return k.item.clone();
+            }
+            let item = self.lan_display_data(tag, e);
+            kept.insert(
+                id,
+                KeptDisplay {
+                    registry,
+                    kind: e.kind.clone(),
+                    tag: tag.clone(),
+                    meta: e.meta.clone(),
+                    defaults: e.defaults.clone(),
+                    item: item.clone(),
+                },
+            );
+            item
+        })
+    }
+}
+
+/// A display's synched data as [`Game::lan_display_data`] built it from
+/// `tag`, kept for the display's id on the thread that tracks entities, per
+/// level: a server thread tracks each dimension's `others` in turn.
+struct KeptDisplay {
+    registry: usize,
+    kind: String,
+    tag: Tag,
+    meta: Vec<(u8, i32, Value)>,
+    defaults: Vec<(u8, i32, Value)>,
+    /// An item display's item and the index in `meta` its stack goes in.
+    item: Option<horizon_client::items::ItemStack>,
+}
+thread_local! {
+    static KEPT_DISPLAYS: std::cell::RefCell<
+        horizon_client::fast_hash::FxHashMap<super::Dim, horizon_client::fast_hash::FxHashMap<u32, KeptDisplay>>,
+    > = Default::default();
 }
 
 impl Game<'_> {
@@ -611,39 +684,29 @@ impl Game<'_> {
         // `notifyLeasheeRemoved` discards it once the last lead is gone.
         self.forget_untied_knots();
         let next = &mut self.next_entity;
-        self.tnts.iter_mut().for_each(|t| {
-            super::entity::assign_stored_id(next, &mut t.id, None);
-        });
-        self.falling.for_each_mut(|f| {
-            super::entity::assign_stored_id(next, &mut f.id, Some(&f.attachment_lifetime));
-        });
-        self.creatures.projectiles.for_each_mut(|p| {
-            super::entity::assign_stored_id(next, &mut p.id, Some(&p.attachment_lifetime));
-        });
-        self.tridents.iter_mut().for_each(|t| {
-            super::entity::assign_stored_id(next, &mut t.id, None);
-        });
-        self.rockets.iter_mut().for_each(|r| {
-            super::entity::assign_stored_id(next, &mut r.id, None);
-        });
-        self.crystals.iter_mut().for_each(|c| {
-            super::entity::assign_stored_id(next, &mut c.id, None);
-        });
+        use super::entity_residency::assign_resident_ids;
+        assign_resident_ids!(self.tnts, t, next, None);
+        assign_resident_ids!(self.falling, f, next, Some(&f.attachment_lifetime));
+        assign_resident_ids!(
+            self.creatures.projectiles,
+            p,
+            next,
+            Some(&p.attachment_lifetime)
+        );
+        assign_resident_ids!(self.tridents, t, next, None);
+        assign_resident_ids!(self.rockets, r, next, None);
+        assign_resident_ids!(self.crystals, c, next, None);
         self.bolts.iter_mut().for_each(|b| {
             assign_entity_id(next, &mut b.id);
         });
-        self.ominous_spawners.for_each_mut(|o| {
-            super::entity::assign_stored_id(next, &mut o.id, None);
-        });
+        assign_resident_ids!(self.ominous_spawners, o, next, None);
         self.potions.thrown_ids().for_each(|id| {
             assign_entity_id(next, id);
         });
         self.end.eye_ids().for_each(|id| {
             assign_entity_id(next, id);
         });
-        self.breath_clouds.for_each_mut(|b| {
-            super::entity::assign_stored_id(next, &mut b.id, None);
-        });
+        assign_resident_ids!(self.breath_clouds, b, next, None);
     }
 
     /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
@@ -853,6 +916,7 @@ impl Game<'_> {
             );
             e.pitch = t.pitch;
             e.velocity = at(t.velocity);
+            e.needs_sync = t.needs_sync;
             // Projectile.getAddEntityPacket: the owner's id, the guest's that
             // threw it.
             e.data = data;
@@ -1198,6 +1262,62 @@ mod tests {
                 assert_eq!(game.next_entity, base + 11);
                 game.lan_assign_ids();
                 assert_eq!(game.next_entity, base + 11);
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn kept_display_data_is_what_a_build_gives() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let snbt = |s: &str| horizon_client::command::snbt::parse_fully(s).unwrap();
+            let displays: [(&str, Tag, Tag); 3] = [
+                (
+                    "minecraft:text_display",
+                    snbt(r#"{text:{text:"Shop",color:"gold"},billboard:"center",line_width:120}"#),
+                    snbt(r#"{text:{text:"Sold out",bold:1b},billboard:"center",background:0}"#),
+                ),
+                (
+                    "minecraft:block_display",
+                    snbt(
+                        r#"{block_state:{Name:"minecraft:oak_stairs",Properties:{facing:"east"}}}"#,
+                    ),
+                    snbt(r#"{block_state:{Name:"minecraft:glass"},brightness:{sky:15,block:3}}"#),
+                ),
+                (
+                    "minecraft:item_display",
+                    snbt(r#"{item:{id:"minecraft:diamond",count:3},item_display:"gui"}"#),
+                    snbt(
+                        r#"{item:{id:"minecraft:apple",count:1},item_display:"head",glow_color_override:255}"#,
+                    ),
+                ),
+            ];
+            let state = |kind: &str| EntityState {
+                kind: kind.into(),
+                ..Default::default()
+            };
+            for (id, (kind, first, second)) in displays.iter().enumerate() {
+                let id = 900 + id as u32;
+                // Ticks with the first compound, then the second, then the first
+                // again: each answer is a fresh build's.
+                for tag in [first, first, first, second, second, first] {
+                    let mut built = state(kind);
+                    let built_item = game.lan_display_data(tag, &mut built);
+                    assert!(!built.meta.is_empty(), "{kind}");
+                    let mut kept = state(kind);
+                    let kept_item = game.lan_display_data_kept(id, tag, &mut kept);
+                    assert_eq!(format!("{kept_item:?}"), format!("{built_item:?}"));
+                    assert_eq!(
+                        format!("{:?}", kept.meta),
+                        format!("{:?}", built.meta),
+                        "{kind}"
+                    );
+                    assert_eq!(
+                        format!("{:?}", kept.defaults),
+                        format!("{:?}", built.defaults),
+                        "{kind}"
+                    );
+                }
             }
         });
     }

@@ -3,6 +3,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
+mod menu_books;
 use horizon_client::{
     lang,
     mod_list::{self, Installed},
@@ -19,6 +20,49 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+
+/// Read filesystem-bound package declarations concurrently, retaining dependency order and
+/// keeping an individual package's refusal attached to that package.
+fn read_contents(
+    requests: &[(&Path, &horizon_mod_package::Manifest, Vec<String>)],
+) -> Vec<Result<horizon_mod_package::Content, String>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let next = AtomicUsize::new(0);
+    let threads = horizon_threads::worker_count().clamp(1, requests.len().max(1));
+    let mut done: Vec<_> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((path, manifest, declared)) = requests.get(index) else {
+                            return done;
+                        };
+                        let content =
+                            horizon_mod_package::Content::read_declaring(path, manifest, declared);
+                        if declared.is_empty()
+                            && let Ok(content) = &content
+                        {
+                            remember_verdict(path, content);
+                        }
+                        done.push((index, content));
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| {
+                worker
+                    .join()
+                    .unwrap_or_else(|e| std::panic::resume_unwind(e))
+            })
+            .collect()
+    });
+    done.sort_by_key(|(index, _)| *index);
+    done.into_iter().map(|(_, result)| result).collect()
+}
 
 #[derive(Default)]
 pub(super) struct CodeSwitches {
@@ -183,12 +227,24 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
 /// hook runs, so every step sees the same values.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
+    let directory = Game::game_dir();
+    #[cfg(unix)]
+    let directory = {
+        use std::os::unix::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
+    };
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
+    };
     mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
         builtin_registry_names(root)?,
         horizon_world::native_load_context::capture_settings(
             &Game::mod_data_root(),
             packages.ids(),
         ),
+        directory,
     ));
     Ok(())
 }
@@ -220,8 +276,12 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
 }
 
 /// Finish every once-only content declaration on the registration thread.
-pub(super) fn freeze_declarations() {
-    let _ = native_declared();
+pub(super) fn freeze_declarations() -> horizon_client::Result<()> {
+    let declared = native_declared();
+    if !declared.errors.is_empty() {
+        return Err(declared.errors.join("\n").into());
+    }
+    Ok(())
 }
 
 struct NativeDeclared {
@@ -237,11 +297,12 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
-        Game::native_items(&RegistrationContext::new(), &mut items);
+        let context = RegistrationContext::new();
+        Game::native_blocks(&context, &mut blocks);
+        Game::native_items(&context, &mut items);
+        let mut errors = mod_api::__private::take_declaration_refusals(&context);
         let types = super::api_values::block_entity_declarations();
         use super::api_values::TryIntoEngine;
-        let mut errors = Vec::new();
         let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
             .iter()
             .filter_map(|v| {
@@ -330,19 +391,19 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
 }
 pub(super) fn collect_key_mappings<'declared>(
     role: ExecutionRole,
-    declared: &'declared [(&'static str, mod_api::NativeKeyRegistration)],
-) -> &'declared [(&'static str, mod_api::NativeKeyRegistration)] {
+    declared: &'declared [(&'static str, mod_api::KeyRegistration)],
+) -> &'declared [(&'static str, mod_api::KeyRegistration)] {
     if role.is_client() { declared } else { &[] }
 }
 
-/// The native mods' entity model layers (`native_layer_definitions`), kept
+/// The native mods' entity model layers (`native_register_layer_definitions`), kept
 /// once at start for `bake_layer`.
 pub(super) fn register_layer_definitions(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut layers = Vec::new();
-    Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
+    Game::native_register_layer_definitions(&RegistrationContext::new(), &mut layers);
     horizon_client::mobs::model_layers::register(layers);
 }
 /// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
@@ -405,24 +466,60 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
-/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
-/// start, before resources load, so `tints` entries on them read the mod's colour.
-pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+/// The types native mods register for resource definitions, kept once at start, before
+/// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
+/// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
+/// definitions' entries on them list the mod's sprites; and model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads.
+pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut sources = Vec::new();
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
+    let mut sources = Vec::new();
+    Game::native_register_sprite_sources(&RegistrationContext::new(), &mut sources);
+    horizon_client_render::mod_sprite_sources::register(sources);
+    let mut loaders = Vec::new();
+    Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
+    horizon_client_render::mod_model_loaders::register(loaders);
 }
+/// The client presentation registrations, resolved once before the first level opens: the
+/// dimension transition screens and the entity spectator shaders.
+pub(super) fn register_client_presentations(role: ExecutionRole) {
+    register_preset_editors(role);
+    register_dimension_transition_screens(role);
+    register_entity_spectator_shaders(role);
+}
+
 /// Resolve client dimension-transition registrations once, before the first level opens.
-pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
+fn register_dimension_transition_screens(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut screens = Vec::new();
     Game::native_register_dimension_transition_screen(&RegistrationContext::new(), &mut screens);
     horizon_client_render::dimension_transition::register(screens);
+}
+
+/// Resolve client spectator post-effect registrations once, before the first level opens.
+pub(super) fn register_entity_spectator_shaders(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut shaders = Vec::new();
+    Game::native_register_entity_spectator_shaders(&RegistrationContext::new(), &mut shaders);
+    horizon_client_render::spectator_shaders::register(shaders);
+}
+
+pub(super) fn register_preset_editors(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut editors = Vec::new();
+    Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
+    horizon_client::title::preset_editors::register(editors);
 }
 
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
@@ -456,15 +553,19 @@ pub(super) fn add_section_geometry(role: ExecutionRole) {
     Game::native_add_section_geometry(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_section_geometry(registry.into_renderers());
 }
-/// The native mods' particle providers (`native_register_particle_providers`), kept once at
-/// start, before resources load; every particle sprite-set load resolves each type's provider.
-pub(super) fn register_particle_providers(role: ExecutionRole) {
+/// The native mods' particle providers (`native_register_particle_providers`) and render groups
+/// (`native_register_particle_groups`), kept once at start, before resources load; every particle
+/// sprite-set load resolves each type's provider and group.
+pub(super) fn register_particles(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::ParticleProviderRegistry::default();
     Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
     horizon_client::particles::register_particle_providers(registry.into_providers());
+    let mut groups = Vec::new();
+    Game::native_register_particle_groups(&RegistrationContext::new(), &mut groups);
+    horizon_client::particles::register_particle_groups(groups);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -495,7 +596,6 @@ pub(super) fn content_overlay(
     jar_store: &std::path::Path,
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mod_package::Content;
     let here = std::env::current_dir().unwrap_or_default();
     let original_base = root.to_owned();
 
@@ -578,27 +678,28 @@ pub(super) fn content_overlay(
     let order = horizon_mod_package::dependencies::resolve_content(&inputs)
         .map_err(|error| error.to_string())?
         .order;
-    for index in order {
+    // Hooks are queried on the calling thread, never from a content reader.
+    let native_items = &native_declared().items;
+    let requests: Vec<_> = order
+        .iter()
+        .map(|&index| {
+            let source = &packages[index];
+            let declared =
+                super::native_content_items::owned_item_ids(source.manifest, native_items);
+            (source.path, source.manifest, declared)
+        })
+        .collect();
+    let read = read_contents(&requests);
+    for (index, content) in order.into_iter().zip(read) {
         let source = &packages[index];
         let m = source.manifest;
-        // The items this mod's native code declares may be a file item's crafting remainder.
-        let declared: Vec<String> = native_declared()
-            .items
-            .iter()
-            .filter(|i| i.id.split_once(':').is_some_and(|(ns, _)| ns == m.id))
-            .map(|i| i.id.clone())
-            .collect();
-        let content = match Content::read_declaring(source.path, m, &declared) {
+        let content = match content {
             Ok(content) => content,
             Err(e) => {
                 log::warn!("Horizon: mod {} content not loaded: {e}", m.id);
                 continue;
             }
         };
-        // Read as `Content::read` reads it: `start_mods` need not read it again.
-        if declared.is_empty() {
-            remember_verdict(source.path, &content);
-        }
         let known = match &mut known {
             Some(types) => types,
             None => match mod_content::known_components(root) {
@@ -815,9 +916,28 @@ pub(super) fn content_root(
             .join("\n")
     })?;
     register_entity_types(&overlay.mods);
-    register_menu_types(&overlay.mods);
+    register_menu_types(&overlay.mods)?;
+    register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
+}
+
+/// Publish the built-in registry orders mods iterate. The report already
+/// includes the types and menus the content overlay registered, in registration
+/// order (`BuiltInRegistries` protocol ids).
+fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
+    use horizon_protocol::registry::Builtin;
+    let path = Builtin::find(root).ok_or("registries.json not found")?;
+    let builtin = Builtin::load(&path)?;
+    if let Some(ids) = builtin.get("minecraft:entity_type") {
+        mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    if let Some(ids) = builtin.get("minecraft:menu") {
+        mod_api::__private::resolve_menus(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    Ok(())
 }
 
 fn register_block_entity_types(
@@ -1019,9 +1139,12 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
 
 /// the mods' menu types, as their entity types: set once, from the startup
 /// root.
-fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
+fn register_menu_types(
+    mods: &[horizon_client::mod_content::ContentMod],
+) -> horizon_client::Result<()> {
     use horizon_client::containers;
     let menus = horizon_client::mod_content::menu_types(mods);
+    menu_books::validate_registered(&menus)?;
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
         let crafting = m.crafting.map(|c| containers::ModCrafting {
@@ -1050,6 +1173,7 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
+    Ok(())
 }
 
 /// The embedded inventory, formatted for the crash report.
@@ -1215,9 +1339,8 @@ impl Game<'_> {
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
         self.loop_context = context.game;
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.loop_context = self.loop_context.clone();
-        }
+        self.refresh_recipe_property_context();
+        self.setting_overrides.borrow_mut().clear();
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
         }
@@ -1309,7 +1432,7 @@ impl Game<'_> {
         let built = self.mods.native.built();
         let built_mods = native_mods_detail(built);
         if let Some(list) = built_mods {
-            mod_api::crash::set_detail("Native Mods", list);
+            mod_api::content::crash::set_detail("Native Mods", list);
         }
 
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
@@ -1523,10 +1646,16 @@ mod tests {
         assert_eq!(verdict(&ruby, &manifest, true), switches_on_restart);
         assert_eq!(verdict(&ruby, &manifest, false), Some(Ok(())));
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
-        std::fs::File::open(&ruby)
-            .unwrap()
-            .set_modified(later)
-            .unwrap();
+        let mut folder = std::fs::OpenOptions::new();
+        folder.read(true);
+        // Windows opens a folder only with FILE_FLAG_BACKUP_SEMANTICS, and sets its time only
+        // with write access.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            folder.write(true).custom_flags(0x0200_0000);
+        }
+        folder.open(&ruby).unwrap().set_modified(later).unwrap();
         assert_eq!(verdict(&ruby, &manifest, false), switches_on_restart);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1538,7 +1667,7 @@ mod tests {
     fn only_clients_collect_registered_keys() {
         let declared = [(
             "sample",
-            mod_api::NativeKeyRegistration::new("zoom", "key.keyboard.z"),
+            mod_api::KeyRegistration::new("zoom", "key.keyboard.z"),
         )];
         assert_eq!(
             collect_key_mappings(ExecutionRole::Client, &declared).len(),
@@ -2598,5 +2727,61 @@ mod tests {
             0,
             brewing::Category::Neutral
         )]));
+    }
+}
+
+#[cfg(test)]
+mod concurrent_content_tests {
+    use super::*;
+    #[test]
+    fn mods_read_at_once_keep_their_order_and_their_own_errors() {
+        let dir = std::env::temp_dir().join(format!("horizon-read-at-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths: Vec<PathBuf> = (0..12).map(|i| dir.join(format!("m{i}"))).collect();
+        for (i, path) in paths.iter().enumerate() {
+            std::fs::create_dir_all(path).unwrap();
+            std::fs::write(
+                path.join("horizon-mod.toml"),
+                format!(
+                    "id = \"m{i}\"\nname = \"M\"\nversion = \"0.1.0\"\napi = \"0.2\"\n\
+                     side = \"both\"\ncapabilities = [\"registries\"]\n"
+                ),
+            )
+            .unwrap();
+            // Mod i has i + 1 language files; mod 5 also writes into another mod's namespace.
+            let lang = path.join(format!("assets/m{i}/lang"));
+            std::fs::create_dir_all(&lang).unwrap();
+            for n in 0..=i {
+                std::fs::write(lang.join(format!("l{n}.json")), "{}").unwrap();
+            }
+            if i == 5 {
+                std::fs::create_dir_all(path.join("assets/m0/lang")).unwrap();
+                std::fs::write(path.join("assets/m0/lang/x.json"), "{}").unwrap();
+            }
+        }
+        let packages: Vec<(&PathBuf, horizon_mod_package::Package)> = paths
+            .iter()
+            .map(|p| (p, horizon_mod_package::Package::read(p).unwrap()))
+            .collect();
+        let requests: Vec<_> = packages
+            .iter()
+            .map(|(path, package)| (path.as_path(), &package.manifest, Vec::new()))
+            .collect();
+        let read = read_contents(&requests);
+        assert_eq!(read.len(), 12);
+        for (i, content) in read.iter().enumerate() {
+            if i == 5 {
+                assert!(content.as_ref().unwrap_err().contains("own namespaces"));
+                continue;
+            }
+            let files = &content.as_ref().unwrap().files;
+            assert_eq!(files.len(), i + 1, "mod {i}");
+            assert!(
+                files
+                    .iter()
+                    .all(|f| f.starts_with(&format!("assets/m{i}/")))
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

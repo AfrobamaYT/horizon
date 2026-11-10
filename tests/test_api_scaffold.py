@@ -17,6 +17,7 @@ CONFIG = textwrap.dedent('''
     [[type]]
     engine = "eng::Dir"
     kind = "enum"
+    domain = "world"
     topic = "dir"
     doc = "A direction."
     variants = ["Up", "Down"]
@@ -24,6 +25,7 @@ CONFIG = textwrap.dedent('''
     [[type]]
     engine = "eng::Pt"
     kind = "struct"
+    domain = "world"
     topic = "point"
     doc = "A point."
     fields = ["x: i32", "y: i32"]
@@ -31,6 +33,7 @@ CONFIG = textwrap.dedent('''
     [[type]]
     engine = "eng::Boat"
     kind = "handle"
+    domain = "entity"
     topic = "boat"
     doc = "A boat."
     methods = [{ name = "is_wet", ret = "Option<bool>", doc = "Wet." }]
@@ -43,8 +46,8 @@ class ScaffoldTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
         for rel, text in {
-            'crates/horizon-mod-api/src/lib.rs': 'pub struct Vec3;\n',
-            'crates/horizon-mod-api/src/point.rs': '//! Hand-written.\npub struct Keep;\n',
+            'crates/horizon-mod-vocab/src/lib.rs': 'pub struct Vec3;\n',
+            'crates/horizon-mod-vocab/src/world/point.rs': '//! Hand-written.\npub struct Keep;\n',
             'crates/horizon-client/src/game/modding/api_values.rs':
                 '#[path = "api_values/a.rs"]\npub(in crate::game) mod a;\n\nfn tail() {}\n',
         }.items():
@@ -69,37 +72,72 @@ class ScaffoldTest(unittest.TestCase):
         self.assertEqual(len(list(self.root.rglob('*.rs'))), len(before))
 
     def test_existing_type_is_refused_and_nothing_is_written(self):
-        self.write('crates/horizon-mod-api/src/other.rs', 'pub enum Dir {}\n')
+        self.write('crates/horizon-mod-vocab/src/other.rs', 'pub enum Dir {}\n')
         done = self.run_tool('--apply')
         self.assertNotEqual(done.returncode, 0)
         self.assertIn('already declared', done.stderr)
-        self.assertFalse((self.root / 'crates/horizon-mod-api/src/exports/dir.rs').exists())
+        self.assertFalse((self.root / 'crates/horizon-mod-vocab/src/exports/dir.rs').exists())
 
     def test_lib_is_never_a_target(self):
         self.config.write_text(CONFIG.replace('topic = "dir"', 'topic = "lib"'))
         done = self.run_tool('--apply')
         self.assertIn('lib.rs is never a target', done.stderr)
-        self.assertEqual((self.root / 'crates/horizon-mod-api/src/lib.rs').read_text(), 'pub struct Vec3;\n')
+        self.assertEqual((self.root / 'crates/horizon-mod-vocab/src/lib.rs').read_text(), 'pub struct Vec3;\n')
 
     def test_apply_appends_and_creates(self):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
-        api = self.root / 'crates/horizon-mod-api/src'
-        point = (api / 'point.rs').read_text()
+        api = self.root / 'crates/horizon-mod-vocab/src'
+        point = (api / 'world/point.rs').read_text()
         self.assertTrue(point.startswith('//! Hand-written.\npub struct Keep;\n'))
         self.assertIn('pub struct Pt {\n    /// The `x` component.\n    pub x: i32,', point)
         self.assertIn('pub const fn new(x: i32, y: i32) -> Self', point)
-        self.assertEqual((api / 'exports/dir.rs').read_text().splitlines()[-1], 'pub use crate::dir::Dir;')
-        self.assertIn('pub struct BoatRef {', (api / 'boat.rs').read_text())
+        self.assertEqual((api / 'exports/dir.rs').read_text().splitlines()[-1], 'pub use crate::world::dir::Dir;')
+        self.assertIn('pub(crate) mod boat;', (api / 'entity/mod.rs').read_text())
+        self.assertIn('horizon_mod_api_macros::Wire', point)
+        self.assertIn('horizon_mod_api_macros::Wire', (api / 'world/dir.rs').read_text())
+        self.assertIn('pub struct BoatRef {', (api / 'entity/boat.rs').read_text())
         self.assertIn('fn boat_is_wet(&self, handle: BoatRef) -> Option<bool>;', (api / 'host/boat.rs').read_text())
         conv = (self.root / 'crates/horizon-client/src/game/modding/api_values/dir.rs').read_text()
         self.assertIn('_ => return Err(UnsupportedDir)', conv)
         boat = (self.root / 'crates/horizon-client/src/game/modding/api_values/boat.rs').read_text()
         self.assertIn('pub(crate) fn boat_is_wet(&self, handle: mod_api::BoatRef) -> Option<bool>', boat)
-        self.assertIn('impl crate::wire::Wire for BoatRef', (api / 'boat.rs').read_text())
+        self.assertIn('horizon_mod_api_macros::Wire', (api / 'entity/boat.rs').read_text())
         values = (self.root / 'crates/horizon-client/src/game/modding/api_values.rs').read_text()
         self.assertIn('mod dir;', values)
         self.assertTrue(values.endswith('\n\nfn tail() {}\n'))
         self.assertLess(values.index('mod a;'), values.index('mod dir;'))
+
+    def test_explicit_wire_derives_cover_all_emitted_values(self):
+        self.assertEqual(self.run_tool('--apply').returncode, 0)
+        api = self.root / 'crates/horizon-mod-vocab/src'
+        for rel, declarations in [('world/dir.rs', ['Dir']), ('world/point.rs', ['Pt']),
+                                  ('entity/boat.rs', ['BoatRef', 'BoatRefFields'])]:
+            source = (api / rel).read_text()
+            for name in declarations:
+                self.assertRegex(source, rf'(?s)#\[derive\([^)]*horizon_mod_api_macros::Wire[^)]*\)\]'
+                                 rf'(?:(?!pub (?:struct|enum)).)*pub (?:struct|enum) {name}\b')
+            self.assertNotIn('impl crate::wire::Wire', source)
+            self.assertNotIn('NativeWorldEpoch', source)
+        self.assertIn('crate::WorldEpoch', (api / 'entity/boat.rs').read_text())
+
+    def test_native_engine_names_are_preserved_only_on_engine_side(self):
+        self.config.write_text(CONFIG.replace('eng::Pt', 'eng::NativePt'))
+        self.assertEqual(self.run_tool('--apply').returncode, 0)
+        source = (self.root / scaffold.API / 'world/point.rs').read_text()
+        self.assertIn('pub struct Pt', source)
+        conv = (self.root / scaffold.CONV / 'point.rs').read_text()
+        self.assertIn('for eng::NativePt', conv)
+        self.assertIn('for mod_api::Pt', conv)
+        self.assertNotIn('mod_api::Native', conv)
+
+    def test_shared_topic_is_registered_once(self):
+        self.config.write_text(CONFIG.replace('topic = "point"', 'topic = "dir"'))
+        self.assertEqual(self.run_tool('--apply').returncode, 0)
+        api = self.root / scaffold.API
+        self.assertEqual((api / 'world/mod.rs').read_text().count('mod dir;'), 1)
+        source = (api / 'world/dir.rs').read_text()
+        self.assertIn('pub enum Dir', source)
+        self.assertIn('pub struct Pt', source)
 
     def test_exhaustive_struct_is_built_by_literal(self):
         self.config.write_text(CONFIG.replace('fields = ["x: i32", "y: i32"]',
@@ -107,14 +145,18 @@ class ScaffoldTest(unittest.TestCase):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
         conv = (self.root / 'crates/horizon-client/src/game/modding/api_values/point.rs').read_text()
         self.assertIn('mod_api::Pt { x: self.x, y: self.y }', conv)
-        self.assertNotIn('pub const fn new', (self.root / 'crates/horizon-mod-api/src/point.rs').read_text())
+        self.assertNotIn('pub const fn new', (self.root / 'crates/horizon-mod-vocab/src/world/point.rs').read_text())
 
     def test_handle_reads_must_be_optional(self):
         self.config.write_text(CONFIG.replace('ret = "Option<bool>"', 'ret = "bool"'))
         self.assertIn('returns Option', self.run_tool('--dry-run').stderr)
 
     def test_bad_names_are_refused_without_writing(self):
-        for old, new in [('topic = "dir"', 'topic = "../../escaped"'), ('topic = "dir"', 'topic = "host/../lib"'),
+        for old, new in [('domain = "world"', 'domain = "../../escaped"'),
+                         ('domain = "world"', 'domain = ["world"]'),
+                         ('domain = "world"', ''),
+                         ('topic = "dir"', 'topic = "mod"'),
+                         ('topic = "dir"', 'topic = "dir"\nname = "NativeDir"'), ('topic = "dir"', 'topic = "../../escaped"'), ('topic = "dir"', 'topic = "host/../lib"'),
                          ('topic = "dir"', 'topic = "/tmp/abs"'), ('topic = "dir"', 'topic = "type"'),
                          ('variants = ["Up", "Down"]', 'variants = ["Up", "fn"]'),
                          ('fields = ["x: i32", "y: i32"]', 'fields = ["x: i32", "y z: i32"]'),
@@ -153,7 +195,7 @@ class RankTest(unittest.TestCase):
 
     def test_ref_and_key_names_carry_the_engine_type(self):
         with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / 'crates/horizon-mod-api/src'
+            src = Path(tmp) / 'crates/horizon-mod-vocab/src'
             src.mkdir(parents=True)
             (src / 'a.rs').write_text('pub struct MobRef;\npub use x::{Foo, Bar};\n')
             self.assertLessEqual({'MobRef', 'Mob', 'Foo', 'Bar'}, scaffold.available(Path(tmp)))

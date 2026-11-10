@@ -793,24 +793,9 @@ fn sense_babies(m: &mut Mob, w: &MobWorld) {
     }
     mem(m).visible_villager_babies.set_list(babies);
 }
-/// `SecondaryPoiSensor.doTick`: a farmer's farmland within four blocks.
-fn sense_secondary(m: &mut Mob, w: &MobWorld) {
-    let mut sites = Vec::new();
-    if super::villager::is_farmer(m) {
-        let c = block_of(m.position);
-        for x in -4..=4 {
-            for y in -2..=2 {
-                for z in -4..=4 {
-                    let p = [c[0] + x, c[1] + y, c[2] + z];
-                    if farmland(w, p) {
-                        sites.push(p);
-                    }
-                }
-            }
-        }
-    }
-    mem(m).secondary_job_site.set_list(sites);
-}
+#[path = "villager_secondary.rs"]
+mod secondary;
+use secondary::sense_secondary;
 /// `GolemSensor`.
 fn sense_golem(m: &mut Mob, w: &MobWorld) {
     let golem = mem_ref(m)
@@ -886,7 +871,9 @@ fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Opti
         .filter(|p| p.is_job())
 }
 fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
-    (name.ends_with("_bed") && part == Some("head")).then_some(Poi::Home)
+    // PoiTypes.BEDS contains the colored Blocks.BED collection, not STRAW_BED.
+    (name.ends_with("_bed") && name != "minecraft:straw_bed" && part == Some("head"))
+        .then_some(Poi::Home)
 }
 
 /// Which POI types a predicate accepts.
@@ -975,12 +962,12 @@ fn chunk_pois(
         return;
     };
     let kind = |state: u32| poi_of_state(w, horizon_world::registry::BlockStateId(state));
-    let min = w.world.bottom_y();
-    for s in (y0 - min) >> 4..=(y1 - min) >> 4 {
-        let section = &chunk.sections[s as usize];
-        for &(i, poi) in w.world.pois.get((qx, s, qz), section, kind).iter() {
+    let (min, mut lists) = (w.world.bottom_y(), Vec::new());
+    w.world.pois.column(chunk, min, (y0, y1), kind, &mut lists);
+    for (base, pois) in &lists {
+        for &(i, poi) in pois.iter() {
             let i = i32::from(i);
-            let y = min + s * 16 + (i >> 8);
+            let y = base + (i >> 8);
             if (y0..=y1).contains(&y) {
                 visit(poi, [qx * 16 + (i & 15), y, qz * 16 + (i >> 4 & 15)]);
             }
@@ -3447,7 +3434,7 @@ fn same_path(a: Option<&Path>, b: Option<&Path>) -> bool {
 }
 /// `Swim`: deeper than the jump threshold, or in lava.
 fn swim_condition(m: &Mob) -> bool {
-    m.fluids.water > m.fluid_jump_threshold() || m.fluids.in_lava
+    m.floats()
 }
 fn panic_condition(m: &Mob) -> bool {
     mem_ref(m).is_some_and(|mm| mm.hurt_by.present() || mm.nearest_hostile.present())
@@ -4783,9 +4770,38 @@ mod poi_classification_tests {
     }
 
     #[test]
-    fn straw_bed_head_differs_between_runtime_and_saved_pois() {
+    #[ignore = "requires the vanilla bed POI oracle output"]
+    fn vanilla_bed_poi_states() {
+        let path = std::env::var("HORIZON_BED_POI_ORACLE").expect("oracle output path");
+        let rows = std::fs::read_to_string(path).unwrap();
+        assert_eq!(rows.lines().count(), 272);
+        for row in rows.lines() {
+            let fields: Vec<_> = row.split_whitespace().collect();
+            let [name, part, expected] = fields[..] else {
+                panic!("invalid oracle row")
+            };
+            let expected = expected == "true";
+            let state = BlockState {
+                name: name.into(),
+                properties: [("part".into(), part.into())].into_iter().collect(),
+            };
+            assert_eq!(
+                runtime_bed_poi(name, Some(part)).is_some(),
+                expected,
+                "{row}"
+            );
+            assert_eq!(
+                horizon_world::poi::saved_poi(&state) == Some(Poi::Home),
+                expected,
+                "{row}"
+            );
+        }
+    }
+
+    #[test]
+    fn bed_heads_agree_between_runtime_and_saved_pois() {
         for (name, part, runtime, saved) in [
-            ("minecraft:straw_bed", "head", true, false),
+            ("minecraft:straw_bed", "head", false, false),
             ("minecraft:straw_bed", "foot", false, false),
             ("minecraft:red_bed", "head", true, true),
             ("minecraft:red_bed", "foot", false, false),

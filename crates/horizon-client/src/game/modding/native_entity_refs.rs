@@ -8,6 +8,12 @@
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
+#[path = "native_entity_refs/dragon_parts_table.rs"]
+pub(in crate::game) mod dragon_parts_table;
+#[path = "native_entity_refs/dragon_query.rs"]
+mod dragon_query;
+#[path = "native_entity_refs/save_lending.rs"]
+mod save_lending;
 use super::{
     Game,
     commands::Target,
@@ -17,22 +23,21 @@ use horizon_core::geometry::{Aabb, Vec3};
 use horizon_items::items::ItemStack;
 use horizon_world::registry::BlockStateId;
 use mod_api::{
-    DimensionKey, EntityRayHit, EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind,
-    NativeBlockUpdateFlags, NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
-    NeighbourUpdate,
+    BlockFace, BlockShapeKind, BlockUpdateFlags, ClipBlock, ClipFluid, ClipHit, DimensionKey,
+    EntityRayHit, EntityRef, LevelRef, NeighbourUpdate,
 };
 
 /// The engine's direction of a mod API block face.
-pub(super) fn block_face_direction(face: NativeBlockFace) -> horizon_core::geometry::Direction {
+pub(super) fn block_face_direction(face: BlockFace) -> horizon_core::geometry::Direction {
     use horizon_core::geometry::Direction;
     match face {
-        NativeBlockFace::Down => Direction::Down,
-        NativeBlockFace::Up => Direction::Up,
-        NativeBlockFace::North => Direction::North,
-        NativeBlockFace::South => Direction::South,
-        NativeBlockFace::West => Direction::West,
-        NativeBlockFace::East => Direction::East,
-        _ => unreachable!("NativeBlockFace: unhandled variant"),
+        BlockFace::Down => Direction::Down,
+        BlockFace::Up => Direction::Up,
+        BlockFace::North => Direction::North,
+        BlockFace::South => Direction::South,
+        BlockFace::West => Direction::West,
+        BlockFace::East => Direction::East,
+        _ => unreachable!("BlockFace: unhandled variant"),
     }
 }
 
@@ -82,21 +87,6 @@ impl Game<'_> {
         remote.tracked_entity(i32::try_from(entity.id()).ok()?)
     }
 
-    /// Keep a held-out entity inaccessible until its copy has been stored back.
-    pub(super) fn with_entity_held_out<R>(
-        &mut self,
-        id: u32,
-        action: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        if mod_api::__private::mods().is_empty() {
-            return action(self);
-        }
-        self.held_out.push(id);
-        let result = action(self);
-        self.held_out.pop();
-        result
-    }
-
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
         if self.held_out.contains(&entity.id())
@@ -105,38 +95,16 @@ impl Game<'_> {
         {
             return None;
         }
-        let id = i32::try_from(entity.id()).ok()?;
-        if id == 0 {
+        let horizon_client::join_seq::residency::table::EntityLookup::Found { location, value } =
+            self.server_resident_entity(entity.id())
+        else {
             return None;
-        }
-        // The acting guest's state is in place, not in their hub record.
-        if self.lan_acting_uuid.is_some()
-            && self.lan_acting_entity == Some(entity.id())
-            && self.player.is_some()
-        {
-            return Some(Target::Player);
-        }
-        let player = self
-            .lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .find(|g| g.placed && g.entity_id == id);
-        if let Some(g) = player {
-            // An outer guest in a nested swap has a displaced record.
-            return (!self.lan_guest_swaps.contains(&g.conn)).then_some(Target::Guest(g.conn));
-        }
-        // Not in `level_entity`: packets and cameras never reach a hook.
-        if self.fishing_hook_by_id(entity.id()).is_some() {
-            return (!self.persist.removals.contains(&Target::Hook(entity.id())))
-                .then_some(Target::Hook(entity.id()));
-        }
-        if let Some(part) = self.level_dragon_part(entity.id()) {
-            return Some(part);
-        }
-        match self.level_entity(id)? {
-            Target::Mob(id) if !self.mobs.iter().any(|m| m.id == id && !m.removed) => None,
-            t => Some(t),
-        }
+        };
+        // Players are server-wide records. Ordinary body operations retain
+        // their existing current-level domain; source membership is global.
+        (matches!(value, Target::Player | Target::Guest(_))
+            || location.owner.dimension == self.dim.key())
+        .then_some(value)
     }
     /// What a handle names on a client: the local player, or an entity the
     /// server told this client of (`ClientLevel.getEntity`, whose entities are
@@ -194,7 +162,9 @@ impl Game<'_> {
         let Target::Dragon(id) = self.native_entity_read_target(entity)? else {
             return Some(Vec::new());
         };
-        (id + 1..=id + 8).map(|part| self.entity(part)).collect()
+        (1..=8)
+            .map(|offset| self.entity(id.checked_add(offset)?))
+            .collect()
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: on a client,
     /// the level it shows, whatever the server calls it. None with no world
@@ -210,6 +180,13 @@ impl Game<'_> {
             .chain(self.levels.parked_dims())
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.key()))
+    }
+    /// The client level in place as a handle: the level this window shows and
+    /// ticks. None before login, while reconfiguring, or with no world open.
+    pub(super) fn native_client_level(&self) -> Option<LevelRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let remote = self.remote.as_ref().filter(|r| r.has_level())?;
+        Some(LevelRef::new(epoch, remote.level_key))
     }
     /// The name of a dimension's key.
     pub(in crate::game) fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
@@ -232,14 +209,37 @@ impl Game<'_> {
             .filter_map(|dim| self.level(dim.id()))
             .collect()
     }
+    /// All lookup members of the active server level, without spatial filtering.
+    /// Parts are not lookup members. Refuses remote, stale and parked levels.
+    pub(super) fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
+        if !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || level.dimension() != self.dim.key()
+        {
+            return None;
+        }
+        let ids = self
+            .resident_entities
+            .table
+            .borrow_mut()
+            .level_entities(level.dimension());
+        ids.into_iter()
+            .map(|id| {
+                let entity = EntityRef::new(level.epoch(), id);
+                self.native_entity_target(entity).map(|_| entity)
+            })
+            .collect()
+    }
+
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
     /// its entity handles cannot resolve until the level is in place. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings, other special entities and the dragon
-    /// are not on the entity-list walk.
+    /// yet resolve; frames, paintings and other special entities
+    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     pub(super) fn level_entities_in(
@@ -265,6 +265,7 @@ impl Game<'_> {
                 ids.push(entity.id());
             }
         });
+        self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.fishing_hooks_here()
                 .filter(|(hook, _)| bounds.intersects(hook.bounds()))
@@ -296,6 +297,7 @@ impl Game<'_> {
                 ids.push(id);
             }
         }
+        self.append_dragon_query_ids(bounds, true, &mut ids);
         Some(
             ids.into_iter()
                 .map(|id| EntityRef::new(level.epoch(), id))
@@ -360,7 +362,7 @@ impl Game<'_> {
         level: LevelRef,
         pos: [i32; 3],
         state: BlockStateId,
-        flags: NativeBlockUpdateFlags,
+        flags: BlockUpdateFlags,
     ) -> Result<bool, mod_api::LevelWriteError> {
         if !self.native_level_write_position(level, pos)? {
             return Ok(false);
@@ -378,7 +380,7 @@ impl Game<'_> {
             return false;
         }
         let changed =
-            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+            self.with_level(|_, level, ticks| level.remove_block_write(ticks, pos, moved));
         let _ = self.process_level_events();
         changed
     }
@@ -523,15 +525,16 @@ impl Game<'_> {
             && self.world.loaded(pos[0], pos[2])
             && self.world.shape.contains_y(pos[1])
     }
-    /// Block-local outline or collision boxes with an empty context. Interaction,
-    /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a closed level. Unloaded blocks read
-    /// as air; collision errors return no boxes, like `block_collision`.
+    /// The supplied state's block-local outline or collision boxes at a level
+    /// position with an empty context. The world is never modified. Returns None
+    /// on a client, for a stale handle or for a closed level. Unloaded neighbors
+    /// read as air; collision errors return no boxes, like `block_collision`.
     pub(super) fn level_block_shape(
         &self,
         level: LevelRef,
+        state: BlockStateId,
         pos: [i32; 3],
-        kind: NativeBlockShapeKind,
+        kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
         if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
@@ -549,15 +552,7 @@ impl Game<'_> {
                 self.levels.parked_anims(dim)?,
             )
         };
-        Some(match kind {
-            NativeBlockShapeKind::Outline => self
-                .outline_boxes_in_context(world, anims, pos, false)
-                .into_iter()
-                .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
-                .collect(),
-            NativeBlockShapeKind::Collision => self.native_block_collision_in(world, pos),
-            _ => unreachable!("NativeBlockShapeKind: unhandled variant"),
-        })
+        Some(self.state_shape_boxes(world, anims, state, pos, kind))
     }
 
     /// Gameplay's face support in the current or a parked server level, including
@@ -567,8 +562,8 @@ impl Game<'_> {
         &self,
         level: LevelRef,
         pos: [i32; 3],
-        face: NativeBlockFace,
-        support: NativeSupportType,
+        face: BlockFace,
+        support: mod_api::SupportType,
     ) -> Option<bool> {
         let state = self.level_block_state(level, pos)?;
         let direction = block_face_direction(face);
@@ -585,20 +580,20 @@ impl Game<'_> {
                 subject: None,
             };
             let support = match support {
-                NativeSupportType::Full => SupportType::Full,
-                NativeSupportType::Center => SupportType::Center,
-                NativeSupportType::Rigid => SupportType::Rigid,
-                _ => unreachable!("NativeSupportType: unhandled variant"),
+                mod_api::SupportType::Full => SupportType::Full,
+                mod_api::SupportType::Center => SupportType::Center,
+                mod_api::SupportType::Rigid => SupportType::Rigid,
+                _ => unreachable!("mod_api::SupportType: unhandled variant"),
             };
             return dynamic
                 .is_face_sturdy(&mut scene, pos, direction, support)
                 .ok();
         }
         Some(match support {
-            NativeSupportType::Full => b.is_face_sturdy(state, direction),
-            NativeSupportType::Center => b.is_face_sturdy_center(state, direction),
-            NativeSupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
-            _ => unreachable!("NativeSupportType: unhandled variant"),
+            mod_api::SupportType::Full => b.is_face_sturdy(state, direction),
+            mod_api::SupportType::Center => b.is_face_sturdy_center(state, direction),
+            mod_api::SupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
+            _ => unreachable!("mod_api::SupportType: unhandled variant"),
         })
     }
 
@@ -609,9 +604,9 @@ impl Game<'_> {
         level: LevelRef,
         from: [f64; 3],
         to: [f64; 3],
-        blocks: NativeClipBlock,
-        fluids: NativeClipFluid,
-    ) -> Option<NativeClipHit> {
+        blocks: ClipBlock,
+        fluids: ClipFluid,
+    ) -> Option<ClipHit> {
         use horizon_client::collisions::SceneCollisions;
         use horizon_core::geometry::Direction;
         use horizon_world::{
@@ -634,13 +629,13 @@ impl Game<'_> {
             }),
         };
         let mode = match blocks {
-            NativeClipBlock::Collider => RayBlockMode::Collider,
-            NativeClipBlock::Outline => RayBlockMode::Outline,
-            _ => unreachable!("NativeClipBlock: unhandled variant"),
+            ClipBlock::Collider => RayBlockMode::Collider,
+            ClipBlock::Outline => RayBlockMode::Outline,
+            _ => unreachable!("ClipBlock: unhandled variant"),
         };
         let fluid = match fluids {
-            NativeClipFluid::None => RayFluidMode::None,
-            _ => unreachable!("NativeClipFluid: unhandled variant"),
+            ClipFluid::None => RayFluidMode::None,
+            _ => unreachable!("ClipFluid: unhandled variant"),
         };
         let result = clip_world(
             &mut rays,
@@ -653,14 +648,14 @@ impl Game<'_> {
         .ok()?;
         let h = result.hit;
         let face = match h.direction {
-            Direction::Down => NativeBlockFace::Down,
-            Direction::Up => NativeBlockFace::Up,
-            Direction::North => NativeBlockFace::North,
-            Direction::South => NativeBlockFace::South,
-            Direction::West => NativeBlockFace::West,
-            Direction::East => NativeBlockFace::East,
+            Direction::Down => BlockFace::Down,
+            Direction::Up => BlockFace::Up,
+            Direction::North => BlockFace::North,
+            Direction::South => BlockFace::South,
+            Direction::West => BlockFace::West,
+            Direction::East => BlockFace::East,
         };
-        Some(NativeClipHit {
+        Some(ClipHit {
             miss: result.miss,
             block: [h.block.x, h.block.y, h.block.z],
             face,
@@ -713,6 +708,11 @@ impl Game<'_> {
             {
                 return None;
             }
+            if let Some(words) =
+                self.known_resident_entity_uuid_at(self.native_level_key(), entity.id())
+            {
+                return Some(uuid_from_words(words));
+            }
             if let Some((uuid, _)) = r.level_player(id) {
                 return Some(uuid);
             }
@@ -724,7 +724,12 @@ impl Game<'_> {
                 .map(uuid_from_words);
         }
         let words = match self.native_entity_target(entity)? {
-            Target::Player => return self.lan_acting_uuid,
+            Target::Player => {
+                let dimension = self.current_player_resident_location()?.owner.dimension;
+                return self
+                    .known_resident_entity_uuid_at(dimension, entity.id())
+                    .map(uuid_from_words);
+            }
             Target::Guest(conn) => return self.command_guest(conn).map(|g| g.uuid),
             _ => self.uuid_for(entity.id()),
         };
@@ -756,7 +761,7 @@ mod ray_tests {
     use super::*;
 
     fn entity(id: u32) -> EntityRef {
-        EntityRef::new(mod_api::NativeWorldEpoch::new(1), id)
+        EntityRef::new(mod_api::WorldEpoch::new(1), id)
     }
 
     /// A unit box with its lowest corner at `x` on the x axis, around the ray along x.
@@ -927,6 +932,35 @@ pub(super) mod tests {
         Some(root)
     }
 
+    pub(in crate::game) fn prepare_entity_ticking_neighborhood(
+        game: &mut super::Game<'_>,
+        center: horizon_core::position::ChunkPos,
+    ) {
+        for z in center.z - 2..=center.z + 2 {
+            for x in center.x - 2..=center.x + 2 {
+                if !game.world.chunks.contains_key(&(x, z)) {
+                    game.world.chunks.insert(
+                        (x, z),
+                        std::sync::Arc::new(horizon_client::chunk::Chunk::empty(x, z)),
+                    );
+                    game.block_ticks
+                        .add_empty_chunk(horizon_core::position::ChunkPos::new(x, z))
+                        .unwrap();
+                }
+            }
+        }
+    }
+
+    /// Bind the fixture body's canonical identity before configuring its acting context.
+    pub(in crate::game) fn bind_local_player(game: &mut super::Game<'_>, id: u32, uuid: u128) {
+        game.player.as_mut().expect("fixture player body").entity_id =
+            i32::try_from(id).expect("fixture entity ID fits the protocol");
+        game.level.player_uuid = Some(horizon_client::lan::playerdata::uuid_ints(uuid));
+        game.bind_local_player_residency();
+        game.lan_acting_entity = Some(id);
+        game.lan_acting_uuid = Some(uuid);
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_at(root, test);
@@ -972,7 +1006,7 @@ pub(super) mod tests {
         test: impl FnOnce(&mut super::Game<'_>),
     ) {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
-        use mod_api::NativeAuthority;
+        use mod_api::Authority;
 
         // Parts registration replaces its metadata snapshot. Finish registration before
         // loading the resource graph, whose registry retains one immutable worker snapshot.
@@ -1016,8 +1050,9 @@ pub(super) mod tests {
             None,
         )
         .unwrap();
+        game.reset_entity_residency();
         game.native_lifecycle
-            .begin_open(NativeAuthority::IntegratedServer);
+            .begin_open(Authority::IntegratedServer);
 
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
@@ -1068,6 +1103,116 @@ pub(super) mod tests {
                 b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
             });
             assert_eq!(signal, 15);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::position::BlockPos;
+        use std::sync::Arc;
+
+        // The fixture's parts: glass sustains any plant, grass sustains none.
+        mod_api::__private::part_tests::sustain_plant_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let dandelion = state("minecraft:dandelion");
+            let survives = |game: &mut super::super::Game<'_>, soil: &str| {
+                game.world.set(5, 64, 5, state(soil)).unwrap();
+                game.with_level(|b, level, ticks| {
+                    b.can_survive(level, ticks, BlockPos::new(5, 65, 5), dandelion)
+                })
+            };
+            // Allow: vanilla refuses a dandelion on glass; the soil's part lets it stand.
+            assert!(survives(game, "minecraft:glass"));
+            // Deny: vanilla lets a dandelion stand on grass; the soil's part refuses it.
+            assert!(!survives(game, "minecraft:grass_block"));
+            // Default: soils with no part answer as vanilla's plant rule does.
+            assert!(survives(game, "minecraft:dirt"));
+            assert!(!survives(game, "minecraft:stone"));
+            // A client's copy of the level does not ask the part.
+            game.options.dedicated = None;
+            assert!(!survives(game, "minecraft:glass"));
+            assert!(survives(game, "minecraft:grass_block"));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_part_decides_whether_the_tool_harvests() {
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use horizon_core::{geometry::Vec3, position::ChunkPos};
+        use std::sync::Arc;
+
+        // The fixture's parts: stone is harvested by any tool, dirt by none.
+        mod_api::__private::part_tests::harvest_game_thread();
+        with_game(|game| {
+            let scratch = std::env::temp_dir().join(format!(
+                "horizon-harvest-part-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&scratch).unwrap();
+            game.world_root = scratch.clone();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 62.0, 4.5)).unwrap());
+            game.player.as_mut().unwrap().ground.on_ground = true;
+            game.creative = false;
+            game.build_registries();
+            game.set_allow_commands(true);
+            assert!(game.run_command("gamemode survival"));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            let registry = game.pack.assets.registry;
+            let pos = [5, 63, 4];
+            // The dig's progress and the drops of a break by bare hand: (block, its hardness, what
+            // vanilla drops by hand, and what the drop is). Vanilla's own rule: a block that
+            // requires a tool drops nothing by hand, and the dig is 3.33 times slower for it.
+            for (block, hardness, part, by_hand, drop) in [
+                // Stone needs a pickaxe; the part harvests it anyway.
+                (
+                    "minecraft:stone",
+                    1.5_f32,
+                    Some(true),
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                // Dirt needs none; the part refuses it.
+                ("minecraft:dirt", 0.5, Some(false), true, "minecraft:dirt"),
+                // No part: vanilla's rule alone, both ways.
+                (
+                    "minecraft:cobblestone",
+                    2.0,
+                    None,
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                ("minecraft:grass_block", 0.6, None, true, "minecraft:dirt"),
+            ] {
+                let state = registry.default_state(block).unwrap();
+                let harvest = !part.unwrap_or(by_hand);
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+                let divisor = if harvest { 30.0 } else { 100.0 };
+                assert_eq!(
+                    game.destroy_progress(pos),
+                    1.0 / hardness / divisor,
+                    "{block}"
+                );
+                game.dropped.clear();
+                game.break_block(pos).unwrap();
+                let dropped = game.dropped.iter().any(|item| &*item.stack.item == drop);
+                assert_eq!(dropped, harvest, "{block}: drops {drop}");
+            }
+            std::fs::remove_dir_all(scratch).unwrap();
         });
     }
 
@@ -1453,7 +1598,7 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_part_answers_is_pathfindable_once_per_state_and_type() {
-        use mod_api::mobs::PathComputationType::{self, Air, Land, Water};
+        use mod_api::entity::mobs::PathComputationType::{self, Air, Land, Water};
 
         // Before any part: every state answers as the vanilla export says.
         with_game(|game| {
@@ -1668,7 +1813,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
         use horizon_client::chunk::Chunk;
-        use mod_api::{ChunkStatus, NativeAuthority};
+        use mod_api::{Authority, ChunkStatus};
         use std::sync::Arc;
         with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
@@ -1698,7 +1843,7 @@ pub(super) mod tests {
                 .chunks
                 .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
             game.native_lifecycle
-                .begin_open(NativeAuthority::IntegratedServer);
+                .begin_open(Authority::IntegratedServer);
             assert!(game.chunk(level, [-2, 3]).is_none());
             assert!(!chunk.loaded(game));
             assert_eq!(chunk.status(game), None);
@@ -1709,7 +1854,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_reads_and_writes_use_dimension_build_height() {
         use horizon_client::chunk::{Chunk, LevelShape};
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::BlockUpdateFlags;
         use std::sync::Arc;
         with_game(|game| {
             game.world.shape = LevelShape::new(0, 128, 128, true, false).unwrap();
@@ -1739,7 +1884,7 @@ pub(super) mod tests {
             assert!(!game.level_is_loaded(level, [0, -1, 0]));
             assert_eq!(game.level_block_state(level, [0, -1, 0]), None);
             assert_eq!(
-                game.level_set_block(level, [0, 128, 0], stone, NativeBlockUpdateFlags::NEIGHBORS),
+                game.level_set_block(level, [0, 128, 0], stone, BlockUpdateFlags::NEIGHBORS),
                 Ok(false)
             );
             assert!(
@@ -2030,10 +2175,7 @@ pub(super) mod tests {
             assert_eq!((abilities.walk_speed, abilities.fly_speed), (0.2, 0.1));
             assert!(game.player_set_game_mode(player, GameMode::Survival));
             let stale = mod_api::__private::game::player_ref(
-                mod_api::EntityRef::new(
-                    mod_api::NativeWorldEpoch::new(0),
-                    player.fields().entity.id(),
-                ),
+                mod_api::EntityRef::new(mod_api::WorldEpoch::new(0), player.fields().entity.id()),
                 player.uuid(),
             );
             assert!(!game.player_set_game_mode(stale, GameMode::Creative));
@@ -2221,7 +2363,7 @@ pub(super) mod tests {
     fn entities_in_returns_readable_handles_and_intersects_boxes() {
         use horizon_client::entities::ArmorStand;
         use horizon_core::geometry::Vec3;
-        use mod_api::{LevelRef, NativeWorldEpoch};
+        use mod_api::{LevelRef, WorldEpoch};
         with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
             game.armor_stands
@@ -2245,7 +2387,7 @@ pub(super) mod tests {
             );
             assert!(
                 game.level_entities_in(
-                    LevelRef::new(NativeWorldEpoch::new(0), game.dim.key()),
+                    LevelRef::new(WorldEpoch::new(0), game.dim.key()),
                     [0.0; 3],
                     [2.0; 3]
                 )
@@ -2956,9 +3098,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources"]
     fn level_sturdy_uses_gameplay_support() {
         use horizon_client::chunk::Chunk;
-        use mod_api::{
-            LevelRef, NativeBlockFace as Face, NativeSupportType as Support, NativeWorldEpoch,
-        };
+        use mod_api::SupportType as Support;
+        use mod_api::{BlockFace as Face, LevelRef, WorldEpoch};
         use std::sync::Arc;
         with_game(|game| {
             game.world
@@ -3153,10 +3294,7 @@ pub(super) mod tests {
                 level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
                 Some(false),
             );
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             assert_eq!(
                 stale.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
                 None
@@ -3168,9 +3306,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources"]
     fn level_clip_reads_parked_world_and_refuses_unloaded() {
         use horizon_client::chunk::Chunk;
-        use mod_api::{
-            NativeBlockFace as Face, NativeClipBlock as Block, NativeClipFluid as Fluid,
-        };
+        use mod_api::{BlockFace as Face, ClipBlock as Block, ClipFluid as Fluid};
         use std::sync::Arc;
         with_game(|game| {
             game.world
@@ -3237,7 +3373,7 @@ pub(super) mod tests {
                     .is_none()
             );
             let stale = mod_api::LevelRef::new(
-                mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+                mod_api::WorldEpoch::new(level.epoch().get() + 1),
                 level.dimension(),
             );
             assert!(
@@ -3353,7 +3489,7 @@ pub(super) mod tests {
     fn level_shapes_use_empty_context() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::chunk::Chunk;
-        use mod_api::{NativeAuthority, NativeBlockShapeKind};
+        use mod_api::{Authority, BlockShapeKind};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3390,7 +3526,7 @@ pub(super) mod tests {
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
-            .begin_open(NativeAuthority::IntegratedServer);
+            .begin_open(Authority::IntegratedServer);
 
         let level = game.level("minecraft:overworld").unwrap();
         assert!(
@@ -3416,17 +3552,18 @@ pub(super) mod tests {
         assert_eq!(host.levels().list_levels(), vec![level, nether]);
         let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
         assert_eq!(
-            game.level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Outline),
+            game.level_block_shape(nether, stone, [0, 64, 0], BlockShapeKind::Outline),
             Some(cube.clone())
         );
         assert_eq!(
-            game.level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Collision),
+            game.level_block_shape(nether, stone, [0, 64, 0], BlockShapeKind::Collision),
             Some(cube)
         );
         let shape = |game: &mut Game<'_>, name: &str, kind| {
             let state = game.pack.assets.registry.default_state(name).unwrap();
             game.world.set(0, 64, 0, state).unwrap();
-            game.level_block_shape(level, [0, 64, 0], kind).unwrap()
+            game.level_block_shape(level, state, [0, 64, 0], kind)
+                .unwrap()
         };
         game.inventory[game.selected] = Some(horizon_client::items::ItemStack {
             item: "minecraft:light".into(),
@@ -3434,17 +3571,13 @@ pub(super) mod tests {
             damage: 0,
             extra: None,
         });
-        assert!(shape(&mut game, "minecraft:light", NativeBlockShapeKind::Outline).is_empty());
+        assert!(shape(&mut game, "minecraft:light", BlockShapeKind::Outline).is_empty());
         assert_eq!(
             game.outline_boxes([0, 64, 0]),
             vec![[0.0, 64.0, 0.0, 1.0, 65.0, 1.0]]
         );
         game.inventory[game.selected].as_mut().unwrap().item = "minecraft:scaffolding".into();
-        let scaffolding = shape(
-            &mut game,
-            "minecraft:scaffolding",
-            NativeBlockShapeKind::Outline,
-        );
+        let scaffolding = shape(&mut game, "minecraft:scaffolding", BlockShapeKind::Outline);
         assert!(!scaffolding.is_empty());
         assert_ne!(scaffolding, vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]);
         assert_eq!(
@@ -3452,19 +3585,11 @@ pub(super) mod tests {
             vec![[0.0, 64.0, 0.0, 1.0, 65.0, 1.0]]
         );
         assert_eq!(
-            shape(
-                &mut game,
-                "minecraft:stone_slab",
-                NativeBlockShapeKind::Outline
-            ),
+            shape(&mut game, "minecraft:stone_slab", BlockShapeKind::Outline),
             vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]
         );
         assert_eq!(
-            shape(
-                &mut game,
-                "minecraft:stone_slab",
-                NativeBlockShapeKind::Collision
-            ),
+            shape(&mut game, "minecraft:stone_slab", BlockShapeKind::Collision),
             vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]
         );
         let contains = |boxes: &[[f64; 6]], p: [f64; 3]| {
@@ -3472,11 +3597,7 @@ pub(super) mod tests {
                 .iter()
                 .any(|b| (0..3).all(|i| b[i] < p[i] && p[i] < b[i + 3]))
         };
-        let stair = shape(
-            &mut game,
-            "minecraft:oak_stairs",
-            NativeBlockShapeKind::Outline,
-        );
+        let stair = shape(&mut game, "minecraft:oak_stairs", BlockShapeKind::Outline);
         assert!(contains(&stair, [0.25, 0.25, 0.25]));
         let upper = [
             [0.25, 0.75, 0.25],
@@ -3488,18 +3609,10 @@ pub(super) mod tests {
             upper.into_iter().filter(|p| contains(&stair, *p)).count(),
             2
         );
-        let fence = shape(
-            &mut game,
-            "minecraft:oak_fence",
-            NativeBlockShapeKind::Outline,
-        );
+        let fence = shape(&mut game, "minecraft:oak_fence", BlockShapeKind::Outline);
         assert!(contains(&fence, [0.5, 0.5, 0.5]));
         assert!(!contains(&fence, [0.1, 0.5, 0.1]));
-        let lectern = shape(
-            &mut game,
-            "minecraft:lectern",
-            NativeBlockShapeKind::Collision,
-        );
+        let lectern = shape(&mut game, "minecraft:lectern", BlockShapeKind::Collision);
         assert!(contains(&lectern, [0.5, 0.5, 0.5]));
         assert!(!contains(&lectern, [0.1, 0.5, 0.1]));
     }
@@ -3517,7 +3630,7 @@ pub(super) mod tests {
     fn level_block_writes_validate_and_change_world() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::chunk::Chunk;
-        use mod_api::{NativeAuthority, NativeBlockUpdateFlags};
+        use mod_api::{Authority, BlockUpdateFlags};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3555,7 +3668,7 @@ pub(super) mod tests {
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
-            .begin_open(NativeAuthority::IntegratedServer);
+            .begin_open(Authority::IntegratedServer);
 
         let level = game.level("minecraft:overworld").unwrap();
         let stone = game
@@ -3582,7 +3695,7 @@ pub(super) mod tests {
         let invalid: mod_api::BlockState =
             mod_api::BlockStateRecord::new(api_stone.block(), u16::MAX).into();
         assert_eq!(
-            level.set_block(&mut game, [0, 64, 0], invalid, NativeBlockUpdateFlags::NONE),
+            level.set_block(&mut game, [0, 64, 0], invalid, BlockUpdateFlags::NONE),
             Err(mod_api::LevelWriteError::InvalidState(
                 mod_api::BlockStateError::UnknownState
             ))
@@ -3591,12 +3704,7 @@ pub(super) mod tests {
         {
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
             assert_eq!(
-                level.set_block(
-                    &mut game,
-                    [0, 64, 0],
-                    api_stone,
-                    NativeBlockUpdateFlags::NONE
-                ),
+                level.set_block(&mut game, [0, 64, 0], api_stone, BlockUpdateFlags::NONE),
                 Err(mod_api::LevelWriteError::Unavailable)
             );
         }
@@ -3623,12 +3731,12 @@ pub(super) mod tests {
         assert!(game.world.block_log.as_ref().unwrap().is_empty());
         // Flag-aware writes log only client updates; ordinary World::set still logs by default.
         assert_eq!(
-            game.level_set_block(level, [2, 64, 0], stone, NativeBlockUpdateFlags::NONE),
+            game.level_set_block(level, [2, 64, 0], stone, BlockUpdateFlags::NONE),
             Ok(true)
         );
         assert!(game.world.block_log.as_ref().unwrap().is_empty());
         assert_eq!(
-            game.level_set_block(level, [3, 64, 0], stone, NativeBlockUpdateFlags::CLIENTS),
+            game.level_set_block(level, [3, 64, 0], stone, BlockUpdateFlags::CLIENTS),
             Ok(true)
         );
         assert_eq!(game.world.block_log.as_ref().unwrap(), &vec![(3, 64, 0)]);
@@ -3637,7 +3745,7 @@ pub(super) mod tests {
                 level,
                 [4, 64, 0],
                 stone,
-                NativeBlockUpdateFlags::CLIENTS | NativeBlockUpdateFlags::INVISIBLE
+                BlockUpdateFlags::CLIENTS | BlockUpdateFlags::INVISIBLE
             ),
             Ok(true)
         );
@@ -3678,7 +3786,7 @@ pub(super) mod tests {
             assert!(removed);
             assert_eq!(game.world.block(5, 64, 0), water);
         }
-        let flags = NativeBlockUpdateFlags::NEIGHBORS;
+        let flags = BlockUpdateFlags::NEIGHBORS;
         assert_eq!(
             game.level_set_block(level, [0, 64, 0], stone, flags),
             Ok(true)
@@ -3693,7 +3801,7 @@ pub(super) mod tests {
             Ok(false)
         );
         let stale = mod_api::LevelRef::new(
-            mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+            mod_api::WorldEpoch::new(level.epoch().get() + 1),
             level.dimension(),
         );
         assert_eq!(
@@ -3745,7 +3853,7 @@ pub(super) mod tests {
                 level,
                 [0, 64, 0],
                 air,
-                NativeBlockUpdateFlags::SKIP_BLOCK_ENTITY_SIDE_EFFECTS
+                BlockUpdateFlags::SKIP_BLOCK_ENTITY_SIDE_EFFECTS
             ),
             Ok(true)
         );

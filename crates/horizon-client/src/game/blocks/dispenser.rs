@@ -27,7 +27,6 @@ use horizon_world::{
     level::{BucketContent, PlaceContext, PlaceOutcome},
     registry::BlockStateId,
 };
-pub(super) use mod_api::NativeDispensed;
 use std::sync::Arc;
 
 type Pos = (i32, i32, i32);
@@ -105,7 +104,7 @@ fn shrink(mut stack: ItemStack) -> Option<ItemStack> {
 type Dispensed = (Option<ItemStack>, i32);
 
 /// None keeps vanilla's behaviour; an explicit empty remainder consumes the stack.
-fn mod_dispensed(answer: Option<NativeDispensed>, items: &Items) -> Option<Dispensed> {
+fn mod_dispensed(answer: Option<mod_api::Dispensed>, items: &Items) -> Option<Dispensed> {
     use super::api_values::TryIntoEngine;
     answer.and_then(|(stack, event)| Some((stack.try_into_engine(items).ok()?, event)))
 }
@@ -701,7 +700,12 @@ impl Game<'_> {
             }
             return Ok((self.default_execute(pos, facing, stack), CLICK));
         }
-        if stack.item.ends_with("_spawn_egg") {
+        // DispenserBlock.getDefaultDispenseMethod: an egg without ENTITY_DATA drops as an item.
+        if stack.item.ends_with("_spawn_egg")
+            && stack
+                .data()
+                .is_none_or(|data| data.other("!minecraft:entity_data").is_none())
+        {
             return self.dispense_spawn_egg(pos, facing, stack);
         }
         Ok((self.default_execute(pos, facing, stack), CLICK))
@@ -969,6 +973,7 @@ impl Game<'_> {
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return Ok(());
         };
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut m = self.mobs.extract(self.mobs[i].join).unwrap();
         let mut events = Vec::new();
         {
@@ -998,13 +1003,14 @@ impl Game<'_> {
         }
         self.mob_ambient(id)
     }
+    /// `SpawnEggItemBehavior.execute`: spawn the type selected by the stack's entity data.
     fn dispense_spawn_egg(
         &mut self,
         pos: Pos,
         facing: Direction,
         stack: ItemStack,
     ) -> Result<Dispensed> {
-        let kind = stack.item.trim_end_matches("_spawn_egg").to_owned();
+        let (kind, _) = horizon_client::block_entity_item::spawn_egg_on_spawner(&stack, false);
         let front = offset(pos, facing);
         let Some(id) = self.spawn_mob_at(&kind, front, facing != Direction::Up) else {
             return Ok((Some(stack), CLICK));
@@ -2334,7 +2340,7 @@ mod tests {
             &self,
             _: &mut dyn mod_api::ServerHost,
             event: &mut mod_api::DispenseMethodEvent<'_>,
-        ) -> Option<NativeDispensed> {
+        ) -> Option<mod_api::Dispensed> {
             let state = crate::game::api_values::TryIntoEngine::try_into_engine(&event.state, &())
                 .unwrap()
                 .0;
@@ -2355,7 +2361,7 @@ mod tests {
             &self,
             _: &mut dyn mod_api::ServerHost,
             event: &mut mod_api::DispenseItemEvent<'_>,
-        ) -> Option<NativeDispensed> {
+        ) -> Option<mod_api::Dispensed> {
             self.0.record("item", event.pos, 0);
             Some((None, CLICK))
         }

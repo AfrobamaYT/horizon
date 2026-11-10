@@ -12,10 +12,19 @@
 //! game rules, the scoreboard, the maps and the entities waiting to arrive
 //! through a portal.
 
+use super::commands::Target;
+use super::entity_residency::{define_resident_access, resident_owners};
 use super::{
     Dim, ExperienceOrb, FallingBlock, Game, ItemEntity, Mob, boats, commands,
     creaking::CreakingState, dragon, fireworks, lightning, machines, minecarts,
     ominous_item_spawner, persist, raids::Raiding, sculk::SculkState, tnt, trident,
+};
+use horizon_client::join_seq::{
+    Joined,
+    residency::{
+        Journal, Kind, Owner,
+        table::{EntityLookup, Location, SourceEntity},
+    },
 };
 use horizon_client::{
     Result,
@@ -29,6 +38,7 @@ use horizon_client::{
     world::World,
 };
 use horizon_world::level::{LevelEvent, Ticks};
+use mod_api::DimensionKey;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -52,7 +62,7 @@ pub(super) struct Parked {
     random_tick_sections: RandomTickSections,
     level_events: Vec<LevelEvent>,
     /// Entity portal processes and cooldowns belong to this level's entities.
-    portal_states: HashMap<u32, horizon_client::nether_portal::PortalState>,
+    pub(super) portal_states: HashMap<u32, horizon_client::nether_portal::PortalState>,
     falling: horizon_client::join_seq::JoinList<FallingBlock, false>,
     paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
     item_frames: horizon_client::join_seq::JoinList<horizon_client::entities::ItemFrame>,
@@ -65,7 +75,7 @@ pub(super) struct Parked {
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
-    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
+    dragon: super::native_entity_refs::dragon_parts_table::DragonSlot,
     breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
     rockets: horizon_client::join_seq::JoinList<fireworks::Rocket>,
@@ -76,6 +86,7 @@ pub(super) struct Parked {
     pub(super) mobs: horizon_client::join_seq::JoinList<Mob>,
     /// The entity ids of the level's fence knots (`knot_ids`).
     knot_ids: HashMap<[i32; 3], u32>,
+    knots: horizon_client::join_seq::JoinList<super::leads::Knot>,
     projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile, false>,
     dropped: horizon_client::join_seq::JoinList<ItemEntity>,
     orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
@@ -102,6 +113,171 @@ pub(super) struct Parked {
     /// last told of it (`LanHost::border_sent`).
     border: horizon_client::worldborder::WorldBorder,
     border_sent: Option<horizon_client::lan::border::Sent>,
+}
+
+impl Parked {
+    resident_owners!(define_resident_access, self, projectiles, knots);
+}
+
+impl Game<'_> {
+    /// Resolve through the exact owner, never by trying dimension swaps.
+    pub(super) fn locate_server_resident_owner(
+        &self,
+        at: Location,
+    ) -> Option<SourceEntity<(Target, bool)>> {
+        if matches!(
+            at.owner.kind,
+            horizon_client::join_seq::residency::Kind::Player
+                | horizon_client::join_seq::residency::Kind::Hook
+        ) {
+            return self.locate_specialized_resident_owner(at);
+        }
+        if at.owner.dimension == self.dim.key() {
+            return self.locate_resident_owner(at);
+        }
+        let dim = match at.owner.dimension {
+            DimensionKey::OVERWORLD => Dim::Overworld,
+            DimensionKey::NETHER => Dim::Nether,
+            DimensionKey::END => Dim::End,
+            key => Dim::Extra(key),
+        };
+        self.levels.parked.get(&dim)?.locate_resident_owner(at)
+    }
+
+    pub(super) fn resident_source_target_visible(
+        &self,
+        dimension: DimensionKey,
+        target: Target,
+    ) -> bool {
+        if dimension == self.dim.key() {
+            return !self.persist.removals.contains(&target);
+        }
+        let dim = match dimension {
+            DimensionKey::OVERWORLD => Dim::Overworld,
+            DimensionKey::NETHER => Dim::Nether,
+            DimensionKey::END => Dim::End,
+            key => Dim::Extra(key),
+        };
+        self.levels
+            .parked
+            .get(&dim)
+            .is_none_or(|parked| !parked.persist.removals.contains(&target))
+    }
+
+    /// Visit exactly the actual physical lifetime slot. Resolution releases the
+    /// table and its journal before lending storage; no lift, swap or replacement
+    /// occurs, including when the visitor unwinds. Logical visibility is a caller
+    /// policy, just as for the underlying owner resolver. The visitor must not
+    /// call entity lookup or recursively enter this seam.
+    pub(super) fn with_resident_slot<R>(
+        &mut self,
+        dimension: &mod_api::DimensionKey,
+        id: std::num::NonZeroU32,
+        visit: impl FnOnce(&mut horizon_mod_runtime::attachments::AttachmentLifetime) -> R,
+    ) -> super::entity_residency::SlotAccess<R> {
+        use super::entity_residency::SlotAccess;
+        let resolved = {
+            self.resident_entities
+                .table
+                .borrow_mut()
+                .entity_lookup(dimension, id.get(), |at| {
+                    self.locate_server_resident_owner(at)
+                })
+        };
+        let location = match resolved {
+            EntityLookup::Found { location, .. } => location,
+            EntityLookup::Taken => return SlotAccess::Taken,
+            EntityLookup::Missing => return SlotAccess::Missing,
+        };
+        debug_assert!(self.resident_entities.table.try_borrow_mut().is_ok());
+        if matches!(
+            location.owner.kind,
+            horizon_client::join_seq::residency::Kind::Player
+                | horizon_client::join_seq::residency::Kind::Hook
+        ) {
+            if *dimension != self.dim.key() {
+                let dim = match *dimension {
+                    DimensionKey::OVERWORLD => Dim::Overworld,
+                    DimensionKey::NETHER => Dim::Nether,
+                    DimensionKey::END => Dim::End,
+                    key => Dim::Extra(key),
+                };
+                if !self.levels.parked.contains_key(&dim) {
+                    return SlotAccess::Missing;
+                }
+            }
+            return self.with_specialized_resident_slot(location, visit);
+        }
+        if *dimension == self.dim.key() {
+            self.with_resident_owner_slot(location, visit)
+        } else {
+            let dim = match *dimension {
+                mod_api::DimensionKey::OVERWORLD => Dim::Overworld,
+                mod_api::DimensionKey::NETHER => Dim::Nether,
+                mod_api::DimensionKey::END => Dim::End,
+                key => Dim::Extra(key),
+            };
+            self.levels
+                .parked
+                .get_mut(&dim)
+                .map_or(SlotAccess::Missing, |parked| {
+                    parked.with_resident_owner_slot(location, visit)
+                })
+        }
+    }
+
+    pub(super) fn server_resident_entity(&self, id: u32) -> EntityLookup<Target> {
+        let found = self
+            .resident_entities
+            .table
+            .borrow_mut()
+            .server_entity_lookup(id, |at| self.locate_server_resident_owner(at));
+        match found {
+            EntityLookup::Found {
+                location,
+                value: (value, true),
+            } => EntityLookup::Found { location, value },
+            EntityLookup::Found {
+                value: (_, false), ..
+            }
+            | EntityLookup::Missing => EntityLookup::Missing,
+            EntityLookup::Taken => EntityLookup::Taken,
+        }
+    }
+    /// Find the canonical level without swapping or probing physical families.
+    pub(super) fn resident_target_dimension(&self, target: Target) -> Option<Dim> {
+        let id = self.resident_target_id(target)?;
+        let found = match self.server_resident_entity(id) {
+            EntityLookup::Found { location, value }
+                if value == target
+                    || matches!(
+                        (value, target),
+                        (Target::Player, Target::Guest(_)) | (Target::Guest(_), Target::Player)
+                    ) =>
+            {
+                location
+            }
+            _ => return None,
+        };
+        Some(match found.owner.dimension {
+            DimensionKey::OVERWORLD => Dim::Overworld,
+            DimensionKey::NETHER => Dim::Nether,
+            DimensionKey::END => Dim::End,
+            key => Dim::Extra(key),
+        })
+    }
+
+    /// A new epoch invalidates every old producer before rebinding retained levels.
+    pub(super) fn reset_entity_residency(&mut self) {
+        let table = self.resident_entities.table.get_mut();
+        table.reset();
+        let journal = table.producer();
+        self.bind_resident_owners(&journal, self.dim.key());
+        self.bind_specialized_resident_owners(&journal);
+        for (dim, parked) in &mut self.levels.parked {
+            parked.bind_resident_owners(&journal, dim.key());
+        }
+    }
 }
 
 /// Which passes of the server tick the level in place runs: the first
@@ -359,6 +535,7 @@ impl Game<'_> {
             hoppers: HashMap::new(),
             mobs: Default::default(),
             knot_ids: HashMap::new(),
+            knots: Default::default(),
             projectiles: Default::default(),
             dropped: Default::default(),
             orbs: Default::default(),
@@ -508,6 +685,7 @@ impl Game<'_> {
         swap(&mut self.hoppers, &mut p.hoppers);
         swap(&mut self.mobs, &mut p.mobs);
         swap(&mut self.knot_ids, &mut p.knot_ids);
+        swap(&mut self.resident_entities.knots, &mut p.knots);
         swap(&mut self.creatures.projectiles, &mut p.projectiles);
         swap(&mut self.dropped, &mut p.dropped);
         swap(&mut self.orbs, &mut p.orbs);
@@ -592,24 +770,107 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// The entity's memory (its UUID and the compound it was loaded with)
-    /// moves with it from the level not in place to the level in place, so
-    /// it is saved in the other level as it was.
-    pub(super) fn move_entity_memory(&mut self, from: Dim, id: u32) {
+    /// Follow the direct mount of a travelling player through complete source objects.
+    /// A later player in the same travelling stack finds no source root: the first
+    /// arrival already moved it, keeping every id that the guests' mounts name.
+    pub(super) fn parked_vehicle_root(&self, from: Dim, mut id: u32) -> Option<u32> {
+        let p = self.levels.parked.get(&from)?;
+        for _ in 0..=p.mobs.len() + p.persist.off_level.len() + 1 {
+            let mob = p
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .or_else(|| {
+                    p.persist.off_level.get(&id).map(|object| match object {
+                        persist::OffLevel::Mob(mob) => mob,
+                    })
+                })
+                .filter(|m| !m.removed);
+            if let Some(parent) = mob.and_then(|m| m.extra.mount) {
+                id = parent;
+                continue;
+            }
+            let present = mob.is_some()
+                || p.boats.iter().any(|b| b.id == id)
+                || p.carts.iter().any(|c| c.id == id);
+            let removed = p.persist.removals.iter().any(|target| matches!(
+                target, commands::Target::Mob(n) | commands::Target::Boat(n) | commands::Target::Cart(n) if *n == id
+            ));
+            return (present && !removed).then_some(id);
+        }
+        None
+    }
+
+    /// Move the source tree's object memory and take its Mob descendants in
+    /// canonical postorder. The caller owns the extracted root and admits it last.
+    /// Transfer removal preserves lifetimes; residency is decided in the destination.
+    pub(super) fn move_entity_memory(&mut self, from: Dim, root: u32) -> Vec<Mob> {
         let Some(p) = self.levels.parked.get_mut(&from) else {
-            return;
+            return Vec::new();
         };
-        let uuid = p.persist.uuids.remove(&id);
-        let raw = p.persist.raw.remove(&id);
-        let slots = p.persist.passenger_slots.remove(&id);
-        if let Some(u) = uuid {
-            self.persist.uuids.insert(id, u);
+        let mut edges: Vec<_> = p
+            .mobs
+            .iter()
+            .chain(p.persist.off_level.values().map(|object| match object {
+                persist::OffLevel::Mob(mob) => mob,
+            }))
+            .filter(|mob| !mob.removed)
+            .map(|mob| (mob.extra.mount, mob.extra.vehicle_order, mob.id))
+            .collect();
+        edges.sort_by_key(|&(_, order, id)| (order, id));
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (parent, _, id) in edges {
+            if let Some(parent) = parent {
+                children.entry(parent).or_default().push(id);
+            }
         }
-        if let Some(r) = raw {
-            self.persist.raw.insert(id, r);
+        let mut pending = vec![(root, false)];
+        let mut seen = std::collections::HashSet::new();
+        let mut ordered = Vec::new();
+        while let Some((id, done)) = pending.pop() {
+            if done {
+                ordered.push(id);
+            } else if seen.insert(id) {
+                pending.push((id, true));
+                if let Some(riders) = children.get(&id) {
+                    pending.extend(riders.iter().rev().map(|&rider| (rider, false)));
+                }
+            }
         }
-        if let Some(s) = slots {
-            self.persist.passenger_slots.insert(id, s);
+        let mut moved = Vec::new();
+        for id in ordered {
+            p.persist.move_object_to(id, &mut self.persist);
+            if id == root {
+                continue;
+            }
+            if let Some(state) = p.portal_states.remove(&id) {
+                self.portals.entities.insert(id, state);
+            }
+            let mob = if let Some(index) = p.mobs.iter().position(|m| m.id == id) {
+                Some(p.mobs.remove_for_transfer(index))
+            } else {
+                p.persist.off_level.remove(&id).map(|object| match object {
+                    persist::OffLevel::Mob(mob) => mob,
+                })
+            };
+            if let Some(mut mob) = mob {
+                mob.join = horizon_client::join_seq::JoinSeq::UNJOINED;
+                moved.push(mob);
+            }
+        }
+        moved
+    }
+
+    /// An already-owned body changes level, never construction identity.
+    pub(super) fn admit_transferred_mob(&mut self, mut mob: Mob) {
+        let id = mob.id;
+        self.rebind_transferred_entity(id, &mut mob);
+        if self.mob_uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
+            self.persist
+                .off_level
+                .insert(id, persist::OffLevel::Mob(mob));
+        } else {
+            self.mobs.push(mob);
         }
     }
 
@@ -652,10 +913,14 @@ impl Game<'_> {
     /// run. The native server tick hook brackets it (`ServerTickStart` before
     /// the first level, `ServerTickEnd` after the last).
     pub(super) fn tick_server(&mut self, paused: bool) -> Result<()> {
+        self.with_residency_tick(|game| game.tick_server_body(paused))
+    }
+
+    fn tick_server_body(&mut self, paused: bool) -> Result<()> {
         // `tickRateManager.tick()` once per server tick, before any level
         // (each `ServerLevel.tick` only reads `runsNormally`), and the native
-        // `ServerTickStart` before that level work, where NeoForge fires
-        // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
+        // `ServerTickStart` before that level work (NeoForge's
+        // `ServerTickEvent.Pre`). A paused pass and a held server tick nothing.
         let running = if !paused && !self.agent.hold_server {
             self.clock.check_sprint_completion();
             if let Some(report) = self.clock.take_sprint_report() {
@@ -713,8 +978,8 @@ impl Game<'_> {
                 running,
                 packets_drained: false,
             };
-            if observe_level {
-                self.native_level_tick_pre(dim.id());
+            if observe_level && let Some(level) = self.level(dim.id()) {
+                self.native_level_tick_pre(level);
             }
             self.update_dedicated_streaming();
             self.update_world();
@@ -738,8 +1003,8 @@ impl Game<'_> {
             if result.is_err() {
                 break;
             }
-            if observe_level {
-                self.native_level_tick_post(dim.id());
+            if observe_level && let Some(level) = self.level(dim.id()) {
+                self.native_level_tick_post(level);
             }
             self.publish_server_debug(dim);
             // An entity that crossed into a level that already ticked this
@@ -972,8 +1237,8 @@ impl Game<'_> {
             let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
             self.native_chunks_unloaded(&chunks);
             // Its entities' attachments are saved with them; they leave memory too.
-            for uuid in self.persist.uuids.values() {
-                self.entity_attachments.remove(uuid);
+            for id in self.persist.uuids.keys() {
+                self.entity_attachments.remove(id);
             }
             self.enter_level(back)?;
             self.levels.parked.remove(&dim);
@@ -989,6 +1254,12 @@ impl Game<'_> {
             || self.levels.heard_open.contains(&dim)
         {
             return;
+        }
+        let journal = self.resident_entities.table.borrow().producer();
+        if dim == self.dim {
+            self.bind_resident_owners(&journal, dim.key());
+        } else if let Some(parked) = self.levels.parked.get_mut(&dim) {
+            parked.bind_resident_owners(&journal, dim.key());
         }
         self.bind_dimension_attachments(dim);
         self.levels.heard_open.push(dim);
@@ -1021,6 +1292,9 @@ impl Game<'_> {
     /// could not be is logged. A level not open any more is opened to be saved, like a parked one.
     /// The level in place is put back.
     pub(super) fn run_requested_saves(&mut self) {
+        if Self::admit_entity_save().is_err() {
+            return;
+        }
         let requested = std::mem::take(&mut self.levels.requested_saves);
         if requested.is_empty() || self.remote.is_some() {
             return;
@@ -1073,7 +1347,6 @@ impl Game<'_> {
     /// Memory still belongs to the parked source until the caller moves it.
     pub(super) fn rebind_transferred_entity(
         &mut self,
-        source: super::Dim,
         id: u32,
         entity: &mut impl horizon_mod_runtime::attachments::HasAttachmentLifetime,
     ) {
@@ -1084,12 +1357,7 @@ impl Game<'_> {
         let Some(level) = self.level(self.dim.id()) else {
             return;
         };
-        let Some(map) = self
-            .levels
-            .parked_mut(source)
-            .and_then(|p| p.persist.uuids.get(&id))
-            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
-        else {
+        let Some(map) = self.entity_attachments.get_mut(&id) else {
             return;
         };
         slot.bind(
@@ -1161,11 +1429,12 @@ mod tests {
 
     /// A game on a scratch world folder, the way `dedicated.rs` opens one
     /// (`load_world` with an absolute folder).
-    fn open_game(
+    fn open_game<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
         root: &std::path::Path,
         home: &std::path::Path,
         world: &std::path::Path,
-    ) -> Game<'static> {
+    ) -> Game<'a> {
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
         let settings = Settings::default();
         let loaded = load_resources(
@@ -1182,7 +1451,7 @@ mod tests {
         )
         .unwrap();
         // The game keeps a reference to its resources for the whole test.
-        let resources: &'static _ = Box::leak(Box::new(loaded.resources));
+        let resources = resources.insert(loaded.resources);
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.to_path_buf();
         options.game_dir = Some(home.to_path_buf());
@@ -1230,14 +1499,16 @@ mod tests {
         let home = std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h260");
         let world = home.join("saves/h260");
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // A server ticks before it saves.
             game.tick_world(true).unwrap();
             assert!(game.run_command("worldborder set 50"));
             assert!(game.run_command("execute in minecraft:the_nether run worldborder set 100"));
             game.save_game().unwrap();
         }
-        let mut game = open_game(&root, &home, &world);
+        let mut resources = None;
+        let mut game = open_game(&mut resources, &root, &home, &world);
         let mut failures = Vec::new();
         if game.border.size() != 50.0 {
             failures.push(format!("in place after the open: {}", game.border.size()));
@@ -1284,7 +1555,8 @@ mod tests {
         const DEFAULT: f64 = 59_999_968.0;
         let mut failures = Vec::new();
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // A new world: every level at the default.
             if game.border.size() != DEFAULT {
                 failures.push(format!("new world in place: {}", game.border.size()));
@@ -1299,7 +1571,8 @@ mod tests {
             game.save_game().unwrap();
         }
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // Before the first tick: the read, then the set.
             if game.border.size() != 50.0 {
                 failures.push(format!("first read before a tick: {}", game.border.size()));
@@ -1316,7 +1589,8 @@ mod tests {
             game.save_game().unwrap();
         }
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             let got = sizes(&mut game);
             if got != (Some(70.0), Some(100.0), Some(DEFAULT)) {
                 failures.push(format!("after the save and another reopen: {got:?}"));
@@ -1350,7 +1624,8 @@ mod tests {
             }
         }
         copy(&source, &world);
-        let mut game = open_game(&root, &home, &world);
+        let mut resources = None;
+        let mut game = open_game(&mut resources, &root, &home, &world);
         // The world's level.dat has cheats off: the open read it after open_game's setting.
         game.set_allow_commands(true);
         assert!(game.run_command("forceload add 208 0 239 15"));
@@ -1412,7 +1687,8 @@ mod tests {
         }
         copy(&source, &world);
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // The world's level.dat has cheats off: the open read it after open_game's setting.
             game.set_allow_commands(true);
             assert!(game.run_command("forceload add 208 0 239 15"));
@@ -1510,7 +1786,8 @@ mod tests {
             }
         }
         copy(&source, &world);
-        let mut game = open_game(&root, &home, &world);
+        let mut resources = None;
+        let mut game = open_game(&mut resources, &root, &home, &world);
         game.set_allow_commands(true);
         assert!(game.run_command("forceload add 208 0 239 15"));
         let mut loaded = false;
@@ -1549,6 +1826,20 @@ mod tests {
 #[cfg(test)]
 mod request_save_tests {
     use super::{Dim, Levels};
+
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes"]
+    fn requested_save_waits_without_consuming_the_queue_while_lifted() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.levels.request_save(Dim::Overworld);
+            let pass = game.dropped.lift();
+            game.run_requested_saves();
+            assert_eq!(game.levels.requested_saves, [Dim::Overworld]);
+            drop(pass);
+            game.run_requested_saves();
+            assert!(game.levels.requested_saves.is_empty());
+        });
+    }
 
     /// A level asked for twice is queued once, and clearing the levels drops the queue.
     #[test]

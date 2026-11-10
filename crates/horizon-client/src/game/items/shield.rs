@@ -15,6 +15,15 @@ use horizon_world::blocking_rules::{BlockingRules, DamageReduction, ItemDamageFu
 /// `Inventory.SLOT_OFFHAND`: the `using` slot of an off-hand item.
 pub(super) const OFFHAND_SLOT: usize = 40;
 
+/// `LivingEntity.getItemBlockingWith`'s delay: an item that blocks attacks blocks once it has been
+/// used for `BlocksAttacks.blockDelayTicks` (`Math.round(seconds * 20)`) ticks.
+pub(super) fn block_delay_passed(
+    component: &horizon_client::items::BlocksAttacks,
+    ticks: u32,
+) -> bool {
+    ticks as i32 >= (component.delay_seconds * 20.0).round() as i32
+}
+
 impl Game<'_> {
     /// The stack in an inventory slot, the off hand at `OFFHAND_SLOT`.
     pub(super) fn stack_in(&self, slot: usize) -> Option<&ItemStack> {
@@ -62,8 +71,7 @@ impl Game<'_> {
     ) -> Option<Blocking> {
         let (slot, ticks) = self.using?;
         let component = self.blocks_attacks(self.stack_in(slot)?)?;
-        // BlocksAttacks.blockDelayTicks: Math.round(seconds * 20).
-        if (ticks as i32) < (component.delay_seconds * 20.0).round() as i32 {
+        if !block_delay_passed(&component, ticks) {
             return None;
         }
         let tags = &self.stations().enchantments.damage_tags;
@@ -173,7 +181,15 @@ impl Game<'_> {
             if let Some((from, disable)) = self.combat.player_attacker {
                 let fully = outcome.fully_blocked;
                 let attacker = ([from[0], from[2]], disable);
-                self.blocked_by_attacker(&component, attacker, fully, at, source, attack);
+                self.blocked_by_attacker(
+                    &component,
+                    attacker,
+                    fully,
+                    at,
+                    source,
+                    attack,
+                    outcome.blocked,
+                );
             }
             return;
         };
@@ -218,7 +234,15 @@ impl Game<'_> {
             let _ = self.handle_mob_events(events);
             return;
         }
-        self.blocked_by_attacker(&component, ([mx, mz], disable), fully, at, source, attack);
+        self.blocked_by_attacker(
+            &component,
+            ([mx, mz], disable),
+            fully,
+            at,
+            source,
+            attack,
+            outcome.blocked,
+        );
     }
 
     /// What a blocked melee hit does to the defender once the shield took
@@ -233,12 +257,13 @@ impl Game<'_> {
         at: Option<[f64; 3]>,
         source: HurtSource<'_>,
         attack: &Attack,
+        damage: f32,
     ) {
         // LivingEntity.blockedByItem: defender.knockback(0.5, defender - attacker,
         // source), which moves the defender along -(xd, zd).
         if !fully && let Some(p) = self.player.as_ref() {
             let (xd, zd) = (p.position.x - mx, p.position.z - mz);
-            self.knock_back_player(0.5, xd, zd, source, attack);
+            self.knock_back_player(0.5, xd, zd, source, attack, damage);
         }
         // BlocksAttacks.disable: item cooldown and stopUsingItem.
         let ticks = disable * component.disable_scale;

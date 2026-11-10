@@ -16,6 +16,8 @@ use horizon_world::level::flags as level_flags;
 
 #[derive(Clone, Debug)]
 pub(super) struct PrimedTnt {
+    /// Entity-owned registration metadata; content clones are detached.
+    pub(super) attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.yRot` and `xRot` (`/tp`, `/data get ... Rotation`).
     pub rotation: [f32; 2],
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
@@ -389,6 +391,7 @@ impl Game<'_> {
             horizon_client::save::insecure_uuid(&mut horizon_client::random_source::entity());
         self.persist.uuids.insert(self.next_entity, uuid);
         self.tnts.push(PrimedTnt {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -837,6 +840,7 @@ mod tests {
         ]))
         .unwrap();
         let mut tnt = PrimedTnt {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             id: 1,
@@ -905,6 +909,7 @@ mod tests {
         use horizon_core::geometry::Direction;
         use horizon_world::piston_push::bounce_velocity;
         let mut tnt = PrimedTnt {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -955,6 +960,7 @@ mod tests {
         for bordered in [false, true] {
             let at = Vec3::new(24.0, 4.0, 20.5);
             let mut tnt = PrimedTnt {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: false,
@@ -1034,6 +1040,7 @@ mod tests {
             }
             let at = Vec3::new(19.5, top, 20.5);
             let mut tnt = PrimedTnt {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: false,
@@ -1109,6 +1116,7 @@ mod tests {
         world.set(21, 4, 20, flowing).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         let mut tnt = PrimedTnt {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -1271,6 +1279,7 @@ mod tests {
         // (Entity.handleOnInsideBubbleColumn / handleOnAboveBubbleColumn).
         let at = Vec3::new(20.5, 6.0, 20.5);
         let mut tnt = PrimedTnt {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -1379,6 +1388,7 @@ mod tests {
         world.set(20, 2, 20, soul_sand).unwrap();
         let at = Vec3::new(20.5, 6.0, 20.5);
         let primed = || PrimedTnt {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -1443,7 +1453,9 @@ mod tests {
 
     /// A server's game on the prepared resources with the chunk at the origin
     /// loaded, as `native_machines`' tests make one; None without them.
-    fn server_game() -> Option<Game<'static>> {
+    fn server_game<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+    ) -> Option<Box<Game<'a>>> {
         use crate::game::*;
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
@@ -1472,24 +1484,34 @@ mod tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let res: &'static _ = Box::leak(Box::new(loaded.resources));
-        let mut game = Game::new(
-            res,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
-        game.options.dedicated = Some(Vec::new());
-        game.world.chunks.insert(
-            (0, 0),
-            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        let res = resources.insert(loaded.resources);
+        // Keep nested fixture helpers from copying the large Game value
+        // through several test-thread stack frames.
+        let mut game = Box::new(
+            Game::new(
+                res,
+                loaded.pack,
+                loaded.gui.unwrap(),
+                options,
+                settings,
+                Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                    root.clone(),
+                )),
+                None,
+            )
+            .unwrap(),
         );
+        game.options.dedicated = Some(Vec::new());
+        // Entity ticking waits for every chunk within 2 columns
+        // (`ChunkMap.prepareEntityTickingChunk`).
+        for z in -2..=2 {
+            for x in -2..=2 {
+                game.world.chunks.insert(
+                    (x, z),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(x, z)),
+                );
+            }
+        }
         game.streaming.forced.insert((0, 0));
         Some(game)
     }
@@ -1497,7 +1519,8 @@ mod tests {
     #[test]
     fn loaded_tnt_fuse_uses_numeric_short_and_saves_without_raw() {
         use horizon_core::nbt::Tag;
-        let Some(mut game) = server_game() else {
+        let mut resources = None;
+        let Some(mut game) = server_game(&mut resources) else {
             return;
         };
         let cases = [
@@ -1585,7 +1608,8 @@ mod tests {
     fn live_data_commands_adopt_into_the_existing_tnt() {
         use crate::game::commands::Target;
         use horizon_core::nbt::Tag;
-        let mut game = server_game().expect("prepared Game resources are required");
+        let mut resources = None;
+        let mut game = server_game(&mut resources).expect("prepared Game resources are required");
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks
@@ -1680,7 +1704,8 @@ mod tests {
 
     #[test]
     fn silent_tnt_keeps_the_blast_without_its_sound() {
-        let Some(mut game) = source_silence_game() else {
+        let mut resources = None;
+        let Some(mut game) = source_silence_game(&mut resources) else {
             return;
         };
         let mut rows = Vec::new();
@@ -1736,7 +1761,8 @@ mod tests {
     #[test]
     fn silent_potions_keep_the_splash_without_its_sound() {
         use horizon_client::projectiles::{Hit, Projectile, ProjectileKind};
-        let Some(mut game) = source_silence_game() else {
+        let mut resources = None;
+        let Some(mut game) = source_silence_game(&mut resources) else {
             return;
         };
         let mut rows = Vec::new();
@@ -1801,7 +1827,8 @@ mod tests {
 
     #[test]
     fn silent_creeper_keeps_the_blast_after_its_source_is_removed() {
-        let Some(mut game) = source_silence_game() else {
+        let mut resources = None;
+        let Some(mut game) = source_silence_game(&mut resources) else {
             return;
         };
         for silent in [false, true, false] {
@@ -1834,7 +1861,8 @@ mod tests {
 
     #[test]
     fn silent_launched_potions_and_bottles_keep_their_impact() {
-        let Some(mut game) = source_silence_game() else {
+        let mut resources = None;
+        let Some(mut game) = source_silence_game(&mut resources) else {
             return;
         };
         let stone = game
@@ -1900,7 +1928,8 @@ mod tests {
     #[test]
     fn silent_bottles_preserve_xp_and_the_server_random_stream() {
         use horizon_client::projectiles::{Hit, Projectile, ProjectileKind};
-        let Some(mut game) = source_silence_game() else {
+        let mut resources = None;
+        let Some(mut game) = source_silence_game(&mut resources) else {
             return;
         };
         let mut rows = Vec::new();
@@ -1947,8 +1976,10 @@ mod tests {
         write_silence_output("bottles", &rows);
     }
 
-    fn source_silence_game() -> Option<Game<'static>> {
-        let mut game = server_game()?;
+    fn source_silence_game(
+        resources: &mut Option<std::sync::Arc<crate::game::Resources>>,
+    ) -> Option<Box<Game<'_>>> {
+        let mut game = server_game(resources)?;
         // Observe the server's real emission requests without a camera or render tick.
         game.particles.requested = Some(Vec::new());
         Some(game)
@@ -1958,6 +1989,31 @@ mod tests {
         game.particles.requested.as_ref().unwrap().len()
     }
 
+    /// #13852: a chunk enters entity ticking only once every chunk within 2
+    /// columns is loaded (`ChunkMap.prepareEntityTickingChunk`), so TNT beside
+    /// a missing chunk keeps its fuse until the neighbourhood is whole.
+    #[test]
+    fn tnt_waits_while_a_chunk_two_columns_away_is_missing() {
+        let mut resources = None;
+        let Some(mut game) = server_game(&mut resources) else {
+            return;
+        };
+        game.world.chunks.remove(&(2, 0));
+        game.add_primed_tnt(BlockPos::new(8, 64, 8), 0.0, 80, None, None);
+        game.tnts[0].no_gravity = true;
+        game.tnts[0].velocity = Vec3::ZERO;
+        for _ in 0..3 {
+            game.tick_world(true).unwrap();
+        }
+        assert_eq!(game.tnts[0].fuse, 80, "no entity ticking yet");
+        game.world.chunks.insert(
+            (2, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(2, 0)),
+        );
+        game.tick_world(true).unwrap();
+        assert!(game.tnts[0].fuse < 80, "ticks once the chunk is back");
+    }
+
     /// #10063: TNT lit between level ticks (flint and steel, a command) has its
     /// first tick in the next level tick, so its fuse reads 79 after it, and it
     /// explodes on the 80th (`PrimedTnt.tick`). Horizon held every TNT that
@@ -1965,7 +2021,8 @@ mod tests {
     /// against an `announced` already raised past it.
     #[test]
     fn lit_tnt_ticks_on_the_next_level_tick_and_explodes_on_the_80th() {
-        let Some(mut game) = server_game() else {
+        let mut resources = None;
+        let Some(mut game) = server_game(&mut resources) else {
             return;
         };
         game.add_primed_tnt(BlockPos::new(8, 64, 8), 0.0, 80, None, None);
@@ -1993,7 +2050,8 @@ mod tests {
     /// must not tick it in the tick it joined.
     #[test]
     fn tnt_primed_by_a_blast_waits_for_the_next_tick() {
-        let Some(mut game) = server_game() else {
+        let mut resources = None;
+        let Some(mut game) = server_game(&mut resources) else {
             return;
         };
         let block = game
@@ -2029,6 +2087,7 @@ mod tests {
     }
 }
 horizon_client::impl_joined!(PrimedTnt);
+horizon_mod_runtime::impl_attachment_lifetime!(PrimedTnt);
 
 #[cfg(test)]
 mod entity_collision_tests {

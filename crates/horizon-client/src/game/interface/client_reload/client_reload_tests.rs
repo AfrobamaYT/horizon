@@ -734,7 +734,10 @@ fn an_arm_pose_answer_replaces_the_pose_the_item_gives() {
         assert_eq!(game.held_arm_poses(1, &m), [None, None]);
         let mods = vec![ModEntry::new("horn", Box::new(Horn))].into();
         with_mods(mods, || {
-            assert_eq!(game.held_arm_poses(1, &m), [Some(ArmPose::TootHorn), None]);
+            assert_eq!(
+                game.held_arm_poses(1, &m),
+                [Some(horizon_core::arm_pose::ArmPose::TootHorn), None]
+            );
         });
     });
 }
@@ -796,6 +799,7 @@ fn refused_client_context_keeps_pack_and_listeners() {
             &[],
             &game.mods,
             game.register_client_reload_listeners(),
+            &[],
             &[],
             &game.pack.assets,
             &game.res,
@@ -903,8 +907,7 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
             use mod_api::__private::{ModPhase, PhaseOwner};
             use mod_api::{
                 ClientHost, ClientSetupEvent, ClientTickPreEvent, ConfigLoadingEvent, Hooks,
-                HostSide, ModEntry, NativeConfig, NativeConfigKind, RegisterConfigsEvent,
-                ScreenOpening, ScreenOpeningEvent,
+                HostSide, ModEntry, RegisterConfigsEvent, ScreenOpening, ScreenOpeningEvent,
             };
             use std::{sync::Mutex, time::Instant};
 
@@ -912,14 +915,14 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
             #[mod_api::__subscriptions]
             impl Hooks for Probe {
                 fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
-                    event.configs.push(NativeConfig::new(
+                    event.configs.push(mod_api::Config::new(
                         "startup_phase",
-                        NativeConfigKind::Client,
+                        mod_api::ConfigKind::Client,
                         "enabled = true\n",
                     ));
-                    event.configs.push(NativeConfig::new(
+                    event.configs.push(mod_api::Config::new(
                         "startup_phase",
-                        NativeConfigKind::Common,
+                        mod_api::ConfigKind::Common,
                         "enabled = true\n",
                     ));
                 }
@@ -1104,7 +1107,7 @@ fn humanoid_arm_pose_mod_reads_mob_state_and_changes_the_model() {
         game.tick_player_model();
         let own_before =
             anim::humanoid_arm_poses(game.player_model.as_ref().unwrap(), [None; 2], 0.0);
-        assert_eq!(own_before, [ArmPose::Item, ArmPose::Item]);
+        assert_eq!(own_before, [horizon_core::arm_pose::ArmPose::Item; 2]);
         for (id, kind) in [
             (60, "minecraft:zombie"),
             (61, "minecraft:skeleton"),
@@ -1144,7 +1147,7 @@ fn humanoid_arm_pose_mod_reads_mob_state_and_changes_the_model() {
                 game.tick_remote_arm_poses();
                 assert_eq!(
                     game.mobs[0].extra.held_arm_pose,
-                    [Some(ArmPose::ThrowTrident), None]
+                    [Some(horizon_core::arm_pose::ArmPose::ThrowTrident), None]
                 );
                 let posed = arms(&game.mobs[0]);
                 assert!((posed[1][3] + std::f32::consts::PI).abs() < 1e-6);
@@ -1168,3 +1171,6 @@ fn humanoid_arm_pose_mod_reads_mob_state_and_changes_the_model() {
         assert_eq!(game.mobs.iter().map(arms).collect::<Vec<_>>(), baseline);
     });
 }
+
+#[path = "custom_arm_pose_tests.rs"]
+mod custom_arm_pose_tests;

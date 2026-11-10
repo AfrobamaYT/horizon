@@ -88,32 +88,7 @@ def code_tokens(source):
     return out
 
 
-def wire_impls(sources):
-    """Collect ordinary generic impls and macro impl families from their bodies.
-
-    Macro names are not an allowlist: a family qualifies only if its body really
-    contains an impl Wire for the metavariable passed at its invocation.
-    """
-    texts = [' '.join(v for v, _ in code_tokens(s)).replace(': :', '::') for s in sources]
-    text = '\n'.join(texts)
-    names = set()
-    for match in re.finditer(r'\bWire\s+for\s+((?:\w+\s*::\s*)*\w+)', text):
-        names.add(re.split(r'\s*::\s*', match[1])[-1])
-    for body in re.finditer(r'macro_rules\s*!\s*(\w+)\s*\{(.*?)(?=macro_rules\s*!|\Z)', text, re.S):
-        if not re.search(r'\bWire\s+for\s+\$\s*\w+', body[2]):
-            continue
-        for call in re.finditer(r'\b' + re.escape(body[1]) + r'\s*!\s*\((.*?)\)', text, re.S):
-            # Families accept a comma-separated list of type paths, optionally
-            # after a scalar representation and semicolon (slot_keys).
-            args = call[1].split(';')[-1]
-            for arg in args.split(','):
-                path = re.fullmatch(r'\s*((?:\w+\s*::\s*)*\w+)\s*', arg)
-                if path:
-                    names.add(re.split(r'\s*::\s*', path[1].strip())[-1])
-    return names
-
-
-def violations(source, implemented=()):
+def violations(source):
     ts = code_tokens(source)
     missing = []
     for i, (value, pos) in enumerate(ts):
@@ -145,7 +120,7 @@ def violations(source, implemented=()):
         derive = any(re.search(r'(?:^|[,\s])(?:\w+::)*Wire(?:\s|,|$)', a)
                      for a in re.findall(r'#\s*\[\s*derive\s*\((.*?)\)\s*\]', attrs, re.S))
         reason = re.search(r'(?m)^[ \t]*// no wire:[ \t]*\S[^\n]*', prefix + attrs)
-        if not (derive or reason or name in implemented):
+        if not (derive or reason):
             missing.append((source.count('\n', 0, pos) + 1, name))
     return missing
 
@@ -158,7 +133,7 @@ def decode_literal(literal):
     return None
 
 
-def template_violations(source, implemented=()):
+def template_violations(source):
     """Check literal templates, resolving only proven literal policy fragments.
 
     An if/else binding qualifies only when BOTH literal arms explicitly satisfy
@@ -202,23 +177,67 @@ def template_violations(source, implemented=()):
             # Both arms proved valid; use the first for policy inspection only.
             template = template.replace('{' + name + '}', decode_literal(binding[2]) + '\n')
         result.extend((source.count('\n', 0, pos) + 1, line, name)
-                      for line, name in violations(template, implemented))
+                      for line, name in violations(template))
     return result
 
 
+def runtime_reexport_names(source):
+    """Follow public use trees, including groups and aliases, into the runtime."""
+    ts = [value for value, _ in code_tokens(source)]
+    names = set()
+
+    def walk(parts, prefix=()):
+        i = 0
+        while i < len(parts):
+            path = list(prefix)
+            grouped = False
+            while i < len(parts) and parts[i] != ',':
+                value = parts[i]
+                i += 1
+                if value == '{':
+                    start, depth = i, 1
+                    while i < len(parts) and depth:
+                        depth += (parts[i] == '{') - (parts[i] == '}')
+                        i += 1
+                    walk(parts[start:i - 1], tuple(path))
+                    grouped = True
+                elif value == 'as':
+                    i += 1  # The exported alias does not rename its definition.
+                elif value != ':':
+                    path.append(value)
+            if not grouped and path and path[0] == 'horizon_mod_runtime':
+                names.add(path[-1])
+            i += 1
+
+    for i in range(len(ts) - 1):
+        if ts[i:i + 2] == ['pub', 'use']:
+            end = i + 2
+            while end < len(ts) and ts[end] != ';':
+                end += 1
+            walk(ts[i + 2:end])
+    return names
+
+
 def repository_violations(root=ROOT):
-    api = root / 'crates/horizon-mod-api/src'
     sources = {}
-    for path in sorted(api.rglob('*.rs')):
-        if path.name == '__private.rs' or path.name.endswith('_tests.rs'):
-            continue
-        # Export fragments contain only use/mod declarations; their private
-        # scopes have no public type definitions to check.
-        sources[str(path.relative_to(root))] = path.read_text()
-    implemented = wire_impls(sources.values())
+    for crate in ('horizon-mod-api', 'horizon-mod-vocab'):
+        api = root / 'crates' / crate / 'src'
+        for path in sorted(api.rglob('*.rs')):
+            if path.name == '__private.rs' or path.name.endswith('_tests.rs'):
+                continue
+            sources[str(path.relative_to(root))] = path.read_text()
     result = []
     for path, source in sources.items():
-        result.extend(f'{path}:{line}: {name}' for line, name in violations(source, implemented))
+        result.extend(f'{path}:{line}: {name}' for line, name in violations(source))
+    # Runtime-owned types are public API too; policy lives on their definition,
+    # not on a use alias or on an unrelated hand-written impl with the same name.
+    runtime_names = set().union(*(runtime_reexport_names(s) for s in sources.values()))
+    if '*' in runtime_names:
+        result.append('runtime re-export: wildcard requires explicit named exports for Wire policy')
+    runtime = root / 'crates/horizon-mod-runtime/src'
+    for path in sorted(runtime.rglob('*.rs')):
+        result.extend(f'{path.relative_to(root)}:{line}: {name}'
+                      for line, name in violations(path.read_text()) if name in runtime_names)
     gen = root / 'crates/horizon-mod-api-gen/src'
     for relative in API_TEMPLATE_FILES:
         path = gen / relative
@@ -226,7 +245,7 @@ def repository_violations(root=ROOT):
         # Only production string literals, never Rust generator implementation
         # types or cfg(test) fixture programs, are emitted API templates.
         production = source.split('#[cfg(test)]', 1)[0]
-        for source_line, line, name in template_violations(production, implemented):
+        for source_line, line, name in template_violations(production):
             result.append(f'{path.relative_to(root)}:{source_line}: template line {line}: {name}')
     return result
 

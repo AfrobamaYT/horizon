@@ -511,17 +511,14 @@ mod enchantment_conflict_tests {
     use crate::game::api_values::{stack_value, test_snapshot};
     use crate::game::native_entity_refs::tests::with_game;
     use horizon_core::random::RandomSource;
-    use mod_api::{Identifier, ItemResource, LevelRef, NativeWorldEpoch};
+    use mod_api::{Identifier, ItemResource, LevelRef, WorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn enchanting_a_resource_uses_the_active_levels_random_and_preserves_the_input() {
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
-            let stale = LevelRef::new(
-                NativeWorldEpoch::new(level.epoch().get() + 1),
-                level.dimension(),
-            );
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             let stack = ItemStack::new("minecraft:book", 1);
             let resource = ItemResource::of(&test_snapshot(&stack));
             let pool = Identifier::parse("minecraft:in_enchanting_table").unwrap();
@@ -891,8 +888,7 @@ mod combat_query_tests {
 
     fn actor(game: &mut Game<'_>) -> mod_api::LivingRef {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_uuid = Some(123);
-        game.lan_acting_entity = Some(20);
+        crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
         mod_api::LivingRef::new(game.entity(20).unwrap())
     }
     fn resource(stack: &ItemStack) -> mod_api::ItemResource {
@@ -1096,10 +1092,8 @@ mod combat_query_tests {
                 enchanted.attack_damage_bonus(game, zombie, target, 7.0),
                 Some(2.0)
             );
-            let stale = mod_api::LivingRef::new(mod_api::EntityRef::new(
-                mod_api::NativeWorldEpoch::new(999),
-                20,
-            ));
+            let stale =
+                mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(999), 20));
             assert!(plain.entity_attack_range(game, stale).is_none());
             assert!(plain.damage_source(game, stale).is_none());
             assert!(

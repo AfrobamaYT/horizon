@@ -2,7 +2,7 @@
 <!-- separator: 1 -->
 
 `Host` exposes the documented `Game` helpers declared by area in
-`crates/horizon-mod-api/src/host/<area>.rs`, one trait per area; `Host`, `ServerHost` and `ClientHost` are the
+`crates/horizon-mod-vocab/src/host/<area>.rs`, one trait per area; `Host`, `ServerHost` and `ClientHost` are the
 unions of those traits, so a mod calls through them and never names an area trait. Each helper keeps its
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
@@ -35,7 +35,7 @@ The following documented `Game` helpers are not in the trait yet:
 - `with_mod_block_entity` is generic, so its signature cannot be called through `dyn Host`.
 
 Experience-orb values use vanilla's signed `i32` representation in
-`NativeExperienceOrb`, `ServerHost::set_experience_orb`, and the pickup and merge hooks.
+`ExperienceOrb`, `ServerHost::set_experience_orb`, and the pickup and merge hooks.
 Reading or changing a value preserves zero and negative saved values rather than
 clamping them through an unsigned representation. A negative value does not grant
 positive experience when picked up.

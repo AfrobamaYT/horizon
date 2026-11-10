@@ -171,10 +171,11 @@ pub struct JoinList<T, const DIRECT: bool = true>(
     Option<residency::Binding<T>>,
     ListStamp,
     Option<visibility::Binding>,
+    Option<visibility::PassLease>,
 );
 impl<T: Clone, const DIRECT: bool> Clone for JoinList<T, DIRECT> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), None, ListStamp::new(), None)
+        Self(self.0.clone(), None, ListStamp::new(), None, None)
     }
 }
 impl<T, const DIRECT: bool> Drop for JoinList<T, DIRECT> {
@@ -233,14 +234,60 @@ impl<T> ResidentSlot<T> {
         owner: residency::Owner,
         identity: fn(&T) -> (u32, JoinSeq),
     ) {
+        self.bind_residency_specialized(
+            journal,
+            owner,
+            identity,
+            residency::Source::Ordinary,
+            None,
+            None,
+        );
+    }
+    /// Bind a real specialized singleton or its fixed semantic children. The
+    /// projection is part of every parent structural operation, not a second pass.
+    pub fn bind_residency_specialized(
+        &mut self,
+        journal: &residency::Journal,
+        owner: residency::Owner,
+        identity: fn(&T) -> (u32, JoinSeq),
+        source: residency::Source,
+        children: Option<(residency::Kind, u8, fn(&T, u8) -> Option<[i32; 4]>)>,
+        known_uuid: Option<fn(&T) -> Option<[i32; 4]>>,
+    ) {
+        let mut binding = journal.bind(owner, identity);
+        binding.source(source);
+        binding.known_uuid(known_uuid);
+        if let Some((kind, count, uuid)) = children {
+            binding.children(kind, count, uuid);
+        }
+        if self
+            .1
+            .as_ref()
+            .is_some_and(|current| current.same(&binding))
+        {
+            return;
+        }
         self.emit_current(residency::Change::Remove);
-        self.1 = Some(journal.bind(owner, identity));
+        self.1 = Some(binding);
         self.emit_current(residency::Change::Install);
     }
     fn emit_current(&self, change: fn(residency::Identity) -> residency::Change) {
         if let (Some(binding), Some(entity)) = (&self.1, &self.0) {
             binding.entity(entity, change);
         }
+    }
+    /// Canonical metadata travelling with this actual filled slot. This is not
+    /// a source lookup and carries no element position or reference to a Game.
+    pub fn resident_location(&self) -> Option<residency::table::Location> {
+        self.1.as_ref()?.location(self.0.as_ref()?)
+    }
+    /// The whole real slot is moving into a caller-held actor frame. Its
+    /// payload and binding travel together; only this identity is unavailable.
+    pub fn begin_loan(&self) {
+        self.emit_current(residency::Change::Extract);
+    }
+    pub fn finish_loan(&self) {
+        self.emit_current(residency::Change::PutBack);
     }
     /// Report the existing allocator's delayed zero-to-live id assignment.
     pub fn id_assigned(&self) {
@@ -362,6 +409,16 @@ impl<T: Joined> ResidentList<T> {
     ) {
         self.0.bind_residency(journal, owner, identity);
     }
+    pub fn bind_residency_with_subtype(
+        &mut self,
+        journal: &residency::Journal,
+        owner: residency::Owner,
+        identity: fn(&T) -> (u32, JoinSeq),
+        subtype: fn(&T) -> residency::EntitySubtype,
+    ) {
+        self.0
+            .bind_residency_with_subtype(journal, owner, identity, subtype);
+    }
     /// Report the existing allocator's delayed zero-to-live id assignment.
     pub fn id_assigned(&self, index: usize) {
         self.0.id_assigned(index);
@@ -434,7 +491,7 @@ impl<'a, T> IntoIterator for &'a ResidentList<T> {
 
 impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
     fn default() -> Self {
-        Self(Vec::new(), None, ListStamp::new(), None)
+        Self(Vec::new(), None, ListStamp::new(), None, None)
     }
 }
 
@@ -471,6 +528,18 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
         self.written();
         self.bind_to(journal.bind(owner, identity));
     }
+    /// Bind immutable receiver class from the same actual stored payload.
+    pub fn bind_residency_with_subtype(
+        &mut self,
+        journal: &residency::Journal,
+        owner: residency::Owner,
+        identity: fn(&T) -> (u32, JoinSeq),
+        subtype: fn(&T) -> residency::EntitySubtype,
+    ) {
+        let mut binding = journal.bind(owner, identity);
+        binding.subtype(subtype);
+        self.bind_to(binding);
+    }
     fn bind_to(&mut self, binding: residency::Binding<T>) {
         self.written();
         if let Some(old) = &self.1 {
@@ -495,6 +564,10 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn lift(&mut self) -> Self {
         self.written();
         let mut taken = std::mem::take(self);
+        assert!(taken.4.is_none(), "lifting an already owned pass");
+        if taken.3.is_none() {
+            taken.4 = Some(visibility::PassLease::enter());
+        }
         self.1 = taken.1.clone();
         self.3 = taken
             .3
@@ -521,6 +594,7 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
         self.written();
         let visibility_lease = taken.3.as_mut().and_then(|b| b.lease.take());
+        let pass_lease = taken.4.take();
         if let (Some(a), Some(b)) = (&self.3, &taken.3) {
             assert!(
                 a.sink.same(&b.sink),
@@ -558,9 +632,16 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
             binding.marker(residency::Change::Restored);
         }
         drop(visibility_lease);
+        drop(pass_lease);
     }
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity), None, ListStamp::new(), None)
+        Self(
+            Vec::with_capacity(capacity),
+            None,
+            ListStamp::new(),
+            None,
+            None,
+        )
     }
     /// Move a batch back without changing its join numbers or order.
     pub fn append(&mut self, other: &mut Self) {
@@ -979,6 +1060,7 @@ impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
         IntoIter {
             rows: std::mem::take(&mut self.0).into_iter(),
             _lease: self.3.as_mut().and_then(|b| b.lease.take()),
+            _pass: self.4.take(),
         }
     }
 }
@@ -988,6 +1070,7 @@ impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
 pub struct IntoIter<T> {
     rows: std::vec::IntoIter<T>,
     _lease: Option<visibility::Lease>,
+    _pass: Option<visibility::PassLease>,
 }
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
@@ -1016,6 +1099,32 @@ mod tests {
         value: u32,
     }
     crate::impl_joined!(Entity);
+    #[derive(Debug)]
+    struct E {
+        join: JoinSeq,
+    }
+    crate::impl_joined!(E);
+
+    /// A numbered entity put back lands by its join number; a new one goes last.
+    #[test]
+    fn put_back_keeps_the_join_order() {
+        let mut list: JoinList<E> = JoinList::default();
+        for _ in 0..3 {
+            list.push(E {
+                join: JoinSeq::UNJOINED,
+            });
+        }
+        let first = list.remove(0);
+        let first_seq = first.join;
+        list.put_back(0, first);
+        assert_eq!(list[0].join, first_seq, "back before the later joins");
+        list.push(E {
+            join: JoinSeq::UNJOINED,
+        });
+        let seqs: Vec<_> = list.iter().map(|e| e.join).collect();
+        assert!(seqs.windows(2).all(|w| w[0] < w[1]), "{seqs:?}");
+        assert_eq!(seqs.len(), 4);
+    }
 
     fn entity(value: u32) -> Entity {
         Entity {

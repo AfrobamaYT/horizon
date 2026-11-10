@@ -34,6 +34,21 @@ Download and install a release (a tag such as v2026.10.13, or "latest").
 
 MCP: `install`.
 
+## `horizon-launcher developer-install`
+
+Install a local unsigned developer build from a trusted checkout.
+
+    horizon-launcher developer-install --program <PROGRAM> --trust-unsigned <CHECKOUT>
+
+- `CHECKOUT`: The trusted clean Horizon checkout to package
+- `--program`: The real horizon-client executable built from that committed checkout
+- `--trust-unsigned`: Allow executing this checkout's build code and unsigned game with your rights
+
+Example: horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned
+This executes the checkout's build code and an unsigned game with your rights. Trust both before continuing.
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher remove`
 
 Remove an installed version.
@@ -46,7 +61,7 @@ MCP: `remove`, needs `confirm: true`.
 
 ## `horizon-launcher import-build`
 
-Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed release or Nightly's game files, and select it. Nothing signed it: it runs with your rights, and updates never replace it.
+Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed base's game files, and select it. A local unsigned developer base is allowed only when explicitly selected or named with --version. Nothing signed it: it runs with your rights, and updates never replace it.
 
     horizon-launcher import-build <PATH>
 
@@ -116,6 +131,8 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
     horizon-launcher native-build [FOLDER]
 
 - `--sync-internals`: Discover internal uses through compiler diagnostics. Prints resolved declarations as JSON for cargo horizon-mod internals sync; never installs or selects a game
+- `--catalog`
+- `--catalog-output`: Copy discovery catalogs into this caller-owned empty directory
 - `FOLDER`: A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance). Server exports also read wasm internals declarations from .hmod packages directly in this folder
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
 - `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
@@ -194,7 +211,7 @@ MCP: `account_sign_out`, needs `confirm: true`.
 
 ## `horizon-launcher account select`
 
-Play as this account, or as one of your offline names.
+Play as this account.
 
     horizon-launcher account select <WHO>
 
@@ -202,48 +219,13 @@ Play as this account, or as one of your offline names.
 
 MCP: `account_select`.
 
-## `horizon-launcher account offline`
-
-Play offline (LAN, offline-mode servers) beside a signed-in account that owns the game: as NAME (kept to switch back to; 3 to 16 letters, digits or _), or as the name the game made up.
-
-    horizon-launcher account offline [NAME]
-
-- `NAME`
-
-MCP: `account_offline`.
-
-## `horizon-launcher account forget-offline`
-
-Forget one of your offline names; its skin and cape go with it.
-
-    horizon-launcher account forget-offline <NAME>
-
-- `NAME`
-
-MCP: `account_forget_offline`.
-
-## `horizon-launcher account skin`
-
-Show or set an offline name's skin and cape: a 64x64 (or 64x32) skin PNG, a 64x32 cape PNG, the model. Kept by the launcher and given to the game when that name plays.
-
-    horizon-launcher account skin <NAME> [FILE]
-
-- `NAME`
-- `FILE`: The skin's PNG
-- `--model`: classic or slim arms
-- `--cape`: The cape's PNG
-- `--no-skin`: Back to the default skin
-- `--no-cape`: Take the cape off
-
-MCP: `account_skin`.
-
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, game-architecture auto|x64|arm64, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit in GiB, default 30; 0 disables automatic cleanup).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, game-architecture auto|x64|arm64, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), cache-limit-gib N (managed cache limit in GiB: 10, 25 (default), 50, 100; 0 disables automatic cleanup).
 
     horizon-launcher settings [KEY] [VALUE]
 
-- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, game-architecture, proxy, while-playing, language, accent, background, native-cache-gib)
+- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, game-architecture, proxy, while-playing, language, accent, background, cache-limit-gib)
 - `VALUE`: The new value (with KEY)
 
 MCP: `settings`.
@@ -319,6 +301,81 @@ Write a bug report to a file you attach to the issue by hand; nothing is sent (d
 - `--log`: Add the end of the game's log (names and worlds hidden, without chat)
 
 MCP: `bug_report`.
+
+## `horizon-launcher data status`
+
+What is allowed, the install ID and how many items wait (the default).
+
+    horizon-launcher data status
+
+MCP: `data_status`.
+
+## `horizon-launcher data allow`
+
+Turn kinds on: performance, crashes, bugs, benchmarks, or all.
+
+    horizon-launcher data allow <KINDS>...
+
+- `KINDS`
+
+MCP: `data_allow`, only when the player asks.
+
+## `horizon-launcher data deny`
+
+Turn kinds off: performance, crashes, bugs, benchmarks, or all.
+
+    horizon-launcher data deny <KINDS>...
+
+- `KINDS`
+
+MCP: `data_deny`.
+
+## `horizon-launcher data show`
+
+Print exactly what would be sent.
+
+    horizon-launcher data show
+
+MCP: `data_show`.
+
+## `horizon-launcher data delete`
+
+Delete everything sent from here, and what waits, and take a new install ID.
+
+    horizon-launcher data delete
+
+MCP: `data_delete`, needs `confirm: true`.
+
+## `horizon-launcher data send`
+
+Send what is waiting now.
+
+    horizon-launcher data send
+
+MCP: `data_send`, only when the player asks.
+
+## `horizon-launcher data bug`
+
+Send a bug report you write; it is printed first, as it would leave.
+
+    horizon-launcher data bug <TEXT>
+
+- `TEXT`
+- `--log`: Add the end of the game's log (scrubbed, without chat)
+- `--yes`: Send without asking
+
+MCP: `data_bug`, only when the player asks.
+
+## `horizon-launcher data benchmark`
+
+Upload a benchmark report (docs/benchmark-report.md); it is printed first.
+
+    horizon-launcher data benchmark <FILE>
+
+- `FILE`
+- `--yes`
+
+MCP: `data_benchmark`, only when the player asks.
 
 ## `horizon-launcher instance list`
 

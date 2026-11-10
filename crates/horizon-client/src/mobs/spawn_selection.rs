@@ -20,9 +20,14 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
-use mod_api::{NativeSpawnCheck, SpawnFlags, SpawnLimits};
+use mod_api::{SpawnCheck, SpawnFlags, SpawnLimits};
 use serde_json::Value;
-use std::{borrow::Cow, collections::HashMap, fs, path::Path};
+use std::{
+    borrow::{Borrow, Cow},
+    collections::HashMap,
+    fs,
+    path::Path,
+};
 
 pub use crate::biome::{SpawnCost, parse_costs, parse_entries};
 
@@ -342,8 +347,8 @@ pub trait NaturalLevel: SpawnLevel {
         _reason: Reason,
         _at: [f64; 3],
         _pending: Pending,
-    ) -> NativeSpawnCheck {
-        NativeSpawnCheck::Default
+    ) -> SpawnCheck {
+        SpawnCheck::Default
     }
     /// The position check just asked refused the mob: what the level made
     /// for it is dropped.
@@ -630,8 +635,8 @@ pub fn position_ok<L: NaturalLevel>(
     vanilla: impl FnOnce() -> bool,
 ) -> bool {
     let ok = match l.position_check(entity, reason, at, pending) {
-        NativeSpawnCheck::Succeed => true,
-        NativeSpawnCheck::Fail => false,
+        SpawnCheck::Succeed => true,
+        SpawnCheck::Fail => false,
         _ => vanilla(),
     };
     if !ok {
@@ -975,15 +980,20 @@ impl SpawnState {
     /// `NaturalSpawner.createState`: every non-persistent entity of a
     /// spawning category in a loaded chunk adds its biome's spawn charge, its
     /// category count and (for mobs) the local caps of the players near it.
-    pub fn new<L: NaturalLevel>(
+    pub fn new<'a, L: NaturalLevel, I>(
         l: &L,
         spawnable_chunks: i32,
         players: Vec<SpawnPlayer>,
-        entities: &[Counted],
+        entities: I,
         chunk_loaded: impl Fn(i32, i32) -> bool,
-    ) -> Self {
+    ) -> Self
+    where
+        I: IntoIterator,
+        I::Item: std::borrow::Borrow<Counted<'a>>,
+    {
         let mut state = Self::uncounted(spawnable_chunks, players);
         for e in entities {
+            let e = e.borrow();
             if e.is_mob && e.persistent || e.category == Category::Misc {
                 continue;
             }
@@ -1020,6 +1030,10 @@ impl SpawnState {
     pub fn with_limits(mut self, limits: SpawnLimits) -> Self {
         self.limits = limits;
         self
+    }
+    /// Reclaims the player buffer for reuse across passes.
+    pub fn into_players(self) -> Vec<SpawnPlayer> {
+        self.players
     }
     fn add_charge(&mut self, pos: [i32; 3], charge: f64) {
         if charge != 0.0 {

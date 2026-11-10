@@ -671,7 +671,7 @@ fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
     {
         m.set_ai_target(w, None);
         if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
-            m.extra.anger = 0;
+            super::neutral_anger::stop(m);
             m.ai.last_hurt_by = None;
         }
     }
@@ -933,24 +933,19 @@ pub fn finish_tick(
     m.anim.end_tick(m.ai.swinging);
     tick_swing(m);
     flower_contact_effects(m, w);
-    if m.species() == Species::CopperGolem {
-        // CopperGolem.tick: updateWeathering after the living tick.
-        super::copper_golem::update_weathering(m, w, level.random(), events);
-    }
-    if m.species() == Species::Strider {
-        super::strider::float(m, w);
-    }
-    if m.species() == Species::Bat {
-        super::bat::tick(m);
-    }
-    if m.species() == Species::Bee {
-        super::bee::tick(m, level.random());
-    }
-    if m.species() == Species::Allay {
-        super::allay::tick(m, w, events);
-    }
-    if m.species() == Species::Panda {
-        super::panda::tick(m, w, events);
+    // The species' own tick after the living tick, with or without AI.
+    match m.species() {
+        // CopperGolem.tick: updateWeathering.
+        Species::CopperGolem => {
+            super::copper_golem::update_weathering(m, w, level.random(), events)
+        }
+        Species::Strider => super::strider::float(m, w),
+        Species::Bat => super::bat::tick(m),
+        Species::Bee => super::bee::tick(m, level.random()),
+        Species::Allay => super::allay::tick(m, w, events),
+        Species::Panda => super::panda::tick(m, w, events),
+        Species::Villager => super::villager::tick(m, w.game_time),
+        _ => {}
     }
     aquatic::school_tick(m, w, level.random());
     // Dolphin.tick: after super.tick, NoAI restores the species maximum.
@@ -996,6 +991,9 @@ fn effects_from_blocks(
         );
         if w.block_name(x, y, z) == "minecraft:magma_block" {
             m.damage(level, 1.0, Damage::of(DamageKind::HotFloor));
+            // Enderman.hurtServer finishes before stepOn returns; the scan
+            // below still uses the movements captured before that hurt.
+            hurt_teleports(m, w, events);
         }
         // TurtleEggBlock.stepOn: a mob never steps carefully, so an egg under
         // it breaks one time in a hundred (`destroyEgg`), unless it is a turtle
@@ -1393,6 +1391,9 @@ fn base_tick(
         } else {
             if m.fire_ticks % 20 == 0 && !m.fluids.in_lava {
                 m.damage(level, 1.0, Damage::of(DamageKind::OnFire));
+                // Entity.baseTick's hurt teleports before later contact is
+                // checked, so the old spot's fire cannot ignite the landing.
+                hurt_teleports(m, w, events);
             }
             m.fire_ticks -= 1;
         }
@@ -1504,11 +1505,6 @@ fn base_tick(
     }
     if m.invulnerable > 0 {
         m.invulnerable -= 1;
-    }
-    // Entity.baseTick: the entity-level invulnerability window counts down
-    // too, its own timer (#916), never the damage cooldown above.
-    if m.invulnerable_time > 0 {
-        m.invulnerable_time -= 1;
     }
     // LivingEntity.baseTick runs tickEffects after the timers count down.
     tick_effects(m, w.loop_context, level, w.mod_effects);
@@ -2693,8 +2689,8 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     // `MobDespawnEvent` comes first in NeoForge's `Mob.checkDespawn`, so an answer
     // other than `Default` skips vanilla's checks and their `nextInt(800)` draw.
     match std::mem::take(&mut m.despawn) {
-        mod_api::NativeDespawn::Allow => return false,
-        mod_api::NativeDespawn::Deny => return true,
+        mod_api::Despawn::Allow => return false,
+        mod_api::Despawn::Deny => return true,
         _ => {}
     }
     // Mob.checkDespawn discards disallowed types even when persistent or NoAI.
@@ -2762,10 +2758,15 @@ fn never_removed_when_far(s: Species) -> bool {
             | Species::Wither
     )
 }
-/// Movement speed bonus from the modeled baby modifier, unless it was removed.
+/// The movement speed multiplier of the mob's transient `minecraft:baby`
+/// modifier (`Zombie.SPEED_MODIFIER_BABY` +0.5, `Piglin.SPEED_MODIFIER_BABY`
+/// +0.2, both `ADD_MULTIPLIED_BASE`): the same modifier `/attribute` reads, so
+/// one taken away with `modifier remove` no longer speeds the baby up.
 pub fn speed_bonus(m: &Mob) -> f64 {
-    super::finalize::transient(m, super::finalize::Attr::MovementSpeed)
-        .map_or(1.0, |(amount, _)| 1.0 + amount)
+    match super::finalize::transient(m, super::finalize::Attr::MovementSpeed) {
+        Some((amount, super::finalize::Op::AddMultipliedBase)) => 1.0 + amount,
+        _ => 1.0,
+    }
 }
 /// The ambient, hurt and death sounds of species that pick them by state
 /// (`getHurtSound` / `getDeathSound` overrides); the type's otherwise.
@@ -7036,120 +7037,47 @@ mod trader_llama_no_ai_tests {
 }
 
 #[cfg(test)]
-mod hurt_teleport_contact_tests {
+#[path = "hurt_teleport_contact_tests.rs"]
+mod hurt_teleport_contact_tests;
+
+#[cfg(test)]
+mod baby_speed_tests {
     use super::*;
-    use crate::mobs::world::with_built_test_world;
-    use horizon_world::registry::BlockRegistry;
+    use crate::mobs::{finalize, sensor_scan_tests::kind};
+    use horizon_core::geometry::Vec3;
     use std::sync::Arc;
 
-    /// A stone floor over the loaded 2x2 chunks (so a teleport finds ground),
-    /// `under` below the mob's spot and `at` in it.
-    fn build(
-        under: &'static str,
-        at: &'static str,
-    ) -> impl FnOnce(&mut crate::world::World, &BlockRegistry) {
-        move |world, registry| {
-            let stone = registry.default_state("minecraft:stone").unwrap();
-            for cx in -1..1 {
-                for cz in -1..1 {
-                    world
-                        .chunks
-                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
-                }
-            }
-            for x in -16..16 {
-                for z in -16..16 {
-                    world.set(x, 63, z, stone).unwrap();
-                }
-            }
-            world
-                .set(0, 63, 0, registry.default_state(under).unwrap())
-                .unwrap();
-            world
-                .set(0, 64, 0, registry.default_state(at).unwrap())
-                .unwrap();
-        }
-    }
-
-    fn enderman(types: &crate::mobs::MobTypes, seed: i64) -> Mob {
-        let kind = Arc::new(types.types["minecraft:enderman"].clone());
-        let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-        register(&mut m);
-        m.random = horizon_core::random::LegacyRandom::new(seed);
-        m.on_ground = true;
-        m.stuck_multiplier = Vec3::ZERO;
+    fn baby(species: Species, id: &str) -> Mob {
+        let mut k = kind();
+        let km = Arc::make_mut(&mut k);
+        km.id = id.into();
+        km.species = species;
+        let mut m = Mob::new(1, k, Vec3::ZERO, 0.0);
+        finalize::set_baby(&mut m, true);
         m
     }
 
-    /// `Entity.applyEffectsFromBlocks` fixes the tick's movements before
-    /// `stepOn`: when the magma's hurt teleports an enderman, the scan still
-    /// walks the path it had, and the cobweb it stood in still holds it.
+    /// #11994: movement reads the transient `minecraft:baby` modifier itself:
+    /// `Zombie.SPEED_MODIFIER_BABY` +0.5 and `Piglin.SPEED_MODIFIER_BABY` +0.2
+    /// (`ADD_MULTIPLIED_BASE`), and none once `/attribute ... modifier remove`
+    /// took it away, until the next `setBaby`.
     #[test]
-    fn a_magma_teleport_leaves_the_block_scan_on_the_old_path() {
-        with_built_test_world(
-            &[],
-            build("minecraft:magma_block", "minecraft:cobweb"),
-            |w, types| {
-                let mut teleported = 0;
-                for seed in 0..40 {
-                    let mut m = enderman(types, seed);
-                    let mut test_level = crate::health::TestLevel::new(42);
-                    let mut random = test_level.level();
-                    let mut events = Vec::new();
-                    effects_from_blocks(&mut m, w, &mut random, &mut events);
-                    if m.position != Vec3::new(0.5, 64.0, 0.5) {
-                        teleported += 1;
-                        assert_eq!(
-                            m.stuck_multiplier,
-                            Vec3::new(0.25, f64::from(0.05_f32), 0.25),
-                            "seed {seed}: the cobweb on the old path"
-                        );
-                    }
-                }
-                assert!(teleported > 0, "some seed teleports");
-            },
-        );
-    }
-
-    /// A hurt in `baseTick` that teleports an enderman (`snapTo` resets the
-    /// old position) leaves aiStep's fire contact at the landing spot: no
-    /// fire there, so the fire timer only counts down (no re-ignite to 160).
-    #[test]
-    fn a_burning_teleport_does_not_take_the_old_spots_fire_along() {
-        with_built_test_world(
-            &[],
-            build("minecraft:stone", "minecraft:fire"),
-            |w, types| {
-                let mut teleported = 0;
-                for seed in 0..40 {
-                    let mut m = enderman(types, seed);
-                    m.fire_ticks = 20;
-                    // Whether the burning hurt's own teleport lands (one in ten
-                    // draws none, and a try can find no ground: the old spot's
-                    // fire then ignites it before the second hurt teleports it).
-                    let mut first = m.clone();
-                    let mut events = Vec::new();
-                    hurt(
-                        &mut first,
-                        w,
-                        &mut events,
-                        1.0,
-                        Damage::of(DamageKind::OnFire),
-                    );
-                    base_tick(
-                        &mut m,
-                        w,
-                        &mut crate::health::TestLevel::new(0).level(),
-                        &mut events,
-                    );
-                    if first.position != Vec3::new(0.5, 64.0, 0.5) {
-                        assert_eq!(m.position, first.position, "seed {seed}: the same teleport");
-                        teleported += 1;
-                        assert_eq!(m.fire_ticks, 19, "seed {seed}: no fire where it landed");
-                    }
-                }
-                assert!(teleported > 0, "some seed teleports");
-            },
-        );
+    fn a_babys_speed_follows_its_baby_modifier() {
+        let mut zombie = baby(Species::Zombie, "minecraft:zombie");
+        assert_eq!(speed_bonus(&zombie), 1.5);
+        zombie
+            .extra
+            .attributes
+            .get_or_insert_default()
+            .baby_speed_removed = true;
+        assert_eq!(speed_bonus(&zombie), 1.0, "removed with /attribute");
+        finalize::set_baby(&mut zombie, true);
+        assert_eq!(speed_bonus(&zombie), 1.5, "setBaby adds it back");
+        // The piglin's is 0.2F widened to a double, not the zombie's 0.5.
+        let piglin = baby(Species::Piglin, "minecraft:piglin");
+        assert_eq!(speed_bonus(&piglin), 1.0 + f64::from(0.2f32));
+        let mut adult = baby(Species::Zombie, "minecraft:zombie");
+        finalize::set_baby(&mut adult, false);
+        assert_eq!(speed_bonus(&adult), 1.0);
     }
 }

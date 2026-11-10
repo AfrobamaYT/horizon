@@ -3,8 +3,8 @@
 //! use `/waypoint_set` to place a cyan marker. The most recent death appears in red after respawn.
 use mod_api::{
     ClientHost, ClientTickPostEvent, CommandEvent, ConfigFileError, ConfigPath, Flow, Hooks,
-    ModEntry, NativeCommand, RegisterClientCommandsEvent, RenderLevelStage, RenderLevelStageEvent,
-    WorldDepth, WorldLine,
+    ModEntry, RegisterClientCommandsEvent, RenderLevelStage, RenderLevelStageEvent, WorldDepth,
+    WorldLine,
 };
 use std::sync::Mutex;
 
@@ -49,7 +49,7 @@ impl Hooks for Waypoints {
         _: &mut dyn ClientHost,
         event: &mut RegisterClientCommandsEvent<'_>,
     ) {
-        event.commands.push(NativeCommand::new("waypoint_set"));
+        event.commands.push(mod_api::Command::new("waypoint_set"));
     }
 
     fn command(&self, host: &mut dyn ClientHost, event: &mut CommandEvent<'_>) -> Flow {
@@ -131,11 +131,12 @@ impl Hooks for Waypoints {
 }
 
 fn main() {
+    let startup = horizon_client::entry::prepare();
     horizon_client::entry::main_with(
         vec![ModEntry::new("waypoints", Box::<Waypoints>::default())],
         &[],
         &[],
-        None,
+        startup,
     );
 }
 

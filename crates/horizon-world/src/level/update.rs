@@ -434,7 +434,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn remove_block(&mut self, pos: BlockPos, moved_by_piston: bool) -> bool {
         let fluid = self.fluid_at(pos);
         let legacy = self.b.legacy_block(fluid);
-        self.set_block(pos, legacy, 3 | if moved_by_piston { 64 } else { 0 })
+        let replacement =
+            self.level
+                .adjust_remove_block(pos, self.state(pos), moved_by_piston, legacy);
+        self.set_block(pos, replacement, 3 | if moved_by_piston { 64 } else { 0 })
     }
     /// `Level.destroyBlock(pos, dropResources, null, limit)`.
     pub fn destroy_block(&mut self, pos: BlockPos, drop: bool, limit: i32) -> bool {
@@ -534,8 +537,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- neighbour updater ----
     pub fn update_neighbors_at(&mut self, pos: BlockPos, block: BlockId) {
-        // NeoForge asks here and in the skipping variant, but not in the
-        // oriented one, which `ServerLevel` doesn't patch.
+        // Mods are asked here and in the skipping variant, but not in the
+        // oriented one.
         if self.level.neighbor_notify(pos, None) {
             return;
         }
@@ -720,11 +723,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let mut state = self.state(relative);
             if self.b.table.is(state, self.b.named.comparator) {
                 self.neighbor_changed_full(state, relative, block, false);
-            } else if self.is_redstone_conductor(state, relative) {
+            }
+            self.level
+                .observe_block_entity_neighbor(relative, state, pos);
+            if !self.b.table.is(state, self.b.named.comparator)
+                && self.is_redstone_conductor(state, relative)
+            {
                 relative = rel(relative, direction);
                 state = self.state(relative);
                 if self.b.table.is(state, self.b.named.comparator) {
                     self.neighbor_changed_full(state, relative, block, false);
+                }
+                if self.level.receives_weak_changes(relative, state) {
+                    self.level
+                        .observe_block_entity_neighbor(relative, state, pos);
                 }
             }
         }
