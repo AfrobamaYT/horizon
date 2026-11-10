@@ -69,6 +69,51 @@ pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn player_dimensions_validate_identity_on_both_server_roles() {
+    use super::execution_role::ExecutionRole;
+    with_guests(|game| {
+        for role in [
+            ExecutionRole::DedicatedServer,
+            ExecutionRole::IntegratedServer,
+        ] {
+            game.options.execution_role = role;
+            let player = game.player(12).unwrap();
+            let other = game.player(13).unwrap();
+            let epoch = player.entity().epoch();
+            let unknown = mod_api::__private::game::player_ref(player.entity(), 999);
+            let stale = mod_api::__private::game::player_ref(
+                EntityRef::new(WorldEpoch::new(epoch.get() + 1), player.entity().id()),
+                player.uuid(),
+            );
+            let replaced = mod_api::__private::game::player_ref(other.entity(), player.uuid());
+            for invalid in [unknown, stale, replaced] {
+                assert_eq!(game.player_level(invalid), None, "{role:?}");
+                assert_eq!(game.player_dimension(invalid), None, "{role:?}");
+            }
+            assert_eq!(
+                game.player_level(player).unwrap().dimension_id(),
+                "minecraft:overworld"
+            );
+            game.as_guest(12, |game| {
+                assert_eq!(
+                    game.player_dimension(player).unwrap().as_str(),
+                    "minecraft:overworld"
+                );
+                game.as_guest(13, |game| {
+                    assert_eq!(
+                        game.player_level(player).unwrap().dimension_id(),
+                        "minecraft:overworld"
+                    );
+                })
+                .unwrap();
+            })
+            .unwrap();
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn refused_wire_reload_preserves_hub_and_engine_generation() {
     with_guests(|game| {
         let before = game.lan.as_ref().unwrap().hub.lan.shared.sync();

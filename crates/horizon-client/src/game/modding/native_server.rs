@@ -1277,7 +1277,7 @@ impl Game<'_> {
             return None;
         }
         if !self.is_logical_server() {
-            return (self.local_player()? == player).then(|| self.native_level_key());
+            return None;
         }
         if self.native_acting_player() == Some(player) {
             let dim = match self.lan_acting {
@@ -1293,6 +1293,7 @@ impl Game<'_> {
             return Some(Dim::from_id(&guest.dimension).key());
         }
         if self.serving.is_some()
+            && self.player(player.uuid()) == Some(player)
             && self
                 .level
                 .player_uuid
@@ -1304,9 +1305,8 @@ impl Game<'_> {
         None
     }
 
-    /// The level the online player is in (`ServerPlayer.level`): on an integrated
-    /// server or dedicated server, the player's current dimension; on a client,
-    /// the client's level. None for a stale or unavailable player.
+    /// The level the online player is in (`ServerPlayer.level`) on an integrated
+    /// or dedicated server. None for a stale or unavailable player.
     pub(super) fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
         let dim = self.player_dimension_key(player)?;
         Some(LevelRef::new(player.fields().entity.epoch(), dim))
