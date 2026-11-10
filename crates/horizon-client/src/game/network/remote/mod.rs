@@ -9412,7 +9412,7 @@ impl Game<'_> {
 
     /// The shared dry-level boundary for a normal block use or the empty
     /// method requested by a canceled `BLOCK` phase's `TryWithEmptyHand`.
-    fn remote_block_template(
+    pub(super) fn remote_block_template(
         &mut self,
         hit: &super::Hit,
         held: Option<&ItemStack>,
@@ -11979,6 +11979,9 @@ impl<'w> DryLevel<'w> {
 }
 
 impl horizon_world::level::LevelAccess for DryLevel<'_> {
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        self.base.cake_can_eat(vanilla)
+    }
     fn emit(&mut self, event: horizon_world::level::LevelEvent) {
         if let horizon_world::level::LevelEvent::Sound {
             pos,

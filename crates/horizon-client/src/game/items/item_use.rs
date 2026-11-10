@@ -1164,6 +1164,29 @@ pub(super) mod interact_vibration_tests {
                     horizon_world::level::InteractionResult::Success
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 3);
+                game.with_level(|b, level, _| {
+                    let cake = b
+                        .table
+                        .default_state(b.table.block_by_name("minecraft:cake").unwrap());
+                    horizon_world::level::LevelAccess::set_raw(
+                        level,
+                        horizon_core::position::BlockPos::new(0, 64, 0),
+                        cake,
+                    );
+                });
+                let hit = super::super::Hit {
+                    pos: [0, 64, 0],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 0.5],
+                    inside: false,
+                };
+                let (result, _) = game.remote_block_template(&hit, None, true);
+                assert_eq!(result, horizon_world::level::InteractionResult::Success);
+                assert_eq!(
+                    calls.load(Ordering::Relaxed),
+                    4,
+                    "client dry-level path asks the hook"
+                );
             })
             .expect("HORIZON_TEST_RESOURCES must name prepared resources");
         });
