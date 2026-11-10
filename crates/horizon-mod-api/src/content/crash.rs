@@ -7,6 +7,8 @@ pub use mod_vocab::content::crash::{
 };
 use std::cell::{Cell, RefCell};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+static HOSTED_CALLS: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     /// The native mod hook this thread is inside, for the panic hook to name.
@@ -32,24 +34,34 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
     let _ = ensure_installed();
     mod_vocab::content::crash::enter_native_mod(call)
 }
-fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory<'_>, call: ModCall) {
-    let frame = NEXT_FRAME
-        .try_with(|c| {
-            let next = c.get().checked_add(1);
-            if let Some(next) = next {
-                c.set(next);
-            }
-            next
-        })
-        .ok()
-        .flatten();
-    let outer_frame = NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten();
-    let outer_call = IN_NATIVE_MOD
-        .try_with(|c| c.replace(Some(call)))
-        .ok()
-        .flatten();
-    let timing = crate::__private::profiler::enter(call).map(|guard| guard.into_timing());
-    factory.finish(outer_frame, outer_call, timing);
+fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
+    let frame = if HOSTED_CALLS.load(Relaxed) {
+        NEXT_FRAME
+            .try_with(|c| {
+                let next = c.get().checked_add(1);
+                if let Some(next) = next {
+                    c.set(next);
+                }
+                next
+            })
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let outer_frame = if HOSTED_CALLS.load(Relaxed) {
+        NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten()
+    } else {
+        None
+    };
+    factory.finish(mod_vocab::dispatch_scope::State {
+        outer_frame,
+        outer_call: IN_NATIVE_MOD
+            .try_with(|c| c.replace(Some(call)))
+            .ok()
+            .flatten(),
+        timing: crate::__private::profiler::enter(call).map(|guard| guard.into_timing()),
+    })
 }
 /// The `[mod] id` of the native mod this thread is inside a hook of, if any.
 pub fn current_native_mod() -> Option<&'static str> {
@@ -77,7 +89,22 @@ fn enter_converted(call: ConvertedCall) -> Option<ConvertedPackageGuard> {
     if current_native_mod() != Some(call.runtime) {
         return None;
     }
-    let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
+    HOSTED_CALLS.store(true, Relaxed);
+    let frame = NATIVE_FRAME
+        .try_with(|cell| {
+            if let Some(frame) = cell.get() {
+                return Some(frame);
+            }
+            let frame = NEXT_FRAME.with(|next| {
+                let frame = next.get().checked_add(1)?;
+                next.set(frame);
+                Some(frame)
+            });
+            cell.set(frame);
+            frame
+        })
+        .ok()
+        .flatten()?;
     let token = NEXT_SCOPE
         .try_with(|c| {
             let next = c.get().checked_add(1)?;
@@ -114,10 +141,12 @@ fn leave_converted(token: u64, mut outer: Option<ConvertedScope>) {
     });
 }
 
-fn leave_native(state: &mut mod_vocab::dispatch_scope::State) {
-    let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
+fn leave_native(mut state: mod_vocab::dispatch_scope::State) {
+    if HOSTED_CALLS.load(Relaxed) {
+        let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
+    }
     let _ = IN_NATIVE_MOD.try_with(|c| c.set(state.outer_call));
-    if let Some(timing) = state.timing.take() {
+    if let Some(timing) = state.timing {
         crate::__private::profiler::leave(timing);
     }
 }
