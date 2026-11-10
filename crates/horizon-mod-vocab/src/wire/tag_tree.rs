@@ -5,27 +5,22 @@ use horizon_core::nbt::{Compound, JavaString, discard_tag};
 
 const CONTAINERS: usize = 512;
 
-enum Write<'a> {
-    Tag(&'a Tag, usize),
-    Key(&'a JavaString),
+enum WriteFrame<'a> {
+    List(std::slice::Iter<'a, Tag>),
+    Map(std::collections::btree_map::Iter<'a, JavaString, Tag>),
 }
 
 pub(super) fn put(tag: &Tag, out: &mut Writer) {
-    let mut pending = vec![Write::Tag(tag, 0)];
-    while let Some(task) = pending.pop() {
-        if out.error().is_some() {
-            break;
-        }
-        let (tag, depth) = match task {
-            Write::Key(key) => {
-                out.put(key);
-                continue;
-            }
-            Write::Tag(tag, depth) => (tag, depth),
-        };
-        if matches!(tag, Tag::List(_) | Tag::Compound(_)) && depth >= CONTAINERS {
+    // One iterator per ancestor, never one allocation per value or one slot
+    // per sibling. Even a wide compound uses only its bounded ancestor stack.
+    let mut frames: [Option<WriteFrame<'_>>; CONTAINERS] = [const { None }; CONTAINERS];
+    let mut len = 0;
+    let mut current = tag;
+    loop {
+        let tag = current;
+        if matches!(tag, Tag::List(_) | Tag::Compound(_)) && len >= CONTAINERS {
             out.fail(WireError::Depth);
-            break;
+            return;
         }
         match tag {
             Tag::End => out.put(&0u32),
@@ -64,15 +59,14 @@ pub(super) fn put(tag: &Tag, out: &mut Writer) {
             Tag::List(v) => {
                 out.put(&9u32);
                 out.put_len(v.len());
-                pending.extend(v.iter().rev().map(|t| Write::Tag(t, depth + 1)));
+                frames[len] = Some(WriteFrame::List(v.iter()));
+                len += 1;
             }
             Tag::Compound(v) => {
                 out.put(&10u32);
                 out.put_len(v.len());
-                for (key, value) in v.iter().rev() {
-                    pending.push(Write::Tag(value, depth + 1));
-                    pending.push(Write::Key(key));
-                }
+                frames[len] = Some(WriteFrame::Map(v.iter()));
+                len += 1;
             }
             Tag::IntArray(v) => {
                 out.put(&11u32);
@@ -82,6 +76,27 @@ pub(super) fn put(tag: &Tag, out: &mut Writer) {
                 out.put(&12u32);
                 out.put(v);
             }
+        }
+        if out.error().is_some() {
+            return;
+        }
+        loop {
+            if len == 0 {
+                return;
+            }
+            let next = match frames[len - 1].as_mut().unwrap() {
+                WriteFrame::List(values) => values.next(),
+                WriteFrame::Map(values) => values.next().map(|(key, value)| {
+                    out.put(key);
+                    value
+                }),
+            };
+            if let Some(next) = next {
+                current = next;
+                break;
+            }
+            len -= 1;
+            frames[len] = None;
         }
     }
 }
