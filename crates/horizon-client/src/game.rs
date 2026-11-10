@@ -8306,6 +8306,7 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
         }
@@ -11232,19 +11233,6 @@ impl Game<'_> {
         }
         self.mark_motion(out.len(), 0);
         self.mark_stage(out.len(), "NONE");
-    }
-
-    /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
-    /// (any other progress). Cracks not updated for 400 ticks are dropped.
-    pub(crate) fn destroy_block_progress(&mut self, breaker: i32, pos: [i32; 3], progress: i32) {
-        let now = self.world.game_time;
-        self.destroying
-            .retain(|_, c| now.saturating_sub(c.2) <= 400);
-        if (0..10).contains(&progress) {
-            self.destroying.insert(breaker, (pos, progress as u8, now));
-        } else {
-            self.destroying.remove(&breaker);
-        }
     }
 
     /// `ServerLevel.destroyBlockProgress`: breaker `breaker`'s crack on `pos`
