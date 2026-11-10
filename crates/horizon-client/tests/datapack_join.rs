@@ -361,7 +361,9 @@ fn a_reload_snapshot_gives_the_client_generation_two_and_stales_old_handles() {
         Some(&DatapackValue::Int(7))
     );
     // The host registers the guest on a tick after the client joined.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while host.joined.is_empty() {
+        assert!(Instant::now() < deadline, "host did not admit the joined client");
         host.tick();
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -416,7 +418,9 @@ fn a_refused_reload_disconnects_instead_of_retaining_the_old_generation() {
     let mut host = Host::start();
     let session = connect(host.port(), "Mage", &data);
     join(&mut host, &session);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while host.joined.is_empty() {
+        assert!(Instant::now() < deadline, "host did not admit the joined client");
         host.tick();
         std::thread::yield_now();
     }
