@@ -55,23 +55,28 @@ impl Game<'_> {
         found || self.entity_ids_off_walk().any(|e| e == id)
     }
 
+    /// Object ownership for persistence cleanup, never a level-query membership set.
+    pub(super) fn retained_entity_ids(&self) -> std::collections::HashSet<u32> {
+        let mut retained = self.live_entity_ids();
+        retained.extend(self.persist.off_level.keys().copied());
+        retained
+    }
+
     /// The attachments of entities that left the level, dropped: each tick
     /// while any entity has some. Only those entities are looked at, and
     /// nothing else of the entities' memory changes.
     pub(super) fn prune_entity_attachments(&mut self) {
-        let alive = self.live_entity_ids();
-        let gone: Vec<[i32; 4]> = self
+        let alive = self.retained_entity_ids();
+        let gone: Vec<u32> = self
             .persist
             .uuids
-            .iter()
-            .filter(|(id, uuid)| {
-                self.entity_attachments.contains_key(*uuid) && !alive.contains(*id)
-            })
-            .map(|(_, uuid)| *uuid)
+            .keys()
+            .copied()
+            .filter(|id| self.entity_attachments.contains_key(id) && !alive.contains(id))
             .collect();
-        for uuid in gone {
-            self.forget_entity_initialization(uuid);
-            self.entity_attachments.remove(&uuid);
+        for id in gone {
+            self.forget_entity_initialization(mod_api::Holder::Entity(id));
+            self.entity_attachments.remove(&id);
         }
     }
 
@@ -117,7 +122,43 @@ impl Game<'_> {
         self.attachment_slot(holder, access)
     }
 
-    /// Where `holder`'s attachment map lives now: an entity's by its UUID, a player's where
+    /// Bind first-store contents to their real owner, including writes made before
+    /// insertion by EntityConstructing listeners. Never invent a temporary owner.
+    pub(super) fn bind_resident_entity_attachments(
+        &mut self,
+        id: u32,
+    ) -> Result<(), mod_api::AttachmentError> {
+        use mod_api::AttachmentError;
+        let id = std::num::NonZeroU32::new(id).ok_or(AttachmentError::MissingHolder)?;
+        if !matches!(
+            self.server_resident_entity(id.get()),
+            horizon_client::join_seq::residency::table::EntityLookup::Found {
+                value: super::commands::Target::Mob(_) | super::commands::Target::Painting(_),
+                ..
+            }
+        ) {
+            return Ok(());
+        }
+        if !self.entity_attachments.contains_key(&id.get()) {
+            return Ok(());
+        }
+        let level = self
+            .level(self.dim.id())
+            .ok_or(AttachmentError::MissingHolder)?;
+        let holder =
+            mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id.get()));
+        let index = self.attachment_indexes.entry(self.dim).or_default().clone();
+        let mut map = self.entity_attachments.remove(&id.get()).unwrap();
+        self.with_resident_slot(&self.dim.key(), id, |slot| {
+            if !slot.is_bound() {
+                slot.bind(&mut map, &index, holder);
+            }
+        });
+        self.entity_attachments.insert(id.get(), map);
+        Ok(())
+    }
+
+    /// Where `holder`'s attachment map lives now: an entity's by its object ID, a player's where
     /// their state is (swapped in for a guest's turn, or kept beside), the world's others.
     pub(super) fn attachment_slot(
         &mut self,
@@ -126,6 +167,45 @@ impl Game<'_> {
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         use mod_api::AttachmentError;
         if let mod_api::Holder::Entity(id) = holder {
+            if self.entity_initialization.active != Some(holder) {
+                use super::entity_residency::SlotAccess;
+                use horizon_client::join_seq::residency::Kind;
+                let id = std::num::NonZeroU32::new(id).ok_or(AttachmentError::MissingHolder)?;
+                match self.with_resident_slot(&self.dim.key(), id, |_| ()) {
+                    SlotAccess::Done(()) => {}
+                    SlotAccess::Taken => return Err(AttachmentError::HolderBusy),
+                    SlotAccess::Missing => return Err(AttachmentError::MissingHolder),
+                    SlotAccess::UnsupportedKind(kind) => {
+                        let name = match kind {
+                            Kind::Mob => "mob",
+                            Kind::Item => "item",
+                            Kind::Orb => "orb",
+                            Kind::Projectile => "projectile",
+                            Kind::Stand => "armorstand",
+                            Kind::Frame => "itemframe",
+                            Kind::Painting => "painting",
+                            Kind::Boat => "boat",
+                            Kind::Cart => "minecart",
+                            Kind::Other => "other",
+                            Kind::Fangs => "fangs",
+                            Kind::Crystal => "crystal",
+                            Kind::Dragon => "dragon",
+                            Kind::Tnt => "tnt",
+                            Kind::Falling => "falling",
+                            Kind::Rocket => "rocket",
+                            Kind::Trident => "trident",
+                            Kind::Spawner => "spawner",
+                            Kind::Cloud => "cloud",
+                            Kind::Cushion => "cushion",
+                            Kind::Knot => "knot",
+                            Kind::Player => "player",
+                            Kind::Hook => "hook",
+                            Kind::DragonPart => "dragonpart",
+                        };
+                        return Err(AttachmentError::UnsupportedHolder(name));
+                    }
+                }
+            }
             if self.entity_initialization.active != Some(holder)
                 && !self.attachment_entity_exists(id)
             {
@@ -138,12 +218,7 @@ impl Game<'_> {
                     .get(&id)
                     .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
             )?;
-            let painting = if access == AttachmentAccess::Store {
-                self.paintings.iter().position(|painting| painting.id == id)
-            } else {
-                None
-            };
-            if painting.is_some()
+            if access == AttachmentAccess::Store
                 && self
                     .persist
                     .removals
@@ -151,23 +226,13 @@ impl Game<'_> {
             {
                 return Err(AttachmentError::MissingHolder);
             }
-            let level = painting.and_then(|_| self.level(self.dim.id()));
-            let uuid = self.uuid_for(id);
-            let map = self.entity_attachments.entry(uuid).or_default();
-            if let Some(i) = painting {
-                let level = level.ok_or(AttachmentError::MissingHolder)?;
-                if !self.paintings[i].attachment_lifetime.is_bound() {
-                    self.paintings[i].attachment_lifetime.bind(
-                        map,
-                        self.attachment_indexes.entry(self.dim).or_default(),
-                        mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(
-                            level.epoch(),
-                            id,
-                        )),
-                    );
-                }
+            if access == AttachmentAccess::Store
+                && self.entity_initialization.active != Some(holder)
+            {
+                self.entity_attachments.entry(id).or_default();
+                self.bind_resident_entity_attachments(id)?;
             }
-            return Ok(map);
+            return Ok(self.entity_attachments.entry(id).or_default());
         }
         if let mod_api::Holder::Player(uuid) = holder {
             if self.entity_initialization.active != Some(holder)
@@ -226,6 +291,22 @@ pub(super) fn level_side<'a>(level: &'a super::GameLevel<'_>) -> mod_api::LevelS
 }
 
 impl mod_api::LevelHost for super::GameLevel<'_> {
+    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        use mod_api::__private::game::Fields;
+        let fields = entity.fields();
+        if self.api_level != Some(fields.level) {
+            return None;
+        }
+        let [x, y, z] = fields.position;
+        let key = (x, y, z);
+        if self.world.block_entities.generation(&key) != Some(fields.generation) {
+            return None;
+        }
+        let entity = self.world.block_entities.get(&key)?;
+        let name = &self.facts.get(self.world.block(x, y, z)).name;
+        super::native_block_entity_refs::save_without_metadata(self.world, key, entity, name)
+    }
+
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
         super::native_block_states::parse(self.block_registries, self.registry, name)?
             .try_into_api()
@@ -577,7 +658,7 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
     }
 
     fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
-        self.level.native_remove_block(self.ticks, pos, moved)
+        self.level.remove_block_write(self.ticks, pos, moved)
     }
 
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {

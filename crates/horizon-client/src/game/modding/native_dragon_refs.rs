@@ -340,6 +340,7 @@ mod tests {
         with_game(|game| {
             let (_, dragon) = dragon_in(game);
             let cloud = |from_dragon| Breath {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id: 0,
                 at: [0.0; 3],
@@ -385,8 +386,7 @@ mod tests {
             let mob = game.mob(entity).unwrap();
             game.player =
                 Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(7);
-            game.lan_acting_entity = Some(30);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 30, 7);
             let target = game.entity(30).unwrap();
             let living = game.living(target).unwrap();
             assert!(mob.set_target(game, Some(living)));

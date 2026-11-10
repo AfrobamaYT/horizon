@@ -10,6 +10,7 @@ use std::sync::atomic::AtomicUsize;
 
 mod generated {
     #![allow(clippy::all, unused, dead_code, non_snake_case)]
+    use crate::__private::game::{BackendMutRefOf, BackendRefOf, ClientBackendMutRefOf};
     use crate::*;
     include!(concat!(env!("OUT_DIR"), "/wire_guest_generated.rs"));
 }
@@ -684,7 +685,7 @@ pub fn run(id: u32) -> (*const u8, u32) {
     let result = match id {
         crate::wire::INIT => reader
             .take::<Vec<crate::PackageInfo>>()
-            .map(crate::world::phase::install_guest_packages),
+            .map(crate::install_guest_packages),
         crate::wire::RELEASE => reader.take::<Vec<Id>>().map(release),
         id => dispatch(id, &mut reader, &mut reply),
     };
@@ -725,6 +726,64 @@ fn release(ids: Vec<Id>) {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_refusals_decode_in_guest_reply_without_reinterning() {
+        let mut writer = Writer::new();
+        for value in [
+            crate::AttachmentRowError::HolderBusy,
+            crate::AttachmentRowError::UnsupportedHolder("dragonpart"),
+        ] {
+            writer.clear();
+            writer.put(&value);
+            assert_eq!(Reply(writer.bytes().to_vec()).take(), Ok(value));
+        }
+        let bound: &'static str = Box::leak("é".repeat(128).into_boxed_str());
+        writer.clear();
+        writer.put(&crate::AttachmentRowError::UnsupportedHolder(bound));
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take(),
+            Ok(crate::AttachmentRowError::UnsupportedHolder(bound))
+        );
+        writer.clear();
+        writer.put(&crate::AttachmentError::UnsupportedHolder(bound));
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take(),
+            Ok(crate::AttachmentError::UnsupportedHolder(bound))
+        );
+        writer.clear();
+        writer.put(&3u32);
+        writer.put(&"é".repeat(129));
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take::<crate::AttachmentRowError>(),
+            Err(WireError::Invalid("static string too long"))
+        );
+        writer.clear();
+        writer.put(&crate::AttachmentError::UnsupportedHolder("dragon"));
+        let reply = Reply(writer.bytes().to_vec());
+        let crate::AttachmentError::UnsupportedHolder(first) = reply.take().unwrap() else {
+            unreachable!()
+        };
+        for _ in 0..32 {
+            let crate::AttachmentError::UnsupportedHolder(next) = reply.take().unwrap() else {
+                unreachable!()
+            };
+            assert!(std::ptr::eq(first.as_ptr(), next.as_ptr()));
+        }
+        writer.clear();
+        writer.put(&crate::AttachmentError::HolderBusy);
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take::<crate::AttachmentError>(),
+            Ok(crate::AttachmentError::HolderBusy)
+        );
+        writer.clear();
+        writer.put(&8u32);
+        writer.put(&"x".repeat(257));
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take::<crate::AttachmentError>(),
+            Err(WireError::Invalid("static string too long"))
+        );
+    }
 
     trait Probe {
         fn answer(&self) -> u32;

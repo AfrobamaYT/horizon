@@ -1145,24 +1145,22 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
         source: ExplosionSource,
     ) -> Result<()> {
+        let start = ExplosionStart::from(mod_api::__private::built::ExplosionStart {
+            dimension: self.dim.id(),
+            center,
+            radius,
+            fire,
+            interaction: match interaction {
+                BlockInteraction::Keep => mod_api::BlockInteraction::Keep,
+                BlockInteraction::Destroy => mod_api::BlockInteraction::Destroy,
+                BlockInteraction::DestroyWithDecay => mod_api::BlockInteraction::DestroyWithDecay,
+            },
+            damage_type,
+            source: self.combat.explosion_source,
+            // `getIndirectSourceEntity`, as the blast's attacker is.
+            owner: self.blast_attacker().map(|(id, _)| id),
+        });
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let start = ExplosionStart::from(mod_api::__private::built::ExplosionStart {
-                dimension: self.dim.id(),
-                center,
-                radius,
-                fire,
-                interaction: match interaction {
-                    BlockInteraction::Keep => mod_api::BlockInteraction::Keep,
-                    BlockInteraction::Destroy => mod_api::BlockInteraction::Destroy,
-                    BlockInteraction::DestroyWithDecay => {
-                        mod_api::BlockInteraction::DestroyWithDecay
-                    }
-                },
-                damage_type,
-                source: self.combat.explosion_source,
-                // `getIndirectSourceEntity`, as the blast's attacker is.
-                owner: self.blast_attacker().map(|(id, _)| id),
-            });
             if self.explosion_start_cancelled(&start) {
                 return Ok(());
             }
@@ -1175,7 +1173,10 @@ impl Game<'_> {
                 p.position.z - center[2],
             ];
             let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            self.pad_rumble(horizon_client::gamepad::Rumble::Explosion { distance, radius });
+            self.input_feedback(horizon_client::input_source::Feedback::Explosion {
+                distance,
+                radius,
+            });
         }
         // Explosion.explode: the blast is heard.
         let ctx = horizon_client::sculk::Context::default();
@@ -1193,7 +1194,7 @@ impl Game<'_> {
             }
             let mut drops = ExplosionDrops::default();
             for &pos in &targets {
-                self.explosion_hit_block(pos, radius, interaction, &mut drops)?;
+                self.explosion_hit_block(pos, radius, interaction, &start, &mut drops)?;
             }
             self.spawn_explosion_drops(drops);
         }
@@ -1267,6 +1268,7 @@ impl Game<'_> {
         pos: [i32; 3],
         radius: f32,
         interaction: BlockInteraction,
+        explosion: &ExplosionStart<'_>,
         dropped: &mut ExplosionDrops,
     ) -> Result<()> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -1365,6 +1367,7 @@ impl Game<'_> {
             }
         }
         self.pending.clear(pos);
+        self.notify_block_exploded(pos, state, explosion);
         self.level_set(pos, self.world.air)?;
         // BeehiveBlock.onExplosionHit: the bees about turn on the player.
         if is_hive {
@@ -1459,6 +1462,46 @@ impl Game<'_> {
         for item in merged.into_iter().flatten().chain(edited) {
             self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
         }
+    }
+
+    /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
+    /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
+    /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
+    /// rule picks decay).
+    pub(super) fn explode(
+        &mut self,
+        source: Option<u32>,
+        center: [f64; 3],
+        radius: f32,
+        blast: ExplosionSource,
+    ) -> Result<()> {
+        self.explode_with(source, center, radius, false, blast)
+    }
+    /// `ServerLevel.explode` with `ExplosionInteraction.MOB` and the caller's fire flag.
+    pub(super) fn explode_mob(
+        &mut self,
+        center: [f64; 3],
+        radius: f32,
+        fire: bool,
+        blast: ExplosionSource,
+    ) -> Result<()> {
+        self.explode_with(None, center, radius, fire, blast)
+    }
+    /// `SulfurCube.tickFuse`: `ExplosionInteraction.TNT` (the
+    /// tnt_explosion_drop_decay rule) with mobGriefing, `NONE` without.
+    pub(super) fn explode_sulfur_cube(
+        &mut self,
+        source: Option<u32>,
+        center: [f64; 3],
+        radius: f32,
+        blast: ExplosionSource,
+    ) -> Result<()> {
+        let interaction = if !self.can_entity_grief(source) {
+            BlockInteraction::Keep
+        } else {
+            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY)
+        };
+        self.server_explode_from(center, radius, interaction, false, blast)
     }
 }
 
@@ -1666,8 +1709,23 @@ mod tests {
                 let mut drops = ExplosionDrops::default();
                 for pos in [[1, 64, 1], [2, 64, 1]] {
                     game.world.set(pos[0], pos[1], pos[2], dirt).unwrap();
-                    game.explosion_hit_block(pos, 4.0, BlockInteraction::Destroy, &mut drops)
-                        .unwrap();
+                    game.explosion_hit_block(
+                        pos,
+                        4.0,
+                        BlockInteraction::Destroy,
+                        &ExplosionStart::from(mod_api::__private::built::ExplosionStart {
+                            dimension: "minecraft:overworld",
+                            center: [0.0; 3],
+                            radius: 4.0,
+                            fire: false,
+                            interaction: mod_api::BlockInteraction::Destroy,
+                            damage_type: "minecraft:explosion",
+                            source: None,
+                            owner: None,
+                        }),
+                        &mut drops,
+                    )
+                    .unwrap();
                 }
                 game.spawn_explosion_drops(drops);
                 game.world.random.next_int()
@@ -1976,6 +2034,7 @@ mod tests {
             step_sound: None,
             food: Default::default(),
             tempt: Default::default(),
+            passenger_attachments: Vec::new(),
         })
     }
 
@@ -2237,3 +2296,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "explosion/explosion_part_tests.rs"]
+mod explosion_part_tests;

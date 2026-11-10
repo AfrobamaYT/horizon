@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.check_mod_api_wire import API_TEMPLATE_FILES, violations, template_violations
+from tools.check_mod_api_wire import (
+    API_TEMPLATE_FILES, violations, template_violations,
+    repository_violations, runtime_reexport_names,
+)
 
 
 class WireGuardFixtures(unittest.TestCase):
@@ -30,6 +33,14 @@ class WireGuardFixtures(unittest.TestCase):
             api.write_text('#[derive(mod_api::Wire)] pub struct MissingType;')
             accepted = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
             self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            vocab = root / 'crates/horizon-mod-vocab/src/lib.rs'
+            vocab.parent.mkdir(parents=True)
+            vocab.write_text('pub struct MissingVocabularyForm;')
+            refused_vocab = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+            self.assertEqual(refused_vocab.returncode, 1)
+            self.assertIn('MissingVocabularyForm', refused_vocab.stdout)
+            vocab.write_text('#[derive(mod_api::Wire)] pub struct MissingVocabularyForm;')
+            self.assertEqual(repository_violations(root), [])
             api.write_text('mod checked; mod collision;')
             (api.parent / 'checked.rs').write_text(
                 '// no wire: checked manual codec\npub struct Shared;\nimpl Wire for Shared {}')
@@ -38,6 +49,39 @@ class WireGuardFixtures(unittest.TestCase):
             self.assertEqual(collision.returncode, 1)
             self.assertIn('collision.rs:1: Shared', collision.stdout)
             self.assertNotIn('checked.rs:', collision.stdout)
+
+    def test_runtime_reexports_check_the_definition_not_the_alias_or_manual_impl(self):
+        source = '''pub use {other::Ignored, horizon_mod_runtime::attachments::{
+            AttachmentError as PublicError, nested::{AttachmentRowError},
+        }};
+        #[cfg(test)] mod tests { pub use horizon_mod_runtime::OnlyTest; }
+        '''
+        self.assertEqual(runtime_reexport_names(source),
+                         {'AttachmentError', 'AttachmentRowError'})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = root / 'crates/horizon-mod-api/src/lib.rs'
+            api.parent.mkdir(parents=True)
+            api.write_text(source)
+            runtime = root / 'crates/horizon-mod-runtime/src/attachments.rs'
+            runtime.parent.mkdir(parents=True)
+            runtime.write_text('pub enum AttachmentError {}\npub struct AttachmentRowError;\n'
+                               'pub struct Unexported;\nimpl Wire for AttachmentError {}')
+            for relative in API_TEMPLATE_FILES:
+                template = root / 'crates/horizon-mod-api-gen/src' / relative
+                template.parent.mkdir(parents=True, exist_ok=True)
+                template.write_text('')
+            failures = repository_violations(root)
+            self.assertEqual(len(failures), 2)
+            self.assertTrue(any('AttachmentError' in f for f in failures))
+            self.assertTrue(any('AttachmentRowError' in f for f in failures))
+            runtime.write_text('// no wire: runtime-owned explicit codec\n'
+                               'pub enum AttachmentError {}\n'
+                               '#[derive(Wire)] pub struct AttachmentRowError;\n'
+                               'pub struct Unexported;')
+            self.assertEqual(repository_violations(root), [])
+            api.write_text('pub use horizon_mod_runtime::attachments::*;')
+            self.assertTrue(any('wildcard' in f for f in repository_violations(root)))
 
     def test_missing_declarations_include_aliases_and_generics(self):
         source = 'pub struct A<T>(T); pub enum B { A } pub type C<T> = Vec<T>;'

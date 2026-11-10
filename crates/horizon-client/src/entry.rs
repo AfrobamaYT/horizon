@@ -1,11 +1,47 @@
 //! Startup shared by the gameplay library and its executable.
+#[path = "horizon_look.rs"]
+mod horizon_look;
 use crate::{crash, game, logging};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 
+/// Validated startup state. No native hooks or workers may run before prepare returns.
+pub struct Startup {
+    launch: LaunchArguments,
+    options: game::Options,
+    _capture: Option<horizon_mod_package::output::Capture>,
+}
+
+/// Holder mode runs first. The game's sole Options validation reads arguments/environment
+/// and resource marker metadata only: no logging, account loading, mods or worker threads.
+/// Account IO, cwd changes and command registration remain in Options::read, after leases.
+pub fn prepare() -> Startup {
+    horizon_mod_package::holder::enter();
+    let result: crate::Result<_> = (|| {
+        let mut command = std::process::Command::new(std::env::current_exe()?);
+        command.args(std::env::args_os().skip(1));
+        let launch = LaunchArguments::for_command(&command)?;
+        let options = game::Options::validate(launch.clone())?;
+        Ok((launch, options))
+    })();
+    let (launch, options) = result.unwrap_or_else(|error| {
+        eprintln!("Horizon: {error}");
+        std::process::exit(game::exit_code::USAGE);
+    });
+    let Some(options) = options else {
+        std::process::exit(0);
+    };
+    let capture = horizon_mod_package::holder::acquire(&launch);
+    Startup {
+        launch,
+        options,
+        _capture: capture,
+    }
+}
+
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
-pub fn main(launch: Option<LaunchArguments>) {
-    main_with(Vec::new(), &[], &[], launch);
+pub fn main(startup: Startup) {
+    main_with(Vec::new(), &[], &[], startup);
 }
 
 /// A native function slot, checked against its place's exact type before erasure.
@@ -20,8 +56,13 @@ pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
     slots: &[NativeSlot],
     built: &'static [horizon_mod_package::runtime::BuiltMod],
-    launch: Option<LaunchArguments>,
+    startup: Startup,
 ) {
+    let Startup {
+        launch,
+        options,
+        _capture,
+    } = startup;
     let exe = std::env::current_exe();
     let native: crate::Result<_> = exe
         .as_ref()
@@ -37,27 +78,23 @@ pub fn main_with(
         }
     };
     horizon_threads::configure_allocator();
+    horizon_look::give();
+    // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
+    horizon_client::pack_formats::install();
+    // horizon-extras (docs/forking.md): without the feature, no Horizon Settings or Mods page.
+    if !cfg!(feature = "horizon-extras") {
+        horizon_client::options_ui::HORIZON_EXTRAS
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    horizon_client::telemetry::mark_start();
+    // Opt-in telemetry keeps each crash report (docs/telemetry.md), whatever the mode.
+    crash::on_report(horizon_client::telemetry::keep_crash);
+    // Crates above the engine registered their hooks before this (horizon-official's `main`),
+    // then the Horizon parts still in this crate; none registers after this point.
+    game::player_hooks::register();
+    horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
-    // Managed main already validated these exact roots before native hooks could change cwd/env.
-    let launch: crate::Result<_> = match launch {
-        Some(launch) => Ok(launch),
-        None => std::env::current_dir().map_err(Into::into).and_then(|cwd| {
-            Ok(LaunchArguments::parse(
-                std::env::args().skip(1),
-                &cwd,
-                &logging::game_home(),
-                std::env::var_os("HORIZON_HOME").as_deref(),
-            )?)
-        }),
-    };
-    let launch = match launch {
-        Ok(launch) => launch,
-        Err(error) => {
-            eprintln!("Horizon: {error}");
-            std::process::exit(game::exit_code::USAGE);
-        }
-    };
     let wasm = horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
     let mut mods = mods;
     mods.extend(wasm.mods);
@@ -109,7 +146,6 @@ pub fn main_with(
             }
         }
     }
-    let help = launch.is_information_request();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
     let (home, side, thread) = if launch
@@ -128,15 +164,13 @@ pub fn main_with(
         }
         (launch.context.home.clone(), "client", "Render thread")
     };
-    if !help {
-        logging::init(
-            logging::player_dir_override().unwrap_or(home.as_path()),
-            thread,
-        );
-        // The log's first line names the build, so a bug report that carries the log says which one it was.
-        log::info!("Horizon {}", crash::version());
-        crash::install(home.clone(), side);
-    }
+    logging::init(
+        logging::player_dir_override().unwrap_or(home.as_path()),
+        thread,
+    );
+    // The log's first line names the build, so a bug report that carries the log says which one it was.
+    log::info!("Horizon {}", crash::version());
+    crash::install(home.clone(), side);
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |context, id, table| {
@@ -158,11 +192,11 @@ pub fn main_with(
                 let context = reader.context();
                 mod_api::dispatch_modify_default_components(&context, item, components);
             },
-            loot_function: |kind, data, ctx, stack| {
-                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack);
+            loot_function: |kind, data, ctx, stack, tags| {
+                crate::game::api_values::dispatch_loot_function(kind, data, ctx, stack, tags);
             },
-            loot_condition: |kind, data, ctx, holds| {
-                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds);
+            loot_condition: |kind, data, ctx, holds, tags| {
+                crate::game::api_values::dispatch_loot_condition(kind, data, ctx, holds, tags);
             },
         },
     )
@@ -188,13 +222,13 @@ pub fn main_with(
     }
     install_client_hooks();
     raise_open_file_limit();
-    if let Err(error) = game::run_with(launch, native) {
+    if let Err(error) = game::run_with(options, native) {
         // A bad command line is the caller's mistake, not a crash: no report.
         let usage = error.is::<game::UsageError>();
         log::error!("Horizon: {error}");
         logging::flush();
         // The report's path is the last line on stderr (crash::SAVED_LINE).
-        if !help && !usage {
+        if !usage {
             crash::report_error(&home, side, &*error);
         }
         // Started from Explorer, the console window closes with the game:
@@ -210,6 +244,7 @@ pub fn main_with(
             game::exit_code::ERROR
         });
     }
+    horizon_hooks::engine::shutdown();
     logging::flush();
 }
 
@@ -329,6 +364,9 @@ pub(crate) fn install_client_hooks() {
         },
         block_speed_factor: |context, state, factor| {
             crate::game::block_speed_factor(context, state, factor);
+        },
+        is_ladder: |context, entity, pos, state, ladder| {
+            crate::game::is_ladder(context, entity, pos, state, ladder);
         },
         player_stays_on_ground_surface: |context, entity, staying| {
             if !mod_api::__private::listened(mod_api::HookId::PlayerStaysOnGroundSurface) {

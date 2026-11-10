@@ -1,8 +1,29 @@
 # Design: custom recipe-book settings
 
-Proposal for [#1023](https://github.com/arismoko/horizon/issues/1023), not an
-implemented API. This is a Horizon design; vanilla 26.3 is the reference for the
+Design for [#1023](https://github.com/arismoko/horizon/issues/1023).
+Storage, registration, player settings handles and negotiated synchronization
+are implemented. This is a Horizon design; vanilla 26.3 is the reference for the
 four existing books. No other project's implementation is a reference.
+
+## Player settings operations
+
+`PlayerRef::recipe_book_settings(host, &key)` reads an authoritative
+`RecipeBookSettings { open, filtering }` pair. Fresh registered books read
+`false, false`; unavailable players and unregistered keys return `None`.
+`PlayerRef::set_recipe_book_settings(host, &key, settings)` is a server-only
+write. It leaves every other book untouched, synchronizes changed flags and
+notifies the existing `player_recipe_book_settings_change` moment once.
+That notification now carries `RecipeBookIdentity`: one of the four vanilla
+identities or `Custom(RecipeBookTypeKey)`, never a fabricated vanilla ordinal.
+The values explicitly derive `Wire` and share the generated native/wasm boundary.
+
+A client mod reads `PlayerRef::synced_recipe_book_settings` and submits intent
+with `PlayerRef::request_recipe_book_settings` through a `ClientHost`. Engine
+menu panels use the same view through `Game::custom_book_settings` and
+`Game::request_custom_book_settings`. Until a negotiated snapshot arrives, or
+while a revision gap needs a replacement snapshot, reads return `None` and
+the panel must stay disabled. Requesting never changes saved flags. Disconnecting
+with pending intent restores the server's last accepted pair on the next join.
 
 ## Registration and ownership
 
@@ -27,11 +48,27 @@ handle; it cannot directly mutate server state. Do not add player-id helpers to
 `Host`. Registration uses its existing registration receiver.
 
 Book identities are separate from `RecipeBookCategory` in
-`crates/horizon-mod-api/src/item/recipe_book.rs`. Categories group recipes and provide
+`crates/horizon-mod-vocab/src/item/recipe_book.rs`. Categories group recipes and provide
 icons; a book owns two flags. A screen can associate categories with a registered
 book explicitly. Neither category registration nor recipe-type registration
 implicitly registers a book. Display layout, unlocking and custom recipe displays
 remain separate work; this proposal supplies settings only.
+
+### Registration API
+
+In `Hooks::register`, call `r.recipe_book_type("demo:cooking_pot")` on the
+existing `Registrar`. It returns `Result<RecipeBookTypeKey, String>`; failures
+include the declaring mod, supplied ID and rule and refuse installation even
+if ignored. Keep the returned key (`mod_api::item::recipe_book::RecipeBookTypeKey`)
+for screen bindings. `as_str()` returns its stable identity and `is_registered()`
+checks membership in this process's installed registry. No public unchecked
+constructor exists. Native and wasm share the same registrar method through
+the generated Wire boundary; the key explicitly derives `Wire`.
+
+This registration does not create a category, settings handle, UI or network
+payload. Successful installation freezes the registry; resource reload does
+not reopen it. The settings and synchronization operations below are the
+contract for the remaining implementation, not callable methods yet.
 
 ## Storage, persistence, copy and replace
 
@@ -104,7 +141,7 @@ exactly one entry. Reject malformed/oversized payloads before allocation or
 mutation, including duplicate snapshot keys. Rate-limit requests to 20 per
 second per player; excess requests are rejected and cannot alter flags. Client
 UI may show pending intent but only authoritative replies enter saved state.
-Single-player uses the same server apply operation without network serialization.
+The design called for single-player to use the same server apply operation without serialization; this build instead preserves the existing integrated server's byte-pipe connection and identical negotiated, rate-limited authority semantics, because a typed local route needs per-connection ordered queues bound to integrated player ownership and reconnect lifetime.
 
 ## Worked book and acceptance cases
 
@@ -154,11 +191,60 @@ net.minecraft.stats.RecipeBookSettings replaceFrom` and `rea_vanilla.py method
 net.minecraft.stats.ServerRecipeBook sendInitialRecipeBook`. Custom registration,
 retention and negotiation are Horizon decisions, not claims about vanilla.
 
-## Open questions
+## Recipe displays and category membership (#828)
 
-- Exact public handle and registration declaration names: recommend following
-  the registration catalog's naming when implemented, with `RecipeBookTypeKey`
-  as the owned identity and no new broad Host service.
-- Payload channel allocation: recommend one dedicated recipe-book-settings
-  channel within the existing negotiated mod transport. The wire schema and
-  bounds above should be shared by native and wasm adapters.
+The `recipe_book_categories` declaration now carries `target_menu`, `book`,
+`search_group` and `displays` beside the category id, recipe type and icon.
+A type supplies `RecipeBookDisplayEntry` values for its recipes during the
+existing recipe-table declaration callback. The callback can read the Host's
+recipe table and interpret its own JSON; the engine does not impose a JSON
+schema on mod recipes.
+
+`RecipeBookDisplay` names the shaped, shapeless, furnace, stonecutter and
+smithing layouts. `RecipeSlotDisplay` describes slots using API-owned values:
+items, stacks, tags, fuel, potion/component transforms, dyeing, trimming,
+remainders and composites. All three display types explicitly derive `Wire`.
+Named resource references are resolved at load, not while drawing.
+
+The engine's `ModBookIndex::build` boundary validates declarations atomically
+against resource tables. Unknown resources, invalid layouts, duplicate recipe
+ownership and conflicting book membership return `DisplayLoadError` values.
+A book has one menu and one search group; no search group can aggregate two
+books. Search membership is derived from the book's categories, so two mod
+books remain isolated and vanilla books have no mod search members.
+
+The live recipe-table declaration path validates the entire batch before
+publishing any categories. A refused batch retains its typed load error for
+that generation and publishes no partial book; reload or disconnect clears
+the cache. Multiple categories may share a recipe type. The engine's panel
+projection requires both the declared target menu and registered book key,
+and a category selected in another book cannot be reused as a tab here.
+
+This is display/index infrastructure, **not screen integration**. Existing
+screens do not yet render these declarations. A declaration's `book` is a
+registered `RecipeBookTypeKey` from #2415; it does not implicitly register
+a book or create settings. The index checks the key against the frozen registry. Enabling
+custom book screens still requires the registration and negotiated settings
+route described above. No vanilla book ordinal or packet meaning changes.
+
+## Transport and cost
+
+The dedicated `horizon:recipe_book_settings` channel is used only after the
+server announces mod transport and the client offers its frozen registered
+keys. The server intersects those keys with its own registry before replying
+with the initial snapshot. Vanilla clients never send the offer and receive no
+custom settings. The bounded binary codec refuses oversized payloads, invalid
+flags, trailing bytes and duplicate snapshot keys before applying anything.
+
+Negotiation, snapshots and requests do work only on connection or a settings
+change. There is no per-tick mod scan or new tick allocation. A connection's
+request replay guard and rate allowance survive rejected requests and repeat
+offers. Disconnect removes the connection authority and clears pending client
+intent; the saved server map remains independent of the client view.
+
+The response budget covers every payload, including malformed input and
+snapshot requests. Once exhausted, a negotiated peer receives a one-byte busy
+control reply instead of another large snapshot. The client disables the custom
+view and coalesces a retry after one second; a busy response schedules the next
+retry, and a successful authoritative snapshot cancels it. This bounds response
+amplification without leaving a lost resnapshot or pending UI intent unresolved.

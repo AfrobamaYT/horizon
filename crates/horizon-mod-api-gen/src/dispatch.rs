@@ -106,13 +106,17 @@ pub(super) fn emit<'a>(
                 },
             )
         } else {
-            if !target.starts_with("horizon_client::game::native_hooks::")
+            if !target.starts_with("horizon_client::game::")
                 || !target.ends_with(&format!("::{native}"))
             {
                 return Err(format!("wrong target for {name}"));
             }
             (
-                one_function(methods.iter(), &native)?.clone(),
+                if target.starts_with("horizon_client::game::native_hooks::") {
+                    one_function(methods.iter(), &native)?.clone()
+                } else {
+                    super::named_hooks::resolve(root, target, name)?
+                },
                 format!("dispatch_{name}"),
             )
         };
@@ -671,6 +675,9 @@ pub(super) fn emit<'a>(
             (Contract::Replace, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
+            (Contract::Collect, Some(out)) if matches!(name, "blocks" | "items") => method_source.push_str(&format!(
+                "///\n/// Each mod receives its own empty `{event}.{out}` batch. Declared identifiers must\n/// belong to that mod's manifest-owned namespaces; unowned identifiers refuse registration.\n"
+            )),
             (Contract::Collect, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Every {callee} gets `{event}.{out}` in order and may add, change or remove {out}.\n"
             )),
@@ -692,11 +699,19 @@ pub(super) fn emit<'a>(
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
-        let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
+        let build = format!(
+            "let {}{event} = {event_type} {{ {} }};",
+            if matches!(name, "blocks" | "items") {
+                ""
+            } else {
+                "mut "
+            },
+            inits.join(", "),
+        );
         // A trait mod's call is marked with the mod for a panic to name.
         let each = match &hook.owner {
             Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
-            None if answered => {
+            None if answered || hook.collect_validator.is_some() => {
                 format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
             }
             None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
@@ -715,14 +730,27 @@ pub(super) fn emit<'a>(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
                 o = out.unwrap()
             ),
+            Contract::Collect if hook.collect_validator.is_some() => {
+                let validator = hook.collect_validator.as_ref().unwrap();
+                let output = out.unwrap();
+                format!(
+                    "let previous = {event}.{output}.clone(); {callee}.{name}({invoke}); {validator}(mod_id, &previous, {event}.{output});"
+                )
+            }
             _ => format!("{callee}.{name}({invoke});"),
         };
-        let binding = if answered {
+        let binding = if answered || hook.collect_validator.is_some() {
             format!("(mod_id, {mod_item})")
         } else {
             mod_item.clone()
         };
         let (lookup, calls) = match &scoped {
+            None if matches!(name, "blocks" | "items") => (
+                String::new(),
+                format!(
+                    "for (mod_id, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ let mut local = Vec::new(); {{ let mut {event} = {event_type} {{ {name}: &mut local }}; {mod_item}.{name}(context, &mut {event}); }} for declaration in &mut local {{ match super::parts::owned_declaration_id(mod_id, &declaration.id) {{ Ok(id) => declaration.id = id, Err(reason) => context.refuse_declaration(reason), }} }} {event}.{name}.extend(local); }}"
+                ),
+            ),
             None if name == "setting_changed" => (
                 String::new(),
                 format!(
@@ -946,7 +974,7 @@ fn stack_crossing_routed(
                 )
             } else if block {
                 format!(
-                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(_) => return }}"
+                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(error) => {{ log::warn!(\"mod block state write refused: {{error:?}}\"); return; }} }}"
                 )
             } else if stack {
                 let result = format!("__checked_{name}");
@@ -1315,6 +1343,11 @@ fn main() {
         let unguarded = body.replace(guard, "");
         assert_ne!(early, body);
         assert_ne!(unguarded, body);
+        let silent = body.replace(
+            "log::warn!(\"mod block state write refused: {error:?}\");",
+            "",
+        );
+        assert_ne!(silent, body);
         let fixture = include_str!("../../../tools/refactors/api-pr3b/hook_crossing.rs");
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/hook-crossing-proof");
@@ -1323,6 +1356,7 @@ fn main() {
             ("baseline", body, true),
             ("early_commit", early, false),
             ("no_guard", unguarded, false),
+            ("silent_refusal", silent, false),
         ] {
             let source = directory.join(format!("{name}.rs"));
             let binary = directory.join(name);

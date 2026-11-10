@@ -30,7 +30,7 @@ pub(super) fn inject_error(error: &InjectError) -> String {
             reason,
             declaration,
         } => trf(
-            "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; use a native mod or a game build supporting this slot",
+            "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook",
             &[
                 ("id", id),
                 ("reason", no_slot_reason(*reason)),
@@ -45,14 +45,16 @@ fn no_slot_reason(reason: NoSlotReason) -> &'static str {
         NoSlotReason::NotListed => tr("not listed"),
         NoSlotReason::KindHasNoSlot => tr("kind has no slot"),
         NoSlotReason::NativeOnly => tr("native-only place"),
-        NoSlotReason::WasmSitesPending => tr("wasm sites pending"),
-        NoSlotReason::LocalSlotsPending => tr("local slots pending (I5)"),
-        NoSlotReason::ExtensionSlotsPending => tr("extension slots pending (I6)"),
-        NoSlotReason::ApiSitesPending => tr("API site listeners pending (U4c)"),
+        NoSlotReason::WasmSitesUnsupported => {
+            tr("wasm does not support internals or call-site injections; use a hook")
+        }
+        NoSlotReason::ExpressionSourceOnly => tr("expression requires native internals source rebuilding; use internals, or request a hook"),
+        NoSlotReason::LocalSourceOnly => tr("modify_local requires native internals source rebuilding; use internals, or request a hook"),
+        NoSlotReason::FieldRequiresSource => tr("field requires native internals source rebuild; use attachments for API, wasm, persistence or sync"),
+        NoSlotReason::ApiSitesUnsupported => tr("API call-site injections require internals"),
         NoSlotReason::SourcePending => tr("source injects pending (U5)"),
-        NoSlotReason::ReplacePending => tr("internals replace listeners pending (U9)"),
         NoSlotReason::NoApiRecord => tr("no API record: a parameter has no API type yet"),
-        NoSlotReason::ReplaceWithoutValue => tr("replace needs a return the API carries"),
+        NoSlotReason::ReplaceWithoutValue => tr("replace needs a return its record carries"),
     }
 }
 
@@ -66,12 +68,12 @@ mod tests {
             NoSlotReason::NotListed,
             NoSlotReason::KindHasNoSlot,
             NoSlotReason::NativeOnly,
-            NoSlotReason::WasmSitesPending,
-            NoSlotReason::LocalSlotsPending,
-            NoSlotReason::ExtensionSlotsPending,
-            NoSlotReason::ApiSitesPending,
+            NoSlotReason::WasmSitesUnsupported,
+            NoSlotReason::LocalSourceOnly,
+            NoSlotReason::FieldRequiresSource,
+            NoSlotReason::ExpressionSourceOnly,
+            NoSlotReason::ApiSitesUnsupported,
             NoSlotReason::SourcePending,
-            NoSlotReason::ReplacePending,
             NoSlotReason::NoApiRecord,
             NoSlotReason::ReplaceWithoutValue,
         ];

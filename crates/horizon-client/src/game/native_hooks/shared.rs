@@ -1,5 +1,7 @@
+use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+use screen_chars::chars_to_type;
 
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
@@ -8,34 +10,6 @@ struct ContentsChangedGuard<'a, 'game> {
 impl Drop for ContentsChangedGuard<'_, '_> {
     fn drop(&mut self) {
         self.game.contents_changing.pop();
-    }
-}
-
-pub(super) struct ObservedScreen {
-    id: &'static str,
-    /// Not a `Screen` value: the title's own screen or an overlay drawn over
-    /// gameplay (sign editor, book, dialog, prompt). `set_screen` never sees
-    /// it open or close.
-    overlay: bool,
-    menu: Option<String>,
-    title: Option<std::sync::Arc<mod_api::Text>>,
-    rect: [f32; 4],
-    slots: usize,
-    mouse: [f32; 2],
-    partial_tick: f32,
-}
-
-impl ObservedScreen {
-    fn view(&self) -> ScreenView<'_> {
-        ScreenView::from(mod_api::__private::built::ScreenView {
-            id: self.id,
-            menu: self.menu.as_deref(),
-            title: self.title.as_deref(),
-            rect: self.rect,
-            slots: self.slots,
-            mouse: self.mouse,
-            partial_tick: self.partial_tick,
-        })
     }
 }
 
@@ -177,6 +151,7 @@ impl Game<'_> {
             self.mining = None;
             self.capture(false);
         }
+        self.build_screen();
     }
     /// The events of one change of screen, in order, for
     /// `set_screen` and for the overlays `observe_screen` announces: `opens`
@@ -265,14 +240,20 @@ impl Game<'_> {
     ) -> bool {
         if !self.screen_hooks_heard() {
             open(self);
+            self.screen_state.build.reopened();
+            self.build_screen();
             return true;
         }
-        // What changed earlier this frame is told first, so `observed_screen`
+        // What changed earlier this frame is told first, so `screen_state`
         // is what shows now.
         self.observe_screen();
         let decision = {
             let none = self.screen_change_view(Screen::Playing);
-            let from = self.observed_screen.as_ref().filter(|old| old.overlay);
+            let from = self
+                .screen_state
+                .observed
+                .as_ref()
+                .filter(|old| old.overlay);
             let from = from.map(ObservedScreen::view);
             let to = screen_view_with_id(&none, id);
             self.decide_screen(from.as_ref().unwrap_or(&none), &to, from.is_some())
@@ -281,14 +262,16 @@ impl Game<'_> {
             ScreenDecision::Keep => return false,
             ScreenDecision::ModScreen(mod_id) => {
                 self.apply_screen(Screen::Mod, Some(mod_id));
-                self.observed_screen = self.observed_now();
+                self.screen_state.observed = self.observed_now();
                 return false;
             }
             ScreenDecision::Open => {}
         }
         open(self);
+        self.screen_state.build.reopened();
+        self.build_screen();
         // Told here, so the frame's `observe_screen` sees no change to announce.
-        self.observed_screen = self.observed_now();
+        self.screen_state.observed = self.observed_now();
         let none = self.screen_change_view(Screen::Playing);
         self.native_screen_init_post(&screen_view_with_id(&none, id));
         true
@@ -351,7 +334,8 @@ impl Game<'_> {
         if let Some(title) = self.title.as_mut() {
             title.mode = mode;
         }
-        self.observed_screen = self.observed_now();
+        self.build_screen();
+        self.screen_state.observed = self.observed_now();
         let none = self.screen_change_view(Screen::Playing);
         self.native_screen_init_post(&screen_view_with_id(&none, id));
     }
@@ -367,19 +351,7 @@ impl Game<'_> {
         title.set_rule_registry(Arc::new(crate::game::api_values::game_rule_registry()));
         self.show_title_with_registry(title);
     }
-    pub(super) fn show_title_with_registry(&mut self, mut title: horizon_client::title::Title) {
-        title.set_additional_data_packs(self.pack.additional_data.clone());
-        if !self.screen_hooks_heard() {
-            self.title = Some(title);
-            return;
-        }
-        let id = title.mode.id();
-        self.title_change(Some(id));
-        self.title = Some(title);
-        self.observed_screen = self.observed_now();
-        let none = self.screen_change_view(Screen::Playing);
-        self.native_screen_init_post(&screen_view_with_id(&none, id));
-    }
+
     /// Takes the title down as a world opens over it (`setScreen` to the
     /// loading screen, then null): `screen_opening` to no screen, then
     /// `screen_closing` for the title's screen, before it goes. The world
@@ -392,7 +364,8 @@ impl Game<'_> {
             self.title_change(None);
         }
         self.title = None;
-        self.observed_screen = self.observed_now();
+        self.build_screen();
+        self.screen_state.observed = self.observed_now();
     }
     /// The hooks of the title appearing (`to` is its screen) or going
     /// (`None`), from what shows now. What changed before is told first.
@@ -401,7 +374,11 @@ impl Game<'_> {
         self.observe_change(now);
         let none = self.screen_change_view(Screen::Playing);
         // The title's screen or an overlay; a `Screen` told its own change.
-        let from = self.observed_screen.as_ref().filter(|old| old.overlay);
+        let from = self
+            .screen_state
+            .observed
+            .as_ref()
+            .filter(|old| old.overlay);
         let from = match (from, self.title.as_ref()) {
             (Some(old), _) => Some(old.view()),
             // No renderer yet (startup, a test): the title is still known.
@@ -419,6 +396,9 @@ impl Game<'_> {
 
     pub(super) fn observe_screen(&mut self) {
         self.settle_title_mode();
+        // Keeps the build on the frame's window size and drops it once nothing
+        // shows; an unchanged frame compares and builds nothing.
+        self.build_screen();
         // Free with no native mod: the snapshot clones the title and menu.
         if mod_api::__private::mods().is_empty() {
             return;
@@ -434,13 +414,17 @@ impl Game<'_> {
     /// and in the same order, but after the change. `screen_init_post`
     /// follows for every kind, on opening and on a resize.
     fn observe_change(&mut self, current: Option<ObservedScreen>) {
-        let changed = match (&self.observed_screen, &current) {
+        let changed = match (&self.screen_state.observed, &current) {
             (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
             (None, None) => false,
             _ => true,
         };
         if changed {
-            let old = self.observed_screen.as_ref().filter(|old| old.overlay);
+            let old = self
+                .screen_state
+                .observed
+                .as_ref()
+                .filter(|old| old.overlay);
             let opens = current.as_ref().is_some_and(|new| new.overlay)
                 || (current.is_none() && old.is_some());
             if old.is_some() || opens {
@@ -457,12 +441,12 @@ impl Game<'_> {
             if let Some(new) = &current {
                 self.native_screen_init_post(&new.view());
             }
-        } else if let (Some(old), Some(new)) = (&self.observed_screen, &current)
+        } else if let (Some(old), Some(new)) = (&self.screen_state.observed, &current)
             && old.rect != new.rect
         {
             self.native_screen_init_post(&new.view());
         }
-        self.observed_screen = current;
+        self.screen_state.observed = current;
     }
 }
 
@@ -563,6 +547,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// the server sent them, and what the server sent before the menu opened
 /// (`horizon:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
+    pub(super) layout_revision: u64,
     key: Pos,
     window: i32,
     block: String,
@@ -795,19 +780,6 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
     Some(left)
 }
 
-/// What of a key press's text is characters for the
-/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
-/// handling takes those, and vanilla fires no `charTyped` for them).
-/// With the edit modifier held the key is a shortcut and its characters are
-/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
-/// gets none for Ctrl+A.
-fn chars_to_type(text: &str, types_text: bool) -> String {
-    if !types_text {
-        return String::new();
-    }
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// The single admission point for all toast families. Producers decide the
@@ -940,11 +912,17 @@ impl Game<'_> {
     /// drawn this frame, which `ScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> ScreenView<'_> {
+        self.screen_view_at(screen, self.screen_rect(batch, screen))
+    }
+    /// `screen_view` with the panel `rect` the caller is laying out: the
+    /// container build tells a mod the panel it is about to draw, not the one
+    /// the previous frame drew.
+    pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
-            rect: self.screen_rect(batch, screen),
+            rect,
             slots: self.slot_count(),
             mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
@@ -2024,7 +2002,7 @@ impl GameLevel<'_> {
         changed
     }
     /// `Level.removeBlock`: replace a block with its fluid's legacy block.
-    pub(super) fn native_remove_block(
+    pub(super) fn remove_block_write(
         &mut self,
         ticks: &mut Ticks,
         pos: [i32; 3],
@@ -2403,32 +2381,16 @@ impl Game<'_> {
         let size = self.window.as_ref()?.inner_size();
         Some([size.width, size.height])
     }
-    /// The areas the game itself draws beside the open screen's window.
+    /// The areas the game itself draws beside the open screen's window: the
+    /// container build's, or the frame's own arithmetic with no build yet.
     fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
-        let mut areas = Vec::new();
-        match self.screen {
-            Screen::Creative => {
-                let image = self.container_image(batch);
-                let (x, y, w, h) = (
-                    image.left as f32,
-                    image.top as f32,
-                    image.width as f32,
-                    image.height as f32,
-                );
-                areas.push([x, y - Creative::TAB_ROW_DEPTH, w, Creative::TAB_ROW_DEPTH]);
-                areas.push([x, y + h, w, Creative::TAB_ROW_DEPTH]);
-                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
-            }
-            Screen::Inventory if self.title.is_none() => {
-                areas.extend(self.recipe_book_rect(batch));
-                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
-                    let (x, y) = self.inventory_origin(batch);
-                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
-                }
-            }
-            _ => {}
+        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            return Vec::new();
         }
-        areas
+        match self.built_container(batch) {
+            Some(layout) => layout.exclusion(),
+            None => self.container_layout(batch).exclusion(),
+        }
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {
@@ -3361,6 +3323,11 @@ impl Game<'_> {
         self.native_screen(&block, &mut screen);
         if let Some(screen) = screen {
             self.mod_screen = Some(OpenNativeScreen {
+                layout_revision: {
+                    static NEXT: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(1);
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                },
                 key,
                 window,
                 block,
@@ -3371,7 +3338,7 @@ impl Game<'_> {
         }
     }
     /// The mod screen showing now, if any.
-    fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
+    pub(super) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
         self.mod_screen
             .as_ref()
             .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
@@ -5153,6 +5120,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
             block: "gtmod:machine".into(),
@@ -5185,8 +5153,8 @@ mod tests {
     fn native_loot_kinds_stay_hookable() {
         let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
-            "pub fn native_loot_function(",
-            "pub fn native_loot_condition(",
+            "pub fn native_invoke_loot_function(",
+            "pub fn native_invoke_loot_condition(",
         ] {
             let at = source
                 .find(hook)

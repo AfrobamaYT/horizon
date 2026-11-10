@@ -102,8 +102,12 @@ impl ClientHost for TestHost {}
 #[allow(dead_code)]
 mod generated {
     pub(super) mod mod_api {
-        pub struct Block;
-        pub struct Item;
+        pub struct Block {
+            pub id: String,
+        }
+        pub struct Item {
+            pub id: String,
+        }
         pub(super) use super::super::ItemStack;
         pub(super) use super::super::{
             Command, Config, Dispensed, InteractionResult, MapDecoration, MapInfo, Minimap, Screen,
@@ -427,7 +431,7 @@ impl Hooks for Mod {
             .or_insert_with(|| serde_json::json!([]));
         value.as_array_mut().unwrap().push(self.id.into());
     }
-    fn level_tick_pre(&self, _: &mut dyn ServerHost, _: &mut LevelTickPreEvent<'_>) {
+    fn level_tick_pre(&self, _: HostSide, _: &mut LevelTickPreEvent) {
         self.calls.lock().unwrap().push(self.id);
     }
     fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<Zoom> {
@@ -584,7 +588,9 @@ mod stubs {
     }
     pub(super) struct LootStack;
     pub(super) struct LootContext;
+    pub(super) trait Tags {}
     pub(super) struct NativeReloadListener;
+    #[derive(Clone)]
     pub(super) struct RecipePropertyAddition;
     pub(super) struct AdvancementProgress {
         pub done: bool,

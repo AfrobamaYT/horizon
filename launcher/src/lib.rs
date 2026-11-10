@@ -3,13 +3,12 @@ pub mod account;
 pub mod agents;
 pub mod backend;
 pub mod browser;
-pub mod bug_report;
 pub mod build_import;
-pub mod cache_cleanup;
 pub mod data_location;
 pub mod datapacks;
 pub mod desktop;
 pub mod desktop_seams;
+pub mod developer_install;
 pub mod export;
 #[cfg(unix)]
 pub mod game_app;
@@ -23,7 +22,6 @@ pub mod import;
 pub mod installer;
 pub mod instances;
 pub mod instances_mrpack;
-pub mod jars;
 pub mod java;
 pub mod java_launch;
 pub mod launch;
@@ -51,16 +49,25 @@ pub mod screenshots;
 pub mod server_list;
 pub mod servers;
 pub mod setup_args;
+pub mod shop;
 pub mod shortcut;
 pub mod signed;
-pub mod skins;
 pub mod sources;
-pub mod storage;
 pub mod tailscale;
+pub mod telemetry;
 pub mod themes;
 pub mod uninstall_aside;
 pub mod update_handoff;
 pub mod update_recovery;
+pub mod wardrobe;
 #[cfg(windows)]
 mod windows_runtime;
 pub mod worlds;
+
+pub mod jars;
+
+pub mod storage;
+
+pub mod cache_cleanup;
+
+pub mod bug_report;

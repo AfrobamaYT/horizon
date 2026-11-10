@@ -40,6 +40,9 @@ impl Game<'_> {
     /// `itemGroup.<mod>.<name>`, else its `title` as a lang key (a mod's own
     /// `itemGroup.<mod>`), else `title` as English text.
     pub(super) fn creative_tab_title(&self, tab: &horizon_client::creative::Tab) -> String {
+        if let Some((name, _)) = &tab.name {
+            return name.clone();
+        }
         match horizon_client::creative::item_group_key(&tab.id) {
             Some(key) => self.translate_with_fallback(key, &tab.title),
             None => {
@@ -167,7 +170,12 @@ impl Game<'_> {
                 &title,
                 ox + 8.0,
                 oy + 6.0,
-                rgba(64, 64, 64, 255),
+                tab.name
+                    .as_ref()
+                    .and_then(|n| n.1)
+                    .map_or(rgba(64, 64, 64, 255), |c| {
+                        rgba((c >> 16) as u8, (c >> 8) as u8, c as u8, 255)
+                    }),
                 false,
             );
         }
@@ -412,6 +420,9 @@ impl Game<'_> {
             let (tx, ty) = Creative::tab_position(t);
             if cx >= ox + tx && cx < ox + tx + 26.0 && cy >= oy + ty && cy < oy + ty + 32.0 {
                 select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, i);
+                // The tab's slots and page replace the previous tab's: the
+                // build reads the new ones from this click on.
+                self.build_screen();
                 self.refresh_saved_hotbars();
                 self.inv_drag = None;
                 self.last_inv_click = None;

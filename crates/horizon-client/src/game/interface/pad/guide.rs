@@ -35,6 +35,9 @@ impl Game<'_> {
             && settings.guide_detail != GuideDetail::Off
             && self.pad.in_use
             && !self.pad.keyboard_took_over
+            // Hidden once the radial menu shows, not on the opener's press: a quick tap draws
+            // nothing, so the guide doesn't blink.
+            && !self.pad_radial_shown()
             && !self.pad_in_menu()
             && !self.screen_over_playing()
             && self.sleeping.is_none()
@@ -118,7 +121,7 @@ impl Game<'_> {
             || self.pad.keyboard_took_over
             || self.prompt_open()
             || self.title.is_some()
-            || self.pad.menu.osk.is_some()
+            || self.pad_keyboard_captures()
         {
             return;
         }
@@ -616,7 +619,7 @@ impl Game<'_> {
             _ if horizon_client::items::bucket_contents(&info.id).is_some() => return None,
             _ if info.blocks_attacks.is_some() => Verb::Raise,
             _ if let Some(consumable) = &info.consumable => {
-                if info.food.is_some() && !self.can_eat(&stack, info.can_always_eat) {
+                if info.food.is_some() && !self.can_eat(Some(&stack), info.can_always_eat) {
                     return None;
                 }
                 use horizon_core::use_animation::UseAnimation;
@@ -635,6 +638,8 @@ impl Game<'_> {
             {
                 Verb::Equip
             }
+            // A content mod's rod casts as vanilla's does.
+            _ if info.is("minecraft:fishing_rod") => Verb::Fish,
             _ if super::super::remote::item_has_use(&info) => Verb::Use,
             _ => return None,
         })

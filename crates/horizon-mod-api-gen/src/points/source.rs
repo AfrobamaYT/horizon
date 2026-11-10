@@ -37,7 +37,7 @@ pub fn read(root: &Path) -> Result<Vec<Point>, String> {
 pub fn build_input(root: &Path) -> Result<Vec<Point>, String> {
     let path = root.join(FILE);
     if path.exists() {
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
     }
     read(root)
 }

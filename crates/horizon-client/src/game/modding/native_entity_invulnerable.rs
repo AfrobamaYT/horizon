@@ -480,8 +480,7 @@ mod tests {
                     horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
                 player.entity_id = 7;
                 game.player = Some(player);
-                game.lan_acting_uuid = Some(1);
-                game.lan_acting_entity = Some(7);
+                crate::game::native_entity_refs::tests::bind_local_player(game, 7, 1);
                 game.set_game_mode(horizon_client::command::args::GameMode::Survival);
                 let victim = game.entity(7).unwrap();
                 assert_eq!(
@@ -640,8 +639,7 @@ mod tests {
         use horizon_client::motion::PlayerMotion;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             game.armor_stands
                 .push(horizon_client::entities::ArmorStand::new(
@@ -742,8 +740,7 @@ mod tests {
 
             // The player's two, on the same clock.
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             assert!(game.entity_set_damage_cooldown_time(player, 7));
             assert!(game.entity_set_invulnerable_time(player, 3));
@@ -852,8 +849,7 @@ mod tests {
         use horizon_client::motion::PlayerMotion;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
 
             // The window refuses an ordinary hit; a creative player's
@@ -987,8 +983,7 @@ mod tests {
             assert_eq!(mob.invulnerable_to_piercing_weapon(game), Some(true));
             // A player's flag, apart from the abilities.
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             assert!(game.entity_set_invulnerable(player, true));
             assert_eq!(player.invulnerable_to_piercing_weapon(game), Some(true));
@@ -1019,8 +1014,7 @@ mod tests {
             game.mobs
                 .push(Mob::new(300001, zombie, Vec3::new(0.5, 64.0, 0.5), 0.0));
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             // Survival and alive: a zombie takes the player as a target.
             assert!(game.native_mob_valid_target(&game.mobs[0], Target::Player));
@@ -1080,8 +1074,7 @@ mod tests {
         use horizon_core::nbt::Tag;
         with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.lan_acting_uuid = Some(123);
-            game.lan_acting_entity = Some(20);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
             let player = game.entity(20).unwrap();
             assert!(game.entity_set_invulnerable(player, true));
             assert!(game.entity_set_invulnerable_time(player, 7));
@@ -1129,6 +1122,13 @@ mod tests {
             let entity = game.entity(15).unwrap();
             assert!(game.entity_set_invulnerable(entity, true));
 
+            // Match cmd_damage's normalized direct and causing player source.
+            let source = (
+                Some(super::Target::Player),
+                Some(super::Target::Player),
+                None,
+            );
+            let before = game.dragon.as_ref().unwrap().health;
             // A survival player's blow: refused.
             game.creative = false;
             assert!(!game.command_damage_dragon(
@@ -1136,8 +1136,9 @@ mod tests {
                 10.0,
                 "minecraft:generic",
                 DamageKind::Generic,
-                (Some(super::Target::Player), None, None),
+                source,
             ));
+            assert_eq!(game.dragon.as_ref().unwrap().health, before);
             // A creative player's blow passes the flag (`isCreativePlayer`).
             game.creative = true;
             assert!(game.command_damage_dragon(
@@ -1145,8 +1146,9 @@ mod tests {
                 10.0,
                 "minecraft:generic",
                 DamageKind::Generic,
-                (Some(super::Target::Player), None, None),
+                source,
             ));
+            assert!(game.dragon.as_ref().unwrap().health < before);
             // And the void needs no creative help (`#bypasses_invulnerability`).
             game.creative = false;
             assert!(game.command_damage_dragon(
@@ -1154,7 +1156,7 @@ mod tests {
                 1000.0,
                 "minecraft:out_of_world",
                 DamageKind::OutOfWorld,
-                (Some(super::Target::Player), None, None),
+                source,
             ));
         });
     }

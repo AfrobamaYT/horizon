@@ -26,6 +26,7 @@ mod inject;
 mod inject_sync;
 mod internals;
 mod jar;
+mod layouts;
 mod registry;
 mod wasm;
 
@@ -34,11 +35,18 @@ use std::{
     process::{Command, ExitCode},
 };
 
+fn is_compiler_wrapper(name: &str) -> bool {
+    name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
+}
+
 fn main() -> ExitCode {
     // Cargo runs `cargo-horizon-mod horizon-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if std::env::var_os("HORIZON_GROUP_WRAPPER").is_some()
-        && args.first().is_some_and(|a| a.ends_with("rustc"))
+        // `rustc`, or `rustc.exe` on Windows.
+        && args
+            .first()
+            .is_some_and(|a| is_compiler_wrapper(a))
     {
         return match wasm::rustc(args) {
             Ok(()) => ExitCode::SUCCESS,
@@ -76,7 +84,15 @@ fn main() -> ExitCode {
         Some("use-jar") => jar::run(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
         Some("inject") => inject::run(&args[1..]),
-        Some("update") => update(Path::new("."), flag(&args[1..], "--horizon")),
+        Some("update") => update(
+            Path::new("."),
+            flag(&args[1..], "--horizon"),
+            &args[1..]
+                .windows(2)
+                .filter(|pair| pair[0] == "--accept")
+                .map(|pair| pair[1].as_str())
+                .collect::<Vec<_>>(),
+        ),
         _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | update [--horizon <commit>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
@@ -226,7 +242,7 @@ fn newest_prebuilt(releases: &serde_json::Value) -> Option<String> {
 }
 
 /// Repins the native mod and its API dependencies, reporting signature changes before writing.
-fn update(dir: &Path, horizon: Option<&str>) -> Result<(), String> {
+fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
@@ -258,9 +274,20 @@ fn update(dir: &Path, horizon: Option<&str>) -> Result<(), String> {
             .ok_or_else(|| format!("Cargo.toml: no dependencies.{package}.rev"))?;
         internals::set_string(rev, &horizon);
     }
-    if !manifest.internals.is_empty() {
+    if !manifest.internals.is_empty() || manifest.inject.iter().any(|i| i.hash.is_none()) {
+        // #2593: these become the pinned catalogs with the mod's own modules applied.
         let old = internals::load(dir, &native.horizon)?;
         let new = internals::load(dir, &horizon)?;
+        let (reports, refused) = inject::update::pin_moves(&manifest, &old, &new, accept);
+        for report in reports {
+            println!("{report}");
+        }
+        if refused {
+            return Err(
+                "update refused; no files changed (pass --accept <inject id> to take a change)"
+                    .into(),
+            );
+        }
         print!("{}", internals::refresh(&manifest, &mut doc, &old, &new)?);
     }
     internals::set_string(
@@ -329,6 +356,9 @@ fn build_in(root: &Path) -> Result<PathBuf, String> {
 
 fn pack_into(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
+    if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
+        layouts::build(root)?;
+    }
     let bytes = Package::pack_directory(root)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.hmod", package.manifest.id));
@@ -576,7 +606,7 @@ mod tests {
             .contains("40 lowercase hex")
         );
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, Some(newer)).unwrap();
+        update(&path, Some(newer), &[]).unwrap();
         let manifest =
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         assert_eq!(manifest.native.unwrap().horizon, newer);
@@ -602,5 +632,26 @@ mod tests {
         ]);
         assert_eq!(newest_prebuilt(&releases).as_deref(), Some(old));
         assert_eq!(newest_prebuilt(&serde_json::json!([])), None);
+    }
+}
+
+#[cfg(test)]
+mod wrapper_suffix_tests {
+    #[test]
+    fn compiler_names_keep_suffix_contract() {
+        for (name, expected) in [
+            ("diagnostic-rustc", true),
+            ("xrustc", true),
+            ("rustc", true),
+            ("/path/to/rustc", true),
+            ("rustc.exe", true),
+            ("diagnostic-rustc.exe", true),
+            ("rustc.custom", false),
+            ("rustc-wrapper", false),
+            ("cargo-horizon-mod", false),
+            ("/rustc/tool", false),
+        ] {
+            assert_eq!(super::is_compiler_wrapper(name), expected, "{name}");
+        }
     }
 }

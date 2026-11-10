@@ -1,10 +1,14 @@
 use mod_api::Hooks;
 
 pub mod area_macros;
+pub mod matrix;
 pub mod replace;
+pub mod turn;
+pub use matrix::{mirrors, sum_return};
 pub mod shutdown;
 pub use replace::own_average;
 pub use shutdown::on_shutdown;
+pub use turn::turn_angle;
 
 #[derive(Default)]
 pub struct Mod;

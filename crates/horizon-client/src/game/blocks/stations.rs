@@ -3,6 +3,9 @@
 //! colours and sounds follow the vanilla screens (`EnchantmentScreen`,
 //! `AnvilScreen`, `GrindstoneScreen`, `SmithingScreen`, `StonecutterScreen`,
 //! `BrewingStandScreen`); item rules live in `horizon_client::stations`.
+
+#[path = "stations/anvil.rs"]
+mod anvil;
 /// Invalid measurements must not reach tooltip positioning or reserve empty space.
 fn tooltip_component_size(size: Option<[f32; 2]>) -> Option<[f32; 2]> {
     size.filter(|size| size.iter().all(|v| v.is_finite() && *v > 0.0))
@@ -384,7 +387,7 @@ impl Station {
             bookcases: 0,
             anvil: AnvilResult::default(),
             name: String::new(),
-            rename: anvil_box(),
+            rename: anvil::rename_box(),
             stone: Default::default(),
             selected: None,
             start: 0,
@@ -1257,14 +1260,13 @@ impl Game<'_> {
             return;
         };
         if s.kind == Kind::Anvil && s.inputs[0] != s.anvil_last {
-            // AnvilScreen.slotChanged: the box shows the new input's name.
+            // AnvilScreen.slotChanged: the box follows its input item.
             s.anvil_last = s.inputs[0].clone();
-            s.name = s.inputs[0]
+            let name = s.inputs[0]
                 .as_ref()
                 .map(|i| stations::hover_name(&self.pack.names, i))
                 .unwrap_or_default();
-            let name = s.name.clone();
-            s.rename.set_value(&name);
+            anvil::input_changed(s, name);
         }
         self.station_changed();
     }
@@ -1439,10 +1441,7 @@ impl Game<'_> {
     }
     /// A click in the anvil's name box (`EditBox.onClick`).
     fn anvil_name_click(&mut self, ox: f32, oy: f32) -> bool {
-        let open = self
-            .station
-            .as_ref()
-            .is_some_and(|s| s.kind == Kind::Anvil && s.inputs[0].is_some());
+        let open = self.station.as_ref().is_some_and(|s| s.kind == Kind::Anvil);
         if !open {
             return false;
         }
@@ -1474,7 +1473,7 @@ impl Game<'_> {
         edit.bordered = false;
         edit.focused = true;
         edit.text_color = u32::MAX;
-        edit.max_length = ANVIL_NAME_CHARS;
+        edit.max_length = anvil::NAME_CHARS;
         edit.draw(batch, &self.gui.atlas, None);
     }
 
@@ -3368,6 +3367,7 @@ impl Game<'_> {
         &mut self,
         pos: (i32, i32, i32),
     ) -> horizon_client::Result<()> {
+        let fuel = self.brewing_fuel_remainder(pos);
         let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
@@ -3380,6 +3380,7 @@ impl Game<'_> {
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
+            &|s| fuel.resolve(world_items!(self), s),
         );
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
@@ -3397,15 +3398,12 @@ impl Game<'_> {
             });
             // A cancelled Pre fires Post itself, with the slots the mods left.
             let cancelled = matches!(asked, Some((_, true)));
+            let rest = self.brewing_ingredient_remainder(pos, cancelled);
             let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
                 return Ok(());
             };
-            b.brew_after_pre(
-                asked,
-                &world_stations!(self).brewing,
-                world_items!(self),
-                &mut out,
-            );
+            let brewing = &world_stations!(self).brewing;
+            b.brew_after_pre(asked, brewing, &|_| rest.clone(), &mut out);
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
             post = hooked && (out.brewed || cancelled);
         }
@@ -3466,19 +3464,6 @@ impl Game<'_> {
         }
         Ok(())
     }
-}
-
-/// The anvil's rename box (`AnvilScreen`: `setMaxLength(50)`).
-const ANVIL_NAME_CHARS: usize = 50;
-
-fn anvil_box() -> horizon_client::ui::EditBox {
-    let mut edit = horizon_client::ui::EditBox::new(0.0, 0.0, 103.0, 12.0);
-    edit.message = super::screen_info::tr("container.repair", &[]);
-    edit.bordered = false;
-    edit.max_length = ANVIL_NAME_CHARS;
-    edit.text_color = u32::MAX;
-    edit.focused = true;
-    edit
 }
 
 #[cfg(test)]

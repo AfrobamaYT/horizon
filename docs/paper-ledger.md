@@ -16,7 +16,7 @@ The Paper/Bukkit references below are public Javadoc, not implementation sources
 | [CommandExecutor](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/command/CommandExecutor.html) and Brigadier | **Partial:** register `Command` usages through `native_register_commands`, then execute commands from any source in `native_run_mod_command` with typed source identity and arguments. Horizon builds a command tree from its supported usage syntax; this is not a general Bukkit executor or arbitrary Brigadier registration. See `crates/horizon-client/src/game/modding/native_server.rs` and [server commands](https://arismoko.github.io/horizon/reference/hook-notes.html#server-commands-and-players). |
 
 For callback signatures, side and current limitations, use [native mods](modding/src/how-to/native-mods.md)
-and the hook declarations under `crates/horizon-mod-api/src/hooks/` at the fork revision being targeted.
+and the hook declarations under `crates/horizon-mod-vocab/src/hooks/` at the fork revision being targeted.
 
 ## Event counterparts: miscellaneous additions (#1015)
 
@@ -1042,7 +1042,6 @@ one of these moments has to move that logic into a client native mod.
 | `item_tooltip.rs` | `item_tooltip` |
 | `key_mapping_pre.rs` | `key_mapping_pre` |
 | `left_click_empty.rs` | `left_click_empty` |
-| `model_layers.rs` | `layer_definitions` |
 | `movement_input.rs` | `movement_input` |
 | `player_heart_type.rs` | `player_heart_type` |
 | `register_block_tint_sources.rs` | `register_block_tint_sources` |
@@ -1051,6 +1050,7 @@ one of these moments has to move that logic into a client native mod.
 | `register_debug_renderers.rs` | `register_debug_renderers` |
 | `register_gui_layers.rs` | `register_gui_layers` |
 | `register_item_tint_sources.rs` | `register_item_tint_sources` |
+| `register_layer_definitions.rs` | `register_layer_definitions` |
 | `register_range_select_item_model_property.rs` | `register_range_select_item_model_property` |
 | `register_runtime_sprites.rs` | `register_runtime_sprites` |
 | `register_texture_atlases.rs` | `register_texture_atlases` |

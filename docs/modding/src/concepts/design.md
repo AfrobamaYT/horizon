@@ -18,7 +18,7 @@ branches. An old mod rebuilds, and the compiler says what moved. Removing a path
 catalog, these docs, the tests and the sample mod in the same change. A hook with no NeoForge counterpart is
 judged on its merits like any other.
 
-Every hook is declared once, in the catalog (`crates/horizon-mod-api/src/hooks/`): its name, side, contract,
+Every hook is declared once, in the catalog (`crates/horizon-mod-vocab/src/hooks/`): its name, side, contract,
 scope and `doc`. The generator writes everything repeated from it: the `Hooks` trait, the part traits, the
 `Host` traits, the dispatch and the [reference](../reference/api.md). A hook is added by declaring it, not by
 editing match arms.
@@ -91,7 +91,7 @@ and [Parts](trait-mods.md#parts).
 | Client commands | `Hooks::register_client_commands` collects `Command` usages | Client, at connection start and when the server sends its tree | After the client incorporates them into completion and local dispatch. |
 | HUD layers and F3 entries | `register_gui_layers` and `register_debug_entries` | Client startup | When the installed HUD order or debug entry list is used for drawing. |
 | World-space debug renderers | `register_debug_renderers` | Client, each refresh of the renderer list | The next debug draw uses the refreshed list. |
-| Model layers, colour resolvers, block and item tints, numeric and categorical item model properties | `layer_definitions`, `register_color_resolvers`, `register_block_tint_sources`, `register_item_tint_sources`, `register_range_select_item_model_property`, `register_select_item_model_property` | Client startup before resource loading | The client can resolve the declarations when it builds its models and rendering tables. |
+| Model layers, colour resolvers, block and item tints, numeric and categorical item model properties | `register_layer_definitions`, `register_color_resolvers`, `register_block_tint_sources`, `register_item_tint_sources`, `register_range_select_item_model_property`, `register_select_item_model_property` | Client startup before resource loading | The client can resolve the declarations when it builds its models and rendering tables. |
 | Data map types | `data_map_types` | Server, at world data load and each reload | After the server publishes the loaded data maps. |
 | Recipe property additions | `recipe_property_sets` | Server data load and client preload, after recipes resolve, and again on reload | When station slot checks use the published sets. |
 | Mod configs | `register_configs` | Config phase on the owning side, once at startup for Client/Common and per world for Server | After the file is read and the mod receives its config loading callback. |

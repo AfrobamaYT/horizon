@@ -572,6 +572,7 @@ mod tests {
     fn push(game: &mut Game<'_>, id: u32, kind: &str) -> DisplayRef {
         game.options.dedicated = Some(Vec::new());
         game.others.push(OtherEntity {
+            attachment_lifetime: Default::default(),
             knot_check: None,
             eye: None,
             join: Default::default(),
@@ -599,6 +600,7 @@ mod tests {
             assert_eq!(item.kind(game), Some(DisplayKind::Item));
             assert_eq!(text.entity(), game.entity(21).unwrap());
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),
@@ -800,8 +802,8 @@ mod tests {
             );
             assert_eq!(saved.get("view_range"), Some(&Tag::Float(2.5f32.to_bits())));
             assert_eq!(
-                saved.get("text").and_then(|t| t.get("text")),
-                Some(&Tag::String("saved".into()))
+                comp_text(&tag_to_json(saved.get("text").unwrap())).plain(),
+                "saved"
             );
         });
     }

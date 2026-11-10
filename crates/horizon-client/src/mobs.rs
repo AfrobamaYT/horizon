@@ -60,6 +60,11 @@ pub mod mod_behaviors;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
+pub mod neutral_anger;
+pub use neutral_anger::{
+    adopt_anger_end, anger_left, persistent_anger, resume_anger, settle_anger_end,
+};
+mod knockback;
 pub mod nav;
 pub mod nether;
 pub mod panda;
@@ -108,7 +113,8 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-pub use world::{TargetInfo, visual_clip};
+use living::totem_death_effects;
+pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
@@ -502,6 +508,7 @@ pub struct MobType {
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
     pub tempt: Arc<[String]>,
+    pub passenger_attachments: Vec<[f32; 3]>,
 }
 impl MobType {
     pub fn inventory_stack_limit(&self, stack: &crate::items::ItemStack) -> u32 {
@@ -765,10 +772,7 @@ impl MobTypes {
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let fields = MobType::attribute_fields(|name| defaults.get(name).copied());
             let mut layers = crate::fast_hash::FxHashMap::default();
-            if let Some(all) = models
-                .as_ref()
-                .and_then(|models| models.value().as_object())
-            {
+            if let Some(all) = models.as_ref().and_then(|m| m.value().as_object()) {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
@@ -785,6 +789,8 @@ impl MobTypes {
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
+            let passenger_attachments =
+                riders::parse_passenger_attachments(&t["passenger_attachments"]);
             out.insert(
                 id.clone(),
                 MobType {
@@ -835,15 +841,12 @@ impl MobTypes {
                     anim: def.anim,
                     sounds: def.sounds,
                     step_sound: def.step_sound,
-                    food: def
-                        .food_tag()
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                    food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
                         .or(def.food_tag())
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                        .map_or_else(|| Arc::from(Vec::new()), tag),
+                    passenger_attachments,
                     category,
                     id,
                 },
@@ -1255,14 +1258,6 @@ pub struct Attrs {
 }
 /// `minecraft:wolf_armor`'s maximum damage.
 pub const WOLF_ARMOR_DURABILITY: i32 = 64;
-/// `NeutralMob.readPersistentAngerSaveData`: the anger runs until its end
-/// time, so a mob that is loaded again is angry for what is left of it.
-pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
-    if anger_end <= 0 {
-        return 0;
-    }
-    (anger_end - game_time).clamp(0, i64::from(i32::MAX)) as i32
-}
 
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
@@ -1377,6 +1372,8 @@ pub struct Extra {
     /// anger ends at, -1 when the mob is calm. The save keeps it, so the
     /// anger goes on while the chunk is unloaded.
     pub anger_end: i64,
+    /// Countdown and age when `anger_end` was last settled (`neutral_anger`).
+    pub anger_stamp: Option<(i32, u32)>,
     /// `NeutralMob.getPersistentAngerTarget`: the entity the mob is angry
     /// at, which the save keeps with it.
     pub angry_at: Option<Who>,
@@ -1701,31 +1698,6 @@ impl Extra {
     }
 }
 
-/// `DeathProtection.TOTEM_EFFECTS`: clear, then regeneration II, absorption II
-/// and fire resistance.
-fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
-    use crate::items::{ConsumeEffect, ConsumeEffectSpec};
-    let spec = |id: &str, duration, amplifier| ConsumeEffectSpec {
-        id: id.to_owned(),
-        duration,
-        amplifier,
-        ambient: false,
-        show_particles: true,
-        show_icon: true,
-    };
-    vec![
-        ConsumeEffect::ClearAllEffects,
-        ConsumeEffect::ApplyEffects {
-            effects: vec![
-                spec("minecraft:regeneration", 900, 1),
-                spec("minecraft:absorption", 100, 1),
-                spec("minecraft:fire_resistance", 800, 0),
-            ],
-            probability: 1.0,
-        },
-    ]
-}
-
 /// How far the boxes of a set of mobs reach from their positions: the widest reach sideways, below
 /// and above among them, worked out from each mob's real box ([`Mob::bounds`]: a shulker's grows
 /// toward its open lid, sideways or below its position). A box query over many mobs (a vehicle's,
@@ -1919,6 +1891,9 @@ pub struct Mob {
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
+    /// A pose laid over this player's body after the vanilla animation (`anim::setup`), timed on
+    /// `age`: a Horizon emote (docs/cosmetics.md), given by the game. Visual only.
+    pub emote: Option<Arc<dyn anim::BodyPose>>,
     /// A mannequin's `DATA_PROFILE` (ResolvableProfile): the profile's
     /// `textures` property resolves to `skin` like a player's.
     pub profile: Option<horizon_protocol::entity_data::Profile>,
@@ -3663,6 +3638,8 @@ pub struct MobWorld<'a> {
     /// player in the level stands, alive or not (the despawn distance).
     pub nearest_player: Option<Vec3>,
     pub others: &'a [Seen],
+    /// Retained passenger objects for topology only, never targets or colliders.
+    pub passenger_objects: &'a [Seen],
     /// Disjoint live mob state, available only while an actor is ticked.
     pub live_mobs: Option<&'a dyn LiveMobs>,
     /// The separately simulated dragon, visible to revenge and melee goals.
@@ -4016,6 +3993,7 @@ impl Mob {
         random: LegacyRandom,
     ) -> Self {
         let mut mob = Self {
+            emote: None,
             attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
@@ -4132,6 +4110,7 @@ impl Mob {
         if mob.species() == Species::Salmon {
             mob.extra.variant = 1;
         }
+        neutral_anger::init(&mut mob);
         // `Creeper.explosionRadius = 3` until a save or a command sets it.
         mob.extra.explosion_radius = 3;
         // The PathNavigation constructor: the base follow range.
@@ -4649,7 +4628,7 @@ impl Mob {
                     (f[0] - self.position.x, f[2] - self.position.z)
                 }),
             };
-            self.knockback(level, f64::from(0.4f32), dx, dz, &source);
+            self.knockback(level, f64::from(0.4f32), dx, dz, &source, amount);
         }
         ai::after_hurt(self, &source);
         if self.health <= 0.0 {
@@ -4815,96 +4794,6 @@ impl Mob {
             }
         }
     }
-    /// LivingEntity.knockback(power, xd, zd, source) towards the negative
-    /// direction. `Creaking.knockback`: a creaking that cannot move is not
-    /// shoved. The native knockback hook runs once the knockback resistance
-    /// took its share, before the motion changes and the draws of a random
-    /// direction.
-    pub fn knockback(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        power: f64,
-        xd: f64,
-        zd: f64,
-        source: &Damage,
-    ) {
-        self.knockback_by(level, power, xd, zd, source, None);
-    }
-    /// `LivingEntity.knockback(power, xd, zd, source, damage, comesFromEffect = true)`: an extra
-    /// push of a blow (sprint, the Knockback enchantment). A sulfur cube with a block turns it
-    /// into its own launch (`SulfurCube.knockback`), scaled by `power * 0.25` and `sqrt(damage)`.
-    pub fn knockback_effect(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        power: f64,
-        xd: f64,
-        zd: f64,
-        source: &Damage,
-        damage: f32,
-    ) {
-        self.knockback_by(level, power, xd, zd, source, Some(damage));
-    }
-    /// `getAttributeValue(KNOCKBACK_RESISTANCE)`: the mob's own, and what its gear adds.
-    pub fn knockback_resistance(&self) -> f64 {
-        self.gear_knockback_resistance
-            .unwrap_or(self.attrs.knockback_resistance)
-    }
-    fn knockback_by(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        power: f64,
-        xd: f64,
-        zd: f64,
-        source: &Damage,
-        effect: Option<f32>,
-    ) {
-        if let Some(damage) = effect
-            && self.species() == Species::SulfurCube
-            && sulfur_cube::has_body(self)
-            && source.attacker.is_some()
-            && sulfur_cube::knockback(self, (xd, zd), source.from, damage, Some(power))
-        {
-            return;
-        }
-        if creaking::is_creaking(self) && !creaking::can_move(self) {
-            return;
-        }
-        // The native hook runs first, on the raw strength, then the resistance scales what it left.
-        let mut knock = crate::health::Knock {
-            strength: power,
-            x: xd,
-            z: zd,
-        };
-        let pushed = crate::health::Hurting::Mob(self, source);
-        if level.knockback_canceled(pushed, &mut knock) {
-            return;
-        }
-        let crate::health::Knock {
-            strength: power,
-            x: mut xd,
-            z: mut zd,
-        } = knock;
-        let power = power * (1.0 - self.knockback_resistance());
-        if power <= 0.0 {
-            return;
-        }
-        self.needs_sync = true;
-        while xd * xd + zd * zd < f64::from(1.0e-5_f32) {
-            xd = (self.random.next_double() - self.random.next_double()) * 0.01;
-            zd = (self.random.next_double() - self.random.next_double()) * 0.01;
-        }
-        let len = (xd * xd + zd * zd).sqrt();
-        let (kx, kz) = (xd / len * power, zd / len * power);
-        self.velocity = Vec3::new(
-            self.velocity.x / 2.0 - kx,
-            if self.on_ground {
-                (self.velocity.y / 2.0 + power).min(0.4)
-            } else {
-                self.velocity.y
-            },
-            self.velocity.z / 2.0 - kz,
-        );
-    }
     /// One game tick. Returns false once the mob should be removed.
     pub fn tick(
         &mut self,
@@ -4913,7 +4802,7 @@ impl Mob {
         events: &mut Vec<MobEvent>,
     ) -> bool {
         self.prepare_tick();
-        ai::tick(self, w, level, events)
+        neutral_anger::around_tick(self, w.game_time, |m| ai::tick(m, w, level, events))
     }
     /// A game-owned tick may pause before fox consumption to release its loans.
     pub fn tick_until_consumption(
@@ -4923,7 +4812,7 @@ impl Mob {
         events: &mut Vec<MobEvent>,
     ) -> ai::TickProgress {
         self.prepare_tick();
-        ai::tick_until_consumption(self, w, level, events)
+        neutral_anger::tick_until_consumption(self, w, level, events)
     }
     fn prepare_tick(&mut self) {
         self.track_section();
@@ -5580,117 +5469,8 @@ impl Mob {
 }
 
 #[cfg(test)]
-mod lighting_tests {
-    use super::*;
-    use glam::{Mat4, Vec3};
-    use serde_json::json;
-
-    fn plane(normal: [f32; 3]) -> Part {
-        Part::parse(
-            "root",
-            &json!({
-                "polygons": [[[0,0,0,0,0], [0,0,0,1,0], [0,0,0,1,1], [0,0,0,0,1]]],
-                "normals": [normal]
-            }),
-        )
-    }
-
-    #[test]
-    fn exported_normals_survive_collapsed_faces_and_mirroring() {
-        let part = plane([1.0, 0.0, 0.0]);
-        assert_eq!(
-            part.polygons[0].vertex_normal(ModelNormals::new(Mat4::IDENTITY)),
-            [127, 0, 0, -127]
-        );
-        assert_eq!(
-            part.polygons[0].vertex_normal(ModelNormals::new(Mat4::from_scale(Vec3::new(
-                -1.0, -1.0, 1.0
-            )))),
-            [-127, 0, 0, -127]
-        );
-    }
-
-    #[test]
-    fn normal_matrix_includes_parent_scale_and_child_rotation() {
-        let mut child = plane([1.0, 0.0, 0.0]);
-        child.pose[5] = std::f32::consts::FRAC_PI_4;
-        let parent = Part {
-            name: "parent".into(),
-            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.5],
-            polygons: Vec::new(),
-            children: vec![child],
-        };
-        let mut animated = Vec::new();
-        render::draw(
-            &parent,
-            Mat4::IDENTITY,
-            &anim::Poses::new(&parent),
-            [0.0, 0.0, 1.0, 1.0],
-            0x80402010,
-            240,
-            1,
-            &mut animated,
-        );
-        let mut direct = Vec::new();
-        render_model(
-            &parent,
-            Mat4::IDENTITY,
-            &|p| p.pose,
-            [0.0, 0.0, 1.0, 1.0],
-            240,
-            1,
-            &mut direct,
-        );
-        assert_eq!(animated.len(), 4);
-        for (a, b) in animated.iter().zip(&direct) {
-            assert_eq!(a.normal, [56, 113, 0, -127]);
-            assert_eq!(a.normal, b.normal);
-            assert_eq!(a.pos, b.pos);
-            assert_eq!(a.uv, b.uv);
-            assert_eq!((a.color, a.light, a.layer), (0x80402010, 240, 1));
-        }
-    }
-
-    #[test]
-    fn trusted_rotation_retains_native_quaternion_rounding() {
-        let mut part = plane([1.0, 0.0, 0.0]);
-        part.pose[3] = std::f32::consts::FRAC_PI_2;
-        let mut vertices = Vec::new();
-        render::draw(
-            &part,
-            Mat4::IDENTITY,
-            &anim::Poses::new(&part),
-            [0.0, 0.0, 1.0, 1.0],
-            0xffffffff,
-            240,
-            0,
-            &mut vertices,
-        );
-        assert_eq!(vertices[0].normal, [126, 0, 0, -127]);
-    }
-
-    #[test]
-    fn legacy_models_infer_non_degenerate_face_normals() {
-        let part = Part::parse(
-            "root",
-            &json!({"polygons": [
-                [[0,0,0,0,0], [1,0,0,1,0], [1,1,0,1,1], [0,1,0,0,1]]
-            ]}),
-        );
-        assert_eq!(part.polygons[0].normal, [0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn packed_normal_uses_native_snorm_bytes_without_changing_vertex_offsets() {
-        assert_eq!(std::mem::offset_of!(Vertex, normal), 32);
-        assert_eq!(std::mem::size_of::<Vertex>(), 44);
-        let part = plane([0.0, 1.0, 0.0]);
-        assert_eq!(
-            part.polygons[0].vertex_normal(ModelNormals::new(Mat4::from_scale(Vec3::ZERO))),
-            [0, 0, 0, -127]
-        );
-    }
-}
+#[path = "mobs/lighting_tests.rs"]
+mod lighting_tests;
 
 /// `LivingEntity.elytraAnimationState`: eased wing angles and render interpolation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -5985,6 +5765,7 @@ pub(crate) mod sensor_scan_tests {
             step_sound: None,
             food: Arc::default(),
             tempt: Arc::default(),
+            passenger_attachments: Vec::new(),
         })
     }
     #[test]

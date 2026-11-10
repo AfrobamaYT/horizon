@@ -289,7 +289,9 @@ impl Game<'_> {
         slot: u32,
         stack: Option<ItemStack>,
     ) -> Result<bool, BlockEntityItemError> {
-        let _ = tx;
+        if !self.transaction_holds(tx) {
+            return Ok(false);
+        }
         let key = self
             .native_block_entity_write_key(entity)
             .ok_or(BlockEntityItemError::Stale)?;
@@ -540,7 +542,7 @@ fn save_with_metadata(
     Some(data)
 }
 
-fn save_without_metadata(
+pub(super) fn save_without_metadata(
     world: &World,
     pos: (i32, i32, i32),
     entity: &BlockEntity,
