@@ -236,6 +236,32 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
 }
 
 #[test]
+fn code_items_can_reference_both_owned_namespaces_in_one_batch() {
+    let mut content = Content::declared("porter");
+    content.namespaces.push("legacy".into());
+    let mut mods = vec![ContentMod {
+        id: "porter".into(),
+        content,
+        jars: vec![],
+    }];
+    let items = [
+        ("legacy:wrench", "porter:spoon"),
+        ("porter:spoon", "legacy:wrench"),
+    ]
+    .map(|(id, remainder)| horizon_mod_package::content::Item {
+        id: id.into(),
+        template: "minecraft:stick".into(),
+        crafting_remainder: Some(remainder.into()),
+        ..horizon_mod_package::content::Item::default()
+    });
+    let errors = accept_declared(&mut mods, &[], &items, &[], &BTreeSet::new());
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(mods.len(), 1);
+    assert_eq!(mods[0].id, "porter");
+    assert_eq!(mods[0].content.items, items);
+}
+
+#[test]
 fn code_declarations_join_the_manifest_owner_of_a_secondary_namespace() {
     let base = base("owned-namespace");
     let mut content = Content::declared("porter");

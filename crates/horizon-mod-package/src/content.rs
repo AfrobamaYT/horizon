@@ -1069,17 +1069,12 @@ impl Content {
     }
 
     /// Adds blocks and items a native mod declares in code (`native_blocks`,
-    /// `native_items`), checked as declaration files are: ids in this mod's
-    /// own namespace (its id, as `data/<id>/horizon/` is) and declared once
+    /// `native_items`), checked as declaration files are: ids in any of this
+    /// mod's owned namespaces (its id and manifest `namespaces`) and declared once
     /// with what it already has, a vanilla template, a crafting remainder
     /// that is vanilla or this mod's. All or nothing: on an error nothing is
     /// added.
     pub fn declare(&mut self, blocks: &[Block], items: &[Item]) -> Result<(), String> {
-        let own = self
-            .namespaces
-            .first()
-            .map(String::as_str)
-            .unwrap_or_default();
         let mut ids: BTreeSet<&str> = self
             .blocks
             .iter()
@@ -1102,7 +1097,10 @@ impl Content {
         for block in blocks {
             let id = block.id.as_str();
             if !in_own(id) {
-                return Err(format!("block {id:?} is not an id in {own}:"));
+                return Err(format!(
+                    "block {id:?} is not an id in owned namespaces {:?}",
+                    self.namespaces
+                ));
             }
             check_block(block).map_err(|e| format!("block {id}: {e}"))?;
             if !ids.insert(id) {
@@ -1117,7 +1115,10 @@ impl Content {
         for item in items {
             let id = item.id.as_str();
             if !in_own(id) {
-                return Err(format!("item {id:?} is not an id in {own}:"));
+                return Err(format!(
+                    "item {id:?} is not an id in owned namespaces {:?}",
+                    self.namespaces
+                ));
             }
             check_item(item).map_err(|e| format!("item {id}: {e}"))?;
             if !item_ids.insert(id) {
@@ -3526,7 +3527,10 @@ capabilities = ["registries"]
         foreign.id = "unowned:a".into();
         let error = code.declare(&[foreign], &[]).unwrap_err();
         assert!(
-            error.contains("unowned") && error.contains("ruby"),
+            error.contains("unowned:a")
+                && error.contains("owned namespaces")
+                && error.contains("ruby")
+                && error.contains("kaisyn"),
             "{error}"
         );
         // A namespace it does not list is still outside.
