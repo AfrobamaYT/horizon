@@ -23,9 +23,9 @@ fn loader_workers_keep_owning_mod_sets_and_share_only_matching_numeric_payloads(
     for name in ["horizon-resources.json", "facts.json", "block-tags.json"] {
         std::fs::copy(prepared.join(name), scratch.path().join(name)).unwrap();
     }
-    let first: mod_api::Mods = Arc::from([mod_api::ModEntry::new("loader:first", Box::new(Owner))]);
+    let first: mod_api::Mods = Arc::from([mod_api::ModEntry::new("loader_first", Box::new(Owner))]);
     let second: mod_api::Mods =
-        Arc::from([mod_api::ModEntry::new("loader:second", Box::new(Owner))]);
+        Arc::from([mod_api::ModEntry::new("loader_second", Box::new(Owner))]);
     let root = scratch.path();
     let loaded: Vec<_> = std::thread::scope(|owners| {
         [first.clone(), first, second]
@@ -33,18 +33,27 @@ fn loader_workers_keep_owning_mod_sets_and_share_only_matching_numeric_payloads(
             .map(|mods| {
                 owners.spawn(move || {
                     mod_api::testing::with_mods(mods, || {
-                        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+                        mod_api::__private::part_tests::install_parts_fixture(
+                            mod_api::__private::mods(),
+                        )
+                        .unwrap();
                         let ids: Vec<_> = mod_api::__private::installed_code_ids().collect();
                         let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
+                        let installation = mod_api::__private::registry_installation_identity();
+                        assert!(installation.1.is_some());
                         std::thread::scope(|workers| {
-                            // A plain spawn loses the test-local installation.
-                            assert!(
-                                workers
-                                    .spawn(|| mod_api::__private::mods().is_empty())
-                                    .join()
-                                    .unwrap()
-                            );
+                            // A plain spawn loses the test-local Parts installation.
+                            let raw = workers
+                                .spawn(mod_api::__private::registry_installation_identity)
+                                .join()
+                                .unwrap();
+                            assert!(raw.1.is_none());
+                            assert_ne!(raw, installation);
                             named_scope(workers, "installation-test", move || {
+                                assert_eq!(
+                                    mod_api::__private::registry_installation_identity(),
+                                    installation
+                                );
                                 assert_eq!(
                                     mod_api::__private::installed_code_ids().collect::<Vec<_>>(),
                                     ids
