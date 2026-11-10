@@ -109,18 +109,42 @@ mod tests {
         );
     }
     #[test]
-    fn a_crafting_map_cannot_invent_crafting_storage() {
-        let menu = menu();
+    fn persistent_grid_roles_are_valid_but_computed_storage_must_agree() {
+        let persistent = MenuType {
+            slots: 8,
+            results: vec![6],
+            ..menu()
+        };
+        let geometry = mod_api::Screen {
+            slots: vec![Some([8.0, 8.0]); 8],
+            ..screen()
+        };
         let roles = RecipeBookLayout::Crafting {
-            width: 1,
-            height: 1,
-            slots: vec![0],
-            result: 2,
+            width: 3,
+            height: 2,
+            slots: (0..6).collect(),
+            result: 6,
+        };
+        assert!(validate(&[&persistent], "demo:pot", roles.clone(), &geometry).is_ok());
+        let computed = MenuType {
+            crafting: Some(horizon_mod_package::content::MenuCrafting {
+                grid: 0,
+                size: 2,
+                result: 6,
+            }),
+            ..persistent
         };
         assert!(
-            validate(&[&menu], "demo:pot", roles, &screen())
+            validate(&[&computed], "demo:pot", roles, &geometry)
                 .unwrap_err()
                 .contains("InvalidGrid")
         );
+        let matching = RecipeBookLayout::Crafting {
+            width: 2,
+            height: 2,
+            slots: (0..4).collect(),
+            result: 6,
+        };
+        assert!(validate(&[&computed], "demo:pot", matching, &geometry).is_ok());
     }
 }
