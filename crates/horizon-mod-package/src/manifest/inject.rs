@@ -31,7 +31,7 @@ pub struct Inject {
     pub nth: Option<usize>,
     pub ctx: Option<String>,
     pub local: Option<String>,
-    /// Rust type of the selected local or injected field.
+    /// Rust type of the selected local, expression value, or injected field.
     #[serde(rename = "type")]
     pub local_type: Option<String>,
     pub position: Option<Position>,
@@ -203,10 +203,26 @@ impl Inject {
                     ));
                 }
             }
-            if entry.local_type.is_some() != matches!(entry.kind, Kind::ModifyLocal | Kind::Field) {
+            if entry.local_type.is_some()
+                != matches!(
+                    entry.kind,
+                    Kind::ModifyLocal | Kind::Expression | Kind::Field
+                )
+            {
                 return Err(invalid(
                     "type",
-                    "type is required only for modify_local and field",
+                    "type is required only for modify_local, expression and field",
+                ));
+            }
+            if entry.expr.is_some() != (entry.kind == Kind::Expression)
+                || entry
+                    .expr
+                    .as_ref()
+                    .is_some_and(|expr| expr.trim().is_empty())
+            {
+                return Err(invalid(
+                    "expr",
+                    "expression needs expr, the expression as written; other kinds take none",
                 ));
             }
             if entry.local.as_ref().is_some_and(|name| {
@@ -293,6 +309,7 @@ pub enum NoSlotReason {
     WasmSitesUnsupported,
     LocalSourceOnly,
     FieldRequiresSource,
+    ExpressionSourceOnly,
     ApiSitesUnsupported,
     SourcePending,
     NoApiRecord,
@@ -310,6 +327,7 @@ impl fmt::Display for NoSlotReason {
             }
             Self::LocalSourceOnly => "modify_local requires native internals source rebuilding; use internals, or request a hook",
             Self::FieldRequiresSource => "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
+            Self::ExpressionSourceOnly => "expression requires native internals source rebuilding; use internals, or request a hook",
             Self::ApiSitesUnsupported => "API call-site injections require internals",
             Self::SourcePending => "source injects pending (U5)",
             Self::NoApiRecord => "no API record: a parameter has no API type yet",
@@ -422,6 +440,11 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
             Some(NoSlotReason::LocalSourceOnly)
         }
         Kind::Field => Some(NoSlotReason::FieldRequiresSource),
+        Kind::Expression
+            if entry.target != Target::Native || inject.access != Access::Internals =>
+        {
+            Some(NoSlotReason::ExpressionSourceOnly)
+        }
         _ => None,
     } {
         return Err(InjectError::NoSlot {
@@ -704,6 +727,7 @@ mod tests {
                     if let Some(pending) = match kind {
                         Kind::ModifyLocal => Some(NoSlotReason::LocalSourceOnly),
                         Kind::Field => Some(NoSlotReason::FieldRequiresSource),
+                        Kind::Expression => Some(NoSlotReason::ExpressionSourceOnly),
                         _ => None,
                     } {
                         for target in [Target::Native, Target::Wasm] {

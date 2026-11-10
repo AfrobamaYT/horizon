@@ -150,6 +150,17 @@ fn each_refusal_names_what_changed_or_why() {
             && unpinned.contains("inject add"),
         "{unpinned}"
     );
+    // Routed as a head, an internals replace would run beside the body instead of replacing it.
+    let replace = refused(
+        inject("chemlib::transfer", Kind::Replace, Access::Internals, &hash),
+        &same,
+    );
+    assert!(
+        replace.starts_with("E_INJECT_NO_SLOT")
+            && replace.contains("addon:listen")
+            && replace.contains("api replace only"),
+        "{replace}"
+    );
 }
 
 #[test]

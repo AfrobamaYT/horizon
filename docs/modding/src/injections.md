@@ -139,7 +139,28 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites and internals `replace` are refused. Mutable locals and fields use the native source routes described below.
+
+An internals `replace` (native only; wasm refuses it at load with the internals refusal) has the same
+contract through the point's raw form. Its function takes the real receiver and the raw record,
+`&mut` to every argument in its engine type, and returns the function's own return type, `()` at a
+unit point, where the cancel is forced:
+
+```rust,ignore
+pub fn own_tick(game: &mut internals::game::Game<'_>, raw: &mut internals::raw::__TickRaw<'_>) {
+    // the body of `Game::tick` never runs; this does instead
+}
+```
+
+A free or associated function has no receiver: the function takes the raw record alone. It runs after
+every API and internals head listener at the point, whatever its priority: they may change its
+arguments, and an internals head that sets `result` or `cancel` before it is overruled by it. One
+replace owns a point whatever the tier: an API and an internals replace, or two internals ones, at the
+same point refuse the second at registration, naming both mods. A replacing mod that stops or is
+disabled hands the function back. The point must be listed with a raw form whose record carries the
+outcome: a borrowed return (no raw `result`) and a `Result<(), E>` (whose cancel answers `Ok(())`)
+refuse it at load, naming the point and type, and an unlisted function refuses it naming the slot row
+to add. The launcher emits it as `mod_points::replace!(internals …)`.
+API call sites are refused. Locals and fields use the native source routes described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -933,3 +954,41 @@ Injected mod fields must not change engine equality, ordering or hashing. Target
 `PartialEq`, `Eq`, `PartialOrd`, `Ord` or `Hash` are currently refused with `E_INJECT_FIELD`;
 a neutral comparison wrapper is follow-up work. Hand-written comparison implementations
 ignore the injected field. `Debug`, `Clone` and `Default` keep their normal field behavior.
+### Expressions (native source rebuild only)
+
+`expression` replaces one value the function reads: a literal (`64.0`, `-1`, `"name"`), a
+constant's path (`MAX_REACH`) or a field read (`self.speed`). It requires
+`access = "internals"` and a rebuild from source, and takes `expr`, `type`, `nth` and `ctx`;
+`call`, `local` and `position` are refused:
+
+```toml
+[[inject]]
+id = "farther"
+at = "horizon_client::game::Game<'_>::reach"
+kind = "expression"
+access = "internals"
+with = "farther"
+hash = "<function hash>"
+expr = "64.0"
+type = "f64"
+nth = 0
+ctx = "<statement context>"
+```
+
+The callback `fn farther(value: f64) -> f64` gets the value the game would use and returns the
+one it uses instead; listeners chain in the usual priority order, and no Host is passed. `expr`
+is matched as Rust tokens, so spacing doesn't matter. `nth` counts the matching reads in the
+function from 0, in source order, and `ctx` pins the statement it sits in, as for call sites.
+Reads a value can't stand in for are not counted: an assignment's place, a borrow's operand
+(`&LIMIT`) and a method's receiver (`4u32.max(1)`), along with constant contexts and nested items.
+
+`type` is the value's Rust type: a copied scalar (`i8` … `u128`, `isize`, `usize`, `f32`, `f64`,
+`bool`, `char`) or `&'static str`. A suffixed literal whose suffix differs is refused before the
+build. An unsuffixed literal, a constant or a field takes the declared type as written; when the
+game uses another type there, the build fails with `E_INJECT_EXPRESSION_TYPE`, naming each mod
+and inject id that declared the site, the type, the expression and the function.
+
+When the function changes and `ctx` no longer matches, the refusal (`E_INJECT_LOST`) lists every
+matching read now in the function as `nth = …, ctx = "…"`, so the declaration can be fixed without
+staging the game. Mods declaring the same read with the same type share one site. API access and
+wasm permanently refuse it; use native internals or request a hook.

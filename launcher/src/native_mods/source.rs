@@ -130,6 +130,42 @@ pub(super) fn stage(
                 });
                 continue;
             }
+            if let Some(expr) = &inject.expr {
+                let ty = inject.local_type.clone().expect("validated type");
+                let ordinal = inject.nth.expect("validated ordinal");
+                let ctx = inject.ctx.clone().expect("validated statement identity");
+                let origin = format!("{}:{}", manifest.id, inject.id);
+                let target = super::internals::plain_path(&inject.at);
+                // Mods declaring the same read with the same type share its site; a failure there
+                // names each of them.
+                calls
+                    .entry((
+                        target.clone(),
+                        expr.clone(),
+                        ordinal,
+                        ctx.clone(),
+                        None,
+                        Some(ty.clone()),
+                        None,
+                    ))
+                    .and_modify(|declaration: &mut Declaration| {
+                        let expression = declaration.expression.as_mut().expect("expression site");
+                        expression.origin = format!("{}, {origin}", expression.origin);
+                    })
+                    .or_insert(Declaration {
+                        local: None,
+                        expression: Some(horizon_mod_api_gen::sites::Expression {
+                            ty,
+                            origin: origin.clone(),
+                        }),
+                        target,
+                        selector: expr.clone(),
+                        ordinal: Some(ordinal),
+                        ctx,
+                        origin,
+                    });
+                continue;
+            }
             if let Some(call) = &inject.call {
                 let target = super::internals::plain_path(&inject.at);
                 let selector = call.clone();

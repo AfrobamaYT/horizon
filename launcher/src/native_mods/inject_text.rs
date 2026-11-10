@@ -71,6 +71,7 @@ mod tests {
             NoSlotReason::WasmSitesUnsupported,
             NoSlotReason::LocalSourceOnly,
             NoSlotReason::FieldRequiresSource,
+            NoSlotReason::ExpressionSourceOnly,
             NoSlotReason::ApiSitesUnsupported,
             NoSlotReason::SourcePending,
             NoSlotReason::NoApiRecord,
