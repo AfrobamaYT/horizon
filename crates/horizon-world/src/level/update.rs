@@ -720,11 +720,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let mut state = self.state(relative);
             if self.b.table.is(state, self.b.named.comparator) {
                 self.neighbor_changed_full(state, relative, block, false);
-            } else if self.is_redstone_conductor(state, relative) {
+            }
+            self.level
+                .observe_block_entity_neighbor(relative, state, pos);
+            if !self.b.table.is(state, self.b.named.comparator)
+                && self.is_redstone_conductor(state, relative)
+            {
                 relative = rel(relative, direction);
                 state = self.state(relative);
                 if self.b.table.is(state, self.b.named.comparator) {
                     self.neighbor_changed_full(state, relative, block, false);
+                }
+                if self.level.receives_weak_changes(relative, state) {
+                    self.level
+                        .observe_block_entity_neighbor(relative, state, pos);
                 }
             }
         }

@@ -9,12 +9,12 @@ use std::{
     path::PathBuf,
     sync::OnceLock,
 };
-struct Fixture {
-    registry: BlockRegistry,
-    behaviours: Behaviours,
+pub(super) struct Fixture {
+    pub(super) registry: BlockRegistry,
+    pub(super) behaviours: Behaviours,
 }
 
-fn fixture() -> Option<&'static Fixture> {
+pub(super) fn fixture() -> Option<&'static Fixture> {
     static FIXTURE: OnceLock<Option<Fixture>> = OnceLock::new();
     FIXTURE
         .get_or_init(|| {
@@ -94,7 +94,7 @@ pub(crate) struct TestLevel {
     pub opened: HashSet<BlockPos>,
 }
 impl TestLevel {
-    fn new(b: &Behaviours) -> Self {
+    pub(super) fn new(b: &Behaviours) -> Self {
         Self {
             blocks: HashMap::new(),
             air: b.air(),

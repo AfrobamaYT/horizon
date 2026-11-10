@@ -864,6 +864,18 @@ pub trait LevelAccess {
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// A block entity changed beside this cell, after vanilla comparator processing.
+    fn observe_block_entity_neighbor(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _neighbor: BlockPos,
+    ) {
+    }
+    /// Whether this cell receives changes through an intervening conductor.
+    fn receives_weak_changes(&self, _pos: BlockPos, _state: BlockStateId) -> bool {
+        false
+    }
     /// Whether a signal query needs the weak-power block hook.
     fn has_weak_power_hook(&self) -> bool {
         false
@@ -1763,3 +1775,6 @@ mod dimension_key_tests {
         assert_eq!(vanilla_sea_level(custom), 63);
     }
 }
+
+#[cfg(test)]
+mod block_entity_neighbor_tests;

@@ -8,7 +8,6 @@ use loading_screen::{
     App, Loading, leave_fullscreen_after, missing_resources, run_event_loop, unclean_start_recovery,
 };
 use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
-
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
 /// `stations` methods read the same tables, but taking `&self` blocks a
@@ -49,7 +48,6 @@ macro_rules! world_biomes {
         }
     };
 }
-
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOverlay<'_> {
     match world_tables {
@@ -1387,6 +1385,8 @@ impl LevelAccess for GameLevel<'_> {
         }
         source
     }
+    fn observe_block_entity_neighbor(&self, pos: BlockPos, state: BlockStateId, neighbor: BlockPos) { self.block_entity_neighbor_notice(pos, state, neighbor); }
+    fn receives_weak_changes(&self, pos: BlockPos, state: BlockStateId) -> bool { self.block_entity_weak_changes(pos, state) }
     fn has_weak_power_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldCheckWeakPower)
