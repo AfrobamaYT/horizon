@@ -103,7 +103,8 @@
       "horizon-mod-vocab",
       "horizon-mod-api-gen",
       "horizon-mod-api-macros",
-      "horizon-mod-point-shape"
+      "horizon-mod-point-shape",
+      "horizon-game-discovery"
     ],
     "forbidden": [
       "arboard",
