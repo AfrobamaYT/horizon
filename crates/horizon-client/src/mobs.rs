@@ -100,6 +100,7 @@ pub mod suffocation;
 pub mod sulfur_cube;
 pub mod sync;
 pub mod tame;
+mod target;
 pub mod trader;
 pub mod transport_items;
 pub mod trial_spawner;
@@ -118,7 +119,6 @@ use living::totem_death_effects;
 pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
-
 /// A mob's stored active effect with its registry index resolved once at creation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoredEffect {
@@ -1331,6 +1331,7 @@ pub struct Extra {
     /// `Fox.DATA_TRUSTED_ID_0` and `_1`: the players a fox trusts, first free
     /// slot first, and a third replaces the second (`Fox.addTrustedEntity`).
     pub trusted: [Option<[i32; 4]>; 2],
+    pub last_stare_sound: Option<u32>,
     /// `Animal.LoveCause`: the player who fed this animal into love, which a
     /// fox's breeding hands to its baby as trust (`Fox.FoxBreedGoal.breed`).
     pub love_cause: Option<[i32; 4]>,
@@ -2359,6 +2360,7 @@ pub enum MobEvent {
         mob: u32,
         target: Who,
     },
+    PiglinAlertTarget(undead::PiglinAlert),
     /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
     /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
     HoglinAttackTarget {
@@ -4839,10 +4841,8 @@ impl Mob {
     /// Movement speed attribute bonus (baby zombies, sprinting modifiers).
     /// MOVEMENT_SPEED including effects (speed +20%/level, slowness -15%/level).
     pub fn movement_speed(&self) -> f64 {
-        let mut v = strider::movement_speed(
-            self,
-            witch::speed(self, self.attrs.speed) + enderman::attacking_speed(self),
-        ) * self.speed_bonus();
+        let mut v = strider::movement_speed(self, witch::speed(self, self.attrs.speed))
+            * self.speed_bonus();
         // LivingEntity.SPEED_MODIFIER_SPRINTING: 0.3F, ADD_MULTIPLIED_TOTAL.
         if self.extra.sprinting {
             v *= 1.0 + f64::from(0.3f32);

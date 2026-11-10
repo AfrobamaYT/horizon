@@ -8,7 +8,6 @@ mod borrowed_tick;
 mod death_tail;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
-
 mod projectile_world;
 mod pufferfish_player;
 mod residency;
@@ -3276,6 +3275,7 @@ impl Game<'_> {
                         .or(self.lan_acting);
                     self.set_event_ai_target(mob, Some(target), player);
                 }
+                MobEvent::PiglinAlertTarget(alert) => self.piglin_alert_target(alert),
                 MobEvent::HoglinAttackTarget { mob, target } => {
                     let places: Vec<(u32, horizon_core::geometry::Vec3)> = self
                         .mobs
@@ -8381,7 +8381,7 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         self.rendered_mobs.set(0);
-        let skinning = self.skinning();
+        let (skinning, listened) = (self.skinning(), self.mob_render_listened());
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -8497,16 +8497,13 @@ impl Game<'_> {
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
                 .map(|name| PlayerRender { name, local: false });
-            let mut hidden = mod_api::HiddenParts::default();
-            let modded = if layers_only {
-                false
-            } else if let Some(who) = who {
-                let drawn;
-                (drawn, hidden) =
-                    self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out);
-                drawn
-            } else {
-                !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out)
+            let (modded, hidden) = match who {
+                _ if layers_only => (false, mod_api::HiddenParts::default()),
+                Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
+                None => (
+                    !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
+                    mod_api::HiddenParts::default(),
+                ),
             };
             if modded {
                 if let Some(rgb) = outline {
@@ -8551,7 +8548,7 @@ impl Game<'_> {
                     mob.species(),
                     Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
                 );
-            let mut skinned = None;
+            let (mut skinned, mut parts) = (None, None);
             if posable {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
@@ -8564,6 +8561,7 @@ impl Game<'_> {
                     &lookup,
                     packed,
                     self.res.mob_data(),
+                    listened.then_some(&mut parts),
                     out,
                     &mut skin,
                 );
@@ -8578,6 +8576,7 @@ impl Game<'_> {
                         packed,
                         self.res.mob_data(),
                         &armor,
+                        listened.then_some(&mut parts),
                         out,
                     );
                 } else {
@@ -8590,6 +8589,7 @@ impl Game<'_> {
                         self.res.mob_data(),
                         &armor,
                         hidden,
+                        listened.then_some(&mut parts),
                         out,
                     );
                 }
@@ -8652,7 +8652,7 @@ impl Game<'_> {
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-                self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+                self.mod_mob_layer_geometry(mob, who, parts, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
