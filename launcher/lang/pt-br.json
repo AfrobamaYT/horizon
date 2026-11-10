@@ -308,7 +308,7 @@
   "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.": "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.",
   "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.": "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
   "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.": "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.",
-  "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source listeners, helpers or modules. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source listeners, helpers or modules. Use cargo horizon-mod internals add for this mod.",
+  "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.",
   "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}": "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}",
   "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.": "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.",
   "Each switch is off unless you turn it on. What it sends is below it; the privacy page on playhorizon.dev says how long it is kept.": "Todas as opções ficam desativadas por padrão. As informações enviadas são descritas logo abaixo de cada uma, e a página de privacidade em playhorizon.dev informa por quanto tempo elas são armazenadas.",
@@ -1187,7 +1187,6 @@
   "entities": "Entidades",
   "environment": "Ambiente",
   "equipment": "Equipamento",
-  "extension slots pending (I6)": "extension slots pending (I6)",
   "failed": "falhou",
   "first build": "primeira compilação",
   "fonts": "Fontes",
@@ -1359,5 +1358,6 @@
   "{version} is not installed": "{version} não está instalada",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ou .mcp.json em um projeto)",
   "← All servers": "← Todos os servidores",
-  "← Newer": "← Mais recentes"
+  "← Newer": "← Mais recentes",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync"
 }

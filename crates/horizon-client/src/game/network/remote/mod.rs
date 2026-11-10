@@ -6,6 +6,8 @@
 //! clicks). The player still moves with the local physics, as the vanilla
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
+mod recipe_properties;
+
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::render_tick::{mob_tracking_body, player_tracking_body};
 use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
@@ -1305,23 +1307,6 @@ impl Game<'_> {
         self.adv = Default::default();
         self.stats = Default::default();
         Ok(())
-    }
-
-    /// Minecraft.disconnect's `ClientPlayerNetworkEvent.LoggingOut`: on
-    /// leaving a world, and on quitting the game from one. Once per
-    /// connection, whichever way out runs first.
-    pub(super) fn client_logging_out(&mut self) {
-        let Some(remote) = self.remote.as_mut().filter(|r| !r.logged_out) else {
-            return;
-        };
-        remote.logged_out = true;
-        let player = self
-            .player
-            .as_ref()
-            .map(|_| (remote.entity_id, remote.profile));
-        self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
-        self.native_lifecycle.begin_close();
-        self.native_lifecycle_world_closed();
     }
 
     /// Prepare a client session and remote state to receive packets from a studio replay.
@@ -5365,6 +5350,7 @@ impl Game<'_> {
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
             C::MountScreenOpen(p) => self.remote_open_mount(p),
+            C::UpdateRecipes(p) => self.remote_recipe_properties(p),
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
@@ -16808,6 +16794,7 @@ mod tests {
         let enchantments = Enchantments::default();
         let names = Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::game::test_server_load()

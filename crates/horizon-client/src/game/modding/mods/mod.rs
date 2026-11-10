@@ -891,8 +891,27 @@ pub(super) fn content_root(
     })?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
+    register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
+}
+
+/// Publish the built-in registry orders mods iterate. The report already
+/// includes the types and menus the content overlay registered, in registration
+/// order (`BuiltInRegistries` protocol ids).
+fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
+    use horizon_protocol::registry::Builtin;
+    let path = Builtin::find(root).ok_or("registries.json not found")?;
+    let builtin = Builtin::load(&path)?;
+    if let Some(ids) = builtin.get("minecraft:entity_type") {
+        mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    if let Some(ids) = builtin.get("minecraft:menu") {
+        mod_api::__private::resolve_menus(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    Ok(())
 }
 
 fn register_block_entity_types(

@@ -30,6 +30,11 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::item_compost_chance` | crosses | Wire call |
 | `Host::enchantments_compatible` | crosses | Wire call |
 | `Host::entity_type_in_tag` | crosses | Wire call |
+| `Host::block_keys` | crosses | Wire call |
+| `Host::item_keys` | crosses | Wire call |
+| `Host::entity_type_keys` | crosses | Wire call |
+| `Host::menu_keys` | crosses | Wire call |
+| `Host::enchantment_keys` | crosses | Wire call |
 | `Host::is_loaded` | crosses | Wire call |
 | `Host::chunk` | crosses | Wire call |
 | `Host::living` | crosses | Wire call |
@@ -335,6 +340,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::block_key` | crosses | Wire call |
 | `Backend::effect_key` | crosses | Wire call |
 | `Backend::block_entity_type_key_id` | crosses | Wire call |
+| `Backend::entity_type_key_id` | crosses | Wire call |
+| `Backend::menu_key_id` | crosses | Wire call |
+| `Backend::enchantment_key_id` | crosses | Wire call |
 | `Backend::level_find_closest_biome` | crosses | Wire call |
 | `Backend::level_find_nearest_structure` | crosses | Wire call |
 | `Backend::level_get_sky_darken` | crosses | Wire call |
@@ -970,6 +978,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::register_key_mapping` | crosses | Wire call |
 | `Registrar::attach_menu_part` | crosses | Wire call |
 | `Registrar::particle_key` | crosses | Wire call |
+| `Registrar::recipe_book_type` | crosses | Wire call |
 | `Registrar::register_setting` | crosses | Wire call |
 | `Registrar::declare_spawn_placement` | crosses | Wire call |
 | `Registrar::add_structure_type` | crosses | Wire call |
@@ -1718,6 +1727,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemPart::use_animation` | crosses | Wire call |
 | `ItemPart::on_use_tick` | crosses | Wire call |
 | `ItemPart::release_using` | crosses | Wire call |
+| `ItemPart::crafting_remainder` | crosses | Wire call |
 | `ItemPart::item_interact_mob` | crosses | Wire call |
 | `ItemPart::on_item_use_first` | crosses | Wire call |
 | `MenuPart::menu_subscribed` | crosses | Wire call |
