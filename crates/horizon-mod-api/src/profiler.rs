@@ -417,6 +417,7 @@ mod tests {
     fn overflow_tokens_do_not_alias_records_or_lose_crash_owners() {
         let _serial = SERIAL.lock().unwrap();
         stop();
+        TIME.with(|time| time.set(0));
         assert!(start_with_clock(tick));
         let mut guards: Vec<_> = (0..CALLS)
             .map(|_| enter_native_mod(call("nested", "frame", None)))
@@ -435,7 +436,12 @@ mod tests {
         assert_eq!(ACTIVE.load(SeqCst), 0);
         let report = stop_report();
         assert_eq!(report.dropped, 1);
-        assert_eq!(report.calls[&("nested", "frame", None)].count, CALLS as u64);
+        let nested = &report.calls[&("nested", "frame", None)];
+        assert_eq!(nested.count, CALLS as u64);
+        // The deterministic clock yields odd inclusive durations 1 .. 8191.
+        // A sentinel aliasing any real record breaks these bounds.
+        assert_eq!(nested.min, 1);
+        assert_eq!(nested.max, (2 * CALLS - 1) as u64);
         assert!(!report.calls.contains_key(&("overflow", "frame", None)));
     }
 
