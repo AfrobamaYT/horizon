@@ -91,8 +91,8 @@ pub(super) struct Changes {
     downfall: Option<Number>,
     has_precipitation: Option<bool>,
     temperature_modifier: Option<String>,
-    /// `effects` colours by name, as 24-bit RGB.
-    colours: Vec<(&'static str, u32)>,
+    /// `effects` colours by name, as 24-bit RGB; `None` removes the override.
+    colours: Vec<(&'static str, Option<u32>)>,
     /// Whole `attributes` values (ambient particles, ambient sounds, music), checked.
     attributes: Vec<(&'static str, Value)>,
 }
@@ -187,14 +187,19 @@ fn attribute(key: &str, v: &Value) -> std::result::Result<Value, String> {
 }
 
 /// The colours of `effects` that `horizon:modify_biome` sets.
-const COLOURS: [&str; 6] = [
+const COLOURS: [&str; 7] = [
     "sky_color",
     "fog_color",
     "water_color",
     "water_fog_color",
     "foliage_color",
+    "dry_foliage_color",
     "grass_color",
 ];
+
+/// The colours that are optional in 26.3's `BiomeSpecialEffects`: a `null` removes them. The
+/// others are required or are attributes, so they cannot be removed.
+const REMOVABLE: [&str; 3] = ["foliage_color", "dry_foliage_color", "grass_color"];
 
 /// A colour as an integer 0..=0xFFFFFF or a `#rrggbb` string.
 fn colour(v: &Value) -> Option<u32> {
@@ -238,8 +243,14 @@ impl Changes {
                         .iter()
                         .find(|c| *c == key)
                         .ok_or_else(|| format!("effects: unknown colour {key}"))?;
-                    let rgb = colour(value)
-                        .ok_or_else(|| format!("effects.{key}: not a colour 0..=0xFFFFFF"))?;
+                    let rgb =
+                        match value {
+                            Value::Null if REMOVABLE.contains(name) => None,
+                            Value::Null => return Err(format!("effects.{key}: cannot be removed")),
+                            value => Some(colour(value).ok_or_else(|| {
+                                format!("effects.{key}: not a colour 0..=0xFFFFFF")
+                            })?),
+                        };
                     colours.push((*name, rgb));
                 }
             }
@@ -881,6 +892,12 @@ fn modify(biome: &mut J, changes: &Changes) {
                 ("attributes", format!("minecraft:visual/{name}"))
             }
             _ => ("effects", (*name).to_owned()),
+        };
+        let Some(rgb) = rgb else {
+            if let Some(map) = biome.get_mut(section) {
+                map.remove(&key);
+            }
+            continue;
         };
         if biome.get(section).is_none() {
             biome.set(section, J::Obj(Vec::new()));

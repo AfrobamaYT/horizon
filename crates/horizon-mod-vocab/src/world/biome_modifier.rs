@@ -33,6 +33,20 @@ pub struct BiomeModifierSpawner {
     pub max_count: u32,
 }
 
+/// A change to a colour that 26.3 treats as an optional override of the biome's `effects`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
+pub enum BiomeColourChange {
+    /// Sets the colour, 24-bit RGB (0..=0xFFFFFF).
+    Set {
+        /// The colour.
+        rgb: u32,
+    },
+    /// Removes the override, so the colour comes from the colormap again.
+    Remove,
+}
+
 /// One ambient particle of a biome (`minecraft:visual/ambient_particles`).
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: a mod builds it with a literal; the game reads it
@@ -155,10 +169,12 @@ pub enum BiomeModifierOperation {
         water_color: Option<u32>,
         /// `effects.water_fog_color`, 24-bit RGB.
         water_fog_color: Option<u32>,
-        /// `effects.foliage_color`, 24-bit RGB.
-        foliage_color: Option<u32>,
-        /// `effects.grass_color`, 24-bit RGB.
-        grass_color: Option<u32>,
+        /// `effects.foliage_color`: set it or remove the override.
+        foliage_color: Option<BiomeColourChange>,
+        /// `effects.dry_foliage_color`: set it or remove the override.
+        dry_foliage_color: Option<BiomeColourChange>,
+        /// `effects.grass_color`: set it or remove the override.
+        grass_color: Option<BiomeColourChange>,
         /// `minecraft:visual/ambient_particles`: replaces the biome's particles (an empty list
         /// removes them).
         ambient_particles: Option<Vec<BiomeAmbientParticle>>,
@@ -280,6 +296,7 @@ impl BiomeModifier {
                 water_color,
                 water_fog_color,
                 foliage_color,
+                dry_foliage_color,
                 grass_color,
                 ambient_particles,
                 ambient_loop,
@@ -289,6 +306,15 @@ impl BiomeModifier {
                 music_volume,
                 ..
             } => {
+                let change = |c: &Option<BiomeColourChange>| match c {
+                    Some(BiomeColourChange::Set { rgb }) => Some(*rgb),
+                    _ => None,
+                };
+                let (foliage_color, dry_foliage_color, grass_color) = (
+                    change(foliage_color),
+                    change(dry_foliage_color),
+                    change(grass_color),
+                );
                 let id = |s: &String| name_ok(s, false);
                 let unit = |n: &f64| (0.0..=1.0).contains(n);
                 let ticks = |n: &u32| i32::try_from(*n).is_ok();
@@ -319,8 +345,9 @@ impl BiomeModifier {
                     fog_color,
                     water_color,
                     water_fog_color,
-                    foliage_color,
-                    grass_color,
+                    &foliage_color,
+                    &dry_foliage_color,
+                    &grass_color,
                 ];
                 let modifier = temperature_modifier
                     .as_deref()
@@ -413,6 +440,7 @@ impl BiomeModifier {
                 water_color,
                 water_fog_color,
                 foliage_color,
+                dry_foliage_color,
                 grass_color,
                 ambient_particles,
                 ambient_loop,
@@ -481,16 +509,23 @@ impl BiomeModifier {
                     }
                 }
                 let mut effects = serde_json::Map::new();
+                let change = |c: &Option<BiomeColourChange>| match c {
+                    Some(BiomeColourChange::Set { rgb }) => Some(json!(rgb)),
+                    // `null` removes the override.
+                    Some(BiomeColourChange::Remove) => Some(Value::Null),
+                    None => None,
+                };
                 for (key, colour) in [
-                    ("sky_color", sky_color),
-                    ("fog_color", fog_color),
-                    ("water_color", water_color),
-                    ("water_fog_color", water_fog_color),
-                    ("foliage_color", foliage_color),
-                    ("grass_color", grass_color),
+                    ("sky_color", sky_color.map(|c| json!(c))),
+                    ("fog_color", fog_color.map(|c| json!(c))),
+                    ("water_color", water_color.map(|c| json!(c))),
+                    ("water_fog_color", water_fog_color.map(|c| json!(c))),
+                    ("foliage_color", change(foliage_color)),
+                    ("dry_foliage_color", change(dry_foliage_color)),
+                    ("grass_color", change(grass_color)),
                 ] {
                     if let Some(colour) = colour {
-                        effects.insert(key.into(), json!(colour));
+                        effects.insert(key.into(), colour);
                     }
                 }
                 if !effects.is_empty() {
@@ -570,6 +605,7 @@ mod tests {
                 water_color: Some(0x3938c9),
                 water_fog_color: None,
                 foliage_color: None,
+                dry_foliage_color: None,
                 grass_color: None,
                 ambient_particles: None,
                 ambient_loop: None,
@@ -611,6 +647,7 @@ mod tests {
             water_color: None,
             water_fog_color: None,
             foliage_color: None,
+            dry_foliage_color: None,
             grass_color: None,
             ambient_particles: Some(vec![BiomeAmbientParticle {
                 particle: "minecraft:ash".into(),
@@ -634,6 +671,35 @@ mod tests {
             }),
             music_volume: Some(0.5),
         }
+    }
+
+    #[test]
+    fn modify_biome_sets_or_removes_the_optional_colour_overrides() {
+        let mut op = effects();
+        if let BiomeModifierOperation::ModifyBiome {
+            foliage_color,
+            dry_foliage_color,
+            grass_color,
+            ..
+        } = &mut op
+        {
+            *foliage_color = Some(BiomeColourChange::Remove);
+            *dry_foliage_color = Some(BiomeColourChange::Set { rgb: 0x8c3a04 });
+            *grass_color = Some(BiomeColourChange::Set { rgb: 0x1000000 });
+        }
+        assert_eq!(
+            modifier(op.clone()).check(),
+            Err(BiomeModifierError::InvalidValue)
+        );
+        if let BiomeModifierOperation::ModifyBiome { grass_color, .. } = &mut op {
+            *grass_color = Some(BiomeColourChange::Remove);
+        }
+        assert_eq!(modifier(op.clone()).check(), Ok(()));
+        let file: Value = serde_json::from_str(&modifier(op).json()).unwrap();
+        assert_eq!(
+            file["effects"],
+            json!({"foliage_color": null, "dry_foliage_color": 0x8c3a04, "grass_color": null})
+        );
     }
 
     #[test]

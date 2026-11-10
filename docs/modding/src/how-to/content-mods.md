@@ -740,7 +740,7 @@ removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own 
 `MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
 type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
 (`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
-`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+`foliage_color`, `dry_foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
 
 ```json
 {
@@ -757,6 +757,13 @@ sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 2
 type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
 modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
 here, so the API names no phase for them.
+
+A `null` for `foliage_color`, `dry_foliage_color` or `grass_color` removes that override from the biome's `effects`, so the
+colormap tints it again; removing one the biome lacks changes nothing. The other colours are required or are attributes,
+so a `null` there skips the modifier with a warning. The removal form is inferred from the title of NeoForge's change
+"Add ability to remove color overrides in BiomeSpecialEffectsBuilder" (neoforged/NeoForge#3528, `26.3.0.19-beta`), whose
+field list is not public; it is not confirmed against NeoForge's code. In code, `foliage_color`, `dry_foliage_color` and
+`grass_color` are `Option<BiomeColourChange>` (`Set { rgb }` or `Remove`).
 
 A modifier also sets the biome's ambient and music attributes, in an `attributes` object with the vanilla keys and
 values of a biome file (`warped_forest.json` has all of them). Each key present replaces the biome's whole value;

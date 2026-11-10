@@ -628,6 +628,62 @@ fn modify_biome_sets_ambient_particles_sounds_and_music() {
     fs::remove_dir_all(scratch).unwrap();
 }
 
+/// A `null` colour removes an optional override (inferred from NeoForge's "remove color overrides"
+/// change); removing one the biome lacks changes nothing, and a required colour cannot be removed.
+#[test]
+fn modify_biome_removes_optional_colour_overrides_only() {
+    let base = biome_base("biome-modifiers-modify-remove");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[
+            (
+                "a-set",
+                r##"{"type":"horizon:modify_biome","biomes":["minecraft:plains","minecraft:desert"],"effects":{"grass_color":"#80a0ff","dry_foliage_color":"#8c3a04"}}"##,
+            ),
+            (
+                "b-remove",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"grass_color":null}}"#,
+            ),
+            (
+                "c-lacks",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"foliage_color":null}}"#,
+            ),
+            (
+                "d-required",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"water_color":null}}"#,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    assert_eq!(
+        warnings.iter().filter(|w| w.contains("skipped")).count(),
+        1,
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("effects.water_color: cannot be removed"))
+    );
+    let after: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let effects = |id: &str| {
+        serde_json::from_str::<serde_json::Value>(&after[id]).unwrap()["effects"].clone()
+    };
+    // Set, then removed; the dry foliage colour set beside it stays; nothing to remove is no-op.
+    assert_eq!(
+        effects("minecraft:plains"),
+        serde_json::json!({"dry_foliage_color": "#8c3a04"})
+    );
+    assert_eq!(
+        effects("minecraft:desert"),
+        serde_json::json!({"grass_color": "#80a0ff", "dry_foliage_color": "#8c3a04"})
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 /// An invalid ambient or music value skips the modifier with a warning naming the attribute.
 #[test]
 fn modify_biome_with_an_invalid_effect_is_skipped_with_a_warning() {
