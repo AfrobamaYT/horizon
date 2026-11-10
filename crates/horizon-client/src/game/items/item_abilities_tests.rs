@@ -145,6 +145,8 @@ fn parts_grant_and_deny_the_abilities_vanilla_asks_of_an_item_isolated() {
             let granted = game
                 .blocks_attacks(&sword)
                 .expect("the part grants blocking");
+            let again = game.blocks_attacks(&sword).unwrap();
+            assert!(std::ptr::eq(granted.as_ref(), again.as_ref()));
             assert_eq!(granted.delay_seconds, 0.0);
             assert_eq!(granted.reductions.len(), 1);
             assert_eq!(granted.reductions[0].horizontal_angle, 90.0);

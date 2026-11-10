@@ -23,7 +23,7 @@ mod mod_api {
 }
 struct Game { conversions: Cell<u32> }
 impl Game {
- fn native_can_perform_action(&self,_:&ItemStack,_:&str,out:&mut bool) { self.conversions.set(self.conversions.get()+1); *out=true; }
+ fn native_can_perform_action(&self,stack:&ItemStack,_:&str,out:&mut bool) { self.conversions.set(self.conversions.get()+1); if stack.item == "subscribed" { *out=true; } }
  METHOD
 }
 #[test] fn conversion_is_scoped() {
