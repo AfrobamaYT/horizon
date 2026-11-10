@@ -586,6 +586,7 @@ impl Game<'_> {
             self.rockets.insert(i, r);
             i += 1;
         }
+        self.entity_sections_stepped(super::entity_sections::Family::Rockets);
     }
     /// `FireworkRocketEntity.explode` and `dealExplosionDamage`.
     fn explode_rocket(&mut self, r: &Rocket) {

@@ -3055,8 +3055,6 @@ struct Game<'a> {
     spawners: spawner::SpawnerState,
     /// Reused candidate buffers for natural spawning.
     spawn_scratch: natural_spawning::SpawnScratch,
-    /// `entity_entering_section`'s view of the level in place (per level: `levels.rs` swaps it).
-    entity_sections: entity_sections::EntitySections,
     trident_model: Option<horizon_client::mobs::Part>,
     arrow_model: Option<horizon_client::mobs::Part>,
     bee_stinger_model: Option<horizon_client::mobs::Part>,
@@ -16521,7 +16519,6 @@ impl<'a> Game<'a> {
             creaking: Default::default(),
             spawners: Default::default(),
             spawn_scratch: Default::default(),
-            entity_sections: Default::default(),
             trident_model: prepared.trident_model,
             arrow_model: prepared.arrow_model,
             bee_stinger_model: prepared.bee_stinger_model,

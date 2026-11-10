@@ -1285,6 +1285,7 @@ impl Game<'_> {
             self.tridents.insert(i, t);
             i += 1;
         }
+        self.entity_sections_stepped(super::entity_sections::Family::Tridents);
     }
     /// ThrownTridentRenderer.
     pub(super) fn trident_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {

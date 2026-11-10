@@ -3795,7 +3795,7 @@ impl Game<'_> {
         }
     }
 
-    pub(in crate::game) fn handle_packet(&mut self, packet: C) -> Result<()> {
+    pub(in crate::game) fn apply_packet(&mut self, packet: C) -> Result<()> {
         self.observe_client_packet(&packet);
         match packet {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
@@ -3971,8 +3971,6 @@ impl Game<'_> {
                     r.sequence = 0;
                 }
                 self.enter_remote_dimension(&p.spawn, true, reason);
-                // The new LocalPlayer is added to its section, untold.
-                self.forget_entity_section(self.own_entity_id() as u32);
                 // handleRespawn adds the new LocalPlayer after what the kept
                 // level holds; a new level holds nothing yet.
                 let before: std::collections::HashSet<u32> =
@@ -6740,8 +6738,6 @@ impl Game<'_> {
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
     pub(super) fn tick_remote(&mut self) -> Result<()> {
         self.tick_remote_level()?;
-        // `EntityEvent.EnteringSection` for what this tick and its packets moved.
-        self.native_entity_sections();
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.
         self.tick_own_rockets();
@@ -11759,10 +11755,6 @@ impl Remote {
     /// (a busy server takes seconds to place a new player) sends nothing.
     pub(in crate::game) fn has_level(&self) -> bool {
         client_has_level(self.logged_in, self.reconfiguring)
-    }
-    /// Every entity the server told this client of, with where it last placed it.
-    pub(super) fn tracked_positions(&self) -> impl Iterator<Item = (i32, [f64; 3])> + '_ {
-        self.entities.iter().map(|(&id, t)| (id, t.position))
     }
     /// An entity the server added to this client level: its type
     /// (`minecraft:text_display`) and its position as last sent.

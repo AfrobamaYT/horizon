@@ -25,8 +25,8 @@ impl Game<'_> {
             attachments.replace_contents(copy);
         }
         self.reinitialize_server_player(uuid, conn);
-        // The new `ServerPlayer` joins its section untold, in whichever level it comes back to.
-        self.forget_entity_section(entity_id as u32);
+        // The new `ServerPlayer` is filed where it is placed, untold.
+        self.entity_section_forget(entity_id as u32);
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(i);
         // AbstractContainerScreen.tick / ServerPlayer.closeContainer: the dead

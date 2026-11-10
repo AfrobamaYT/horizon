@@ -8,16 +8,17 @@ pub trait Hooks {
     /// section differs, so the entity is in another chunk column. `host` is the side that saw
     /// the move. Nothing can be cancelled: the entity is already in its new section.
     ///
-    /// Told on each side for every entity of the level it shows: on the server for each
-    /// entity of every kind in each level and for each player in it, on a client for its own
-    /// player and for each entity its server told it of, where the server last placed it.
-    /// Walking, being pushed, riding, a teleport and a client's position packet all count
-    /// alike. Each side looks once a tick (the server at the end of each level's tick, before
-    /// `level_tick_post`; a client after its tick) and tells each entity once whose section
-    /// changed since it last looked, from the section it was in then: two crossings by one
-    /// entity within a tick are told as one, and a move out and back within a tick is not
-    /// told. An entity joining a level, changing level, or a player respawning starts in its
-    /// section untold, as vanilla adds it to its section without this event.
+    /// Told on each side as the move happens, once for every section change, from the
+    /// section the entity was in before that move: two moves told apart are two events, and a
+    /// move out and one back are two. The moves: an entity's own move in its tick (on the
+    /// server every kind in the level's lists, the fishing hooks and the dragon; on a client
+    /// each entity it shows, where its interpolation puts it), each move a server player sent,
+    /// a teleport (`/tp`, a mod's `teleport_to`), a piston or shulker push, and on a client
+    /// each packet that places an entity (its own player's teleport, a vehicle it drives). Moves
+    /// within one entity's tick are one move. An entity joining a level, changing level, or a
+    /// player respawning starts in its section untold, as vanilla adds it to its section
+    /// without this event; one that moves before its first tick is told. What a listener moves
+    /// is told at the next move, not from inside its own call.
     #[hook(
         side = "both",
         contract = "listen",

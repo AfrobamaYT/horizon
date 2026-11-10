@@ -646,6 +646,7 @@ impl Game<'_> {
         if self.dimension_type().has_ender_dragon_fight {
             self.ensure_exit_portal()?;
         }
+        self.entity_sections_stepped(super::entity_sections::Family::Dragon);
         Ok(())
     }
 

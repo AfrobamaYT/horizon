@@ -1154,6 +1154,7 @@ impl Game<'_> {
         for (i, damage_type) in dead.into_iter().rev() {
             self.break_armor_stand_by_anything(i, damage_type, 0);
         }
+        self.entity_sections_stepped(super::entity_sections::Family::ArmorStands);
         Ok(())
     }
     /// The armor stands' share of `Shulker.onPeekAmountChange`: the opening

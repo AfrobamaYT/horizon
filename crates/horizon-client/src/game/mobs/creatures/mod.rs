@@ -4496,7 +4496,7 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn tick_projectiles(&mut self) -> Result<()> {
+    pub(super) fn tick_projectiles_now(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();
