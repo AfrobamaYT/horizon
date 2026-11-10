@@ -1334,3 +1334,42 @@ fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
         let _ = target;
     }
 
+    /// A carrier file without a prepared operation is an orphan: the
+/// cleanup deletes it at the next open.
+#[test]
+fn an_orphan_carrier_file_is_deleted_by_the_cleanup() {
+    let fixture = Fixture::new("orphan-carrier");
+    let mut store = fixture.store();
+    // A committed assembly's index entry exists, then the journal's
+    // record is gone (a torn last slot leaves the file orphaned).
+    store
+        .begin(OpKind::Assemble, 71, 1, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
+    store
+        .write_carrier(71, 1, b"owned carrier bytes")
+        .unwrap();
+    let carrier = fixture
+        .data()
+        .join(format!("horizon_carrier_{:032x}-1.nbt", 71_u128));
+    assert!(carrier.is_file());
+    // The index still lists it, so this is not an orphan yet: remove
+    // the listing the way a disassembly would, keep the file (the
+    // crash before the durable delete), and the tombstone holds —
+    // then a reopen resolves it. Instead, for the true orphan: the
+    // file exists without any journal knowledge at all.
+    let mut orphan = fixture.store();
+    orphan
+        .write_carrier(72, 1, b"orphaned carrier bytes")
+        .unwrap();
+    // 72 is not in the index and not tombstoned: an orphan.
+    let report = orphan.cleanup().unwrap();
+    assert_eq!(report.orphan_carriers, 1);
+    assert!(!fixture
+        .data()
+        .join(format!("horizon_carrier_{:032x}-1.nbt", 72_u128))
+        .is_file());
+    // The listed carrier (71) survives: it is owned, not orphaned.
+    assert!(carrier.is_file());
+}
+
