@@ -1,11 +1,10 @@
 //! Resolve a published release's channel or exact installed version.
 use super::Release;
 
-pub(super) fn by_tag<'a>(releases: &'a [Release], tag: &str) -> Result<&'a Release, String> {
+pub(super) fn by_tag<'a>(releases: &'a [Release], tag: &str) -> Option<&'a Release> {
     releases
         .iter()
         .find(|release| release.tag == tag || release.nightly.as_deref() == Some(tag))
-        .ok_or_else(|| crate::i18n::trf("No Horizon release is tagged {tag}.", &[("tag", tag)]))
 }
 
 #[cfg(test)]
@@ -46,8 +45,8 @@ mod tests {
     #[test]
     fn an_unknown_tag_never_falls_back_to_an_available_build() {
         let releases = published("nightly");
-        assert!(by_tag(&releases, "nightly-2026-11-09").is_err());
-        assert!(by_tag(&releases, "nightly-2026-11-10-deadbee").is_err());
-        assert!(by_tag(&[], "nightly").is_err());
+        assert!(by_tag(&releases, "nightly-2026-11-09").is_none());
+        assert!(by_tag(&releases, "nightly-2026-11-10-deadbee").is_none());
+        assert!(by_tag(&[], "nightly").is_none());
     }
 }

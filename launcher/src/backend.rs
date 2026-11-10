@@ -3174,7 +3174,9 @@ mod release_selection;
 pub fn release_notes(tag: Option<&str>) -> Result<Release, String> {
     let releases = releases()?;
     match tag {
-        Some(tag) => release_selection::by_tag(&releases, tag).cloned(),
+        Some(tag) => release_selection::by_tag(&releases, tag)
+            .cloned()
+            .ok_or_else(|| format!("No Horizon release is tagged {tag}.")),
         None => releases
             .into_iter()
             .next()
@@ -3354,7 +3356,8 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
             .find(|r| r.asset.is_some() && !r.prerelease)
             .ok_or("No release has a build for this platform yet.")?
     } else {
-        release_selection::by_tag(&releases, tag)?
+        release_selection::by_tag(&releases, tag)
+            .ok_or_else(|| format!("No Horizon release is tagged {tag}."))?
     };
     if release.asset.is_none() {
         return Err(format!("{} has no build for this platform.", release.tag));
