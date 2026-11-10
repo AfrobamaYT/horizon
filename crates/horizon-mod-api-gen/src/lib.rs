@@ -8,7 +8,9 @@ pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 pub use game_modules::materialize_game_modules;
 mod host;
 mod layout;
+mod named_hooks;
 mod parts;
+pub mod wire_types;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
@@ -471,7 +473,9 @@ pub enum Target {
     Client,
 }
 
-/// Fill new hooks' placeholders in hand-written source. Never writes generated files.
+/// Fill new hooks' placeholders in `game/native_hooks/`. Never writes generated files.
+/// Named hooks in other logical game modules must already call their own dispatch;
+/// this command validates them but never fills or rewrites their bodies.
 pub fn fill_hooks(root: &Path) -> Result<(), String> {
     sources(root, FillMode::Fill).map(|_| ())
 }
@@ -609,6 +613,23 @@ mod host_param;
 mod index;
 mod wire;
 pub use wire::generate as generate_wire;
+pub use wire::generate_coverage as generate_wire_coverage;
+
+static GENERATED_ON_STDOUT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// For a tool that prints generated text on stdout (`xtask mod-api coverage`): the generator's
+/// `cargo:rerun-if-changed` lines, meant for a build script's Cargo, are left out of it.
+pub fn generated_on_stdout() {
+    GENERATED_ON_STDOUT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tells the build script's Cargo to rerun it when `path` changes.
+pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
+    if !GENERATED_ON_STDOUT.load(std::sync::atomic::Ordering::Relaxed) {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_table;
@@ -1113,3 +1134,6 @@ mod tests {
         );
     }
 }
+
+/// Native source-only transient fields.
+pub mod fields;

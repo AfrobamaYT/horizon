@@ -162,8 +162,9 @@ pub trait LevelsBackend {
     /// its entity handles cannot resolve until the level is in place. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings, other special entities and the dragon
-    /// are not on the entity-list walk.
+    /// yet resolve; frames, paintings and other special entities
+    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     #[access(WorldOnly)]
@@ -253,9 +254,9 @@ pub trait LevelsBackend {
     /// `native_level_height`. Does not load chunks.
     #[access(WorldOnly)]
     fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
-    /// Side: server.
-    /// The ticks the server has run (`Level.getGameTime`), shared by every
-    /// level as in vanilla. API 381.
+    /// Side: both.
+    /// The level's game time (`Level.getGameTime`). On clients this is the
+    /// synchronized time advanced by the local level tick. API 381.
     #[access(WorldOnly)]
     fn level_game_time(&self, level: LevelRef) -> Option<i64>;
     /// Side: both.
@@ -914,11 +915,18 @@ pub trait LevelsBackendMut {
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
     /// Side: server.
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
-    /// `Level.gameEvent(null, event, at)` does: sculk sensors, shriekers,
-    /// wardens and allays in range hear it. False for an event vanilla
-    /// doesn't have.
+    /// `Level.gameEvent(event, at, context)` does: sculk sensors, shriekers,
+    /// wardens and allays receive the optional source and affected state.
+    /// Returns false without emitting for an unknown event, invalid position,
+    /// stale or foreign source, unregistered state, client or inactive level.
     #[access(WorldOnly)]
-    fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool;
+    fn level_game_event(
+        &mut self,
+        level: LevelRef,
+        event: &str,
+        at: [f64; 3],
+        context: GameEventContext,
+    ) -> bool;
     /// Side: server.
     /// Queues block event `a`, `b` for `block` at `pos`, as `ServerLevel.blockEvent(pos, block,
     /// a, b)` does: after this tick's scheduled ticks the level runs the block's

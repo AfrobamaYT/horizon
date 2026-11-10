@@ -1531,7 +1531,7 @@ impl Game<'_> {
             PlayerRead::Acting { .. } => self.respawn_config.map(|c| c.saved()),
             PlayerRead::Guest(guest) => guest.respawn_elsewhere.clone(),
         };
-        let Some((dimension, [x, y, z], yaw, forced)) = saved else {
+        let Some((dimension, [x, y, z], yaw, _pitch, forced)) = saved else {
             return Some(None);
         };
         Some(Some(PlayerRespawnConfig {
@@ -3938,12 +3938,17 @@ mod fake_action_tests {
             game.ender_items[0] = diamonds.clone();
             let ender = [2, 64, 0];
             place(game, ender, "minecraft:ender_chest");
+            let key = (ender[0], ender[1], ender[2]);
+            // A raw block state has no stand-in. Establish the closed state
+            // whose preservation this refused action is meant to check.
+            game.open_ender_chest(key);
+            game.close_ender_chest();
+            game.container = None;
             assert_eq!(
                 game.player_perform_action(player, on_top(ender)),
                 Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
             );
             assert!(game.ender_open.is_none());
-            let key = (ender[0], ender[1], ender[2]);
             match game.world.block_entities.get(&key) {
                 Some(horizon_client::chunk::block_entity::BlockEntity::Chest(items)) => assert!(
                     items.iter().all(Option::is_none),
@@ -3972,6 +3977,7 @@ mod fake_action_tests {
                 dim,
                 pos: [1, 2, 3],
                 yaw: 0.0,
+                pitch: 0.0,
                 forced: false,
             };
             let spawn = horizon_core::geometry::Vec3::new(1.0, 2.0, 3.0);
@@ -5133,7 +5139,7 @@ mod player_rule_tests {
             );
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guests[0].respawn_elsewhere,
-                Some((nether.into(), [1, 2, 3], -90.0, true)),
+                Some((nether.into(), [1, 2, 3], -90.0, 0.0, true)),
                 "the record a respawn reads"
             );
             assert_eq!(

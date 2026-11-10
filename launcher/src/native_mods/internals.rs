@@ -16,6 +16,10 @@ pub(super) struct Catalog {
     pub(super) points: Vec<inject::ListedPoint>,
     pub(super) sites: Vec<sites::Site>,
     pub(super) discovery: bool,
+    /// The `mod_api` types a mod point's `api` record may hold, as the game's build lists them.
+    pub(super) wire: BTreeSet<String>,
+    /// Every code mod's own points (#2339), listed from its source.
+    pub(super) mods: Vec<super::mod_points::ModLibrary>,
 }
 
 pub(super) struct Facade {
@@ -51,12 +55,15 @@ pub(super) enum Error {
     Path {
         path: String,
     },
+    /// An injection at another mod's point that doesn't load (#2339).
+    ModPoint(horizon_mod_package::manifest::inject::mod_points::Refusal),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::Inject(error) => super::inject_text::inject_error(error),
+            Self::ModPoint(refusal) => super::mod_points::refusal(refusal),
             Self::Missing { mod_id, path } => trf(
                 "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
@@ -119,8 +126,8 @@ impl Catalog {
         let path = dir.join(INTERNALS);
         let listed = inject::catalog(&dir.join(inject::POINTS))?;
         let mut points = listed.points;
-        for point in horizon_mod_api_gen::points::source::read(dir)? {
-            let name = point_shape::camel(&point.name);
+        for point in horizon_platform::mod_build::api_gen::points::source::read(dir)? {
+            let name = horizon_platform::mod_build::point_shape::camel(&point.name);
             points.push(inject::ListedPoint {
                 name: point.name,
                 target: point.target,
@@ -138,7 +145,7 @@ impl Catalog {
             });
         }
         let mut sites = listed.sites;
-        for site in horizon_mod_api_gen::sites::source::read(dir)? {
+        for site in horizon_platform::mod_build::api_gen::sites::source::read(dir)? {
             if sites.iter().any(|public| public.name == site.name) {
                 return Err(format!("E_SOURCE_COLLISION: {}", site.name));
             }
@@ -149,11 +156,57 @@ impl Catalog {
             points,
             sites,
             discovery: false,
+            wire: listed.wire,
+            mods: Vec::new(),
         })
+    }
+
+    /// The catalog entry an `[[inject]]` at `at` targets: a function, method or (for a field)
+    /// struct, never a shape-only entry.
+    pub(super) fn target(&self, at: &str) -> Option<&ListedInternal> {
+        self.internals.iter().find(|item| {
+            !item.shape_only
+                && plain_path(&item.path) == plain_path(at)
+                && matches!(item.kind.as_str(), "fn" | "method" | "struct")
+        })
+    }
+
+    /// `manifest` with each absent `hash` taken from this catalog, the pinned game's as the build
+    /// checks it (`[native] horizon` fixes it exactly). The build records this form in
+    /// `native-mods.json`; a declaration that doesn't resolve keeps no hash and is refused by
+    /// [`Self::check`].
+    pub(super) fn pinned(
+        &self,
+        manifest: &horizon_mod_package::Manifest,
+    ) -> horizon_mod_package::Manifest {
+        let mut pinned = manifest.clone();
+        for inject in pinned
+            .inject
+            .iter_mut()
+            .filter(|inject| inject.hash.is_none())
+        {
+            inject.hash = self.target(&inject.at).map(|item| item.hash.clone());
+        }
+        for declared in pinned
+            .internals
+            .iter_mut()
+            .filter(|declared| declared.hash.is_none())
+        {
+            declared.hash = internals::resolve(
+                &self.internals,
+                &manifest.id,
+                &declared.path,
+                declared.kind.as_deref(),
+            )
+            .ok()
+            .map(|entry| entry.hash.clone());
+        }
+        pinned
     }
 
     pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
         super::slots::check(self, manifest).map_err(Error::Inject)?;
+        super::mod_points::routes(self, manifest).map_err(Error::ModPoint)?;
         if manifest.native.is_none() {
             return Ok(());
         }
@@ -297,7 +350,7 @@ impl Catalog {
                 .and_then(|name| name.strip_suffix("Listener"))
                 .expect("generated listener name");
             constructors.insert(format!(
-                "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::SlotListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::SlotListener::new(id, mod_points::PointId::{variant}, f as *const ()) }}\n    }}\n"
+                "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::SlotListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::SlotListener::new(id, mod_points::PointId::{variant}.place(), f as *const ()) }}\n    }}\n"
             ));
         }
         for (_, site) in super::slots::sites(&self.sites, manifest) {
@@ -466,6 +519,8 @@ mod tests {
         let catalog = Catalog {
             discovery: false,
             sites: Vec::new(),
+            wire: Default::default(),
+            mods: Vec::new(),
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },
                 { "path": "horizon_client::game::maps::dimension_id", "kind": "fn", "signature": "fn dimension_id() -> u8", "hash": "5678" },
@@ -478,6 +533,62 @@ mod tests {
             ])).unwrap(),
         };
         (dir, bundle, catalog)
+    }
+
+    #[test]
+    fn explicit_hash_survives_pinned_filling() {
+        let (dir, mut bundle, catalog) = fixture("explicit-pin");
+        bundle.manifest.inject[0].hash = Some("explicit".into());
+        bundle.manifest.internals[0].hash = Some("explicit-internal".into());
+        let pinned = catalog.pinned(&bundle.manifest);
+        assert_eq!(pinned.inject[0].hash.as_deref(), Some("explicit"));
+        assert_eq!(
+            pinned.internals[0].hash.as_deref(),
+            Some("explicit-internal")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn absent_hashes_are_checked_against_the_pinned_catalog_and_recorded_from_it() {
+        let (dir, mut bundle, mut catalog) = fixture("pinned");
+        // An item a mod's own `[[native.module]]` adds is in the staged catalog the source build
+        // checks against, and nowhere else: declared without a hash, it checks and is filled.
+        catalog.internals.extend(serde_json::from_value::<Vec<ListedInternal>>(serde_json::json!([
+            { "path": "horizon_client::game::ported_level::PortedGame", "kind": "struct", "signature": "pub(super) struct PortedGame", "hash": "ported" }
+        ])).unwrap());
+        let manifest = &mut bundle.manifest;
+        manifest.inject[0].hash = None;
+        manifest.internals[0].hash = None;
+        manifest
+            .internals
+            .push(horizon_mod_package::manifest::Internal {
+                path: "horizon_client::game::ported_level::PortedGame".into(),
+                kind: None,
+                hash: None,
+            });
+        catalog.check(manifest).unwrap();
+        let pinned = catalog.pinned(manifest);
+        assert_eq!(pinned.inject[0].hash.as_deref(), Some("tick-hash"));
+        let hashes: Vec<_> = pinned.internals.iter().map(|i| i.hash.as_deref()).collect();
+        assert_eq!(hashes, [Some("1234"), Some("5678"), Some("ported")]);
+        // The record is what a stale pin is later checked against: the same catalog passes it, a
+        // changed function refuses it, as a hash written by the tool would be.
+        catalog.check(&pinned).unwrap();
+        catalog.internals[3].hash = "tick-changed".into();
+        assert!(matches!(
+            catalog.check(&pinned),
+            Err(Error::Inject(
+                horizon_mod_package::manifest::inject::InjectError::Changed { .. }
+            ))
+        ));
+        // A present hash that is stale is refused as before.
+        manifest.internals[0].hash = Some("stale".into());
+        assert!(matches!(
+            catalog.check(manifest),
+            Err(Error::Changed { .. })
+        ));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -522,7 +633,7 @@ pub mod raw {
     /// Registers a function of this place's exact listener type.
     pub const fn tick(id: &'static str, f: __TickListener) -> mod_points::__private::SlotListener {
         // SAFETY: `f` has this place's listener type, checked by the signature.
-        unsafe { mod_points::__private::SlotListener::new(id, mod_points::PointId::Tick, f as *const ()) }
+        unsafe { mod_points::__private::SlotListener::new(id, mod_points::PointId::Tick.place(), f as *const ()) }
     }
 }
 "#
@@ -534,8 +645,7 @@ pub mod raw {
         let main = api::main_rs(
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
             &[&bundle.manifest],
-            &catalog.points,
-            &catalog.sites,
+            &catalog,
         );
         assert!(main.contains("#![forbid(unsafe_code)]"));
         assert!(main.contains(
@@ -654,7 +764,7 @@ pub mod raw {
             .internals
             .push(horizon_mod_package::manifest::Internal {
                 path: "horizon_client::game::Game".into(),
-                hash: "1234".into(),
+                hash: Some("1234".into()),
                 kind: None,
             });
         assert!(needed(&bundle.manifest));
@@ -681,7 +791,7 @@ pub mod raw {
         bundle.manifest.internals[1] = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::maps::Game<'_>::dimension_id".into(),
             kind: None,
-            hash: "abcd".into(),
+            hash: Some("abcd".into()),
         };
         bundle.manifest.inject[0].kind = horizon_mod_package::manifest::inject::Kind::Return;
         let text = catalog.facade(&bundle.manifest).unwrap().source;
@@ -695,12 +805,7 @@ pub mod raw {
             text.contains("pub const fn tick_return(id: &'static str, f: __TickReturnListener)")
         );
         assert!(text.contains("PointId::TickReturn"));
-        let main = api::main_rs(
-            "/* MOD_SLOTS */",
-            &[&bundle.manifest],
-            &catalog.points,
-            &catalog.sites,
-        );
+        let main = api::main_rs("/* MOD_SLOTS */", &[&bundle.manifest], &catalog);
         assert!(main.contains(
             "mod_0_internals::raw::tick_return(\"example\", mod_0::count).ordered(0, \"count\")"
         ));
@@ -719,13 +824,13 @@ pub mod raw {
         bundle.manifest.internals[1] = horizon_mod_package::manifest::Internal {
             path: method.path.clone(),
             kind: Some("method".into()),
-            hash: method.hash,
+            hash: Some(method.hash),
         };
         let facade = catalog.facade(&bundle.manifest).unwrap();
         assert!(facade
             .source
             .contains("pub use horizon_client::game::Game;"));
-        bundle.manifest.internals[1].hash = "field".into();
+        bundle.manifest.internals[1].hash = Some("field".into());
         assert!(
             matches!(catalog.check(&bundle.manifest), Err(Error::Changed { signature, .. }) if signature == method.signature)
         );

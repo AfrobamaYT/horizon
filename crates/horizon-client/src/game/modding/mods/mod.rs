@@ -226,12 +226,24 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
 /// hook runs, so every step sees the same values.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
+    let directory = Game::game_dir();
+    #[cfg(unix)]
+    let directory = {
+        use std::os::unix::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
+    };
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
+    };
     mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
         builtin_registry_names(root)?,
         horizon_world::native_load_context::capture_settings(
             &Game::mod_data_root(),
             packages.ids(),
         ),
+        directory,
     ));
     Ok(())
 }
@@ -378,14 +390,14 @@ pub(super) fn collect_key_mappings<'declared>(
     if role.is_client() { declared } else { &[] }
 }
 
-/// The native mods' entity model layers (`native_layer_definitions`), kept
+/// The native mods' entity model layers (`native_register_layer_definitions`), kept
 /// once at start for `bake_layer`.
 pub(super) fn register_layer_definitions(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut layers = Vec::new();
-    Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
+    Game::native_register_layer_definitions(&RegistrationContext::new(), &mut layers);
     horizon_client::mobs::model_layers::register(layers);
 }
 /// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
@@ -448,24 +460,60 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
-/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
-/// start, before resources load, so `tints` entries on them read the mod's colour.
-pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+/// The types native mods register for resource definitions, kept once at start, before
+/// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
+/// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
+/// definitions' entries on them list the mod's sprites; and model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads.
+pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut sources = Vec::new();
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
+    let mut sources = Vec::new();
+    Game::native_register_sprite_sources(&RegistrationContext::new(), &mut sources);
+    horizon_client_render::mod_sprite_sources::register(sources);
+    let mut loaders = Vec::new();
+    Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
+    horizon_client_render::mod_model_loaders::register(loaders);
 }
+/// The client presentation registrations, resolved once before the first level opens: the
+/// dimension transition screens and the entity spectator shaders.
+pub(super) fn register_client_presentations(role: ExecutionRole) {
+    register_preset_editors(role);
+    register_dimension_transition_screens(role);
+    register_entity_spectator_shaders(role);
+}
+
 /// Resolve client dimension-transition registrations once, before the first level opens.
-pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
+fn register_dimension_transition_screens(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut screens = Vec::new();
     Game::native_register_dimension_transition_screen(&RegistrationContext::new(), &mut screens);
     horizon_client_render::dimension_transition::register(screens);
+}
+
+/// Resolve client spectator post-effect registrations once, before the first level opens.
+pub(super) fn register_entity_spectator_shaders(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut shaders = Vec::new();
+    Game::native_register_entity_spectator_shaders(&RegistrationContext::new(), &mut shaders);
+    horizon_client_render::spectator_shaders::register(shaders);
+}
+
+pub(super) fn register_preset_editors(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut editors = Vec::new();
+    Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
+    horizon_client::title::preset_editors::register(editors);
 }
 
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
@@ -489,15 +537,19 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
-/// The native mods' particle providers (`native_register_particle_providers`), kept once at
-/// start, before resources load; every particle sprite-set load resolves each type's provider.
-pub(super) fn register_particle_providers(role: ExecutionRole) {
+/// The native mods' particle providers (`native_register_particle_providers`) and render groups
+/// (`native_register_particle_groups`), kept once at start, before resources load; every particle
+/// sprite-set load resolves each type's provider and group.
+pub(super) fn register_particles(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::ParticleProviderRegistry::default();
     Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
     horizon_client::particles::register_particle_providers(registry.into_providers());
+    let mut groups = Vec::new();
+    Game::native_register_particle_groups(&RegistrationContext::new(), &mut groups);
+    horizon_client::particles::register_particle_groups(groups);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -855,8 +907,27 @@ pub(super) fn content_root(
     })?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
+    register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
+}
+
+/// Publish the built-in registry orders mods iterate. The report already
+/// includes the types and menus the content overlay registered, in registration
+/// order (`BuiltInRegistries` protocol ids).
+fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
+    use horizon_protocol::registry::Builtin;
+    let path = Builtin::find(root).ok_or("registries.json not found")?;
+    let builtin = Builtin::load(&path)?;
+    if let Some(ids) = builtin.get("minecraft:entity_type") {
+        mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    if let Some(ids) = builtin.get("minecraft:menu") {
+        mod_api::__private::resolve_menus(ids.names.iter().map(String::as_str))
+            .map_err(|errors| errors.join("\n"))?;
+    }
+    Ok(())
 }
 
 fn register_block_entity_types(
@@ -1254,10 +1325,8 @@ impl Game<'_> {
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
         self.loop_context = context.game;
+        self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.loop_context = self.loop_context.clone();
-        }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
         }

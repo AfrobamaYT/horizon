@@ -237,6 +237,7 @@ fn load_player_type(models: &horizon_client::mobs::EntityModelDocument) -> Optio
             step_sound: None,
             food: Arc::from([]),
             tempt: Arc::from([]),
+            passenger_attachments: Vec::new(),
         })
     })
 }
@@ -306,11 +307,11 @@ impl Game<'_> {
     /// front of) it, pulled in where visual shapes are in the way. Returns the
     /// position, yaw and pitch to render from.
     pub(super) fn camera_view(&mut self, partial: f32) -> Option<(glam::DVec3, f32, f32)> {
-        if self.studio_freecam.active {
+        if self.studio.flying() {
             return Some((
-                self.studio_freecam.position,
-                self.studio_freecam.yaw,
-                self.studio_freecam.pitch,
+                self.studio.freecam.position,
+                self.studio.freecam.yaw,
+                self.studio.freecam.pitch,
             ));
         }
         // Minecraft.cameraEntity: a server's spectator camera on a mob or
@@ -337,7 +338,9 @@ impl Game<'_> {
             }
         };
         let mut view = self.view;
+        let pull = self.hooks_camera_distance(partial);
         let kind = self.camera_type;
+
         let context = CollisionContext::for_entity(
             CollisionEntity {
                 identity: EntityIdentity(0),
@@ -365,7 +368,7 @@ impl Game<'_> {
             partial,
             kind,
             |distance| {
-                let mut distance = distance;
+                let mut distance = distance * pull;
                 self.native_camera_distance(partial, kind.is_mirrored(), &entity, &mut distance);
                 distance
             },
@@ -671,8 +674,9 @@ impl Game<'_> {
     /// The model's old pitch is the player's `xRotO`, which the turn moves
     /// with `xRot` (`turn_rotation`).
     pub(super) fn turn_player(&mut self, xo: f64, yo: f64) {
-        if self.studio_freecam.active {
-            self.studio_freecam
+        if self.studio.flying() {
+            self.studio
+                .freecam
                 .turn((xo * 0.15) as f32, (yo * 0.15) as f32);
             return;
         }
@@ -725,7 +729,7 @@ impl Game<'_> {
     /// `LevelExtractor`'s skip of the camera entity: the player's own body
     /// is drawn unless the camera is in first person, or while it sleeps.
     pub(super) fn own_body_in_view(&self) -> bool {
-        !self.camera_type.is_first_person() || self.sleeping.is_some() || self.studio_freecam.active
+        !self.camera_type.is_first_person() || self.sleeping.is_some() || self.studio.flying()
     }
     /// Whether the player's own model shows in the world view (its body or,
     /// while invisible, only its armour and held items).
@@ -841,6 +845,8 @@ impl Game<'_> {
                 packed,
                 out,
             );
+            let world = horizon_hooks::players::Pass::World;
+            self.own_layers_geometry(m, world, camera, alpha as f32, packed, out);
             self.player_elytra_geometry(m, chest, camera, alpha as f32, packed, out);
             self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
             self.shoulder_parrots_geometry(m, camera, alpha as f32, packed, out);
@@ -954,6 +960,8 @@ impl Game<'_> {
             240 | 240 << 8,
             &mut verts,
         );
+        let picture = horizon_hooks::players::Pass::Picture;
+        self.own_layers_geometry(&m, picture, camera, 1.0, 240 | 240 << 8, &mut verts);
         // `WingsLayer` draws through `RenderTypes.armorCutoutNoCull`: the
         // wings' faces show from both sides (the elytra texture is empty on
         // the face that looks at the body).
@@ -1249,7 +1257,7 @@ impl Game<'_> {
         m: &Mob,
         stacks: [Option<&horizon_client::items::ItemStack>; 2],
     ) -> [Option<horizon_core::arm_pose::ArmPose>; 2] {
-        use super::api_values::TryIntoApi;
+        use super::api_values::{TryIntoApi, TryIntoEngine};
         use horizon_client::mobs::anim::humanoid_arm_poses;
         let stacks =
             stacks.map(|stack| stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air"));
@@ -1274,8 +1282,8 @@ impl Game<'_> {
             }),
             ticks_using_item: m.extra.using_item,
             use_animation: m.extra.use_animation,
-            main_arm_pose,
-            off_arm_pose,
+            main_arm_pose: main_arm_pose.try_into_api().unwrap(),
+            off_arm_pose: off_arm_pose.try_into_api().unwrap(),
         };
         for ((pose, stack), hand) in poses
             .iter_mut()
@@ -1287,10 +1295,13 @@ impl Game<'_> {
             };
             let mut answer = None;
             self.native_get_arm_pose(entity_id, hand, stack, &humanoid, &mut answer);
-            if answer.is_some() {
-                *pose = answer;
+            if let Some(answer) = answer
+                && let Ok(answer) = answer.try_into_engine(&())
+            {
+                *pose = Some(answer);
             }
         }
+        self.transform_selected_arm_poses(m, &mut poses, humanoid);
         poses
     }
     /// The entity id the local player has on its server: the one it was

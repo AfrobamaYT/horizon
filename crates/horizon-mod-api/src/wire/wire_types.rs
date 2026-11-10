@@ -1,8 +1,8 @@
 //! Checked wire decoding for opaque API values.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{
-    BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, FluidKey, ItemKey,
-    TagKey, UnresolvedFluid,
+    BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, EnchantmentKey,
+    EntityTypeKey, FluidKey, ItemKey, MenuKey, TagKey, UnresolvedFluid,
 };
 
 impl Wire for crate::OwnProvider {
@@ -70,11 +70,15 @@ impl Wire for crate::LoadedMods {
     }
 }
 impl Wire for crate::RegistrationContext {
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::RegistrationContext));
-    const MIN: usize = 0;
-    fn put(&self, _: &mut Writer) {}
-    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self::new())
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed("RegistrationContext.instance_dir.v1");
+    const MIN: usize = <Option<crate::InstanceDirectory> as Wire>::MIN;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.instance_dir);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        let mut context = Self::new();
+        context.instance_dir = input.take()?;
+        Ok(context)
     }
 }
 
@@ -91,6 +95,9 @@ mod resource_wire_tests {
             8,
             "a transaction crosses as its frame token"
         );
+        let mut context = crate::RegistrationContext::new();
+        context.instance_dir = Some(crate::InstanceDirectory::Unix(vec![b'/', 0xff, b'x']));
+        out.put(&context);
         let mut input = Reader::new(out.bytes());
         let tx: crate::Transaction = input.take().unwrap();
         assert_eq!(tx, crate::Transaction(7));
@@ -99,6 +106,10 @@ mod resource_wire_tests {
             let context: crate::RegistrationContext = input.take().unwrap();
             assert_eq!(mods.ids().collect::<Vec<_>>(), ["test_mod"]);
             assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["test_mod"]);
+            assert_eq!(
+                context.instance_dir().unwrap(),
+                &crate::InstanceDirectory::Unix(vec![b'/', 0xff, b'x'])
+            );
         });
         let package = crate::PackageInfo::new(
             "test".into(),
@@ -152,7 +163,7 @@ layout_fields!("slot" => $width);
         }
     )+};
 }
-slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, FluidKey, ItemKey, crate::client::particle_keys::ParticleKey, TagKey);
+slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, EnchantmentKey, EntityTypeKey, FluidKey, ItemKey, MenuKey, crate::client::particle_keys::ParticleKey, TagKey);
 slot_keys!(u64; UnresolvedFluid);
 
 impl Wire for crate::Identifier {
@@ -1095,44 +1106,6 @@ impl crate::wire::Wire for serde_json::Map<String, serde_json::Value> {
             .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
     }
 }
-impl crate::wire::Wire for crate::ArmPose {
-    layout_fields!("tag" => u32, "0:Empty" => (), "1:Item" => (), "2:Block" => (), "3:Bow" => (), "4:CrossbowHold" => (), "5:CrossbowCharge" => (), "6:ThrowTrident" => (), "7:TootHorn" => (), "8:Spyglass" => (), "9:Spear" => (), "10:Brush" => ());
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::ArmPose));
-    const MIN: usize = 4;
-    fn put(&self, out: &mut crate::wire::Writer) {
-        out.put(&match self {
-            Self::Empty => 0u32,
-            Self::Item => 1u32,
-            Self::Block => 2u32,
-            Self::Bow => 3u32,
-            Self::CrossbowHold => 4u32,
-            Self::CrossbowCharge => 5u32,
-            Self::ThrowTrident => 6u32,
-            Self::TootHorn => 7u32,
-            Self::Spyglass => 8u32,
-            Self::Spear => 9u32,
-            Self::Brush => 10u32,
-        });
-    }
-    fn take(
-        input: &mut crate::wire::Reader<'_>,
-    ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        Ok(match input.take::<u32>()? {
-            0 => Self::Empty,
-            1 => Self::Item,
-            2 => Self::Block,
-            3 => Self::Bow,
-            4 => Self::CrossbowHold,
-            5 => Self::CrossbowCharge,
-            6 => Self::ThrowTrident,
-            7 => Self::TootHorn,
-            8 => Self::Spyglass,
-            9 => Self::Spear,
-            10 => Self::Brush,
-            tag => return Err(crate::wire::WireError::Tag(tag)),
-        })
-    }
-}
 impl crate::wire::Wire for crate::UseAnimation {
     layout_fields!("tag" => u32, "0:None" => (), "1:Eat" => (), "2:Drink" => (), "3:Block" => (), "4:Bow" => (), "5:Trident" => (), "6:Crossbow" => (), "7:Spyglass" => (), "8:TootHorn" => (), "9:Brush" => (), "10:Bundle" => (), "11:Spear" => ());
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::UseAnimation));
@@ -1202,7 +1175,7 @@ impl crate::wire::Wire for crate::ConnectionKind {
 
 #[allow(unreachable_patterns, unused_variables)]
 impl crate::wire::Wire for crate::AttachmentRowError {
-    layout_fields!("tag" => u32, "0:Value" => crate::AttachmentError, "1:StaleHolder" => ());
+    layout_fields!("tag" => u32, "0:Value" => crate::AttachmentError, "1:StaleHolder" => (), "2:HolderBusy" => (), "3:UnsupportedHolder" => &'static str);
     const LAYOUT_SEED: u64 = crate::wire::layout_name("AttachmentRowError");
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
@@ -1212,6 +1185,11 @@ impl crate::wire::Wire for crate::AttachmentRowError {
                 out.put(f0);
             }
             Self::StaleHolder => out.put(&1u32),
+            Self::HolderBusy => out.put(&2u32),
+            Self::UnsupportedHolder(kind) => {
+                out.put(&3u32);
+                out.put(kind);
+            }
             _ => {
                 out.fail(crate::wire::WireError::Invalid(
                     "unknown AttachmentRowError",
@@ -1226,6 +1204,11 @@ impl crate::wire::Wire for crate::AttachmentRowError {
                 out.put_owned(f0);
             }
             Self::StaleHolder => out.put_owned(1u32),
+            Self::HolderBusy => out.put_owned(2u32),
+            Self::UnsupportedHolder(kind) => {
+                out.put_owned(3u32);
+                out.put_owned(kind);
+            }
             _ => {
                 out.fail(crate::wire::WireError::Invalid(
                     "unknown AttachmentRowError",
@@ -1240,6 +1223,8 @@ impl crate::wire::Wire for crate::AttachmentRowError {
             Ok(match input.take::<u32>()? {
                 0 => Self::Value(input.take()?),
                 1 => Self::StaleHolder,
+                2 => Self::HolderBusy,
+                3 => Self::UnsupportedHolder(input.take()?),
                 tag => return Err(crate::wire::WireError::Tag(tag)),
             })
         })
@@ -1247,7 +1232,7 @@ impl crate::wire::Wire for crate::AttachmentRowError {
 }
 #[allow(unreachable_patterns, unused_variables)]
 impl crate::wire::Wire for crate::AttachmentError {
-    layout_fields!("tag" => u32, "0:MissingHolder" => (), "1:TypeMismatch" => (), "2:Decode" => (), "3:Encode" => (), "4:InvalidNamespace" => (), "5:InvalidCopyPolicy" => (), "6:InvalidSyncPolicy" => ());
+    layout_fields!("tag" => u32, "0:MissingHolder" => (), "1:TypeMismatch" => (), "2:Decode" => (), "3:Encode" => (), "4:InvalidNamespace" => (), "5:InvalidCopyPolicy" => (), "6:InvalidSyncPolicy" => (), "7:HolderBusy" => (), "8:UnsupportedHolder" => &'static str);
     const LAYOUT_SEED: u64 = crate::wire::layout_name("AttachmentError");
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
@@ -1259,6 +1244,12 @@ impl crate::wire::Wire for crate::AttachmentError {
             Self::InvalidNamespace => 4u32,
             Self::InvalidCopyPolicy => 5u32,
             Self::InvalidSyncPolicy => 6u32,
+            Self::HolderBusy => 7u32,
+            Self::UnsupportedHolder(kind) => {
+                out.put(&8u32);
+                out.put(kind);
+                return;
+            }
             _ => {
                 out.fail(crate::wire::WireError::Invalid("unknown AttachmentError"));
                 return;
@@ -1276,6 +1267,8 @@ impl crate::wire::Wire for crate::AttachmentError {
             4 => Self::InvalidNamespace,
             5 => Self::InvalidCopyPolicy,
             6 => Self::InvalidSyncPolicy,
+            7 => Self::HolderBusy,
+            8 => Self::UnsupportedHolder(input.take()?),
             tag => return Err(crate::wire::WireError::Tag(tag)),
         })
     }

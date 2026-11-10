@@ -3,6 +3,9 @@
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
 mod event_timings;
+#[cfg(test)]
+mod level_event_targets;
+mod residency;
 
 use super::{
     Game,
@@ -1035,25 +1038,23 @@ pub(super) fn mob_meta(
             }
             defaults.push((16, serializer::INT, Value::Int(0)));
         }
-        // AbstractCubeMob.ID_SIZE; SulfurCube also syncs FROM_BUCKET and
-        // MAX_FUSE (clients tick the fuse for the swell / white flash).
+        // AbstractCubeMob.ID_SIZE; SulfurCube then syncs MAX_FUSE (-1 until primed;
+        // clients tick it for the swell / white flash) and FROM_BUCKET (#13721).
         "minecraft:slime" | "minecraft:magma_cube" | "minecraft:sulfur_cube" => {
             if e.size > 1 {
                 meta.push((18, serializer::INT, Value::Int(e.size)));
             }
             defaults.push((18, serializer::INT, Value::Int(1)));
             if kind == "minecraft:sulfur_cube" {
-                let from_bucket = e.scratch[3] != 0;
-                if from_bucket {
-                    meta.push((19, serializer::BOOLEAN, Value::Bool(true)));
-                }
-                defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
-                // SulfurCube.MAX_FUSE: set when primed; 0 means unprimed.
                 let fuse = horizon_client::mobs::sulfur_cube::fuse(m);
                 if fuse >= 0 {
-                    meta.push((20, serializer::INT, Value::Int(fuse)));
+                    meta.push((19, serializer::INT, Value::Int(fuse)));
                 }
-                defaults.push((20, serializer::INT, Value::Int(0)));
+                defaults.push((19, serializer::INT, Value::Int(-1)));
+                if e.scratch[3] != 0 {
+                    meta.push((20, serializer::BOOLEAN, Value::Bool(true)));
+                }
+                defaults.push((20, serializer::BOOLEAN, Value::Bool(false)));
             }
         }
         // Creeper.DATA_SWELL_DIR, DATA_IS_POWERED and DATA_IS_IGNITED: the
@@ -1688,6 +1689,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
+        self.bind_guest_residency(&mut hub);
         hub.rule_registry = self.level.rule_registry.clone();
         hub.sync_attachments = !mod_api::__private::mods().is_empty();
         hub.flat_world = self.world_flat;
@@ -2908,6 +2910,7 @@ impl Game<'_> {
         let events = {
             let clock_rate = self.network_clock_rate();
             let mut ctx = TickCtx {
+                sea_level: self.end.locator().map_or(63, |terrain| terrain.sea_level()),
                 world: &mut self.world,
                 entities: entities.as_slice(),
                 next_entity: &mut self.next_entity,
@@ -3012,13 +3015,6 @@ impl Game<'_> {
         {
             host.hub.synced = vec![(i32::MIN, next)];
         }
-    }
-
-    /// The start of a phase vanilla runs before ChunkMap.tick and Horizon
-    /// among the entities' ticks (ServerChunkCache.tickChunks' spawning and
-    /// thunder, the raids): the counter to give `lan_synced_since`.
-    pub(super) fn lan_synced_from(&mut self) -> Option<i32> {
-        self.lan_ids_so_far()
     }
 
     /// The end of such a phase: what joined during it is first updated in
@@ -3225,6 +3221,8 @@ impl Game<'_> {
             for d in &mut self.dropped {
                 d.needs_sync = false;
             }
+            self.tridents.iter_mut().for_each(|t| t.needs_sync = false);
+
             // The step command reaches clients before the events its tick
             // generated, as ServerTickRateManager.updateStepTicks does.
             let Some(host) = self.lan.as_mut() else {
@@ -3266,6 +3264,7 @@ impl Game<'_> {
                     return;
                 };
                 let mut ctx = TickCtx {
+                    sea_level: self.end.locator().map_or(63, |terrain| terrain.sea_level()),
                     world: &mut self.world,
                     entities,
                     next_entity: &mut self.next_entity,
@@ -3545,6 +3544,7 @@ impl Game<'_> {
         };
         let clock_rate = self.network_clock_rate();
         let mut ctx = TickCtx {
+            sea_level: self.end.locator().map_or(63, |terrain| terrain.sea_level()),
             world: &mut self.world,
             entities,
             next_entity: &mut self.next_entity,
@@ -4076,39 +4076,8 @@ fn event_kind(event: &HostEvent) -> EventKind {
     }
 }
 
-/// Who `ServerLevel.levelEvent` leaves out of the broadcast.
-///
-/// `LevelAccessor.levelEvent(int, BlockPos, int)` passes a null source, so the
-/// acting player is included. `ComposterBlock.useItemOn` (and the hopper input
-/// container) fill that way: event 1500, which the client turns into
-/// `handleFill` (the fill particles and `playLocalSound`). A call that names
-/// the player still excludes them. `collateral_break` is a later 2001 from
-/// `destroyBlock` with no player, after the breaker's own `playerWillDestroy`.
 #[cfg(test)]
-fn level_event_except(id: i32, acting: Option<u32>, collateral_break: bool) -> Option<u32> {
-    if matches!(
-        id,
-        2015 | 1500
-            | 1501
-            | 1503
-            | 1505
-            | 1026
-            | 1027
-            | 1029
-            | 1030
-            | 1045
-            | 1052
-            | 2019
-            | 2020
-            | 3000
-            | 3008
-    ) || collateral_break
-    {
-        None
-    } else {
-        acting
-    }
-}
+use level_event_targets::level_event_except;
 
 /// Notes how long the event that started at `started` took (`spans::note`), with what it
 /// was about when [`Game::event_detail`] said.
@@ -5042,7 +5011,7 @@ mod tests {
     }
 
     /// A hub with no players and empty registries, for `mob_meta`.
-    fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
+    pub(super) fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
         use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
         let mut sync = data::SyncData::empty();
         for (registry, id) in [
@@ -5663,6 +5632,7 @@ mod sources_tests {
         assert_ne!(key(&files), key(&changed));
         assert_ne!(key(&files), key(&[]));
     }
+    include!("sulfur_cube_meta_tests.rs");
 }
 
 #[cfg(test)]

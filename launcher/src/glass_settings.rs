@@ -13,7 +13,7 @@ use crate::glass_ui::{self as ui, white};
 use horizon_theme::glass::{fill, ink, radius};
 
 /// The list's entries: name and icon. The settings sections.
-const SECTIONS: [(&str, &str); 8] = [
+const SECTIONS: [(&str, &str); 9] = [
     ("Account", "user"),
     ("Updates", "refresh"),
     ("Launcher", "computer"),
@@ -22,6 +22,7 @@ const SECTIONS: [(&str, &str); 8] = [
     ("Storage", "computer"),
     ("AI", "ai-chat-02"),
     ("About", "information-circle"),
+    ("Data collection", "view"),
 ];
 
 /// What `settings_page` builds before it knows which look draws it.
@@ -454,17 +455,7 @@ impl Launcher {
                 .into_any_element()
         };
         let about = card()
-            .child(index_row(
-                0,
-                tr("Data folder"),
-                Some(mono(short(&backend::data_dir()))),
-                Some(
-                    button("about-open-data", "Open", Kind::Secondary, &t)
-                        .on_click(|_, _, cx| crate::glass_toast::open(cx, &backend::data_dir()))
-                        .into_any_element(),
-                ),
-                &t,
-            ))
+            .child(self.location_row(0, cx).mb(px(0.)))
             .child(index_row(
                 0,
                 tr("Logs"),
@@ -496,8 +487,7 @@ impl Launcher {
                     Some(b.menu_entry.into_any_element()),
                     &t,
                 ))
-            })
-            .children(self.dev_options_section(cx));
+            });
         vec![
             account,
             updates,
@@ -507,6 +497,7 @@ impl Launcher {
             self.glass_storage(cx),
             ai,
             about,
+            card().child(self.collection_section(cx)),
         ]
     }
 }

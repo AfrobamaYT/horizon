@@ -46,6 +46,7 @@ impl Game<'_> {
     /// Number keys, F and Q over a slot of the open menu: SWAP with a hotbar
     /// slot or the off hand, THROW one or the whole stack.
     pub(super) fn inventory_hotkey(&mut self, key: KeyCode) -> bool {
+        use horizon_client::container_screen::{HotbarKey, hotbar_swap};
         use horizon_client::menu::Input;
         let Some(size) = self
             .renderer
@@ -58,15 +59,21 @@ impl Game<'_> {
         let Some(slot) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return false;
         };
-        let digit = HOTBAR_DIGITS.iter().position(|k| *k == key);
-        let done = match (digit, key) {
-            (Some(n), _) => self.click_open_inventory(Some(slot), n as i32, Input::Swap),
-            (None, KeyCode::KeyF) => self.click_open_inventory(Some(slot), 40, Input::Swap),
-            (None, KeyCode::KeyQ) => {
-                let all = drop_whole_stack(self.modifiers);
-                self.click_open_inventory(Some(slot), i32::from(all), Input::Throw)
-            }
-            _ => false,
+        let hotbar = HOTBAR_DIGITS
+            .iter()
+            .position(|k| *k == key)
+            .map(HotbarKey::Slot)
+            .or((key == KeyCode::KeyF).then_some(HotbarKey::Offhand));
+        // checkHotbarKeyPressed refuses the swap while the cursor carries a
+        // stack; the drop below is the next arm of keyPressed, which the menu
+        // itself leaves to an empty hand.
+        let done = if let Some(button) = hotbar_swap(hotbar, self.carried.is_none()) {
+            self.click_open_inventory(Some(slot), button, Input::Swap)
+        } else if key == KeyCode::KeyQ {
+            let all = drop_whole_stack(self.modifiers);
+            self.click_open_inventory(Some(slot), i32::from(all), Input::Throw)
+        } else {
+            false
         };
         if done && let Some(key) = self.container {
             self.container_changed(key);
@@ -358,22 +365,36 @@ impl Game<'_> {
         &self,
         batch: &HudBatch,
     ) -> horizon_client::container_screen::Image {
-        let (ox, oy) = self.inventory_origin(batch);
+        match self.built_container(batch) {
+            Some(layout) => Self::image_of(layout.image),
+            None => Self::image_of(self.container_image_parts(batch)),
+        }
+    }
+    /// `leftPos`, `topPos`, `imageWidth`, `imageHeight` from the game's state
+    /// alone: the container build's own arithmetic, and the fallback when no
+    /// build holds this size.
+    pub(super) fn container_image_parts(&self, batch: &HudBatch) -> [f32; 4] {
+        let (ox, oy) = self.inventory_origin_unbuilt(batch);
         let (shift, width, height) = if self.screen == Screen::Creative {
-            (0.0, Creative::WIDTH as i32, Creative::HEIGHT as i32)
+            (0.0, Creative::WIDTH, Creative::HEIGHT)
         } else {
             let (shift, width) = match self.station.as_ref().map(|s| s.kind) {
-                Some(stations::Kind::Merchant) => (-50.0, 276),
-                Some(stations::Kind::Beacon) => (beacon::SHIFT, 230),
-                _ => (0.0, self.native_screen_width().map_or(176, |w| w as i32)),
+                Some(stations::Kind::Merchant) => (-50.0, 276.0),
+                Some(stations::Kind::Beacon) => (beacon::SHIFT, 230.0),
+                _ => (0.0, self.native_screen_width().unwrap_or(176.0)),
             };
-            (shift, width, self.screen_height() as i32)
+            (shift, width, self.screen_height())
         };
+        [ox + shift, oy, width, height]
+    }
+    /// The build's panel as `AbstractContainerScreen`'s `leftPos`/`topPos`/
+    /// `imageWidth`/`imageHeight`, the shape `hasClickedOutside` reads.
+    fn image_of([left, top, width, height]: [f32; 4]) -> horizon_client::container_screen::Image {
         horizon_client::container_screen::Image {
-            left: (ox + shift) as i32,
-            top: oy as i32,
-            width,
-            height,
+            left: left as i32,
+            top: top as i32,
+            width: width as i32,
+            height: height as i32,
         }
     }
     /// A click outside the window (slot id -999): `THROW` does nothing; a

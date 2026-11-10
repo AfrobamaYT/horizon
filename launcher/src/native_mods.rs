@@ -35,7 +35,9 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
+mod mod_points;
 mod package;
 mod picker;
 mod prebuilt;
@@ -542,7 +544,6 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
     internals_sync::rustc_wrapper()
 }
 
-/// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
 ) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, Failed> {
@@ -557,7 +558,7 @@ pub fn cache_error(error: crate::storage::Error) -> String {
         }
         crate::native_cache::Error::IncompleteUnit => tr("Native compilation outputs were kept because their executable completeness cannot be proven.").into(),
         crate::native_cache::Error::UnprovenExclusion => tr(
-            "Space it couldn't free: an older game build can use this cache without runtime leases.",
+            "An older game build can use this cache without runtime leases.",
         )
         .into(),
         crate::native_cache::Error::UnsupportedFilesystem => {
@@ -649,7 +650,7 @@ impl Bundle {
 
 /// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
-    let found = scan_bundles(folder)?;
+    let found = package::checked_bundles(folder)?;
     if found.is_empty() {
         return Err(format!(
             "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
@@ -1467,7 +1468,7 @@ fn prepare_mixins_source(source: &Path, prepared: &Path) -> Result<(), String> {
         fs::remove_dir_all(prepared).map_err(|e| format!("{}: {e}", prepared.display()))?;
     }
     let result = sync(source, prepared)
-        .and_then(|()| horizon_mod_api_gen::materialize_game_modules(prepared));
+        .and_then(|()| horizon_platform::mod_build::api_gen::materialize_game_modules(prepared));
     if result.is_err() {
         let _ = fs::remove_dir_all(prepared);
     }
@@ -1516,7 +1517,7 @@ fn compile(
     if target == Target::Server {
         cmd.arg("--no-default-features");
     }
-    cmd.args(["-p", package, "--bin", "horizon-client"]);
+    cmd.args(["-p", package, "--bin", api::executable(package)]);
     cmd
 }
 
@@ -1958,7 +1959,9 @@ fn pipeline(
             left_out.clone()
         },
     };
-    let about = |route: &str| {
+    // The record carries each declaration's hash as the build checked it: an absent one from
+    // the pinned catalog (`internals::Catalog::pinned`).
+    let about = |route: &str, catalog: &internals::Catalog| {
         serde_json::json!({
             "base": origin,
             "horizon": revision,
@@ -1974,13 +1977,16 @@ fn pipeline(
             "target": target.name(),
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
-            "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.manifest.id,
-                "version": m.manifest.version,
-                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-                "internals": m.manifest.internals,
-                "inject": m.manifest.inject,
-            })).collect::<Vec<_>>(),
+            "mods": mods.iter().map(|m| {
+                let pinned = catalog.pinned(&m.manifest);
+                serde_json::json!({
+                    "id": m.manifest.id,
+                    "version": m.manifest.version,
+                    "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+                    "internals": pinned.internals,
+                    "inject": pinned.inject,
+                })
+            }).collect::<Vec<_>>(),
         })
     };
     let linker = || match target {
@@ -2010,7 +2016,7 @@ fn pipeline(
             target,
             &binary,
             &libraries,
-            &about("prebuilt"),
+            &about("prebuilt", &internals::Catalog::read(game)?),
             &ordered,
         )?;
     } else if !exists {
@@ -2127,6 +2133,7 @@ fn pipeline(
         source::stage(&pending, &catalog_dir, &ordered)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
+            .and_then(|catalog| catalog.with_mods(mods.iter()))
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
@@ -2136,8 +2143,8 @@ fn pipeline(
         for name in [
             inject::POINTS,
             internals::INTERNALS,
-            horizon_mod_api_gen::points::source::FILE,
-            horizon_mod_api_gen::sites::source::FILE,
+            horizon_platform::mod_build::api_gen::points::source::FILE,
+            horizon_platform::mod_build::api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(&pending, &catalog_dir, error))?;
@@ -2149,7 +2156,7 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let catalog = internals::Catalog::read(&real)?;
+        let catalog = internals::Catalog::read(&real)?.with_mods(mods.iter())?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
             catalog.log_raw(&project.bundle.manifest)?;
@@ -2195,6 +2202,12 @@ fn pipeline(
             .map_err(|error| Failed::Other(cache_error(error)))?;
         crate::run_leases::publish(&profile_dir).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
+        let mut declared_injections = diagnostics::Declared::expressions(
+            &horizon_platform::mod_build::api_gen::sites::source::read(&real)?,
+        );
+        declared_injections.extend(diagnostics::Declared::fields(
+            mods.iter().map(|bundle| &bundle.manifest),
+        ));
         let identities: Vec<_> = mods
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
@@ -2206,11 +2219,7 @@ fn pipeline(
                 target,
                 &target_dir,
                 compiled,
-                if has_api {
-                    api::PACKAGE
-                } else {
-                    "horizon-client"
-                },
+                api::game_package(&stage, target, has_api),
             ),
             "Compiling the game",
             |line| {
@@ -2239,6 +2248,7 @@ fn pipeline(
                 stage: &stage,
                 source: &source,
                 mods: &identities,
+                declared: &declared_injections,
             }),
         )
         .map_err(|ran| {
@@ -2256,6 +2266,12 @@ fn pipeline(
             }
         })?;
         check_cancelled()?;
+        api::as_client(
+            &stage,
+            target,
+            has_api,
+            &target_dir.join(compiled.cargo().0),
+        )?;
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         if let Some(expected) = platform.machine {
             let actual = pe_machine(&binary).map_err(|error| {
@@ -2280,7 +2296,7 @@ fn pipeline(
             target,
             &binary,
             &[],
-            &about("source"),
+            &about("source", &catalog),
             &ordered,
         )?;
     } else {
@@ -3978,6 +3994,11 @@ mod tests {
             denied(build(base, &folder, &instances::selected(), choice, |_| {}));
         }
         denied(sync_internals(&folder));
+        let expected = require_consent().unwrap_err().to_string();
+        assert_eq!(
+            pinned_catalog_with_modules(&folder).err().unwrap(),
+            expected
+        );
         let preview = root().join("installed.routes");
         fs::create_dir_all(&preview).unwrap();
         let marker = preview.join("permission-sentinel");
