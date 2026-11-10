@@ -432,6 +432,37 @@ impl Game<'_> {
             ))),
         };
         horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
+        self.send_datapack_snapshots();
+    }
+    /// Sends each joined Horizon client the snapshot of the set just published, built from the
+    /// offer it made at the join. A client that cannot be sent one keeps what it has.
+    fn send_datapack_snapshots(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        let payloads: Vec<(u32, Vec<u8>)> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| g.placed && g.participates_online() && g.brand == "horizon")
+            .filter_map(|g| {
+                Some((
+                    g.conn,
+                    horizon_client::datapack_net::reload_payload(g.uuid)?,
+                ))
+            })
+            .collect();
+        for (conn, data) in payloads {
+            host.hub.send_to(
+                conn,
+                &horizon_protocol::packets::play::Clientbound::CustomPayload(
+                    horizon_protocol::packets::configuration::CustomPayload {
+                        channel: horizon_client::datapack_net::CHANNEL.into(),
+                        data,
+                    },
+                ),
+            );
+        }
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).

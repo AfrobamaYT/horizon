@@ -186,6 +186,23 @@ impl DatapackRegistrySet {
     }
 }
 
+impl DatapackRegistrySet {
+    /// Publishes a later snapshot's candidate over this set, on a client: the same session, the
+    /// server's generation. `None` when the snapshot's generation does not come after this
+    /// one's, so a snapshot out of order or sent twice changes nothing.
+    pub fn received_next(
+        &self,
+        snapshot: &DatapackSnapshot,
+        candidate: DatapackCandidate,
+    ) -> Option<Self> {
+        (snapshot.generation > self.generation).then(|| Self {
+            session: self.session,
+            generation: snapshot.generation,
+            registries: candidate.registries,
+        })
+    }
+}
+
 impl DatapackSnapshot {
     /// What a client offers its server: the registries `declarations` list as synchronized,
     /// with their schemas, as wire bytes.

@@ -1225,6 +1225,9 @@ fn login_and_configure(
         }
     }
     // The mods' datapack registries this client has, or the reason it cannot play (#811).
+    if let Some(offer) = &datapack_offer {
+        crate::datapack_net::remember_offer(uuid, offer.clone());
+    }
     match crate::datapack_net::server_step(brand == "horizon", datapack_offer.as_deref()) {
         crate::datapack_net::Step::Nothing => {}
         crate::datapack_net::Step::Send(data) => send(

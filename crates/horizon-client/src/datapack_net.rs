@@ -7,10 +7,14 @@
 //! before it keeps anything, and a snapshot that fails ends the join. The set a server last
 //! published and the set a client received are held here, for the lan thread and the game.
 //!
-//! Only the join carries a snapshot so far: a `/reload` publishes the next generation on the
-//! server and clients keep the one they joined with until they rejoin. See
+//! A `/reload` that publishes the next generation sends each joined Horizon client a new snapshot
+//! on the same channel, built from the offer it made at the join (kept here by player). The
+//! client checks it as at the join and swaps its set in one step, or ends the connection. See
 //! `docs/modding/src/concepts/mod-datapack-registries.md`.
-use std::sync::{Arc, Mutex, atomic::AtomicU64};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, atomic::AtomicU64},
+};
 
 /// The snapshot, server to client.
 pub const CHANNEL: &str = "horizon:datapack_registries";
@@ -23,6 +27,37 @@ static SERVED: Held = Mutex::new(None);
 /// What this process's client last received from a server.
 static RECEIVED: Held = Mutex::new(None);
 static SESSION: AtomicU64 = AtomicU64::new(1);
+/// The offer each joined player made, to build the snapshots a reload sends them.
+static OFFERS: Mutex<Option<HashMap<u128, Vec<u8>>>> = Mutex::new(None);
+/// The most offers kept; past it they are dropped and those players get no reload snapshot
+/// until they rejoin.
+const MAX_OFFERS: usize = 4096;
+
+/// Keeps the offer `player` made at the join, replacing an earlier one.
+pub fn remember_offer(player: u128, offer: Vec<u8>) {
+    let mut offers = OFFERS.lock().unwrap_or_else(|e| e.into_inner());
+    let offers = offers.get_or_insert_with(HashMap::new);
+    if offers.len() >= MAX_OFFERS {
+        offers.clear();
+    }
+    offers.insert(player, offer);
+}
+
+/// The snapshot of the set now served for `player`, from the offer they made at the join, when
+/// there is one to send.
+pub fn reload_payload(player: u128) -> Option<Vec<u8>> {
+    let offer = OFFERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()?
+        .get(&player)?
+        .clone();
+    let declarations = mod_api::__private::datapack_registry_declarations();
+    match step_for(declarations, served().as_deref(), true, Some(&offer)) {
+        Step::Send(bytes) => Some(bytes),
+        _ => None,
+    }
+}
 
 fn held(slot: &Held) -> Option<Arc<mod_api::DatapackRegistrySet>> {
     slot.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -123,13 +158,16 @@ fn step_for(
 /// the set its mods read, or says why the join must end. Nothing is kept on failure.
 pub fn accept(bytes: &[u8]) -> Result<(), String> {
     let declarations = mod_api::__private::datapack_registry_declarations();
-    let received = receive(declarations, bytes)?;
+    let received = receive(declarations, received().as_deref(), bytes)?;
     put(&RECEIVED, Some(Arc::new(received)));
     Ok(())
 }
 
+/// A snapshot after the first of a join keeps the session, so a handle from the generation
+/// before fails as stale; one that does not come after the generation held is refused.
 fn receive(
     declarations: &[mod_api::DatapackRegistryDeclaration],
+    previous: Option<&mod_api::DatapackRegistrySet>,
     bytes: &[u8],
 ) -> Result<mod_api::DatapackRegistrySet, String> {
     let refused = |error: mod_api::DatapackSnapshotError| {
@@ -137,6 +175,11 @@ fn receive(
     };
     let snapshot = mod_api::DatapackSnapshot::decode(bytes).map_err(refused)?;
     let candidate = snapshot.candidate(declarations).map_err(refused)?;
+    if let Some(previous) = previous {
+        return previous
+            .received_next(&snapshot, candidate)
+            .ok_or_else(|| "The server's mod registries arrived out of order.".to_owned());
+    }
     let session = SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(mod_api::DatapackRegistrySet::received(
         &snapshot, candidate, session,
@@ -183,14 +226,58 @@ mod tests {
         let Step::Send(bytes) = step_for(declarations, Some(&server), true, Some(&offer)) else {
             panic!("a snapshot is sent");
         };
-        let client = receive(declarations, &bytes).unwrap();
+        let client = receive(declarations, None, &bytes).unwrap();
         let handle = client.handle("example:spell", "addon:fire").unwrap();
         assert_eq!(
             client.get(&handle).unwrap().get("power"),
             Some(&mod_api::DatapackValue::Int(7))
         );
         // Truncated bytes are refused and nothing is kept.
-        assert!(receive(declarations, &bytes[..bytes.len() - 1]).is_err());
+        assert!(receive(declarations, None, &bytes[..bytes.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn a_reload_snapshot_replaces_the_set_under_the_same_session() {
+        let declaration = spell(DatapackRegistrySync::Required);
+        let declarations = std::slice::from_ref(&declaration);
+        let first = set(&declaration);
+        let offer = mod_api::DatapackSnapshot::encode_offer(declarations).unwrap();
+        let send = |server: &DatapackRegistrySet| {
+            let Step::Send(bytes) = step_for(declarations, Some(server), true, Some(&offer)) else {
+                panic!("a snapshot is sent");
+            };
+            bytes
+        };
+        let joined = receive(declarations, None, &send(&first)).unwrap();
+        let held = joined.handle("example:spell", "addon:fire").unwrap();
+        let reloaded = first
+            .reload(
+                DatapackCandidate::build(
+                    declarations,
+                    &[(
+                        "data/addon/example/spell/fire.json".to_owned(),
+                        vec![br#"{"power": 9}"#.to_vec()],
+                    )],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let bytes = send(&reloaded);
+        let next = receive(declarations, Some(&joined), &bytes).unwrap();
+        assert_eq!(next.generation(), 2);
+        // The handle from generation 1 is stale, not from another session.
+        assert_eq!(
+            next.get(&held),
+            Err(mod_api::DatapackReadError::StaleGeneration)
+        );
+        let fresh = next.handle("example:spell", "addon:fire").unwrap();
+        assert_eq!(
+            next.get(&fresh).unwrap().get("power"),
+            Some(&mod_api::DatapackValue::Int(9))
+        );
+        // The same snapshot again, or an older one, changes nothing.
+        assert!(receive(declarations, Some(&next), &bytes).is_err());
+        assert!(receive(declarations, Some(&next), &send(&first)).is_err());
     }
 
     #[test]
