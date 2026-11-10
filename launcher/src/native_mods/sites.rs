@@ -4,9 +4,9 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(super) struct Site {
     #[serde(default)]
-    pub local: Option<horizon_mod_api_gen::sites::Local>,
+    pub local: Option<horizon_platform::mod_build::api_gen::sites::Local>,
     #[serde(default)]
-    pub expression: Option<horizon_mod_api_gen::sites::Expression>,
+    pub expression: Option<horizon_platform::mod_build::api_gen::sites::Expression>,
     pub name: String,
     pub target: String,
     pub call: String,
@@ -19,8 +19,8 @@ pub(super) struct Site {
     pub output: String,
 }
 
-impl From<horizon_mod_api_gen::sites::Site> for Site {
-    fn from(site: horizon_mod_api_gen::sites::Site) -> Self {
+impl From<horizon_platform::mod_build::api_gen::sites::Site> for Site {
+    fn from(site: horizon_platform::mod_build::api_gen::sites::Site) -> Self {
         Self {
             local: site.local,
             expression: site.expression,
@@ -46,7 +46,11 @@ impl Site {
         if self.local.is_some() || self.expression.is_some() {
             return self.name.clone();
         }
-        horizon_mod_api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
+        horizon_platform::mod_build::api_gen::sites::source::facade_name(
+            &self.target,
+            &self.call,
+            self.ordinal,
+        )
     }
 
     pub(super) fn facade(

@@ -455,6 +455,7 @@ name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "horizon-mod-point-shape",
  "horizon-shader-api",
  "log",
  "minisign-verify",
@@ -466,6 +467,17 @@ dependencies = [
  "toml",
  "wasmparser",
  "zip",
+]
+
+[[package]]
+name = "horizon-mod-point-shape"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]
