@@ -17,6 +17,7 @@
 - [Mod render colour](concepts/mod-render-colour.md)
 - [Create and Mekanism capabilities](concepts/create-mekanism-capabilities.md)
 - [Farmer's Delight's calls against existing hooks](concepts/farmers-delight-hooks.md)
+- [Block experience and explosions](concepts/block-break-experience-and-explosions.md)
 - [Where the mod API is going](concepts/design.md)
 - [Design: chunk attachment disk hooks](concepts/chunk-attachment-disk.md)
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
