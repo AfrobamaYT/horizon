@@ -637,7 +637,7 @@ impl GameLevel<'_> {
                     .filter(|_| !silk || &*name == "minecraft:spawner")
                     .unwrap_or(0)
             });
-        let experience = if silk && &*name != "minecraft:spawner" {
+        let experience = if exp_to_drop.is_none() && silk && &*name != "minecraft:spawner" {
             0
         } else {
             experience

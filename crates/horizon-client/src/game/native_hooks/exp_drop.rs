@@ -67,8 +67,7 @@ impl Game<'_> {
         let breaker = Some(self.native_acting_id());
         *experience = self.with_level(|_, level, _| {
             let pos = BlockPos::new(pos[0], pos[1], pos[2]);
-            Some(
-                level
+            let amount = level
                     .part_break_experience(pos, state, breaker, tool.as_ref())
                     .unwrap_or_else(|| {
                         horizon_world::level::removal::break_experience(
@@ -76,8 +75,9 @@ impl Game<'_> {
                             &level.facts.get(state).name,
                         )
                         .unwrap_or(0)
-                    }),
-            )
+                    });
+            Some(if tool.as_ref().is_some_and(|tool| tool.enchantment_level("minecraft:silk_touch") > 0)
+                && &*level.facts.get(state).name != "minecraft:spawner" { 0 } else { amount })
         });
     }
 }

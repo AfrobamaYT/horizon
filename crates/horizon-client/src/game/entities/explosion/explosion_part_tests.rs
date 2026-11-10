@@ -155,6 +155,7 @@ fn block_parts_xp_and_explosion_contract() {
                 .enchantments
                 .push(("minecraft:silk_touch".into(), 1));
             assert_eq!(drop(game, ore, Some(&silk), None), 0);
+            assert_eq!(drop(game, ore, Some(&silk), xp), 10);
             assert_eq!(drop(game, spawner, Some(&silk), None), 7);
             for (answer, expected) in [(-1, 0), (i32::MAX, 32767), (7, 7)] {
                 amount.store(answer, Ordering::Relaxed);
