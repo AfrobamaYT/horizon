@@ -6,6 +6,7 @@
 /// as native mods, including the host's encoding; it gains no filesystem access.
 /// Never interpret Unix bytes as UTF-8 or discard unpaired Windows surrogates.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
 pub enum InstanceDirectory {
     /// A Unix path, preserving every byte, including non-UTF-8 names.
     Unix(Vec<u8>),
