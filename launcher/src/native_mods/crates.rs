@@ -434,7 +434,7 @@ fn fits(horizon: &BTreeSet<Locked>, wanted: &Wanted) -> bool {
     let requirement = semver::VersionReq::parse(&wanted.version).ok();
     horizon.iter().any(|locked| {
         locked.name == wanted.name
-            && requirement.as_ref().map_or(true, |requirement| {
+            && requirement.as_ref().is_none_or(|requirement| {
                 semver::Version::parse(&locked.version)
                     .map_or(true, |version| requirement.matches(&version))
             })
