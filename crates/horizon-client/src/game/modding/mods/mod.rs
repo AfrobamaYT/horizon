@@ -226,12 +226,24 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
 /// hook runs, so every step sees the same values.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
+    let directory = Game::game_dir();
+    #[cfg(unix)]
+    let directory = {
+        use std::os::unix::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
+    };
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
+    };
     mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
         builtin_registry_names(root)?,
         horizon_world::native_load_context::capture_settings(
             &Game::mod_data_root(),
             packages.ids(),
         ),
+        directory,
     ));
     Ok(())
 }

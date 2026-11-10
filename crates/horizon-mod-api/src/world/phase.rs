@@ -395,6 +395,7 @@ pub fn install_guest_packages(packages: Vec<PackageInfo>) {
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RegistrationData {
+    instance_dir: crate::InstanceDirectory,
     /// Built-in registry names in ID order, by registry name.
     pub(crate) registries: Arc<[(String, Arc<[String]>)]>,
     /// Each loaded mod's settings, by mod ID then key.
@@ -407,8 +408,10 @@ impl RegistrationData {
     pub fn new(
         registries: BTreeMap<String, Vec<String>>,
         settings: BTreeMap<String, BTreeMap<String, String>>,
+        instance_dir: crate::InstanceDirectory,
     ) -> Self {
         Self {
+            instance_dir,
             registries: registries
                 .into_iter()
                 .map(|(name, ids)| (name, ids.into()))
@@ -561,18 +564,31 @@ impl std::error::Error for RegistrationReadError {}
 /// }
 /// ```
 // exhaustive: its fields are private, so mods cannot build or destructure it
-// no wire: zero-byte phase token: decoding rebinds installed packages and registration data, not the stored host tables.
+// no wire: phase context has a custom Wire layout for its derived directory value; other host tables rebind locally.
 pub struct RegistrationContext {
     pub(crate) mods: LoadedMods,
     pub(crate) data: Option<RegistrationData>,
+    pub(crate) instance_dir: Option<crate::InstanceDirectory>,
 }
 
 impl RegistrationContext {
     pub(crate) fn new() -> Self {
+        let data = registration_data();
+        let instance_dir = data.as_ref().map(|data| data.instance_dir.clone());
         Self {
             mods: LoadedMods::new(),
-            data: registration_data(),
+            data,
+            instance_dir,
         }
+    }
+
+    /// The instance directory captured before registration, identically on native
+    /// and wasm. This is data only, not permission to access a filesystem.
+    /// The value preserves the host OS's raw path encoding, including non-UTF-8 names.
+    pub fn instance_dir(&self) -> Result<&crate::InstanceDirectory, RegistrationReadError> {
+        self.instance_dir
+            .as_ref()
+            .ok_or(RegistrationReadError::Unavailable)
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
@@ -1150,6 +1166,11 @@ mod tests {
             let registry = |name| format!("{:?}", cx.registry(name));
             let setting = |id, key| format!("{:?}", cx.setting(id, key));
             vec![
+                format!(
+                    "{:?}",
+                    cx.instance_dir()
+                        .map(|dir| dir == &crate::InstanceDirectory::Unix(vec![47, 255]))
+                ),
                 registry("minecraft:item"),
                 registry("minecraft:missing"),
                 registry("item"),
@@ -1194,6 +1215,7 @@ mod tests {
                     BTreeMap::from([("mode".to_owned(), "slow".to_owned())]),
                 ),
             ]),
+            crate::InstanceDirectory::Unix(vec![47, 255]),
         );
 
         let registered = Arc::new(Mutex::new(Vec::new()));
@@ -1204,6 +1226,7 @@ mod tests {
         .into();
         crate::install(mods.clone());
         let expected = [
+            "Ok(true)",
             r#"Ok(["minecraft:air", "minecraft:stone"])"#,
             r#"Err(UnknownRegistry("minecraft:missing"))"#,
             r#"Err(InvalidRegistryName("item"))"#,
@@ -1230,9 +1253,10 @@ mod tests {
             crate::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
             let refused = registered.lock().unwrap().clone();
             assert_eq!(refused[0], "Err(Unavailable)");
-            assert_eq!(refused[2], r#"Err(InvalidRegistryName("item"))"#);
-            assert_eq!(refused[4], "Err(Unavailable)");
-            assert_eq!(refused[8], r#"Err(InvalidSettingKey(""))"#);
+            assert_eq!(refused[1], "Err(Unavailable)");
+            assert_eq!(refused[3], r#"Err(InvalidRegistryName("item"))"#);
+            assert_eq!(refused[5], "Err(Unavailable)");
+            assert_eq!(refused[9], r#"Err(InvalidSettingKey(""))"#);
         });
     }
 }
