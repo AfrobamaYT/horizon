@@ -37,3 +37,6 @@ pub mod selection;
 
 pub use content::Content;
 pub use manifest::{Capability, Manifest, Package, Side, find};
+
+/// Filename of the versioned SDK tool catalog.
+pub use horizon_mod_point_shape::SDK_CATALOG_FILE;

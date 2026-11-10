@@ -53,7 +53,7 @@ fn stage_with_catalog(
     .map_err(|error| format!("{}: {error}", stamp.display()))?;
     if matches!(mode, Mode::Build) {
         let catalog = catalog()?;
-        let destination = points_json.with_file_name("mod-catalog.json");
+        let destination = points_json.with_file_name(horizon_mod_point_shape::SDK_CATALOG_FILE);
         std::fs::write(&destination, catalog)
             .map_err(|e| format!("{}: {e}", destination.display()))?;
     }
@@ -144,7 +144,7 @@ mod tests {
             } else {
                 stage(&root, &output, &root.join("internals.json"), Mode::Build).unwrap();
                 assert_eq!(
-                    std::fs::read_to_string(root.join("mod-catalog.json")).unwrap(),
+                    std::fs::read_to_string(root.join(horizon_mod_point_shape::SDK_CATALOG_FILE)).unwrap(),
                     "{}\n"
                 );
                 let bytes = std::fs::read(&output).unwrap();

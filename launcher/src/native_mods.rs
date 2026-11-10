@@ -2219,7 +2219,7 @@ fn pipeline(
         fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
         for name in [
             inject::POINTS,
-            "mod-catalog.json",
+            horizon_mod_package::SDK_CATALOG_FILE,
             internals::INTERNALS,
             horizon_platform::mod_build::api_gen::points::source::FILE,
             horizon_platform::mod_build::api_gen::sites::source::FILE,
