@@ -4923,7 +4923,7 @@ impl Mob {
         events: &mut Vec<MobEvent>,
     ) -> ai::TickProgress {
         self.prepare_tick();
-        ai::tick_until_consumption(self, w, level, events)
+        neutral_anger::tick_until_consumption(self, w, level, events)
     }
     fn prepare_tick(&mut self) {
         self.track_section();
