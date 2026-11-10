@@ -217,9 +217,9 @@ files shipped beside a mod are never loaded as compiled code.
 On Unix, the game creates the cache folder with mode 0700 and entries with mode 0600. It checks
 folder ownership and permissions, then checks each opened entry is a regular file owned by the
 current user, not writable by group or others, and has only one hard link. Symlink entries are
-refused. On Windows, the folder must be under `LOCALAPPDATA` or `USERPROFILE`; the folder and
-opened entry must not be reparse points, and entries must be regular files. Windows relies on
-inherited profile ACLs. The player's account is the trust boundary.
+refused. On Windows, persistent caching is disabled until owner, DACL and inheritance trust
+can be verified for the cache folder and opened entries. Modules compile from wasm instead,
+with one warning explaining the fallback. The player's account is the trust boundary.
 
 A failed check logs the reason once per launch. Unavailable, corrupt or incompatible entries
 fall back to compiling the wasm. Writes replace entries atomically without changing files that

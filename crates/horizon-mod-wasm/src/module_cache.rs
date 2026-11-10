@@ -23,13 +23,22 @@ impl ModuleCache {
     /// Hits are mapped by `Module::deserialize_open_file`, as in `deserialize_file`.
     /// Unix checks folder ownership and write permissions without following a symlink.
     /// Each opened entry must be regular, owned by this user, not group/other writable,
-    /// and have exactly one link. Windows checks the folder is under LOCALAPPDATA or
-    /// USERPROFILE and neither folder nor opened entry is a reparse point; entries must
-    /// be regular. Windows relies on inherited profile ACLs, rather than inspecting ACLs.
+    /// and have exactly one link. Windows caching is disabled until owner, DACL and
+    /// inheritance trust can be established for folders and opened entries (#2901).
     pub(crate) fn new(root: PathBuf) -> Self {
-        let disabled = prepare_folder(&root)
-            .err()
-            .map(|why| format!("folder {}: {why}", root.display()));
+        Self::new_for_platform(root, cfg!(windows))
+    }
+
+    fn new_for_platform(root: PathBuf, windows: bool) -> Self {
+        let disabled = if windows {
+            Err(io::Error::other(
+                "Windows owner/DACL/inheritance trust is not verified; compiling wasm",
+            ))
+        } else {
+            prepare_folder(&root)
+        }
+        .err()
+        .map(|why| format!("folder {}: {why}", root.display()));
         if disabled.is_none() {
             remove_stale_temporaries(&root);
         }
@@ -79,7 +88,7 @@ impl ModuleCache {
                 // A mapped entry must remain unchanged for the Module lifetime. Writers
                 // only temp-and-rename (including corrupt-entry recovery), giving a new
                 // inode and preserving every live mapping; they never rewrite in place.
-                // Unix also rejects hard links; Windows relies on inherited profile ACLs.
+                // Unix also rejects hard links; Windows never reaches this path.
                 match unsafe { Module::deserialize_open_file(engine, file) } {
                     Ok(module) => return Ok((module, Source::Cached)),
                     Err(why) => self.warn_once(&path, &why),
@@ -300,6 +309,10 @@ fn check_permissions(metadata: &fs::Metadata) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 #[path = "module_cache_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "module_cache_gate_tests.rs"]
+mod gate_tests;
