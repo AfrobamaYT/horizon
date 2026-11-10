@@ -577,6 +577,7 @@ pub struct RegistrationContext {
     pub(crate) mods: LoadedMods,
     pub(crate) data: Option<RegistrationData>,
     pub(crate) declaration_refusals: std::sync::Mutex<Vec<String>>,
+    pub(crate) instance_dir: Option<crate::InstanceDirectory>,
 }
 
 impl RegistrationContext {
@@ -585,8 +586,9 @@ impl RegistrationContext {
         let instance_dir = data.as_ref().map(|data| data.instance_dir.clone());
         Self {
             mods: LoadedMods::new(),
-            data: registration_data(),
+            data,
             declaration_refusals: Default::default(),
+            instance_dir,
         }
     }
 
