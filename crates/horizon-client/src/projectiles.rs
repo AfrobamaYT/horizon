@@ -3,6 +3,9 @@
 //! snowballs, eggs, ender pearls, gravity 0.03) and fireballs
 //! (`AbstractHurtingProjectile`: no gravity, 0.1 acceleration, 0.95 inertia).
 //! The game applies the effects of a hit.
+#[cfg(test)]
+#[path = "projectile_rotation_tests.rs"]
+mod projectile_rotation_tests;
 use crate::entity_rules::EntityRules;
 use crate::mobs::Who;
 use horizon_core::{
@@ -936,15 +939,16 @@ impl Projectile {
         source_velocity: Vec3,
         source_on_ground: bool,
     ) {
+        use horizon_core::geometry::trig::{DEG_TO_RAD, cos, sin};
         let (p, y, o) = (
-            pitch.to_radians(),
-            yaw.to_radians(),
-            (pitch + offset).to_radians(),
+            f64::from(pitch * DEG_TO_RAD),
+            f64::from(yaw * DEG_TO_RAD),
+            f64::from((pitch + offset) * DEG_TO_RAD),
         );
         let dir = [
-            f64::from(-y.sin() * p.cos()),
-            f64::from(-o.sin()),
-            f64::from(y.cos() * p.cos()),
+            f64::from(-sin(y) * cos(p)),
+            f64::from(-sin(o)),
+            f64::from(cos(y) * cos(p)),
         ];
         self.shoot(random, dir, speed, uncertainty);
         self.velocity = Vec3::new(
