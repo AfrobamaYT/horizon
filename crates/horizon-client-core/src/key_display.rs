@@ -164,7 +164,8 @@ mod tests {
 
     #[test]
     fn keys_show_what_the_layout_writes() {
-        // The layout table is shared: these keys are this test's alone.
+        let _guard = TEST_BINDINGS.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_layout = std::mem::take(&mut *LAYOUT.write().unwrap());
         assert_eq!(display_name("key.keyboard.q").plain(), "Q");
         // AZERTY: A on the Q key, M on the semicolon key, a dead ^ on the
         // left bracket, a comma on the M key.
@@ -188,11 +189,13 @@ mod tests {
         assert_eq!(display_name("key.keyboard.g").plain(), "G");
         assert_eq!(display_name("key.keyboard.h").plain(), "H");
         assert_eq!(display_name("key.keyboard.slash").plain(), "/");
+        *LAYOUT.write().unwrap() = prior_layout;
     }
 
     #[test]
     fn action_keybinds_resolve_through_client_bindings() {
         let _guard = TEST_BINDINGS.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_layout = std::mem::take(&mut *LAYOUT.write().unwrap());
         replace_action_bindings([
             ("key.jump", "key.keyboard.space"),
             ("key.forward", "key.keyboard.w"),
@@ -269,5 +272,6 @@ mod tests {
                 assert_eq!(display_name("key.jump").plain(), "Jump");
             },
         );
+        *LAYOUT.write().unwrap() = prior_layout;
     }
 }
