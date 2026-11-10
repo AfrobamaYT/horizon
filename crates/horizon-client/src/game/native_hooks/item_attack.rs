@@ -44,9 +44,13 @@ impl Game<'_> {
         if !mod_api::__private::has_part_hook(mod_api::HookId::OnLeftClickEntity) {
             return false;
         }
-        let Some(stack) = self.held().cloned() else {
+        let Some(stack) = self.held() else {
             return false;
         };
+        if !mod_api::__private::item_listens(mod_api::HookId::OnLeftClickEntity, &stack.item) {
+            return false;
+        }
+        let stack = stack.clone();
         let player = self.native_acting_id();
         let mut canceled = false;
         self.native_on_left_click_entity(player, &stack, entity, kind, &mut canceled);
@@ -63,9 +67,13 @@ impl Game<'_> {
             Hand::Main => self.held(),
             Hand::Off => self.offhand.as_ref(),
         };
-        let Some(stack) = stack.cloned() else {
+        let Some(stack) = stack else {
             return false;
         };
+        if !mod_api::__private::item_listens(mod_api::HookId::OnEntitySwing, &stack.item) {
+            return false;
+        }
+        let stack = stack.clone();
         let entity = self.player.as_ref().map(|p| p.entity_id);
         let mut canceled = false;
         self.native_on_entity_swing(&stack, entity, hand, &mut canceled);
