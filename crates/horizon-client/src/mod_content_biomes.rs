@@ -268,16 +268,14 @@ impl<'a> Registries<'a> {
         placed: &'a BTreeSet<String>,
         feature_tags: &'a BTreeMap<String, String>,
         entities: (&'a BTreeSet<String>, &'a BTreeMap<String, String>),
-        carver_ids: &'a BTreeSet<String>,
+        carvers: (&'a BTreeSet<String>, &'a BTreeMap<String, String>),
     ) -> Self {
         let registry = |what, ids, tags| Registry { what, ids, tags };
-        // A world's packs' carver tags are not read: ids only.
-        static NO_TAGS: BTreeMap<String, String> = BTreeMap::new();
         Self {
             biome: registry("biome", biome_ids, biome_tags),
             feature: registry("placed feature", placed, feature_tags),
             entity: registry("entity type", entities.0, entities.1),
-            carver: registry("carver", carver_ids, &NO_TAGS),
+            carver: registry("carver", carvers.0, carvers.1),
         }
     }
 }
@@ -614,6 +612,12 @@ pub(super) fn apply(
                     e.insert(serde_json::from_str(text).map_err(|e| at(format!("{biome}: {e}")))?)
                 }
             };
+            if matches!(
+                m.action,
+                Action::AddCarvers { .. } | Action::RemoveCarvers { .. }
+            ) {
+                super::carver_registry::expand(doc, carver_reg)?;
+            }
             edit(doc, &m.action, &ids, entity_categories)
                 .map_err(|e| at(format!("{biome}: {e}")))?;
         }
@@ -922,6 +926,8 @@ pub(super) fn saved_bytes(
     if declared.is_empty()
         && packs.entries("biomes").next().is_none()
         && packs.tags("biome_tags").next().is_none()
+        && packs.entries("carvers").next().is_none()
+        && packs.tags("carver_tags").next().is_none()
     {
         return None;
     }
