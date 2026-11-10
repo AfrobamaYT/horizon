@@ -100,6 +100,8 @@ pub struct Hook {
     /// A listener about one mod's own things: the event field naming that mod, whose
     /// subscription alone is told.
     pub owner: Option<String>,
+    /// Validate a collector's edits at the per-listener ownership boundary.
+    pub collect_validator: Option<String>,
     pub scope: Option<PartScope>,
     pub host: Option<HostAccess>,
     pub context: Option<PhaseContext>,
@@ -246,6 +248,7 @@ struct ModApiEntry {
     key: Option<String>,
     answered_by: Option<AnsweredBy>,
     owner: Option<String>,
+    collect_validator: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -293,6 +296,13 @@ impl Hook {
         if api.owner.is_some() && (api.contract != Contract::Listen || scope.is_some()) {
             return Err(CatalogError::OwnerNeedsGlobalListener(name));
         }
+        if let Some(validator) = &api.collect_validator {
+            if api.contract != Contract::Collect || scope.is_some()
+                || syn::parse_str::<syn::Path>(validator).is_err()
+            {
+                return Err(CatalogError::InvalidContract(name));
+            }
+        }
         let counterparts = Counterparts {
             neoforge: counterparts(&name, "neoforge", entry.neoforge)?,
             fabric: counterparts(&name, "fabric", entry.fabric)?,
@@ -308,6 +318,7 @@ impl Hook {
             out: api.out,
             answered_by_mod,
             owner: api.owner,
+            collect_validator: api.collect_validator,
             scope,
             host: entry.host,
             context: entry.context,
@@ -514,7 +525,7 @@ impl Declared {
                         }
                         // The contract's arguments are the entry's `mod_api` object.
                         let mut api = serde_json::Map::new();
-                        for key in ["contract", "out", "scope", "key", "answered_by", "owner"] {
+                        for key in ["contract", "out", "scope", "key", "answered_by", "owner", "collect_validator"] {
                             if let Some(value) = entry.remove(key) {
                                 api.insert(key.into(), value);
                             }
@@ -683,6 +694,7 @@ impl Hook {
             out: None,
             answered_by_mod: false,
             owner: None,
+            collect_validator: None,
             scope: None,
             host: None,
             context: None,
