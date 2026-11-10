@@ -163,7 +163,7 @@ def main():
     host = next(line.split(": ", 1)[1] for line in compiler.splitlines() if line.startswith("host: "))
     runtime = sysroot / "lib/rustlib" / host / "lib"
     std_runtime = sorted(runtime.glob(f"{prefix}std-*{extension}"))
-    game = next(deps.glob("libhorizon_client-*.rmeta"))
+    game = sdk_tools.dylib(deps, "horizon_mod_host")
     failures = []
 
     def runtime_env(*folders):
@@ -204,7 +204,7 @@ def main():
     shipped_exe = shipped / ("horizon-client.exe" if windows else "horizon-client")
     subprocess.run([*route, "--crate-type", "bin", "--crate-name", "horizon_native_game",
                     *(flag for arg in identity["link_args"] for flag in ("-C", f"link-arg={arg}")),
-                    "--extern", f"horizon_client={game}", "--extern", f"horizon_mod_host={sdk_tools.dylib(deps, 'horizon_mod_host')}", *extern("mod_api"), *extern("mod_points"), *extern("horizon_mod_package"),
+                    *extern("horizon_client"), *extern("horizon_mod_host"), *extern("mod_api"), *extern("mod_points"), *extern("horizon_mod_package"),
                     "--extern", f"mod_0={shipped / 'libmod_0.rlib'}", "-o", str(shipped_exe), str(shipped / "main.rs")], check=True)
     if windows:
         # std's DLL always exports the allocator shim; the game exports one only if it has its own allocator.
