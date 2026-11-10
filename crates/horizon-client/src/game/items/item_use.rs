@@ -830,6 +830,132 @@ mod tests {
         });
     }
 
+    /// `render_hand` draws in a hand that holds an item, where `render_arm`
+    /// never fires. What the mod drew is in the hand's vertices, in a run of
+    /// its own ahead of vanilla's, and it stays when the mod leaves vanilla's
+    /// hand out. The pose the mod sets moves vanilla's hand, not what it
+    /// drew. The empty off hand is asked too.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mod_draws_in_a_hand_that_holds_an_item() {
+        use mod_api::{ClientHost, Flow, Hand, Hooks, ModEntry, Mods, RenderHandEvent};
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        // One quad a block wide, a block in front of the eyes.
+        const MARK: [[f32; 3]; 4] = [
+            [0.0, 1.0, -1.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, -1.0],
+            [1.0, 1.0, -1.0],
+        ];
+        struct Mod {
+            cancel: Arc<AtomicBool>,
+            shift: Arc<AtomicBool>,
+            asked: Arc<Mutex<Vec<(Hand, bool)>>>,
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn render_hand(&self, _: &dyn ClientHost, event: &mut RenderHandEvent<'_, '_>) -> Flow {
+                let holds_an_item = event.render.stack.is_some();
+                self.asked
+                    .lock()
+                    .unwrap()
+                    .push((event.render.hand, holds_an_item));
+                if self.shift.load(Ordering::Relaxed) {
+                    event.render.translation[0] += 1.0;
+                }
+                // Draw in the hand that holds the sword only.
+                if holds_an_item {
+                    let uv = [0.0, 0.0, 16.0, 16.0];
+                    assert!(event.draw.quad("block/stone", MARK, uv, 0xFF_FF_FF));
+                }
+                if self.cancel.load(Ordering::Relaxed) {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        fn hold_a_sword(game: &mut crate::game::Game<'_>) {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.inventory[game.selected] = Some(horizon_client::items::ItemStack::new(
+                "minecraft:iron_sword",
+                1,
+            ));
+            game.tick_player_model();
+            game.visible_hands[0].1 = game.inventory[game.selected].clone();
+        }
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let shift = Arc::new(AtomicBool::new(false));
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let hooks = Mod {
+            cancel: cancel.clone(),
+            shift: shift.clone(),
+            asked: asked.clone(),
+        };
+        let mods: Mods = vec![ModEntry::new("hand", Box::new(hooks))].into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        let mut drawn = None;
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                hold_a_sword(game);
+                let kept = game.hand_geometry(0.0);
+                shift.store(true, Ordering::Relaxed);
+                let posed = game.hand_geometry(0.0).0;
+                shift.store(false, Ordering::Relaxed);
+                cancel.store(true, Ordering::Relaxed);
+                drawn = Some((kept, posed, game.hand_geometry(0.0)));
+            });
+        });
+        let ((kept, kept_runs), posed, (alone, alone_runs)) = drawn.unwrap();
+        // Each frame both hands were asked, the empty off hand included.
+        let frame = [(Hand::Main, true), (Hand::Off, false)];
+        assert_eq!(*asked.lock().unwrap(), [frame, frame, frame].concat());
+        // Cancelled: only the mod's quad, in a run with no rendered item id.
+        assert!(!alone.is_empty());
+        assert_eq!(alone_runs, [(0, 0)]);
+        // The pose the mod set is not under its draw: the quad stays, and
+        // vanilla's hand moves by the block asked along the view's x.
+        assert_eq!(posed.len(), kept.len());
+        let (quad, hand) = posed.split_at(alone.len());
+        assert!(quad.iter().zip(&alone).all(|(a, b)| a.pos == b.pos));
+        for (moved, still) in hand.iter().zip(&kept[alone.len()..]) {
+            let by = (0..3)
+                .map(|i| (moved.pos[i] - still.pos[i]).powi(2))
+                .sum::<f32>()
+                .sqrt();
+            assert!((by - 1.0).abs() < 1e-4, "moved by {by}");
+        }
+
+        // The unmodified comparison owns a new resource graph and Parts snapshot.
+        crate::game::api_values::install_parts(&[]).unwrap();
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            hold_a_sword(game);
+            let (vanilla, vanilla_runs) = game.hand_geometry(0.0);
+            assert!(!vanilla.is_empty());
+            // Kept: the same quad first, then vanilla's hand exactly as without a mod.
+            assert_eq!(kept.len(), alone.len() + vanilla.len());
+            assert!(kept.iter().zip(&alone).all(|(a, b)| a.pos == b.pos));
+            let hand = &kept[alone.len()..];
+            assert!(hand.iter().zip(&vanilla).all(|(a, b)| a.pos == b.pos));
+            let shifted = vanilla_runs
+                .iter()
+                .map(|&(start, id)| (start + alone.len() as u32, id));
+            let runs = std::iter::once((0, 0)).chain(shifted).collect::<Vec<_>>();
+            assert_eq!(kept_runs, runs);
+        });
+    }
+
     #[test]
     fn a_use_runs_out_on_its_last_tick() {
         // a 32 tick food: ticks 0 to 30 go on, the 32nd tick finishes it.

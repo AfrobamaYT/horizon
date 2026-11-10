@@ -13822,11 +13822,10 @@ impl Game<'_> {
                 rotation: [0.0; 3],
                 scale: 1.0,
             };
-            let mut canceled = false;
-            if snapshot.is_some() {
-                self.native_render_hand(&mut render, &mut canceled);
-            }
-            if canceled {
+            // RenderHandEvent: the mods pose the hand, draw in it or leave vanilla's out.
+            if snapshot.is_some()
+                && self.render_hand_cancelled(&mut render, to_world, packed, &mut out, &mut runs)
+            {
                 continue;
             }
             // No mod moved the hand (always so without one): no matrices to build.

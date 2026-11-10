@@ -160,16 +160,24 @@ fn server_services_forward_commands_messages_and_player_identity() {
 }
 
 #[test]
-fn render_hand_chains_pose_until_cancelled() {
+fn render_hand_chains_pose_and_draw_until_cancelled() {
     struct HandMod {
         offset: f32,
         cancel: bool,
+    }
+    /// Counts the pushes the mods make on the one draw they share.
+    struct Draw(u32);
+    impl BlockEntityDrawContext for Draw {
+        fn push(&mut self) {
+            self.0 += 1;
+        }
     }
     #[mod_api::__subscriptions]
     impl Hooks for HandMod {
         fn render_hand(&self, _host: &dyn ClientHost, event: &mut RenderHandEvent<'_, '_>) -> Flow {
             assert_eq!((event.render.player, event.render.player_entity_id), (7, 9));
             event.render.translation[0] += self.offset;
+            event.draw.push();
             if self.cancel {
                 Flow::Cancel
             } else {
@@ -217,9 +225,12 @@ fn render_hand_chains_pose_until_cancelled() {
         scale: 1.0,
     };
     let mut canceled = false;
-    dispatch_render_hand(&host, &mut render, &mut canceled);
+    let mut draw = Draw(0);
+    dispatch_render_hand(&host, &mut render, &mut draw, &mut canceled);
     assert!(canceled);
     assert_eq!(render.translation, [3.0, 0.0, 0.0]);
+    // The mod that cancelled drew too; the one after it was not asked.
+    assert_eq!(draw.0, 2);
 }
 
 /// Installs one mod, `id`, that attaches `part` to sticks.
