@@ -197,17 +197,25 @@ pub(crate) static INSTALLED: OnceLock<Installed> = OnceLock::new();
 thread_local! {
     /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
     pub(crate) static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
+}
+#[cfg(test)]
+thread_local! {
     pub(crate) static TEST_PART_LOOKUPS: Cell<usize> = const { Cell::new(0) };
 }
 pub(crate) static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
 pub(crate) static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
 
+/// The validity context travels with the owning game's lookup table.
+pub(crate) struct GamePartsLookup {
+    pub(super) parts: Option<Rc<Parts>>,
+    pub(super) game_thread: bool,
+    pre_world: bool,
+}
 thread_local! {
-    /// This thread's game's parts, its tags resolved; none before its world opens.
-    pub(crate) static GAME_PARTS: RefCell<Option<Rc<Parts>>> = const { RefCell::new(None) };
-    /// Whether a `Game` runs on this thread.
-    pub(crate) static GAME_THREAD: Cell<bool> = const { Cell::new(false) };
-    pub(crate) static PRE_WORLD: Cell<bool> = const { Cell::new(false) };
+    /// The per-game table and the context that determines which fallback is valid.
+    pub(crate) static GAME_PARTS: RefCell<GamePartsLookup> = const { RefCell::new(GamePartsLookup {
+        parts: None, game_thread: false, pre_world: false,
+    }) };
 }
 
 pub(crate) fn installed() -> Option<&'static Installed> {
@@ -279,15 +287,17 @@ pub(crate) fn try_parts(
     hook: HookId,
     name: &'static str,
 ) -> Result<PartsRef, MissingResolvedParts> {
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
         return Ok(PartsRef::Shared(&NO_PARTS));
     };
-    if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
+    let (game_parts, pre_world) =
+        GAME_PARTS.with_borrow(|lookup| (lookup.parts.clone(), lookup.pre_world));
+    if let Some(parts) = game_parts {
         return Ok(PartsRef::Game(parts));
     }
-    if installed.tag_hook_bits[hook as usize] && !PRE_WORLD.get() {
+    if installed.tag_hook_bits[hook as usize] && !pre_world {
         return Err(MissingResolvedParts {
             hook: name,
             thread: std::thread::current()
@@ -301,13 +311,16 @@ pub(crate) fn try_parts(
 
 /// Enter a worldless game context, discarding the previous world's table.
 pub fn clear_game_parts() {
-    GAME_PARTS.set(None);
-    PRE_WORLD.set(true);
+    let previous = GAME_PARTS.with_borrow_mut(|lookup| {
+        lookup.pre_world = true;
+        lookup.parts.take()
+    });
+    drop(previous);
 }
 
 /// Mark this thread as running a `Game`, whose dispatches read its own resolved parts.
 pub fn mark_game_thread() {
-    GAME_THREAD.set(true);
+    GAME_PARTS.with_borrow_mut(|lookup| lookup.game_thread = true);
     clear_game_parts();
 }
 
@@ -393,8 +406,11 @@ pub fn prepare_parts(
 /// Publish Parts prepared for this owning game thread.
 pub fn install_resolved_parts(parts: Option<Parts>) {
     if let Some(parts) = parts {
-        GAME_PARTS.set(Some(Rc::new(parts)));
-        PRE_WORLD.set(false);
+        let previous = GAME_PARTS.with_borrow_mut(|lookup| {
+            lookup.pre_world = false;
+            lookup.parts.replace(Rc::new(parts))
+        });
+        drop(previous);
     }
 }
 
@@ -756,6 +772,47 @@ pub(crate) fn install_registrar(
     }
     Ok(())
 }
+#[cfg(test)]
+mod lookup_context_tests {
+    use super::*;
+
+    struct DropObserver(Arc<AtomicBool>);
+    #[mod_api::horizon_part]
+    impl BlockPart for DropObserver {}
+    impl Drop for DropObserver {
+        fn drop(&mut self) {
+            self.0.store(
+                GAME_PARTS.with(|lookup| lookup.try_borrow().is_ok()),
+                Ordering::Relaxed,
+            );
+        }
+    }
+    fn table(observed: Arc<AtomicBool>) -> Parts {
+        let mut parts = Parts::default();
+        parts.blocks.insert(
+            "test:drop".into(),
+            vec![Attached {
+                mod_id: "drop",
+                mod_index: 0,
+                order: 0,
+                type_name: "DropObserver",
+                part: Arc::new(DropObserver(observed)),
+            }],
+        );
+        parts
+    }
+    #[test]
+    fn replacing_and_clearing_lookup_tables_release_the_borrow_before_dropping_parts() {
+        let first = Arc::new(AtomicBool::new(false));
+        let second = Arc::new(AtomicBool::new(false));
+        install_resolved_parts(Some(table(first.clone())));
+        install_resolved_parts(Some(table(second.clone())));
+        assert!(first.load(Ordering::Relaxed));
+        clear_game_parts();
+        assert!(second.load(Ordering::Relaxed));
+    }
+}
+
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {

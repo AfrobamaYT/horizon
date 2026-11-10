@@ -80,9 +80,9 @@
     "reason": "Immutable empty lookup result before installation."
   },
   "parts/shared.rs::GAME_PARTS": {
-    "type": "RefCell<Option<Rc<Parts>>>",
+    "type": "RefCell<GamePartsLookup>",
     "category": "Parts lookup table",
-    "reason": "Per-game lookup table rebuilt when world tags change."
+    "reason": "Per-game lookup table and its world/thread validity context, replaced when world tags change."
   },
   "runtime.rs::MODS": {
     "type": "OnceLock<Installed>",

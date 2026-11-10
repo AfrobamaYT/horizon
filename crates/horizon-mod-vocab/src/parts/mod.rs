@@ -13,7 +13,7 @@ use crate::{
 };
 use std::{
     any::{Any, type_name},
-    cell::{Cell, RefCell},
+    cell::RefCell,
     collections::{HashMap, HashSet},
     marker::PhantomData,
     rc::Rc,
@@ -28,3 +28,6 @@ include!(concat!(env!("OUT_DIR"), "/parts_modules.rs"));
 impl Registrar for PartRegistrar {}
 
 impl CapabilityProviders for InstalledProviders {}
+
+#[cfg(any(test, feature = "testing"))]
+use std::cell::Cell;

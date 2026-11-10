@@ -32,10 +32,12 @@ pub fn entity_parts() -> PartsRef {
     let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
     };
-    if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
+    let (game_parts, game_thread) =
+        GAME_PARTS.with_borrow(|lookup| (lookup.parts.clone(), lookup.game_thread));
+    if let Some(parts) = game_parts {
         return PartsRef::Game(parts);
     }
-    if !GAME_THREAD.get() {
+    if !game_thread {
         let thread = std::thread::current();
         let thread = thread.name().unwrap_or("unnamed");
         if !OFF_THREAD_WARNED.swap(true, Ordering::Relaxed) {
