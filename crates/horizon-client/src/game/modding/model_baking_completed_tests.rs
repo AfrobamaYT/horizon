@@ -92,9 +92,7 @@ fn a_client_mod_hears_model_baking_completed_once_per_load_and_keeps_its_handles
     with_mods(mods, || {
         with_client_game(|game| {
             // The first load, as `run` fires them before `client_setup`.
-            game.texture_atlases_stitched();
-            game.native_model_baking_completed();
-            game.native_client_setup();
+            game.publish_initial_client_models();
             let first = {
                 let kept = kept.lock().unwrap();
                 assert_eq!(
