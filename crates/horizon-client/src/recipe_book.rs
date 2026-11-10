@@ -13,6 +13,9 @@ use horizon_world::loot::PackOverlay;
 pub use mod_api::item::recipe_book::RecipeBookCategory;
 use std::collections::{BTreeSet, HashMap};
 
+mod properties;
+pub use properties::ServerRecipeProperties;
+
 mod custom_books;
 pub use custom_books::{BookError, BookFlags, CustomBooks, read_saved};
 

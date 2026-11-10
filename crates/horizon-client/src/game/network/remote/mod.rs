@@ -5367,6 +5367,9 @@ impl Game<'_> {
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
             C::MountScreenOpen(p) => self.remote_open_mount(p),
+            C::UpdateRecipes(p) => {
+                self.recipe_ui.server_properties.replace(p);
+            }
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),

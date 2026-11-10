@@ -64,6 +64,8 @@ struct View {
 
 #[derive(Default)]
 pub(super) struct RecipeUi {
+    /// The last authoritative property-set and stonecutter generation.
+    pub(super) server_properties: crate::recipe_book::ServerRecipeProperties,
     book: Option<Book>,
     tab: Option<Tab>,
     pub(super) search: Option<EditBox>,
