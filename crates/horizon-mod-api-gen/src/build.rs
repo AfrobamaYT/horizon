@@ -27,14 +27,16 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             // engine's `GoalCx` in `mobs/part_goals.rs`.
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
-        Target::Api => {
-            fs::write(
-                out_dir.join(super::parts::OUTPUT),
-                super::parts::source(root)?,
-            )
-            .map_err(|e| e.to_string())?;
-            for (name, code) in super::exports::sources(root)? {
-                fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+        Target::Api | Target::Vocab => {
+            if matches!(target, Target::Vocab) {
+                fs::write(
+                    out_dir.join(super::parts::OUTPUT),
+                    super::parts::source(root)?,
+                )
+                .map_err(|e| e.to_string())?;
+                for (name, code) in super::exports::sources(root)? {
+                    fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                }
             }
             let hooks = generated.hooks;
             let included = [
@@ -55,14 +57,22 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             for path in sources.iter().chain(&generated_wire.sources) {
                 println!("cargo:rerun-if-changed={}", path.display());
             }
-            vec![
+            let outputs = vec![
                 (host::AREAS_OUTPUT, generated.areas),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("capability_providers_generated.rs", providers),
                 ("wire_generated.rs", generated_wire.wire),
                 ("wire_guest_generated.rs", generated_wire.guest),
-            ]
+            ];
+            outputs
+                .into_iter()
+                .filter(|(name, _)| match target {
+                    Target::Api => *name == "wire_guest_generated.rs",
+                    Target::Vocab => *name != "wire_guest_generated.rs",
+                    Target::Client => unreachable!(),
+                })
+                .collect()
         }
     };
     for (name, code) in outputs {
@@ -182,7 +192,7 @@ fn listed_render_slots_have_eligible_points() {
 /// The `mod_api` types with a `Wire` layout ([`super::wire`]), for point records.
 /// A source tree without the mod API (a generator fixture's) has none.
 pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
-    if !root.join("crates/horizon-mod-api/src/hooks").is_dir() {
+    if !root.join("crates/horizon-mod-vocab/src/hooks").is_dir() {
         return Ok(Default::default());
     }
     let generated = sources(root, super::FillMode::Require)?;
@@ -254,7 +264,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     println!(
         "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-mod-api/src/lib.rs").display()
+        root.join("crates/horizon-mod-vocab/src/lib.rs").display()
     );
     for retired in super::catalog::RETIRED {
         // Only while present: Cargo reruns a build script on every build for a path that doesn't
@@ -266,7 +276,11 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
-    directory(&root.join("crates/horizon-mod-api/src/parts"), "rs", false)?;
+    directory(
+        &root.join("crates/horizon-mod-vocab/src/parts"),
+        "rs",
+        false,
+    )?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     println!(
         "cargo:rerun-if-changed={}",

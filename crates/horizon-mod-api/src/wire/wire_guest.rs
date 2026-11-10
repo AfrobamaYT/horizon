@@ -10,6 +10,7 @@ use std::sync::atomic::AtomicUsize;
 
 mod generated {
     #![allow(clippy::all, unused, dead_code, non_snake_case)]
+    use crate::__private::game::{BackendMutRefOf, BackendRefOf, ClientBackendMutRefOf};
     use crate::*;
     include!(concat!(env!("OUT_DIR"), "/wire_guest_generated.rs"));
 }
@@ -684,7 +685,7 @@ pub fn run(id: u32) -> (*const u8, u32) {
     let result = match id {
         crate::wire::INIT => reader
             .take::<Vec<crate::PackageInfo>>()
-            .map(crate::world::phase::install_guest_packages),
+            .map(crate::install_guest_packages),
         crate::wire::RELEASE => reader.take::<Vec<Id>>().map(release),
         id => dispatch(id, &mut reader, &mut reply),
     };

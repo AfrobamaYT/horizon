@@ -18,11 +18,11 @@ NeoForge source or Javadoc is copied. Counts exclude each interface's private `s
 | **n/a** | The method has no Horizon equivalent because the architecture removes its reason to exist. |
 
 A **Part method** is a generated method on `BlockPart`, `ItemPart`, `BlockEntityPart`, `MenuPart` or `EntityPart`,
-declared with `scope` in `crates/horizon-mod-api/src/hooks/<area>.rs`. A Part method runs only for the objects a
+declared with `scope` in `crates/horizon-mod-vocab/src/hooks/<area>.rs`. A Part method runs only for the objects a
 mod attached its part to. An **unscoped hook** in the same files is global: every mod hears it and filters by the
 arguments itself. **Data** means a content declaration in `crates/horizon-mod-package/src/content.rs`, read into
 the game through `crates/horizon-items/src/blocks.rs`. **Handle** means a value or reference type in
-`crates/horizon-mod-api/src/` (`ItemStack`, `ItemResource`, `AttachmentStore`).
+`crates/horizon-mod-vocab/src/` (`ItemStack`, `ItemResource`, `AttachmentStore`).
 
 `EntityPart` exists today but has two methods, `register_goals` and `spawn_cluster_size` (`docs/modding/src/concepts/trait-mods/023-entity-parts-and-mob-goals.md`).
 It does not answer `IEntityExtension` methods; those are covered only where a global hook or a handle does.
@@ -245,7 +245,7 @@ and global hooks. On the server a mod can act on entities through `EntityRef` an
 ## `IBlockEntityExtension`
 
 Block entity parts are attached with `r.block_entity_part`; `BlockEntityPart` extends `BlockPart` and carries the
-block-entity hooks (`crates/horizon-mod-api/src/hooks/` with `scope = "block_entity"`). Saved data and attachments
+block-entity hooks (`crates/horizon-mod-vocab/src/hooks/` with `scope = "block_entity"`). Saved data and attachments
 are reachable through `BlockEntityRef`.
 
 | Method | Verdict | Horizon | Notes |
@@ -257,12 +257,12 @@ are reachable through `BlockEntityRef`.
 | `onLoad()` | Partial | `BlockEntityPart::block_entity` (`hooks/base.rs`) | Initial saved data is set at creation, before the saved NBT is applied; no after-load notice. |
 | `requestModelDataUpdate()` | Missing | — | No model-data invalidation API. |
 | `getModelData()` | Missing | — | No `ModelData`; drawing uses `block_entity_submit` and the model path. |
-| `invalidateCapabilities()` | n/a | capability providers are queried per lookup (`crates/horizon-mod-api/src/parts/block_entities.rs`) | There is no cached handler to invalidate. |
+| `invalidateCapabilities()` | n/a | capability providers are queried per lookup (`crates/horizon-mod-vocab/src/parts/block_entities.rs`) | There is no cached handler to invalidate. |
 | `applyStructureRotation(mirror, rotation)` | Missing | — | Structure rotation is engine-owned; no callback. |
 
 ## `IFluidExtension`
 
-Fluid type facts are one record, `FluidTypeProperties` (`crates/horizon-mod-api/src/block/fluid_states.rs`), read with
+Fluid type facts are one record, `FluidTypeProperties` (`crates/horizon-mod-vocab/src/block/fluid_states.rs`), read with
 `host.fluid_states().type_properties(key)`. They are static per fluid, not per position or block, and they are
 derived today: the record describes water's and lava's families and gives every other fluid inert values
 (`crates/horizon-client/src/game/modding/native_block_states.rs`). A mod's own fluid declares a sprite and tint,

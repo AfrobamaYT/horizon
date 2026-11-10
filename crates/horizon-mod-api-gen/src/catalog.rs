@@ -1,4 +1,4 @@
-//! The hook catalog as typed data: the declaration files under `crates/horizon-mod-api/src/hooks`, read once.
+//! The hook catalog as typed data: the declaration files under `crates/horizon-mod-vocab/src/hooks`, read once.
 //!
 //! The loader here is the only code that reads the declarations. Every generated output
 //! (the `Hooks` dispatch, the Host traits, the game's entry points, the rustdoc, the mixin hook
@@ -330,7 +330,7 @@ pub struct Catalog {
 }
 
 /// Where the declarations live, relative to the checkout root.
-pub const DECLARATIONS: &str = "crates/horizon-mod-api/src/hooks";
+pub const DECLARATIONS: &str = "crates/horizon-mod-vocab/src/hooks";
 
 /// What the catalog was declared in before the declarations: a file here is refused, never ignored.
 pub(crate) const RETIRED: &[&str] = &["native-hooks.json", "tools/native-hook-fragments"];
@@ -452,7 +452,7 @@ impl Declared {
             let kind = declarations.ident.to_string();
             if kind == "Helpers" {
                 return Err(invalid(
-                    "helpers are hand-written host traits now: declare the method in `crates/horizon-mod-api/src/host/<area>.rs`"
+                    "helpers are hand-written host traits now: declare the method in `crates/horizon-mod-vocab/src/host/<area>.rs`"
                         .into(),
                 ));
             }

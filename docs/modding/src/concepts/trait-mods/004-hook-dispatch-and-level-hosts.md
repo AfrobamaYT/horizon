@@ -78,7 +78,7 @@ the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods kee
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
-The trait has every hook declared under `crates/horizon-mod-api/src/hooks/` ([Adding a hook](027-adding-a-hook.md#adding-a-hook)).
+The trait has every hook declared under `crates/horizon-mod-vocab/src/hooks/` ([Adding a hook](027-adding-a-hook.md#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
 `state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`

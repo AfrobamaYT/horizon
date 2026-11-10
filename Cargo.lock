@@ -2125,6 +2125,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
+ "horizon-mod-vocab",
  "log",
  "serde",
  "serde_json",
@@ -2283,6 +2284,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-vocab"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "horizon-core",
+ "horizon-items",
+ "horizon-mod-api",
+ "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "horizon-mod-runtime",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "horizon-mod-wasm"
 version = "0.1.0"
 dependencies = [
@@ -2351,6 +2369,8 @@ version = "0.1.0"
 dependencies = [
  "horizon-core",
  "horizon-hooks",
+ "horizon-mod-api-gen",
+ "horizon-mod-point-shape",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-server-files",

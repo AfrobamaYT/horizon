@@ -182,13 +182,21 @@ The rule, in order (duckybertduck's):
 A feature often splits along this rule: the part others build on is platform, and the finished feature on top of it
 is Horizon (PvP & HUD and replays, [above](#controllers-splitscreen-replays-and-ui-pages)).
 
+The mod interface follows that split too: `horizon-mod-vocab` is an engine crate, while
+`horizon-mod-api` preserves the mod-facing paths through re-exports. The build-time generator,
+procedural macros and point-shape parser are engine dependencies of that interface. Horizon's launcher
+reaches the generator and point-shape parser through `horizon-platform`'s optional `mod-build` feature.
+The initial extraction also carries dispatch's crash markers, profiling, resource codec, phase access,
+and Parts registration state; it is not yet a stateless or unsafe-free interface ([#2587](https://github.com/arismoko/horizon/issues/2587)).
+
 | I add... | Layer | Where |
 |---|---|---|
 | A vanilla behaviour, block, mob, packet, command or screen | engine | the crate that owns the area ([CLAUDE.md](../CLAUDE.md) crate table) |
 | A speed-up that keeps vanilla's results | engine | next to the code it speeds up |
 | A call to a Mojang or Microsoft service vanilla makes | engine | `auth.rs`, `realms/`, `skins.rs`, `horizon-server-files` |
 | A place mods, ports or Horizon can hook into | engine + platform | an extension point in the engine crate, naming no type from above; its public face in the platform |
-| A mod hook, host method or mod format | platform | `horizon-mod-api`, with game owners under `game/modding/` and `game/native_hooks/` |
+| A mod hook or host interface | engine + platform | `horizon-mod-vocab` owns the engine vocabulary and dispatch; `horizon-mod-api` re-exports it for mods and owns guest transport |
+| A mod package format | platform | `horizon-mod-package` |
 | A shader or resource pack format vanilla doesn't read | platform | `horizon-shaders`, `horizon-optifine`, `horizon-polytone`, or a new platform crate |
 | A dedicated server option (anticheat, chat filter) | platform | `horizon-anticheat`, `horizon-chat-filter` |
 | Controller support: a device, bindings, glyphs, pad menus | platform | the pad modules, on the engine's input hooks ([Controllers](#controllers-splitscreen-replays-and-ui-pages)) |

@@ -847,7 +847,7 @@ mod tests {
                 assert!(
                     sources
                         .iter()
-                        .any(|p| p.ends_with("crates/horizon-mod-api/src/wire/wire_types.rs"))
+                        .any(|p| p.ends_with("crates/horizon-mod-vocab/src/wire/wire_types.rs"))
                 );
             })
             .unwrap()

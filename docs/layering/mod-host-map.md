@@ -104,8 +104,8 @@ Counts are source references (one per `use` leaf or path), split into production
 |---|---|---|---|---|---|
 | horizon-client | horizon-mod-api | dev | platform | 197 | hooks |
 | horizon-client | horizon-mod-api | normal | platform | 23 | hooks |
-| horizon-client | horizon-mod-api-gen | build | platform | 14 | slots |
-| horizon-client | horizon-mod-api-macros | normal | platform | 25 | slots |
+| horizon-client | horizon-mod-api-gen | build | engine | 14 | slots |
+| horizon-client | horizon-mod-api-macros | normal | engine | 25 | slots |
 | horizon-client | horizon-mod-package | normal | engine | 58 | loading |
 | horizon-client | horizon-mod-points | normal | platform | 24 | slots |
 | horizon-client | horizon-mod-render | normal | platform | 22 | content_render |
@@ -118,7 +118,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | horizon-client-lib | horizon-mod-runtime | normal | engine | 17 | content_render |
 | horizon-client-render | horizon-mod-api | dev | platform | 89 | hooks |
 | horizon-client-render | horizon-mod-api | normal | platform | 13 | hooks |
-| horizon-client-render | horizon-mod-api-macros | normal | platform | 14 | slots |
+| horizon-client-render | horizon-mod-api-macros | normal | engine | 14 | slots |
 | horizon-client-render | horizon-mod-package | normal | engine | 24 | loading |
 | horizon-client-render | horizon-mod-render | normal | platform | 12 | content_render |
 | horizon-client-render | horizon-mod-runtime | normal | engine | 11 | content_render |
@@ -214,39 +214,15 @@ Outside the host areas, 2279 `mod_api` references are in test code; 206 of them 
 
 |  | files | lines |
 |---|---|---|
-| all | 944 | 68433 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 772 | 24619 |
-| includes generator output (OUT_DIR) | 6 |  |
-| `unsafe` | 3 | 55 |
-| process state (static, thread_local, locks, atomics, cells) | 23 | 143 |
+| all | 2 | 1045 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 0 | 0 |
+| includes generator output (OUT_DIR) | 1 |  |
+| `unsafe` | 1 | 45 |
+| process state (static, thread_local, locks, atomics, cells) | 1 | 31 |
 
-Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-runtime` (normal, engine); build script: yes.
+Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, engine), `horizon-mod-api-macros` (normal, engine), `horizon-mod-runtime` (normal, engine), `horizon-mod-vocab` (normal, engine); build script: yes.
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
-- `src/__private.rs`: generated_include 83,91,107,474; state 420
-- `src/block/fluid_capability.rs`: state 143,144,316
-- `src/block/item_place.rs`: state 17,271
-- `src/block/unresolved_fluid.rs`: state 5,50
-- `src/client/client_reload.rs`: state 13,27,28,34,35,40,41
-- `src/client/particle_keys.rs`: state 3,11,12
-- `src/content/crash.rs`: state 5,7,9,11,12,13,15,16,18,26
-- `src/content/registry_keys.rs`: state 51,52,53,73,74,75
-- `src/host.rs`: generated_include 6
-- `src/lib.rs`: generated_include 15,23,26,27; state 9
-- `src/parts/block_entities.rs`: state 30,31
-- `src/parts/capabilities.rs`: generated_include 56
-- `src/parts/effects.rs`: state 2,3
-- `src/parts/fluids.rs`: state 23,24
-- `src/parts/mod.rs`: generated_include 26; state 16,21,22
-- `src/parts/shared.rs`: state 157,158,159,160,161,162,173,174,178,181,193,200…
-- `src/profiler.rs`: unsafe 116,202,214,244,265,273; state 9,10,15,16,17,18,19,20,111,118,120,126…
-- `src/runtime.rs`: state 35,65,75
-- `src/testing/services.rs`: state 3,46
-- `src/wire/mod.rs`: state 72,73,78
 - `src/wire/wire_guest.rs`: generated_include 14; unsafe 18,32,37,39,51,199,223,278,313,314,315,319…; state 7,9,25,169,170,173,176,177,202,206,207,220…
-- `src/wire/wire_resources.rs`: unsafe 256,350,377,379; state 5,33,34,119
-- `src/world/phase.rs`: state 25,54,55,330,441
-- `src/world/reload.rs`: state 69,74
-- `src/world/server_reload.rs`: state 15,25,26,32,33,38,39
 <!-- generated: end -->

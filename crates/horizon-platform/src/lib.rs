@@ -49,3 +49,12 @@ pub use horizon_server_files as server_files;
 pub mod hooks {
     pub use horizon_hooks::{Hooks, Started, TooLate, register};
 }
+
+/// Build-time mod source generation and point signature inspection.
+#[cfg(feature = "mod-build")]
+pub mod mod_build {
+    /// The shared mod API and source generator.
+    pub use horizon_mod_api_gen as api_gen;
+    /// Parsing and validation of injection point signatures.
+    pub use horizon_mod_point_shape as point_shape;
+}

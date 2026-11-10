@@ -4,6 +4,7 @@
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
+#![deny(unsafe_code)]
 extern crate self as mod_api;
 
 use std::sync::{Arc, OnceLock};

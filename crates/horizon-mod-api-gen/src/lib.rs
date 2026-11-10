@@ -339,7 +339,7 @@ pub fn neoforge_catalog(root: &Path) -> Result<String, String> {
 fn free_function_source(target: &str) -> Option<(&'static str, String)> {
     let prefixes = [
         ("horizon_world::", "horizon-world"),
-        ("mod_api::", "horizon-mod-api"),
+        ("mod_api::", "horizon-mod-vocab"),
         ("mod_render::", "horizon-mod-render"),
         ("horizon_client_lib::", "horizon-client"),
         ("horizon_client_render::", "horizon-client-render"),
@@ -467,8 +467,10 @@ const ENTITY_PART_DOCS: &str = "/// An entity type's part (arismoko/horizon#1077
 /// The crate whose generated sources are being built.
 #[derive(Clone, Copy)]
 pub enum Target {
-    /// `horizon-mod-api`: the hook traits, their dispatch, and the host traits.
+    /// `horizon-mod-api`: the mod-side WebAssembly guest transport.
     Api,
+    /// Engine vocabulary: hook and host traits, values, and dispatch.
+    Vocab,
     /// The game: the host traits' implementation on `Game`.
     Client,
 }
@@ -891,13 +893,13 @@ mod tests {
             .join("target")
             .join(format!("mod-api-fill-{}", std::process::id()));
         let mut inputs: Vec<String> = [
-            "crates/horizon-mod-api/src/hooks",
-            "crates/horizon-mod-api/src/exports",
-            "crates/horizon-mod-api/src/host",
-            "crates/horizon-mod-api/src/parts",
+            "crates/horizon-mod-vocab/src/hooks",
+            "crates/horizon-mod-vocab/src/exports",
+            "crates/horizon-mod-vocab/src/host",
+            "crates/horizon-mod-vocab/src/parts",
             "crates/horizon-client/src/game.rs",
             "crates/horizon-client/src/game",
-            "crates/horizon-mod-api/src/lib.rs",
+            "crates/horizon-mod-vocab/src/lib.rs",
         ]
         .map(str::to_owned)
         .into();
