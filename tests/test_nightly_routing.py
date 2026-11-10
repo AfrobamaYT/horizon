@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,7 @@ from tests.test_ci_runners import jobs, runs_on
 ROOT = Path(__file__).resolve().parents[1]
 GAME = ROOT / ".github/workflows/game-build.yml"
 NIGHTLY = ROOT / ".github/workflows/nightly-build.yml"
+SMOKE = ROOT / "tools/ci/game_smoke.sh"
 
 
 class NightlyRoutingTests(unittest.TestCase):
@@ -28,6 +30,9 @@ class NightlyRoutingTests(unittest.TestCase):
         self.assertIn("needs: runner-configuration", workflow_jobs["exporters"])
         self.assertIn("needs: [runner-configuration, exporters]", workflow_jobs["build"])
         expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)
+        self.assertEqual(len(expressions), 3)
+        smoke = workflow_jobs["linux-smoke"]
+        smoke_if = re.search(r"^\s*if:\s*\$\{\{(.*?)\}\}\s*$", smoke, re.M).group(1)
         block = text.split("        include:\n", 1)[1].split("    runs-on:", 1)[0]
         rows = []
         for line in block.splitlines():
@@ -41,6 +46,10 @@ class NightlyRoutingTests(unittest.TestCase):
                 value = value.strip()
                 rows[-1][key] = {"true": True, "false": False}.get(value, value)
         self.assertEqual({row["name"] for row in rows}, {"linux", "linux-musl", "windows", "windows-arm64", "macos", "macos-x64"})
+        linux = next(row for row in rows if row["name"] == "linux")
+        self.assertIn(f"name: {linux['asset']}", smoke, "smoke must download the hosted producer's archive")
+        self.assertIn(f"/hosted-linux/{linux['dir']}", smoke)
+        self.assertIn("needs: [runner-configuration, build]", smoke)
         script = """const fs = require('fs');
 const state = JSON.parse(fs.readFileSync(0, 'utf8'));
 // Actions returns an empty string for absent context properties, not undefined.
@@ -73,15 +82,32 @@ console.log(JSON.stringify(eval(expression)));
                 self.assertEqual(evaluate(expressions[0], {}, trusted), expected_exporter)
                 expected_bookkeeping = "dyna-small" if override else ("ubuntu-latest" if disabled else ["self-hosted", "linux", "horizon-light"])
                 self.assertEqual(evaluate(bookkeeping, {}, trusted), expected_bookkeeping)
+                self.assertEqual(evaluate(smoke_if, {}, trusted), not trusted and override)
+                if not trusted and override:
+                    self.assertEqual(evaluate(expressions[2], {}, trusted), "dyna-large")
                 for row in rows:
+                    if row["name"] in {"linux", "linux-musl"}:
+                        self.assertEqual(row["os"], "ubuntu-22.04", "shipped Linux binaries keep the documented libc baseline")
                     if row.get("mac"):
                         expected = dedicated if trusted else ("macos-15" if disabled or override else default_mac)
-                    elif row["name"] == "linux" and not trusted and override:
-                        expected = "dyna-large"
                     else:
                         expected = row["os"]
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+
+    def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
+        text = GAME.read_text()
+        commands = re.findall(r"check_glibc.py ([^\n]+)", text.replace("\\\n", " "))
+        checked = [{Path(argument).name for argument in shlex.split(command)} for command in commands]
+        self.assertEqual(checked, [
+            {"horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server"},
+            {"horizon-engine", "horizon-server", "horizon-prepare"},
+        ])
+        tools = [step for step in text.split("\n      - ") if "path: .workflow-tools" in step]
+        self.assertTrue(tools)
+        for checkout in tools:
+            self.assertIn("ref: ${{ github.workflow_sha }}", checkout,
+                          "older build candidates may lack the new workflow's validator/smoke helpers")
 
     def test_hosted_runners_never_use_machine_specific_tool_setup(self):
         steps = [block for block in GAME.read_text().split("\n      - ") if "bash tools/ci/runner-env.sh" in block]
@@ -118,7 +144,7 @@ console.log(JSON.stringify(eval(expression)));
 
     @unittest.skipUnless(os.name == "posix", "The smoke command runs on Linux and macOS")
     def test_smoke_runs_from_relative_or_absolute_binary_directory(self):
-        command = next(line.strip() for line in GAME.read_text().splitlines() if line.strip().startswith("client="))
+        command = next(line.strip() for line in SMOKE.read_text().splitlines() if line.strip().startswith("client="))
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             binary_dir = root / "target tree/release"
@@ -134,16 +160,26 @@ console.log(JSON.stringify(eval(expression)));
 
     @unittest.skipUnless(shutil.which("Xvfb"), "Xvfb is required for the Linux smoke display")
     def test_linux_smoke_gets_a_ready_display(self):
-        text = GAME.read_text()
-        client = next(line.strip() for line in text.splitlines() if line.strip().startswith("client="))
-        display = "display=()" + text.split("          display=()", 1)[1].split('          (cd "$home"', 1)[0]
         with tempfile.TemporaryDirectory() as folder:
-            binary = Path(folder) / "horizon-client"
-            binary.write_text("#!/bin/sh\nprintf '%s|%s' \"$DISPLAY\" \"${WAYLAND_DISPLAY-unset}\"\n")
+            root = Path(folder)
+            binary = root / "horizon-client"
+            # A controlled game fixture isolates the real smoke orchestration and Xvfb.
+            binary.write_text(textwrap.dedent('''\
+                #!/usr/bin/env python3
+                import json, os, pathlib, sys
+                args = sys.argv[1:]
+                report = {"frames": int(args[args.index("--world-frames") + 1]),
+                          "chunks": 1, "meshed_sections": 1, "player": [0, 64, 0],
+                          "display": os.environ.get("DISPLAY"), "wayland": os.environ.get("WAYLAND_DISPLAY")}
+                pathlib.Path(args[args.index("--smoke-report") + 1]).write_text(json.dumps(report))
+            '''))
             binary.chmod(0o755)
-            result = subprocess.run(["bash", "-c", client + "\n" + display + '\n"${display[@]}" "$client"'], cwd=ROOT, env={**os.environ, "BIN": folder, "RUNNER_OS": "Linux", "DISPLAY": ":invalid", "WAYLAND_DISPLAY": "invalid"}, text=True, capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertRegex(result.stdout, r"^:[0-9]+\|unset$")
+            result = subprocess.run(["bash", str(SMOKE)], cwd=ROOT, env={**os.environ, "BIN": folder, "RUNNER_TEMP": folder, "RUNNER_OS": "Linux", "DISPLAY": ":invalid", "WAYLAND_DISPLAY": "invalid"}, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads((root / "smoke-test.json").read_text())
+            self.assertEqual(report["frames"], 1500)
+            self.assertRegex(report["display"], r"^:[0-9]+$")
+            self.assertIsNone(report["wayland"])
 
     @unittest.skipUnless(os.name == "posix", "The signing gate runs in Bash on Linux")
     def test_fork_dry_run_cannot_pass_without_real_smoke_report(self):
