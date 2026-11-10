@@ -65,11 +65,12 @@ pub(super) fn validate_batch(
     Ok(())
 }
 fn validate(info: &PlacementInfo, resources: &dyn DisplayResources) -> Result<(), String> {
-    if let Some([w, h]) = info.shape {
-        if w == 0 || h == 0 || usize::from(w).checked_mul(usize::from(h)) != Some(info.cells.len())
-        {
-            return Err("shape dimensions disagree with cells".into());
-        }
+    if let Some([w, h]) = info.shape
+        && (w == 0
+            || h == 0
+            || usize::from(w).checked_mul(usize::from(h)) != Some(info.cells.len()))
+    {
+        return Err("shape dimensions disagree with cells".into());
     }
     // This is only a preflight for values provably unable to cross Wire. The
     // derived codec below, not a second decoder or local depth budget, decides
@@ -95,16 +96,15 @@ fn validate(info: &PlacementInfo, resources: &dyn DisplayResources) -> Result<()
         if ordered != ingredient.items || ordered.len() != ingredient.order.len() {
             return Err("ingredient holder order disagrees with its items".into());
         }
-        if let Some((kind, _)) = &ingredient.custom {
-            if ingredient.children.is_some()
+        if let Some((kind, _)) = &ingredient.custom
+            && (ingredient.children.is_some()
                 || !super::super::custom_books::valid_book_id(kind)
-                || kind.starts_with("minecraft:")
-            {
-                return Err("custom ingredient kind is invalid or mixed with a child shape".into());
-            }
-            // Tag owns its independent, iterative vanilla depth budget.
-            // The shared codec below validates it; ingredient depth is not NBT depth.
+                || kind.starts_with("minecraft:"))
+        {
+            return Err("custom ingredient kind is invalid or mixed with a child shape".into());
         }
+        // Tag owns its independent, iterative vanilla depth budget.
+        // The shared codec below validates it; ingredient depth is not NBT depth.
         if let Some((shape, children)) = &ingredient.children {
             if children.is_empty()
                 || matches!(shape, mod_api::item::crafting::Shape::Difference)
