@@ -677,3 +677,8 @@ The field is never saved or synced. Use attachments for persistence or synchroni
 API access and wasm permanently refuse this kind and point to attachments. No declarations means
 no rewrite and zero runtime cost. A declared field adds its size (and layout alignment) to every
 instance; Default and Clone perform the field type's normal operations.
+
+Injected mod fields must not change engine equality, ordering or hashing. Targets deriving
+`PartialEq`, `Eq`, `PartialOrd`, `Ord` or `Hash` are currently refused with `E_INJECT_FIELD`;
+a neutral comparison wrapper is follow-up work. Hand-written comparison implementations
+ignore the injected field. `Debug`, `Clone` and `Default` keep their normal field behavior.

@@ -269,3 +269,16 @@ fn emitted_field_collision_names_both_declaration_owners() {
     assert!(error.contains("m:first-slot"), "{error}");
     assert!(error.contains("m_:second-slot"), "{error}");
 }
+
+#[test]
+fn comparison_derives_refuse_mod_state_by_declaration_name() {
+    for derive in ["PartialEq", "Eq", "PartialOrd", "Ord", "Hash"] {
+        let source = format!("#[derive({derive})] struct S {{ value: u32 }}");
+        let error = rewrite(&source, "fixture", &[declaration("example")]).unwrap_err();
+        assert!(
+            error.contains("E_INJECT_FIELD: example:count-slot"),
+            "{error}"
+        );
+        assert!(error.contains(&format!("derive {derive}")), "{error}");
+    }
+}

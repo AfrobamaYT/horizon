@@ -122,6 +122,11 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             }
             check(&catalog, &manifest).unwrap();
             if kind == Kind::Field {
+                let facade = catalog.facade(&manifest).unwrap();
+                let main = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
+                assert!(!facade.source.contains("FieldCall"));
+                assert!(!facade.source.contains("__horizon_inject_test"));
+                assert!(!main.contains("__horizon_inject_test"));
                 assert!(points(&catalog.points, &manifest).next().is_none());
                 assert!(report(&catalog, &manifest)
                     .next()

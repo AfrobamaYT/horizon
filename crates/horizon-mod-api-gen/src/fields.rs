@@ -313,8 +313,13 @@ impl<'ast> Visit<'ast> for Rewriter<'_> {
                         let name = derive.segments.last().unwrap().ident.to_string();
                         match name.as_str() {
                             "Serialize" | "Deserialize" => serde = true,
-                            "Clone" | "Default" | "Debug" | "Copy" | "PartialEq" | "Eq"
-                            | "PartialOrd" | "Ord" | "Hash" => {}
+                            "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" => {
+                                self.refuse(format!(
+                                    "derive {name} would include mod state in engine comparison"
+                                ));
+                                return;
+                            }
+                            "Clone" | "Default" | "Debug" | "Copy" => {}
                             _ => {
                                 self.refuse(format!("derive {name} cannot guarantee the field is never saved or synced"));
                                 return;
