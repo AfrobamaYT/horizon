@@ -206,7 +206,10 @@ pub trait LevelsBackend {
     /// join in the order it stored them: section by section, each in admission
     /// order, as vanilla stores them. An entity that moved into another section
     /// since it joined keeps its admission place there, where vanilla moves it
-    /// to the end of that section.
+    /// to the end of that section. Zero runtime IDs fall back to stable storage
+    /// join order, not runtime admission order. Unregistered entity kinds have
+    /// no authoritative lookup handle and are omitted. These limitations mean
+    /// saved-world and whole-level ordering parity is not yet complete (#2703).
     /// Allocates a result buffer, not one allocation per entity; sorting is
     /// O(n log n), followed by one authoritative handle lookup per candidate.
     #[access(WorldOnly)]
