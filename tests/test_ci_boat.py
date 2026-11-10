@@ -409,3 +409,16 @@ class RustupRetryTests(unittest.TestCase):
         status, calls = self.run_script(failures=10)
         self.assertNotEqual(status, 0)
         self.assertEqual(len(calls), 4)
+
+
+class RunnerPackagesTests(unittest.TestCase):
+    def test_hosted_steps_install_the_image_list_and_the_fallback_stays_within_it(self):
+        root = Path(__file__).parents[1]
+        listed = [line for line in (root / "tools/ci/runner-packages.txt").read_text().splitlines() if not line.startswith("#")]
+        self.assertEqual(len(listed), len(set(listed)))
+        workflow = (root / ".github/workflows/dyna-ci.yml").read_text()
+        self.assertEqual(workflow.count("$(grep -v '^#' tools/ci/runner-packages.txt)"), 2)
+        deps = (root / "tools/ci/dyna_ci_deps.sh").read_text()
+        fallback = deps.split("packages=(", 1)[1].split(")", 1)[0].split()
+        self.assertTrue(fallback)
+        self.assertLessEqual(set(fallback), set(listed))
