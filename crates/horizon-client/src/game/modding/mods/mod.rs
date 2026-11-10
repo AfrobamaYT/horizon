@@ -273,8 +273,12 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
 }
 
 /// Finish every once-only content declaration on the registration thread.
-pub(super) fn freeze_declarations() {
-    let _ = native_declared();
+pub(super) fn freeze_declarations() -> horizon_client::Result<()> {
+    let declared = native_declared();
+    if !declared.errors.is_empty() {
+        return Err(declared.errors.join("\n").into());
+    }
+    Ok(())
 }
 
 struct NativeDeclared {
@@ -290,11 +294,12 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
-        Game::native_items(&RegistrationContext::new(), &mut items);
+        let context = RegistrationContext::new();
+        Game::native_blocks(&context, &mut blocks);
+        Game::native_items(&context, &mut items);
+        let mut errors = mod_api::__private::take_declaration_refusals(&context);
         let types = super::api_values::block_entity_declarations();
         use super::api_values::TryIntoEngine;
-        let mut errors = Vec::new();
         let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
             .iter()
             .filter_map(|v| {
@@ -666,14 +671,8 @@ pub(super) fn content_overlay(
         .iter()
         .map(|&index| {
             let source = &packages[index];
-            let declared = native_items
-                .iter()
-                .filter(|i| {
-                    i.id.split_once(':')
-                        .is_some_and(|(ns, _)| ns == source.manifest.id)
-                })
-                .map(|i| i.id.clone())
-                .collect::<Vec<_>>();
+            let declared =
+                super::native_content_items::owned_item_ids(source.manifest, native_items);
             (source.path, source.manifest, declared)
         })
         .collect();

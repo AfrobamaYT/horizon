@@ -1064,7 +1064,7 @@ fn deal_default_knockback(m: &mut Mob, level: &mut DamageLevel<'_>, source: &Dam
     if source.attacker.is_some() {
         knockback(m, (xd, zd), source.from, damage, None);
     } else {
-        m.knockback(level, f64::from(0.4_f32), xd, zd, source);
+        m.knockback(level, f64::from(0.4_f32), xd, zd, source, damage);
     }
 }
 /// `SulfurCube.knockback` with a block and a causing entity: the archetype's powers, turned by

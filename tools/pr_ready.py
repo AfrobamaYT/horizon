@@ -76,12 +76,13 @@ in_shell() { if [ "$(uname)" = Linux ] && ! pkg-config --exists xkbcommon 2>/dev
 
 
 # Build-script inputs outside the crates: catalog-only edits still need to build and test their consumers.
-MOD_API_INPUTS = ("crates/horizon-mod-api/src/hooks/",)
+MOD_API_INPUTS = ("crates/horizon-mod-vocab/src/hooks/",)
 # The generated dispatch surface: edits here change what the dispatch tests compile and run. The registry is its
 # own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
 DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"
 DISPATCH_TEST_INPUTS = ("crates/horizon-mod-api-gen/", "crates/horizon-mod-api-macros/",
-                        "crates/horizon-mod-point-shape/", "crates/horizon-mod-api/", *MOD_API_INPUTS)
+                        "crates/horizon-mod-point-shape/", "crates/horizon-mod-api/",
+                        "crates/horizon-mod-vocab/", *MOD_API_INPUTS)
 MOD_REGISTRY = "crates/horizon-mod-registry/Cargo.toml"
 
 def is_doc(path):

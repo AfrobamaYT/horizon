@@ -3,7 +3,6 @@
 use clap::{Parser, Subcommand};
 use horizon_launcher::account::{self, Accounts};
 use horizon_launcher::backend::{self, Release};
-use horizon_launcher::build_import;
 use horizon_launcher::github_mods;
 use horizon_launcher::i18n::{tr, trf};
 use horizon_launcher::instances;
@@ -703,10 +702,14 @@ enum Cmd {
     },
     /// Download and install a release (a tag such as v2026.10.13, or "latest")
     Install { tag: String },
+    /// Install a local unsigned developer build from a trusted checkout
+    #[command(about = tr("Install a local unsigned developer build from a trusted checkout"), after_help = tr("Example: horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned\nThis executes the checkout's build code and an unsigned game with your rights. Trust both before continuing."), long_about = tr("Install a local unsigned developer build. This runs the checkout's build code through cargo run -p xtask -- package. Commit tracked changes and rebuild first. Build horizon-ctl, horizon-prepare and horizon-server beside the game, and compile exporters into the checkout's exporters folder. Native builds use the saved local source commit, including unpublished commits. Select this base explicitly; automatic updates never replace it."))]
+    DeveloperInstall(developer_builds::DeveloperInstall),
     /// Remove an installed version
     Remove { tag: String },
     /// Install a game program you have, such as a horizon-client built on your fork's Actions,
-    /// as its own version on an installed release or Nightly's game files, and select it.
+    /// as its own version on an installed base's game files, and select it. A local unsigned
+    /// developer base is allowed only when explicitly selected or named with --version.
     /// Nothing signed it: it runs with your rights, and updates never replace it
     #[command(
         after_help = "The program must match this computer's executable format and carry the exact `horizon-game-executable;`\nidentity signature embedded by ordinary and launcher-generated games. It carries no mod API level or build id,\nand is not a signature of authenticity. Unmarked programs are refused."
@@ -714,8 +717,8 @@ enum Cmd {
     ImportBuild {
         /// The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
         path: PathBuf,
-        /// The installed release or Nightly whose game files it plays with (default: the
-        /// selected one, else the newest)
+        /// The installed base whose game files it plays with (default: the selected usable
+        /// base, else the newest release or Nightly; developer bases need explicit selection)
         #[arg(long)]
         version: Option<String>,
         /// You picked this build yourself and trust it with full access to this computer
@@ -1279,7 +1282,9 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 } else {
                     "prepared, no sounds (prepare again)"
                 };
-                println!("{mark} {tag}  {state}");
+                let label =
+                    horizon_launcher::developer_install::label(tag).unwrap_or_else(|| tag.clone());
+                println!("{mark} {label}  {state}");
             }
         }
         Cmd::Versions { installed: false } => {
@@ -1434,6 +1439,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 )
             );
         }
+        Cmd::DeveloperInstall(args) => developer_builds::install(args, as_json)?,
         Cmd::Remove { tag } => {
             backend::remove_version(&tag)?;
             println!("Removed {tag}.");
@@ -1442,24 +1448,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             path,
             version,
             trust_unsigned,
-        } => {
-            if !trust_unsigned {
-                return Err("An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.".into());
-            }
-            let tag = build_import::import(&path, version.as_deref())?;
-            let prepared = backend::check_prepared(&tag);
-            if as_json {
-                json(serde_json::json!({ "imported": tag, "prepared": prepared }));
-            } else if prepared {
-                println!(
-                    "Imported {tag} and selected it. It is prepared already, from another installed version."
-                );
-            } else {
-                println!(
-                    "Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}"
-                );
-            }
-        }
+        } => developer_builds::import(&path, version.as_deref(), trust_unsigned, as_json)?,
         Cmd::Prepare {
             minecraft,
             download,
@@ -2787,7 +2776,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
         serde_json::json!({
             "id": i.id, "name": i.name, "kind": format!("{:?}", i.kind).to_lowercase(),
             "home": i.home, "icon": i.icon, "group": i.group, "selected": selected,
-            "version": i.version, "java": i.java, "played_secs": i.played.as_secs(),
+            "version": i.version, "version_label": i.version.as_deref().and_then(horizon_launcher::developer_install::label), "java": i.java, "played_secs": i.played.as_secs(),
             "last_played_ms": i.last_played.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
         })
     };
@@ -2808,7 +2797,10 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                 ),
                 None => format!("  Minecraft {} (Java Edition)", java.minecraft),
             },
-            (None, Some(v)) => format!("  {v}"),
+            (None, Some(v)) => format!(
+                "  {}",
+                horizon_launcher::developer_install::label(v).unwrap_or_else(|| v.clone())
+            ),
             (None, None) => String::new(),
         };
         let played = match i.last_played {
@@ -4063,3 +4055,5 @@ mod catalog_tests;
 #[path = "cli_native_permission.rs"]
 mod native_permission_impl;
 use native_permission_impl::{github_native, native_permission};
+
+mod developer_builds;

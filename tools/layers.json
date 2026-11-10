@@ -43,7 +43,7 @@
     "horizon-dualsense": "platform",
     "horizon-hdr": "platform",
     "horizon-mcp": "platform",
-    "horizon-mod-api-gen": "platform",
+    "horizon-mod-api-gen": "engine",
     "horizon-mod-deps": "platform",
     "horizon-optifine": "platform",
     "horizon-platform": "platform",
@@ -66,7 +66,7 @@
     "xtask": "tool",
     "horizon-internals": "platform",
     "horizon-mod-api": "platform",
-    "horizon-mod-api-macros": "platform",
+    "horizon-mod-api-macros": "engine",
     "horizon-mod-point-emit": "platform",
     "horizon-mod-point-shape": "engine",
     "horizon-mod-points": "platform",
@@ -85,7 +85,8 @@
     "horizon-telemetry": "horizon",
     "horizon-telemetry-server": "horizon",
     "horizon-discord": "horizon",
-    "horizon-official-servers": "horizon"
+    "horizon-official-servers": "horizon",
+    "horizon-mod-vocab": "engine"
   },
   "portable": {
     "_doc": "docs/layers.md#engine: vanilla's rules and data with no desktop in them, which a port builds on. They depend only on each other, and never on a forbidden library.",
@@ -100,7 +101,11 @@
       "horizon-world",
       "horizon-mod-package",
       "horizon-mod-point-shape",
-      "horizon-mod-runtime"
+      "horizon-mod-runtime",
+      "horizon-mod-vocab",
+      "horizon-mod-api-gen",
+      "horizon-mod-api-macros",
+      "horizon-game-discovery"
     ],
     "forbidden": [
       "arboard",
