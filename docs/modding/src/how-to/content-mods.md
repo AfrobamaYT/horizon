@@ -723,10 +723,28 @@ data pack adds is not known to them, and carver tags are not read. NeoForge's do
 caves are not carvers.
 
 NeoForge calls a modifier once in each of five phases (`BEFORE_EVERYTHING`, `ADD`, `REMOVE`, `MODIFY`,
-`AFTER_EVERYTHING`, in that order; its public biome modifier documentation). Horizon's file and code modifiers are the
-`ADD` and `REMOVE` kinds, so it applies every addition and then every removal, in mod order within each. `MODIFY`
-(climate, colours and the other single values), `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` exist in NeoForge for
-modifier types a mod defines itself; Horizon has no such modifier type yet, so there are no phases to name in the API.
+`AFTER_EVERYTHING`, in that order; its public biome modifier documentation). Horizon applies every addition, then every
+removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own modifier types only add and remove;
+`MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
+type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
+(`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
+`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "#minecraft:is_forest",
+  "temperature": 0.3,
+  "has_precipitation": true,
+  "effects": { "sky_color": 12632319, "grass_color": "#80a0ff" }
+}
+```
+
+What the file leaves out stays. A colour is an integer 0 to 0xFFFFFF or `#rrggbb`; the biome keeps `#rrggbb`, with the
+sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 26.3 keeps them. A value of the wrong
+type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
+modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
+here, so the API names no phase for them.
 
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
@@ -747,12 +765,14 @@ load. Climate sets apply only to `biomes`, not `features`.
 
 A code mod declares the same modifiers without a file: `Registrar::declare_biome_modifier(path, modifier)` takes a
 `BiomeModifier` (its `biomes`, and an operation: `AddFeatures`, `RemoveFeatures`, `AddSpawns`, `RemoveSpawns`,
-`AddSpawnCosts`, `RemoveSpawnCosts`, `AddCarvers` or `RemoveCarvers`). `BiomeModifier::json` renders it as the file above, so a declared modifier and
-a shipped one are applied by the same code, in the same order (additions first, then removals, mods in dispatch
+`AddSpawnCosts`, `RemoveSpawnCosts`, `AddCarvers`, `RemoveCarvers` or `ModifyBiome`, whose `Option` fields are the
+values above). `BiomeModifier::json` renders it as the file above, so a declared modifier and
+a shipped one are applied by the same code, in the same order (additions first, then removals, then modifications, mods in dispatch
 order, declarations in registration order). An id outside the mod's namespace or that is not a file path, a repeated
 id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
-smallest group above its largest, and a spawn cost that is not finite refuse the mods at startup, naming the mod.
-Climate and effects operations are not available: the game has no such modifier yet. Declared modifiers are
+smallest group above its largest, a spawn cost that is not finite, a climate number that is not finite, a colour above
+0xFFFFFF and a temperature modifier other than `none` or `frozen` refuse the mods at startup, naming the mod.
+Declared modifiers are
 read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
 arismoko/horizon#2732).
 

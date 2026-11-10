@@ -80,9 +80,95 @@ enum Action {
     AddCarvers { carvers: Value },
     /// Takes configured carvers out of the biome's `carvers` (`remove_carvers`).
     RemoveCarvers { carvers: Value },
+    /// Sets single values of the biome, in the MODIFY phase (`horizon:modify_biome`).
+    Modify(Changes),
+}
+
+/// The single values a `horizon:modify_biome` modifier sets; what it leaves out stays.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Changes {
+    temperature: Option<Number>,
+    downfall: Option<Number>,
+    has_precipitation: Option<bool>,
+    temperature_modifier: Option<String>,
+    /// `effects` colours by name, as 24-bit RGB.
+    colours: Vec<(&'static str, u32)>,
+}
+
+/// The colours of `effects` that `horizon:modify_biome` sets.
+const COLOURS: [&str; 6] = [
+    "sky_color",
+    "fog_color",
+    "water_color",
+    "water_fog_color",
+    "foliage_color",
+    "grass_color",
+];
+
+/// A colour as an integer 0..=0xFFFFFF or a `#rrggbb` string.
+fn colour(v: &Value) -> Option<u32> {
+    match v {
+        Value::Number(n) => n
+            .as_u64()
+            .filter(|c| *c <= 0xFF_FFFF)
+            .and_then(|c| u32::try_from(c).ok()),
+        Value::String(s) => s
+            .strip_prefix('#')
+            .filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+            .and_then(|h| u32::from_str_radix(h, 16).ok()),
+        _ => None,
+    }
+}
+
+impl Changes {
+    /// The values in a `horizon:modify_biome` file, vanilla biome JSON's names.
+    fn read(doc: &Value) -> std::result::Result<Self, String> {
+        let num = |k: &str| match doc.get(k) {
+            None => Ok(None),
+            Some(Value::Number(n)) => Ok(Some(n.clone())),
+            Some(_) => Err(format!("{k}: not a number")),
+        };
+        let has_precipitation = match doc.get("has_precipitation") {
+            None => None,
+            Some(Value::Bool(b)) => Some(*b),
+            Some(_) => return Err("has_precipitation: not a boolean".into()),
+        };
+        let temperature_modifier = match doc.get("temperature_modifier") {
+            None => None,
+            Some(Value::String(s)) if s == "none" || s == "frozen" => Some(s.clone()),
+            Some(_) => return Err("temperature_modifier: not none or frozen".into()),
+        };
+        let mut colours = Vec::new();
+        match doc.get("effects") {
+            None => {}
+            Some(Value::Object(effects)) => {
+                for (key, value) in effects {
+                    let name = COLOURS
+                        .iter()
+                        .find(|c| *c == key)
+                        .ok_or_else(|| format!("effects: unknown colour {key}"))?;
+                    let rgb = colour(value)
+                        .ok_or_else(|| format!("effects.{key}: not a colour 0..=0xFFFFFF"))?;
+                    colours.push((*name, rgb));
+                }
+            }
+            Some(_) => return Err("effects: not an object".into()),
+        }
+        Ok(Self {
+            temperature: num("temperature")?,
+            downfall: num("downfall")?,
+            has_precipitation,
+            temperature_modifier,
+            colours,
+        })
+    }
 }
 
 impl Action {
+    fn is_modify(&self) -> bool {
+        matches!(self, Self::Modify(_))
+    }
+
     fn is_add(&self) -> bool {
         matches!(
             self,
@@ -227,10 +313,17 @@ impl Modifier {
             "remove_carvers" => Action::RemoveCarvers {
                 carvers: field("carvers")?,
             },
+            "horizon:modify_biome" => match Changes::read(&doc) {
+                Ok(changes) => Action::Modify(changes),
+                Err(e) => {
+                    warnings.push(at(format!("{e}: skipped")));
+                    return Ok(None);
+                }
+            },
             other => {
                 warnings.push(at(format!(
-                    "biome modifier type {other:?} skipped: only feature, spawn, carver and \
-                     none modifiers are read"
+                    "biome modifier type {other:?} skipped: only feature, spawn, carver, \
+                     horizon:modify_biome and none modifiers are read"
                 )));
                 return Ok(None);
             }
@@ -547,7 +640,7 @@ impl Selector {
 }
 
 /// Applies `modifiers` to the biome bundle `biomes` (id → the biome's text):
-/// every addition first, then every removal, each in mod and file order. A modifier naming a
+/// every addition first, then every removal, then every `horizon:modify_biome`, each in mod and file order. A modifier naming a
 /// biome, feature, entity type or tag the root doesn't have (another mod's, a
 /// `#c:` convention tag) is skipped with a line in `warnings`, instead of dropping every content mod.
 pub(super) fn apply(
@@ -564,10 +657,14 @@ pub(super) fn apply(
         carver: carver_reg,
     } = registries;
     let adds = modifiers.iter().filter(|m| m.action.is_add());
-    let removes = modifiers.iter().filter(|m| !m.action.is_add());
+    let removes = modifiers
+        .iter()
+        .filter(|m| !m.action.is_add() && !m.action.is_modify());
+    // NeoForge's MODIFY phase follows ADD and REMOVE.
+    let modifies = modifiers.iter().filter(|m| m.action.is_modify());
     // Each biome changed, parsed once, in the bundle's order.
     let mut changed: BTreeMap<String, J> = BTreeMap::new();
-    for m in adds.chain(removes) {
+    for m in adds.chain(removes).chain(modifies) {
         let at = |e: String| format!("{}: {e}", m.name);
         let resolved: std::result::Result<(Vec<String>, Vec<String>), String> = m
             .biomes
@@ -579,6 +676,7 @@ pub(super) fn apply(
                     Action::AddCarvers { carvers } | Action::RemoveCarvers { carvers } => {
                         carver_reg.resolve(carvers)?
                     }
+                    Action::Modify(_) => Vec::new(),
                     Action::AddSpawns(spawners) => {
                         if let Some(s) = spawners
                             .iter()
@@ -649,6 +747,41 @@ fn edit(
         Action::RemoveSpawnCosts(_) => remove_spawn_costs(biome, ids),
         Action::AddCarvers { .. } => edit_carvers(biome, true, ids),
         Action::RemoveCarvers { .. } => edit_carvers(biome, false, ids),
+        Action::Modify(changes) => {
+            modify(biome, changes);
+            Ok(())
+        }
+    }
+}
+
+/// One `horizon:modify_biome` modifier's change to one biome. In 26.3 the sky, fog and water
+/// fog colours are the biome's `minecraft:visual/*` attributes; the others stay in `effects`.
+fn modify(biome: &mut J, changes: &Changes) {
+    if let Some(n) = &changes.temperature {
+        biome.set("temperature", J::Num(n.clone()));
+    }
+    if let Some(n) = &changes.downfall {
+        biome.set("downfall", J::Num(n.clone()));
+    }
+    if let Some(b) = changes.has_precipitation {
+        biome.set("has_precipitation", J::Bool(b));
+    }
+    if let Some(m) = &changes.temperature_modifier {
+        biome.set("temperature_modifier", J::Str(m.clone()));
+    }
+    for (name, rgb) in &changes.colours {
+        let (section, key) = match *name {
+            "sky_color" | "fog_color" | "water_fog_color" => {
+                ("attributes", format!("minecraft:visual/{name}"))
+            }
+            _ => ("effects", (*name).to_owned()),
+        };
+        if biome.get(section).is_none() {
+            biome.set(section, J::Obj(Vec::new()));
+        }
+        if let Some(map) = biome.get_mut(section) {
+            map.set(&key, J::Str(format!("#{rgb:06x}")));
+        }
     }
 }
 

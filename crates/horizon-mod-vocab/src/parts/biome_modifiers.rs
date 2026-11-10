@@ -104,16 +104,19 @@ pub trait BiomeModifiersRegistrar {
     /// operations as the data files in `data/<ns>/neoforge/biome_modifier/` (add and remove
     /// features, add and remove spawns, add and remove spawn costs) on the biomes it names.
     /// The game applies it with the data-file modifiers, once, when the world's tables build:
-    /// every addition first, then every removal, each in mod and registration order. A world
+    /// every addition first, then every removal, then every `ModifyBiome`, each in mod and
+    /// registration order. A world
     /// no modifier names generates exactly as before.
     ///
-    /// Carver, climate and effects operations are not here yet: the game has no such modifier.
+    /// `ModifyBiome` is NeoForge's MODIFY phase: it sets a biome's climate values and effects
+    /// colours (`horizon:modify_biome` in a file).
     /// A modifier naming a biome, feature or entity type the world lacks (another mod's, a
     /// convention tag) is skipped with a line in the log, as a data file is.
     ///
     /// An id outside the mod's namespace, a repeated id, an empty list, a name that is not
     /// namespaced, an unknown generation step, a spawner of weight 0 or with its smallest group
-    /// above its largest, and a spawn cost that is not finite refuse the mods, naming the mod.
+    /// above its largest, a spawn cost that is not finite, and a climate number that is not finite, a colour above
+    /// 0xFFFFFF or a temperature modifier other than `none` or `frozen` refuse the mods, naming the mod.
     fn declare_biome_modifier(
         &mut self,
         path: &str,
