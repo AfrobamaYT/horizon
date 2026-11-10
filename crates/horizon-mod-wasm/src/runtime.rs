@@ -71,9 +71,12 @@ impl Default for State {
     }
 }
 
+/// Explicit engine settings; the remaining defaults are covered by Wasmtime compatibility.
+pub(crate) const ENGINE_CONFIG: (&str, bool) = ("epoch_interruption", true);
+
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = wasmtime::Config::new();
-    config.epoch_interruption(true);
+    config.epoch_interruption(ENGINE_CONFIG.1);
     let engine = Engine::new(&config)?;
     let weak = engine.weak();
     std::thread::Builder::new()
@@ -440,12 +443,13 @@ impl WasmMod {
         engine: &Engine,
         manifests: &[(&str, &horizon_mod_package::Manifest)],
         members: &[Member<'_>],
+        cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
         let mut armed = false;
-        let mut group = Group::link_with(store, members, |store, module, name| {
+        let mut group = Group::link_cached_with(store, members, cache, |store, module, name| {
             // Compilation is not guest execution and must not consume its load deadline.
             if !armed {
                 store.set_epoch_deadline(30_000);
