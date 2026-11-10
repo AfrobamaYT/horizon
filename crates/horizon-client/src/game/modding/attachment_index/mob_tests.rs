@@ -227,7 +227,7 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
         });
         assert!(result.is_err());
         assert!(!game.mobs[0].attachment_lifetime.is_bound());
-        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        assert!(!game.entity_attachments[&id].has_index_binding());
         let index = game.attachment_indexes[&Dim::Overworld].clone();
         assert!(
             index
@@ -272,7 +272,7 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
         assert!(
             !game
                 .entity_attachments
-                .get(&uuid)
+                .get(&id)
                 .is_some_and(|map| map.has_index_binding())
         );
         game.mobs.restore(
