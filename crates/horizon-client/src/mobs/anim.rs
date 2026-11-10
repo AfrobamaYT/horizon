@@ -582,10 +582,14 @@ pub(super) fn crossbow_charge(p: &mut Poses, max: f32, ticks: f32, in_right: boo
 /// `HumanoidModel.SPYGLASS_ARM_ROT_X`.
 const SPYGLASS_ARM_ROT_X: f32 = 1.919_862_2;
 /// `HumanoidModel.poseRightArm` / `poseLeftArm`.
+#[path = "anim/custom_arm_pose.rs"]
+mod custom_arm_pose;
+
 fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
     let arm = if right { "right_arm" } else { "left_arm" };
     let (hx, hy) = (p.get("head")[3], p.get("head")[4]);
     match pose {
+        ArmPose::Custom { angles, .. } => custom_arm_pose::apply(p, angles),
         ArmPose::Empty => p.yrot(arm, 0.0),
         ArmPose::Item => {
             let x = p.get(arm)[3];

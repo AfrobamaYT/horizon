@@ -1257,7 +1257,7 @@ impl Game<'_> {
         m: &Mob,
         stacks: [Option<&horizon_client::items::ItemStack>; 2],
     ) -> [Option<horizon_core::arm_pose::ArmPose>; 2] {
-        use super::api_values::TryIntoApi;
+        use super::api_values::{TryIntoApi, TryIntoEngine};
         use horizon_client::mobs::anim::humanoid_arm_poses;
         let stacks =
             stacks.map(|stack| stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air"));
@@ -1266,7 +1266,10 @@ impl Game<'_> {
                 .and_then(|s| self.items().get(&s.item))
                 .and_then(|info| info.arm_pose)
         });
-        if !mod_api::__private::listened(mod_api::HookId::GetArmPose) {
+        if !mod_api::__private::listened(mod_api::HookId::GetArmPose)
+            && !(mod_api::__private::listened(mod_api::HookId::ArmPoseTransform)
+                && mod_api::CustomArmPose::from_slot(0).is_some())
+        {
             return poses;
         }
         let [main_arm_pose, off_arm_pose] = humanoid_arm_poses(m, poses, m.anim.attack_anim);
@@ -1282,8 +1285,8 @@ impl Game<'_> {
             }),
             ticks_using_item: m.extra.using_item,
             use_animation: m.extra.use_animation,
-            main_arm_pose,
-            off_arm_pose,
+            main_arm_pose: main_arm_pose.try_into_api().unwrap(),
+            off_arm_pose: off_arm_pose.try_into_api().unwrap(),
         };
         for ((pose, stack), hand) in poses
             .iter_mut()
@@ -1295,8 +1298,21 @@ impl Game<'_> {
             };
             let mut answer = None;
             self.native_get_arm_pose(entity_id, hand, stack, &humanoid, &mut answer);
-            if answer.is_some() {
-                *pose = answer;
+            if let Some(answer) = answer
+                && let Ok(answer) = answer.try_into_engine(&())
+            {
+                *pose = Some(answer);
+            }
+            if let Some(horizon_core::arm_pose::ArmPose::Custom { slot, angles, .. }) = pose
+                && let Some(registered) = mod_api::CustomArmPose::from_slot(*slot)
+            {
+                let mut value = mod_api::ArmAngles {
+                    right: [f32::NAN; 3],
+                    left: [f32::NAN; 3],
+                };
+                let right = (hand == Hand::Main) != m.main_arm_left();
+                self.native_arm_pose_transform(registered, &humanoid, right, &mut value);
+                *angles = [value.right.map(f32::to_bits), value.left.map(f32::to_bits)];
             }
         }
         poses

@@ -368,6 +368,20 @@ player models, in the first person's own third-person view and in other players'
 with a kinetic weapon. A code mod that must decide by stack, hand or entity answers the `get_arm_pose` hook instead,
 which wins over the declared key.
 
+Code mods can also register a namespaced custom pose once in `Hooks::register` through
+`Registrar::register_arm_pose("mymod:flip", uses_both_arms, affects_offhand)`. Keep its
+`CustomArmPose` token and return `ArmPose::Custom(token)` from `get_arm_pose`. The two
+flags independently control the humanoid's two-arm ordering and whether the other
+hand's pose gives way. Duplicate, malformed and foreign-namespace ids refuse registration.
+
+In `arm_pose_transform`, match `event.pose` to that token and set `event.angles.right`
+or `event.angles.left` to absolute `[pitch, yaw, roll]` in radians. `event.right_arm`
+identifies the physical arm; `event.humanoid` supplies both stacks and the use state.
+Each non-finite angle leaves the base model component unchanged. The transform runs
+only for selected registered poses, on local players, remote players and humanoid mobs;
+swing and mob-specific animations still run afterward and can change those angles.
+Native and wasm mods use the same registration, token and Wire angle value.
+
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }
 ```
