@@ -6,6 +6,7 @@
 mod borrowed_panic_tests;
 mod borrowed_tick;
 mod death_tail;
+mod hoglin_target;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 
@@ -3276,21 +3277,11 @@ impl Game<'_> {
                         .or(self.lan_acting);
                     self.set_event_ai_target(mob, Some(target), player);
                 }
-                MobEvent::HoglinAttackTarget { mob, target } => {
-                    let places: Vec<(u32, horizon_core::geometry::Vec3)> = self
-                        .mobs
-                        .iter()
-                        .filter(|m| m.alive())
-                        .map(|m| (m.id, m.position))
-                        .collect();
-                    let position = |who: Who| match who {
-                        Who::Mob(id) => places.iter().find(|(i, _)| *i == id).map(|(_, p)| *p),
-                        Who::Player => None,
-                    };
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        horizon_client::mobs::piglin::receive_attack_target(m, target, position);
-                    }
-                }
+                MobEvent::HoglinAttackTarget {
+                    mob,
+                    target,
+                    player,
+                } => self.hoglin_attack_target(mob, target, player),
                 MobEvent::HuntHoglin { mob, target, ticks } => {
                     let mut acquire = false;
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
