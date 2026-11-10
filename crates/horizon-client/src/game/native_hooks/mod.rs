@@ -12,6 +12,7 @@ pub(in crate::game) use fire::{
     BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
     ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
+use mod_api::BlockEntityRef;
 
 use super::native_data_maps::DataMapType;
 use super::{
@@ -85,7 +86,7 @@ use mod_api::{
 };
 use mod_api::{
     BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HiddenParts, MapDecorationType,
-    PosedParts, RuntimeSprite, TaskId, TextureAtlasRegistration,
+    ParticleGroup, PosedParts, RuntimeSprite, TaskId, TextureAtlasRegistration,
 };
 pub(crate) use mod_api::{
     BlockRim, ClientPacket, ClientPayload, ColoredLight, ExplosionStart, ItemFished, LootDrops,

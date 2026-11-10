@@ -286,6 +286,56 @@ fn client_tick_pre_and_post_hear_their_own_moment() {
 }
 
 #[test]
+fn level_tick_pre_and_post_hear_the_level_in_their_own_moment() {
+    use std::sync::Mutex;
+    struct Ticks(Arc<Mutex<Vec<(&'static str, LevelRef)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Ticks {
+        fn level_tick_pre(&self, _: HostSide, event: &mut LevelTickPreEvent) {
+            self.0.lock().unwrap().push(("pre", event.level));
+        }
+        fn level_tick_post(&self, _: HostSide, event: &mut LevelTickPostEvent) {
+            self.0.lock().unwrap().push(("post", event.level));
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let level = LevelRef::new(WorldEpoch::new(4), DimensionKey::OVERWORLD);
+    testing::with_mods(
+        vec![ModEntry::new("ticks", Box::new(Ticks(heard.clone())))].into(),
+        || {
+            dispatch_level_tick_pre(HostSide::Client(&mut FakeHost::new()), level);
+            dispatch_level_tick_post(HostSide::Client(&mut FakeHost::new()), level);
+        },
+    );
+    assert_eq!(*heard.lock().unwrap(), [("pre", level), ("post", level)]);
+}
+
+#[test]
+fn living_death_post_hears_the_entity_the_blow_and_the_attacker() {
+    use std::sync::Mutex;
+    struct Post(Arc<Mutex<Vec<(u32, String, u32)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Post {
+        fn living_death_post(&self, _: &mut dyn ServerHost, event: &mut LivingDeathPostEvent<'_>) {
+            self.0.lock().unwrap().push((
+                event.entity,
+                event.damage_type.to_owned(),
+                event.attacker,
+            ));
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    testing::with_mods(
+        vec![ModEntry::new("post", Box::new(Post(heard.clone())))].into(),
+        || dispatch_living_death_post(&mut FakeHost::new(), 7, "minecraft:fall", 0),
+    );
+    assert_eq!(
+        *heard.lock().unwrap(),
+        [(7, "minecraft:fall".to_owned(), 0)]
+    );
+}
+
+#[test]
 fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
     use std::{sync::Mutex, time::Duration};
     struct Frames(Arc<Mutex<Vec<(&'static str, Duration)>>>);

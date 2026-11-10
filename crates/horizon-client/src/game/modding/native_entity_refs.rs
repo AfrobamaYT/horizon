@@ -8,6 +8,10 @@
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
+#[path = "native_entity_refs/dragon_parts_table.rs"]
+pub(in crate::game) mod dragon_parts_table;
+#[path = "native_entity_refs/dragon_query.rs"]
+mod dragon_query;
 #[path = "native_entity_refs/save_lending.rs"]
 mod save_lending;
 use super::{
@@ -177,6 +181,13 @@ impl Game<'_> {
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.key()))
     }
+    /// The client level in place as a handle: the level this window shows and
+    /// ticks. None before login, while reconfiguring, or with no world open.
+    pub(super) fn native_client_level(&self) -> Option<LevelRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let remote = self.remote.as_ref().filter(|r| r.has_level())?;
+        Some(LevelRef::new(epoch, remote.level_key))
+    }
     /// The name of a dimension's key.
     pub(in crate::game) fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::dimension_id(key).map(str::to_owned)
@@ -204,8 +215,9 @@ impl Game<'_> {
     /// its entity handles cannot resolve until the level is in place. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings, other special entities and the dragon
-    /// are not on the entity-list walk.
+    /// yet resolve; frames, paintings and other special entities
+    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     pub(super) fn level_entities_in(
@@ -231,6 +243,7 @@ impl Game<'_> {
                 ids.push(entity.id());
             }
         });
+        self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.fishing_hooks_here()
                 .filter(|(hook, _)| bounds.intersects(hook.bounds()))
@@ -262,6 +275,7 @@ impl Game<'_> {
                 ids.push(id);
             }
         }
+        self.append_dragon_query_ids(bounds, true, &mut ids);
         Some(
             ids.into_iter()
                 .map(|id| EntityRef::new(level.epoch(), id))
@@ -344,7 +358,7 @@ impl Game<'_> {
             return false;
         }
         let changed =
-            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+            self.with_level(|_, level, ticks| level.remove_block_write(ticks, pos, moved));
         let _ = self.process_level_events();
         changed
     }
@@ -903,6 +917,25 @@ pub(super) mod tests {
         Some(root)
     }
 
+    pub(in crate::game) fn prepare_entity_ticking_neighborhood(
+        game: &mut super::Game<'_>,
+        center: horizon_core::position::ChunkPos,
+    ) {
+        for z in center.z - 2..=center.z + 2 {
+            for x in center.x - 2..=center.x + 2 {
+                if !game.world.chunks.contains_key(&(x, z)) {
+                    game.world.chunks.insert(
+                        (x, z),
+                        std::sync::Arc::new(horizon_client::chunk::Chunk::empty(x, z)),
+                    );
+                    game.block_ticks
+                        .add_empty_chunk(horizon_core::position::ChunkPos::new(x, z))
+                        .unwrap();
+                }
+            }
+        }
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_at(root, test);
@@ -1045,6 +1078,116 @@ pub(super) mod tests {
                 b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
             });
             assert_eq!(signal, 15);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::position::BlockPos;
+        use std::sync::Arc;
+
+        // The fixture's parts: glass sustains any plant, grass sustains none.
+        mod_api::__private::part_tests::sustain_plant_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let dandelion = state("minecraft:dandelion");
+            let survives = |game: &mut super::super::Game<'_>, soil: &str| {
+                game.world.set(5, 64, 5, state(soil)).unwrap();
+                game.with_level(|b, level, ticks| {
+                    b.can_survive(level, ticks, BlockPos::new(5, 65, 5), dandelion)
+                })
+            };
+            // Allow: vanilla refuses a dandelion on glass; the soil's part lets it stand.
+            assert!(survives(game, "minecraft:glass"));
+            // Deny: vanilla lets a dandelion stand on grass; the soil's part refuses it.
+            assert!(!survives(game, "minecraft:grass_block"));
+            // Default: soils with no part answer as vanilla's plant rule does.
+            assert!(survives(game, "minecraft:dirt"));
+            assert!(!survives(game, "minecraft:stone"));
+            // A client's copy of the level does not ask the part.
+            game.options.dedicated = None;
+            assert!(!survives(game, "minecraft:glass"));
+            assert!(survives(game, "minecraft:grass_block"));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_part_decides_whether_the_tool_harvests() {
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use horizon_core::{geometry::Vec3, position::ChunkPos};
+        use std::sync::Arc;
+
+        // The fixture's parts: stone is harvested by any tool, dirt by none.
+        mod_api::__private::part_tests::harvest_game_thread();
+        with_game(|game| {
+            let scratch = std::env::temp_dir().join(format!(
+                "horizon-harvest-part-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&scratch).unwrap();
+            game.world_root = scratch.clone();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 62.0, 4.5)).unwrap());
+            game.player.as_mut().unwrap().ground.on_ground = true;
+            game.creative = false;
+            game.build_registries();
+            game.set_allow_commands(true);
+            assert!(game.run_command("gamemode survival"));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            let registry = game.pack.assets.registry;
+            let pos = [5, 63, 4];
+            // The dig's progress and the drops of a break by bare hand: (block, its hardness, what
+            // vanilla drops by hand, and what the drop is). Vanilla's own rule: a block that
+            // requires a tool drops nothing by hand, and the dig is 3.33 times slower for it.
+            for (block, hardness, part, by_hand, drop) in [
+                // Stone needs a pickaxe; the part harvests it anyway.
+                (
+                    "minecraft:stone",
+                    1.5_f32,
+                    Some(true),
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                // Dirt needs none; the part refuses it.
+                ("minecraft:dirt", 0.5, Some(false), true, "minecraft:dirt"),
+                // No part: vanilla's rule alone, both ways.
+                (
+                    "minecraft:cobblestone",
+                    2.0,
+                    None,
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                ("minecraft:grass_block", 0.6, None, true, "minecraft:dirt"),
+            ] {
+                let state = registry.default_state(block).unwrap();
+                let harvest = !part.unwrap_or(by_hand);
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+                let divisor = if harvest { 30.0 } else { 100.0 };
+                assert_eq!(
+                    game.destroy_progress(pos),
+                    1.0 / hardness / divisor,
+                    "{block}"
+                );
+                game.dropped.clear();
+                game.break_block(pos).unwrap();
+                let dropped = game.dropped.iter().any(|item| &*item.stack.item == drop);
+                assert_eq!(dropped, harvest, "{block}: drops {drop}");
+            }
+            std::fs::remove_dir_all(scratch).unwrap();
         });
     }
 

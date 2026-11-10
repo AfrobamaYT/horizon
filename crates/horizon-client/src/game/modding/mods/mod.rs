@@ -226,12 +226,24 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
 /// hook runs, so every step sees the same values.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
+    let directory = Game::game_dir();
+    #[cfg(unix)]
+    let directory = {
+        use std::os::unix::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
+    };
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::ffi::OsStrExt;
+        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
+    };
     mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
         builtin_registry_names(root)?,
         horizon_world::native_load_context::capture_settings(
             &Game::mod_data_root(),
             packages.ids(),
         ),
+        directory,
     ));
     Ok(())
 }
@@ -448,10 +460,11 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
-/// The source types native mods register for resource definitions, kept once at start, before
+/// The types native mods register for resource definitions, kept once at start, before
 /// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
-/// them read the mod's colour, and atlas sprite sources (`native_register_sprite_sources`), so
-/// atlas definitions' entries on them list the mod's sprites.
+/// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
+/// definitions' entries on them list the mod's sprites; and model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -462,6 +475,9 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut sources = Vec::new();
     Game::native_register_sprite_sources(&RegistrationContext::new(), &mut sources);
     horizon_client_render::mod_sprite_sources::register(sources);
+    let mut loaders = Vec::new();
+    Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
+    horizon_client_render::mod_model_loaders::register(loaders);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
@@ -521,15 +537,19 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
-/// The native mods' particle providers (`native_register_particle_providers`), kept once at
-/// start, before resources load; every particle sprite-set load resolves each type's provider.
-pub(super) fn register_particle_providers(role: ExecutionRole) {
+/// The native mods' particle providers (`native_register_particle_providers`) and render groups
+/// (`native_register_particle_groups`), kept once at start, before resources load; every particle
+/// sprite-set load resolves each type's provider and group.
+pub(super) fn register_particles(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::ParticleProviderRegistry::default();
     Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
     horizon_client::particles::register_particle_providers(registry.into_providers());
+    let mut groups = Vec::new();
+    Game::native_register_particle_groups(&RegistrationContext::new(), &mut groups);
+    horizon_client::particles::register_particle_groups(groups);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -1305,10 +1325,8 @@ impl Game<'_> {
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
         self.loop_context = context.game;
+        self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.loop_context = self.loop_context.clone();
-        }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
         }

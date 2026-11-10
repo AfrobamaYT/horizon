@@ -212,6 +212,9 @@ pub struct ClientGuiOptions {
     pub main_hand_left: bool,
     /// Whether the debug screen shows reduced information.
     pub reduced_debug_info: bool,
+    /// Current `advancedItemTooltips` preference, toggled with F3+H.
+    /// This is the user's preference, independent of a tooltip request's advanced flag.
+    pub advanced_item_tooltips: bool,
     /// Whether the high contrast resource pack is on.
     pub high_contrast: bool,
     /// Whether subtitles are shown.
