@@ -7,7 +7,7 @@ Provisional answer to scope 2 of [#2554](https://github.com/arismoko/horizon/iss
 Ari's answer on #2554 sets two starting points, and this note keeps both:
 
 - **Regions with weights.** Each mod lays out its biomes in its own region. A hidden extra parameter decides which region owns an area, and vanilla's layout is one region among them. Ordering between mods is settled by the regions, not by competing for the same climate points.
-- **The mix is fixed when the world is created and saved with the world.** Installing or removing a mod never changes terrain in an existing world unless the player opts in for that world.
+- **The mix is fixed when the world is created and saved with the world.** The promise is: terrain in an existing world changes only by a recorded, per-world choice.
 
 The same answer says NeoForge has no API for this: its biome modifiers change biomes that already generate and cannot add a biome to a dimension's layout, and the region mechanism is a third-party library. So there is no NeoForge contract to mirror. That statement comes from the issue; this note did not verify it, and it did not read the third-party library's source. Behaviour of that library is therefore not claimed anywhere below.
 
@@ -31,13 +31,13 @@ Not verified for this note: how vanilla's `MultiNoiseBiomeSource` presets are bu
 
 **Choosing a region.** A low-frequency noise of the world seed, sampled per biome cell, picks a region by cumulative weight. The nearest-point search then runs inside that region's own index only. A region never competes with another region's points, which is what makes ordering between mods unnecessary. The noise's exact form, frequency and its random-stream position are open (see questions) and must not disturb any vanilla stream: a world with no regions declared must generate exactly as today.
 
-**Fixed at creation.** When a world is created the ordered region list (ids, weights and a hash of each region's points) is written into the world's data. On load the game compares it with the installed regions:
+**Fixed at creation.** When a world is created the ordered region list (owner mod, region id, weight and full climate points, including biome ids) is written into the world's data, not hashes. A point's numeric payload is 52 bytes plus its biome id and region metadata; there is no per-region total because this proposal sets no point bound. The saved layout wins on load:
 
-- the same list: nothing changes;
-- a mod removed or its points changed: areas not yet generated use the saved list's region, which no longer exists, so they fall back to the vanilla region, and the game says so in the log and on the world's entry. Generated chunks keep their stored biomes;
-- a mod added: ignored for that world unless the player opts in.
+- the same mods installed: use the saved points even if a mod later changes its declaration;
+- a mod added: ignored for that world unless the player opts in;
+- a saved region's mod absent: tell the player which mod and region are missing and require an explicit per-world choice: do not open, or open with a recorded substitution. With substitution, vanilla's layout takes that region's share from then on. Save that decision once with the world, rather than silently substituting on each load. A dedicated server requires the decision in a setting and refuses to start otherwise, explaining the missing mod and region and the required choice.
 
-**Opt-in for an existing world.** A per-world switch, off by default, adds the installed regions to the saved list. Chunks that already exist keep their stored biomes, so the border between old and new chunks can show a biome seam. Whether terrain shape can also seam depends on whether terrain reads the biome (open, see questions).
+**Opt-in for an existing world.** A recorded per-world choice, off by default, adopts the installed layout, including new regions or changed points. Without it the full saved points remain authoritative. Already generated chunks are never touched, including after a missing-mod substitution. The border between old and new chunks can show a biome seam. Whether terrain shape can also seam depends on whether terrain reads the biome (open, see questions).
 
 **API surface.** One registrar method, one `BiomeRegion` record with `Wire`, and a read of the saved list (`level.biome_regions(host)`) for mods that want to know what the world was created with. No new hook.
 
@@ -48,7 +48,8 @@ Not verified for this note: how vanilla's `MultiNoiseBiomeSource` presets are bu
 | No region declared | Biome output of the vanilla presets is identical to today for a fixed seed, at several coordinates. |
 | Two mods, weights 1 and 3, vanilla default | Over a large sample, region ownership follows the weights within a stated tolerance; the same seed gives the same map twice. |
 | Same mods installed in a different order | Same sorted list, same map. |
-| World created with mod A, mod A removed | Existing chunks keep their biomes; ungenerated areas use vanilla; the log names the missing region. |
+| World created with mod A, mod A removed | Name the missing mod and region; require do-not-open or a recorded per-world vanilla substitution. Dedicated servers refuse without the setting. Existing chunks are never touched. |
+| Mod A changes its climate points | Full saved points win until a recorded per-world opt-in adopts the new layout; existing chunks are never touched. |
 | Mod B added to an existing world, no opt-in | No change in any generated or new chunk. |
 | Opt-in on an existing world | New chunks may use B's region; existing chunks unchanged; the list saved afterwards includes B. |
 | A region with invalid points or a duplicate id | Refused at registration, naming the mod; no region installed. |
@@ -57,10 +58,9 @@ Not verified for this note: how vanilla's `MultiNoiseBiomeSource` presets are bu
 
 - What noise picks the region, and how is its seed offset kept from moving any vanilla random stream? Recommendation: a dedicated noise instance seeded from the world seed and a fixed salt, with the same sampling grid as the biome source, verified against the vanilla presets as an oracle.
 - Does terrain shape read the biome, or only the climate router? Recommendation: check before the opt-in border is promised to be seam-free.
-- Is falling back to vanilla for a removed mod's areas right, or should a world with a missing region refuse to open? Recommendation: fall back and warn; a refusal punishes removing a mod.
 - Should weights be integers with a fixed default for vanilla, or relative to it? Recommendation: integers, vanilla at a fixed default, written down in the API docs.
 - Nether, Overworld and the End: should the End be included? Recommendation: Overworld and Nether first, as the issue asks.
-- Where is the saved list stored (level data or a separate file), and how does it round-trip a mod's version change? Recommendation: decide with the world-save owners before any code.
+- Where is the saved list stored (level data or a separate file), and how does it round-trip the full saved points and recorded per-world decisions? Recommendation: decide with the world-save owners before any code.
 
 ## Stages
 
