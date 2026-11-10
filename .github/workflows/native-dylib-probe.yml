@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      # Dependency-set changes, not source edits: newly packaged crates need the probe.
+      # Dependency-set changes and the SDK producer/consumer contract.
       - 'crates/horizon-addresses/Cargo.toml'
       - 'crates/horizon-anticheat/Cargo.toml'
       - 'crates/horizon-assets/Cargo.toml'
@@ -32,9 +32,9 @@ on:
       - 'crates/horizon-mod-api-macros/Cargo.toml'
       - 'crates/horizon-mod-api/Cargo.toml'
       - 'crates/horizon-mod-host/Cargo.toml'
-      - 'crates/horizon-mod-package/Cargo.toml'
+      - 'crates/horizon-mod-package/**'
       - 'crates/horizon-mod-point-emit/Cargo.toml'
-      - 'crates/horizon-mod-point-shape/Cargo.toml'
+      - 'crates/horizon-mod-point-shape/**'
       - 'crates/horizon-mod-points/Cargo.toml'
       - 'crates/horizon-mod-render/Cargo.toml'
       - 'crates/horizon-mod-runtime/Cargo.toml'
@@ -42,7 +42,7 @@ on:
       - 'crates/horizon-mod-wasm/Cargo.toml'
       - 'crates/horizon-narrator/Cargo.toml'
       - 'crates/horizon-optifine/Cargo.toml'
-      - 'crates/horizon-platform/Cargo.toml'
+      - 'crates/horizon-platform/**'
       - 'crates/horizon-polytone/Cargo.toml'
       - 'crates/horizon-protocol/Cargo.toml'
       - 'crates/horizon-server-files/Cargo.toml'
@@ -60,6 +60,8 @@ on:
       - 'tools/native_dylib_probe/**'
       - 'tools/prebuilt_game.py'
       - '.github/workflows/native-dylib-probe.yml'
+      - 'launcher/src/native_mods/**'
+      - 'launcher/src/native_mods.rs'
       - 'launcher/src/rust_toolchain.rs'
       - 'rust-toolchain*'
 
