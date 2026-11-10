@@ -805,6 +805,9 @@ enum Cmd {
         sync_internals: bool,
         #[arg(long, requires = "folder", conflicts_with_all = ["sync_internals", "server_output", "instance", "version", "update", "profile"])]
         catalog: bool,
+        /// Copy discovery catalogs into this caller-owned empty directory
+        #[arg(long, requires = "catalog")]
+        catalog_output: Option<PathBuf>,
         /// A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them
         /// (default: the native mods installed and turned on in the instance). Server exports
         /// also read wasm internals declarations from .hmod packages directly in this folder
@@ -1330,6 +1333,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
         Cmd::NativeBuild {
             sync_internals,
             catalog,
+            catalog_output,
             folder,
             server_output,
             allow_jar_downloads,
@@ -1343,7 +1347,9 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             if catalog {
                 let discovered =
                     native_mods::pinned_catalog_with_modules(&folder.expect("required by clap"))?;
-                println!("{}", discovered.directory.display());
+                let destination = catalog_output.ok_or("--catalog requires --catalog-output")?;
+                let destination = discovered.snapshot(&destination)?;
+                println!("{}", destination.display());
                 return Ok(0);
             }
             if sync_internals {

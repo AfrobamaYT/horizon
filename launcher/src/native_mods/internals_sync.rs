@@ -129,6 +129,18 @@ pub struct DiscoveryCatalog {
     _lease: crate::native_cache::Cache,
 }
 
+impl DiscoveryCatalog {
+    /// Copy both files while the discovery lease is held; refuse a reused destination.
+    pub fn snapshot(&self, destination: &Path) -> Result<PathBuf, String> {
+        fs::create_dir(destination).map_err(|e| e.to_string())?;
+        for name in ["internals.json", "points.json"] {
+            fs::copy(self.directory.join(name), destination.join(name))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(destination.to_path_buf())
+    }
+}
+
 /// Discover the pinned game with only this mod's modules, using the launcher's managed tools.
 /// Hold the returned catalog while reading its internals.json and points.json files.
 pub fn pinned_catalog_with_modules(folder: &Path) -> Result<DiscoveryCatalog, String> {
@@ -399,7 +411,7 @@ mod tests {
         fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
         fs::write(game.join("Cargo.lock"), "original").unwrap();
         fs::write(game.join("game.rs"), "struct Game;").unwrap();
-        prepare_stage(game, &stage).unwrap();
+        prepare_stage(&game, &stage).unwrap();
         let modified = fs::metadata(stage.join("game.rs"))
             .unwrap()
             .modified()
@@ -408,7 +420,7 @@ mod tests {
         fs::write(stage.join("Cargo.toml"), "with a generated mod").unwrap();
         fs::create_dir_all(stage.join("native-api/old/src")).unwrap();
         fs::write(stage.join("native-api/old/src/lib.rs"), "old mod").unwrap();
-        prepare_stage(game, &stage).unwrap();
+        prepare_stage(&game, &stage).unwrap();
         assert_eq!(
             fs::read(stage.join("Cargo.lock")).unwrap(),
             b"resolved with mod dependencies"
@@ -441,7 +453,7 @@ mod tests {
         let partial = root.join("stage.new");
         fs::create_dir_all(&partial).unwrap();
         fs::write(partial.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
-        prepare_stage(game, &stage).unwrap();
+        prepare_stage(&game, &stage).unwrap();
         assert_eq!(fs::read(stage.join("internals.json")).unwrap(), b"[]");
         assert!(stage.join("crates/lib.rs").is_file());
         assert!(!partial.exists());
@@ -483,3 +495,39 @@ mod tests {
 #[cfg(test)]
 #[path = "internals_sync_tests.rs"]
 mod catalog_tests;
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    #[test]
+    fn catalog_snapshot_survives_a_second_discovery_between_reads() {
+        let dir = std::env::temp_dir().join(format!("catalog-snapshot-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let shared = dir.join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        for name in ["internals.json", "points.json"] {
+            fs::write(shared.join(name), "first").unwrap();
+        }
+        let lease = crate::native_cache::Cache::acquire(&dir.join("cache")).unwrap();
+        let catalog = DiscoveryCatalog {
+            directory: shared.clone(),
+            _lease: lease,
+        };
+        let snapshot = dir.join("snapshot");
+        let snapshot = catalog.snapshot(&snapshot).unwrap();
+        drop(catalog);
+        assert_eq!(
+            fs::read_to_string(snapshot.join("internals.json")).unwrap(),
+            "first"
+        );
+        // The next discovery replaces both published files once the first lease ends.
+        for name in ["internals.json", "points.json"] {
+            fs::write(shared.join(name), "second").unwrap();
+        }
+        assert_eq!(
+            fs::read_to_string(snapshot.join("points.json")).unwrap(),
+            "first"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+}

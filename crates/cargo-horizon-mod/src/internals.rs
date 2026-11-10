@@ -144,12 +144,26 @@ pub(crate) fn catalog_directory(dir: &Path, manifest: &Manifest) -> Result<PathB
     }
     let launcher =
         std::env::var_os("HORIZON_LAUNCHER").unwrap_or_else(|| "horizon-launcher".into());
+    let snapshots = dir.join("target/horizon-mod/catalog-snapshots");
+    fs::create_dir_all(&snapshots).map_err(|e| e.to_string())?;
+    let destination = snapshots
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .join(format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        ));
     let output = std::process::Command::new(launcher)
-        .args(["native-build", "--catalog", "--trust-native-code"])
+        .args(["native-build", "--catalog", "--trust-native-code", "--catalog-output"])
+        .arg(&destination)
         .arg(dir.canonicalize().map_err(|e| e.to_string())?)
         .stderr(std::process::Stdio::inherit())
         .output()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Could not run horizon-launcher: {e}. Install it on PATH or set HORIZON_LAUNCHER to its executable."))?;
     if !output.status.success() {
         return Err("Module catalog discovery failed".into());
     }

@@ -46,7 +46,7 @@ impl Fixture {
         fs::write(catalog.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
         let launcher = root.join("launcher-stub");
         // Verify the real command contract and emit a path without shell-interpolating it.
-        fs::write(&launcher, "#!/bin/sh\n[ \"$1\" = native-build ] && [ \"$2\" = --catalog ] && [ \"$3\" = --trust-native-code ] && [ \"$4\" = \"$PWD\" ] || exit 19\nprintf '%s\\n' \"$PWD/module-catalog\"\nprintf invoked > \"$PWD/launcher-called\"\n").unwrap();
+        fs::write(&launcher, "#!/bin/sh\n[ \"$1\" = native-build ] && [ \"$2\" = --catalog ] && [ \"$3\" = --trust-native-code ] && [ \"$6\" = \"$PWD\" ] || exit 19\nmkdir \"$5\"; cp \"$PWD/module-catalog/\"*.json \"$5/\"; printf '%s\\n' \"$5\"\nprintf invoked > \"$PWD/launcher-called\"\n").unwrap();
         fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
         Self { root, launcher }
     }
@@ -88,7 +88,7 @@ fn internals_add_uses_launcher_module_catalog_hash() {
     let declared = fixture.manifest();
     assert_eq!(declared.internals.len(), 1);
     assert_eq!(declared.internals[0].path, METHOD);
-    assert_eq!(declared.internals[0].hash, fixture.catalog_hash());
+    assert_eq!(declared.internals[0].hash, Some(fixture.catalog_hash()));
     assert!(fixture.root.join("launcher-called").is_file());
 }
 
@@ -101,7 +101,7 @@ fn inject_add_head_uses_launcher_module_catalog_hash() {
     let declared = fixture.manifest();
     assert_eq!(declared.inject.len(), 1);
     assert_eq!(declared.inject[0].at, METHOD);
-    assert_eq!(declared.inject[0].hash, fixture.catalog_hash());
+    assert_eq!(declared.inject[0].hash, Some(fixture.catalog_hash()));
     assert!(fixture.root.join("launcher-called").is_file());
 }
 
