@@ -1812,6 +1812,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-dualsense",
  "horizon-friends",
+ "horizon-game-discovery",
  "horizon-hdr",
  "horizon-hooks",
  "horizon-items",
@@ -2078,6 +2079,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-game-discovery"
+version = "0.1.0"
+dependencies = [
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "horizon-hdr"
 version = "0.1.0"
 dependencies = [
@@ -2146,6 +2154,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
+ "horizon-game-discovery",
  "horizon-mod-package",
  "horizon-mod-point-shape",
  "prettyplease",
