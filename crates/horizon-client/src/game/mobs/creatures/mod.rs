@@ -6522,24 +6522,22 @@ impl Game<'_> {
             (ProjectileKind::SmallFireball, hit) => match hit {
                 Hit::Entity { who, .. } => match who {
                     Who::Player => {
-                        if !self.creative {
-                            // SmallFireball.onHitEntity: remember the fire, ignite,
-                            // and restore it when the hurt is refused (a raised shield).
-                            let remaining = self.player.as_ref().map(|p| p.fire_ticks);
-                            if let Some(p) = self.player.as_mut() {
-                                p.ignite_for_ticks(100)?;
-                            }
-                            let hurt = self.mob_hits_player(
-                                5.0,
-                                [p.previous.x, p.previous.y, p.previous.z],
-                                "minecraft:fireball",
-                            );
-                            if !hurt
-                                && let Some(remaining) = remaining
-                                && let Some(pl) = self.player.as_mut()
-                            {
-                                pl.set_remaining_fire_ticks(remaining);
-                            }
+                        // SmallFireball.onHitEntity: remember the fire, ignite,
+                        // and restore it when the hurt is refused (a raised shield).
+                        let remaining = self.player.as_ref().map(|p| p.fire_ticks);
+                        if let Some(p) = self.player.as_mut() {
+                            p.ignite_for_ticks(100)?;
+                        }
+                        let hurt = self.mob_hits_player(
+                            5.0,
+                            [p.previous.x, p.previous.y, p.previous.z],
+                            "minecraft:fireball",
+                        );
+                        if !hurt
+                            && let Some(remaining) = remaining
+                            && let Some(pl) = self.player.as_mut()
+                        {
+                            pl.set_remaining_fire_ticks(remaining);
                         }
                     }
                     Who::Mob(id) => {
@@ -6739,13 +6737,11 @@ impl Game<'_> {
             (ProjectileKind::ShulkerBullet { .. }, Hit::Entity { who, .. }) => match who {
                 Who::Player => {
                     // Only a hit that hurt (`wasHurt`) brings the levitation.
-                    if !self.creative
-                        && self.mob_hits_player(
-                            4.0,
-                            [p.previous.x, p.previous.y, p.previous.z],
-                            "minecraft:mob_projectile",
-                        )
-                    {
+                    if self.mob_hits_player(
+                        4.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:mob_projectile",
+                    ) {
                         self.give_player_effect("minecraft:levitation", 200, 0);
                     }
                 }

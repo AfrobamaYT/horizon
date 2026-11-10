@@ -6,6 +6,7 @@ use horizon_client::{
     effects::EffectAction,
     mobs::{Damage, DamageKind, Mob, Who},
     motion::PlayerMotion,
+    projectiles::{Hit, Projectile, ProjectileKind},
 };
 use horizon_core::geometry::Vec3;
 use mod_api::{EntityInvulnerabilityCheckEvent, Hooks, LevelRandomHost};
@@ -56,6 +57,59 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             );
             assert!(!game.hurt_player_from(1.0, None, "minecraft:generic", Some(None), false));
             check(&[false], "player cooldown refusal");
+
+            for mode in [GameMode::Creative, GameMode::Survival] {
+                for kind in [
+                    ProjectileKind::SmallFireball,
+                    ProjectileKind::ShulkerBullet {
+                        target: Some(Who::Player),
+                        dir: None,
+                        steps: 0,
+                        delta: [0.0; 3],
+                        seed: 0,
+                    },
+                ] {
+                    fresh_player(game, mode);
+                    game.remove_player_effects(None);
+                    game.player.as_mut().unwrap().set_remaining_fire_ticks(37);
+                    let fireball = matches!(kind, ProjectileKind::SmallFireball);
+                    let shot = Projectile::new(kind, Vec3::new(0.0, 1.0, 0.5), None);
+                    game.projectile_hit(
+                        &shot,
+                        Hit::Entity {
+                            who: Who::Player,
+                            at: Vec3::ZERO,
+                        },
+                    )
+                    .unwrap();
+                    check(
+                        &[false],
+                        "actual small-fireball or shulker-bullet player entry",
+                    );
+                    let creative = mode == GameMode::Creative;
+                    assert_eq!(
+                        game.player.as_ref().unwrap().health.health(),
+                        if creative {
+                            20.0
+                        } else if fireball {
+                            15.0
+                        } else {
+                            16.0
+                        }
+                    );
+                    assert_eq!(
+                        game.player.as_ref().unwrap().fire_ticks,
+                        if fireball && !creative { 100 } else { 37 },
+                        "refused fireball restores prior fire"
+                    );
+                    assert_eq!(
+                        game.potions.effects.get("minecraft:levitation").is_some(),
+                        !fireball && !creative,
+                        "levitation requires successful shulker damage"
+                    );
+                }
+            }
+            game.remove_player_effects(None);
 
             fresh_player(game, GameMode::Survival);
             game.player
