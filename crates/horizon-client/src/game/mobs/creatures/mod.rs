@@ -7598,7 +7598,7 @@ impl Game<'_> {
             {
                 m.heal(&self.loop_context, 25.0);
                 consume = true;
-                sound = Some("entity.iron_golem.repair");
+                eat = Some(("entity.iron_golem.repair", 1.0, m.golem_repair_pitch()));
             }
             Species::Creeper if creeper_igniter => {
                 m.extra.flag = true;
@@ -8728,22 +8728,15 @@ impl Game<'_> {
             // Cosmetics (game/cosmetics.rs), posed on the GPU with the mob's own jobs: culled
             // with it.
             if !layers_only
-                && super::cosmetics::enabled()
+                && horizon_hooks::engine::any()
                 && (is_player || &*mob.kind.id == "minecraft:mannequin")
             {
                 let mark = self.skin_frame.borrow().mark();
                 let base = horizon_client::mobs::render::base_transform(mob, alpha as f32, camera);
                 let gpu = skinning;
-                if let Some((lo, hi)) = self.cosmetics_geometry(
-                    mob,
-                    false,
-                    base,
-                    Some(camera),
-                    alpha as f32,
-                    packed,
-                    gpu,
-                    out,
-                ) {
+                if let Some((lo, hi)) =
+                    self.player_layers_geometry(mob, base, camera, alpha as f32, packed, gpu, out)
+                {
                     skinned = Some(match skinned {
                         Some((first, Some((l, h)))) => (first, Some((l.min(lo), h.max(hi)))),
                         Some((first, None)) => (first, Some((lo, hi))),
@@ -8799,6 +8792,7 @@ impl Game<'_> {
         }
         // What follows isn't a tracked mob: close the last one's span.
         self.mark_motion(out.len(), 0);
+        self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);
         let live = self.creatures.projectiles.iter().map(|a| {
             let at = [
