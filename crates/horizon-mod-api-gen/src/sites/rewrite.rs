@@ -72,6 +72,15 @@ fn call_context(body: &syn::Block, expr: &Expr) -> String {
 }
 
 pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
+    if let Some(local) = &declaration.local {
+        return format!(
+            "S{}",
+            digest(format!(
+                "{}|{}|{ordinal}|{}|{}|{}",
+                declaration.target, declaration.selector, local.binding, local.ty, local.after
+            ))
+        );
+    }
     format!(
         "S{}",
         digest(format!(
@@ -106,13 +115,15 @@ pub fn rewrite(
         &mut functions,
     );
     let rule = Rule::new(entries);
-    let mut edits = BTreeMap::new();
+    let mut edits: BTreeMap<(usize, usize), String> = BTreeMap::new();
     let mut claimed = BTreeMap::new();
     let mut sites = Vec::new();
     let lines: Vec<_> = std::iter::once(0)
         .chain(source.match_indices('\n').map(|(i, _)| i + 1))
         .collect();
     let offset = |at| crate::points::offset(source, &lines, at);
+    let mut declarations = declarations.iter().collect::<Vec<_>>();
+    declarations.sort_by_key(|d| d.local.is_some());
     for declaration in declarations {
         let enclosing = match super::identity::enclosing(&declaration.target, entries, &rule) {
             Ok(entry) => entry,
@@ -200,6 +211,58 @@ pub fn rewrite(
                     );
                 }
                 let expr = calls[index];
+                if let Some(local) = &declaration.local {
+                    if !private {
+                        return Err(Cause::Source(
+                            "modify_local requires native source rebuilding".into(),
+                        )
+                        .into());
+                    }
+                    let binding = super::local::validate(found.sig, found.body, expr, local)?;
+                    let ty: Type = syn::parse_str(&local.ty)?;
+                    let name = name(declaration, ordinal);
+                    let variant = format_ident!("{name}");
+                    let record = format_ident!("__{name}Args");
+                    let listener = format_ident!("__{name}Listener");
+                    let receiver = format_ident!("__{name}Receiver");
+                    let output = format_ident!("__{name}Output");
+                    let args = lexical.fresh("__local_args");
+                    let wrap = lexical.fresh("__local_wrap");
+                    let raw = quote! {
+                        pub struct #record;
+                        pub type #receiver<'g, 'r> = &'r mut #ty;
+                        pub type #output = ();
+                        pub type #listener = fn(&mut #ty, &mut #record, &mut dyn FnMut(&mut #ty, &mut #record));
+                    };
+                    let dispatch = quote! {
+                        if ::mod_points::__private::SITES[::mod_points::SiteId::#variant as usize].load(::std::sync::atomic::Ordering::Relaxed) {
+                            let mut #args = #record;
+                            ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver, #record, #output, &mut #binding, #args, |_: &mut #ty, _: &mut #record| ())
+                        }
+                    };
+                    let result = lexical.fresh("__local_result");
+                    let replacement = if local.after {
+                        quote!({ let #result = #expr; #dispatch #result })
+                    } else {
+                        quote!({ #dispatch #expr })
+                    };
+                    let site = Site {
+                        local: Some(local.clone()),
+                        name,
+                        target: declaration.target.clone(),
+                        selector: declaration.selector.clone(),
+                        ordinal,
+                        hash: digest(call_context(found.body, expr)),
+                        call: path,
+                        ctx: contexts[index].clone(),
+                        listener: format!("{}::{listener}", found.module),
+                        record: format!("{}::{record}", found.module),
+                        receiver: quote!(&mut #ty).to_string(),
+                        args: vec![],
+                        output: "()".into(),
+                    };
+                    return Ok((expr.span(), raw.to_string(), replacement.to_string(), site));
+                }
                 let Resolved {
                     callee,
                     signature,
@@ -284,6 +347,7 @@ pub fn rewrite(
                 let nth = ordinal;
                 let same = calls.len();
                 let site = Site {
+                    local: None,
                     name,
                     target: declaration.target.clone(),
                     selector: declaration.selector.clone(),
@@ -314,13 +378,24 @@ pub fn rewrite(
                 .map_err(|e| e.at(format!("{}: {}", declaration.origin, declaration.target)))?;
             let start = offset(span.start());
             let end = offset(span.end());
-            if let Some(other) = claimed.insert((start, end), declaration.origin.clone()) {
+            if let Some(other) = claimed.insert((start, end), declaration.origin.clone())
+                && declaration.local.is_none()
+            {
                 return Err(Error::from(Cause::Conflict(other)).at(declaration.origin.clone()));
             }
+            let replacement = if declaration.local.is_some() {
+                let original = source[start..end].to_owned();
+                let spelling = syn::parse_str::<Expr>(&original)?
+                    .to_token_stream()
+                    .to_string();
+                replacement.replace(&spelling, edits.get(&(start, end)).unwrap_or(&original))
+            } else {
+                replacement
+            };
             edits.insert((start, end), replacement);
             edits
                 .entry((offset(found.end), offset(found.end)))
-                .or_insert_with(String::new)
+                .or_default()
                 .push_str(&raw);
             sites.push(site);
         }

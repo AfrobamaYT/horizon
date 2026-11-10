@@ -637,7 +637,7 @@ impl Game<'_> {
                     .into());
                 }
                 if arg(2)? != "up" {
-                    self.pad.keyboard_took_over = true;
+                    self.input_keyboard_used();
                 }
                 // The command confirmation takes the keys; none go past it.
                 if self.command_prompt.is_some() {
@@ -797,7 +797,7 @@ impl Game<'_> {
                 // controller still holding one keeps it.
                 let options = [self.settings.toggle_crouch, self.settings.toggle_sprint];
                 for (slot, name) in [(0, "key.sneak"), (1, "key.sprint")] {
-                    if !self.pad.holds_action(&self.settings.controller, name) {
+                    if !self.input_holds(name) {
                         self.toggles.key(
                             slot,
                             horizon_client::keymapping::KeyAction::Release,
@@ -870,6 +870,23 @@ impl Game<'_> {
                 self.previous_position = to;
                 ok()
             }
+            "emote" => match words.get(1).copied() {
+                None => {
+                    let owned: Vec<String> =
+                        self.owned_emotes().iter().map(|i| i.id.clone()).collect();
+                    Ok(Some(
+                        json!({ "owned": owned, "playing": self.emote_playing() }),
+                    ))
+                }
+                Some("stop") => {
+                    self.stop_emote();
+                    ok()
+                }
+                Some(id) if self.play_emote(id) => ok(),
+                Some(id) => {
+                    Err(format!("can't play emote {id} now (not owned, or not standing)").into())
+                }
+            },
             "hotbar" => {
                 let slot: usize = arg(1)?.parse()?;
                 if !(1..=9).contains(&slot) {
@@ -1020,6 +1037,7 @@ impl Game<'_> {
                     path: path.trim().into(),
                     size: None,
                     scaled: false,
+                    background: false,
                 });
                 self.pending_screenshot = Some(reply.clone());
                 Ok(None)
@@ -1363,6 +1381,7 @@ impl Game<'_> {
             Screen::Mod => "mod",
             Screen::HudEditor => "hud-editor",
             Screen::Studio => "studio",
+            Screen::EmoteWheel => "emote-wheel",
         }
     }
 

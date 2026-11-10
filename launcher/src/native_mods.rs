@@ -36,6 +36,7 @@ mod inject_text;
 mod internals;
 mod internals_sync;
 mod isolate;
+mod mod_points;
 mod package;
 mod picker;
 mod prebuilt;
@@ -557,7 +558,7 @@ pub fn cache_error(error: crate::storage::Error) -> String {
         }
         crate::native_cache::Error::IncompleteUnit => tr("Native compilation outputs were kept because their executable completeness cannot be proven.").into(),
         crate::native_cache::Error::UnprovenExclusion => tr(
-            "Space it couldn't free: an older game build can use this cache without runtime leases.",
+            "An older game build can use this cache without runtime leases.",
         )
         .into(),
         crate::native_cache::Error::UnsupportedFilesystem => {
@@ -649,7 +650,7 @@ impl Bundle {
 
 /// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
-    let found = scan_bundles(folder)?;
+    let found = package::checked_bundles(folder)?;
     if found.is_empty() {
         return Err(format!(
             "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
@@ -1516,7 +1517,7 @@ fn compile(
     if target == Target::Server {
         cmd.arg("--no-default-features");
     }
-    cmd.args(["-p", package, "--bin", "horizon-client"]);
+    cmd.args(["-p", package, "--bin", api::executable(package)]);
     cmd
 }
 
@@ -2127,6 +2128,7 @@ fn pipeline(
         source::stage(&pending, &catalog_dir, &ordered)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
+            .and_then(|catalog| catalog.with_mods(mods.iter()))
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
@@ -2149,7 +2151,7 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let catalog = internals::Catalog::read(&real)?;
+        let catalog = internals::Catalog::read(&real)?.with_mods(mods.iter())?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
             catalog.log_raw(&project.bundle.manifest)?;
@@ -2206,11 +2208,7 @@ fn pipeline(
                 target,
                 &target_dir,
                 compiled,
-                if has_api {
-                    api::PACKAGE
-                } else {
-                    "horizon-client"
-                },
+                api::game_package(&stage, target, has_api),
             ),
             "Compiling the game",
             |line| {
@@ -2256,6 +2254,12 @@ fn pipeline(
             }
         })?;
         check_cancelled()?;
+        api::as_client(
+            &stage,
+            target,
+            has_api,
+            &target_dir.join(compiled.cargo().0),
+        )?;
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         if let Some(expected) = platform.machine {
             let actual = pe_machine(&binary).map_err(|error| {

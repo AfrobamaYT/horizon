@@ -279,6 +279,19 @@ pub struct ItemInfo {
     pub components: Vec<String>,
     /// Opaque native component defaults, keyed by their registered name.
     pub custom_components: std::collections::BTreeMap<String, horizon_core::nbt::Tag>,
+    /// A content mod's item: the vanilla item it copies (its `template`), whose
+    /// behaviour it has where Horizon follows the template (`ItemInfo::is`).
+    /// None for vanilla's items.
+    pub template: Option<Arc<str>>,
+}
+impl ItemInfo {
+    /// Whether this item is the vanilla item `vanilla`, or a content mod's item
+    /// copied from it: what vanilla's `instanceof` on the item's class asks
+    /// (a content item copies its template's class, as a NeoForge mod's
+    /// `new FishingRodItem(...)` would).
+    pub fn is(&self, vanilla: &str) -> bool {
+        &*self.id == vanilla || self.template.as_deref() == Some(vanilla)
+    }
 }
 /// `Item.Properties.craftRemainder` (not a data component, so not in the
 /// default-component report): what an item leaves in the grid when crafted with.
@@ -292,6 +305,9 @@ pub const CRAFT_REMAINDERS: [(&str, &str); 5] = [
 /// In a root built by `mod_content::build`: the content mods' items' crafting
 /// remainders, by item. Other roots have none.
 pub const MOD_CRAFT_REMAINDERS: &str = "horizon-mod-craft-remainders.json";
+/// In a root built by `mod_content::build`: the content mods' items' vanilla
+/// templates, by item (`ItemInfo::template`). Other roots have none.
+pub const MOD_ITEM_TEMPLATES: &str = "horizon-mod-item-templates.json";
 /// The mod items' declared arm poses (`arm_pose`): item id to the pose's name.
 pub const MOD_ITEM_ARM_POSES: &str = "horizon-mod-item-arm-poses.json";
 /// Explicit item-to-block mappings from content mods (not block drops).
@@ -903,14 +919,17 @@ impl Items {
         defaults: &ItemDefaults,
     ) -> Result<Self> {
         let entity_tags = load_tags(root, "entity_type", overlay)?;
-        let path = root.join(MOD_CRAFT_REMAINDERS);
-        let mod_remainders: HashMap<String, String> = match fs::read(&path) {
-            Ok(bytes) => {
-                serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))?
+        let by_item = |name: &str| -> Result<HashMap<String, String>> {
+            let path = root.join(name);
+            match fs::read(&path) {
+                Ok(bytes) => Ok(serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("{}: {e}", path.display()))?),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+                Err(e) => Err(format!("{}: {e}", path.display()).into()),
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
-            Err(e) => return Err(format!("{}: {e}", path.display()).into()),
         };
+        let mod_remainders = by_item(MOD_CRAFT_REMAINDERS)?;
+        let mod_templates = by_item(MOD_ITEM_TEMPLATES)?;
         let path = root.join(MOD_ITEM_ARM_POSES);
         let mod_arm_poses: HashMap<String, horizon_core::arm_pose::ArmPose> =
             match fs::read(&path) {
@@ -1060,6 +1079,7 @@ impl Items {
                         .find(|(item, _)| *item == name)
                         .map(|(_, rest)| (*rest).to_owned())
                         .or_else(|| mod_remainders.get(name).cloned()),
+                    template: mod_templates.get(name).map(|t| Arc::from(t.as_str())),
                     villager_food: c["minecraft:villager_food"]["nutrition"]
                         .as_i64()
                         .map(|n| n as i32),
@@ -3249,6 +3269,46 @@ mod tests {
     }
 
     #[test]
+    fn attribute_modifiers_come_from_the_stack() {
+        let items = Items::for_tests(HashMap::new());
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        let attack = horizon_core::nbt::Tag::compound([
+            (
+                "type",
+                horizon_core::nbt::Tag::String("minecraft:attack_damage".into()),
+            ),
+            (
+                "id",
+                horizon_core::nbt::Tag::String("minecraft:test".into()),
+            ),
+            ("amount", horizon_core::nbt::Tag::Double(0.1f64.to_bits())),
+            (
+                "operation",
+                horizon_core::nbt::Tag::String("add_value".into()),
+            ),
+            ("slot", horizon_core::nbt::Tag::String("mainhand".into())),
+        ]);
+        sword.data_mut().set_other(
+            "minecraft:attribute_modifiers",
+            Some(horizon_core::nbt::Tag::List(vec![attack])),
+        );
+        let modifiers = sword.default_attribute_modifiers(&items);
+        assert_eq!(modifiers.len(), 1);
+        assert_eq!(modifiers[0].attribute, "minecraft:attack_damage");
+        // A double, as `AttributeModifier.amount`: not rounded through a float.
+        assert_eq!(modifiers[0].amount, 0.1);
+        drop(modifiers);
+        sword.data_mut().set_other(
+            "!minecraft:attribute_modifiers",
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
+                &str,
+                horizon_core::nbt::Tag,
+            )>::new())),
+        );
+        assert!(sword.default_attribute_modifiers(&items).is_empty());
+    }
+
+    #[test]
     fn admitted_tool_rules_override_defaults_and_removals_survive_saving() {
         let root =
             std::env::temp_dir().join(format!("horizon-tool-components-{}", std::process::id()));
@@ -4482,6 +4542,36 @@ mod tests {
             Some("minecraft:bucket")
         );
         assert_eq!(remainder(&modded, "minecraft:bowl"), None);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A content root's templates make the mods' items what they copy (`ItemInfo::is`).
+    #[test]
+    fn mod_items_are_their_templates() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-item-templates-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        let items = r#"{"minecraft:fishing_rod": {}, "minecraft:stick": {}, "ruby:rod": {}}"#;
+        fs::write(root.join("items.json"), items).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let catalog = |root: &Path| Items::catalog(root, &PackOverlay::NONE, &defaults).unwrap();
+        let vanilla = catalog(&root);
+        assert!(!vanilla.items["ruby:rod"].is("minecraft:fishing_rod"));
+        fs::write(
+            root.join(MOD_ITEM_TEMPLATES),
+            r#"{"ruby:rod": "minecraft:fishing_rod"}"#,
+        )
+        .unwrap();
+        let modded = catalog(&root);
+        let rod = &modded.items["ruby:rod"];
+        assert_eq!(rod.template.as_deref(), Some("minecraft:fishing_rod"));
+        assert!(rod.is("minecraft:fishing_rod"));
+        assert!(rod.is("ruby:rod"));
+        assert!(!rod.is("minecraft:stick"));
+        assert!(modded.items["minecraft:fishing_rod"].is("minecraft:fishing_rod"));
+        assert!(!modded.items["minecraft:stick"].is("minecraft:fishing_rod"));
+        assert_eq!(modded.items["minecraft:fishing_rod"].template, None);
         fs::remove_dir_all(&root).unwrap();
     }
 }

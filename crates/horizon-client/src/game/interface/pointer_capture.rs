@@ -26,7 +26,7 @@ impl Game<'_> {
         let pointer = self.captured || self.agent_pointer;
         let grabbed = pointer
             && self.screen == Screen::Playing
-            && (self.player.is_some() || self.studio_freecam.active);
+            && (self.player.is_some() || self.studio.flying());
         let active = self.focused || self.agent_pointer;
         if active
             && grabbed
@@ -61,23 +61,7 @@ impl Game<'_> {
             && !self.is_published()
             && !self.has_split_players()
             && self.title.is_none()
-            && (matches!(
-                self.screen,
-                Screen::Paused
-                    | Screen::Options
-                    | Screen::Stats
-                    | Screen::Advancements
-                    | Screen::WorldOptions
-                    | Screen::Friends
-                    | Screen::Social
-                    | Screen::ServerLinks
-                    | Screen::ConfirmLink
-                    | Screen::DialogWarning
-                    | Screen::CommandBlock
-                    | Screen::DebugOptions
-                    | Screen::HudEditor
-            ) || self.book.is_some()
-                || self.win_screen_pauses())
+            && (self.screen.is_pause_screen() || self.book.is_some() || self.win_screen_pauses())
     }
     /// A screen open over gameplay while `screen` stays `Playing`: a book or
     /// lectern, a sign, a server dialog, the code of conduct, a link or
@@ -103,10 +87,7 @@ impl Game<'_> {
             .is_some_and(|t| t.elapsed() > Duration::from_millis(500))
             && self.control.is_none()
             && self.screen == Screen::Playing
-            && !studio_suppresses_focus_pause(
-                self.studio_replay.is_some(),
-                self.studio_freecam.active,
-            )
+            && !studio_suppresses_focus_pause(self.replay.playing(), self.studio.flying())
             && self.player.is_some()
             && !self.options.no_pause
             && self.settings.file.bool("pauseOnLostFocus")
@@ -177,7 +158,7 @@ impl Game<'_> {
         self.reset_inventory_clicks();
         if !capture {
             self.stop_mining();
-            self.studio_rmb_down = false;
+            self.studio.rmb_down = false;
         }
         // The real pointer takes over from an agent's.
         self.agent_pointer = false;
@@ -381,9 +362,9 @@ impl Game<'_> {
     /// click. A screen that is open keeps it free, as releasing the pointer
     /// for that screen did: it is the screen, not the focus, that shows it.
     pub(super) fn regrab_on_refocus(&mut self) {
-        if self.studio_replay.is_some() || self.studio_freecam.active {
+        if self.studio_up() {
             self.regrab_on_refocus = false;
-            self.studio_rmb_down = false;
+            self.studio.rmb_down = false;
             self.capture(false);
             return;
         }

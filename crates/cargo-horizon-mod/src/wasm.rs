@@ -36,7 +36,7 @@ struct Toolchain {
 
 /// `tool` (`cargo`, `rustc`) of the pinned toolchain: through rustup when there is one, else
 /// the one on `PATH`, which must then be that toolchain.
-fn pinned(tool: &str) -> Command {
+pub(crate) fn pinned(tool: &str) -> Command {
     let mut command = if rustup_found() {
         let mut c = Command::new("rustup");
         c.args(["run", TOOLCHAIN, tool]);
@@ -64,7 +64,7 @@ fn rustup_found() -> bool {
     Command::new("rustup").arg("--version").output().is_ok()
 }
 
-fn output(mut command: Command) -> Result<String, String> {
+pub(crate) fn output(mut command: Command) -> Result<String, String> {
     let out = command.output().map_err(|e| format!("{command:?}: {e}"))?;
     if !out.status.success() {
         return Err(format!(
@@ -626,6 +626,9 @@ mod route_tests {
 
     fn inject(id: &str, kind: Kind, access: Access, call: Option<&str>) -> Inject {
         Inject {
+            local: None,
+            local_type: None,
+            position: None,
             id: id.into(),
             at: "game::tick".into(),
             kind,

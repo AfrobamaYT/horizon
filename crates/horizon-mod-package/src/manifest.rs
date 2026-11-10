@@ -382,6 +382,10 @@ fn plain_path(name: &str) -> bool {
 pub struct Package {
     pub manifest: Manifest,
     pub icon: Option<crate::icon::Icon>,
+    pub layouts: crate::layouts::Layouts,
+    /// A wasm mod's own points (#2339), as its build listed them; a native mod's are listed from
+    /// its source when it is built.
+    pub points: Option<inject::mod_points::Catalog>,
 }
 impl Package {
     /// The kind of this validated package, independent of its install folder.
@@ -508,7 +512,31 @@ impl Package {
                 return Self::read_zip(&mut zip);
             }
         };
-        let package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        let mut package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        match std::fs::File::open(path.join(crate::layouts::FILE)) {
+            Ok(file) => {
+                check_folder_file(path, crate::layouts::FILE)?;
+                package.layouts = crate::layouts::Layouts::read(file)?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("layouts.json: {e}")),
+        }
+        if let Some(wasm) = &package.manifest.wasm {
+            let bytes = match std::fs::File::open(path.join(inject::mod_points::FILE)) {
+                Ok(file) => {
+                    check_folder_file(path, inject::mod_points::FILE)?;
+                    Some(inject::mod_points::read_bytes(file)?)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(format!("{}: {e}", inject::mod_points::FILE)),
+            };
+            package.points = inject::mod_points::bound(bytes.as_deref(), wasm.points())?;
+        } else if std::fs::symlink_metadata(path.join(inject::mod_points::FILE)).is_ok() {
+            return Err(format!(
+                "{}: only a wasm package carries its points",
+                inject::mod_points::FILE
+            ));
+        }
         if let Some(wasm) = &package.manifest.wasm {
             let bytes = std::fs::read(path.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?;
             wasm.check(&bytes).map_err(|e| e.to_string())?;
@@ -524,6 +552,8 @@ impl Package {
         let mut has_source = false;
         let mut has_wasm = false;
         let mut entries = Vec::new();
+        let mut layouts = None;
+        let mut points = None;
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
             let name = entry.name().map_err(|e| e.to_string())?.into_owned();
@@ -544,6 +574,20 @@ impl Package {
             // The one executable a package may carry, checked against `[wasm]` below.
             if name == WASM && matches!(mode & 0o170000, 0 | 0o100000) {
                 has_wasm = true;
+                continue;
+            }
+            if name == crate::layouts::FILE && matches!(mode & 0o170000, 0 | 0o100000) {
+                if layouts.is_some() {
+                    return Err("duplicate layouts.json".into());
+                }
+                layouts = Some(crate::layouts::Layouts::read(&mut entry)?);
+                continue;
+            }
+            if name == inject::mod_points::FILE && matches!(mode & 0o170000, 0 | 0o100000) {
+                if points.is_some() {
+                    return Err(format!("duplicate {name}"));
+                }
+                points = Some(inject::mod_points::read_bytes(&mut entry)?);
                 continue;
             }
             check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
@@ -573,7 +617,7 @@ impl Package {
         if toml.len() as u64 > MAX_MANIFEST {
             return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
         }
-        let package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        let mut package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
         if let Some(wasm) = &package.manifest.wasm {
             let mut bytes = Vec::new();
             zip.by_name(WASM)
@@ -582,6 +626,19 @@ impl Package {
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("{WASM}: {e}"))?;
             wasm.check(&bytes).map_err(|e| e.to_string())?;
+        }
+        package.layouts = layouts.unwrap_or_default();
+        match &package.manifest.wasm {
+            Some(wasm) => {
+                package.points = inject::mod_points::bound(points.as_deref(), wasm.points())?;
+            }
+            None if points.is_some() => {
+                return Err(format!(
+                    "{}: only a wasm package carries its points",
+                    inject::mod_points::FILE
+                ));
+            }
+            None => {}
         }
         if package.has_source() || package.manifest.wasm.is_some() {
             let mut names = std::collections::HashSet::new();
@@ -600,6 +657,8 @@ impl Package {
                 }
                 if !directory {
                     if name != MANIFEST
+                        && name != crate::layouts::FILE
+                        && !(name == inject::mod_points::FILE && package.manifest.wasm.is_some())
                         && name != "icon.png"
                         && !(name == WASM && package.manifest.wasm.is_some())
                         && !name.starts_with("assets/")
@@ -646,7 +705,12 @@ impl Package {
         has_wasm: bool,
     ) -> Result<Self, String> {
         let manifest = Manifest::parse(text)?;
-        let package = Package { manifest, icon };
+        let package = Package {
+            manifest,
+            icon,
+            layouts: Default::default(),
+            points: None,
+        };
         if has_cargo != package.has_source() || has_source != has_cargo {
             return Err("inconsistent code declaration ([native] or [wasm]) and source".into());
         }
@@ -682,6 +746,22 @@ impl Package {
         let mut reader = content.reader()?;
         for name in &content.files {
             files.insert(name.clone(), reader.read(name)?);
+        }
+        if let Ok(file) = std::fs::File::open(root.join(crate::layouts::FILE)) {
+            let mut bytes = Vec::new();
+            file.take((1 << 20) + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            crate::layouts::Layouts::read(bytes.as_slice())?;
+            files.insert(crate::layouts::FILE.into(), bytes);
+        }
+        if self.manifest.wasm.is_some()
+            && let Ok(file) = std::fs::File::open(root.join(inject::mod_points::FILE))
+        {
+            files.insert(
+                inject::mod_points::FILE.into(),
+                inject::mod_points::read_bytes(file)?,
+            );
         }
         if let Some(icon) = &self.icon {
             files.insert("icon.png".to_string(), icon.bytes().to_vec());
@@ -773,6 +853,15 @@ impl Package {
         for (name, bytes) in files {
             let code = manifest.native.is_some() || manifest.wasm.is_some();
             let source = code && source_file(name) && plain_path(name);
+            if *name == crate::layouts::FILE {
+                crate::layouts::Layouts::read(*bytes)?;
+                put(name, bytes)?;
+                continue;
+            }
+            if *name == inject::mod_points::FILE && manifest.wasm.is_some() {
+                put(name, bytes)?;
+                continue;
+            }
             if *name == WASM && manifest.wasm.is_some() {
                 put(name, bytes)?;
                 continue;
@@ -1204,6 +1293,26 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn layout_metadata_round_trips_and_malformed_archives_are_refused() {
+        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#;
+        let bytes = Package::write_files(EXAMPLE, &[("layouts.json", layouts)]).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let package = Package::read_zip(&mut zip).unwrap();
+        let changed =
+            crate::layouts::Layouts::read(br#"{"ruby":{"ruby::T":"1123456789abcdef"}}"#.as_slice())
+                .unwrap();
+        assert_eq!(
+            package.layouts.first_difference("ruby", &changed),
+            Some("ruby::T")
+        );
+        assert!(
+            Package::write_files(EXAMPLE, &[("layouts.json", b"{")])
+                .unwrap_err()
+                .contains("layouts.json")
+        );
+    }
+
+    #[test]
     fn flat_native_archive_round_trips_through_shared_writer() {
         let manifest = format!(
             "{EXAMPLE}[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
@@ -1412,6 +1521,118 @@ issues = \"http://example.org/issues\"
                 .expect("unknown native field refused before package classification");
             assert!(error.contains("unknown field `injection`"), "{error}");
         }
+    }
+
+    #[test]
+    fn only_a_wasm_package_carries_its_points_and_only_the_ones_its_build_pinned() {
+        use std::io::Write;
+        let module = wat::parse_str(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                (func (export "horizon_layout")) (func (export "horizon_in")) (func (export "horizon_hook")))"#,
+        )
+        .unwrap();
+        let points = br#"{"crate":"ruby","table":"__horizon_points","points":[]}"#;
+        let manifest = |pin: Option<&[u8]>| {
+            format!(
+                "{}\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n{}",
+                EXAMPLE.trim_end(),
+                sha512_of(&module),
+                pin.map(|bytes| format!("points = \"{}\"\n", sha512_of(bytes)))
+                    .unwrap_or_default()
+            )
+        };
+        // Build an archive directly: the writer refuses what the reader must refuse too.
+        let archive = |text: &str, catalog: Option<&[u8]>| {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let mut files = vec![(MANIFEST, text.as_bytes()), (WASM, module.as_slice())];
+            files.extend(catalog.map(|bytes| (inject::mod_points::FILE, bytes)));
+            for (name, bytes) in files {
+                zip.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+            let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
+            Package::read_zip(&mut archive).map(|package| package.points)
+        };
+        let pinned = manifest(Some(points));
+        assert_eq!(
+            archive(&pinned, Some(points)).unwrap().unwrap().krate,
+            "ruby"
+        );
+        assert!(
+            Package::write_files(
+                &pinned,
+                &[(WASM, &module), (inject::mod_points::FILE, points)]
+            )
+            .is_ok()
+        );
+        assert_eq!(archive(&manifest(None), None).unwrap(), None);
+        let tampered = br#"{"crate":"attacker","table":"other","points":[]}"#;
+        for (case, text, catalog, error) in [
+            (
+                "missing but pinned",
+                &pinned,
+                None,
+                "mod-points.json: missing; [wasm] pins one",
+            ),
+            (
+                "changed after the build",
+                &pinned,
+                Some(tampered.as_slice()),
+                "mod-points.json: does not match the hash [wasm] pins: changed after the build",
+            ),
+            (
+                "present but unpinned",
+                &manifest(None),
+                Some(points.as_slice()),
+                "mod-points.json: [wasm] pins no points; only the build writes mod-points.json",
+            ),
+        ] {
+            assert_eq!(archive(text, catalog).err().unwrap(), error, "read: {case}");
+            let mut files = vec![(WASM, module.as_slice())];
+            files.extend(catalog.map(|bytes| (inject::mod_points::FILE, bytes)));
+            assert_eq!(
+                Package::write_files(text, &files).unwrap_err(),
+                error,
+                "write: {case}"
+            );
+        }
+        // A pinned but malformed catalog is refused by its parse.
+        let malformed = b"{";
+        assert!(
+            archive(&manifest(Some(malformed)), Some(malformed))
+                .err()
+                .unwrap()
+                .starts_with("mod-points.json:")
+        );
+        // A content package carrying one is refused: no build of it wrote points.
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            (MANIFEST, EXAMPLE.as_bytes()),
+            (inject::mod_points::FILE, points.as_slice()),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
+        assert_eq!(
+            Package::read_zip(&mut archive).err().unwrap(),
+            "mod-points.json: only a wasm package carries its points"
+        );
+        // The folder reader holds the same rule.
+        let folder = std::env::temp_dir().join(format!("mod-points-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(MANIFEST), EXAMPLE).unwrap();
+        assert!(Package::read(&folder).is_ok());
+        std::fs::write(folder.join(inject::mod_points::FILE), points).unwrap();
+        let refused = Package::read(&folder).err();
+        std::fs::remove_dir_all(&folder).unwrap();
+        assert_eq!(
+            refused.unwrap(),
+            "mod-points.json: only a wasm package carries its points"
+        );
     }
 
     #[test]
