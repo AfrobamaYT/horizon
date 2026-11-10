@@ -1,9 +1,12 @@
 //! Frozen mod-book membership and recipe-display validation, built on table reload.
+#[path = "mod_panel.rs"]
+mod panel;
 #[cfg(test)]
 #[path = "mod_index_tests.rs"]
 mod tests;
 use super::RecipeBookCategory;
 use mod_api::{RecipeBookDisplay as Display, RecipeSlotDisplay as Slot};
+pub use panel::ModBookPanel;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Resource tables consulted at the load boundary, never while drawing tabs.
@@ -15,6 +18,7 @@ pub trait DisplayResources {
     fn component(&self, id: &str) -> bool;
     fn trim_pattern(&self, id: &str) -> bool;
     fn menu(&self, id: &str) -> bool;
+    fn recipe_type(&self, kind: &str) -> bool;
     fn recipe(&self, id: &str, kind: &str) -> bool;
 }
 
@@ -50,6 +54,9 @@ impl ModBookIndex {
                 if !super::custom_books::valid_book_id(id) || id.starts_with("minecraft:") {
                     return Err(DisplayLoadError::InvalidId(id.clone()));
                 }
+            }
+            if !resources.recipe_type(&category.recipe_type) {
+                return Err(unknown("recipe type", &category.recipe_type));
             }
             if !resources.book(&category.book) {
                 return Err(unknown("book", category.book.as_str()));
@@ -123,6 +130,10 @@ impl ModBookIndex {
     }
     pub fn category(&self, id: &str) -> Option<&RecipeBookCategory> {
         self.categories.get(id)
+    }
+    /// Validated declarations in stable category-id order.
+    pub fn categories(&self) -> impl Iterator<Item = &RecipeBookCategory> {
+        self.categories.values()
     }
 }
 fn unknown(kind: &'static str, id: &str) -> DisplayLoadError {

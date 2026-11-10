@@ -17,6 +17,7 @@ const NOT_TOOLS: &[&str] = &[
     "native-build",
     // It installs a program nothing signed: the player's decision.
     "import-build",
+    "developer-install",
     // They install native code nobody reviewed, and say it first: the player's decision.
     "mods add-github",
     "mods update-github",
