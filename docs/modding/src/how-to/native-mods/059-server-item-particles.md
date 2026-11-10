@@ -3,7 +3,8 @@
 ### Server item particles
 
 Set `ParticleOptions::item_stack(item_particle_key, stack)` and call
-`ServerHost::level_send_particles` with the level handle. The key is the
+`level.send_particles(host, &options, state, at, spread, speed, count)` with a
+`LevelRef` and a `ServerHost`. The key is the
 load-resolved `minecraft:item` particle key; the stack is an API `ItemStack`.
 The same request crosses the native and wasm boundaries through `Wire`.
 

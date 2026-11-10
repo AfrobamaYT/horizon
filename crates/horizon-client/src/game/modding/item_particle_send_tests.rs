@@ -18,16 +18,7 @@ fn stack_particle_crosses_server_packet_and_resolves_apple() {
         let key = mod_api::__private::particle_named_key("minecraft:item").unwrap();
         let options = mod_api::ParticleOptions::item_stack(key, api_stack.clone());
         let level = game.level(game.dim.id()).unwrap();
-        assert!(mod_api::prelude::LevelsBackendMut::level_send_particles(
-            game,
-            level,
-            &options,
-            None,
-            [0.0, 64.0, 0.0],
-            [0.2; 3],
-            0.0,
-            5
-        ));
+        assert!(level.send_particles(game, &options, None, [0.0, 64.0, 0.0], [0.2; 3], 0.0, 5));
         let queued = game.creatures.lan_particles.pop().unwrap();
         let mut sync = horizon_client::lan::data::SyncData::empty();
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -58,9 +49,7 @@ fn stack_particle_crosses_server_packet_and_resolves_apple() {
         oversized.set_count(99).unwrap();
         let bad = mod_api::ParticleOptions::item_stack(key, oversized);
         assert!(bad.try_into_engine(game.items()).is_err());
-        assert!(!mod_api::prelude::LevelsBackendMut::level_send_particles(
-            game, level, &bad, None, [0.0; 3], [0.0; 3], 0.0, 1
-        ));
+        assert!(!level.send_particles(game, &bad, None, [0.0; 3], [0.0; 3], 0.0, 1));
         assert!(game.creatures.lan_particles.is_empty());
         transfer = Some((packet, sync));
     });
