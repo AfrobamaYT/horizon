@@ -3,7 +3,7 @@ use super::Game;
 impl Game<'_> {
     /// Run equipment continuations with the acting player installed on the real host.
     #[allow(clippy::too_many_arguments)]
-    fn hurt_player_equipment(
+    pub(super) fn hurt_player_equipment(
         &mut self,
         source: horizon_world::damage_source::DamageTypeId,
         amount: f32,
@@ -32,6 +32,7 @@ impl Game<'_> {
                 causing,
                 creative_source,
                 helmet,
+                !self.combat.refuse_player_hit,
             )?;
         if let Some(damage) = hit.helmet_damage() {
             self.hurt_helmet(source, damage);

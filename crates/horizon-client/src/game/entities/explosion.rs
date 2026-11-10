@@ -560,9 +560,8 @@ impl Game<'_> {
         if let Some(p) = self.player.as_mut()
             && let Some(id) = self.health_resources.damage.id(damage_type)
         {
-            // Creative players are invulnerable to explosions.
-            if !creative
-                && !spectator
+            // Creative damage is attempted and refused by Player.hurtServer, not here.
+            if !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
                     crate::game::entity::damage_level_of!(self, scoped),
