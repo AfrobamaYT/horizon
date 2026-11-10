@@ -6949,11 +6949,7 @@ impl Game<'_> {
         self.input_feedback(horizon_client::input_source::Feedback::BlockBroken);
         let broken = state;
         let facts = self.res.facts().get(state).clone();
-        let state = self.crack_mined_pot(pos, state);
-        // Block.playerWillDestroy: mining their gold angers all nearby piglins.
-        if self.guarded_by_piglins(&facts.name) {
-            self.anger_piglins(false);
-        }
+        let held = self.held().cloned();
         // The block entity as it was, for what the drops copy from it.
         let key = (pos[0], pos[1], pos[2]);
         let loot_entity = if self.creative {
@@ -6967,50 +6963,17 @@ impl Game<'_> {
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
-        self.creaking_heart_broken(pos, true);
         let hive = match self.world.block_entities.get(&key) {
             Some(BlockEntity::Beehive(h)) => self.hive_state(pos).map(|s| ((**h).clone(), s)),
             _ => None,
         };
-        // playerWillDestroy and Level.removeBlock through the vanilla behaviour
-        // library: the block entity's side effects (containers spill), neighbour
-        // and shape updates, and the destroy event (particles, sound).
+        let filled_hive = hive
+            .as_ref()
+            .is_some_and(|(h, (honey, _))| !h.bees.is_empty() || honey.is_some_and(|l| l > 0));
         let creative = self.creative;
-        // TripWireBlock.playerWillDestroy: shears disarm the string first (flags
-        // 260), so taking it down does not trip the hook.
-        if &*facts.name == "minecraft:tripwire"
-            && self.held().is_some_and(|s| &*s.item == "minecraft:shears")
-            && let Some(disarmed) = self.with_props(state, &[("disarmed", "true")])
-        {
-            let at = BlockPos::new(pos[0], pos[1], pos[2]);
-            self.with_level(|b, level, ticks| b.set_block(level, ticks, at, disarmed, 260));
-            self.post_block_game_event("minecraft:shear", pos, self.sculk_actor(), None);
-        }
-        if creative && storage::is_shulker_box(&facts.name) {
-            self.drop_creative_shulker(pos);
-        }
-        // BeehiveBlock.playerWillDestroy: a creative break still drops the hive
-        // with its bees and honey level.
-        if creative
-            && self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
-            && let Some((h, (honey, _))) = &hive
-            && (!h.bees.is_empty() || honey.is_some_and(|l| l > 0))
-            && let Some(stack) = self.picked_stack(pos, true)
-        {
-            let at = pos.map(f64::from);
-            self.spawn_item_own(stack, at, 10);
-        }
-        let held = self.held().cloned();
-        let (removed, harvest) = self.player_destroy_block_removal(
-            pos,
-            state,
-            &facts.name,
-            facts.requires_tool,
-            held.as_ref(),
-        );
+        // The block's parts first, then playerWillDestroy and Level.removeBlock.
+        let (removed, state, harvest) =
+            self.player_destroy_block_removal(pos, state, &facts, held.as_ref(), filled_hive);
         if !creative {
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);

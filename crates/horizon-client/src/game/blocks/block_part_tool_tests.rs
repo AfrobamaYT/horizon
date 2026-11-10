@@ -1,8 +1,7 @@
-//! A block's parts decide what a tool makes of it (`tool_modified_state`) and whether a player
-//! breaking it destroyed it (`on_destroyed_by_player`).
-use crate::game::{Game, Hit, native_entity_refs::tests::with_game, native_guest_turn_tests};
-use horizon_client::{chunk::Chunk, items::ItemStack, motion::PlayerMotion};
-use horizon_core::{geometry::Vec3, position::ChunkPos};
+//! A block's parts decide what a tool makes of it (`tool_modified_state`); whether a player
+//! breaking it destroyed it (`on_destroyed_by_player`) is in `player_destroy_tests.rs`.
+use crate::game::{Game, Hit, native_guest_turn_tests};
+use horizon_client::{chunk::Chunk, items::ItemStack};
 use mod_api::{BlockHit, Hand};
 use std::sync::Arc;
 
@@ -141,110 +140,5 @@ fn a_block_part_can_deny_a_shovel_putting_out_a_campfire() {
             );
             assert_eq!(is_lit(game, pos, block), !doused, "{block}: lit after");
         }
-    });
-}
-
-#[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn a_block_part_decides_whether_a_player_breaking_a_block_destroyed_it() {
-    // The fixture's parts: snow loses one layer per break and stays, down to the last, which
-    // vanilla removes; glass is removed by its part, which answers that it was destroyed.
-    mod_api::__private::part_tests::destroyed_by_player_game_thread();
-    with_game(|game| {
-        // The parts' writes need a server.
-        game.options.dedicated = Some(Vec::new());
-        let scratch = std::env::temp_dir().join(format!(
-            "horizon-destroyed-part-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&scratch).unwrap();
-        game.world_root = scratch.clone();
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 62.0, 4.5)).unwrap());
-        game.player.as_mut().unwrap().ground.on_ground = true;
-        game.creative = false;
-        game.build_registries();
-        game.set_allow_commands(true);
-        assert!(game.run_command("gamemode survival"));
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        let registry = game.pack.assets.registry;
-        let pos = [5, 63, 4];
-        let snow = |layers: u32| {
-            registry
-                .resolve(&horizon_world::chunk::BlockState {
-                    name: "minecraft:snow".into(),
-                    properties: [("layers".to_string(), layers.to_string())].into(),
-                })
-                .unwrap()
-        };
-        let air = registry.default_state("minecraft:air").unwrap();
-        let count = |game: &Game<'_>, item: &str| {
-            game.dropped
-                .iter()
-                .filter(|dropped| &*dropped.stack.item == item)
-                .map(|dropped| dropped.stack.count)
-                .sum::<u32>()
-        };
-
-        // Three layers, broken by a bare hand: each break takes a layer, drops its snowball and
-        // leaves the block; the last layer is vanilla's removal.
-        game.world.set(pos[0], pos[1], pos[2], snow(3)).unwrap();
-        game.dropped.clear();
-        for (layers, snowballs) in [(2, 1), (1, 2)] {
-            game.break_block(pos).unwrap();
-            assert_eq!(
-                game.world.block(pos[0], pos[1], pos[2]),
-                snow(layers),
-                "{layers} layers are left"
-            );
-            assert_eq!(count(game, "minecraft:snowball"), snowballs);
-        }
-        game.break_block(pos).unwrap();
-        assert_eq!(game.world.block(pos[0], pos[1], pos[2]), air);
-        // The bare hand never harvests snow, and the stack it holds is empty: the part's own
-        // snowballs are the only ones.
-        assert_eq!(count(game, "minecraft:snowball"), 2);
-        assert_eq!(
-            mod_api::__private::part_tests::take_destroys(),
-            vec![(false, 0); 3]
-        );
-
-        // The part removes glass itself and answers that it did: a destroyed block.
-        game.world
-            .set(
-                pos[0],
-                pos[1],
-                pos[2],
-                registry.default_state("minecraft:glass").unwrap(),
-            )
-            .unwrap();
-        game.break_block(pos).unwrap();
-        assert_eq!(game.world.block(pos[0], pos[1], pos[2]), air);
-        // Glass needs no tool, so a bare hand harvests it.
-        assert_eq!(
-            mod_api::__private::part_tests::take_destroys(),
-            vec![(true, 0)]
-        );
-
-        // No part: vanilla's removal and drops.
-        game.world
-            .set(
-                pos[0],
-                pos[1],
-                pos[2],
-                registry.default_state("minecraft:dirt").unwrap(),
-            )
-            .unwrap();
-        game.dropped.clear();
-        game.break_block(pos).unwrap();
-        assert_eq!(game.world.block(pos[0], pos[1], pos[2]), air);
-        assert_eq!(count(game, "minecraft:dirt"), 1);
-        assert_eq!(mod_api::__private::part_tests::take_destroys(), vec![]);
-        std::fs::remove_dir_all(scratch).unwrap();
     });
 }
