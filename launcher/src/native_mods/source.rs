@@ -138,7 +138,7 @@ pub(super) fn stage(
                     ))
                     .or_insert(Declaration {
                         local: inject.local.as_ref().map(|binding| {
-                            horizon_mod_api_gen::sites::Local {
+                            horizon_platform::mod_build::api_gen::sites::Local {
                                 binding: binding.clone(),
                                 ty: inject.local_type.clone().expect("validated type"),
                                 after: inject.position
@@ -545,13 +545,13 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         {"path":"horizon_client::game::f", "kind":"fn", "signature":"fn f() -> i32", "hash":"fingerprint"},
         {"path":"horizon_client::game::sink", "kind":"fn", "signature":"fn sink(n: i32)", "hash":"sink"}
     ]).to_string();
-    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
-    let local = horizon_mod_api_gen::sites::Local {
+    let entries = horizon_platform::mod_build::api_gen::internals_view::catalog(&metadata).unwrap();
+    let local = horizon_platform::mod_build::api_gen::sites::Local {
         binding: "n".into(),
         ty: "i32".into(),
         after: false,
     };
-    let request = horizon_mod_api_gen::sites::Declaration {
+    let request = horizon_platform::mod_build::api_gen::sites::Declaration {
         target: "horizon_client::game::f".into(),
         selector: "horizon_client::game::sink".into(),
         ordinal: Some(0),
@@ -560,9 +560,10 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         local: Some(local),
     };
     std::fs::write(&file, source).unwrap();
-    let discovered = horizon_mod_api_gen::sites::source::stage(&root, &entries, &[request])
-        .unwrap()
-        .remove(0);
+    let discovered =
+        horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
+            .unwrap()
+            .remove(0);
     std::fs::write(&file, source).unwrap();
     let dir = root.join("catalog");
     std::fs::create_dir_all(&dir).unwrap();
@@ -586,7 +587,7 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
     };
     // Production runs horizon-stage before private-source staging. Preserve that
     // order here so local rewriting is exercised on ordinary point-marked source.
-    horizon_mod_api_gen::points::stage(&root).unwrap();
+    horizon_platform::mod_build::api_gen::points::stage(&root).unwrap();
     stage(&root, &dir, std::slice::from_ref(&bundle)).unwrap();
     let catalog = Catalog::read(&dir).unwrap();
     assert_eq!(catalog.sites.len(), 1);

@@ -29,9 +29,11 @@ impl Catalog {
             .into_iter()
             .filter(|bundle| bundle.manifest.native.is_some())
         {
-            let points =
-                horizon_mod_api_gen::points::mod_crate::mod_points(&bundle.dir, &self.wire)
-                    .map_err(|error| format!("{}: {error}", bundle.manifest.id))?;
+            let points = horizon_platform::mod_build::api_gen::points::mod_crate::mod_points(
+                &bundle.dir,
+                &self.wire,
+            )
+            .map_err(|error| format!("{}: {error}", bundle.manifest.id))?;
             self.mods.push(ModLibrary {
                 id: bundle.manifest.id.clone(),
                 version: bundle.manifest.version.clone(),
@@ -49,7 +51,7 @@ impl Catalog {
 
 /// Stages the mod crate copied to `dir`: its points, for the table its own build compiles.
 pub(super) fn stage(dir: &Path, wire: &BTreeSet<String>) -> Result<(), String> {
-    horizon_mod_api_gen::points::mod_crate::stage_mod(dir, wire).map(|_| ())
+    horizon_platform::mod_build::api_gen::points::mod_crate::stage_mod(dir, wire).map(|_| ())
 }
 
 /// `manifest`'s injections at other mods' points, each with its library and place.

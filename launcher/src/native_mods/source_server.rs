@@ -118,7 +118,7 @@ fn run(proof: Proof, private: bool) {
             horizon_platform::mod_build::api_gen::sites::source::stage(
                 &discovery,
                 &entries,
-                &[horizon_mod_api_gen::sites::Declaration {
+                &[horizon_platform::mod_build::api_gen::sites::Declaration {
                     local: None,
                     target: "horizon_client::game::Game::next_autosave_interval".into(),
                     selector: "horizon_client::game::autosave_interval".into(),
