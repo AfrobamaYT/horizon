@@ -528,9 +528,17 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     horizon_client::title::preset_editors::register(editors);
 }
 
+/// The native mods' meshing registrations, kept once at start, before resources load: colour
+/// resolvers, then the block tint sources that read them, then section geometry renderers.
+pub(super) fn register_meshing(role: ExecutionRole) {
+    register_color_resolvers(role);
+    register_block_tint_sources(role);
+    add_section_geometry(role);
+}
+
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
 /// before the block tint sources that read them and before resources load.
-pub(super) fn register_color_resolvers(role: ExecutionRole) {
+fn register_color_resolvers(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
@@ -541,13 +549,23 @@ pub(super) fn register_color_resolvers(role: ExecutionRole) {
 
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
-pub(super) fn register_block_tint_sources(role: ExecutionRole) {
+fn register_block_tint_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::BlockTintRegistry::default();
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
+}
+/// The native mods' section geometry renderers (`native_add_section_geometry`), kept once at
+/// start, before resources load; every mesh of a section asks them to add their quads.
+fn add_section_geometry(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::SectionGeometryRegistry::default();
+    Game::native_add_section_geometry(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_section_geometry(registry.into_renderers());
 }
 /// The native mods' particle providers (`native_register_particle_providers`) and render groups
 /// (`native_register_particle_groups`), kept once at start, before resources load; every particle
