@@ -991,6 +991,16 @@ pub(super) mod tests {
         }
     }
 
+    /// Bind the fixture body's canonical identity before configuring its acting context.
+    pub(in crate::game) fn bind_local_player(game: &mut super::Game<'_>, id: u32, uuid: u128) {
+        game.player.as_mut().expect("fixture player body").entity_id =
+            i32::try_from(id).expect("fixture entity ID fits the protocol");
+        game.level.player_uuid = Some(horizon_client::lan::playerdata::uuid_ints(uuid));
+        game.bind_local_player_residency();
+        game.lan_acting_entity = Some(id);
+        game.lan_acting_uuid = Some(uuid);
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_at(root, test);

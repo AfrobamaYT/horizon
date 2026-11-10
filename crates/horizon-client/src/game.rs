@@ -11563,20 +11563,20 @@ impl Game<'_> {
                     m.needs_sync = true;
                 } else {
                     let level = crate::game::entity::damage_level_of!(self, &attack);
-                    self.mobs[index].knockback_effect(
+                    self.mobs[index].knockback_full(
                         level,
                         f64::from(knockback),
                         xd,
                         zd,
                         &source,
                         amount,
+                        true,
                     );
                 }
                 self.stop_sprint_after_extra_knockback();
             }
             let mob = &self.mobs[index];
-            // Player.damageStatsAndHearts: the damage the hit actually did.
-            let actual = old_health - mob.health;
+            let actual = old_health - mob.health; // Player.damageStatsAndHearts
             // Player.attack: crit emitter and damage indicator hearts.
             let (feet, width, height) = (
                 [mob.position.x, mob.position.y, mob.position.z],
@@ -18030,10 +18030,8 @@ pub(crate) fn in_own_process(name: &str, body: impl FnOnce()) {
 #[cfg(test)]
 mod escape_tests {
     use super::game_tests::tests::server_game;
-    use horizon_client::chunk::Chunk;
     use horizon_client::items::ItemStack;
     use horizon_core::random::RandomSource;
-    use std::sync::Arc;
 
     /// `Entity.moveTowardsClosestSpace` uses the item's own random, never the
     /// level's random. Seeded Java values pin vanilla's float arithmetic (#13043).
@@ -18044,9 +18042,10 @@ mod escape_tests {
         let mut game = server_game(&mut game_resources);
         let feet = horizon_core::geometry::Vec3::new(8.5, 70.0, 8.5);
         game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        super::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            &mut game,
+            horizon_core::position::ChunkPos::new(0, 0),
+        );
         game.update_chunk_tickets();
         assert!(game.entity_ticking_area()(8, 8));
         let stone = game

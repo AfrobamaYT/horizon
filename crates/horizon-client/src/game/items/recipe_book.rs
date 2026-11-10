@@ -4,6 +4,9 @@
 //! alternatives overlay, ghost recipes, and placing a recipe in the grid
 //! (`ServerPlaceRecipe`). Which recipes are known comes from the advancement
 //! rewards; the open and filter settings are saved with the player.
+#[path = "recipe_book/mod_screen.rs"]
+mod mod_screen;
+
 use super::{Game, Screen};
 use horizon_client::{
     containers::{BlockEntity, FurnaceKind},
@@ -64,6 +67,7 @@ struct View {
 
 #[derive(Default)]
 pub(super) struct RecipeUi {
+    custom: mod_screen::ModRecipeUi,
     /// The last authoritative property-set and stonecutter generation.
     pub(super) server_properties: crate::recipe_book::ServerRecipeProperties,
     book: Option<Book>,
@@ -110,6 +114,7 @@ impl RecipeUi {
         }
         self.view_key = 0;
         self.last_clicked = None;
+        self.custom = mod_screen::ModRecipeUi::default();
     }
 }
 
@@ -121,12 +126,12 @@ fn sprite(name: &str) -> String {
 }
 
 impl Game<'_> {
-    /// The book the open screen has, if any.
+    /// The vanilla book the open screen has, if any.
     pub(super) fn active_book(&self) -> Option<BookType> {
         if self.screen != Screen::Inventory || self.station.is_some() {
             return None;
         }
-        // A mod's screen has no book.
+        // Explicitly assigned mod panels use their own identity and flags.
         if self.mount_active() || self.native_screen_height().is_some() {
             return None;
         }
@@ -149,6 +154,9 @@ impl Game<'_> {
     /// How far the open book pushes the menu to the right
     /// (`RecipeBookComponent.updateScreenPosition`).
     pub(super) fn recipe_book_shift(&self, width: f32) -> f32 {
+        if self.mod_book_open() && width >= NARROW {
+            return 77.0;
+        }
         match self.active_book() {
             Some(book) if self.book_open(book) && width >= NARROW => 77.0,
             _ => 0.0,
@@ -158,16 +166,17 @@ impl Game<'_> {
     /// visible in a window narrower than `NARROW`: the book covers the menu,
     /// so no slot is hovered or clicked.
     pub(super) fn book_covers_menu(&self, width: f32) -> bool {
-        width < NARROW && self.active_book().is_some_and(|b| self.book_open(b))
+        width < NARROW
+            && (self.mod_book_open() || self.active_book().is_some_and(|b| self.book_open(b)))
     }
     /// Whether typed keys go to the search box.
     pub(super) fn recipe_search_focused(&self) -> bool {
-        self.active_book().is_some_and(|b| self.book_open(b))
+        (self.mod_book_open() || self.active_book().is_some_and(|b| self.book_open(b)))
             && self.recipe_ui.search.as_ref().is_some_and(|s| s.focused)
     }
     /// `keyChat` focuses the search box.
     pub(super) fn recipe_focus_search(&mut self) {
-        if self.active_book().is_some_and(|b| self.book_open(b))
+        if (self.mod_book_open() || self.active_book().is_some_and(|b| self.book_open(b)))
             && let Some(s) = self.recipe_ui.search.as_mut()
         {
             s.focused = true;
@@ -383,6 +392,7 @@ impl Game<'_> {
     /// the server's recipes arrived, or a new session began.
     pub(super) fn forget_book(&mut self) {
         self.recipe_ui.book = None;
+        self.recipe_ui.custom = mod_screen::ModRecipeUi::default();
         self.recipe_tables.books = None;
     }
     /// Puts a server's entries over `book` (`Book::use_server_entries`). The
@@ -423,6 +433,9 @@ impl Game<'_> {
             self.server_entries_over(&mut book, self.recipe_ui.server_entries.values());
             self.recipe_ui.book = Some(book);
         }
+        self.ensure_recipe_search();
+    }
+    fn ensure_recipe_search(&mut self) {
         if self.recipe_ui.search.is_none() {
             let mut search = EditBox::new(0.0, 0.0, 81.0, 14.0);
             search.message = super::screen_info::tr("itemGroup.search", &[]);
@@ -623,7 +636,9 @@ impl Game<'_> {
     /// The open book's panel, `[x, y, width, height]` in GUI pixels; none
     /// while the screen has no book or it is closed.
     pub(super) fn recipe_book_rect(&self, batch: &HudBatch) -> Option<[f32; 4]> {
-        self.active_book().filter(|b| self.book_open(*b))?;
+        if !self.mod_book_open() {
+            self.active_book().filter(|b| self.book_open(*b))?;
+        }
         let (x, y) = self.book_origin(batch);
         Some([x, y, WIDTH, HEIGHT])
     }
@@ -662,6 +677,9 @@ impl Game<'_> {
     /// A click while a screen with a recipe book is open; true when the book
     /// used it.
     pub(super) fn recipe_book_click(&mut self, right: bool) -> bool {
+        if self.native_screen_shown() {
+            return self.mod_book_click(right);
+        }
         let Some(book_type) = self.active_book() else {
             return false;
         };
@@ -852,7 +870,9 @@ impl Game<'_> {
     /// `RecipeBookComponent.mouseDragged`: while the search box is focused a
     /// drag moves its selection end to the pointer (`EditBox.onDrag`).
     pub(super) fn recipe_book_drag(&mut self) {
-        if !self.recipe_ui.search_drag || !self.active_book().is_some_and(|b| self.book_open(b)) {
+        if !self.recipe_ui.search_drag
+            || !(self.mod_book_open() || self.active_book().is_some_and(|b| self.book_open(b)))
+        {
             return;
         }
         let x = self.cursor.0;
@@ -879,6 +899,9 @@ impl Game<'_> {
         );
     }
     pub(super) fn recipe_book_flags(&self) -> Option<(bool, bool)> {
+        if self.native_screen_shown() {
+            return self.mod_book_flags();
+        }
         let book = self.active_book()?;
         Some((self.book_open(book), self.book_filtering(book)))
     }
@@ -890,6 +913,12 @@ impl Game<'_> {
     /// pointer button held.
     pub(super) fn pad_recipe_page(&mut self, next: bool) {
         if self.pad.menu.held != [false; 2] {
+            return;
+        }
+        if self.native_screen_shown() {
+            if self.mod_book_open() && !self.spectator() {
+                self.recipe_ui.custom.turn_page(next);
+            }
             return;
         }
         let pages = self.recipe_ui.view.buttons.len().div_ceil(20);
@@ -1011,6 +1040,9 @@ impl Game<'_> {
     /// recipes, page arrows, the craftable filter and the tabs (GUI pixels;
     /// the search box registers itself as a field).
     pub(super) fn recipe_book_targets(&self) -> Vec<horizon_client::widgets::Target> {
+        if self.native_screen_shown() {
+            return self.mod_book_targets();
+        }
         use horizon_client::widgets::{Kind, Target};
         let (Some(book_type), Some(batch)) = (self.active_book(), self.batch_for_size()) else {
             return Vec::new();
@@ -1080,6 +1112,9 @@ impl Game<'_> {
     /// The open screen's book for `hasClickedOutside`: (visible, selected tab
     /// hovered); None when the screen has no book.
     pub(super) fn recipe_book_area(&self, batch: &HudBatch) -> Option<(bool, bool)> {
+        if self.native_screen_shown() {
+            return self.mod_book_area(batch);
+        }
         let book = self.active_book()?;
         if !self.book_open(book) {
             return Some((false, false));
@@ -1458,6 +1493,10 @@ impl Game<'_> {
 
     /// The book button, ghost recipe and the open book.
     pub(super) fn draw_recipe_book(&mut self, batch: &mut HudBatch) {
+        if self.native_screen_shown() {
+            self.draw_mod_book(batch);
+            return;
+        }
         let Some(book_type) = self.active_book() else {
             return;
         };
