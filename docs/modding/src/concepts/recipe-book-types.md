@@ -280,10 +280,13 @@ positions, this is space the screen author must keep clear of slots and labels.
 Both native and wasm declarations carry the same optional value over Wire.
 
 Without an anchor, the client tries an external right, left, then above-menu
-gutter. Wide menus use the book's overlay mode instead of shifting slots off
-screen. If neither closed nor open layout can keep the button in the viewport,
-the book is refused with a diagnostic identifying the mod block and menu and
-requesting `Screen.recipe_book_toggle`. The menu still opens unchanged; the
+gutter, rejecting positions covered by the overlay panel. Menus wider than 176
+GUI pixels, windows narrower than 379 GUI pixels, or windows narrower than the
+menu width plus 202 GUI pixels use overlay mode instead of shifting slots. If
+the toggle does not fit in the viewport in the closed layout or in the open
+layout, the book is refused with a diagnostic identifying the mod block and menu.
+The diagnostic requests `Screen.recipe_book_toggle` when absent, or reports an
+anchored toggle outside the viewport when the declared anchor does not fit. The menu still opens unchanged; the
 engine never clamps a toggle onto mod slots or clips the menu to make room.
 
 The client caches resolved result/search metadata for the screen binding.

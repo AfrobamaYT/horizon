@@ -143,7 +143,11 @@ impl Game<'_> {
                 if let Some(block) = self.native_screen_block() {
                     eprintln!(
                         "{}",
-                        layout::refusal(block, self.native_screen_menu().unwrap_or_default())
+                        layout::refusal(
+                            block,
+                            self.native_screen_menu().unwrap_or_default(),
+                            self.native_screen_toggle().is_some()
+                        )
                     );
                 }
                 self.recipe_ui.custom.refused = true;

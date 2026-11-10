@@ -19,6 +19,13 @@ pub(super) fn layout(
     let y = ((view[1] - menu[1]) / 2.0).trunc();
     let fits =
         |bx: f32, by: f32| bx >= 0.0 && by >= 0.0 && bx + 20.0 <= view[0] && by + 18.0 <= view[1];
+    let (px, py) = (
+        ((view[0] - 147.0) / 2.0).floor(),
+        ((view[1] - 166.0) / 2.0).floor(),
+    );
+    let clear = |bx: f32, by: f32| {
+        !overlay || bx + 20.0 <= px || bx >= px + 147.0 || by + 18.0 <= py || by >= py + 166.0
+    };
     let toggle = if let Some([ax, ay]) = anchor {
         let pos = (x + ax, y + ay);
         fits(pos.0, pos.1).then_some(pos)?
@@ -29,7 +36,7 @@ pub(super) fn layout(
             (x + menu[0] - 20.0, y - 22.0),
         ]
         .into_iter()
-        .find(|&(bx, by)| fits(bx, by))?
+        .find(|&(bx, by)| fits(bx, by) && clear(bx, by))?
     };
     Some(BookLayout {
         shift,
@@ -37,14 +44,37 @@ pub(super) fn layout(
         toggle,
     })
 }
-pub(super) fn refusal(block: &str, menu: &str) -> String {
-    format!(
-        "recipe book refused for mod block {block} menu {menu}: no usable toggle gutter; declare Screen.recipe_book_toggle"
-    )
+pub(super) fn refusal(block: &str, menu: &str, anchored: bool) -> String {
+    let reason = if anchored {
+        "anchored toggle outside the viewport"
+    } else {
+        "no usable toggle gutter; declare Screen.recipe_book_toggle"
+    };
+    format!("recipe book refused for mod block {block} menu {menu}: {reason}")
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn narrow_overlay_rejects_covered_gutters() {
+        // Panel spans x=76..223, y=37..203. Both side gutters overlap it;
+        // the above-menu toggle at (180, 15) is clear.
+        assert_eq!(
+            layout([300.0, 240.0], [100.0, 166.0], None, true)
+                .unwrap()
+                .toggle,
+            (180.0, 15.0)
+        );
+        assert!(layout([300.0, 240.0], [100.0, 100.0], None, true).is_none());
+    }
+    #[test]
+    fn anchored_refusal_names_the_invalid_anchor() {
+        assert!(layout([240.0, 240.0], [240.0, 240.0], Some([230.0, 6.0]), false).is_none());
+        assert_eq!(
+            refusal("demo:machine", "demo:menu", true),
+            "recipe book refused for mod block demo:machine menu demo:menu: anchored toggle outside the viewport"
+        );
+    }
     #[test]
     fn independent_gutter_overlay_and_anchor_positions() {
         assert_eq!(
@@ -89,7 +119,7 @@ mod tests {
         );
         assert!(layout([240.0, 240.0], [240.0, 240.0], None, false).is_none());
         assert_eq!(
-            refusal("demo:machine", "demo:menu"),
+            refusal("demo:machine", "demo:menu", false),
             "recipe book refused for mod block demo:machine menu demo:menu: no usable toggle gutter; declare Screen.recipe_book_toggle"
         );
         assert!(layout([240.0, 240.0], [240.0, 240.0], Some([f32::NAN, 2.0]), false).is_none());
