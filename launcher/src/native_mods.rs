@@ -25,7 +25,6 @@ use std::sync::Arc;
 
 use horizon_mod_package::dependencies;
 
-mod admission;
 mod api;
 mod planning;
 pub use planning::routes;
