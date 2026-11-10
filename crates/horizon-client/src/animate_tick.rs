@@ -2049,7 +2049,11 @@ mod tests {
         use horizon_core::random::RandomSource as _;
         use std::collections::{HashMap, HashSet};
         let run = |level: u8, camera: [f64; 3]| {
-            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            let mut engine = ParticleEngine::new(
+                &crate::resource_source::ResourceSource::indexed(Default::default()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             engine.seed_randoms(5, 9, 0);
             engine.created_requests = Some(Vec::new());
             engine.particle_level = level;

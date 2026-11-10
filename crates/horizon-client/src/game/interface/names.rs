@@ -282,11 +282,7 @@ impl Game<'_> {
             ) {
                 continue;
             }
-            let marks = if player || self.cosmetics_local() {
-                self.cosmetics_marks(m, Some(m.id) == own_id)
-            } else {
-                Marks::default()
-            };
+            let marks = self.hooks_name_marks(m, Some(m.id) == own_id);
             let at = match marks.top {
                 Some(top) => p + glam::DVec3::Y * cosmetic_lift(top, m.model_scale()),
                 None => p,

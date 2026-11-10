@@ -391,7 +391,7 @@ impl Game<'_> {
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
-                    let to_game = std::mem::take(&mut self.options_to_game);
+                    let to_game = self.options_from_title;
                     let back = if let Some(screen) = self.panel.recipes_settings_return.take() {
                         screen
                     } else if std::mem::take(&mut self.options_to_world_options) {

@@ -1463,7 +1463,7 @@ mod tests {
     #[test]
     fn a_bees_anger_target_survives_a_save() {
         use crate::entity_nbt::{mob_from_nbt, mob_to_nbt, player_uuid};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut m = bee();
         {
             let b = super::st(&mut m);

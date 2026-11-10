@@ -167,7 +167,17 @@ impl View {
             _ => 99,
         }
     }
-    /// The slots `HopperBlockEntity.addItem` tries through `face`.
+    pub(super) fn slots_to_add_iter(&self, face: Option<Direction>) -> Slots<'_> {
+        if matches!(self.kind, Kind::Furnace | Kind::Brewing | Kind::Mod) && face.is_some() {
+            self.slots_for_face_iter(face)
+        } else {
+            Slots::Range(0..self.len())
+        }
+    }
+    fn slots_for_face(&self, face: Option<Direction>) -> Vec<usize> {
+        self.slots_for_face_iter(face).collect()
+    }
+    #[cfg(test)]
     fn slots_to_add(&self, face: Option<Direction>) -> Vec<usize> {
         self.slots_to_add_iter(face).collect()
     }
@@ -995,9 +1005,7 @@ impl Game<'_> {
             self.hoppers.remove(&pos);
             return;
         }
-        if info.properties.get("enabled").is_some_and(|v| v == "false") {
-            return;
-        }
+        let state = self.world.block(pos.0, pos.1, pos.2);
         self.hopper_try_move_items_with_state(pos, state);
     }
     /// Drops the cooldowns of hoppers whose block entity is gone.
@@ -1019,11 +1027,8 @@ impl Game<'_> {
         if info.properties.get("enabled").is_some_and(|v| v == "false") {
             return;
         }
-        self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
-        let c = self.containers();
-        let mut changed = false;
-        if !c.is_empty(&view) {
-            changed = self.hopper_eject(pos, &view);
+        if self.hoppers.get(&pos).is_some_and(|h| h.cooldown > 0) {
+            return;
         }
         let Some(BlockEntity::Chest(items)) = self.world.block_entities.get(&pos) else {
             return;
@@ -1069,7 +1074,7 @@ impl Game<'_> {
         };
         let mut changed = false;
         if !is_empty {
-            changed = self.hopper_eject_with_state(pos, state, &view);
+            changed = self.hopper_eject(pos, &view);
         }
         let is_full = !changed && !has_empty_slot && {
             let c = self.containers();
@@ -1153,7 +1158,7 @@ impl Game<'_> {
         };
         let mut changed = false;
         if !c.is_empty(&view) {
-            changed = self.hopper_eject_with_state(pos, state, &view);
+            changed = self.hopper_eject(pos, &view);
         }
         let c = self.containers();
         let full =
@@ -1508,7 +1513,6 @@ impl Game<'_> {
             Some([above.0, above.1, above.2]),
             None,
         );
-        let c = self.containers();
         if let Kind::Composter(level) = source.kind {
             if level != 8 {
                 return Some(false);
@@ -1518,7 +1522,7 @@ impl Game<'_> {
             // second setChanged after the move or, when the hopper has no
             // room, the setItem putting the bone meal back into the detached
             // container (whose bone meal is lost with it).
-            let bone_meal = c.bone_meal.clone();
+            let bone_meal = bone_meal_stack().clone();
             if mod_api::__private::listened(mod_api::HookId::InventoryMoveItem) {
                 let mut cancel = false;
                 self.native_inventory_move_item(
@@ -2364,11 +2368,30 @@ mod mod_container_tests {
                 menu: None,
             })),
         };
-        assert_eq!(view.slots_for_face(Some(Direction::Up)), [0]);
-        assert_eq!(view.slots_for_face(Some(Direction::Down)), [2]);
-        assert_eq!(view.slots_for_face(Some(Direction::North)), [1]);
-        assert!(view.slots_for_face(Some(Direction::East)).is_empty());
-        assert_eq!(view.slots_for_face(None), [0, 1, 2]);
+        assert_eq!(
+            view.slots_for_face_iter(Some(Direction::Up))
+                .collect::<Vec<_>>(),
+            [0]
+        );
+        assert_eq!(
+            view.slots_for_face_iter(Some(Direction::Down))
+                .collect::<Vec<_>>(),
+            [2]
+        );
+        assert_eq!(
+            view.slots_for_face_iter(Some(Direction::North))
+                .collect::<Vec<_>>(),
+            [1]
+        );
+        assert!(
+            view.slots_for_face_iter(Some(Direction::East))
+                .next()
+                .is_none()
+        );
+        assert_eq!(
+            view.slots_for_face_iter(None).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
     }
 
     /// A slot takes no more than its container's limit and the item's: one book into a chiseled
@@ -2398,7 +2421,7 @@ mod mod_container_tests {
 
 #[cfg(test)]
 mod capacity_tests {
-    use super::{Containers, Kind, View, bone_meal};
+    use super::{Containers, Kind, View};
     use horizon_client::{brewing::Brewing, containers::BlockEntity, items::ItemStack};
     use std::collections::HashSet;
 
@@ -2462,7 +2485,6 @@ mod capacity_tests {
             items: &items,
             registry,
             brewing: Some(&brewing),
-            bone_meal: bone_meal(),
         };
         for (x, &(block, kind, len, _, offered)) in (0..).zip(&cases) {
             let view = View {

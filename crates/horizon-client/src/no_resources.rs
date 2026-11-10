@@ -299,7 +299,7 @@ mod tests {
             let button = &layout.buttons[0];
             let physical = (
                 (button.x + button.w / 2.0) * ui.density,
-                (button.y + CONTROL / 2.0) * ui.density,
+                (button.y + control() / 2.0) * ui.density,
             );
             screen.draw(&mut ui);
             let mut hit = HudBatch::new([960, 720], settings);

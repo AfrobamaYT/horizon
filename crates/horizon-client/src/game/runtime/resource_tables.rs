@@ -208,7 +208,7 @@ impl PackResources {
                 let forcefield =
                     named_scope(scope, "pack.forcefield", || load_forcefield(root.source()));
                 let custom_sky = named_scope(scope, "pack.custom_sky", || {
-                    horizon_client::custom_sky::CustomSky::load(root.source())
+                    horizon_client::custom_sky::load(root.source())
                 });
                 let environments =
                     named_scope(scope, "pack.environments", || pack_environments(root));
@@ -309,24 +309,9 @@ fn pack_particles(
 /// The packs' custom colours; their dye and sheep colours go to the draw paths' table.
 fn read_colors(
     root: &horizon_assets::resource_source::ResourceRoot,
-) -> horizon_client::polytone_colors::PackColors {
-    let colors = horizon_client::polytone_colors::PackColors::from_files(
-        root.source()
-            .namespaces("assets")
-            .into_iter()
-            .map(|namespace| {
-                let base = format!("assets/{namespace}/polytone");
-                (
-                    root.source()
-                        .read_to_string(&format!("{base}/color.properties"))
-                        .ok(),
-                    root.source()
-                        .read_to_string(&format!("{base}/colors.json"))
-                        .ok(),
-                )
-            }),
-    );
+) -> horizon_client::pack_palette::PackColors {
+    let colors = horizon_client::pack_palette::read(root.source());
     horizon_client::pack_palette::set(&colors);
-    horizon_client::brewing::set_pack_colors(colors.effects());
+    horizon_client::brewing::set_pack_colors(colors.effects.clone());
     colors
 }

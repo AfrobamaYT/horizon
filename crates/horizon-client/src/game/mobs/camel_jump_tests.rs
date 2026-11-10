@@ -22,13 +22,14 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -43,7 +44,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -96,7 +99,6 @@ fn game() -> Game<'static> {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         2,
         [22.5, 101.0, 9.5],
@@ -157,9 +159,7 @@ fn scene(game: &mut Game<'_>, saddled: bool) {
 }
 
 fn jump(game: &mut Game<'_>, data: i32) {
-    let mut host = game.lan.take().unwrap();
     game.lan_guest_packet(
-        &mut host,
         2,
         horizon_protocol::packets::play::Serverbound::PlayerCommand(
             horizon_protocol::packets::play::PlayerCommand {
@@ -169,7 +169,6 @@ fn jump(game: &mut Game<'_>, data: i32) {
             },
         ),
     );
-    game.lan = Some(host);
 }
 
 fn selected(game: &mut Game<'_>) -> Option<String> {

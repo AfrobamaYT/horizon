@@ -5,8 +5,8 @@ use crate::{
     extras::Corner,
     hud::{HudAtlas, HudBatch, Rect, rgba},
 };
-pub use mod_api::client::extras_hud::Corners;
 use horizon_hooks::hud;
+pub use mod_api::client::extras_hud::Corners;
 
 const BACKGROUND: u32 = 0x7800_0000;
 
@@ -188,9 +188,17 @@ mod tests {
 
     #[test]
     fn layers_stack_with_the_extras_and_skip_hidden_corners() {
-        let atlas =
-            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
-        let mut batch = HudBatch::new([800, 600]);
+        let atlas = HudAtlas::build(&crate::resource_source::ResourceSource::indexed(
+            Default::default(),
+        ))
+        .unwrap();
+        let mut batch = HudBatch::new(
+            [800, 600],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
         let (width, height) = (batch.width, batch.height);
         let mut corners = Corners::new(width, height, 0.0);
         // The minimap already took the top right.

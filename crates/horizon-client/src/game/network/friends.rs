@@ -13,6 +13,7 @@ use horizon_friends::{Host, HostConfig, HostEvent, PathMode, host::DEFAULT_PORT,
 use horizon_protocol::{GAME_VERSION, PROTOCOL_VERSION};
 use std::time::{Duration, Instant};
 
+#[path = "friends/screen.rs"]
 mod screen;
 
 use screen::{self as friends_screen, Action, FriendsView};

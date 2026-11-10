@@ -2563,7 +2563,7 @@ impl Game<'_> {
             a.spawn_velocity = Some(p.velocity);
             a.spawn_rot = Some((p.pitch, p.yaw));
         }
-        self.creatures.projectiles.put_back(p);
+        self.creatures.projectiles.push(p);
         self.native_projectile_launch(player, &name, id, kind);
     }
     /// `MushroomCow.shear`'s `sendParticles(EXPLOSION, x, getY(0.5), z, 1, 0, 0, 0, 0)`:
@@ -8731,22 +8731,15 @@ impl Game<'_> {
             // Cosmetics (game/cosmetics.rs), posed on the GPU with the mob's own jobs: culled
             // with it.
             if !layers_only
-                && super::cosmetics::enabled()
+                && horizon_hooks::engine::any()
                 && (is_player || &*mob.kind.id == "minecraft:mannequin")
             {
                 let mark = self.skin_frame.borrow().mark();
                 let base = horizon_client::mobs::render::base_transform(mob, alpha as f32, camera);
                 let gpu = skinning;
-                if let Some((lo, hi)) = self.cosmetics_geometry(
-                    mob,
-                    false,
-                    base,
-                    Some(camera),
-                    alpha as f32,
-                    packed,
-                    gpu,
-                    out,
-                ) {
+                if let Some((lo, hi)) =
+                    self.player_layers_geometry(mob, base, camera, alpha as f32, packed, gpu, out)
+                {
                     skinned = Some(match skinned {
                         Some((first, Some((l, h)))) => (first, Some((l.min(lo), h.max(hi)))),
                         Some((first, None)) => (first, Some((lo, hi))),

@@ -6,9 +6,9 @@ impl Minecart {
     pub fn to_nbt(
         &self,
         uuid: [i32; 4],
-        raw: Option<&horizon_world::nbt::Tag>,
-    ) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::{JavaString, Tag};
+        raw: Option<&horizon_core::nbt::Tag>,
+    ) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::{JavaString, Tag};
         let mut tag = horizon_client::entity_nbt::vehicle_to_nbt(
             self.kind.id(),
             self.position,
@@ -97,7 +97,7 @@ impl Minecart {
         }
         tag
     }
-    pub fn from_nbt(tag: &horizon_world::nbt::Tag, id: u32, kind: CartKind) -> Option<Self> {
+    pub fn from_nbt(tag: &horizon_core::nbt::Tag, id: u32, kind: CartKind) -> Option<Self> {
         let (position, _, _) = horizon_client::entity_nbt::boat_from_nbt(tag)?;
         let mut c = Self::new(id, kind, position);
         c.load(tag)?;
@@ -106,8 +106,8 @@ impl Minecart {
     /// `Entity.load` on this cart: the saved fields are read over the live
     /// ones, the rest (riders, lerp, hurt state) stays; its kind never changes.
     /// `None`, with nothing changed, when the compound has no position.
-    pub fn load(&mut self, tag: &horizon_world::nbt::Tag) -> Option<()> {
-        use horizon_world::nbt::Tag;
+    pub fn load(&mut self, tag: &horizon_core::nbt::Tag) -> Option<()> {
+        use horizon_core::nbt::Tag;
         let (position, velocity, yaw) = horizon_client::entity_nbt::boat_from_nbt(tag)?;
         let kind = self.kind;
         let c = self;

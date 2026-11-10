@@ -929,7 +929,6 @@ impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
             self.push(entity);
         }
     }
-
 }
 
 impl<T: Joined, const DIRECT: bool> FromIterator<T> for JoinList<T, DIRECT> {
@@ -1041,7 +1040,7 @@ mod tests {
     /// A numbered entity put back lands by its join number; a new one goes last.
     #[test]
     fn put_back_keeps_the_join_order() {
-        let mut list = JoinList::default();
+        let mut list: JoinList<E> = JoinList::default();
         for _ in 0..3 {
             list.push(E {
                 join: JoinSeq::UNJOINED,

@@ -338,7 +338,7 @@ impl Game<'_> {
             }
         };
         let mut view = self.view;
-        let pull = self.emote_camera_pull(partial);
+        let pull = self.hooks_camera_distance(partial);
         let kind = self.camera_type;
 
         let context = CollisionContext::for_entity(
@@ -729,7 +729,7 @@ impl Game<'_> {
     /// `LevelExtractor`'s skip of the camera entity: the player's own body
     /// is drawn unless the camera is in first person, or while it sleeps.
     pub(super) fn own_body_in_view(&self) -> bool {
-        !self.camera_type.is_first_person() || self.sleeping.is_some() || self.studio_freecam.active
+        !self.camera_type.is_first_person() || self.sleeping.is_some() || self.studio.flying()
     }
     /// Whether the player's own model shows in the world view (its body or,
     /// while invisible, only its armour and held items).

@@ -380,15 +380,17 @@ fn meshes_waiting_for_upload_hold_back_new_mesh_jobs() {
         return;
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
-    let render = Arc::new(assets.reload(&root).unwrap());
+    let source = horizon_assets::resource_source::ResourceRoot::directory(root.clone());
+    let render = Arc::new(assets.reload(&source).unwrap());
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let visibility = models::load_visibility(&root, assets.registry).unwrap();
     let context = Arc::new(WorkerContext {
-        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
+        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility, None).unwrap()),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
-        biomes: Arc::new(Biomes::load(&root).unwrap()),
+        biomes: Arc::new(Biomes::load(&source).unwrap()),
         assets,
         render,
+        hidden_states: Arc::from([]),
     });
     let workers = 3;
     let mut streaming = Streaming::new(Arc::new(Saved), context, workers);

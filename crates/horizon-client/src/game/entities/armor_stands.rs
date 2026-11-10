@@ -968,9 +968,6 @@ impl Game<'_> {
             ];
             self.spawn_item(stack, center, v, 10);
         }
-        self.pop_resource(pos, stand);
-        // ArmorStand.kill(level, the causing entity), after the drops.
-        self.break_armor_stand_with_source(i, by);
         self.show_breaking_particles(at, f64::from(width), f64::from(height));
         true
     }
@@ -1482,8 +1479,7 @@ impl Game<'_> {
                 // Entity.igniteForTicks calls clearFreeze.
                 let a = &mut self.armor_stands[i];
                 a.fire_ticks = a.fire_ticks.max(100);
-                if let Some(horizon_world::nbt::Tag::Compound(map)) = self.persist.raw.get_mut(&id)
-                {
+                if let Some(horizon_core::nbt::Tag::Compound(map)) = self.persist.raw.get_mut(&id) {
                     map.remove(&"TicksFrozen".into());
                 }
             }
@@ -1585,7 +1581,11 @@ impl Game<'_> {
         } else {
             let at = self.armor_stands[i].position;
             self.armor_stands[i].health = health;
-            self.stand_game_event("minecraft:entity_damage", [at.x, at.y, at.z], by);
+            self.stand_game_event(
+                "minecraft:entity_damage",
+                [at.x, at.y, at.z],
+                self.level_entity(causing as i32),
+            );
         }
     }
     /// ArmorStandRenderer: the stand with its default pose, then armor layers.

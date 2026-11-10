@@ -40,7 +40,7 @@ impl Game<'_> {
         } else if let Some(server) = &self.integrated {
             match (server.published(), &self.remote) {
                 (Some(_), Some(remote)) => Play::Hosting {
-                    players: remote.player_count(),
+                    players: remote.listed_player_count(),
                     max,
                 },
                 _ => Play::Singleplayer,
@@ -56,6 +56,7 @@ impl Game<'_> {
                 Dim::Overworld => Dimension::Overworld,
                 Dim::Nether => Dimension::Nether,
                 Dim::End => Dimension::End,
+                Dim::Extra(_) => Dimension::Other,
             },
             mode: match self.mode {
                 GameMode::Survival => horizon_hooks::GameMode::Survival,

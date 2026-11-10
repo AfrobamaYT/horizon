@@ -6163,6 +6163,7 @@ mod tests {
         let mut next_entity = 39;
         let entities = [near, untracked];
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &entities,
             next_entity: &mut next_entity,
@@ -6242,6 +6243,7 @@ mod tests {
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
+            sea_level: 63,
             world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -6311,6 +6313,7 @@ mod tests {
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -6489,6 +6492,7 @@ mod tests {
         let mut next_entity = 100;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -6578,6 +6582,7 @@ mod tests {
         let mut next_entity = 100;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -6691,6 +6696,7 @@ mod tests {
         let mut track = |hub: &mut Hub, state: EntityState| {
             let entities = [state];
             hub.track_entities(&mut TickCtx {
+                sea_level: 63,
                 world: &mut world,
                 entities: &entities,
                 next_entity: &mut next_entity,
@@ -6938,6 +6944,7 @@ mod tests {
         let mut next_entity = 100;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -7162,6 +7169,7 @@ mod tests {
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -7230,6 +7238,7 @@ mod tests {
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
+            sea_level: 63,
             world: &mut world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -7563,6 +7572,7 @@ mod tests {
         let mut next_entity = 100;
         let border = crate::worldborder::WorldBorder::default();
         let ctx = TickCtx {
+            sea_level: 63,
             world,
             entities: &[],
             next_entity: &mut next_entity,
@@ -7666,6 +7676,7 @@ mod tests {
             let mut next_entity = 100;
             let border = crate::worldborder::WorldBorder::default();
             let ctx = TickCtx {
+                sea_level: 63,
                 world: &mut world,
                 entities: &[],
                 next_entity: &mut next_entity,

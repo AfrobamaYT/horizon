@@ -987,7 +987,9 @@ impl SpawnState {
         entities: I,
         chunk_loaded: impl Fn(i32, i32) -> bool,
     ) -> Self
-    where I: IntoIterator, I::Item: std::borrow::Borrow<Counted<'a>>,
+    where
+        I: IntoIterator,
+        I::Item: std::borrow::Borrow<Counted<'a>>,
     {
         let mut state = Self::uncounted(spawnable_chunks, players);
         for e in entities {

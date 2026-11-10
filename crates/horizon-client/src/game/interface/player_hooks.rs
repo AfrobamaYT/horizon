@@ -57,10 +57,14 @@ fn kind(m: &Mob) -> Option<Kind> {
 
 /// What `m` wears where a crate may draw: a helmet or head item, a chestplate, a cape or elytra.
 pub(super) fn gear(m: &Mob) -> Gear {
-    let elytra = m.extra.chest.as_deref() == Some("minecraft:elytra");
+    let chest = m.extra.equipment.get(horizon_items::equipment::CHEST);
+    let elytra = chest.is_some_and(|s| &*s.item == "minecraft:elytra");
     Gear::new(
-        m.extra.head.is_some(),
-        m.extra.chest.is_some() && !elytra,
+        m.extra
+            .equipment
+            .get(horizon_items::equipment::HEAD)
+            .is_some(),
+        chest.is_some() && !elytra,
         m.cape.is_some() || elytra,
     )
 }

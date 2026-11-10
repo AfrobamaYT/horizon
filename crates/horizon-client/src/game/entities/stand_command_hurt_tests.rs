@@ -121,7 +121,8 @@ fn fire_from_damage_lights_or_burns_the_stand_though_the_command_fails() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn igniting_a_frozen_stand_clears_its_freeze_while_burning_keeps_it() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     summon(&mut game, ",TicksFrozen:140");
     let (_, frozen) = say(&mut game, &format!("data get entity {STAND} TicksFrozen"));
     assert!(frozen.ends_with(": 140"), "{frozen}");
@@ -141,7 +142,8 @@ fn igniting_a_frozen_stand_clears_its_freeze_while_burning_keeps_it() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn damage_immunity_on_worn_boots_refuses_campfire_but_not_in_fire_or_wrong_slot() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     summon(
         &mut game,
         r#",equipment:{feet:{id:"minecraft:diamond_boots",count:1,components:{"minecraft:enchantments":{"minecraft:frost_walker":1}}}}"#,
@@ -156,7 +158,8 @@ fn damage_immunity_on_worn_boots_refuses_campfire_but_not_in_fire_or_wrong_slot(
     assert!(fire.ends_with(": 100s"), "{fire}");
 
     // Frost Walker on a helmet (head) is not in an active slot for the enchantment.
-    let mut helmeted = self::game();
+    let mut helmet_resources = None;
+    let mut helmeted = self::game(&mut helmet_resources);
     summon(
         &mut helmeted,
         r#",equipment:{head:{id:"minecraft:diamond_helmet",count:1,components:{"minecraft:enchantments":{"minecraft:frost_walker":1}}}}"#,
@@ -178,7 +181,8 @@ fn take_events() -> Vec<(&'static str, [f64; 3], Option<horizon_client::mobs::Wh
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cause_damage_and_explosion_post_attributed_game_events() {
     use horizon_client::mobs::Who;
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     summon(&mut game, ",Fire:200s");
     assert!(game.run_command("summon pig 14.5 100 2.5 {NoAI:1b}"));
     let pig_id = game.mobs[0].id;

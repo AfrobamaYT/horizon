@@ -743,15 +743,13 @@ impl Game<'_> {
                                     .map(|p| (p.conn, p.entity_id))
                             })
                             .ok_or("player command: owner not connected")?;
-                        let mut host = g.lan.take().ok_or("player command: no hub")?;
+                        g.lan.as_ref().ok_or("player command: no hub")?;
                         g.lan_guest_packet(
-                            &mut host,
                             conn,
                             horizon_protocol::packets::play::Serverbound::PlayerCommand(
                                 horizon_protocol::packets::play::PlayerCommand { id, action, data },
                             ),
                         );
-                        g.lan = Some(host);
                         Ok(())
                     })?;
                 }

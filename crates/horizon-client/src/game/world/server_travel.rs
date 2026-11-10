@@ -154,6 +154,7 @@ macro_rules! server_ctx {
             next_entity: &mut $s.next_entity,
             spawn,
             spawn_angle: $s.level.world_spawn_angle,
+            sea_level: $s.end.locator().map_or(63, |terrain| terrain.sea_level()),
             difficulty: i32::from($s.ui.difficulty),
             difficulty_locked: $s.level.difficulty_locked,
             clock_rate,
@@ -871,7 +872,7 @@ impl Game<'_> {
                 if self.spawn_point_change(config.dim, Some(config.pos), config.forced) {
                     self.respawn_config = None;
                 }
-                Some((at, yaw))
+                Some((at, yaw, pitch))
             }
             Ok(None) | Err(_) => {
                 // The block is gone: `PlayerList.respawn` skips
@@ -1010,7 +1011,12 @@ impl Game<'_> {
             let (position, yaw) = if let Some(config) = trip.respawn {
                 let found = self.as_guest(trip.conn, |g| g.resolve_server_respawn(config));
                 match found {
-                    Some(Some(found)) => found,
+                    Some(Some((at, yaw, pitch))) => {
+                        if let Some(host) = self.lan.as_mut() {
+                            host.hub.guests.update(i, |guest| guest.pitch = pitch);
+                        }
+                        (at, yaw)
+                    }
                     _ => {
                         if let Some(host) = self.lan.as_mut() {
                             host.hub.missing_respawn_block(trip.conn);

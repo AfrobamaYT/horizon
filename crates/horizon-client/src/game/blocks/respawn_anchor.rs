@@ -651,7 +651,8 @@ mod connected_spawnpoint_rotation_tests {
     #[test]
     #[ignore = "prepared resources and isolated scratch homes/cwd"]
     fn command_forced_free_point_survives_real_guest_death_and_respawn_packet() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.set_allow_commands(true);
         let scratch = std::env::temp_dir().join(format!(
             "horizon-forced-spawn-{}-{}",
@@ -731,7 +732,6 @@ mod connected_spawnpoint_rotation_tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:7".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             7,
             [4.5, 100.0, 4.5],
@@ -761,15 +761,15 @@ mod connected_spawnpoint_rotation_tests {
             .clone();
         assert_eq!(
             respawn.get("yaw"),
-            Some(&horizon_world::nbt::Tag::Float(45f32.to_bits()))
+            Some(&horizon_core::nbt::Tag::Float(45f32.to_bits()))
         );
         assert_eq!(
             respawn.get("pos"),
-            Some(&horizon_world::nbt::Tag::IntArray(vec![12, 100, 12]))
+            Some(&horizon_core::nbt::Tag::IntArray(vec![12, 100, 12]))
         );
         command(&mut game, "kill Alice");
         game.tick_lan(false);
-        let mut host = game.lan.take().unwrap();
+        let host = game.lan.take().unwrap();
         assert_eq!(host.hub.guests[0].uuid, 77);
         assert_eq!(host.hub.guests[0].health, 0.0);
         assert!(
@@ -777,12 +777,10 @@ mod connected_spawnpoint_rotation_tests {
             "actual command death before request"
         );
         for _ in rx.try_iter() {}
-        game.lan_guest_packet(
-            &mut host,
-            7,
-            S::ClientCommand(play::ClientCommand { action: 0 }),
-        );
-        game.tick_server_travel(&mut host);
+        game.lan = Some(host);
+        game.lan_guest_packet(7, S::ClientCommand(play::ClientCommand { action: 0 }));
+        game.tick_server_travel();
+        let host = game.lan.take().unwrap();
         assert!(
             !game.on_server_trip(7),
             "admitted lit columns permit actual arrival"
@@ -842,7 +840,7 @@ mod connected_spawnpoint_rotation_tests {
                 [p.yaw.to_bits(), p.pitch.to_bits()]
             ),
             (
-                Some(&horizon_world::nbt::Tag::Float(10f32.to_bits())),
+                Some(&horizon_core::nbt::Tag::Float(10f32.to_bits())),
                 [45f32.to_bits(), 10f32.to_bits()],
                 [45f32.to_bits(), 10f32.to_bits()]
             )
@@ -869,7 +867,8 @@ mod pitch_preservation_controls {
     #[test]
     #[ignore = "prepared resources and isolated scratch homes/cwd"]
     fn bed_anchor_facing_and_invalid_personal_fallback_ignore_stored_pitch() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let stone = game
             .pack
             .assets

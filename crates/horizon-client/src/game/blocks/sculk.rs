@@ -365,7 +365,7 @@ impl Game<'_> {
         }
     }
     /// The tracker as saved, once it has been loaded.
-    pub(super) fn warden_tracker_tag(&self) -> Option<horizon_world::nbt::Tag> {
+    pub(super) fn warden_tracker_tag(&self) -> Option<horizon_core::nbt::Tag> {
         self.sculk
             .tracker_loaded
             .then(|| self.sculk.tracker.to_nbt())

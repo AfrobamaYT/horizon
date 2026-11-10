@@ -9,6 +9,7 @@ use horizon_client::mobs::Mob;
 use horizon_client::mobs::anim::BodyPose;
 use horizon_cosmetics::account::OwnedEmote;
 use horizon_cosmetics::{Item, Playing, Slot};
+use horizon_hooks::players::PlayerModels;
 use mod_api::CameraType;
 use std::sync::Arc;
 

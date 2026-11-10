@@ -788,7 +788,28 @@ impl Game<'_> {
         }
         // Restitution reads the new landing block even when the push was blocked.
         if let Some(i) = mob {
-            self.mobs[i].restitute_movement(&self.world, &self.motion.blocks, limited, resolved);
+            let mut mobs = self.mobs.lift();
+            let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
+            // Restitution may call a block Part. Return both loans, including
+            // their progressed state, before propagating a callback panic.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let world = self.mob_world_base(&[]);
+                let mut level = horizon_client::health::DamageLevel::lent(
+                    &self.world,
+                    self.pack.assets.registry,
+                    &mut lent,
+                    Some(world_items!(self)),
+                    Some(&self.pack.block_registries),
+                    &self.damage_hooks,
+                );
+                mobs[i].restitute_movement(&world, &mut level, limited, resolved);
+            }));
+            lent.give_back(&mut self.world);
+            self.mobs
+                .restore(mobs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
+            if let Err(payload) = result {
+                std::panic::resume_unwind(payload);
+            }
         } else if tnt_after_move {
             self.restitute_piston(target, limited, resolved);
         }

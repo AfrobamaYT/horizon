@@ -34,7 +34,7 @@ fn jukebox_playable(
         return None;
     }
     match data.and_then(|d| d.other("minecraft:jukebox_playable")) {
-        Some(horizon_world::nbt::Tag::String(song)) => Some(Some(song.to_string_lossy())),
+        Some(horizon_core::nbt::Tag::String(song)) => Some(Some(song.to_string_lossy())),
         Some(_) => Some(None),
         None => Some(Some(items.get(&record.item)?.jukebox_song.clone()?)),
     }
@@ -228,9 +228,7 @@ impl Game<'_> {
             }),
         );
         self.set_has_record(pos, true);
-        if let Some(song) = song {
-            self.start_song(pos, &song);
-        }
+        self.start_song(pos, &song);
         self.jukebox_changed(pos);
         Some(Answer::Success)
     }
@@ -702,10 +700,10 @@ mod saved_song_clock_tests {
 
 #[cfg(test)]
 mod jukebox_component_tests {
-    use super::super::native_machines::tests::server_game;
     use super::*;
+    use crate::game::game_tests::tests::server_game;
+    use horizon_core::nbt::Tag;
     use horizon_core::position::BlockPos;
-    use horizon_world::nbt::Tag;
 
     fn comparator(game: &mut super::Game<'_>, stack: ItemStack) -> i32 {
         let key = (8, 64, 8);
@@ -730,7 +728,8 @@ mod jukebox_component_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_jukebox_reads_the_discs_own_jukebox_component() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let cat = game.items().songs.get("minecraft:cat").unwrap().comparator;
         assert_eq!(
             comparator(&mut game, ItemStack::new("minecraft:music_disc_cat", 1)),
@@ -766,7 +765,8 @@ mod jukebox_component_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_jukebox_takes_what_the_stacks_component_makes_playable() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let state = game
             .pack
             .assets

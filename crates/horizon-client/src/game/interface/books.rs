@@ -71,6 +71,20 @@ pub(super) enum BookScreen {
     },
 }
 impl BookScreen {
+    fn begin_signing(&mut self) {
+        if let Self::Edit {
+            signing,
+            title,
+            title_edit,
+            ..
+        } = self
+        {
+            *signing = true;
+            title_edit.set_value(title.as_str());
+            title_edit.reset_blink();
+        }
+    }
+
     /// The id the screen hooks see (`ScreenView.id`).
     pub(super) fn id(&self) -> &'static str {
         match self {
@@ -293,8 +307,12 @@ impl Game<'_> {
     fn set_book_signing(&mut self, on: bool) {
         let id = if on { "book_sign" } else { "book_edit" };
         self.open_screen_overlay(id, |game| {
-            if let Some(BookScreen::Edit { signing, .. }) = game.book.as_mut() {
-                *signing = on;
+            if let Some(book @ BookScreen::Edit { .. }) = game.book.as_mut() {
+                if on {
+                    book.begin_signing();
+                } else if let BookScreen::Edit { signing, .. } = book {
+                    *signing = false;
+                }
             }
         });
     }
@@ -1754,7 +1772,8 @@ mod lectern_signal_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_lectern_without_the_has_book_state_feeds_no_comparator() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let key = (8, 64, 8);
         let state = game
             .pack

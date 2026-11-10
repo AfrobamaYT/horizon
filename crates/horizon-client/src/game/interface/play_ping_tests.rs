@@ -48,12 +48,19 @@ fn pass(game: &mut Game<'_>, conn: u32, packet: S) {
     assert_ne!(hub.guests[0].conn, hub.guests[1].conn);
     let registered = hub.guest(conn).expect("origin connection registered");
     assert_eq!(registered.uuid, u128::from(conn));
-    assert!(!registered.fake && !registered.sender.is_fake());
+    assert!(!registered.is_fake());
     assert!(registered.left_reason.is_empty());
     assert_eq!(registered.dimension, "minecraft:overworld");
-    let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
-    guest.inbox.push_back((packet, bytes));
-    guest.inbox_bytes += bytes;
+    game.lan
+        .as_mut()
+        .unwrap()
+        .hub
+        .guests
+        .update_connection(conn, |guest| {
+            guest.inbox.push_back((packet, bytes));
+            guest.inbox_bytes += bytes;
+        })
+        .unwrap();
     // Already registered connections: this is a second level pass, without polling sockets.
     game.level_pass.first = false;
     game.level_pass.packets_drained = false;
@@ -91,8 +98,10 @@ fn pass(game: &mut Game<'_>, conn: u32, packet: S) {
     );
 }
 
-fn fixture() -> (Game<'static>, [mpsc::Receiver<Out>; 2]) {
-    let mut game = crate::game::native_machines::tests::server_game();
+fn fixture(
+    resources: &mut Option<std::sync::Arc<crate::game::Resources>>,
+) -> (Game<'_>, [mpsc::Receiver<Out>; 2]) {
+    let mut game = crate::game::game_tests::tests::server_game(resources);
     game.build_registries();
     game.lan_host(
         LanSettings {
@@ -134,7 +143,6 @@ fn fixture() -> (Game<'static>, [mpsc::Receiver<Out>; 2]) {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             conn as i32,
             [0.5, 80.0, 0.5],
@@ -155,7 +163,8 @@ fn fixture() -> (Game<'static>, [mpsc::Receiver<Out>; 2]) {
 #[test]
 #[ignore = "needs prepared resources and isolated scratch homes/cwd"]
 fn registered_play_ping_echoes_exact_long_to_only_its_connection() {
-    let (mut game, receivers) = fixture();
+    let mut resources = None;
+    let (mut game, receivers) = fixture(&mut resources);
     for (turn, time) in [
         1,
         0,
@@ -206,8 +215,15 @@ fn registered_play_ping_echoes_exact_long_to_only_its_connection() {
 #[test]
 #[ignore = "needs prepared resources and isolated scratch homes/cwd"]
 fn dead_guest_play_ping_is_transport_not_an_action() {
-    let (mut game, receivers) = fixture();
-    game.lan.as_mut().unwrap().hub.guest_mut(1).unwrap().dead = true;
+    let mut resources = None;
+    let (mut game, receivers) = fixture(&mut resources);
+    game.lan
+        .as_mut()
+        .unwrap()
+        .hub
+        .guests
+        .update_connection(1, |guest| guest.dead = true)
+        .unwrap();
     pass(
         &mut game,
         1,
@@ -231,7 +247,8 @@ fn dead_guest_play_ping_is_transport_not_an_action() {
 #[test]
 #[ignore = "needs prepared resources and isolated scratch homes/cwd"]
 fn server_ping_client_pong_keeps_the_existing_prediction_route() {
-    let (mut game, receivers) = fixture();
+    let mut resources = None;
+    let (mut game, receivers) = fixture(&mut resources);
     let hub = &mut game.lan.as_mut().unwrap().hub;
     let mut config = horizon_anticheat::Config::default();
     config.log.clear();
@@ -259,18 +276,20 @@ fn server_ping_client_pong_keeps_the_existing_prediction_route() {
         1,
         S::Pong(horizon_protocol::packets::configuration::Ping { id: 123 }),
     );
-    let record = game
-        .lan
+    game.lan
         .as_mut()
         .unwrap()
         .hub
-        .guest_mut(1)
-        .unwrap()
-        .anticheat
-        .record
-        .as_deref_mut()
-        .expect("existing client Pong updates prediction");
-    assert_eq!(record.tick_end(0, false).seen, Some(123));
+        .guests
+        .update_connection(1, |guest| {
+            let record = guest
+                .anticheat
+                .record
+                .as_deref_mut()
+                .expect("existing client Pong updates prediction");
+            assert_eq!(record.tick_end(0, false).seen, Some(123));
+        })
+        .unwrap();
     for receiver in &receivers {
         assert!(output(receiver).is_empty());
     }
@@ -279,10 +298,18 @@ fn server_ping_client_pong_keeps_the_existing_prediction_route() {
 #[test]
 #[ignore = "needs prepared resources and isolated scratch homes/cwd"]
 fn held_guest_play_ping_survives_the_acknowledgement_filter() {
-    let (mut game, receivers) = fixture();
-    let guest = game.lan.as_mut().unwrap().hub.guest_mut(1).unwrap();
-    guest.placed = false;
-    guest.held = true;
+    let mut resources = None;
+    let (mut game, receivers) = fixture(&mut resources);
+    game.lan
+        .as_mut()
+        .unwrap()
+        .hub
+        .guests
+        .update_connection(1, |guest| {
+            guest.placed = false;
+            guest.held = true;
+        })
+        .unwrap();
     pass(&mut game, 1, S::PingRequest(status::Ping { time: -1 }));
     assert!(matches!(output(&receivers[0]).as_slice(), [C::PongResponse(p)] if p.time == -1));
     assert!(output(&receivers[1]).is_empty());
@@ -301,7 +328,8 @@ fn held_guest_play_ping_survives_the_acknowledgement_filter() {
 #[test]
 #[ignore = "needs prepared resources and isolated scratch homes/cwd"]
 fn handover_guest_play_ping_survives_the_acknowledgement_filter() {
-    let (mut game, receivers) = fixture();
+    let mut resources = None;
+    let (mut game, receivers) = fixture(&mut resources);
     let handover = horizon_client::lan::arrivals::Handover {
         id: 0x1234,
         since: 123,
@@ -311,9 +339,9 @@ fn handover_guest_play_ping_survives_the_acknowledgement_filter() {
         .as_mut()
         .unwrap()
         .hub
-        .guest_mut(1)
-        .unwrap()
-        .handover = Some(handover.clone());
+        .guests
+        .update_connection(1, |guest| guest.handover = Some(handover.clone()))
+        .unwrap();
     pass(
         &mut game,
         1,

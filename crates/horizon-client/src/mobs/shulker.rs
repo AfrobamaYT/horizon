@@ -1435,7 +1435,7 @@ mod saved_bytes_tests {
     #[test]
     fn a_shulker_reads_its_face_and_lid_bytes_like_vanilla() {
         use crate::entity_nbt::mob_from_nbt;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut kind = crate::mobs::sensor_scan_tests::kind();
         let k = std::sync::Arc::make_mut(&mut kind);
         k.id = "minecraft:shulker".into();

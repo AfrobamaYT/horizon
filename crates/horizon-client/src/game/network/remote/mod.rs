@@ -64,9 +64,6 @@ use {
     },
 };
 
-#[path = "remote_poll.rs"]
-mod poll;
-
 type BuiltinCache = Vec<(std::path::PathBuf, Arc<Builtin>)>;
 static BUILTIN: std::sync::Mutex<BuiltinCache> = std::sync::Mutex::new(Vec::new());
 
@@ -267,7 +264,7 @@ impl ChunkGenerator for NoTerrain {
 }
 
 /// A server entity the client tracks (position as last sent).
-struct Tracked {
+pub(super) struct Tracked {
     kind: String,
     position: [f64; 3],
     /// `Entity.getPositionCodec`'s base: the position the server last
@@ -299,7 +296,7 @@ fn seat_passengers(entities: &mut HashMap<i32, Tracked>, vehicle: u32, passenger
 #[derive(Clone, Copy)]
 /// `LinearInterpolationHandler`'s target: a position and rotation (yRot,
 /// xRot) reached in `steps` ticks.
-struct Lerp {
+pub(super) struct Lerp {
     target: [f64; 3],
     rotation: Option<(f32, f32)>,
     steps: u32,
@@ -318,7 +315,7 @@ struct CartStep {
 /// The client's state of a minecart on `NewMinecartBehavior`: the steps the
 /// server sent (`lerpSteps`), the ones being played over 3 ticks
 /// (`currentLerpSteps`) and where the cart was when they began (`oldLerp`).
-struct CartLerp {
+pub(super) struct CartLerp {
     pending: Vec<CartStep>,
     current: Vec<CartStep>,
     total_weight: f64,
@@ -637,7 +634,7 @@ pub(super) struct Remote {
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
     /// follows (`horizon:menu_extra`).
     menu_extra: Option<horizon_protocol::menu_extra::Message>,
-    entities: HashMap<i32, Tracked>,
+    pub(super) entities: HashMap<i32, Tracked>,
     /// Per-tick remote entity scratch retained between frames.
     tick_fluids: Vec<Option<horizon_client::mobs::living::Fluids>>,
     tick_rain: Vec<bool>,
@@ -645,14 +642,14 @@ pub(super) struct Remote {
     tick_water_fx: Vec<horizon_client::mobs::MobEvent>,
     /// Complete network riding graph, including invisible plugin seat entities.
     pub(super) passenger_vehicles: HashMap<u32, u32>,
-    lerps: HashMap<i32, Lerp>,
+    pub(super) lerps: HashMap<i32, Lerp>,
     /// The minecarts the server moves with `ClientboundMoveMinecartPacket`
     /// (`NewMinecartBehavior`), which have no interpolation handler.
-    cart_lerps: HashMap<i32, CartLerp>,
+    pub(super) cart_lerps: HashMap<i32, CartLerp>,
     /// Living entities' `SteppedInterpolationHandler`s.
-    stepped: HashMap<i32, SteppedInterpolation>,
+    pub(super) stepped: HashMap<i32, SteppedInterpolation>,
     /// `LivingEntity.lerpHeadTo`: the head yaw and the ticks left to reach it.
-    head_lerps: HashMap<i32, (f32, u32)>,
+    pub(super) head_lerps: HashMap<i32, (f32, u32)>,
     /// The happy ghast the player just got off, until the server's teleport
     /// puts the player on top of it (`place_ghast_under`).
     pub(super) ghast_dismount: Option<u32>,
@@ -663,7 +660,7 @@ pub(super) struct Remote {
     pub(super) passenger_index: usize,
     /// Item entities waiting for their item data: where they are and their
     /// motion.
-    pending_items: HashMap<i32, ([f64; 3], Vec3)>,
+    pub(super) pending_items: HashMap<i32, ([f64; 3], Vec3)>,
     health: (f32, i32, f32),
     /// `LocalPlayer.flashOnSetHealth`: set by the first health the server
     /// sends; from then on a drop starts the hurt animation.
@@ -735,7 +732,7 @@ pub(super) struct Remote {
     level_player_textures: HashMap<i32, horizon_client::skins::Textures>,
     /// Entities with shared flag 6 (`Entity.isCurrentlyGlowing` on a client); mobs keep
     /// theirs in `Mob::glowing`.
-    glowing: std::collections::HashSet<i32>,
+    pub(super) glowing: std::collections::HashSet<i32>,
     /// The player's own shared flag 5 (`Entity.isInvisible`) as the server
     /// last set it.
     pub(super) own_invisible: bool,
@@ -3609,7 +3606,7 @@ impl Game<'_> {
         self.move_remote_text_display(id, position, rotation);
         self.turn_remote_projectile(id, rotation);
     }
-    fn detach_remote_tracking_entity(&mut self, id: i32) {
+    pub(super) fn detach_remote_tracking_entity(&mut self, id: i32) {
         let mobs = &self.mobs;
         let index = &mut self.mob_index;
         self.particles
@@ -4231,7 +4228,7 @@ impl Game<'_> {
                 self.move_remote_interaction(p.id, p.position);
             }
             C::RemoveEntities(p) => {
-                for id in p.ids {
+                for &id in &p.ids {
                     if let Some(uuid) = self.persist.uuids.get(&(id as u32)).copied() {
                         self.forget_entity_initialization(uuid);
                     }
@@ -12635,8 +12632,6 @@ fn in_storage_range(view_distance: i32, center: (i32, i32), x: i32, z: i32) -> b
 // A packet's removals (`RemoveEntities`), apart: this file may not grow.
 #[cfg(test)]
 mod interaction_event_tests;
-#[path = "remote_removal.rs"]
-mod removal;
 
 #[cfg(test)]
 mod native_entity_tests;

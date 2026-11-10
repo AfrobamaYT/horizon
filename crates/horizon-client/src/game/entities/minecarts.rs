@@ -35,11 +35,6 @@ use horizon_core::{
 };
 use horizon_world::registry::BlockStateId;
 use std::{collections::HashMap, sync::Arc};
-mod index;
-mod nbt;
-pub(super) use index::CartIndex;
-use index::cart_at;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum CartKind {
     Rideable,
