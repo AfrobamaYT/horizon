@@ -16,7 +16,12 @@ use horizon_world::registry::BlockStateId;
 /// The values `apply` takes from one SetEntityData packet, by vanilla's entry
 /// indices (Entity 0..=7, LivingEntity 8..=14, Mob 15, then the subclasses).
 /// `builtin` names the ids of built-in registries.
-fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_entity: i32) -> Option<[f64; 3]> {
+fn apply(
+    m: &mut Mob,
+    values: &[(u8, i32, Value)],
+    builtin: &Builtin,
+    local_entity: i32,
+) -> Option<[f64; 3]> {
     let species = m.species();
     let mut stare_sound = None;
     let baby = super::lan::baby_index(species);
@@ -522,7 +527,8 @@ impl Game<'_> {
                 m.extra.ints[1] = code;
             }
             if let Some(at) = stare_sound {
-                self.audio.play_unshared("minecraft:entity.enderman.stare", Some(at), 2.5, 1.0);
+                self.audio
+                    .play_unshared("minecraft:entity.enderman.stare", Some(at), 2.5, 1.0);
             }
         }
     }
@@ -626,16 +632,21 @@ mod tests {
     fn enderman_stare_metadata_requests_one_local_sound_with_cooldown() {
         let mut mob = fixture_mob("minecraft:enderman");
         let builtin = Builtin::default();
-        let apply = |mob: &mut Mob, values: &[(u8, i32, Value)]| {
-            super::apply(mob, values, &builtin, 99)
-        };
-        assert_eq!(apply(&mut mob, &[(18, s::BOOLEAN, Value::Bool(true))]), None);
+        let apply =
+            |mob: &mut Mob, values: &[(u8, i32, Value)]| super::apply(mob, values, &builtin, 99);
+        assert_eq!(
+            apply(&mut mob, &[(18, s::BOOLEAN, Value::Bool(true))]),
+            None
+        );
         assert_eq!(
             apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]),
             Some([0.0, 1.5, 0.0])
         );
         mob.age = 399;
-        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(false))]), None);
+        assert_eq!(
+            apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(false))]),
+            None
+        );
         mob.age = 400;
         assert_eq!(
             apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]),
@@ -643,17 +654,32 @@ mod tests {
         );
         mob.age = 800;
         mob.silent = true;
-        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(false))]), None);
+        assert_eq!(
+            apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(false))]),
+            None
+        );
         mob.silent = false;
-        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]), None);
+        assert_eq!(
+            apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]),
+            None
+        );
         mob.age = 1200;
         // Entries are assigned in packet order: a clear of creepy still sees
         // the previous stared-at flag before the following clear of index 18.
-        assert!(apply(&mut mob, &[
-            (17, s::BOOLEAN, Value::Bool(false)),
-            (18, s::BOOLEAN, Value::Bool(false)),
-        ]).is_some());
-        assert_eq!(apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]), None);
+        assert!(
+            apply(
+                &mut mob,
+                &[
+                    (17, s::BOOLEAN, Value::Bool(false)),
+                    (18, s::BOOLEAN, Value::Bool(false)),
+                ]
+            )
+            .is_some()
+        );
+        assert_eq!(
+            apply(&mut mob, &[(17, s::BOOLEAN, Value::Bool(true))]),
+            None
+        );
     }
 
     #[test]

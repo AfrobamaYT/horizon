@@ -1177,38 +1177,76 @@ mod tests {
             assert_eq!(game.lan.as_ref().unwrap().mob_players.get(&12), Some(&1));
             // `ZombifiedPiglin.setTarget` does not impersonate a player hit:
             // existing kill credit and its remaining lifetime are unchanged.
-            let kind = game.res.mob_types().get("minecraft:zombified_piglin").unwrap().clone();
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombified_piglin")
+                .unwrap()
+                .clone();
             let mut piglin_state = Mob::new(13, kind, Vec3::ZERO, 0.0);
             piglin_state.ai.last_hurt_by_player = 42;
             game.mobs.push(piglin_state);
             let piglin = game.mob(game.entity(13).unwrap()).unwrap();
             assert!(piglin.set_target(game, Some(player)));
-            assert_eq!(game.mobs.iter().find(|m| m.id == 13).unwrap().ai.last_hurt_by_player, 42);
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|m| m.id == 13)
+                    .unwrap()
+                    .ai
+                    .last_hurt_by_player,
+                42
+            );
             assert!(!game.last_hurt_by_player.contains_key(&13));
             assert!(piglin.set_target(game, None));
-            assert_eq!(game.mobs.iter().find(|m| m.id == 13).unwrap().ai.last_hurt_by_player, 42);
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|m| m.id == 13)
+                    .unwrap()
+                    .ai
+                    .last_hurt_by_player,
+                42
+            );
             let level = game.level(game.dim.id()).unwrap();
             let fake = game.fake_player(level, 9999, "fake").unwrap();
             let fake_living = LivingRef::new(fake.entity());
             assert!(!piglin.set_target(game, Some(fake_living)));
             assert_eq!(piglin.target(game), None);
-            assert_eq!(game.mobs.iter().find(|m| m.id == 13).unwrap().ai.last_hurt_by_player, 42);
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|m| m.id == 13)
+                    .unwrap()
+                    .ai
+                    .last_hurt_by_player,
+                42
+            );
             // The alert recipient is allied with the host, not with the
             // unteamed guest targeted by the source piglin.
-            let kind = game.res.mob_types().get("minecraft:zombified_piglin").unwrap().clone();
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombified_piglin")
+                .unwrap()
+                .clone();
             game.mobs.push(Mob::new(14, kind, Vec3::ZERO, 0.0));
             game.persist.uuids.insert(14, [0, 0, 0, 14]);
             let host_name = game.acting_player_name().to_owned();
             game.score.board.add_team("red");
             game.score.board.add_to_team(&host_name, "red");
-            game.score.board.add_to_team("00000000-0000-0000-0000-00000000000e", "red");
+            game.score
+                .board
+                .add_to_team("00000000-0000-0000-0000-00000000000e", "red");
             let recipient = game.mob(game.entity(14).unwrap()).unwrap();
             assert!(piglin.set_target(game, Some(player)));
-            let alert = || mobs::MobEvent::PiglinAlertTarget(mobs::undead::PiglinAlert {
-                mob: 14,
-                source: 13,
-                target: Who::Player,
-            });
+            let alert = || {
+                mobs::MobEvent::PiglinAlertTarget(mobs::undead::PiglinAlert {
+                    mob: 14,
+                    source: 13,
+                    target: Who::Player,
+                })
+            };
             game.handle_mob_events(vec![alert()]).unwrap();
             assert_eq!(recipient.target(game), Some(player));
             assert!(recipient.set_target(game, None));
@@ -1299,12 +1337,17 @@ mod tests {
             enderman_state.extra.flag2 = true;
             game.audio.capture = Some(Vec::new());
             assert!(enderman.set_target(game, Some(other)));
-            let events = std::mem::take(
-                &mut game.mobs.iter_mut().find(|m| m.id == 13).unwrap().outbox,
-            );
+            let events =
+                std::mem::take(&mut game.mobs.iter_mut().find(|m| m.id == 13).unwrap().outbox);
             game.handle_mob_events(events).unwrap();
-            assert_eq!(game.audio.heard.get("minecraft:entity.enderman.stare"), Some(&1));
-            assert!(game.audio.capture.as_ref().unwrap().is_empty(), "stare stays client-local");
+            assert_eq!(
+                game.audio.heard.get("minecraft:entity.enderman.stare"),
+                Some(&1)
+            );
+            assert!(
+                game.audio.capture.as_ref().unwrap().is_empty(),
+                "stare stays client-local"
+            );
             let m = state(game, 13);
             assert!(m.extra.flag, "DATA_CREEPY");
             assert_eq!(m.extra.counter, 1234, "targetChangeTime");
@@ -1376,8 +1419,14 @@ mod tests {
             game.tick_mobs().unwrap();
             assert_eq!(other.target(game), Some(target));
             game.tick_mobs().unwrap();
-            assert!(game.audio.capture.as_ref().unwrap().iter()
-                .any(|sound| sound.event == "minecraft:entity.zombified_piglin.angry"));
+            assert!(
+                game.audio
+                    .capture
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|sound| sound.event == "minecraft:entity.zombified_piglin.angry")
+            );
         });
     }
 

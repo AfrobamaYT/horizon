@@ -25,7 +25,11 @@ impl Game<'_> {
         alert: horizon_client::mobs::undead::PiglinAlert,
     ) {
         use horizon_client::mobs::Who;
-        let horizon_client::mobs::undead::PiglinAlert { mob, source, target } = alert;
+        let horizon_client::mobs::undead::PiglinAlert {
+            mob,
+            source,
+            target,
+        } = alert;
         let player = self
             .lan
             .as_ref()
