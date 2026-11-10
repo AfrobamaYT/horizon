@@ -19,6 +19,7 @@ pub fn run() -> Result<(), String> {
 /// Prints the wasm boundary coverage chapter for the book preprocessor, without writing a source
 /// file.
 pub fn coverage() -> Result<(), String> {
+    horizon_mod_api_gen::generated_on_stdout();
     print!(
         "{}",
         horizon_mod_api_gen::generate_wire_coverage(&checkout()?)?
@@ -28,6 +29,7 @@ pub fn coverage() -> Result<(), String> {
 
 /// Prints the hook-notes chapter for the book preprocessor, without writing a source file.
 pub fn notes() -> Result<(), String> {
+    horizon_mod_api_gen::generated_on_stdout();
     print!(
         "{}",
         horizon_mod_api_gen::generate_hook_notes(&checkout()?)?

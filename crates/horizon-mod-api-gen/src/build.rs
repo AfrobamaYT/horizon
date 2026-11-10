@@ -53,7 +53,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                     .map_err(|_| "generating the wire impls panicked".to_string())?
             })?;
             for path in sources.iter().chain(&generated_wire.sources) {
-                println!("cargo:rerun-if-changed={}", path.display());
+                crate::rerun_if_changed(&path.display());
             }
             vec![
                 (host::AREAS_OUTPUT, generated.areas),
@@ -107,17 +107,14 @@ pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
 /// Generate the native-only raw render records, without trait dispatch or subscriptions.
 pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
     let declarations = root.join(super::catalog::DECLARATIONS);
-    println!("cargo:rerun-if-changed={}", declarations.display());
+    crate::rerun_if_changed(&declarations.display());
     for module in Catalog::modules(&declarations)? {
-        println!(
-            "cargo:rerun-if-changed={}",
-            declarations.join(format!("{module}.rs")).display()
-        );
+        crate::rerun_if_changed(&declarations.join(format!("{module}.rs")).display());
     }
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-mod-render/src/render.rs")
-            .display()
+    crate::rerun_if_changed(
+        &root
+            .join("crates/horizon-mod-render/src/render.rs")
+            .display(),
     );
     let source = super::dispatch::render(root, &Catalog::load(root)?)?.render_dispatch;
     use syn::spanned::Spanned;
@@ -206,13 +203,13 @@ pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<Strin
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
-    println!("cargo:rerun-if-changed={}", src.join("game.rs").display());
-    println!("cargo:rerun-if-changed={}", src.join("game").display());
+    crate::rerun_if_changed(&src.join("game.rs").display());
+    crate::rerun_if_changed(&src.join("game").display());
     for path in super::points::tracked(root)?
         .into_iter()
         .chain(super::sites::tracked(root).map_err(|e| e.to_string())?)
     {
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
     }
     let private = super::points::source::build_input(root)?;
     println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
@@ -241,37 +238,31 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
 pub(super) fn track(root: &Path) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
             let path = entry.map_err(|e| e.to_string())?.path();
             if path.is_dir() && recursive {
                 directory(&path, extension, recursive)?;
             } else if path.extension().is_some_and(|ext| ext == extension) {
-                println!("cargo:rerun-if-changed={}", path.display());
+                crate::rerun_if_changed(&path.display());
             }
         }
         Ok(())
     }
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-mod-api/src/lib.rs").display()
-    );
+    crate::rerun_if_changed(&root.join("crates/horizon-mod-api/src/lib.rs").display());
     for retired in super::catalog::RETIRED {
         // Only while present: Cargo reruns a build script on every build for a path that doesn't
         // exist. One that appears fails the next generation, and every fresh build, such as CI's.
         let path = root.join(retired);
         if path.exists() {
-            println!("cargo:rerun-if-changed={}", path.display());
+            crate::rerun_if_changed(&path.display());
         }
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
     directory(&root.join("crates/horizon-mod-api/src/parts"), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-client/src/game.rs").display()
-    );
+    crate::rerun_if_changed(&root.join("crates/horizon-client/src/game.rs").display());
     for hook in Catalog::load(root)?.hooks {
         if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;
@@ -280,7 +271,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
                 .join(krate)
                 .join("src")
                 .join(format!("{}.rs", module.replace("::", "/")));
-            println!("cargo:rerun-if-changed={}", path.display());
+            crate::rerun_if_changed(&path.display());
         }
     }
     Ok(())

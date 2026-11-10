@@ -83,7 +83,7 @@ fn collect(
 
 pub(crate) fn generate(root: &Path, out: &Path) -> Result<(), String> {
     let dir = root.join(DIRECTORY);
-    println!("cargo:rerun-if-changed={}", dir.display());
+    crate::rerun_if_changed(&dir.display());
     let mut areas = Catalog::modules(&root.join(DECLARATIONS))?;
     // A fixture can support an engine entry-point module as well as a declaration.
     // Their boundaries need not match when declarations are split per hook.
@@ -98,7 +98,7 @@ pub(crate) fn generate(root: &Path, out: &Path) -> Result<(), String> {
             return Err(format!("fixture area {area} has no catalog declaration"));
         }
         let path = dir.join(format!("{area}.rs"));
-        println!("cargo:rerun-if-changed={}", path.display());
+        crate::rerun_if_changed(&path.display());
         collect(
             &fs::read_to_string(&path).map_err(|e| e.to_string())?,
             area == "shared",
