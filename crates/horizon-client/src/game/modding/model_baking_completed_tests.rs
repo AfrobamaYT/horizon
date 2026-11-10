@@ -5,8 +5,7 @@ use super::native_entity_refs::tests::with_client_game;
 use super::packs::ReloadKind;
 use mod_api::{
     ClientHost, ClientResourcesReloadedEvent, ClientSetupEvent, Hooks, Identifier, ModEntry,
-    ModelBakingCompletedEvent, ModelError, ModelRef, TextureAtlasStitchedEvent,
-    testing::with_mods,
+    ModelBakingCompletedEvent, ModelError, ModelRef, TextureAtlasStitchedEvent, testing::with_mods,
 };
 use std::sync::{Arc, Mutex};
 
@@ -38,11 +37,7 @@ impl Hooks for Keeper {
             .heard
             .push(format!("atlas {:?}", event.atlas));
     }
-    fn model_baking_completed(
-        &self,
-        host: &mut dyn ClientHost,
-        _: &mut ModelBakingCompletedEvent,
-    ) {
+    fn model_baking_completed(&self, host: &mut dyn ClientHost, _: &mut ModelBakingCompletedEvent) {
         let mut kept = self.0.lock().unwrap();
         kept.heard.push("models".into());
         let assets = host.render_assets();
@@ -130,7 +125,10 @@ fn a_client_mod_hears_model_baking_completed_once_per_load_and_keeps_its_handles
                 [Err(ModelError::UnknownModel), Err(ModelError::UnknownModel)]
             );
             let [Ok(_), Ok(second)] = kept.part[..] else {
-                panic!("the standalone model resolves in both hooks: {:?}", kept.part);
+                panic!(
+                    "the standalone model resolves in both hooks: {:?}",
+                    kept.part
+                );
             };
             assert!(game.pack.render.resolve_model(second).is_ok());
             assert_eq!(
@@ -173,10 +171,8 @@ fn a_failed_reload_fires_no_model_baking_completed() {
             )
             .unwrap();
             // An unreadable enabled-mods marker refuses the staged pack's application.
-            let root = std::env::temp_dir().join(format!(
-                "model-baking-refusal-{}",
-                std::process::id()
-            ));
+            let root =
+                std::env::temp_dir().join(format!("model-baking-refusal-{}", std::process::id()));
             std::fs::create_dir_all(&root).unwrap();
             std::fs::write(
                 root.join(horizon_mod_package::enabled::MARKER),
