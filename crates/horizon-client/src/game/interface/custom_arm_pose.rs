@@ -9,6 +9,12 @@ impl Game<'_> {
         humanoid: mod_api::HumanoidRenderState<'_>,
     ) {
         use super::api_values::TryIntoApi;
+        if !poses
+            .iter()
+            .any(|pose| matches!(pose, Some(ArmPose::Custom { .. })))
+        {
+            return;
+        }
         let selected =
             horizon_client::mobs::anim::humanoid_arm_poses(mob, *poses, mob.anim.attack_anim);
         let humanoid = mod_api::HumanoidRenderState {

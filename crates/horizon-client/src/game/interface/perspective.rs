@@ -1266,10 +1266,7 @@ impl Game<'_> {
                 .and_then(|s| self.items().get(&s.item))
                 .and_then(|info| info.arm_pose)
         });
-        if !mod_api::__private::listened(mod_api::HookId::GetArmPose)
-            && !(mod_api::__private::listened(mod_api::HookId::ArmPoseTransform)
-                && mod_api::CustomArmPose::from_slot(0).is_some())
-        {
+        if !mod_api::__private::listened(mod_api::HookId::GetArmPose) {
             return poses;
         }
         let [main_arm_pose, off_arm_pose] = humanoid_arm_poses(m, poses, m.anim.attack_anim);
