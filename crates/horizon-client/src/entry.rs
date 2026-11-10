@@ -4,9 +4,16 @@ use horizon_mod_package::selection::{Argument, LaunchArguments};
 
 /// Validated startup state. No native hooks or workers may run before prepare returns.
 pub struct Startup {
-    pub launch: LaunchArguments,
+    launch: LaunchArguments,
     options: game::Options,
     _capture: Option<horizon_mod_package::output::Capture>,
+}
+
+impl Startup {
+    /// Validated launch context used by the platform's code loader.
+    pub fn launch(&self) -> &LaunchArguments {
+        &self.launch
+    }
 }
 
 /// Holder mode runs first. The game's sole Options validation reads arguments/environment

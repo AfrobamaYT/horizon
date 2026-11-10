@@ -1,13 +1,15 @@
 //! Installed native and wasm code loading.
 use horizon_mod_package::selection::LaunchArguments;
 use mod_api::__private::game::Fields;
+/// Load installed native and wasm code, register its dependency-ordered entries,
+/// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
     slots: &[horizon_client::entry::NativeSlot],
     built: &'static [horizon_mod_package::runtime::BuiltMod],
     startup: horizon_client::entry::Startup,
 ) {
-    let launch: &LaunchArguments = &startup.launch;
+    let launch: &LaunchArguments = startup.launch();
     let exe = std::env::current_exe();
     let native: Result<_, Box<dyn std::error::Error + Send + Sync>> = exe
         .as_ref()
