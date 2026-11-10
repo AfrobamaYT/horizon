@@ -471,6 +471,8 @@ impl Game<'_> {
         }
         self.world_tables = tables;
         self.mods.datapack_registries = datapack_registries;
+        horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
+        self.send_datapack_snapshots();
         self.refresh_recipe_property_context();
         self.structure_spawns = structure_spawns;
         self.health_resources = health;
