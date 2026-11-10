@@ -131,9 +131,9 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 508 | 2797 | 5093 |
+| horizon-client | horizon-mod-api | 509 | 2797 | 5107 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
-| horizon-client | horizon-mod-package | 28 | 86 | 87 |
+| horizon-client | horizon-mod-package | 29 | 86 | 88 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
 | horizon-client | horizon-mod-render | 10 | 18 | 3 |
 | horizon-client | horizon-mod-runtime | 61 | 65 | 167 |
@@ -152,7 +152,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 179 | 1436 | 2210 |
+| game/modding | 180 | 1436 | 2225 |
 | game/native_hooks | 120 | 455 | 522 |
 | client (non-game) | 85 | 407 | 310 |
 | game/interface | 48 | 150 | 485 |
@@ -174,12 +174,12 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 254 | 772 | 78 |
-| host | 111 | 429 | 81 |
+| loading | 254 | 775 | 78 |
+| host | 111 | 430 | 81 |
 | slots | 8 | 0 | 0 |
 | attachments | 166 | 293 | 50 |
 | content_render | 310 | 426 | 179 |
-| hooks | 2675 | 3777 | 1503 |
+| hooks | 2675 | 3788 | 1503 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -210,7 +210,7 @@ Outside the host areas, 2698 `mod_api` references are in test code; 251 of them 
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (stays in the engine) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
 | content_render (phase 5) | 6 | 2749 | 6 | 1 | 46 | 46 | 19 |
-| hooks (phase 6, not built) | 446 | 106338 | 401 | 19 | 588 | 1751 | 242 |
+| hooks (phase 6, not built) | 449 | 106550 | 403 | 19 | 589 | 1751 | 242 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
