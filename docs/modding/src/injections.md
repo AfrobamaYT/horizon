@@ -873,6 +873,34 @@ pub fn tick(game: &mut internals::game::Game<'_>, raw: &mut internals::raw::__Ti
 - `[[inject]]` has no binding or hook-version fields. Implement a catalog hook through `Hooks`;
   use the slot's generated callback signature for an injection.
 
+### Delegated knockback entries
+
+Knockback preserves two independently injectable function entries. The short entry calls
+its full entry once with the effect flag false; a direct full-entry call bypasses the short
+entry. Thus two head listeners that each double strength apply twice through the short
+entry and once through the full entry. Canceling the short entry prevents the full call.
+This does not add a hook: `living_knockback` remains one observation per ordinary physical
+push, before resistance. Sulfur cube effect launches retain their species-specific handling.
+
+The native internals targets are:
+
+- `horizon_client_lib::mobs::knockback::Mob::knockback`
+- `horizon_client_lib::mobs::knockback::Mob::knockback_full`
+- `horizon_client::game::creatures::knockback::Game<'_>::knock_back_player`
+- `horizon_client::game::creatures::knockback::Game<'_>::knock_back_player_full`
+
+Default hurt and sweep pushes use the short entry. `causeExtraKnockback`, including both
+spear pushes, uses the full entry with its corresponding effect flag. The player full entry
+carries damage and the flag even though vanilla player physics does not use them.
+
+These entries are **not admitted API points yet**. The mob receiver `Mob` has no point handle;
+`DamageLevel` and `Damage` have no point mirrors. The player receiver becomes `Host`, but
+`HurtSource` and `Attack` have no point mirrors. Registration refuses the first unadmitted
+type on both native and wasm. General admission is tracked in
+[#2767](https://github.com/arismoko/horizon/issues/2767). `access = "internals"` is native-only;
+wasm refuses it at load, not a silent fallback. Native injection tests do not establish wasm
+entry support while those API refusals remain.
+
 ### Mutable locals (native source rebuild only)
 
 `modify_local` requires `access = "internals"` and a rebuild from source. It uses the

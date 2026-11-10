@@ -246,7 +246,15 @@ pub enum RawKind {
 }
 
 // Function pointers: no data behind them, so they move between threads.
+#[allow(
+    unsafe_code,
+    reason = "Carried point-registry function-pointer erasure; ownership cleanup is tracked in #2587"
+)]
 unsafe impl Send for RawKind {}
+#[allow(
+    unsafe_code,
+    reason = "Carried point-registry function-pointer erasure; ownership cleanup is tracked in #2587"
+)]
 unsafe impl Sync for RawKind {}
 
 /// The host available to a point's hook call; frame objects never cross as data.
@@ -283,7 +291,15 @@ pub enum ApiKind {
 }
 
 // The pointer is a function; forwarding endpoints are Send + Sync resources.
+#[allow(
+    unsafe_code,
+    reason = "Carried point-registry function-pointer erasure; ownership cleanup is tracked in #2587"
+)]
 unsafe impl Send for ApiKind {}
+#[allow(
+    unsafe_code,
+    reason = "Carried point-registry function-pointer erasure; ownership cleanup is tracked in #2587"
+)]
 unsafe impl Sync for ApiKind {}
 
 #[derive(Clone, Copy)]
@@ -403,6 +419,10 @@ impl SlotListener {
     /// `function` is a function of `place`'s raw listener type: `__<Point>Listener` at a head,
     /// `__<Point>ReturnListener` at a return. The place's slot casts it back to that type and calls
     /// it. The generated constructors check the type with a typed parameter before erasing it.
+    #[allow(
+        unsafe_code,
+        reason = "Carried typed point registration contract; ownership cleanup is tracked in #2587"
+    )]
     pub const unsafe fn new(id: &'static str, place: Place, function: *const ()) -> Self {
         Self::of(id, place, Kind::Raw(RawKind::Typed(function)))
     }
@@ -422,6 +442,10 @@ impl SlotListener {
     /// aliasing, ownership and lifetime requirements. The pointers and any references derived
     /// from them must not escape the callback. In particular, a shared receiver must not be
     /// written to.
+    #[allow(
+        unsafe_code,
+        reason = "Carried typed point registration contract; ownership cleanup is tracked in #2587"
+    )]
     pub const unsafe fn erased(
         id: &'static str,
         place: Place,
@@ -436,6 +460,10 @@ impl SlotListener {
     ///
     /// `function` must have this site's exact generated listener type. Erased point callbacks
     /// cannot register as site listeners: their signature has no original continuation.
+    #[allow(
+        unsafe_code,
+        reason = "Carried typed point registration contract; ownership cleanup is tracked in #2587"
+    )]
     pub const unsafe fn site(
         id: &'static str,
         place: Place,
@@ -450,6 +478,10 @@ impl SlotListener {
     ///
     /// # Safety
     /// The generated constructor must check the function's host and record types before erasure.
+    #[allow(
+        unsafe_code,
+        reason = "Carried typed point registration contract; ownership cleanup is tracked in #2587"
+    )]
     pub const unsafe fn api(id: &'static str, place: Place, function: *const ()) -> Self {
         Self::of(id, place, Kind::Api(ApiKind::Typed(function)))
     }

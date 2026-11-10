@@ -28,7 +28,7 @@ Owner decision (2026-11-08): one derive in `horizon-mod-api-macros`, used by `mo
 
 ### What the derive emits: the same bytes as today
 
-The derive implements the existing trait (`crates/horizon-mod-api/src/wire/wire.rs:558`: `MIN`, `put`, `put_owned`, `take`). It copies the generator's rules from `wire/emit.rs` exactly, so no encoding changes:
+The derive implements the existing trait (`crates/horizon-mod-vocab/src/wire/wire.rs:558`: `MIN`, `put`, `put_owned`, `take`). It copies the generator's rules from `wire/emit.rs` exactly, so no encoding changes:
 
 | Shape | Bytes | `MIN` | `take` |
 |---|---|---|---|

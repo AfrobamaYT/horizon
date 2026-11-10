@@ -46,8 +46,8 @@ class ScaffoldTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
         for rel, text in {
-            'crates/horizon-mod-api/src/lib.rs': 'pub struct Vec3;\n',
-            'crates/horizon-mod-api/src/world/point.rs': '//! Hand-written.\npub struct Keep;\n',
+            'crates/horizon-mod-vocab/src/lib.rs': 'pub struct Vec3;\n',
+            'crates/horizon-mod-vocab/src/world/point.rs': '//! Hand-written.\npub struct Keep;\n',
             'crates/horizon-client/src/game/modding/api_values.rs':
                 '#[path = "api_values/a.rs"]\npub(in crate::game) mod a;\n\nfn tail() {}\n',
         }.items():
@@ -72,21 +72,21 @@ class ScaffoldTest(unittest.TestCase):
         self.assertEqual(len(list(self.root.rglob('*.rs'))), len(before))
 
     def test_existing_type_is_refused_and_nothing_is_written(self):
-        self.write('crates/horizon-mod-api/src/other.rs', 'pub enum Dir {}\n')
+        self.write('crates/horizon-mod-vocab/src/other.rs', 'pub enum Dir {}\n')
         done = self.run_tool('--apply')
         self.assertNotEqual(done.returncode, 0)
         self.assertIn('already declared', done.stderr)
-        self.assertFalse((self.root / 'crates/horizon-mod-api/src/exports/dir.rs').exists())
+        self.assertFalse((self.root / 'crates/horizon-mod-vocab/src/exports/dir.rs').exists())
 
     def test_lib_is_never_a_target(self):
         self.config.write_text(CONFIG.replace('topic = "dir"', 'topic = "lib"'))
         done = self.run_tool('--apply')
         self.assertIn('lib.rs is never a target', done.stderr)
-        self.assertEqual((self.root / 'crates/horizon-mod-api/src/lib.rs').read_text(), 'pub struct Vec3;\n')
+        self.assertEqual((self.root / 'crates/horizon-mod-vocab/src/lib.rs').read_text(), 'pub struct Vec3;\n')
 
     def test_apply_appends_and_creates(self):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
-        api = self.root / 'crates/horizon-mod-api/src'
+        api = self.root / 'crates/horizon-mod-vocab/src'
         point = (api / 'world/point.rs').read_text()
         self.assertTrue(point.startswith('//! Hand-written.\npub struct Keep;\n'))
         self.assertIn('pub struct Pt {\n    /// The `x` component.\n    pub x: i32,', point)
@@ -109,7 +109,7 @@ class ScaffoldTest(unittest.TestCase):
 
     def test_explicit_wire_derives_cover_all_emitted_values(self):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
-        api = self.root / 'crates/horizon-mod-api/src'
+        api = self.root / 'crates/horizon-mod-vocab/src'
         for rel, declarations in [('world/dir.rs', ['Dir']), ('world/point.rs', ['Pt']),
                                   ('entity/boat.rs', ['BoatRef', 'BoatRefFields'])]:
             source = (api / rel).read_text()
@@ -145,7 +145,7 @@ class ScaffoldTest(unittest.TestCase):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
         conv = (self.root / 'crates/horizon-client/src/game/modding/api_values/point.rs').read_text()
         self.assertIn('mod_api::Pt { x: self.x, y: self.y }', conv)
-        self.assertNotIn('pub const fn new', (self.root / 'crates/horizon-mod-api/src/world/point.rs').read_text())
+        self.assertNotIn('pub const fn new', (self.root / 'crates/horizon-mod-vocab/src/world/point.rs').read_text())
 
     def test_handle_reads_must_be_optional(self):
         self.config.write_text(CONFIG.replace('ret = "Option<bool>"', 'ret = "bool"'))
@@ -195,7 +195,7 @@ class RankTest(unittest.TestCase):
 
     def test_ref_and_key_names_carry_the_engine_type(self):
         with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / 'crates/horizon-mod-api/src'
+            src = Path(tmp) / 'crates/horizon-mod-vocab/src'
             src.mkdir(parents=True)
             (src / 'a.rs').write_text('pub struct MobRef;\npub use x::{Foo, Bar};\n')
             self.assertLessEqual({'MobRef', 'Mob', 'Foo', 'Bar'}, scaffold.available(Path(tmp)))
