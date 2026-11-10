@@ -73,6 +73,7 @@ fn extinguish_fire_preserves_player_guest_stand_and_item_sound_routes() {
         let mut body = PlayerMotion::new(game.motion, at).unwrap();
         body.entity_id = 7;
         game.player = Some(body);
+        game.bind_local_player_residency();
         game.armor_stands.push(ArmorStand::new(22, at, 0.0));
         game.dropped.push(ItemEntity::new(
             23,
