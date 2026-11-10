@@ -1095,44 +1095,6 @@ impl crate::wire::Wire for serde_json::Map<String, serde_json::Value> {
             .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
     }
 }
-impl crate::wire::Wire for crate::ArmPose {
-    layout_fields!("tag" => u32, "0:Empty" => (), "1:Item" => (), "2:Block" => (), "3:Bow" => (), "4:CrossbowHold" => (), "5:CrossbowCharge" => (), "6:ThrowTrident" => (), "7:TootHorn" => (), "8:Spyglass" => (), "9:Spear" => (), "10:Brush" => ());
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::ArmPose));
-    const MIN: usize = 4;
-    fn put(&self, out: &mut crate::wire::Writer) {
-        out.put(&match self {
-            Self::Empty => 0u32,
-            Self::Item => 1u32,
-            Self::Block => 2u32,
-            Self::Bow => 3u32,
-            Self::CrossbowHold => 4u32,
-            Self::CrossbowCharge => 5u32,
-            Self::ThrowTrident => 6u32,
-            Self::TootHorn => 7u32,
-            Self::Spyglass => 8u32,
-            Self::Spear => 9u32,
-            Self::Brush => 10u32,
-        });
-    }
-    fn take(
-        input: &mut crate::wire::Reader<'_>,
-    ) -> ::std::result::Result<Self, crate::wire::WireError> {
-        Ok(match input.take::<u32>()? {
-            0 => Self::Empty,
-            1 => Self::Item,
-            2 => Self::Block,
-            3 => Self::Bow,
-            4 => Self::CrossbowHold,
-            5 => Self::CrossbowCharge,
-            6 => Self::ThrowTrident,
-            7 => Self::TootHorn,
-            8 => Self::Spyglass,
-            9 => Self::Spear,
-            10 => Self::Brush,
-            tag => return Err(crate::wire::WireError::Tag(tag)),
-        })
-    }
-}
 impl crate::wire::Wire for crate::UseAnimation {
     layout_fields!("tag" => u32, "0:None" => (), "1:Eat" => (), "2:Drink" => (), "3:Block" => (), "4:Bow" => (), "5:Trident" => (), "6:Crossbow" => (), "7:Spyglass" => (), "8:TootHorn" => (), "9:Brush" => (), "10:Bundle" => (), "11:Spear" => ());
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::UseAnimation));
