@@ -463,8 +463,10 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
 /// The types native mods register for resource definitions, kept once at start, before
 /// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
 /// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
-/// definitions' entries on them list the mod's sprites; and model loaders
-/// (`native_register_model_loaders`), so models naming one get the mod's quads.
+/// definitions' entries on them list the mod's sprites; model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads; and block-state
+/// definition types (`native_register_block_state_models`), so blockstate files naming one get
+/// the models the mod picks.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -478,6 +480,9 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut loaders = Vec::new();
     Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
     horizon_client_render::mod_model_loaders::register(loaders);
+    let mut definitions = Vec::new();
+    Game::native_register_block_state_models(&RegistrationContext::new(), &mut definitions);
+    horizon_client_render::mod_block_state_models::register(definitions);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
