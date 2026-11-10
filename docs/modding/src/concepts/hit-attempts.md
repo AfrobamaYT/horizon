@@ -33,5 +33,12 @@ the coverage stated in the hook's reference documentation. A separate explicit i
 query is a query, not an additional hit attempt.
 
 The native regression test `native_hit_attempt_tests` counts actual listener notifications on
-accepted and refused player and mob routes, equipment continuations, effects and explosions. It
-uses prepared resources and leaves every decision unchanged, checking the resulting health too.
+accepted and refused player and mob routes, equipment continuations, effects, explosions, and
+small-fireball, wind-charge and shulker-bullet projectile entries. Unchanged listeners preserve the expected
+health, refused fireballs restore prior fire, and only successful shulker hits grant levitation.
+A decision-changing case checks that the modified answer survives continuations and a new attempt
+asks again. The test uses prepared resources.
+
+Coverage is not yet universal: caller prefilters remain for creative wither-skull and firework
+victims and spectator `/damage` targets. These are implementation gaps tracked by #2752, not
+vanilla non-attempt exclusions.

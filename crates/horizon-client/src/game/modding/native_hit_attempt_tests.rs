@@ -30,6 +30,9 @@ impl Hooks for Probe {
 fn fresh_player(game: &mut super::Game<'_>, mode: GameMode) {
     game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
     bind_local_player(game, 7, 7);
+    // A replacement player starts with survival abilities even when Game was
+    // already creative; force the mode transition to apply them to the new body.
+    game.set_game_mode(GameMode::Survival);
     game.set_game_mode(mode);
 }
 
@@ -58,9 +61,14 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
             assert!(!game.hurt_player_from(1.0, None, "minecraft:generic", Some(None), false));
             check(&[false], "player cooldown refusal");
 
-            for mode in [GameMode::Creative, GameMode::Survival] {
+            for (mode, immune) in [
+                (GameMode::Creative, false),
+                (GameMode::Survival, false),
+                (GameMode::Survival, true),
+            ] {
                 for kind in [
                     ProjectileKind::SmallFireball,
+                    ProjectileKind::WindCharge,
                     ProjectileKind::ShulkerBullet {
                         target: Some(Who::Player),
                         dir: None,
@@ -71,8 +79,14 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
                 ] {
                     fresh_player(game, mode);
                     game.remove_player_effects(None);
+                    game.player
+                        .as_mut()
+                        .unwrap()
+                        .health
+                        .permanently_invulnerable = immune;
                     game.player.as_mut().unwrap().set_remaining_fire_ticks(37);
                     let fireball = matches!(kind, ProjectileKind::SmallFireball);
+                    let shulker = matches!(kind, ProjectileKind::ShulkerBullet { .. });
                     let shot = Projectile::new(kind, Vec3::new(0.0, 1.0, 0.5), None);
                     game.projectile_hit(
                         &shot,
@@ -83,28 +97,37 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
                     )
                     .unwrap();
                     check(
-                        &[false],
+                        &[immune],
                         "actual small-fireball or shulker-bullet player entry",
                     );
                     let creative = mode == GameMode::Creative;
+                    let refused = creative || immune;
                     assert_eq!(
                         game.player.as_ref().unwrap().health.health(),
-                        if creative {
+                        if refused {
                             20.0
                         } else if fireball {
                             15.0
-                        } else {
+                        } else if shulker {
                             16.0
+                        } else {
+                            19.0
                         }
                     );
                     assert_eq!(
                         game.player.as_ref().unwrap().fire_ticks,
-                        if fireball && !creative { 100 } else { 37 },
+                        if creative {
+                            1
+                        } else if fireball && !refused {
+                            100
+                        } else {
+                            37
+                        },
                         "refused fireball restores prior fire"
                     );
                     assert_eq!(
                         game.potions.effects.get("minecraft:levitation").is_some(),
-                        !fireball && !creative,
+                        shulker && !refused,
                         "levitation requires successful shulker damage"
                     );
                 }
