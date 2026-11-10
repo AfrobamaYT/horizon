@@ -1362,5 +1362,14 @@
   "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code, raw listeners and the mod's own modules, not source listeners or helpers. Use cargo horizon-mod internals add for this mod.",
   "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.": "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.",
-  "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.": "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata."
+  "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.": "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.",
+  "Local unsigned developer build · {id}": "Local unsigned developer build · {id}",
+  "Invalid developer build revision.": "Invalid developer build revision.",
+  "Developer package contains an invalid file name.": "Developer package contains an invalid file name.",
+  "Developer package must contain only regular files and directories.": "Developer package must contain only regular files and directories.",
+  "Developer installation runs the checkout's build code and an unsigned game with your rights. Pass --trust-unsigned only if you trust both.": "Developer installation runs the checkout's build code and an unsigned game with your rights. Pass --trust-unsigned only if you trust both.",
+  "Choose a real horizon-client executable built for this computer.": "Choose a real horizon-client executable built for this computer.",
+  "Missing developer packaging inputs: {files}. Build companions with cargo build -p horizon-client-lib --bin horizon-ctl -p horizon-prepare -p horizon-server. Run horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/.": "Missing developer packaging inputs: {files}. Build companions with cargo build -p horizon-client-lib --bin horizon-ctl -p horizon-prepare -p horizon-server. Run horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/.",
+  "The developer checkout has no HEAD commit.": "The developer checkout has no HEAD commit.",
+  "The checkout's release packager failed; no developer build was installed.": "The checkout's release packager failed; no developer build was installed."
 }

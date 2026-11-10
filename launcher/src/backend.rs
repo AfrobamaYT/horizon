@@ -2818,6 +2818,9 @@ pub fn client_command(tag: &str) -> Command {
     let home = game_home();
     let _ = fs::create_dir_all(&home);
     let mut cmd = Command::new(client_program(tag));
+    if crate::developer_install::uses_developer(tag) {
+        cmd.env("HORIZON_TELEMETRY_URL", "off");
+    }
     crate::run_leases::mark(&mut cmd, &version_dir(tag));
     strip_launcher_render_env(&mut cmd);
     cmd.current_dir(&home)
@@ -2855,6 +2858,9 @@ fn client_program(tag: &str) -> PathBuf {
 
 pub fn server_command(tag: &str, folder: &Path) -> Command {
     let mut cmd = Command::new(version_dir(tag).join(CLIENT));
+    if crate::developer_install::uses_developer(tag) {
+        cmd.env("HORIZON_TELEMETRY_URL", "off");
+    }
     crate::run_leases::mark(&mut cmd, &version_dir(tag));
     cmd.current_dir(folder)
         .arg("--resources")
@@ -3345,7 +3351,11 @@ pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) 
     match selected {
         None => true,
         Some(s) if crate::nightly::date_of(s).is_some() => true,
-        Some(s) if crate::build_import::is_imported(s) => false,
+        Some(s)
+            if crate::build_import::is_imported(s) || crate::developer_install::is_developer(s) =>
+        {
+            false
+        }
         Some(s) => installed_before
             .iter()
             .find(|t| is_game_tag(t))

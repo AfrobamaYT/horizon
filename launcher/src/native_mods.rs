@@ -845,6 +845,9 @@ fn mismatch_error(list: &str) -> String {
 
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
 pub fn revision_of(version: &str) -> Result<String, String> {
+    if crate::developer_install::is_developer(version) {
+        return crate::developer_install::revision(version);
+    }
     let reference = match version.strip_prefix("nightly-") {
         // nightly-2026-10-28-0c02067: the commit is its last word.
         Some(rest) => rest.rsplit('-').next().unwrap_or(rest),

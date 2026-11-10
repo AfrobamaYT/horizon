@@ -703,6 +703,15 @@ enum Cmd {
     },
     /// Download and install a release (a tag such as v2026.10.13, or "latest")
     Install { tag: String },
+    /// Install a local unsigned developer build. Runs the trusted checkout\'s build code
+    /// through cargo run -p xtask -- package; requires companion binaries and compiled exporters.
+    DeveloperInstall {
+        checkout: PathBuf,
+        #[arg(long)]
+        program: PathBuf,
+        #[arg(long)]
+        trust_unsigned: bool,
+    },
     /// Remove an installed version
     Remove { tag: String },
     /// Install a game program you have, such as a horizon-client built on your fork's Actions,
@@ -1279,7 +1288,9 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 } else {
                     "prepared, no sounds (prepare again)"
                 };
-                println!("{mark} {tag}  {state}");
+                let label =
+                    horizon_launcher::developer_install::label(tag).unwrap_or_else(|| tag.clone());
+                println!("{mark} {label}  {state}");
             }
         }
         Cmd::Versions { installed: false } => {
@@ -1433,6 +1444,20 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     &[("build", &built)]
                 )
             );
+        }
+        Cmd::DeveloperInstall {
+            checkout,
+            program,
+            trust_unsigned,
+        } => {
+            let tag =
+                horizon_launcher::developer_install::install(&checkout, &program, trust_unsigned)?;
+            let label = horizon_launcher::developer_install::label(&tag).unwrap();
+            if as_json {
+                json(serde_json::json!({"version": tag, "label": label}));
+            } else {
+                println!("{label}");
+            }
         }
         Cmd::Remove { tag } => {
             backend::remove_version(&tag)?;
@@ -2787,7 +2812,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
         serde_json::json!({
             "id": i.id, "name": i.name, "kind": format!("{:?}", i.kind).to_lowercase(),
             "home": i.home, "icon": i.icon, "group": i.group, "selected": selected,
-            "version": i.version, "java": i.java, "played_secs": i.played.as_secs(),
+            "version": i.version, "version_label": i.version.as_deref().and_then(horizon_launcher::developer_install::label), "java": i.java, "played_secs": i.played.as_secs(),
             "last_played_ms": i.last_played.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
         })
     };
@@ -2808,7 +2833,10 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                 ),
                 None => format!("  Minecraft {} (Java Edition)", java.minecraft),
             },
-            (None, Some(v)) => format!("  {v}"),
+            (None, Some(v)) => format!(
+                "  {}",
+                horizon_launcher::developer_install::label(v).unwrap_or_else(|| v.clone())
+            ),
             (None, None) => String::new(),
         };
         let played = match i.last_played {

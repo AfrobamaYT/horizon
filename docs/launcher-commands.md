@@ -34,6 +34,18 @@ Download and install a release (a tag such as v2026.10.13, or "latest").
 
 MCP: `install`.
 
+## `horizon-launcher developer-install`
+
+Install a local unsigned developer build. Runs the trusted checkout\'s build code through cargo run -p xtask -- package; requires companion binaries and compiled exporters.
+
+    horizon-launcher developer-install --program <PROGRAM> <CHECKOUT>
+
+- `CHECKOUT`
+- `--program`
+- `--trust-unsigned`
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher remove`
 
 Remove an installed version.
