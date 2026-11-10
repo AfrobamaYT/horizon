@@ -806,9 +806,8 @@ impl ModsScreen {
         if sort_hover {
             tooltip = Some(tr(&format!("{name}.hover")));
         }
-        self.draw_list(&mut out, m, &g);
-
-        // The info panel.
+        // The info panel's frame, under the list so the list's scrollbar stays on top where
+        // the two overlap.
         let [px, py, _, view] = g.panel;
         // `BackgroundWithPipingWidget`: the list's background and separators, with the frame's
         // 2 px inset on every side for the separators and the scrolling contents between them.
@@ -825,6 +824,10 @@ impl ModsScreen {
         );
         separator_at(&mut out, "header", px - FRAME_PAD, py - FRAME_PAD, frame_w);
         separator_at(&mut out, "footer", px - FRAME_PAD, py + view, frame_w);
+
+        self.draw_list(&mut out, m, &g);
+
+        // The info panel's contents.
         let selected = self.current();
         if let Some(e) = selected {
             let (items, content, width) = self.panel_items(m, e);
@@ -1354,5 +1357,25 @@ mod tests {
             254,
             2
         ));
+    }
+
+    /// The panel's frame reaches 5 px into the list's scrollbar at 427 px wide, so it is drawn
+    /// first and the list, scrollbar included, goes over it.
+    #[test]
+    fn the_panel_frame_is_drawn_under_the_list() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let screen = ModsScreen::new(427, 240, false, &ModList::default());
+        let [px, _, _, _] = screen.geo().panel;
+        let [lx, ..] = screen.geo().list;
+        let draws = screen.draw(&m, (0, 0), 0, 0);
+        let background_at = |x: i32| {
+            draws.iter().position(|call| {
+                matches!(call, Draw::Blit { texture, x: bx, .. }
+                    if texture == "textures/gui/menu_list_background.png" && *bx == x)
+            })
+        };
+        let (frame, list) = (background_at(px - 2).unwrap(), background_at(lx).unwrap());
+        assert!(frame < list, "frame at {frame}, list at {list}");
     }
 }
