@@ -165,7 +165,7 @@ impl FnState {
     /// later selected pack overrides an earlier one (`PackRepository` order).
     pub(in crate::game) fn pack_sources(
         &self,
-    ) -> impl Iterator<Item = &horizon_assets::resource_source::ResourceSource> {
+    ) -> impl DoubleEndedIterator<Item = &horizon_assets::resource_source::ResourceSource> {
         self.enabled
             .iter()
             .rev()

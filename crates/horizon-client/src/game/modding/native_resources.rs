@@ -29,7 +29,7 @@ impl Game<'_> {
             }
             sources.push(&self.pack.data_changes);
             if self.options.execution_role.is_logical_server() {
-                sources.extend(self.fns.pack_sources());
+                sources.extend(self.fns.pack_sources().rev());
             }
             ("data", sources)
         };
@@ -44,6 +44,40 @@ mod tests {
 
     fn id(value: &str) -> Identifier {
         Identifier::parse(value).unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn server_resource_uses_the_higher_of_two_selected_world_packs() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let scratch = tempfile::tempdir().unwrap();
+            game.world_root = scratch.path().to_owned();
+            for (name, bytes) in [("low", "low"), ("high", "high")] {
+                let pack = game.world_root.join("datapacks").join(name);
+                std::fs::create_dir_all(pack.join("data/demo/value")).unwrap();
+                std::fs::write(
+                    pack.join("pack.mcmeta"),
+                    r#"{"pack":{"description":"test","min_format":101,"max_format":101}}"#,
+                )
+                .unwrap();
+                std::fs::write(pack.join("data/demo/value/order.json"), bytes).unwrap();
+            }
+            game.build_registries();
+            game.set_allow_commands(true);
+            assert!(game.run_command("reload"));
+            assert!(game.run_command("datapack enable \"file/high\" last"));
+            assert_eq!(
+                game.resource(PackType::ServerData, &id("demo:value/order.json"))
+                    .as_deref(),
+                Some(b"high".as_slice())
+            );
+            assert!(game.run_command("datapack enable \"file/low\" last"));
+            assert_eq!(
+                game.resource(PackType::ServerData, &id("demo:value/order.json"))
+                    .as_deref(),
+                Some(b"low".as_slice())
+            );
+        });
     }
 
     #[test]
