@@ -480,9 +480,10 @@ impl Game<'_> {
 
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
-        let tags = native_world_read::prepare_block_tags(items);
+        let block_tags = class_tags::prepare(&items.block_tags, self.res.facts());
+        let tags = native_world_read::prepare_block_tags(&block_tags);
         let parts = mod_api::__private::prepare_parts(
-            &items.block_tags,
+            &block_tags,
             &items.item_tags,
             mod_api::__private::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
