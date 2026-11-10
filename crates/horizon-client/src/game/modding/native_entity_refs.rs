@@ -209,6 +209,28 @@ impl Game<'_> {
             .filter_map(|dim| self.level(dim.id()))
             .collect()
     }
+    /// All lookup members of the active server level, without spatial filtering.
+    /// Parts are not lookup members. Refuses remote, stale and parked levels.
+    pub(super) fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
+        if !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || level.dimension() != self.dim.key()
+        {
+            return None;
+        }
+        let ids = self
+            .resident_entities
+            .table
+            .borrow_mut()
+            .level_entities(level.dimension());
+        ids.into_iter()
+            .map(|id| {
+                let entity = EntityRef::new(level.epoch(), id);
+                self.native_entity_target(entity).map(|_| entity)
+            })
+            .collect()
+    }
+
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
