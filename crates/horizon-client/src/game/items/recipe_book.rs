@@ -67,6 +67,9 @@ struct View {
 
 #[derive(Default)]
 pub(super) struct RecipeUi {
+    /// Explicit viewport for renderer-less resource-backed fixtures.
+    #[cfg(test)]
+    pub(super) test_viewport: Option<[u32; 2]>,
     custom: mod_screen::ModRecipeUi,
     /// The last authoritative property-set and stonecutter generation.
     pub(super) server_properties: crate::recipe_book::ServerRecipeProperties,
@@ -670,6 +673,10 @@ impl Game<'_> {
         (self.recipe_ui.time / SWAP_TICKS).floor() as usize
     }
     fn batch_for_size(&self) -> Option<HudBatch> {
+        #[cfg(test)]
+        if let Some(size) = self.recipe_ui.test_viewport {
+            return Some(HudBatch::new(size, self.settings.gui_scale_inputs()));
+        }
         let r = self.renderer.as_ref()?;
         Some(HudBatch::new(
             [r.config.width, r.config.height],

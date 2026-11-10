@@ -58,20 +58,22 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
             game.spawn_projectile_from_rotation(owner, &unknown, &stack, 0.0, 1.5, 1.0)
                 .is_none()
         );
+        assert_eq!(game.creatures.projectiles.len(), count);
+        // Flame's projectile_spawned Ignite(100) runs once the snowball is in
+        // the level: 100 seconds, 2000 ticks.
         let mut enchanted = stack.clone();
         enchanted.enchant("minecraft:flame", 1);
-        let mut before = game.world.random.clone();
-        horizon_client::random_source::set_thread_uniquifier(2709830126447559882).unwrap();
-        assert!(
-            game.spawn_projectile_from_rotation(owner, &entity_type, &enchanted, 0.0, 1.5, 1.0)
-                .is_none()
-        );
-        assert_eq!(game.world.random.next_long(), before.next_long());
-        assert_eq!(
-            horizon_client::random_source::create().next_double(),
-            0.6465821602909256
-        );
-        assert_eq!(game.creatures.projectiles.len(), count);
+        let shot = game
+            .spawn_projectile_from_rotation(owner, &entity_type, &enchanted, 0.0, 1.5, 1.0)
+            .unwrap();
+        let projectile = game
+            .creatures
+            .projectiles
+            .iter()
+            .find(|p| p.id == shot.entity().id())
+            .unwrap();
+        assert_eq!(projectile.fire_ticks, 2000);
+        assert_eq!(enchanted.count, 64);
         let potion = ItemStack::new("minecraft:splash_potion", 16);
         let potion_type = Identifier::parse("minecraft:splash_potion").unwrap();
         let shot = game

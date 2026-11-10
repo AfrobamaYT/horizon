@@ -14,6 +14,7 @@ mod console;
 mod console_page;
 mod cull;
 mod datapacks_page;
+mod developer_play;
 mod export_page;
 mod frame;
 mod game_tools;
@@ -1188,82 +1189,7 @@ impl Launcher {
                         }
                     }
                 }
-                Msg::Session(session) => {
-                    self.load_auth_statuses(false);
-                    if let Some(tag) = self.starting_client.take() {
-                        let mut cmd = backend::client_command(&tag);
-                        let account::GameSession { file, offline, env } = match session {
-                            Ok(pass) => pass,
-                            Err(refused) => {
-                                // A keyring that didn't answer isn't a missing owner (#12179).
-                                if refused.keyring.is_none() {
-                                    self.owner = Some(false);
-                                    self.owner_screen_open = true;
-                                }
-                                self.client_error = Some(refused.in_window());
-                                self.starting_pack = None;
-                                self.joining = None;
-                                self.quick_play = None;
-                                continue;
-                            }
-                        };
-                        self.owner = Some(true);
-                        if let Some(file) = file {
-                            cmd.arg("--session-file").arg(file);
-                        }
-                        cmd.envs(env);
-                        // Still play, offline, and say why.
-                        if let Some(e) = offline {
-                            self.client_error = Some(format!("Playing offline: {e}"));
-                        } else if let Some(e) = account::take_unsaved() {
-                            self.client_error = Some(e);
-                        }
-                        self.accounts = Accounts::load();
-                        // A pack's Play button plays that pack; Play plays the selected instance.
-                        let (profile, run) = match self.starting_pack.take() {
-                            Some(work) => {
-                                let id = instances::list()
-                                    .into_iter()
-                                    .find(|i| i.work == work)
-                                    .map(|i| i.id);
-                                let applied =
-                                    horizon_launcher::modpacks::apply_profile(&mut cmd, &work);
-                                (applied, id)
-                            }
-                            None => {
-                                let instance = instances::selected();
-                                (instances::apply(&mut cmd, &instance), Some(instance.id))
-                            }
-                        };
-                        if let Err(e) = profile {
-                            self.client_error = Some(e);
-                            account::discard_unread_sessions();
-                            continue;
-                        }
-                        if let Some(code) = self.joining.take() {
-                            if let Err(e) = backend::join_friend(&mut cmd, &code) {
-                                self.client_error = Some(e);
-                            }
-                        }
-                        if let Some((flag, value)) = self.quick_play.take() {
-                            cmd.arg(flag).arg(value);
-                        }
-                        backend::append_game_args(&mut cmd);
-                        // Last, around every argument: the instance's pre-launch command,
-                        // wrapper and variables.
-                        let instance = run
-                            .as_ref()
-                            .and_then(|id| instances::list().into_iter().find(|i| &i.id == id));
-                        self.client_vars = instance
-                            .as_ref()
-                            .map(|i| i.vars(cmd.get_program()))
-                            .unwrap_or_default();
-                        cmd.envs(self.client_vars.iter().map(|(k, v)| (k, v)));
-                        let launch = instance.map(|i| i.launch).unwrap_or_default();
-                        self.starting_client = Some(tag);
-                        jar_launch::client(cmd, launch, run, self.tx.clone());
-                    }
-                }
+                Msg::Session(session) => self.handle_game_session(session),
                 Msg::JarConsent { jars, reply } => jar_launch::consent(window, jars, reply, cx),
                 Msg::JarClient { run, prepared } => {
                     self.starting_client = None;
@@ -1889,7 +1815,11 @@ impl Launcher {
                 }
             }
             backend::play_step("reading the sign-in");
-            let session = account::session_for_game(&backend::game_home());
+            let session = if horizon_launcher::developer_offline::enabled(&tag) {
+                Ok(None)
+            } else {
+                account::session_for_game(&backend::game_home()).map(Some)
+            };
             backend::play_step("starting the game");
             let _ = tx.send(Msg::Session(session));
         });

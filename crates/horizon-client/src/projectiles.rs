@@ -650,13 +650,11 @@ impl Projectile {
         self.random.0 = random;
         self
     }
-    /// The shooter's bow enchantments; Flame spawns the arrow burning for 100
-    /// seconds (`projectile_spawned` ignite), Piercing sets its pierce level.
+    /// The shooter's bow enchantments; Piercing sets its pierce level. Flame's
+    /// `projectile_spawned` ignite runs once the arrow is in the level
+    /// (`Projectile.applyOnProjectileSpawned`).
     pub fn set_bonus(&mut self, bonus: crate::mobs::gear::ArrowBonus) {
         if let Some(a) = self.arrow.as_mut() {
-            if bonus.flame {
-                a.ignite_for_seconds(100.0);
-            }
             a.pierce = bonus.pierce.min(127) as u8;
         }
         self.bonus = bonus;
@@ -739,6 +737,14 @@ impl Projectile {
     /// `Entity.clearFire`: it counts from below zero, which `on_fire` reads as out.
     pub fn clear_fire(&mut self) {
         self.fire_ticks = self.fire_ticks.min(0);
+    }
+    /// `Entity.igniteForSeconds`: an arrow keeps its fire in its
+    /// `AbstractArrow` state, every other kind in its own.
+    pub fn ignite_for_seconds(&mut self, seconds: f32) {
+        match self.arrow.as_mut() {
+            Some(a) => a.ignite_for_seconds(seconds),
+            None => self.ignite_for_ticks((seconds * 20.0).floor() as i32),
+        }
     }
     /// `Entity.baseTick` counts down active fire after block effects. The two
     /// item fireballs then renew their own flame in `AbstractHurtingProjectile.tick`.

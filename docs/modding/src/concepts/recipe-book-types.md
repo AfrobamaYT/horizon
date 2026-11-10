@@ -223,6 +223,21 @@ and a category selected in another book cannot be reused as a tab here.
 
 ### Hosting the panel in a mod screen
 
+Construct `Screen` with the geometry your menu needs and use struct update syntax
+for fields you do not set. This keeps the literal compiling when optional fields
+are added; it does not make the default geometry suitable for your menu.
+
+```rust
+let screen = mod_api::Screen {
+    width: 176.0,
+    height: 166.0,
+    slots: vec![Some([44.0, 35.0]), Some([116.0, 35.0])],
+    inventory_x: 8.0,
+    inventory_y: 84.0,
+    ..mod_api::Screen::default()
+};
+```
+
 Set `Screen.recipe_book` to `Some(key.clone())` in the existing `native_screen`
 declaration. Leave it `None` for a screen without a recipe book. The key must
 belong to the categories' `target_menu`; a different menu cannot display that

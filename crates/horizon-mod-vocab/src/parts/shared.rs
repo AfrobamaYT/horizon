@@ -512,7 +512,9 @@ impl PartRegistrar {
             world_fluids: Vec::new(),
             entity_attribute_modifications: Vec::new(),
             attributes: Vec::new(),
+            datapack_registries: Vec::new(),
             spawn_placements: Vec::new(),
+            biome_modifiers: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -670,8 +672,10 @@ pub(crate) fn install_registrar(
         entity_attributes: registrar.entity_attributes,
         world_fluids: registrar.world_fluids,
         attributes: registrar.attributes,
+        datapack_registries: registrar.datapack_registries,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
+        biome_modifiers: registrar.biome_modifiers,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
