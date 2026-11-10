@@ -1,6 +1,7 @@
 # Design: vehicle health layout
 
-Provisional implementation contract for #2741; incorporates Ari's binding answers A and B.
+Provisional implementation contract for #2741; records the provisional answers A and B, with vanilla default sizing preserved.
+Approval admits this note only; public counterpart verification remains a shipping gate.
 Mods supply effective maximum **hearts**, not rows. The engine prepares one immutable
 result per visible HUD frame, before reserving space or drawing any status layer.
 Reservation, vehicle drawing and the player's status layout consume that same result.
@@ -75,7 +76,7 @@ This is a sizing callback, without DrawContext or cancellation. Inputs are the
 existing lifecycle-owned vehicle handle, current health, actual maximum health,
 vanilla default heart capacity and frame dimensions. No second identity generation.
 Output is a mutable f64 `effective_max_hearts`, measured in hearts and initialized
-to the vanilla default (at least 0.5 for an eligible vehicle). Dependency-ordered listeners see prior accepted output; the last
+to the exact vanilla default, including zero at maximum health 1.0. Dependency-ordered listeners see prior accepted output; the last
 accepted value wins. They cannot independently change rows or real entity health.
 
 Resolve eligibility once after HUD visibility is known and before the first status
@@ -86,7 +87,8 @@ Cache only for that frame, never across riding changes or HUD visibility changes
 Move preparation into a sibling module; keep oversized `game.rs` call-site edits
 net zero lines.
 
-Validate each callback result at the boundary. Refuse NaN and either infinity,
+Validate explicitly supplied callback output at the boundary; an unchanged output
+retains the previous answer, including a zero vanilla default. Refuse NaN and either infinity,
 retaining the previous validated capacity; clamp every finite answer to exactly
 **[0.5, 512.0] hearts** (equivalently [1.0, 1024.0] health). Zero and negative
 answers therefore become 0.5; hiding drawing remains the layer Pre hook's job.
@@ -100,8 +102,9 @@ Vanilla's current-fill arithmetic uses `ceil(health)` health points and full/hal
 sprite comparisons; 1.0 current health paints a half heart in that one container.
 This fractional-capacity rounding deliberately differs from the private default
 `getVehicleMaxHearts` integer division quoted above, which returns zero for 1.0
-maximum health. Preserve that helper's ordinary default sizing, with a 0.5-heart
-minimum for eligible vehicles, to satisfy the registered-range contract.
+maximum health. Preserve that helper's exact default sizing whenever no listener
+changes output. Fractional capacity is reserved for explicitly supplied listener
+output; attribute bounds do not impose a minimum on vanilla HUD containers.
 Retain vanilla's 30-heart default display cap while allowing mod output to 512.
 Clamp displayed current fill to capacity without altering entity health. A
 panic/trap discards that listener's output and retains the previous validated
@@ -119,7 +122,7 @@ Native and wasm use the same catalog declaration and API-owned Wire input/output
 records, generated adapters and validation. Unsupported capability registration
 must refuse with a named `UnsupportedCapability(vehicle_health_layout)` error;
 never silently register an inert callback. The no-subscriber path performs one
-O(1) subscriber-presence check, uses vanilla sizing with the eligible-vehicle minimum above and creates no event,
+O(1) subscriber-presence check, uses exact vanilla sizing without an unconditional half-heart minimum and creates no event,
 serialization, listener scan or extra allocation. Existing draw allocation is
 unchanged. With subscribers, dispatch only to the indexed subscriber list.
 
@@ -130,12 +133,13 @@ so the air baseline is `h - 49` = 191, and the air row is drawn at `191 - (rows 
 
 | Case | Prepared hearts | Rows | Observable expectation |
 | --- | ---: | ---: | --- |
+| No listener or unchanged listener output, maximum health 1.0 | 0 | 0 | No vehicle containers; vanilla food and air layout |
 | No listener, maximum health 30, current 8 | 15 | 2 | 15 containers, 4 full; vehicle rows at 201 and 191; air at 181 |
 | Same mount, mod supplies 4 | 4 | 1 | 4 containers, all full; air at 191; one-row reservation |
 | Mod supplies 10 | 10 | 1 | 10 containers at 201; air at 191 |
 | Mod supplies 11 | 11 | 2 | 10 containers at 201, 1 at 191; air at 181 |
 | 11 hearts, Pre cancels drawing | 11 | 2 | No vehicle sprites; reservation unchanged; air remains at 181 |
-| Minimum: 1.0 max/current health, capacity 0.5 | 0.5 | 1 | 1 container with half-heart fill; air at 191 |
+| Listener explicitly supplies 0.5 at 1.0 max/current health | 0.5 | 1 | 1 container with half-heart fill; air at 191 |
 | Maximum: 1024.0 health, mod capacity 512 | 512 | 52 | 512 containers: 51 rows of 10 and final row of 2; air at -319 |
 | Mod supplies 0 | 0.5 | 1 | Clamp to minimum; 1 container; air at 191 |
 | Mod supplies -1 | 0.5 | 1 | Clamp to minimum, for native and wasm |
