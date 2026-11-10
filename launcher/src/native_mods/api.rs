@@ -561,7 +561,7 @@ pub(super) fn stage(
         .iter()
         .map(|(_, project)| &project.bundle.manifest)
         .collect();
-    let mut main = main_rs(&template, &manifests, &catalog.points, &catalog.sites);
+    let mut main = main_rs(&template, &manifests, catalog);
     if official {
         main = main.replace(
             "fn main() {",
