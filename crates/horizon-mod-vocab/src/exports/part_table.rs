@@ -23,6 +23,8 @@ mod __private {
         spawn_placement_declarations, tooltip_appenders,
     };
     #[cfg(any(test, feature = "testing"))]
+    pub use crate::parts::install_process_datapack_registry_declarations;
+    #[cfg(any(test, feature = "testing"))]
     pub use crate::{
         parts::tests as part_tests,
         world::phase::{with_test_packages, with_test_registration_data},
