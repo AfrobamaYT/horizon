@@ -86,6 +86,18 @@ impl Game<'_> {
         id
     }
 
+    /// `Projectile.spawnProjectile` for a mob's shot: an arrow is made from its
+    /// ammo, the mobs' other projectiles from fresh stacks with no
+    /// enchantments. `Projectile.tick` posts on the first tick, through the
+    /// shared arrow-state continuation for ordinary arrows and tridents.
+    pub(super) fn spawn_mob_projectile(&mut self, projectile: Projectile) {
+        let ammo = projectile.arrow.as_ref().map(|a| a.pickup_item.clone());
+        let id = self.add_projectile(projectile);
+        if let Some(ammo) = ammo {
+            self.apply_on_projectile_spawned(id, &ammo);
+        }
+    }
+
     /// `Projectile.applyOnProjectileSpawned` for the projectile `id`, already
     /// in the level: `stack`'s effects, then for an arrow those of the weapon
     /// it was fired from (its own copy, `AbstractArrow.getWeaponItem`) when

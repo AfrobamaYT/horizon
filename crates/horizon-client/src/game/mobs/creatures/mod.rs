@@ -2593,15 +2593,7 @@ impl Game<'_> {
             let v = p.velocity;
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
-        // Projectile.tick posts on the first tick, through the shared arrow-state
-        // continuation for ordinary arrows and tridents, including loaded ones.
-        // A mob's arrow is made from its ammo; its other projectiles come from
-        // fresh stacks with no enchantments.
-        let ammo = p.arrow.as_ref().map(|a| a.pickup_item.clone());
-        let id = self.add_projectile(p);
-        if let Some(ammo) = ammo {
-            self.apply_on_projectile_spawned(id, &ammo);
-        }
+        self.spawn_mob_projectile(p);
     }
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
