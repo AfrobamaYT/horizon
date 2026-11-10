@@ -132,7 +132,7 @@ impl Hooks for Waypoints {
 
 fn main() {
     let startup = horizon_client::entry::prepare();
-    horizon_client::entry::main_with(
+    horizon_mod_host::main_with(
         vec![ModEntry::new("waypoints", Box::<Waypoints>::default())],
         &[],
         &[],
