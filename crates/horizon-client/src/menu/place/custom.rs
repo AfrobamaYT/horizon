@@ -42,6 +42,7 @@ impl Menu {
         plan: &MenuPlacement,
         use_max: bool,
         allow_drop: bool,
+        _guard: impl Fn() -> bool,
     ) -> Result<PostPlace, Refused> {
         if !matches!(self.kind(), Kind::Mod(menu) if menu.id == plan.menu) {
             return Err(Refused::Unavailable);

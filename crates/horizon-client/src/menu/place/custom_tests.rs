@@ -86,7 +86,7 @@ fn noncontiguous_roles_place_one_increment_and_max_without_granting_a_result() {
         let plan = smith();
         for (use_max, expected) in [(false, 1), (false, 2), (true, 4)] {
             assert_eq!(
-                menu.place_custom_recipe(env, &plan, use_max, false),
+                menu.place_custom_recipe(env, &plan, use_max, false, || true),
                 Ok(PostPlace::Nothing)
             );
             for slot in [2, 5, 3] {
@@ -107,7 +107,7 @@ fn ingredient_shortage_returns_old_inputs_but_never_fills_fuel_or_output() {
         menu.load_slot(4, stack("minecraft:dirt", 1));
         menu.load_slot(7, stack("minecraft:coal", 3));
         assert_eq!(
-            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false),
+            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false, || true),
             Ok(PostPlace::Ghost)
         );
         assert!(menu.slot(4).is_none());
@@ -130,13 +130,13 @@ fn full_inventory_refuses_unchanged_in_survival_and_defers_creative_drops() {
         menu.load_slot(4, stack("minecraft:dirt", 1));
         let before = menu.container_items();
         assert_eq!(
-            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false),
+            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false, || true),
             Err(Refused::NoRoom)
         );
         assert_eq!(menu.container_items(), before);
         assert!(menu.dropped.is_empty());
         assert_eq!(
-            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, true),
+            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, true, || true),
             Ok(PostPlace::Ghost)
         );
         assert_eq!(menu.dropped, vec![ItemStack::new("minecraft:dirt", 1)]);
@@ -153,14 +153,14 @@ fn per_slot_caps_limit_max_and_policy_refusal_is_not_a_missing_ingredient_ghost(
         limits[4] = Some(2);
         menu.set_container_limits(limits);
         assert_eq!(
-            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), true, false),
+            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), true, false, || true),
             Ok(PostPlace::Nothing)
         );
         assert_eq!(menu.slot(4).map(|s| s.count), Some(2));
         menu.hide_slot(4);
         let before = menu.container_items();
         assert_eq!(
-            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false),
+            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false, || true),
             Err(Refused::Denied)
         );
         assert_eq!(menu.container_items(), before);
@@ -180,7 +180,7 @@ fn component_distinct_stacks_never_pool_into_one_destination() {
             Some(ItemStack::new("minecraft:paper", 1).with_potion("minecraft:healing")),
         );
         assert_eq!(
-            menu.place_custom_recipe(env, &single("minecraft:paper"), true, false),
+            menu.place_custom_recipe(env, &single("minecraft:paper"), true, false, || true),
             Ok(PostPlace::Nothing)
         );
         assert_eq!(
