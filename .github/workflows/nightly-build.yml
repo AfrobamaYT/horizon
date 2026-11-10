@@ -32,6 +32,8 @@ run-name: nightly build${{ inputs.request && format(' (request {0})', inputs.req
 #   gh workflow run "nightly build"                     # now (skips when the pick is the same commit as last night's)
 #   gh workflow run "nightly build" -f force=true       # build and publish even if unchanged
 #   gh workflow run "nightly build" -f dry_run=true     # build and sign with a throwaway key, publish nothing
+# Dry picks use only nightly/dry-run-<run>-<attempt>, removed by always-run cleanup; nightly-state and real build
+# numbering/quota stay untouched, including on a failed build. A hard-killed cleanup may leave only that isolated ref.
 on:
   schedule:
     - cron: '17 20 * * *'  # 20:17 UTC: after the day's waves, before the 03:07 Paris parity audit takes the Mac mini
@@ -285,6 +287,31 @@ jobs:
         run: |
           echo "Would publish nightly at ${{ needs.pick.outputs.sha }} (${{ needs.pick.outputs.source }})"
           ls -l dist
+
+  cleanup-dry-run:
+    # No consumer needs the temporary checkout ref after build/sign/publish finish.
+    # Derive it independently of pick's outputs: pick may fail after pushing it.
+    needs: [pick, build, sign, publish]
+    if: always() && github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref != 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Remove this dry run's temporary checkout ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref="nightly/dry-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          status=$(curl --silent --show-error --request DELETE \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --output "$RUNNER_TEMP/dry-ref-cleanup.json" --write-out '%{http_code}' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/refs/heads/$ref")
+          case "$status" in
+            204|404) echo "Temporary ref $ref removed or already absent" ;;
+            *) echo "Temporary ref cleanup failed: HTTP $status"; exit 1 ;;
+          esac
 
   answer:
     # Tells the thread that asked for this build how it ended. A conflict `pick` already explained there.

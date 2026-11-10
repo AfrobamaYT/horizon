@@ -161,11 +161,10 @@ def stop(repo: str, issue: str, text: str) -> None:
     sys.exit(1)
 
 
-def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force: bool) -> None:
+def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force: bool, dry_run: bool) -> None:
     """main + the set, merged with git only (nightly_set.assemble), pushed as nightly/build-<date>-<n>."""
     repo, issue = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("NIGHTLY_ISSUE", "")
     token, event = os.environ.get("GH_TOKEN", ""), os.environ.get("GITHUB_EVENT_NAME", "")
-    dry_run = os.environ.get("DRY_RUN") == "true"
     patterns = ns.guarded_patterns(Path(ns.CODEOWNERS).read_text() if Path(ns.CODEOWNERS).exists() else "")
     gone = set(ns.fetch_heads([(e["number"], e["head"]) for e in prs]))
     kept = []
@@ -186,18 +185,27 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
     build = force or previous != sha
     name = "(unchanged)"
     if build:
-        done = ns.builds_today(today)
-        if len(done) >= ns.MAX_BUILDS_PER_DAY and event != "schedule" and os.environ.get("NIGHTLY_URGENT") != "true":
-            stop(repo, issue, f"{len(done)} Nightly builds today already, the most a day takes: the next scheduled "
-                              "one (20:17 UTC) builds the set.")
-        name = ns.next_build(today, done)
+        if dry_run:
+            run, attempt = os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_RUN_ATTEMPT", "")
+            if not re.fullmatch(r"[0-9]+", run) or not re.fullmatch(r"[0-9]+", attempt):
+                stop(repo, "", "a dry run requires its workflow run and attempt identity")
+            # Temporary checkout transport, never a real build or saved selection.
+            # The workflow cleans this isolated ref even if pick fails after pushing it.
+            name = f"nightly/dry-run-{run}-{attempt}"
+        else:
+            done = ns.builds_today(today)
+            if len(done) >= ns.MAX_BUILDS_PER_DAY and event != "schedule" and os.environ.get("NIGHTLY_URGENT") != "true":
+                stop(repo, issue, f"{len(done)} Nightly builds today already, the most a day takes: the next scheduled "
+                                  "one (20:17 UTC) builds the set.")
+            name = ns.next_build(today, done)
         if not ns.push(sha, name, token):
             stop(repo, issue, f"could not push {name}")
         record = {"ref": name, "sha": sha, "main": main.sha, "at": dt.datetime.now(dt.timezone.utc).isoformat(
             timespec="seconds"), "event": event, "dry_run": dry_run, "run": os.environ.get("GITHUB_RUN_ID", ""),
             "prs": [{k: e[k] for k in ("number", "head", "title", "author", "asked_by")} for e in kept],
             "left_out": left_out}
-        ns.update_state(lambda st, builds: (st, builds + json.dumps(record) + "\n", f"build {name}"), token)
+        if not dry_run:
+            ns.update_state(lambda st, builds: (st, builds + json.dumps(record) + "\n", f"build {name}"), token)
     chosen = Ref(name, sha, dt.datetime.now(dt.timezone.utc))
     with open("nightly-notes.md", "w") as f:
         f.write(notes(today, chosen, main, kept, left_out, merged_since(previous, main.sha), train.known_issues()))
@@ -231,11 +239,12 @@ def pick(force: bool) -> None:
     today = dt.datetime.now(dt.timezone.utc).date().isoformat()
     repo, token = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GH_TOKEN", "")
     main = green_base(repo, os.environ.get("NIGHTLY_ISSUE", ""))
+    dry_run = os.environ.get("DRY_RUN") == "true"
     if spec := os.environ.get("NIGHTLY_PRS", "").strip():  # a dry run's own set; the saved one stays
-        return build_set(main, requested(spec, ns.lookup(repo)), [], today, force)
+        return build_set(main, requested(spec, ns.lookup(repo)), [], today, force, dry_run)
     state, _, _ = ns.load_state()
     prs, left_out = state.get("prs", []), []
-    if prs and os.environ.get("GITHUB_EVENT_NAME") == "schedule":
+    if prs and os.environ.get("GITHUB_EVENT_NAME") == "schedule" and not dry_run:
         patterns = ns.guarded_patterns(Path(ns.CODEOWNERS).read_text() if Path(ns.CODEOWNERS).exists() else "")
         get = ns.lookup(repo)
 
@@ -246,7 +255,7 @@ def pick(force: bool) -> None:
                 return None
             return {**st, "prs": kept}, builds, "the scheduled nightly drops the merged, closed and refused"
         prs = ns.update_state(fresh, token).get("prs", [])
-    build_set(main, prs, left_out, today, force)
+    build_set(main, prs, left_out, today, force, dry_run)
 
 
 def rotate() -> None:
