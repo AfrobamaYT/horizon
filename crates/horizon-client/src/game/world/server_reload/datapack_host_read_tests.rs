@@ -1,11 +1,29 @@
 use super::*;
-use mod_api::{DatapackReadError as E, DimensionKey, LevelRef, WorldEpoch};
+use mod_api::{
+    DatapackField, DatapackFieldKind, DatapackReadError as E, DatapackRegistrySync, DimensionKey,
+    LevelRef, Registrar, RegistrationContext, WorldEpoch,
+};
+struct SyncedRegistryMod;
+#[mod_api::__subscriptions]
+impl Hooks for SyncedRegistryMod {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+        r.declare_datapack_registry(
+            "spell",
+            DatapackRegistrySync::Required,
+            vec![DatapackField::required(
+                "power",
+                DatapackFieldKind::Int { min: 0, max: 100 },
+            )],
+        )
+        .unwrap();
+    }
+}
 #[test]
 #[ignore = "needs prepared resources and isolated homes"]
 fn native_datapack_host_reads_enforce_level_session_and_generation() {
     let scratch = tempfile::tempdir().unwrap();
     mod_api::testing::with_mods(
-        vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
+        vec![ModEntry::new("registry_test", Box::new(SyncedRegistryMod))].into(),
         || {
             with_game(|game| {
                 game.load_world(request(scratch.path())).unwrap();
@@ -25,8 +43,9 @@ fn native_datapack_host_reads_enforce_level_session_and_generation() {
                     )
                     .unwrap()
                 };
-                game.mods.datapack_registries =
-                    Some(mod_api::DatapackRegistrySet::first(candidate(), 400));
+                game.mods.datapack_registries = Some(std::sync::Arc::new(
+                    mod_api::DatapackRegistrySet::first(candidate(), 400),
+                ));
                 let level = game.level(game.dim.id()).unwrap();
                 assert_eq!(
                     level.datapack_entries(game, "registry_test:spell"),
@@ -62,25 +81,57 @@ fn native_datapack_host_reads_enforce_level_session_and_generation() {
                         Err(E::UnknownRegistry)
                     );
                 }
-                game.mods.datapack_registries = Some(
+                game.mods.datapack_registries = Some(std::sync::Arc::new(
                     game.mods
                         .datapack_registries
                         .as_ref()
                         .unwrap()
                         .reload(candidate())
                         .unwrap(),
-                );
+                ));
                 assert_eq!(level.datapack_read(game, &handle), Err(E::StaleGeneration));
-                game.mods.datapack_registries =
-                    Some(mod_api::DatapackRegistrySet::first(candidate(), 401));
+                game.mods.datapack_registries = Some(std::sync::Arc::new(
+                    mod_api::DatapackRegistrySet::first(candidate(), 401),
+                ));
                 assert_eq!(level.datapack_read(game, &handle), Err(E::WrongSession));
+                // The client must use the received snapshot, not this Game's server set.
+                let declarations = mod_api::__private::datapack_registry_declarations();
+                let remote = mod_api::DatapackCandidate::build(
+                    declarations,
+                    &[(
+                        "data/registry_test/registry_test/spell/fire.json".into(),
+                        vec![br#"{"power":19}"#.to_vec()],
+                    )],
+                )
+                .unwrap();
+                horizon_client::datapack_net::serve(Some(std::sync::Arc::new(
+                    mod_api::DatapackRegistrySet::first(remote, 900),
+                )));
+                let offer = horizon_client::datapack_net::offer().unwrap();
+                let horizon_client::datapack_net::Step::Send(bytes) =
+                    horizon_client::datapack_net::server_step(true, Some(&offer))
+                else {
+                    panic!("snapshot required");
+                };
+                horizon_client::datapack_net::clear_received();
+                horizon_client::datapack_net::accept(&bytes).unwrap();
                 game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
-                assert_eq!(level.datapack_entries(game, "registry_test:spell"), None);
                 assert_eq!(
-                    level.datapack_handle(game, "registry_test:spell", "registry_test:fire"),
+                    level.datapack_entries(game, "registry_test:spell"),
+                    Some(vec!["registry_test:fire".into()])
+                );
+                let client_handle = level
+                    .datapack_handle(game, "registry_test:spell", "registry_test:fire")
+                    .unwrap();
+                assert_eq!(
+                    level.datapack_read(game, &client_handle),
+                    Ok(vec![("power".into(), DatapackValue::Int(19))])
+                );
+                horizon_client::datapack_net::clear_received();
+                assert_eq!(
+                    level.datapack_read(game, &client_handle),
                     Err(E::UnknownRegistry)
                 );
-                assert_eq!(level.datapack_read(game, &handle), Err(E::UnknownRegistry));
             });
         },
     );
