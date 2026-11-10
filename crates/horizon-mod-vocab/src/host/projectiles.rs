@@ -23,7 +23,11 @@ pub trait ProjectilesServerHost {
     /// (`apply_mob_effect` and `apply_exhaustion` do nothing to a projectile,
     /// as in vanilla); the block, damage, explosion, particle, summon,
     /// function and item-damage effects are refused rather than skipped. No
-    /// random is drawn and nothing spawns on those refusals. The original stack
+    /// random is drawn and nothing spawns on those refusals. Unsupported
+    /// requirement contexts (including entity flags) and invalid clamped
+    /// level-value ranges also refuse before insertion. Type predicates,
+    /// random chance and their boolean combinations are supported.
+    /// The original stack
     /// is unchanged; carried count is one; the effects see the stack as given.
     #[access(WorldOnly)]
     fn spawn_projectile_from_rotation(
