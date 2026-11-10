@@ -366,9 +366,14 @@ fn registered_node_draws_the_models_the_mod_answers_per_stack() {
             kind: &str,
             config: &horizon_core::nbt::Tag,
             stack: &StackView,
+            ctx: &Context,
             models: &mut Vec<String>,
         ) {
             assert_eq!(kind, "nodetest:charge");
+            if ctx.display == DisplayContext::Ground {
+                models.push("full".to_owned());
+                return;
+            }
             assert_eq!(config.get("glow"), Some(&horizon_core::nbt::Tag::Byte(1)));
             let names: &[&str] = match stack.count {
                 1 => &["empty"],
@@ -432,5 +437,18 @@ fn registered_node_draws_the_models_the_mod_answers_per_stack() {
         ]
     );
     assert!(drawn(3, &Env).is_empty(), "a name the node lacks");
+    // The surroundings reach the mod: on the ground the same stack draws `full`.
+    let ground = Context {
+        display: DisplayContext::Ground,
+        ..context.clone()
+    };
+    let mut stack = StackView::new("nodetest:cell", 1);
+    stack.patch.insert(
+        "minecraft:item_model".into(),
+        Some(serde_json::json!("nodetest:cell")),
+    );
+    let layers = models.resolve(&stack, &ground, &Env).layers;
+    assert!(matches!(&layers[..], [layer] if matches!(&layer.content,
+        LayerContent::Model { model } if model == "nodetest:item/full")));
     assert!(drawn(1, &NoEnv).is_empty(), "no mod answers");
 }

@@ -1128,13 +1128,15 @@ pub trait ItemEnv {
     ) -> i32 {
         -1
     }
-    /// A mod's registered node type for `stack`, with the node's object: push the names of the
-    /// node's `models` to draw, in order. None draw when no mod answers.
+    /// A mod's registered node type for `stack`, with the node's object and the surroundings
+    /// `ItemModel.update` reads (`ctx`): push the names of the node's `models` to draw, in order.
+    /// None draw when no mod answers.
     fn item_model_update(
         &self,
         _kind: &str,
         _config: &horizon_core::nbt::Tag,
         _stack: &StackView,
+        _ctx: &Context,
         _models: &mut Vec<String>,
     ) {
     }
@@ -1482,7 +1484,7 @@ impl Resolve<'_> {
             } => {
                 let mut drawn = Vec::new();
                 self.env
-                    .item_model_update(kind, config, self.stack, &mut drawn);
+                    .item_model_update(kind, config, self.stack, self.ctx, &mut drawn);
                 let child = compose(parent, transformation);
                 for name in &drawn {
                     if let Some((_, model)) = models.iter().find(|(key, _)| key == name) {
