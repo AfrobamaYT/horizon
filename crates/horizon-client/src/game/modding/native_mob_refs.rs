@@ -1204,9 +1204,11 @@ mod tests {
             game.score.board.add_to_team("00000000-0000-0000-0000-00000000000e", "red");
             let recipient = game.mob(game.entity(14).unwrap()).unwrap();
             assert!(piglin.set_target(game, Some(player)));
-            let alert = || mobs::MobEvent::PiglinAlertTarget {
-                mob: 14, source: 13, target: Who::Player,
-            };
+            let alert = || mobs::MobEvent::PiglinAlertTarget(mobs::undead::PiglinAlert {
+                mob: 14,
+                source: 13,
+                target: Who::Player,
+            });
             game.handle_mob_events(vec![alert()]).unwrap();
             assert_eq!(recipient.target(game), Some(player));
             assert!(recipient.set_target(game, None));

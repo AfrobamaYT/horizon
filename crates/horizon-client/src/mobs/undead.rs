@@ -18,6 +18,14 @@ use crate::health::DamageLevel;
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
+/// `ZombifiedPiglin.alertOthers` keeps the source's player identity.
+#[derive(Clone, Debug)]
+pub struct PiglinAlert {
+    pub mob: u32,
+    pub source: u32,
+    pub target: Who,
+}
+
 /// `Zombie.hurtServer`, once the hit landed: a zombie with a target (its own,
 /// else a living attacker) asks the game to try calling a reinforcement; the
 /// difficulty, chance and spawn tests are the game's (`call_reinforcements`).
@@ -542,11 +550,11 @@ fn zombified_piglin_step(m: &mut Mob, cx: &mut Cx) {
                         .map(|s| s.id)
                         .collect();
                 for other in others {
-                    cx.events.push(MobEvent::PiglinAlertTarget {
+                    cx.events.push(MobEvent::PiglinAlertTarget(PiglinAlert {
                         mob: other,
                         source: m.id,
                         target,
-                    });
+                    }));
                 }
             }
             m.extra.counter2 = 80 + m.random.next_int_bound(41).unwrap_or(0);

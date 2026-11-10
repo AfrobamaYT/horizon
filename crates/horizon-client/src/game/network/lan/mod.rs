@@ -5,6 +5,7 @@
 mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
+mod mob_metadata;
 mod residency;
 
 use super::{
@@ -1267,25 +1268,7 @@ pub(super) fn mob_meta(
                 defaults.push((index, serializer::BOOLEAN, Value::Bool(true)));
             }
         }
-        // Enderman.DATA_CARRY_STATE and DATA_CREEPY (angry: the open mouth).
-        "minecraft:enderman" => {
-            if let Some(state) = e.carried {
-                meta.push((
-                    16,
-                    serializer::OPTIONAL_BLOCK_STATE,
-                    Value::Id(state.0 as i32),
-                ));
-            }
-            if e.flag {
-                meta.push((17, serializer::BOOLEAN, Value::Bool(true)));
-            }
-            defaults.push((17, serializer::BOOLEAN, Value::Bool(false)));
-            if e.flag2 {
-                meta.push((18, serializer::BOOLEAN, Value::Bool(true)));
-            }
-            defaults.push((18, serializer::BOOLEAN, Value::Bool(false)));
-            defaults.push((16, serializer::OPTIONAL_BLOCK_STATE, Value::Id(0)));
-        }
+        "minecraft:enderman" => mob_metadata::enderman(e, meta, defaults),
         // Zombie.DATA_DROWNED_CONVERSION_ID (after DATA_BABY_ID and
         // DATA_SPECIAL_TYPE_ID): the shaking of the conversion under water.
         "minecraft:zombie" | "minecraft:husk" => {

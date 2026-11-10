@@ -213,7 +213,10 @@ pub fn attacking_speed(m: &Mob) -> f64 {
 /// `Enderman.playStareSound`: the client throttles the local sound to one
 /// every 400 entity ticks, including a silent attempt.
 pub fn stare_sound(m: &mut Mob) -> Option<[f64; 3]> {
-    if m.extra.last_stare_sound.is_some_and(|last| m.age < last.saturating_add(400)) {
+    if m.extra
+        .last_stare_sound
+        .is_some_and(|last| m.age < last.saturating_add(400))
+    {
         return None;
     }
     m.extra.last_stare_sound = Some(m.age);
