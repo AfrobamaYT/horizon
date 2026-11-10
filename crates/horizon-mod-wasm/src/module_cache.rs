@@ -43,14 +43,18 @@ impl ModuleCache {
         }
     }
 
-    /// One sha256 over the wasm digest, Wasmtime's compatibility hash and our engine settings.
-    /// The `Hash` impls write into the digest directly, so the key is stable across Rust
-    /// releases (unlike `DefaultHasher`).
+    /// One sha256 over the wasm digest, our engine settings and Wasmtime's compatibility value.
+    /// The wasm digest and our settings are fixed bytes. Wasmtime's value is opaque and only
+    /// reachable through `Hash`, so a Wasmtime or toolchain update may change the key: that
+    /// costs one recompile, never a wrong hit, because Wasmtime still checks every entry it loads.
     pub(crate) fn key(engine: &Engine, bytes: &[u8]) -> String {
+        let (setting, enabled) = crate::runtime::ENGINE_CONFIG;
         let mut digest = KeyDigest(Sha256::new());
         digest.0.update(Sha256::digest(bytes));
+        digest.0.update((setting.len() as u64).to_le_bytes());
+        digest.0.update(setting.as_bytes());
+        digest.0.update([u8::from(enabled)]);
         engine.precompile_compatibility_hash().hash(&mut digest);
-        crate::runtime::ENGINE_CONFIG.hash(&mut digest);
         format!("{:x}", digest.0.finalize())
     }
 
