@@ -383,7 +383,7 @@ impl Game<'_> {
     /// the server's recipes arrived, or a new session began.
     pub(super) fn forget_book(&mut self) {
         self.recipe_ui.book = None;
-        self.recipe_tables.categories = None;
+        self.recipe_tables.books = None;
     }
     /// Puts a server's entries over `book` (`Book::use_server_entries`). The
     /// names come from the connection's registries; a tag's items are the ones
