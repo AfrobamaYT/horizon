@@ -4,11 +4,10 @@
 //! mod point here is on the addon's target.
 use super::{internals::Catalog, Bundle};
 use crate::i18n::trf;
-use horizon_mod_package::manifest::inject::mod_points::{
-    self, Catalog as Points, Library, Refusal, Routed,
-};
+use horizon_mod_package::manifest::inject::mod_points::{self, Library, Refusal, Routed};
 use horizon_mod_package::manifest::inject::{Access, Inject};
 use horizon_mod_package::Manifest;
+use horizon_platform::mod_build::point_shape::catalog::Catalog as Points;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -179,7 +178,7 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_mod_package::manifest::inject::mod_points::Point;
+    use horizon_platform::mod_build::point_shape::catalog::Point;
 
     const MANIFEST: &str = "name = 'Mod'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '0000000000000000000000000000000000000000'\nmixins = '0000000000000000000000000000000000000000'\n";
 

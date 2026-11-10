@@ -99,11 +99,11 @@
       "horizon-protocol",
       "horizon-world",
       "horizon-mod-package",
+      "horizon-mod-point-shape",
       "horizon-mod-runtime",
       "horizon-mod-vocab",
       "horizon-mod-api-gen",
       "horizon-mod-api-macros",
-      "horizon-mod-point-shape",
       "horizon-game-discovery"
     ],
     "forbidden": [
@@ -182,7 +182,7 @@
     "horizon-mod-api": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-api-macros": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-point-emit": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
-    "horizon-mod-point-shape": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
+    "horizon-mod-point-shape": "Shared point grammar and serialized catalog values; no dependency on the mod host or engine internals.",
     "horizon-mod-points": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-render": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-wasm": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",

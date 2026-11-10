@@ -2871,7 +2871,6 @@ version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
  "horizon-game-discovery",
- "horizon-mod-package",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
@@ -2893,6 +2892,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "horizon-core",
+ "horizon-mod-point-shape",
  "horizon-shader-api",
  "libc",
  "log",
@@ -2928,6 +2928,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn 2.0.119",
 ]
 
