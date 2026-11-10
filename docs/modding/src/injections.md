@@ -727,6 +727,11 @@ pub fn average(raw: &mut internals::raw::__GameBeaconAverageRaw<'_, u32, u32, u3
 }
 ```
 
+Unlike a mixin `@WrapOperation`, a replace has no `original` to continue into: the body is gone for
+as long as it owns the point. Calling the replaced function from the listener doesn't reach the
+body; it enters the point again, runs the replace again and recurses until the stack overflows. Copy
+the part of the body you need into the listener instead.
+
 ### one call argument
 
 `@ModifyArg` changes one argument of a call: a [before_call](#before_call) writing that field.
