@@ -10553,12 +10553,7 @@ impl Game<'_> {
                         _ => return,
                     }
                 }
-                let remainders = world_recipes!(self).remainders(
-                    &recipe,
-                    &self.craft_grid[..cells],
-                    self.craft_size,
-                    &|s| self.crafting_remainder(s),
-                );
+                let remainders = self.craft_grid_remainders(&recipe);
                 for cell in self.craft_grid.iter_mut() {
                     if let Some(s) = cell {
                         s.count -= 1;

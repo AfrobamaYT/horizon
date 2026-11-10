@@ -282,6 +282,15 @@ impl Game<'_> {
         remainder.filter(|value| value.count > 0)
     }
 
+    pub(in crate::game) fn craft_grid_remainders(&self, recipe: &str) -> Vec<Option<ItemStack>> {
+        self.recipes().remainders(
+            recipe,
+            &self.craft_grid[..self.craft_size * self.craft_size],
+            self.craft_size,
+            &|s| self.crafting_remainder(s),
+        )
+    }
+
     /// `Block.asItem`: the block's item name, including air for a block with
     /// no item; None if the block name is unknown.
     pub(super) fn block_item(&self, block: BlockKey) -> Option<mod_api::ItemKey> {
