@@ -199,11 +199,13 @@ mod tests {
     fn managed_launch_binds_external_instance_and_log_roots() {
         for separate in [false, true] {
             let root = tempfile::tempdir().unwrap();
-            let data = root.path().join("launcher");
+            // Compare canonical identities on every platform, including Windows' extended prefix.
+            let root_path = root.path().canonicalize().unwrap();
+            let data = root_path.join("launcher");
             let install = data.join("versions/game");
-            let game = root.path().join("instance");
+            let game = root_path.join("instance");
             let home = if separate {
-                root.path().join("logs")
+                root_path.join("logs")
             } else {
                 game.clone()
             };
@@ -226,7 +228,7 @@ mod tests {
                 );
                 assert!(!context.join(".installed").exists());
             }
-            assert!(!trees.iter().any(|(path, _)| path == root.path()));
+            assert!(!trees.iter().any(|(path, _)| path == &root_path));
             assert!(
                 trees
                     .iter()
