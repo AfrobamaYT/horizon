@@ -7,7 +7,7 @@ pub trait Hooks {
     /// `entity_tick_pre`. `item` is the entity, in the world: read and change
     /// it through the host, its attachments included. Set `canceled` to skip
     /// that tick's vanilla work, as NeoForge's `true` return does; the item
-    /// then neither moves nor merges, and `entity_tick_post` still hears it.
+    /// skips movement and its own merge pass; another item can still merge into it.\n    /// `entity_tick_post` still hears it.
     /// Only the `ItemPart`s attached to `stack`'s item hear it: an item with
     /// none costs one table lookup, and a game with no such part none at all.
     /// Server-side, for every dropped item that ticks.
