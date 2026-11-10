@@ -12,18 +12,25 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux-x86_64
+            rustflags: ''
           - os: windows-latest
             platform: windows-x64
+            rustflags: '-C target-feature=+crt-static'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
     env:
       HORIZON_LAUNCHER_REPOSITORY: arismoko/horizon
+      RUSTFLAGS: ${{ matrix.rustflags }}
       CARGO_INCREMENTAL: 0
       CARGO_BUILD_JOBS: 1
       HORIZON_LAUNCHER_NO_SELF_UPDATE: 1
       HORIZON_NO_AUDIO: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libfontconfig1-dev libvulkan-dev libssl-dev patchelf

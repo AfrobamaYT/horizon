@@ -1,5 +1,36 @@
 # Horizon launcher
 
+## arismoko fork builds
+
+**Horizon Fork Launcher (arismoko)** is not the official Horizon launcher. Fork
+builds start with empty settings and accounts; they do not import official tokens.
+Their launcher and game data live under `horizon-fork-arismoko/launcher` and
+`horizon-fork-arismoko/game`. Relocation metadata and the OS keychain service are
+separate. Explicit home overrides still work for developers.
+
+Signed Nightly Play and Microsoft sign-in are unavailable until the fork's own
+Microsoft application ID is configured. Do not use the official launcher's ID.
+Meanwhile, the launcher can install builds; Play is available only for an unsigned
+local developer build, single-player, with the explicit developer offline switch.
+Signed builds retain the account and ownership checks.
+
+Windows builds are **not Authenticode-signed**. Windows may show “Windows protected
+your PC” or an unknown-publisher warning. Signed checksums do not remove SmartScreen
+warnings. macOS packages are **ad-hoc signed**, without an Apple Developer ID and
+**not notarized**. Gatekeeper may block them or say Apple cannot check them for
+malicious software. No OS trust bypass is implied by a checksum signature.
+
+Build identity defaults to `arismoko/horizon`, consistently with the fork's release
+repository. Set `HORIZON_LAUNCHER_REPOSITORY=horizon-rust/horizon` at build time to
+retain upstream identity. Other values fail the build. Stage packaging with
+`python3 tools/stage_launcher_packaging.py OUTPUT --repository REPOSITORY` using
+the same repository selection. The original packaging templates and icons are
+left unchanged. The fork's workflow is manual, dry-run only, and must remain
+disabled until root authorizes a dispatch. No release or signing step is included.
+Linux x86_64 and Windows x64 are the initial package targets; Windows ARM64 and
+macOS packages are not produced by this dry-run workflow. Any future macOS job
+must use GitHub-hosted runners, never the upstream private runner.
+
 A small desktop app that installs Horizon builds, prepares them from your own copy of
 Minecraft, and starts the client or a dedicated server. Built with [GPUI Fast](https://github.com/longbridge/gpui-fast),
 a fork of Zed's UI framework [GPUI](https://www.gpui.rs) that draws unchanged views from the last frame;

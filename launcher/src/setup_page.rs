@@ -57,7 +57,7 @@ pub fn open(mode: Mode, cx: &mut App) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(760.), px(520.))),
             titlebar: Some(titlebar::options()),
-            app_id: Some("horizon-launcher".into()),
+            app_id: Some(horizon_launcher::identity::APP_ID.into()),
             ..Default::default()
         },
         |window, cx| cx.new(|cx| Setup::new(mode, window, cx)),

@@ -63,32 +63,52 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
         "linux",
         "x86_64",
         "horizon-linux-x86_64.tar.gz",
-        "horizon-launcher-linux-x86_64.tar.gz",
+        if cfg!(horizon_fork_launcher) {
+            "horizon-fork-launcher-linux-x86_64.tar.gz"
+        } else {
+            "horizon-launcher-linux-x86_64.tar.gz"
+        },
     ),
     (
         "macos",
         "aarch64",
         "horizon-macos-arm64.zip",
-        "horizon-launcher-macos-arm64.zip",
+        if cfg!(horizon_fork_launcher) {
+            "horizon-fork-launcher-macos-arm64.zip"
+        } else {
+            "horizon-launcher-macos-arm64.zip"
+        },
     ),
     // Intel Macs (#1161).
     (
         "macos",
         "x86_64",
         "horizon-macos-x64.zip",
-        "horizon-launcher-macos-x64.zip",
+        if cfg!(horizon_fork_launcher) {
+            "horizon-fork-launcher-macos-x64.zip"
+        } else {
+            "horizon-launcher-macos-x64.zip"
+        },
     ),
     (
         "windows",
         "x86_64",
         "horizon-windows-x64.zip",
-        "horizon-launcher-windows-x64.zip",
+        if cfg!(horizon_fork_launcher) {
+            "horizon-fork-launcher-windows-x64.zip"
+        } else {
+            "horizon-launcher-windows-x64.zip"
+        },
     ),
     (
         "windows",
         "aarch64",
         "horizon-windows-arm64.zip",
-        "horizon-launcher-windows-arm64.zip",
+        if cfg!(horizon_fork_launcher) {
+            "horizon-fork-launcher-windows-arm64.zip"
+        } else {
+            "horizon-launcher-windows-arm64.zip"
+        },
     ),
 ];
 
@@ -479,14 +499,18 @@ const fn game_fallback_for(os: &str, arch: &str) -> Option<&'static str> {
 /// one file. A launcher running from one updates by replacing that file ([`appimage_path`]), so it
 /// needs this archive rather than the platform's `.tar.gz`.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = Some("horizon-launcher-linux-x86_64.AppImage");
+pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = Some(if cfg!(horizon_fork_launcher) {
+    "horizon-fork-launcher-linux-x86_64.AppImage"
+} else {
+    "horizon-launcher-linux-x86_64.AppImage"
+});
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = None;
 
 const LAUNCHER_BINARY: &str = if cfg!(windows) {
-    "horizon-launcher.exe"
+    crate::identity::WINDOWS_EXECUTABLE
 } else {
-    "horizon-launcher"
+    crate::identity::EXECUTABLE
 };
 
 pub(crate) const CLIENT: &str = if cfg!(windows) {
@@ -937,7 +961,7 @@ pub fn data_dir() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("horizon-launcher")
+        .join(crate::identity::LAUNCHER_FOLDER)
 }
 
 /// A canonical path without Windows' verbatim prefix: `canonicalize` gives `\\?\C:\...` there,
@@ -2564,7 +2588,7 @@ pub fn game_home() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("horizon")
+        .join(crate::identity::GAME_FOLDER)
 }
 
 /// Whether No AI is on: every AI feature hidden and off (`horizon_platform::no_ai`, kept in the
@@ -3433,7 +3457,7 @@ pub fn self_update_allowed() -> bool {
 /// The version in `horizon-launcher --version`'s output (`horizon-launcher 0.1.5`).
 fn parse_version_output(out: &str) -> Option<&str> {
     out.trim()
-        .strip_prefix("horizon-launcher ")
+        .strip_prefix(crate::identity::VERSION_PREFIX)
         .map(str::trim)
         .filter(|v| !v.is_empty())
 }
@@ -4933,25 +4957,44 @@ pub fn {f}("
             platform_assets("macos", "aarch64"),
             Some((
                 "horizon-macos-arm64.zip",
-                "horizon-launcher-macos-arm64.zip"
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-macos-arm64.zip"
+                } else {
+                    "horizon-launcher-macos-arm64.zip"
+                }
             ))
         );
         assert_eq!(
             platform_assets("macos", "x86_64"),
-            Some(("horizon-macos-x64.zip", "horizon-launcher-macos-x64.zip"))
+            Some((
+                "horizon-macos-x64.zip",
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-macos-x64.zip"
+                } else {
+                    "horizon-launcher-macos-x64.zip"
+                }
+            ))
         );
         assert_eq!(
             platform_assets("windows", "x86_64"),
             Some((
                 "horizon-windows-x64.zip",
-                "horizon-launcher-windows-x64.zip"
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-windows-x64.zip"
+                } else {
+                    "horizon-launcher-windows-x64.zip"
+                }
             ))
         );
         assert_eq!(
             platform_assets("windows", "aarch64"),
             Some((
                 "horizon-windows-arm64.zip",
-                "horizon-launcher-windows-arm64.zip"
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-windows-arm64.zip"
+                } else {
+                    "horizon-launcher-windows-arm64.zip"
+                }
             ))
         );
         assert_eq!(platform_assets("linux", "aarch64"), None);
@@ -5236,8 +5279,16 @@ pub fn {f}("
     #[test]
     fn an_arm64_launcher_skips_a_release_without_its_zip() {
         let (arm, x64) = (
-            "horizon-launcher-windows-arm64.zip",
-            "horizon-launcher-windows-x64.zip",
+            if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher-windows-arm64.zip"
+            } else {
+                "horizon-launcher-windows-arm64.zip"
+            },
+            if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher-windows-x64.zip"
+            } else {
+                "horizon-launcher-windows-x64.zip"
+            },
         );
         let asset = |name: &str| serde_json::json!({"name": name, "browser_download_url": format!("https://example.test/{name}"), "size": 1});
         let list = serde_json::json!([
@@ -5273,7 +5324,13 @@ pub fn {f}("
                 "nightly-build.yml must sign and publish {game} ({os} {arch})"
             );
             assert!(
-                launcher.contains(&format!("asset: {launcher_asset}")),
+                if cfg!(horizon_fork_launcher) {
+                    !matches!((os, arch), ("linux", "x86_64") | ("windows", "x86_64"))
+                        || launcher.contains(launcher_asset)
+                } else {
+                    include_str!("../tests/fixtures-launcher-workflow-upstream.yml")
+                        .contains(&format!("asset: {launcher_asset}"))
+                },
                 "launcher.yml builds no {launcher_asset}"
             );
         }
@@ -5419,7 +5476,7 @@ pub fn {f}("
         assert_eq!(launcher_version("launcher-vx"), None);
         let list = serde_json::json!([
             {"tag_name": "v2026.10.12", "assets": [{"name": "horizon-linux-x86_64.tar.gz", "browser_download_url": "u", "size": 1}]},
-            {"tag_name": "launcher-v9.0.0", "assets": [{"name": "horizon-launcher-linux-x86_64.tar.gz", "browser_download_url": "u", "size": 1}]},
+            {"tag_name": "launcher-v9.0.0", "assets": [{"name": if cfg!(horizon_fork_launcher) { "horizon-fork-launcher-linux-x86_64.tar.gz" } else { "horizon-launcher-linux-x86_64.tar.gz" }, "browser_download_url": "u", "size": 1}]},
             {"tag_name": "v2026.10.13", "assets": []},
             {"tag_name": "launcher-v0.0.1", "draft": true, "assets": []},
         ]);
@@ -5648,7 +5705,7 @@ pub fn {f}("
         assert!(launcher_update(&[r(own_tag())]).is_none());
         assert_eq!(launcher_version(&own_tag()), Some(VERSION));
         assert_eq!(
-            parse_version_output(&format!("horizon-launcher {VERSION}\n")),
+            parse_version_output(&format!("{}{VERSION}\n", crate::identity::VERSION_PREFIX)),
             Some(VERSION)
         );
     }
@@ -5764,7 +5821,11 @@ pub fn {f}("
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         assert_eq!(
             launcher_asset_running_from(true),
-            Some("horizon-launcher-linux-x86_64.AppImage")
+            Some(if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher-linux-x86_64.AppImage"
+            } else {
+                "horizon-launcher-linux-x86_64.AppImage"
+            })
         );
     }
 
@@ -6949,7 +7010,11 @@ pub fn {f}("
     #[test]
     fn launcher_versions_read_from_the_binary() {
         assert_eq!(
-            parse_version_output("horizon-launcher 0.1.5\n"),
+            parse_version_output(if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher 0.1.5\n"
+            } else {
+                "horizon-launcher 0.1.5\n"
+            }),
             Some("0.1.5")
         );
         assert_eq!(parse_version_output("something else"), None);

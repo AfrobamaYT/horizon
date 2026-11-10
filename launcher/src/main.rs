@@ -37,6 +37,7 @@ mod glass_ui;
 mod glass_versions;
 mod home;
 mod home_tabs;
+use horizon_launcher::identity;
 mod import_page;
 mod instance_icons;
 mod instance_mods;
@@ -3091,7 +3092,11 @@ impl Launcher {
                 .child(
                     shell::text(theme::night::TITLE, shell::c(n.ink))
                         .font_family(theme::DISPLAY_FONT)
-                        .child("Horizon"),
+                        .child(tr(if cfg!(horizon_fork_launcher) {
+                            identity::DISPLAY_NAME
+                        } else {
+                            "Horizon"
+                        })),
                 )
         });
         shell::sidebar_plate(&t)
@@ -5568,8 +5573,8 @@ fn page_after_startup(page: Page, data_folder_failed: bool) -> Page {
 fn menus() -> Vec<Menu> {
     vec![
         Menu {
-            name: "Horizon Launcher".into(),
-            items: vec![MenuItem::action("Quit Horizon Launcher", Quit)],
+            name: identity::DISPLAY_NAME.into(),
+            items: vec![MenuItem::action(tr(identity::QUIT_LABEL), Quit)],
             disabled: false,
         },
         Menu {
@@ -5674,7 +5679,7 @@ fn main() {
                     titlebar: Some(titlebar::options()),
                     #[cfg(target_os = "linux")]
                     window_decorations: Some(gpui::WindowDecorations::Client),
-                    app_id: Some("horizon-launcher".into()),
+                    app_id: Some(identity::APP_ID.into()),
                     // GPUI draws a window without focus at most every 33 ms to save energy. A
                     // benchmark's window often starts without it (KDE keeps focus from windows
                     // a background process opens), and it measures drawing, not that limit.
@@ -5865,10 +5870,17 @@ mod tests {
     #[test]
     fn the_app_menu_has_quit() {
         let menus = super::menus();
-        assert_eq!(menus[0].name, "Horizon Launcher");
+        assert_eq!(
+            menus[0].name,
+            if cfg!(horizon_fork_launcher) {
+                "Horizon Fork Launcher (arismoko)"
+            } else {
+                "Horizon Launcher"
+            }
+        );
         assert!(matches!(
             &menus[0].items[0],
-            gpui::MenuItem::Action { name, .. } if name == "Quit Horizon Launcher"
+            gpui::MenuItem::Action { name, .. } if name == horizon_launcher::identity::QUIT_LABEL
         ));
     }
 
