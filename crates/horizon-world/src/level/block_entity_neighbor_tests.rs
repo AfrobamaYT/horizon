@@ -8,6 +8,8 @@ fn block_entity_neighbor_notices_and_weak_changes() {
         inner: TestLevel,
         seen: RefCell<Vec<(BlockPos, BlockPos)>>,
         weak: bool,
+        unloaded: Option<BlockPos>,
+        queries: RefCell<Vec<BlockPos>>,
     }
     impl BlockEntityNeighbors for Observer {
         fn observe_block_entity_neighbor(
@@ -18,7 +20,8 @@ fn block_entity_neighbor_notices_and_weak_changes() {
         ) {
             self.seen.borrow_mut().push((pos, neighbor));
         }
-        fn receives_weak_changes(&self, _: BlockPos, _: BlockStateId) -> bool {
+        fn receives_weak_changes(&self, pos: BlockPos, _: BlockStateId) -> bool {
+            self.queries.borrow_mut().push(pos);
             self.weak
         }
     }
@@ -30,7 +33,7 @@ fn block_entity_neighbor_notices_and_weak_changes() {
             self.inner.set_raw(pos, state)
         }
         fn is_loaded(&self, pos: BlockPos) -> bool {
-            self.inner.is_loaded(pos)
+            Some(pos) != self.unloaded && self.inner.is_loaded(pos)
         }
         fn random(&mut self) -> &mut LegacyRandom {
             self.inner.random()
@@ -55,11 +58,51 @@ fn block_entity_neighbor_notices_and_weak_changes() {
     let origin = BlockPos::new(0, 64, 0);
     let adjacent = BlockPos::new(1, 64, 0);
     let far = BlockPos::new(2, 64, 0);
+    // Independent coordinates pin every direction, not the production direction list.
+    for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+        let adjacent = BlockPos::new(dx, 64, dz);
+        let far = BlockPos::new(2 * dx, 64, 2 * dz);
+        for unloaded in [adjacent, far] {
+            let mut level = Observer {
+                inner: TestLevel::new(b),
+                seen: RefCell::new(Vec::new()),
+                weak: true,
+                unloaded: Some(unloaded),
+                queries: RefCell::new(Vec::new()),
+            };
+            level.set_raw(
+                adjacent,
+                f.registry.default_state("minecraft:stone").unwrap(),
+            );
+            level.set_raw(origin, f.registry.default_state("minecraft:chest").unwrap());
+            let mut ticks = Ticks::new(0);
+            b.container_changed(&mut level, &mut ticks, origin);
+            let seen = level.seen.borrow();
+            if unloaded == adjacent {
+                assert!(!seen.contains(&(adjacent, origin)));
+                assert!(!seen.contains(&(far, origin)));
+                assert!(!level.queries.borrow().contains(&far));
+            } else {
+                assert!(seen.contains(&(adjacent, origin)), "direction {dx}, {dz}");
+                assert!(
+                    level.queries.borrow().contains(&far),
+                    "unloaded far cell is queried"
+                );
+                assert!(
+                    seen.contains(&(far, origin)),
+                    "unloaded far cell is notified"
+                );
+                assert!(!level.is_loaded(far), "notification must not load its cell");
+            }
+        }
+    }
     for weak in [false, true] {
         let mut level = Observer {
             inner: TestLevel::new(b),
             seen: RefCell::new(Vec::new()),
             weak,
+            unloaded: None,
+            queries: RefCell::new(Vec::new()),
         };
         level.set_raw(
             adjacent,
