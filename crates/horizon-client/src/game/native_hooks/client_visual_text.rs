@@ -1,5 +1,5 @@
 #[cfg(test)]
-#[path = "client_visual_text_tests.rs"]
+#[path = "client_visual_text/tests.rs"]
 mod tests;
 use crate::game::{Game, api_values::TryIntoApi};
 

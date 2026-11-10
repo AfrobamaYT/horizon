@@ -23,8 +23,10 @@ fn vanilla_sink_order_and_utf16_run_offsets() {
 
 #[test]
 fn equal_styles_coalesce_but_different_styles_reset_sink_indices() {
-    let mut bold = Style::default();
-    bold.bold = Some(true);
+    let bold = Style {
+        bold: Some(true),
+        ..Style::default()
+    };
     let text = Text::from_spans(vec![
         Span::new("Hello, ", Style::default()),
         Span::new("Alex", bold.clone()),
