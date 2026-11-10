@@ -1725,6 +1725,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemPart::release_using` | crosses | Wire call |
 | `ItemPart::crafting_remainder` | crosses | Wire call |
 | `ItemPart::item_interact_mob` | crosses | Wire call |
+| `ItemPart::on_entity_item_update` | crosses | Wire call |
 | `ItemPart::on_item_use_first` | crosses | Wire call |
 | `MenuPart::menu_subscribed` | crosses | Wire call |
 | `MenuPart::menu_slot_rules` | crosses | Wire call |

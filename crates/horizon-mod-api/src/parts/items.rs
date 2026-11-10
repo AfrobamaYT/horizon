@@ -96,6 +96,15 @@ impl HookParts {
     }
 }
 
+/// Whether an `ItemPart` of item `item` (`minecraft:stick`) subscribes to `hook`, from the
+/// table resolved at load: a hot path asks this before it copies a stack for the dispatch.
+pub fn item_listens(hook: HookId, item: &str) -> bool {
+    has_part_hook(hook)
+        && parts(hook, "item routing")
+            .for_hook(hook)
+            .is_some_and(|table| !table.item(|| Some(item)).is_empty())
+}
+
 impl dyn Registrar + '_ {
     /// Attach `part` to every item in tag `tag` (`minecraft:axes`, without `#`).
     pub fn item_part_tag<P: ItemPart>(&mut self, tag: &str, part: P) {

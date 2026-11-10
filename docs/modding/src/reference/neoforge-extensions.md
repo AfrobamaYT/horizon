@@ -33,7 +33,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `IBlockExtension` | 60 | 3 | 23 | 34 | 0 |
 | `IBlockStateExtension` | 57 | 2 | 22 | 33 | 0 |
-| `IItemExtension` | 46 | 7 | 16 | 23 | 0 |
+| `IItemExtension` | 46 | 8 | 16 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
@@ -157,7 +157,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `getEntityLifespan(stack, level)` | Partial | `item_expire` (`hooks/base.rs`) | Adds extra ticks to a dropped item's life; no absolute lifespan and not per-item. |
 | `hasCustomEntity(stack)` | Missing | — | No custom dropped-entity selection. |
 | `createEntity(level, entity, stack)` | Missing | — | Same. |
-| `onEntityItemUpdate(stack, itemEntity)` | Missing | — | No per-item dropped-entity tick. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `onEntityItemUpdate(stack, itemEntity)` | Covered | `ItemPart::on_entity_item_update` (`hooks/on_entity_item_update.rs`) | Runs on the server before the dropped item's own tick and after `entity_tick_pre`; `canceled` skips that tick's movement and merging, as NeoForge's `true` return does. The part gets the stack and the item entity's handle. |
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
 | `canEquip(stack, slot, entity)` | Partial | `equippable.allowed_entities`, `entity_capability::goes_in_slot` | Component data decides slot and allowed entities; no per-stack code predicate. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
@@ -309,7 +309,7 @@ their rows have landed or become partial since and should be narrowed when they 
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo`, `onDestroyedByPlayer` (all Partial or Missing above).
 - **Item group rows that still need their own answer:** `onLeftClickEntity`, `onEntitySwing`,
-  `onEntityItemUpdate`, `canPerformAction` (all Partial or Missing above).
+  `canPerformAction` (all Partial or Missing above).
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing
   above; they have no follow-up issue yet. The largest are the entity fluid queries, block entity model data and
   fluid tooltips.
