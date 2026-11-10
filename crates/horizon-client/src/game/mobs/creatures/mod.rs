@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod borrowed_panic_tests;
 mod borrowed_tick;
+mod death_tail;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 
@@ -1867,11 +1868,7 @@ impl Game<'_> {
             pos,
             source,
         );
-        self.create_wither_rose(m);
-        if m.species() == Species::CopperGolem {
-            // CopperGolem.dropEquipment: the preserved equipment too.
-            self.golem_drop_equipment(&mut dying);
-        }
+        self.finish_mob_death(m, &mut dying, source);
     }
     /// `AbstractCubeMob.remove`: split only as the dead body is removed.
     fn split_dead_cube(&mut self, mut dying: Mob) {

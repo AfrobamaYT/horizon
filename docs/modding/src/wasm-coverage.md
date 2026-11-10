@@ -1517,6 +1517,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::living_damage_post` | crosses | Wire call |
 | `Hooks::living_damage_pre` | crosses | Wire call |
 | `Hooks::living_death` | crosses | Wire call |
+| `Hooks::living_death_post` | crosses | Wire call |
 | `Hooks::living_destroy_block` | crosses | Wire call |
 | `Hooks::living_drops` | crosses | Wire call |
 | `Hooks::get_equipment_drop_chance` | crosses | Wire call |
