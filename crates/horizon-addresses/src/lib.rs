@@ -47,3 +47,9 @@ pub const HOSTING_PARTNER: &str = "https://my.sculkhosting.com/ref/horizon";
 
 /// The official cosmetics shop.
 pub const SHOP: &str = "https://playhorizon.dev/shop";
+
+/// The official launcher installer's product home.
+pub const LAUNCHER_ABOUT: &str = "https://playhorizon.dev";
+
+/// The separately branded arismoko fork launcher installer's product home.
+pub const FORK_LAUNCHER_ABOUT: &str = "https://github.com/arismoko/horizon";
