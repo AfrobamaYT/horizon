@@ -25,7 +25,10 @@ impl Game<'_> {
             None,
         );
         if let Some(id) = camel {
-            self.post_entity_event("minecraft:entity_action", horizon_client::mobs::Who::Mob(id));
+            self.post_entity_event(
+                "minecraft:entity_action",
+                horizon_client::mobs::Who::Mob(id),
+            );
         }
     }
 
