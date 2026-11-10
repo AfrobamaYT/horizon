@@ -88,35 +88,8 @@ pub(super) enum Finalized {
     Cancelled,
 }
 
-/// Damage types of a projectile: its own entity is the direct one, and
-/// the game keeps no id for it.
-const PROJECTILE_DAMAGE: [&str; 9] = [
-    "minecraft:arrow",
-    "minecraft:trident",
-    "minecraft:fireball",
-    "minecraft:unattributed_fireball",
-    "minecraft:wither_skull",
-    "minecraft:mob_projectile",
-    "minecraft:thrown",
-    "minecraft:wind_charge",
-    "minecraft:fireworks",
-];
-
-/// The `HurtSource` of a death's blow. A melee hit's direct entity is the
-/// one that caused it; a projectile's isn't known, so `direct` is 0.
-pub(in crate::game) fn death_hurt_source(damage_type: &str, causing: u32) -> HurtSource<'_> {
-    let direct = if PROJECTILE_DAMAGE.contains(&damage_type) {
-        0
-    } else {
-        causing as i32
-    };
-    HurtSource {
-        damage_type,
-        causing: causing as i32,
-        direct,
-        position: None,
-    }
-}
+mod death_source;
+pub(in crate::game) use death_source::death_hurt_source;
 
 /// A dying entity whose items drop (`LivingDropsEvent`).
 pub(super) struct DyingDrops<'a> {
@@ -1755,6 +1728,15 @@ impl Game<'_> {
     }
     /// LivingEntity.die / dropAllDeathLoot.
     pub(super) fn mob_died(&mut self, m: &Mob) {
+        // The killing blow for the drop hooks, before the player's hit is forgotten.
+        let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
+        let killer = self
+            .last_hurt_by_player
+            .get(&m.id)
+            .copied()
+            .filter(|_| m.ai.last_hurt_by_player > 0)
+            .and_then(|credit| self.resolve_player_credit(credit));
+        let killer_hand = self.death_killer_hand(m, killer);
         if self.mob_death_canceled(m) {
             return;
         }
@@ -1764,13 +1746,7 @@ impl Game<'_> {
             // The body may be gone already.
             self.set_bed_occupied(bed, false);
         }
-        // The killing blow for the drop hooks, before the player's hit is forgotten.
-        let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
-        let killer = self
-            .last_hurt_by_player
-            .remove(&m.id)
-            .filter(|_| m.ai.last_hurt_by_player > 0)
-            .and_then(|credit| self.resolve_player_credit(credit));
+        self.last_hurt_by_player.remove(&m.id);
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
@@ -1850,6 +1826,7 @@ impl Game<'_> {
             player,
             m.ai.last_hurt_by_player > 0,
             killer_entity,
+            killer_hand,
             consumed,
             pos,
             source,
@@ -2035,6 +2012,7 @@ impl Game<'_> {
         player_uuid: Option<u128>,
         player_killed: bool,
         killer: horizon_world::loot::LootEntity,
+        killer_hand: Option<ItemStack>,
         consumed: bool,
         pos: [f64; 3],
         source: Option<(&'static str, u32)>,
@@ -2189,14 +2167,16 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
+        let killer_hand = killer_hand.as_ref().try_into_api().ok().flatten();
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: hurt,
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: [m.position.x, m.position.y, m.position.z],
             block: None,
             entity: Some((m.id, &kind)),
             player: player_uuid,
-            tool: None,
+            tool: killer_hand.as_ref(),
             explosion: None,
             used: false,
         });
@@ -13954,3 +13934,8 @@ mod leash_without_item_postbaseline_controls;
 mod revenge_home_tests;
 
 mod knockback;
+
+#[cfg(test)]
+mod death_loot_context_tests;
+
+mod death_loot_context;

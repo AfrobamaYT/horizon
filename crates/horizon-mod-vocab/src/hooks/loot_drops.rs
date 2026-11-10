@@ -20,6 +20,10 @@ pub trait Hooks {
     /// player, an explosion or a mob breaks, not other breaks (leaves decaying,
     /// a torch losing its wall, a piston, `/setblock ... destroy`), nor a
     /// creative break or a tool that can't harvest the block, nor experience.
+    /// For deaths, `context.damage_source` carries the death invocation's
+    /// damage type and causing/direct IDs (not remembered player credit), and
+    /// `context.tool` is the killer's captured held stack, including components.
+    /// No killer hand means None; block and use drops retain their tool meaning.
     /// Server-side, for every player.
     #[hook(
         side = "server",
