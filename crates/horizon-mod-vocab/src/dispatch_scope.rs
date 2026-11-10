@@ -6,13 +6,6 @@
 use crate::content::crash::ModCall;
 use std::sync::OnceLock;
 
-static PROFILING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Set the dispatch activity flag from the platform profiler control path.
-#[doc(hidden)]
-pub fn set_profiling(on: bool) {
-    PROFILING.store(on, std::sync::atomic::Ordering::Relaxed);
-}
-
 static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 
 /// Platform callbacks, installed once before dispatch starts.
@@ -20,7 +13,7 @@ static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 pub struct Backend {
     pub enter: fn(ModGuardFactory, ModCall) -> ModGuard,
     pub leave: fn(State),
-    pub current_native: fn() -> Option<ModCall>,
+    pub profiler_enabled: &'static std::sync::atomic::AtomicBool,
     pub current_converted: fn() -> Option<crate::content::crash::ConvertedCall>,
     pub enter_converted: fn(
         crate::content::crash::ConvertedCall,
@@ -48,8 +41,6 @@ pub struct Timing {
 /// The outer attribution and optional timing record restored at scope exit.
 #[doc(hidden)]
 pub struct State {
-    pub outer_frame: Option<u64>,
-    pub outer_call: Option<ModCall>,
     pub timing: Option<Timing>,
 }
 
@@ -58,13 +49,13 @@ pub struct State {
 #[doc(hidden)]
 pub struct ModGuardFactory {
     leave: fn(State),
-    owner: (Option<u64>, Option<ModCall>),
+    owner: (u64, Option<ModCall>),
 }
 impl ModGuardFactory {
     /// Consume the capability, transferring the backend's per-call state.
     pub fn finish(self, state: State) -> ModGuard {
         ModGuard {
-            owner: self.owner,
+            owner: Some(self.owner),
             _timing: state.timing.map(|timing| TimingGuard {
                 leave: self.leave,
                 timing,
@@ -78,14 +69,16 @@ impl ModGuardFactory {
 /// inert; otherwise Drop restores attribution, including during unwinding.
 #[must_use]
 pub struct ModGuard {
-    owner: (Option<u64>, Option<ModCall>),
+    owner: Option<(u64, Option<ModCall>)>,
     _timing: Option<TimingGuard>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
     #[inline]
     fn drop(&mut self) {
-        crate::content::crash::pop(self.owner.0, self.owner.1);
+        if let Some((frame, call)) = self.owner {
+            crate::content::crash::pop(frame, call);
+        }
     }
 }
 
@@ -96,8 +89,6 @@ struct TimingGuard {
 impl Drop for TimingGuard {
     fn drop(&mut self) {
         (self.leave)(State {
-            outer_frame: None,
-            outer_call: None,
             timing: Some(self.timing),
         });
     }
@@ -114,9 +105,12 @@ pub fn install(backend: Backend) -> Result<(), &'static str> {
 
 #[inline]
 pub(crate) fn enter(call: ModCall) -> ModGuard {
-    let owner = crate::content::crash::push(call);
-    if PROFILING.load(std::sync::atomic::Ordering::Relaxed) {
-        if let Some(backend) = BACKEND.get_or_init(|| None) {
+    if let Some(backend) = BACKEND.get_or_init(|| None) {
+        let owner = crate::content::crash::push(call);
+        if backend
+            .profiler_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             return (backend.enter)(
                 ModGuardFactory {
                     leave: backend.leave,
@@ -125,9 +119,14 @@ pub(crate) fn enter(call: ModCall) -> ModGuard {
                 call,
             );
         }
+        return ModGuard {
+            owner: Some(owner),
+            _timing: None,
+            _thread: std::marker::PhantomData,
+        };
     }
     ModGuard {
-        owner,
+        owner: None,
         _timing: None,
         _thread: std::marker::PhantomData,
     }

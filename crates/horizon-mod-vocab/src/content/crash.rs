@@ -3,36 +3,56 @@ pub use crate::dispatch_scope::ModGuard;
 use crate::dispatch_scope::backend;
 use std::borrow::Cow;
 use std::cell::Cell;
+// Frame identity is part of crash ownership: converted-package scopes must be
+// hidden by nested native calls and must expire when their owning frame exits.
+#[derive(Clone, Copy)]
+struct CrashOwner {
+    call: Option<ModCall>,
+    frame: u64,
+    next_frame: u64,
+}
 thread_local! {
- static OWNER: Cell<Option<ModCall>> = const { Cell::new(None) };
- static FRAME: Cell<Option<u64>> = const { Cell::new(None) };
- static NEXT: Cell<u64> = const { Cell::new(0) };
+    static CURRENT_CRASH_OWNER: Cell<CrashOwner> = const { Cell::new(CrashOwner {
+        call: None, frame: 0, next_frame: 0,
+    }) };
 }
 #[doc(hidden)]
 pub fn native_frame() -> Option<u64> {
-    FRAME.try_with(Cell::get).ok().flatten()
-}
-#[inline]
-pub(crate) fn push(call: ModCall) -> (Option<u64>, Option<ModCall>) {
-    let frame = NEXT
-        .try_with(|next| {
-            let frame = next.get().checked_add(1);
-            if let Some(frame) = frame {
-                next.set(frame)
-            }
-            frame
+    CURRENT_CRASH_OWNER
+        .try_with(|owner| {
+            let frame = owner.get().frame;
+            (frame != 0).then_some(frame)
         })
         .ok()
-        .flatten();
-    (
-        FRAME.try_with(|c| c.replace(frame)).ok().flatten(),
-        OWNER.try_with(|c| c.replace(Some(call))).ok().flatten(),
-    )
+        .flatten()
 }
 #[inline]
-pub(crate) fn pop(frame: Option<u64>, owner: Option<ModCall>) {
-    let _ = FRAME.try_with(|c| c.set(frame));
-    let _ = OWNER.try_with(|c| c.set(owner));
+pub(crate) fn push(call: ModCall) -> (u64, Option<ModCall>) {
+    CURRENT_CRASH_OWNER
+        .try_with(|owner| {
+            let mut current = owner.get();
+            let outer = (current.frame, current.call);
+            current.frame = match current.next_frame.checked_add(1) {
+                Some(next) => {
+                    current.next_frame = next;
+                    next
+                }
+                None => 0,
+            };
+            current.call = Some(call);
+            owner.set(current);
+            outer
+        })
+        .unwrap_or((0, None))
+}
+#[inline]
+pub(crate) fn pop(frame: u64, call: Option<ModCall>) {
+    let _ = CURRENT_CRASH_OWNER.try_with(|owner| {
+        let mut current = owner.get();
+        current.frame = frame;
+        current.call = call;
+        owner.set(current);
+    });
 }
 // no wire: process-local crash attribution uses static runtime identities; not a hook payload.
 /// A call into one hook of a native mod.
@@ -135,7 +155,10 @@ impl ConvertedPackage<'_> {
 }
 /// The call currently attributed to the executing thread.
 pub fn current_native_call() -> Option<ModCall> {
-    OWNER.try_with(Cell::get).ok().flatten()
+    CURRENT_CRASH_OWNER
+        .try_with(|owner| owner.get().call)
+        .ok()
+        .flatten()
 }
 /// The current native mod identity.
 pub fn current_native_mod() -> Option<&'static str> {

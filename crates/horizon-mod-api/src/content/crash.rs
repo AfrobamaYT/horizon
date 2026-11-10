@@ -32,8 +32,6 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
 }
 fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
     factory.finish(mod_vocab::dispatch_scope::State {
-        outer_frame: None,
-        outer_call: None,
         timing: crate::__private::profiler::enter(call).map(|guard| guard.into_timing()),
     })
 }
@@ -126,7 +124,7 @@ pub(crate) fn ensure_installed() -> Result<(), &'static str> {
         mod_vocab::dispatch_scope::install(mod_vocab::dispatch_scope::Backend {
             enter: enter_native,
             leave: leave_native,
-            current_native: current_native_call,
+            profiler_enabled: &crate::__private::profiler::ENABLED,
             current_converted: current_converted_call,
             enter_converted,
             set_detail: |key, value| set_detail(key, value),
