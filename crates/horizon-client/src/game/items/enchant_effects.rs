@@ -117,8 +117,26 @@ impl Game<'_> {
         }
         (0.2 * (1.0 + total)) as f32
     }
-    /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
+    /// The wear `ItemStack.hurtAndBreak` goes on to apply for `amount` points:
+    /// what Unbreaking leaves (`EnchantmentHelper.processDurabilityChange`),
+    /// then what the item's parts make of it (`IItemExtension.damageItem`).
     pub(super) fn durability_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        let loss = self.unbreaking_loss(stack, amount);
+        if loss == 0 || self.remote.is_some() {
+            return loss;
+        }
+        // One table lookup tells whether any part of this item listens; with none,
+        // the stack is not converted and no host is made.
+        if !mod_api::__private::item_listens(mod_api::HookId::DamageItem, &stack.item) {
+            return loss;
+        }
+        let mut points = loss.min(i32::MAX as u32) as i32;
+        let mut canceled = false;
+        self.native_damage_item(stack, &mut points, &mut canceled);
+        if canceled { 0 } else { points.max(0) as u32 }
+    }
+    /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
+    fn unbreaking_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         let e = &world_stations!(self).enchantments;
         if !e.has_component(stack, "minecraft:item_damage") {
             return amount;
@@ -140,29 +158,13 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let loss = self.modify_wear(stack, amount);
+        let loss = self.durability_loss(stack, amount);
         if loss > 0 {
             self.trigger_item_durability(stack, (stack.damage as i32).wrapping_add(loss as i32));
         }
         loss
     }
 
-    /// Enchantment and mod changes to a positive durability loss, before the
-    /// durability-changed advancement and the stack write.
-    pub(super) fn modify_wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let mut loss = self.durability_loss(stack, amount);
-        // The mods hear a server player's wear once Unbreaking has had its say,
-        // and may change it or stop it.
-        if loss > 0
-            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
-        {
-            let mut points = loss as i32;
-            let mut cancel = false;
-            self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
-            loss = if cancel { 0 } else { points.max(0) as u32 };
-        }
-        loss
-    }
     /// `getEnchantedDamage - base`: damage bonus of the held weapon against a mob type.
     pub(super) fn enchant_damage_bonus(&mut self, target: &str, victim: Option<u32>) -> f32 {
         self.enchanted_damage(target, 0.0, victim)

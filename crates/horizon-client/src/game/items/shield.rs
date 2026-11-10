@@ -350,4 +350,45 @@ mod durability_tests {
             assert!(game.using.is_none());
         });
     }
+
+    /// The wear a raised shield takes from a blocked hit (8 points here), through the part of the
+    /// shield: halved to 4, canceled to none, and as vanilla (8) for the part-less item next to it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn a_damage_item_part_changes_the_wear_of_a_blocking_shield() {
+        use crate::game::damage_item_tests::{Rule, with_wear_part};
+        with_wear_part("minecraft:shield", Rule::Halve, |game, wear| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let block = |game: &mut Game<'_>| {
+                game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+                game.using = Some((OFFHAND_SLOT, 20));
+                game.after_block(
+                    BlockOutcome {
+                        hurt: false,
+                        blocked: 0.0,
+                        shield_damage: 8,
+                        fully_blocked: true,
+                        sound: false,
+                        knockback: false,
+                        canceled: false,
+                        dealt: 0.0,
+                    },
+                    (None, false),
+                    HurtSource {
+                        damage_type: "minecraft:generic",
+                        causing: 0,
+                        direct: 0,
+                        position: None,
+                    },
+                    &horizon_client::health::NO_ATTACK,
+                );
+                game.offhand.as_ref().unwrap().damage
+            };
+            assert_eq!(block(game), 4);
+            assert_eq!(wear.take_asked(), [8]);
+            wear.set(Rule::Cancel);
+            assert_eq!(block(game), 0);
+            assert_eq!(wear.take_asked(), [8]);
+        });
+    }
 }
