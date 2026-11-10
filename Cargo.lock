@@ -1853,6 +1853,7 @@ dependencies = [
  "toml",
  "unicode-bidi",
  "ureq",
+ "wat",
  "wgpu",
  "winit",
  "winresource",

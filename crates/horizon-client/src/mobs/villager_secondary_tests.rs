@@ -37,7 +37,11 @@ fn fixture(
                 Vec3::new(0.0, 64.0, 0.0),
                 0.0,
             );
-            super::super::super::villager::set_profession(&mut m, profession);
+            super::super::super::villager::set_profession(
+                &mut m,
+                horizon_client::mobs::villager::profession_table(),
+                usize::from(profession as u8),
+            );
             let tags = if entries.is_empty() {
                 HashMap::new()
             } else {

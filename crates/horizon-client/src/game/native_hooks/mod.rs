@@ -76,7 +76,8 @@ use mod_api::{
     HandRender, InteractionAttempt, InteractionKey, LayerDefinition, LifecycleContext, LivingRef,
     NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
     PoiTypeExtensions, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, VillagerProfessions,
+    WorldPhase,
 };
 use mod_api::{
     ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,

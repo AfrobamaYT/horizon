@@ -13,3 +13,5 @@ pub(crate) mod package_side;
 pub(crate) mod packets;
 pub(crate) mod registry_keys;
 pub(crate) mod resource;
+
+pub(crate) mod professions;
