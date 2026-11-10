@@ -103,11 +103,50 @@ pub trait LevelsBackend {
         level: LevelRef,
         handle: &DatapackHandle,
     ) -> Result<Vec<(String, DatapackValue)>, DatapackReadError>;
+    /// Side: both.
+    /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
+    /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool; for a block it has no
+    /// rule for, the tool's default mining speed), before the player's enchantments, attributes, water, ground and
+    /// `player_break_speed` hooks, which `player_break_speed` itself hears. None for a stale
+    /// handle or an unloaded or out-of-height position. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32>;
     /// Side: client.
     /// The biome in the client's current level (`LevelReader.getBiome`). None before
     /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.
     #[access(WorldOnly)]
     fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: both.
+    /// A biome's natural spawners by category (`MobSpawnSettings.getMobs`), from the level's
+    /// biome table, data packs and biome modifiers included, categories sorted by name. None for a
+    /// stale handle or an unknown biome. This is the biome's own list; `potential_spawns` is
+    /// what a position gets after mods edit it. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_spawners(&self, level: LevelRef, biome: &str) -> Option<Vec<BiomeSpawners>>;
+    /// Side: both.
+    /// A biome's own sky, fog and water colours (`BiomeSpecialEffects`), from the level's biome
+    /// table. None for a stale handle or an unknown biome. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_effects(&self, level: LevelRef, biome: &str) -> Option<BiomeEffects>;
+    /// Side: both.
+    /// Whether a biome is in a biome tag (`Holder.is(TagKey)`), by the level's tag tables: the
+    /// vanilla tags, the world's data packs and mods' biome tags merged. `tag` is a namespaced
+    /// id (`minecraft:is_forest`), with or without a leading `#`. A tag no pack defines holds
+    /// nothing, so false. None for a stale handle, an unknown biome or a level that has no tag
+    /// tables loaded. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_in_tag(&self, level: LevelRef, biome: &str, tag: &str) -> Option<bool>;
+    /// Side: both.
+    /// A biome's climate by id (`minecraft:plains`), from the level's biome table, data packs
+    /// included: temperature, downfall, whether it has precipitation and the frozen modifier
+    /// (`Biome.ClimateSettings`). None for a stale handle or an unknown biome. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_properties(&self, level: LevelRef, biome: &str) -> Option<BiomeProperties>;
     /// Side: both.
     /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
     /// from build height. Reads active and parked server levels or the client's current level.
@@ -918,6 +957,15 @@ pub trait LevelsBackendMut {
         progress: i32,
     ) -> bool;
     /// Side: server.
+    /// Tell the clients the block at `pos` changed (`Level.sendBlockUpdated`): its state and
+    /// block entity data are sent again at the end of the tick, without writing anything, for
+    /// a mod that changed what a block shows by other means than a block write. False, with
+    /// nothing queued, for a stale or parked handle, a client, and an unloaded or out-of-height
+    /// position. True with no player to notify (no one is in the level) when the position is
+    /// valid: the chunk is marked changed and nothing is sent.
+    #[access(WorldOnly)]
+    fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
     /// `ServerLevel.playSound(null, ...)` does, under `source`'s volume
@@ -939,7 +987,8 @@ pub trait LevelsBackendMut {
     /// within 32 blocks, as `ServerLevel.sendParticles` does: each offset is
     /// a Gaussian times `spread`, and `speed` scales their motion (a zero
     /// count sends one particle moving along `spread`). Block particle types
-    /// need `state`; item, trail and vibration particles aren't supported.
+    /// need `state`; item particles need `options.item_stack` (validated against
+    /// the item registry and stack limits). Trail and vibration remain unsupported.
     /// True means queued, not drawn.
     #[access(WorldOnly)]
     fn level_send_particles(
@@ -1139,4 +1188,30 @@ pub trait LevelsBackendMut {
     /// client, an unknown biome and an unchanged cell.
     #[access(WorldOnly)]
     fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool;
+}
+/// The handles' client writes of the `levels` area, implemented by the game and reached through [`ClientBackendMut`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
+#[doc(hidden)]
+#[horizon_mod_api_macros::host_area]
+pub trait LevelsClientBackendMut {
+    /// Side: client.
+    /// Show or clear the crack of `breaker` on the block at `pos` in this client's own view
+    /// (`LevelRenderer.destroyBlockProgress`): stages 0..9 show a crack, any other stage removes
+    /// it. Nothing is sent to the server or to other players, and a crack not updated for 400
+    /// ticks goes away. False for a stale or foreign level or before login.
+    ///
+    /// ```compile_fail
+    /// use mod_api::{LevelRef, ServerHost};
+    /// fn wrong_side(level: LevelRef, host: &mut dyn ServerHost) {
+    ///     level.set_client_break_progress(host, -1, [0, 64, 0], 3);
+    /// }
+    /// ```
+    #[access(WorldOnly)]
+    fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool;
 }

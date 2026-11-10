@@ -13,8 +13,11 @@ struct Scene {
     snapshots: Vec<Snapshot>,
     _record: Option<File>,
 }
+/// How long a test waits for a spawned actor to connect or reach a phase. Spawning and starting a process on a loaded
+/// CI runner can take seconds, and only a failing test waits this long, so it is a ceiling, not a timing check. The
+/// one test of a launch timeout passes its own short deadline.
 fn deadline() -> Instant {
-    Instant::now() + Duration::from_secs(3)
+    Instant::now() + Duration::from_secs(60)
 }
 pub(super) fn actor() -> PathBuf {
     std::env::current_exe()
@@ -702,8 +705,14 @@ fn direct_game_owns_install_resources_and_home_until_process_exit() {
     let mut child = command().spawn().unwrap();
     let end = deadline();
     while !ready.is_file() {
-        assert!(Instant::now() < end);
-        std::thread::yield_now();
+        // An actor that exits before signalling fails at once, without waiting out the ceiling.
+        assert_eq!(
+            child.try_wait().unwrap(),
+            None,
+            "actor exited before it was ready"
+        );
+        assert!(Instant::now() < end, "actor did not become ready");
+        std::thread::sleep(Duration::from_millis(5));
     }
     for directory in &directories {
         assert!(matches!(
