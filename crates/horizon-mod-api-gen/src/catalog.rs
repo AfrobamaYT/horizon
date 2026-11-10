@@ -349,7 +349,8 @@ pub const DECLARATIONS: &str = "crates/horizon-mod-vocab/src/hooks";
 /// What the catalog was declared in before the declarations: a file here is refused, never ignored.
 pub(crate) const RETIRED: &[&str] = &["native-hooks.json", "tools/native-hook-fragments"];
 
-/// The game function a hook or helper named `name` is called from, when its declaration gives no `target`.
+/// A declaration's inferred target, resolved to the definition's module by `Catalog::load`.
+/// Parsing declarations alone does not require engine sources (render-record generation).
 fn default_target(name: &str, area: &str) -> String {
     format!("horizon_client::game::native_hooks::{area}::Game<'_>::native_{name}")
 }
@@ -563,6 +564,17 @@ impl Catalog {
     /// then by name, so the order never depends on a list a PR edits.
     /// The retired JSON catalog is refused wherever it still exists.
     pub fn load(root: &Path) -> Result<Self, CatalogError> {
+        let mut catalog = Self::load_declarations(root)?;
+        crate::hook_targets::resolve(root, &mut catalog).map_err(|error| {
+            CatalogError::Declaration {
+                path: "native hook definitions".into(),
+                error,
+            }
+        })?;
+        Ok(catalog)
+    }
+
+    pub(crate) fn load_declarations(root: &Path) -> Result<Self, CatalogError> {
         let read_error = |path: &Path, e: std::io::Error| CatalogError::Read {
             path: path.display().to_string(),
             error: e.to_string(),
@@ -809,7 +821,7 @@ mod tests {
             (&base, HOOK),
             (&index, "mod base;\nmod alpha;"),
         ]);
-        let catalog = Catalog::load(&root).unwrap();
+        let catalog = Catalog::load_declarations(&root).unwrap();
         let names = catalog
             .hooks
             .iter()
@@ -817,10 +829,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(names, ["one", "two"], "base.rs first, then by name");
         fs::remove_file(root.join(&index)).unwrap();
-        assert_eq!(Catalog::load(&root).unwrap().hooks.len(), 2);
+        assert_eq!(Catalog::load_declarations(&root).unwrap().hooks.len(), 2);
         fs::write(root.join(DECLARATIONS).join("not-valid.rs"), HOOK).unwrap();
         assert!(
-            Catalog::load(&root)
+            Catalog::load_declarations(&root)
                 .unwrap_err()
                 .to_string()
                 .contains("invalid hook declaration filename")
