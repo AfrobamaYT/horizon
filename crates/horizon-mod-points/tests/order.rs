@@ -8,6 +8,7 @@ use mod_points::{
 
 #[test]
 fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
+    mod_api::__private::initialize().expect("the point fixture initializes its platform runtime");
     struct Row {
         place: PointId,
         priorities: [i32; 4],

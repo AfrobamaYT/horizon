@@ -47,6 +47,7 @@ impl mod_api::Hooks for SelfStop {
 
 #[test]
 fn one_list_registered_sealed_and_stopped() {
+    mod_api::__private::initialize().expect("the point fixture initializes its platform runtime");
     mod_api::__private::install(
         ["tick_mod", "raw_mod", "stopped_early", "self_stopping"]
             .into_iter()
