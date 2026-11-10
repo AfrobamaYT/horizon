@@ -1288,9 +1288,6 @@ impl Game<'_> {
         self.loop_context = context.game;
         self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.loop_context = self.loop_context.clone();
-        }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
         }

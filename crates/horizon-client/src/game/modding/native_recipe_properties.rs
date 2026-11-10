@@ -45,5 +45,8 @@ impl Game<'_> {
             }
         }
         Arc::make_mut(&mut self.loop_context).set_recipe_properties(Arc::new(sets));
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.loop_context = self.loop_context.clone();
+        }
     }
 }

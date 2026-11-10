@@ -38,6 +38,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::attachments` | crosses | frame accessor; no bytes |
 | `Host::item_cooldown_group` | crosses | Wire call |
 | `Host::player` | crosses | Wire call |
+| `Host::mod_recipe_property_contains` | crosses | Wire call |
 | `Host::recipes_of_type` | crosses | Wire call |
 | `Host::recipe_ingredient` | crosses | Wire call |
 | `Host::recipe_result` | crosses | Wire call |
@@ -990,6 +991,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `DataLoadContext::fluid_tags` | crosses | Wire call |
 | `DataLoadContext::setting` | crosses | Wire call |
 | `DataLoadContext::mods` | crosses | Wire call |
+| `LoopContext::mod_recipe_property_contains` | crosses | Wire call |
 | `LoopContext::side` | crosses | Wire call |
 | `LoopContext::registry` | crosses | Wire call |
 | `LoopContext::setting` | crosses | Wire call |
