@@ -1,7 +1,10 @@
 //! Vanilla point-of-interest classification for saved block states, and the
 //! states mods add to a vanilla type (`extend_poi_types`).
 use crate::chunk::BlockState;
-use std::{collections::BTreeMap, sync::RwLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Mutex, PoisonError, RwLock},
+};
 
 /// A vanilla point-of-interest identity, independent of villager professions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,12 +189,43 @@ pub struct PoiExtension {
 
 /// The states mods added, replaced as a whole each time the hook is collected.
 static EXTENSIONS: RwLock<BTreeMap<BlockState, PoiType>> = RwLock::new(BTreeMap::new());
+/// Held while the table is replaced, and by [`with_extensions`] for as long as its
+/// table is in use, so one replacement never lands in the middle of another's reads.
+static REPLACING: Mutex<()> = Mutex::new(());
 
 /// Replace the mods' additions with `additions`, in their order. Returns the
 /// refusals, one message each: an unknown POI type, and a state vanilla or an
 /// earlier addition already gives to a different type (the message names the
 /// state and both types). Adding a state to the type it already has is a no-op.
 pub fn extend(additions: Vec<PoiExtension>) -> Vec<String> {
+    let _replacing = REPLACING.lock().unwrap_or_else(PoisonError::into_inner);
+    replace(additions)
+}
+
+/// Run `f` with the table replaced by `additions` ([`extend`]'s refusals are its
+/// argument), then put the previous table back, even when `f` panics. Other
+/// replacements wait until `f` returns.
+// hidden: for tests, in this crate and the game's, that need a mod's additions in place
+#[doc(hidden)]
+pub fn with_extensions<R>(additions: Vec<PoiExtension>, f: impl FnOnce(Vec<String>) -> R) -> R {
+    struct Restore(BTreeMap<BlockState, PoiType>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            *EXTENSIONS.write().unwrap_or_else(PoisonError::into_inner) =
+                std::mem::take(&mut self.0);
+        }
+    }
+    let _replacing = REPLACING.lock().unwrap_or_else(PoisonError::into_inner);
+    let _restore = Restore(
+        EXTENSIONS
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
+    );
+    f(replace(additions))
+}
+
+fn replace(additions: Vec<PoiExtension>) -> Vec<String> {
     let mut table = BTreeMap::new();
     let mut refusals = Vec::new();
     for addition in additions {
@@ -259,48 +293,58 @@ mod tests {
         }
     }
 
-    /// The additions are one process-wide table: the tests that replace it run one at a time.
-    static TABLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn a_mod_adds_a_blocks_states_to_a_vanilla_type() {
-        let _table = TABLE
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let hay = state("minecraft:hay_block", &[("axis", "y")]);
-        assert_eq!(saved_poi(&hay), None);
-        let refusals = extend(
-            ["x", "y", "z"]
-                .into_iter()
-                .map(|axis| PoiExtension {
-                    state: state("minecraft:hay_block", &[("axis", axis)]),
-                    poi: "minecraft:home".into(),
-                })
-                .collect(),
-        );
-        assert_eq!(refusals, Vec::<String>::new());
-        assert_eq!(saved_poi(&hay), Some(PoiType::Home));
-        assert_eq!(poi_type(&hay), Some(("minecraft:home", 1)));
-        assert_eq!(extension(&hay), Some(PoiType::Home));
-        // Vanilla's own states are unchanged, and a state the mod did not name stays none.
-        assert_eq!(
-            poi_type(&state("minecraft:bell", &[])),
-            Some(("minecraft:meeting", 32))
-        );
-        assert_eq!(saved_poi(&state("minecraft:stone", &[])), None);
-        // Collecting again replaces the table.
-        assert_eq!(extend(Vec::new()), Vec::<String>::new());
-        assert_eq!(saved_poi(&hay), None);
+        with_extensions(Vec::new(), |_| assert_eq!(saved_poi(&hay), None));
+        let additions = ["x", "y", "z"]
+            .into_iter()
+            .map(|axis| PoiExtension {
+                state: state("minecraft:hay_block", &[("axis", axis)]),
+                poi: "minecraft:home".into(),
+            })
+            .collect();
+        with_extensions(additions, |refusals| {
+            assert_eq!(refusals, Vec::<String>::new());
+            assert_eq!(saved_poi(&hay), Some(PoiType::Home));
+            assert_eq!(poi_type(&hay), Some(("minecraft:home", 1)));
+            assert_eq!(extension(&hay), Some(PoiType::Home));
+            // Vanilla's own states are unchanged, and a state the mod did not name stays none.
+            assert_eq!(
+                poi_type(&state("minecraft:bell", &[])),
+                Some(("minecraft:meeting", 32))
+            );
+            assert_eq!(saved_poi(&state("minecraft:stone", &[])), None);
+            // Collecting again replaces the table.
+            assert_eq!(replace(Vec::new()), Vec::<String>::new());
+            assert_eq!(saved_poi(&hay), None);
+        });
+    }
+
+    #[test]
+    fn the_table_is_put_back_after_a_scoped_replacement() {
+        let hay = state("minecraft:hay_block", &[("axis", "y")]);
+        let home = vec![PoiExtension {
+            state: hay.clone(),
+            poi: "minecraft:home".into(),
+        }];
+        let armorer = vec![PoiExtension {
+            state: hay.clone(),
+            poi: "minecraft:armorer".into(),
+        }];
+        with_extensions(home, |_| {
+            assert_eq!(saved_poi(&hay), Some(PoiType::Home));
+            replace(armorer);
+            assert_eq!(saved_poi(&hay), Some(PoiType::Armorer));
+        });
+        with_extensions(Vec::new(), |_| assert_eq!(saved_poi(&hay), None));
     }
 
     #[test]
     fn refusals_name_both_types_and_leave_vanilla_as_it_was() {
-        let _table = TABLE
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let bell = state("minecraft:bell", &[("attachment", "floor")]);
         let lectern = state("minecraft:lectern", &[("has_book", "false")]);
-        let refusals = extend(vec![
+        let additions = vec![
             PoiExtension {
                 state: bell.clone(),
                 poi: "minecraft:home".into(),
@@ -332,40 +376,42 @@ mod tests {
                 state: state("minecraft:hay_block", &[("axis", "x")]),
                 poi: "minecraft:armorer".into(),
             },
-        ]);
-        assert_eq!(refusals.len(), 3, "{refusals:?}");
-        assert!(
-            refusals[0].contains("minecraft:bell[attachment=floor]")
-                && refusals[0].contains("minecraft:meeting")
-                && refusals[0].contains("minecraft:home"),
-            "{}",
-            refusals[0]
-        );
-        assert!(
-            refusals[1].contains("minecraft:nowhere") && refusals[1].contains("minecraft:stone"),
-            "{}",
-            refusals[1]
-        );
-        assert!(
-            refusals[2].contains("minecraft:hay_block[axis=y]")
-                && refusals[2].contains("minecraft:home")
-                && refusals[2].contains("minecraft:meeting"),
-            "{}",
-            refusals[2]
-        );
-        assert_eq!(saved_poi(&bell), Some(PoiType::Meeting));
-        assert_eq!(saved_poi(&lectern), Some(PoiType::Librarian));
-        assert_eq!(extension(&lectern), None);
-        assert_eq!(
-            saved_poi(&state("minecraft:hay_block", &[("axis", "y")])),
-            Some(PoiType::Home)
-        );
-        assert_eq!(
-            saved_poi(&state("minecraft:hay_block", &[("axis", "x")])),
-            Some(PoiType::Armorer)
-        );
-        assert_eq!(saved_poi(&state("minecraft:stone", &[])), None);
-        extend(Vec::new());
+        ];
+        with_extensions(additions, |refusals| {
+            assert_eq!(refusals.len(), 3, "{refusals:?}");
+            assert!(
+                refusals[0].contains("minecraft:bell[attachment=floor]")
+                    && refusals[0].contains("minecraft:meeting")
+                    && refusals[0].contains("minecraft:home"),
+                "{}",
+                refusals[0]
+            );
+            assert!(
+                refusals[1].contains("minecraft:nowhere")
+                    && refusals[1].contains("minecraft:stone"),
+                "{}",
+                refusals[1]
+            );
+            assert!(
+                refusals[2].contains("minecraft:hay_block[axis=y]")
+                    && refusals[2].contains("minecraft:home")
+                    && refusals[2].contains("minecraft:meeting"),
+                "{}",
+                refusals[2]
+            );
+            assert_eq!(saved_poi(&bell), Some(PoiType::Meeting));
+            assert_eq!(saved_poi(&lectern), Some(PoiType::Librarian));
+            assert_eq!(extension(&lectern), None);
+            assert_eq!(
+                saved_poi(&state("minecraft:hay_block", &[("axis", "y")])),
+                Some(PoiType::Home)
+            );
+            assert_eq!(
+                saved_poi(&state("minecraft:hay_block", &[("axis", "x")])),
+                Some(PoiType::Armorer)
+            );
+            assert_eq!(saved_poi(&state("minecraft:stone", &[])), None);
+        });
     }
 
     #[test]

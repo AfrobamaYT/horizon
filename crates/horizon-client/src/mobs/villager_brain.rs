@@ -4835,13 +4835,15 @@ mod poi_classification_tests {
                     })
                     .collect::<Vec<_>>();
                 assert_eq!(hay_states.len(), 3);
-                assert_eq!(horizon_world::poi::extend(hay_states), Vec::<String>::new());
-                assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Home));
-                assert_eq!(poi_at(w, 1, 64, 0), None);
-                let mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
-                assert!(poi_exists(&mob, w, [0, 64, 0], PoiFilter::Home));
-                assert!(!poi_exists(&mob, w, [0, 64, 0], PoiFilter::Meeting));
-                assert!(!poi_exists(&mob, w, [1, 64, 0], PoiFilter::Home));
+                horizon_world::poi::with_extensions(hay_states, |refusals| {
+                    assert_eq!(refusals, Vec::<String>::new());
+                    assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Home));
+                    assert_eq!(poi_at(w, 1, 64, 0), None);
+                    let mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+                    assert!(poi_exists(&mob, w, [0, 64, 0], PoiFilter::Home));
+                    assert!(!poi_exists(&mob, w, [0, 64, 0], PoiFilter::Meeting));
+                    assert!(!poi_exists(&mob, w, [1, 64, 0], PoiFilter::Home));
+                });
             },
         ));
     }

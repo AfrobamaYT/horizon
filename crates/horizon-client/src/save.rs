@@ -5914,8 +5914,11 @@ mod tests {
             })
             .collect();
         assert_eq!(hay_states.len(), 3);
-        assert_eq!(horizon_world::poi::extend(hay_states), Vec::<String>::new());
-        let tables = SaveTables::new(&assets);
+        // The tables are built once per registry, so they keep the addition.
+        let tables = horizon_world::poi::with_extensions(hay_states, |refusals| {
+            assert_eq!(refusals, Vec::<String>::new());
+            SaveTables::new(&assets)
+        });
         let hay = assets
             .registry
             .default_state("minecraft:hay_block")
