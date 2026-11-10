@@ -732,6 +732,11 @@ mod boat_callback_review_tests {
                 .unwrap()
                 .push((event.entity, event.mounting));
             if !event.mounting && event.entity == 72 {
+                assert_eq!(
+                    host.entity(72).unwrap().vehicle(host).map(|v| v.id()),
+                    Some(71),
+                    "callback observes original riding relationship"
+                );
                 if self.discard {
                     assert!(host.entity(72).unwrap().discard(host));
                 } else {
