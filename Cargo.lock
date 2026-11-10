@@ -2133,7 +2133,6 @@ dependencies = [
  "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
- "horizon-mod-package",
  "horizon-mod-runtime",
  "log",
  "serde",
@@ -2203,6 +2202,13 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-package",
  "log",
+]
+
+[[package]]
+name = "horizon-mod-host"
+version = "0.1.0"
+dependencies = [
+ "horizon-client",
 ]
 
 [[package]]
@@ -2567,7 +2573,6 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
- "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",
