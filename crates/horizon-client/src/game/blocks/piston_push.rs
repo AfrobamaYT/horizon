@@ -1630,12 +1630,11 @@ mod h255_mob_piston_ground_tests {
                 .iter()
                 .position(|p| p.arrow.is_some())
                 .expect("the arrow");
-            {
-                let p = &mut game.creatures.projectiles[i];
+            game.creatures.projectiles.update(i, |p| {
                 p.velocity = Vec3::ZERO;
                 p.stuck = true;
                 p.arrow.as_mut().unwrap().in_ground = true;
-            }
+            });
             let p = &game.creatures.projectiles[i];
             let (bounds, at) = (p.bounds(), [p.position.x, p.position.z]);
             let before = p.position;

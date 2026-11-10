@@ -112,12 +112,19 @@ mod tests {
         ] {
             if matches!(kind, "minecraft:falling_block" | "minecraft:tnt") {
                 assert!(game.spawn_remote_projectile(
-                    id,
                     kind,
-                    [0.0, 64.0, 0.0],
+                    &horizon_protocol::packets::play::AddEntity {
+                        id,
+                        uuid: id as u128,
+                        kind: 0,
+                        position: [0.0, 64.0, 0.0],
+                        velocity: [0.0; 3],
+                        pitch: 0,
+                        yaw: 0,
+                        head_yaw: 0,
+                        data: 0,
+                    },
                     (0.0, 0.0),
-                    [0.0; 3],
-                    0
                 ));
             } else {
                 game.spawn_entity(id, kind, [0.0, 64.0, 0.0], [0.0; 3]);
