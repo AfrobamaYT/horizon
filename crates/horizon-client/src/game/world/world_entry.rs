@@ -266,6 +266,7 @@ impl Game<'_> {
             self.res.item_defaults(),
         )?;
         class_tags::install(&mut items, self.res.facts());
+        api_values::resolve_enchantment_registry(&items)?;
         // Item damage predicates use the same frozen registry as player hurt.
         Arc::make_mut(&mut items.enchantments).bind_damage_catalog(&health.damage);
         // The recipe tables, the stations and the recipe book read one folder:

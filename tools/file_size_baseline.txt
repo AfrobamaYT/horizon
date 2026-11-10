@@ -4,7 +4,6 @@
 crates/horizon-client-render/src/gfx.rs 13575
 crates/horizon-client-render/src/options_ui.rs 5595
 crates/horizon-client/src/game/entities/minecarts.rs 3361
-crates/horizon-client/src/game/network/remote/mod.rs 12604
 crates/horizon-client/src/mobs.rs 5684
 crates/horizon-client/src/title.rs 4690
 launcher/src/backend.rs 4572
