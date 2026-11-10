@@ -927,5 +927,74 @@ jobs:
           RUSTUP_TOOLCHAIN: stable
         run: python tools/test_material_rule_library_parity.py
       - name: Compare fixed, checkerboard and End biome sources with pinned vanilla
-
-[Showing lines 1-933 of 1005 (50.0KB limit). Use offset=934 to continue.]
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_source_parity.py
+      - name: Compare seeded cave paths and failure state with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_cave_carver_parity.py
+      - name: Compare seeded canyon paths and width factors with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_canyon_carver_parity.py
+      - name: Compare initial block-writing feature algorithms with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_basic_feature_parity.py
+      - name: Compare feature placement chains with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_feature_placement_parity.py
+      - name: Compare feature placement primitives with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_placement_parity.py
+      - name: Compare anchored height providers with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_height_provider_parity.py
+      - name: Compare scalar value providers with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_value_provider_parity.py
+      - name: Compare cave and canyon geometric primitives with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_carving_geometry_parity.py
+      - name: Compare carving-mask traversal and callback mutations with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_carving_mask_parity.py
+      - name: Compare registry-bound biome-source codecs with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_source_codec_parity.py
+      - name: Compare all four biome-source kinds in chunk generation with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_generation_parity.py
+      - name: Compare chunk biome filling and failure state with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_chunk_parity.py
+      - name: Compare biome zoom and seed obfuscation with pinned vanilla
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_biome_zoom_parity.py
+      - name: Compare surface-stage chunks with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_material_stage_parity.py
+      - name: Compare block-state JSON codecs with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_block_state_codec_parity.py
+      - name: Compare vertical anchors with pinned vanilla client and server
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_anchor_parity.py
+      - name: Compare float logarithms at domain and rounding boundaries
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: python tools/test_float_log_parity.py
