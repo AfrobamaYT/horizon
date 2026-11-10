@@ -102,6 +102,14 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn owner_launch_reports_explicit_guest_to_launch_listeners() {
+    // Opt in only in a fresh child; never mutate the parallel parent process's environment.
+    if crate::game::native_entity_refs::tests::run_fresh_cases(
+        "game::native_projectile_launch_tests::owner_launch_reports_explicit_guest_to_launch_listeners",
+        "HORIZON_TEST_SEEDS",
+        &["1"],
+    ) {
+        return;
+    }
     use mod_api::{Hooks, ModEntry, ProjectileLaunchEvent, ServerHost};
     use std::sync::{Arc, Mutex};
     struct Observe(Arc<Mutex<Vec<(Option<u128>, String, Option<u128>)>>>);
