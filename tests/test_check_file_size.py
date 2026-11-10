@@ -346,11 +346,19 @@ class BaselineModeTests(RepositoryCase):
 
     def test_shrinking_a_listed_file_needs_no_baseline_edit(self):
         # The cap on the base (3200) is above the file; outside a sync nothing forces it down.
-        self.write("big.rs", 3000)
+        self.write("big.rs", 3050)
         self.commit()
         code, out = self.check()
         self.assertEqual(code, 0, out)
         self.assertIn("baselines not used", out)
+        # Main can shrink independently after this branch forks. Its newer tip is not
+        # this PR's baseline: 3050 still shrinks the common ancestor's 3100 lines.
+        self.git("checkout", "-q", "main")
+        self.write("big.rs", 3025)
+        self.commit("independent main shrink")
+        self.git("checkout", "-q", "work")
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
 
     def test_a_listed_file_still_may_not_grow_outside_a_sync(self):
         # Its entry would allow 3200 lines, but the entry is not used: the base rule holds at 3100.

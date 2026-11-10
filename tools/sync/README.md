@@ -17,9 +17,10 @@ when the full SHA in `tools/file_size_baseline.txt` changes and:
 - it is a direct parent of a merge commit in `base..HEAD`.
 
 A fake SHA, an old base ancestor, an ordinary new ancestor without a merge,
-and missing provenance all fail. Entries above the current non-test size fail
-as stale-high, including entries for deleted files. Other changes may only lower
-or remove caps. The PR body lists every cap and its growth for human review.
+and missing provenance all fail. In a sync PR, entries above the current non-test size fail
+as stale-high, including entries for deleted files. Outside a sync, entries are ignored;
+adding or raising one still fails, and shrinking a listed file needs no baseline edit.
+The PR body lists every sync cap and its growth for human review.
 
 ## Regenerating the baseline
 
