@@ -672,6 +672,12 @@ pub enum RecoveryRefused {
         /// Which field disagreed.
         field: &'static str,
     },
+    /// The prepared carrier's cargo disagrees with the operation's
+    /// before-image: cell count, positions, names or entity content.
+    CargoDisagreement {
+        /// What disagreed.
+        what: &'static str,
+    },
     /// Plain I/O.
     Io(String),
 }
@@ -709,6 +715,10 @@ impl fmt::Display for RecoveryRefused {
             Self::IdentityDisagreement { field } => write!(
                 f,
                 "world load refused: the operation file's {field} disagrees with the journal"
+            ),
+            Self::CargoDisagreement { what } => write!(
+                f,
+                "world load refused: the prepared carrier's cargo disagrees: {what}"
             ),
             Self::Io(why) => write!(f, "recovery I/O: {why}"),
         }
@@ -788,6 +798,40 @@ pub fn recover(
         })?;
         if carrier.uuid() != operation.uuid || carrier.generation() != operation.generation {
             return Err(RecoveryRefused::IdentityDisagreement { field: "carrier" });
+        }
+        // The cargo itself must match the operation's before-image —
+        // cell count, names and entity content — so a carrier that is
+        // short of cells, or carries different ones, never strips a
+        // source it cannot put back.
+        if carrier.cells().len() != operation.cells.len() {
+            return Err(RecoveryRefused::CargoDisagreement {
+                what: "cell count",
+            });
+        }
+        for cell in &operation.cells {
+            let local = [
+                cell.local[0],
+                cell.local[1],
+                cell.local[2],
+            ];
+            let Some(carried) = carrier.cells().iter().find(|c| {
+                [c.pos().x(), c.pos().y(), c.pos().z()] == local && c.name() == cell.before.name
+            })
+            else {
+                return Err(RecoveryRefused::CargoDisagreement { what: "cell state" });
+            };
+            let carried_entity = carried.data().map(|data| {
+                horizon_core::nbt::read_named(&data, horizon_core::nbt::Limits::saved())
+                    .map(|(named, _)| named.tag)
+            });
+            let same_entity = match (&carried_entity, &cell.before.entity) {
+                (None, None) => true,
+                (Some(Ok(found)), Some(expected)) => entities_equal(found, expected),
+                _ => false,
+            };
+            if !same_entity {
+                return Err(RecoveryRefused::CargoDisagreement { what: "entity content" });
+            }
         }
     }
     let mut chunks: Vec<[i32; 2]> = Vec::new();

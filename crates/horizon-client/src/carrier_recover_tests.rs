@@ -190,10 +190,12 @@ fn assemble_chest(op_id: u64, world: [i32; 3]) -> Operation {
 
 /// Writes the operation file and the `prepared` journal record, in the
 /// durable order: file first, journal second.
-/// Publishes the operation file, then — as a live assembly does before
-/// `prepared` — the immutable carrier carrying the before-images'
-/// cargo, then the journal's prepared record.
-fn prepare(store: &mut Store, operation: &Operation) {
+/// Publishes the operation file, the immutable carrier (standing in
+/// for the live assembly's own publication before `prepared` — the
+/// live order is pinned by the live test in game/world/), then the
+/// journal's prepared record. Store-level tests use this helper; the
+/// live boundary itself is verified by the carrier_transfers tests.
+fn prepare_with_published_carrier(store: &mut Store, operation: &Operation) {
     let encoded = encode_operation(operation).unwrap();
     store.write_operation(operation.op_id, &encoded).unwrap();
     if operation.kind == OpKind::Assemble {
@@ -312,7 +314,7 @@ fn a_crash_after_prepared_takes_the_before_image_to_the_after_image() {
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     // The carrier wins: its file was durable before the world changed.
     let report = recover(
         &mut store,
@@ -373,7 +375,7 @@ fn a_crash_mid_chunk_saves_finishes_only_the_untouched_side() {
             entity: None,
         },
     });
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     let report = recover(
         &mut store,
         &fixture.region(),
@@ -400,7 +402,7 @@ fn a_crash_after_every_chunk_before_committed_only_verifies() {
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     let report = recover(
         &mut store,
         &fixture.region(),
@@ -424,7 +426,7 @@ fn a_block_placed_after_the_commit_survives() {
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     let _ = recover(
         &mut store,
         &fixture.region(),
@@ -476,7 +478,7 @@ fn a_cell_holding_neither_image_refuses_the_load() {
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     match recover(
         &mut store,
         &fixture.region(),
@@ -538,7 +540,7 @@ fn a_disassembly_places_its_after_image_with_the_entity() {
             },
         }],
     };
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     let report = recover(
         &mut store,
         &fixture.region(),
@@ -624,7 +626,7 @@ fn damaged_regions_refuse_without_generating_content() {
         );
         let mut store = fixture.store();
         let operation = assemble_chest(store.next_op_id(), chest_at);
-        prepare(&mut store, &operation);
+        prepare_with_published_carrier(&mut store, &operation);
         let region = fixture.region().join("r.0.0.mca");
         (fixture, store, position, region, chest_at)
     }
@@ -745,7 +747,7 @@ fn damaged_regions_refuse_without_generating_content() {
         let mut store = fixture.store();
         let chest_at = [4, 0, 4];
         let operation = assemble_chest(store.next_op_id(), chest_at);
-        prepare(&mut store, &operation);
+        prepare_with_published_carrier(&mut store, &operation);
         match recover(
             &mut store,
             &fixture.region(),
@@ -766,7 +768,7 @@ fn an_affected_chunk_without_a_region_refuses() {
     let fixture = Fixture::new("no-region");
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), [4, 0, 4]);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     match recover(
         &mut store,
         &fixture.region(),
@@ -841,7 +843,7 @@ fn an_operation_of_another_dimension_leaves_this_level_untouched() {
     let op_id = store.next_op_id();
     let mut operation = assemble_chest(op_id, chest_at);
     operation.dimension = "minecraft:the_nether".to_string();
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     match recover(
         &mut store,
         &fixture.region(),
@@ -881,7 +883,7 @@ fn two_operations_replay_one_after_the_other() {
     let mut store = fixture.store();
 
     let operation = assemble_chest(store.next_op_id(), first_at);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     let report = recover(
         &mut store,
         &fixture.region(),
@@ -895,7 +897,7 @@ fn two_operations_replay_one_after_the_other() {
     // The second operation carries a different UUID: the first owns 7.
     let mut operation = assemble_chest(store.next_op_id(), second_at);
     operation.uuid = 8;
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     let report = recover(
         &mut store,
         &fixture.region(),
@@ -935,7 +937,7 @@ fn a_prepared_assembly_recovery_owns_the_cargo_in_a_carrier_file() {
     let mut store = fixture.store();
     let mut operation = assemble_chest(store.next_op_id(), chest_at);
     operation.cells[0].before.entity = Some(entity_with_items(8));
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
 
     let report = recover(
         &mut store,
@@ -995,7 +997,7 @@ fn an_occupied_uuid_refuses_and_keeps_the_first_carrier() {
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
     recover(
         &mut store,
         &fixture.region(),
@@ -1051,7 +1053,7 @@ fn recovery_refuses_a_mismatched_operation_identity() {
         );
         let mut store = fixture.store();
         let operation = assemble_chest(store.next_op_id(), chest_at);
-        prepare(&mut store, &operation);
+        prepare_with_published_carrier(&mut store, &operation);
         // Patch the operation file's identity field and re-encode; the
         // journal still names the original.
         let patched = match mismatch {
@@ -1120,7 +1122,7 @@ fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
     let mut store = fixture.store();
     let mut operation = assemble_chest(store.next_op_id(), chest_at);
     operation.cells[0].before.entity = Some(entity_with_items(5));
-    prepare(&mut store, &operation);
+    prepare_with_published_carrier(&mut store, &operation);
 
     match recover(
         &mut store,
@@ -1144,4 +1146,127 @@ fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
             panic!("a differing entity under a matching state must not pass silently: {other:?}")
         }
     }
+    /// (a2) A prepared assembly whose carrier file is gone: recovery
+    /// refuses with a reason, the source keeps its cargo, the journal
+    /// stays prepared, and a second run refuses again — the cargo is
+    /// never lost to a silent pass.
+    #[test]
+    fn a_missing_carrier_file_refuses_and_keeps_the_source() {
+        let fixture = Fixture::new("missing-carrier");
+        let position = ChunkPos::new(0, 0);
+        let chest_at = [4, 0, 4];
+        put_chunk(
+            &fixture,
+            position,
+            &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
+        );
+        let mut store = fixture.store();
+        let operation = assemble_chest(store.next_op_id(), chest_at);
+        prepare_with_published_carrier(&mut store, &operation);
+        // The crash also lost the carrier file.
+        fs::remove_file(
+            fixture
+                .data()
+                .join(format!("horizon_carrier_{:032x}-1.nbt", 7_u128)),
+        )
+        .unwrap();
+
+        for attempt in 1..=2 {
+            match recover(
+                &mut store,
+                &fixture.region(),
+                &AllStatesKnown,
+                "minecraft:overworld",
+            ) {
+                Err(RecoveryRefused::OperationUnreadable(why)) => {
+                    assert!(why.contains("carrier file"), "{attempt}: {why}");
+                }
+                other => panic!("{attempt}: a missing carrier must refuse, got {other:?}"),
+            }
+            // The journal is still prepared and the source untouched.
+            assert!(
+                store.journal().in_progress.is_some(),
+                "{attempt}: the operation stays prepared"
+            );
+            let root = get_chunk(&fixture, position).unwrap();
+            assert_eq!(chest_items(&root, chest_at), Some(8), "{attempt}");
+        }
+    }
+
+    /// (a3) Recovery verifies the cargo against the journal: the carrier
+    /// must carry exactly the operation's before-image cells — count,
+    /// positions, names and entity content — not merely agree on UUID
+    /// and generation.
+    #[test]
+    fn a_carrier_short_of_the_operations_cells_refuses() {
+        let fixture = Fixture::new("short-carrier");
+        let position = ChunkPos::new(0, 0);
+        let first = [4, 0, 4];
+        let second = [8, 0, 8];
+        put_chunk(
+            &fixture,
+            position,
+            &chunk_root_at(
+                chest_state_tag(),
+                &[(first, vec![7; 8]), (second, vec![7; 8])],
+                0,
+                0,
+            ),
+        );
+        let mut store = fixture.store();
+        // The operation strips two cells...
+        let mut operation = assemble_chest(store.next_op_id(), first);
+        operation.cells.push(OperationCell {
+            world: second,
+            local: [1, 0, 0],
+            before: CellImage {
+                name: "minecraft:chest".to_string(),
+                properties: vec![("facing".to_string(), "north".to_string())],
+                entity: Some(entity_with_items(8)),
+            },
+            after: CellImage {
+                name: "minecraft:air".to_string(),
+                properties: Vec::new(),
+                entity: None,
+            },
+        });
+        // ...but the published carrier carries only one (same UUID and
+        // generation, one cell short).
+        let mut short = operation.clone();
+        short.cells.pop();
+        store
+            .write_operation(operation.op_id, &encode_operation(&operation).unwrap())
+            .unwrap();
+        store
+            .write_carrier(
+                operation.uuid,
+                operation.generation,
+                &carrier_of(&short),
+            )
+            .unwrap();
+        store
+            .begin(
+                operation.kind,
+                operation.uuid,
+                operation.generation,
+                &operation.dimension,
+            )
+            .unwrap();
+
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::CargoDisagreement { .. }) => {}
+            other => panic!("a short carrier must refuse, got {other:?}"),
+        }
+        // Nothing was touched: both source cells keep their cargo.
+        let root = get_chunk(&fixture, position).unwrap();
+        assert_eq!(chest_items(&root, first), Some(8));
+        assert_eq!(chest_items(&root, second), Some(8));
+        assert!(store.journal().in_progress.is_some());
+    }
+
 }

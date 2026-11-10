@@ -890,6 +890,100 @@ mod tests {
         });
     }
 
+    /// (a1) The live order, not the test helper: a real carrier_assemble
+    /// whose flush fails after prepared, then recovery — the cargo (cells,
+    /// states, block entities, items) must be in the published carrier
+    /// file, and the source cell empty. If the live code ever publishes
+    /// the carrier after prepared again, this test fails.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_live_assembly_publishes_the_cargo_before_prepared() {
+        let root = transfer_root("live-cargo");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            let air = registry.default_state("minecraft:air").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.world.set(6, 64, 4, chest).unwrap();
+            game.world.block_entities.insert(
+                (4, 64, 4),
+                horizon_client::chunk::block_entity::BlockEntity::Chest(Vec::new()),
+            );
+            game.world.block_entities.insert(
+                (6, 64, 4),
+                horizon_client::chunk::block_entity::BlockEntity::Chest(vec![
+                    None,
+                    Some(horizon_client::items::ItemStack {
+                        item: "minecraft:stone".into(),
+                        count: 3,
+                        damage: 0,
+                        extra: None,
+                    }),
+                ]),
+            );
+
+            // Crash after prepared.
+            game.world.carrier_fences.fail_flush = true;
+            assert!(
+                game.carrier_assemble(
+                    21,
+                    &[BlockPos::new(4, 64, 4), BlockPos::new(6, 64, 4)]
+                )
+                .is_err()
+            );
+
+            // Recovery, as the next open runs it.
+            let mut store = match crate::carrier_store::Store::open(&root).unwrap() {
+                crate::carrier_store::Opened::Live(store) => store,
+                _ => panic!("the store must reopen"),
+            };
+            let region = root.join("dimensions/minecraft/overworld/region");
+            let states = crate::carrier_store::RegistryStates::new(registry);
+            let report =
+                crate::carrier_store::recover(&mut store, &region, &states, "minecraft:overworld")
+                    .unwrap();
+            assert_eq!(report.applied + report.verified, 1);
+            assert!(store.journal().in_progress.is_none());
+
+            // The source cells are empty.
+            for x in [4, 6] {
+                assert_eq!(game.world.block(x, 64, 4), air);
+            }
+
+            // The cargo lives in the published carrier: both cells, the
+            // chest states, and the entities' items.
+            let bytes = std::fs::read(
+                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 21_u128)),
+            )
+            .unwrap();
+            let carrier = codec::decode(&bytes).unwrap();
+            assert_eq!(carrier.cells().len(), 2, "the whole cargo is carried");
+            let names: Vec<&str> = carrier.cells().iter().map(|c| c.name()).collect();
+            assert!(names.iter().all(|n| *n == "minecraft:chest"));
+            // The entity payload rides each cell; one of them carries
+            // an item stack.
+            let carried: Vec<usize> = carrier
+                .cells()
+                .iter()
+                .map(|c| c.data().map(|d| d.len()).unwrap_or(0))
+                .collect();
+            assert!(
+                carried.iter().all(|len| *len > 0),
+                "both entities are carried: {carried:?}"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A flush that fails after `prepared`: the fences hold, the next
     /// transfer refuses, and recovery at a reopen finishes the
     /// operation with the chest's items in exactly one place.
