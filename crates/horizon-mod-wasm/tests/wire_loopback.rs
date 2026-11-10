@@ -161,6 +161,9 @@ impl LoopContext for Context {
     fn mods(&self) -> mod_api::LoadedMods {
         unreachable!("not used by this fixture")
     }
+    fn mod_recipe_property_contains(&self, _: &str, _: mod_api::ItemKey) -> bool {
+        false
+    }
 }
 #[unsafe(no_mangle)]
 fn __horizon_mod_hooks() -> Box<dyn Hooks> {
