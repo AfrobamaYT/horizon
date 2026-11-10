@@ -9,6 +9,7 @@ pub(super) struct ModRecipeUi {
     binding: Option<(String, String)>,
     selected: Option<String>,
     page: usize,
+    tab_page: usize,
     presentation: Option<ModPresentation>,
     overlay: Option<OverlayView>,
     stocks: Vec<ItemStack>,
@@ -18,6 +19,33 @@ pub(super) struct ModRecipeUi {
 }
 
 impl ModRecipeUi {
+    fn category_pages(&self) -> usize {
+        self.presentation
+            .as_ref()
+            .map_or(0, |p| p.tabs.len().saturating_sub(1).div_ceil(4))
+    }
+    fn visible_tabs(&self) -> Vec<usize> {
+        let total = self.presentation.as_ref().map_or(0, |p| p.tabs.len());
+        if total == 0 {
+            return Vec::new();
+        }
+        let first = 1 + self.tab_page * 4;
+        std::iter::once(0)
+            .chain(first..total.min(first + 4))
+            .collect()
+    }
+    fn turn_categories(&mut self, next: bool) -> bool {
+        let page = if next {
+            self.tab_page
+                .checked_add(1)
+                .filter(|p| *p < self.category_pages())
+        } else {
+            self.tab_page.checked_sub(1)
+        };
+        let Some(page) = page else { return false };
+        self.tab_page = page;
+        true
+    }
     pub(super) fn turn_page(&mut self, next: bool) -> bool {
         let pages = self
             .presentation
@@ -33,6 +61,31 @@ impl ModRecipeUi {
         self.overlay = None;
         true
     }
+}
+
+fn tab_arrows(
+    ui: &ModRecipeUi,
+    xo: f32,
+    yo: f32,
+) -> impl Iterator<Item = (bool, [f32; 4], &'static str, &'static str)> + use<> {
+    [
+        (
+            ui.tab_page > 0,
+            false,
+            [xo - 28.0, yo + 143.0, 12.0, 17.0],
+            "page_backward",
+            "gui.recipebook.previous_page",
+        ),
+        (
+            ui.tab_page + 1 < ui.category_pages(),
+            true,
+            [xo - 11.0, yo + 143.0, 12.0, 17.0],
+            "page_forward",
+            "gui.recipebook.next_page",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(show, next, rect, sprite, key)| show.then_some((next, rect, sprite, key)))
 }
 
 impl Game<'_> {
@@ -182,6 +235,11 @@ impl Game<'_> {
             .take(20)
             .map(|r| r.button.clone())
             .collect();
+        let tabs: Vec<_> = ui
+            .visible_tabs()
+            .into_iter()
+            .map(|index| presentation.tabs[index].clone())
+            .collect();
         let translate = |key: &str| self.translate_with_fallback(key, key);
         let text_width = |s: &str| HudBatch::text_width(&self.gui.atlas, s) as i32;
         let layout = Layout {
@@ -193,7 +251,7 @@ impl Game<'_> {
             index: self.swap_index(),
             filtering,
             search: &search,
-            tabs: &presentation.tabs,
+            tabs: &tabs,
             buttons: &buttons,
             page: ui.page,
             pages: presentation.recipes.len().div_ceil(20),
@@ -202,7 +260,32 @@ impl Game<'_> {
             translate: &translate,
             text_width: &text_width,
         };
-        let calls = screen::draw(&layout);
+        let mut calls = screen::draw(&layout);
+        if ui.overlay.is_none() {
+            for (_, [x, y, w, h], name, key) in tab_arrows(ui, xo, yo) {
+                let hover = inside(self.cursor, x, y, w, h);
+                let id = format!(
+                    "recipe_book/{name}{}",
+                    if hover { "_highlighted" } else { "" }
+                );
+                calls.push(Drawn {
+                    call: Call::Sprite {
+                        id,
+                        x: x as i32,
+                        y: y as i32,
+                        w: w as i32,
+                        h: h as i32,
+                    },
+                    pose: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                });
+                if hover {
+                    calls.push(Drawn {
+                        call: Call::Tooltip(vec![vec![screen::Run::plain(translate(key))]]),
+                        pose: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    });
+                }
+            }
+        }
         if let Some(lines) = self.paint_book(batch, &calls) {
             self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
         }
@@ -278,9 +361,15 @@ impl Game<'_> {
         if ui.page > 0 && inside(cursor, xo + 38.0, yo + 137.0, 12.0, 17.0) {
             return ui.turn_page(false);
         }
-        for (n, id) in presentation.tab_ids.iter().enumerate() {
+        for (next, [x, y, w, h], _, _) in tab_arrows(ui, xo, yo) {
+            if inside(cursor, x, y, w, h) {
+                return ui.turn_categories(next);
+            }
+        }
+        for (n, index) in ui.visible_tabs().into_iter().enumerate() {
+            let id = &presentation.tab_ids[index];
             if inside(cursor, xo - 30.0, yo + 3.0 + 27.0 * n as f32, 35.0, 27.0) {
-                ui.selected = (n != 0).then(|| id.clone());
+                ui.selected = (index != 0).then(|| id.clone());
                 ui.page = 0;
                 ui.presentation = None;
                 return true;
@@ -319,8 +408,8 @@ impl Game<'_> {
         let (xo, yo) = self.book_origin(batch);
         let ui = &self.recipe_ui.custom;
         let hovered = ui.presentation.as_ref().is_some_and(|p| {
-            p.tabs.iter().enumerate().any(|(n, tab)| {
-                tab.selected
+            ui.visible_tabs().into_iter().enumerate().any(|(n, index)| {
+                p.tabs[index].selected
                     && inside(
                         self.cursor,
                         xo - 30.0,
@@ -330,7 +419,9 @@ impl Game<'_> {
                     )
             })
         });
-        Some((open, open && hovered))
+        let arrow =
+            tab_arrows(ui, xo, yo).any(|(_, [x, y, w, h], _, _)| inside(self.cursor, x, y, w, h));
+        Some((open, open && (hovered || arrow)))
     }
     pub(super) fn mod_book_targets(&self) -> Vec<horizon_client::widgets::Target> {
         use horizon_client::widgets::{Kind, Target};
@@ -369,7 +460,9 @@ impl Game<'_> {
         let Some(p) = &ui.presentation else {
             return targets;
         };
-        for (n, tab) in p.tabs.iter().enumerate() {
+        targets.extend(tab_arrows(ui, xo, yo).map(|(_, rect, _, _)| button(rect)));
+        for (n, index) in ui.visible_tabs().into_iter().enumerate() {
+            let tab = &p.tabs[index];
             targets.push(Target {
                 rect: [xo - 30.0, yo + 3.0 + 27.0 * n as f32, 35.0, 27.0],
                 kind: Kind::Tab(tab.selected),
@@ -393,6 +486,39 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use horizon_client::recipe_book::mod_presentation::PresentedRecipe;
+
+    #[test]
+    fn overflow_tabs_are_reachable_without_moving_search_offscreen() {
+        let tabs = (0..14)
+            .map(|_| TabView {
+                icons: ("minecraft:stone".into(), None),
+                selected: false,
+                anim: 0.0,
+            })
+            .collect();
+        let mut ui = ModRecipeUi {
+            presentation: Some(ModPresentation {
+                tab_ids: (0..14).map(|i| format!("test:tab{i}")).collect(),
+                tabs,
+                recipes: Vec::new(),
+            }),
+            ..ModRecipeUi::default()
+        };
+        let mut reached = BTreeSet::new();
+        loop {
+            let indices = ui.visible_tabs();
+            assert_eq!(indices[0], 0);
+            assert!(indices.len() <= 5);
+            reached.extend(indices);
+            if !ui.turn_categories(true) {
+                break;
+            }
+        }
+        assert_eq!(reached, (0..14).collect());
+        assert_eq!(ui.visible_tabs(), vec![0, 13]);
+        assert!(ui.turn_categories(false));
+        assert_eq!(ui.visible_tabs(), vec![0, 9, 10, 11, 12]);
+    }
 
     #[test]
     fn paging_stays_within_the_current_view_and_dismisses_preview() {

@@ -234,13 +234,15 @@ The panel is disabled until the connection has an authoritative settings
 snapshot for the registered key. Opening and filtering submit requests through
 the shared custom-settings route; neither click optimistically changes the
 saved flags. Tabs show this book's category icons, with a search tab aggregating
-only this book. Search matches displayed result names. The craftable filter
+only this book. Four category tabs fit on each tab page; separate arrows reach
+additional categories while search stays visible. Search matches displayed result names. The craftable filter
 matches the display's required input alternatives against player inventory and
 visible menu contents, not the custom recipe's opaque JSON logic.
 
 Recipe buttons cycle through their declared result displays. Clicking a button
 opens a display preview using the shared recipe-book overlay painter, including
-stonecutter and smithing ingredient layouts. These previews do not place recipes,
+stonecutter and smithing ingredient layouts. Larger ingredient grids scale to fit
+the preview instead of spilling into adjacent alternatives. These previews do not place recipes,
 create ghost slots, or send a custom id through vanilla placement packets;
 placement and ghosts are tracked separately in #2599.
 
