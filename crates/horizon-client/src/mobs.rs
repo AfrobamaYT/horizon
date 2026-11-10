@@ -64,6 +64,7 @@ pub mod neutral_anger;
 pub use neutral_anger::{
     adopt_anger_end, anger_left, persistent_anger, resume_anger, settle_anger_end,
 };
+mod hit_attempt;
 mod knockback;
 pub mod nav;
 pub mod nether;
@@ -4343,29 +4344,17 @@ impl Mob {
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
             return sulfur_cube::immune_to(&source);
         }
-        // Warden and ghast overrides can answer before Entity's base check.
-        let bypasses = source.kind.bypasses_invulnerability();
         let reflected = self.reflected_fireball(&source);
-        let flagged = self.is_invulnerable() && !bypasses;
-        if self.species() == Species::Warden && warden::digging_or_emerging(self) && !bypasses {
-            return false;
-        }
-        let vanilla = self.removed
-            || flagged
-            || (source.is_fire() && self.kind.flags.fire_immune && !reflected);
-        let invulnerable = if self.species() == Species::Ghast && (flagged || reflected) {
-            self.removed || flagged
-        } else {
-            level.invulnerability_check(crate::health::Hurting::Mob(self, &source), vanilla)
-        };
-        if invulnerable {
-            return false;
+        if self.invulnerable_to_attempt(level, &source) {
+            return reflected;
         }
         *passed_invulnerability = true;
         if !self.alive() {
             return false;
         }
-        if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
+        if !self.attacker_allows_damage(&source)
+            || !ai::accepts_damage(self, &source, amount, level.attack().player_uuid)
+        {
             return false;
         }
         // LivingEntity.hurtServer refuses fire before hooks and damage processing.
