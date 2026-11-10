@@ -23,6 +23,7 @@ pub struct NativeClientHooks {
     pub living_flying_speed: fn(&LoopContext, u32, &str, &mut f32),
     pub block_jump_factor: fn(&LoopContext, BlockStateId, &mut f32),
     pub block_speed_factor: fn(&LoopContext, BlockStateId, &mut f32),
+    pub bounce_restitution: fn(&LoopContext, BlockStateId, &mut f32),
     pub player_stays_on_ground_surface: fn(&LoopContext, u32, &mut bool),
     pub ender_entity_teleport: fn(&LoopContext, u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
     pub fluid_flow: fn(&LoopContext, &str, BlockPos, &mut [f64; 3]),
@@ -183,6 +184,12 @@ pub(crate) fn block_jump_factor(context: &LoopContext, state: BlockStateId, fact
 pub(crate) fn block_speed_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.block_speed_factor)(context, state, factor);
+    }
+}
+
+pub(crate) fn bounce_restitution(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.bounce_restitution)(context, state, factor);
     }
 }
 

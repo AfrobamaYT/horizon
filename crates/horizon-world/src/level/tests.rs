@@ -93,6 +93,13 @@ pub(crate) struct TestLevel {
     pub shulker_closed: HashMap<BlockPos, bool>,
     /// The containers `container_open` reports as open.
     pub opened: HashSet<BlockPos>,
+    /// The states a part makes slime blocks (`adjust_is_slime_block`).
+    pub slime_states: HashSet<BlockStateId>,
+    /// The states a part makes sticky (`adjust_is_sticky_block`).
+    pub sticky_states: HashSet<BlockStateId>,
+    /// The (state, other) pairs a part of `state` refuses to stick to
+    /// (`adjust_can_stick_to`).
+    pub refused_sticking: HashSet<(BlockStateId, BlockStateId)>,
 }
 impl TestLevel {
     fn new(b: &Behaviours) -> Self {
@@ -125,6 +132,9 @@ impl TestLevel {
             refuse_portals: false,
             shulker_closed: HashMap::new(),
             opened: HashSet::new(),
+            slime_states: HashSet::new(),
+            sticky_states: HashSet::new(),
+            refused_sticking: HashSet::new(),
         }
     }
 }
@@ -147,6 +157,15 @@ impl LevelAccess for TestLevel {
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
+    }
+    fn adjust_is_slime_block(&self, state: BlockStateId, vanilla: bool) -> bool {
+        vanilla || self.slime_states.contains(&state)
+    }
+    fn adjust_is_sticky_block(&self, state: BlockStateId, vanilla: bool) -> bool {
+        vanilla || self.sticky_states.contains(&state)
+    }
+    fn adjust_can_stick_to(&self, state: BlockStateId, other: BlockStateId, vanilla: bool) -> bool {
+        vanilla && !self.refused_sticking.contains(&(state, other))
     }
     fn has_weak_power_hook(&self) -> bool {
         !self.weak_power.is_empty()
@@ -2207,6 +2226,90 @@ fn pistons_push_and_sticky_pistons_pull() {
         "the sticky piston pulled the block back"
     );
     assert_eq!(w.get(BlockPos::new(2, 1, 0)), air);
+}
+
+/// A piston at the origin pushes east once powered: `pushed` and `above` are the states at
+/// `(1, 1, 0)` and `(1, 2, 0)` before it extends, and the world after the push is returned.
+fn pushed_pair<'f>(mut w: World<'f>, pushed: BlockStateId, above: BlockStateId) -> World<'f> {
+    w.floor(0, 10, "stone");
+    w.set(
+        BlockPos::new(0, 1, 0),
+        w.id("piston", &[("facing", "east")]),
+    );
+    w.set(BlockPos::new(1, 1, 0), pushed);
+    w.set(BlockPos::new(1, 2, 0), above);
+    w.set(BlockPos::new(-1, 1, 0), w.id("redstone_block", &[]));
+    for _ in 0..4 {
+        w.full_tick();
+    }
+    assert_eq!(w.prop(BlockPos::new(0, 1, 0), "extended"), "true");
+    w
+}
+
+#[test]
+fn a_sticky_part_block_pulls_its_neighbours_along_with_a_piston() {
+    // Without a part, gold is an ordinary block: the stone on top stays behind.
+    // With one making gold sticky, the stone moves with it.
+    for (sticky, stone_moves) in [(false, false), (true, true)] {
+        let mut w = world!();
+        let (gold, stone, air) = (w.id("gold_block", &[]), w.id("stone", &[]), w.b().air());
+        if sticky {
+            w.level.sticky_states.insert(gold);
+        }
+        let w = pushed_pair(w, gold, stone);
+        assert_eq!(w.get(BlockPos::new(2, 1, 0)), gold);
+        let expected = if stone_moves {
+            (air, stone)
+        } else {
+            (stone, air)
+        };
+        assert_eq!(
+            (w.get(BlockPos::new(1, 2, 0)), w.get(BlockPos::new(2, 2, 0))),
+            expected,
+            "gold is sticky: {sticky}"
+        );
+    }
+}
+
+#[test]
+fn a_sticky_part_block_lets_go_of_what_can_stick_to_says_no_to() {
+    // Honey beside a sticky gold block moves with it, as two sticky blocks hold on to each other.
+    for (refuses, moved) in [(None, true), (Some(false), false), (Some(true), false)] {
+        let mut w = world!();
+        let (gold, honey) = (w.id("gold_block", &[]), w.id("honey_block", &[]));
+        w.level.sticky_states.insert(gold);
+        // `Some(false)` is gold refusing honey, `Some(true)` is honey's side refusing gold: either
+        // side saying no is enough, as the resolver asks both.
+        match refuses {
+            Some(false) => w.level.refused_sticking.insert((gold, honey)),
+            Some(true) => w.level.refused_sticking.insert((honey, gold)),
+            None => false,
+        };
+        let w = pushed_pair(w, gold, honey);
+        let air = w.b().air();
+        let expected = if moved { (air, honey) } else { (honey, air) };
+        assert_eq!(
+            (w.get(BlockPos::new(1, 2, 0)), w.get(BlockPos::new(2, 2, 0))),
+            expected,
+            "refusal {refuses:?}"
+        );
+    }
+}
+
+#[test]
+fn a_slime_part_block_is_held_apart_from_honey_as_slime_is() {
+    // Honey beside a sticky gold block moves with it, unless a part says gold is slime.
+    for (slime, honey_moves) in [(false, true), (true, false)] {
+        let mut w = world!();
+        let (gold, honey) = (w.id("gold_block", &[]), w.id("honey_block", &[]));
+        w.level.sticky_states.insert(gold);
+        if slime {
+            w.level.slime_states.insert(gold);
+        }
+        let w = pushed_pair(w, gold, honey);
+        let moved = w.get(BlockPos::new(2, 2, 0)) == honey;
+        assert_eq!(moved, honey_moves, "gold is slime: {slime}");
+    }
 }
 
 #[test]

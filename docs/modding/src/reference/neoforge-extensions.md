@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 3 | 23 | 34 | 0 |
-| `IBlockStateExtension` | 57 | 2 | 22 | 33 | 0 |
+| `IBlockExtension` | 60 | 7 | 22 | 31 | 0 |
+| `IBlockStateExtension` | 57 | 6 | 21 | 30 | 0 |
 | `IItemExtension` | 46 | 7 | 16 | 23 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -89,9 +89,9 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `getStateAtViewpoint(state, level, pos, viewpoint)` | Missing | — | No viewpoint-state query. |
 | `getBlockPathType(state, level, pos, mob)` | Partial | `BlockPart::is_pathfindable` (`hooks/is_pathfindable.rs`) | Answers whether a `PathComputationType` may pass, once per state and type; not a `PathType` per mob or position. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getAdjacentBlockPathType(state, level, pos, mob, pathType)` | Missing | — | No adjacent-path-type query. |
-| `isSlimeBlock(state)` | Missing | — | No per-state slime query; the piston/fall logic is engine-owned. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `isStickyBlock(state)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `canStickTo(state, otherState)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `isSlimeBlock(state)` | Covered | `BlockPart::is_slime_block` (`hooks/block_sticky.rs`) | Server only, asked by the piston structure resolver for its slime-beside-honey rule. A piston moving a slime block still bounces the entities it pushes off vanilla's slime block alone. |
+| `isStickyBlock(state)` | Covered | `BlockPart::is_sticky_block` (`hooks/block_sticky.rs`) | Server only, asked by the piston structure resolver; starts with vanilla's slime and honey. |
+| `canStickTo(state, otherState)` | Covered | `BlockPart::can_stick_to` (`hooks/block_sticky.rs`) | The part of `state` answers; the resolver asks both sides and needs both to say yes. |
 | `isFlammable(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Sets ignite and burn odds (`0, 0` = never burns), but there is no boolean flammable predicate. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getFireSpreadSpeed(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Ignite/spread odds (the first element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
 | `getFlammability(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Burn/destruction odds (the second element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
@@ -114,7 +114,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isEmpty(state)` | Missing | — | Air/replaceable facts exist (`block_states().replaceable`), but no `isEmpty` answer for a state. |
 | `getBubbleColumnDirection(state)` | Missing | — | Bubble-column rules are engine-owned. |
 | `shouldHideAdjacentFluidFace(state, direction, fluid)` | Missing | — | Fluid-face culling is engine-owned. |
-| `getBounceRestitution(level, pos, state, entity)` | Partial | `BlockPart::bounce_on` (`hooks/block_landing.rs`) | Edits the entity's movement after it bounced; the restitution factor is not exposed. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `getBounceRestitution(level, pos, state, entity)` | Covered | `BlockPart::bounce_restitution` (`hooks/bounce_restitution.rs`) | The factor of the state, read for the player and the mobs on both sides; no position or entity argument, and dropped items keep their own slime rule. `BlockPart::bounce_on` still edits the movement after the bounce. |
 | `getRelocability(level, pos, state)` | Missing | — | No relocation query (pistons, structure blocks). |
 | `canBeConnectedTo(state, direction, neighborBlock)` | Partial | `BlockPart::connects_to` (`hooks/connects_to.rs`) | Asks the connecting fence, wall, bars or pane (your block), not the block being connected to: a modded target cannot answer for a vanilla fence, and only those shapes ask at all. |
 | `getModelData(state, level, pos)` | Missing | — | No `ModelData`; block-entity drawing takes a `block_entity_submit` part with its own model path. |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 2 covered, 22 partial, 33 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 6 covered, 21 partial, 30 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -301,13 +301,13 @@ their rows have landed or become partial since and should be narrowed when they 
   reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds` (state-based, without a
   position or direction); `canSustainPlant` is partly `may_place_on`, which answers for the plant, not the
   soil; `canHarvestBlock` is partly `player_harvest_check`; `getToolModifiedState` is partly
-  `block_tool_modification`.
+  `block_tool_modification`; `isSlimeBlock`, `isStickyBlock`, `canStickTo` and `getBounceRestitution` are
+  Parts.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
   has content data plus `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `damageItem`
   has the global `item_damaged`; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
 - **Block group rows that still need their own answer:** `isLadder`, `getExpDrop`, `onBlockExploded`,
-  `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
-  `canStickTo`, `onDestroyedByPlayer` (all Partial or Missing above).
+  `getWeakChanges`, `onNeighborChange`, `onDestroyedByPlayer` (all Partial or Missing above).
 - **Item group rows that still need their own answer:** `onLeftClickEntity`, `onEntitySwing`,
   `onEntityItemUpdate`, `canPerformAction` (all Partial or Missing above).
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing

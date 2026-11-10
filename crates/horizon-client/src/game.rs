@@ -1383,6 +1383,27 @@ impl LevelAccess for GameLevel<'_> {
         }
         source
     }
+    fn adjust_is_slime_block(&self, state: BlockStateId, vanilla: bool) -> bool {
+        let mut slime = vanilla;
+        if self.native_authoritative {
+            self.native_is_slime_block(self.dimension, state, &mut slime);
+        }
+        slime
+    }
+    fn adjust_is_sticky_block(&self, state: BlockStateId, vanilla: bool) -> bool {
+        let mut sticky = vanilla;
+        if self.native_authoritative {
+            self.native_is_sticky_block(self.dimension, state, &mut sticky);
+        }
+        sticky
+    }
+    fn adjust_can_stick_to(&self, state: BlockStateId, other: BlockStateId, vanilla: bool) -> bool {
+        let mut sticks = vanilla;
+        if self.native_authoritative {
+            self.native_can_stick_to(self.dimension, state, other, &mut sticks);
+        }
+        sticks
+    }
     fn has_weak_power_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldCheckWeakPower)

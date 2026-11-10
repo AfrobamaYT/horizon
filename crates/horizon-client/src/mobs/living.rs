@@ -2063,7 +2063,11 @@ impl RestitutionWorld for MobRestitution<'_, '_, '_> {
     /// `Entity.getBlockBounciness`: the restitution of the block under the
     /// entity, so a mob landing on a slime block or a bed bounces too.
     fn block_bounce_restitution(&mut self, state: BlockStateId) -> Result<f32, ()> {
-        Ok(self.movement(state)?.coefficients.bounce_restitution)
+        Ok(crate::motion::modded_bounce_restitution(
+            self.world.loop_context,
+            state,
+            self.movement(state)?.coefficients.bounce_restitution,
+        ))
     }
     /// `LivingEntity.getAirDrag`.
     fn air_drag(&mut self) -> Result<f32, ()> {

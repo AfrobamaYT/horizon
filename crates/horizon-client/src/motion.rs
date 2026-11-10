@@ -92,6 +92,30 @@ pub fn native_block_speed_factor(context: &LoopContext, state: BlockStateId, fac
     crate::native_client_hooks::block_speed_factor(context, state, factor);
 }
 
+/// A block state's bounce restitution (`Block.getBounceRestitution`) is being read. Its parts may
+/// change it. Fires on replayed ticks too, so a listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_bounce_restitution(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    crate::native_client_hooks::bounce_restitution(context, state, factor);
+}
+
+/// `Block.getBounceRestitution` of `state`, whose own value is `restitution`, after its
+/// `bounce_restitution` parts, for the loop of the side that ticks the entity. A part's
+/// non-finite answer is ignored: it would make the entity's velocity not a number.
+pub fn modded_bounce_restitution(
+    context: &LoopContext,
+    state: BlockStateId,
+    restitution: f32,
+) -> f32 {
+    let mut answer = restitution;
+    native_bounce_restitution(context, state, &mut answer);
+    if answer.is_finite() {
+        answer
+    } else {
+        restitution
+    }
+}
+
 /// The factors the `block_jump_factor` and `block_speed_factor` parts give the blocks an entity
 /// reads, for the loop of the side that ticks it.
 pub(crate) struct ModBlockFactors<'a>(pub &'a LoopContext);
@@ -2895,12 +2919,15 @@ impl RestitutionWorld for MotionWorld<'_, '_, '_> {
         Ok(self.resources.blocks.get(state)?.suppresses_bounce)
     }
     fn block_bounce_restitution(&mut self, state: BlockStateId) -> Result<f32> {
-        Ok(self
-            .resources
-            .blocks
-            .get(state)?
-            .coefficients
-            .bounce_restitution)
+        Ok(modded_bounce_restitution(
+            self.loop_context,
+            state,
+            self.resources
+                .blocks
+                .get(state)?
+                .coefficients
+                .bounce_restitution,
+        ))
     }
     fn air_drag(&mut self) -> Result<f32> {
         living_motion::air_drag(self)

@@ -4927,6 +4927,7 @@ pub(crate) mod tests {
                 block_speed_factor: |context, _, factor| {
                     *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 5.0);
                 },
+                bounce_restitution: |_, _, _| {},
                 player_stays_on_ground_surface: |context, _, staying| {
                     *staying |= context.setting("rules_mod", "stack").is_some();
                 },
