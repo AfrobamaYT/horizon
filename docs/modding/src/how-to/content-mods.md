@@ -5,7 +5,13 @@ Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-own
 `Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
-A block's `item` defaults to false in code.
+A block's `item` defaults to false in code. Each mod receives its own declaration
+batch. New identifiers from code—including block entity types and other registrar
+declarations—may use any namespace owned by that mod's manifest. Bare names use
+the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
+refuses registration with a diagnostic naming both the mod and namespace. This
+is identical for native and wasm mods. Attaching a Part to an existing vanilla or
+foreign block or item is a reference, not a new declaration, and remains allowed.
 
 Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
@@ -509,6 +515,11 @@ as vanilla's; without one it draws as the missing texture). It does nothing on i
 attribute modifiers. A world opened without the mod drops the effect from its players and mobs. Clients join a server
 only with the same mods' effects, as with its blocks.
 
+Code mods read a registered type's classification with `effect_key.category(host)`,
+which returns `EffectCategory::Beneficial`, `Harmful` or `Neutral`. For an active
+instance, use `active_effect.id.category(host)`. The read works on both sides and
+returns `None` before the effect registry is complete; it never guesses a category.
+
 A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type:
 `minecraft:snowball`, a thrown item projectile, or a living mob (below). A thrown type's `item` is one of the mod's own
 items (one type per item), and `damage` (0 by default) is what a hit deals to anything it hits, as `thrown` damage from
@@ -527,6 +538,21 @@ chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity
 it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. Not yet: a dispenser doesn't throw it, and a vanilla client on a
 server with it may be disconnected when one spawns.
+
+A code mod can launch a thrown type with
+`host.spawn_projectile_from_rotation(owner, &entity_type, &stack, offset, power, inaccuracy)`.
+This is the owner-based `Projectile.spawnProjectileFromRotation` operation, not a summon:
+ownership is set before shooting and the existing launch hook runs after insertion.
+It supports registered mod thrown types and vanilla snowballs, eggs, pearls, potions,
+experience bottles and wind charges. Spread uses the projectile's own random in x/y/z
+order, and known owner movement is inherited (vertical movement only when airborne).
+It does not consume an item, award use statistics or apply cooldowns; invalid parameters
+or unsupported types return `None` without spawning or drawing random values.
+The owner must be in the current level; a guest in another dimension is refused.
+The carried item count is one; the supplied stack is unchanged. A stack whose
+enchantments contain a nonempty `projectile_spawned` component is also refused:
+generic post-insertion enchantment effects are not implemented yet (tracked in #2670),
+so this operation never silently discards them.
 
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
@@ -621,8 +647,12 @@ namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
 A listed namespace is the mod's as its id is: its `assets/` and `data/` files load, and the game reads its tags,
-recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types are declared in
-`data/<id>/horizon/` only. `minecraft`, `c` and
+recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types may be declared in
+`data/<owned_namespace>/horizon/`. The same owned set governs code declarations.
+For example, a package with ID `ported_farmersdelight` and
+`namespaces = ["farmersdelight"]` can declare `farmersdelight:cooking_pot`
+and its `farmersdelight:` block entity type without changing saved-world IDs.
+The namespace collision fence below still applies. `minecraft`, `c` and
 `horizon` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16

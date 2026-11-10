@@ -2,7 +2,7 @@ use super::*;
 
 impl Game<'_> {
     /// The mod screen showing now, if any.
-    pub(super) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
+    pub(in crate::game) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
         self.mod_screen
             .as_ref()
             .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))

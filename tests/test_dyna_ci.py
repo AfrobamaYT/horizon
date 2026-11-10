@@ -101,6 +101,34 @@ class DynaRoutingTests(unittest.TestCase):
                 self.assertNotIn(key, exports)
             self.assertIn(str(cargo_home / "bin"), pathfile.read_text())
 
+    @unittest.skipUnless(POSIX_BASH and os.name != "nt", "needs the runner's bash")
+    def test_baked_packages_skip_the_download_and_a_partial_image_falls_back(self):
+        script = ROOT / "tools/ci/dyna_ci_deps.sh"
+        for missing in (False, True):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                stubs = root / "stubs"
+                stubs.mkdir()
+                (stubs / "dpkg-query").write_text(
+                    '#!/bin/bash\nif [ "$MISSING" = 1 ] && [ "${!#}" = libudev-dev ]; then exit 1; fi\nprintf installed\n')
+                (stubs / "apt-get").write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$APT_CALLS"\n')
+                (stubs / "dpkg-deb").write_text("#!/bin/bash\n")
+                for stub in stubs.iterdir():
+                    stub.chmod(0o755)
+                (root / "build").mkdir()
+                env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", HOME=str(root / "home"),
+                           DYNA_CI_BUILD=str(root / "build"), CARGO_HOME=str(root / "cargo"),
+                           GITHUB_ENV=str(root / "env"), GITHUB_PATH=str(root / "path"),
+                           MISSING=str(int(missing)), APT_CALLS=str(root / "apt-calls"), DYNA_CI_APT_TRIES="1")
+                result = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+                calls = (root / "apt-calls").read_text() if (root / "apt-calls").exists() else ""
+                if missing:
+                    self.assertTrue(calls, "a missing package must run the download fallback")
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(calls, "")
+                    self.assertIn("already installed", result.stdout)
+
     def run_deps_with_stub_apt(self, failures):
         """Run the script with an apt-get that fails `failures` times per command, then succeeds."""
         script = ROOT / "tools/ci/dyna_ci_deps.sh"
@@ -113,6 +141,8 @@ class DynaRoutingTests(unittest.TestCase):
                 f'n=$(cat "{root}/count" 2>/dev/null || echo 0); echo $((n + 1)) > "{root}/count"\n'
                 f'if [ "$n" -lt {failures} ]; then echo "E: File has unexpected size (mirror sync)" >&2; exit 100; fi\n')
             (stubs / "dpkg-deb").write_text("#!/usr/bin/env bash\n")
+            # No baked packages: the rootless download fallback is what these cases exercise.
+            (stubs / "dpkg-query").write_text("#!/usr/bin/env bash\nexit 1\n")
             for stub in stubs.iterdir():
                 stub.chmod(0o755)
             home = root / "home"

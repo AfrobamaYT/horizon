@@ -4,6 +4,7 @@ mod book_screen;
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+use screen_chars::chars_to_type;
 
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
@@ -549,6 +550,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// the server sent them, and what the server sent before the menu opened
 /// (`horizon:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
+    pub(super) layout_revision: u64,
     key: Pos,
     window: i32,
     block: String,
@@ -781,19 +783,6 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
     Some(left)
 }
 
-/// What of a key press's text is characters for the
-/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
-/// handling takes those, and vanilla fires no `charTyped` for them).
-/// With the edit modifier held the key is a shortcut and its characters are
-/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
-/// gets none for Ctrl+A.
-fn chars_to_type(text: &str, types_text: bool) -> String {
-    if !types_text {
-        return String::new();
-    }
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// The single admission point for all toast families. Producers decide the
@@ -926,11 +915,17 @@ impl Game<'_> {
     /// drawn this frame, which `ScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> ScreenView<'_> {
+        self.screen_view_at(screen, self.screen_rect(batch, screen))
+    }
+    /// `screen_view` with the panel `rect` the caller is laying out: the
+    /// container build tells a mod the panel it is about to draw, not the one
+    /// the previous frame drew.
+    pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
-            rect: self.screen_rect(batch, screen),
+            rect,
             slots: self.slot_count(),
             mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
@@ -2300,32 +2295,16 @@ impl Game<'_> {
         let size = self.window.as_ref()?.inner_size();
         Some([size.width, size.height])
     }
-    /// The areas the game itself draws beside the open screen's window.
+    /// The areas the game itself draws beside the open screen's window: the
+    /// container build's, or the frame's own arithmetic with no build yet.
     fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
-        let mut areas = Vec::new();
-        match self.screen {
-            Screen::Creative => {
-                let image = self.container_image(batch);
-                let (x, y, w, h) = (
-                    image.left as f32,
-                    image.top as f32,
-                    image.width as f32,
-                    image.height as f32,
-                );
-                areas.push([x, y - Creative::TAB_ROW_DEPTH, w, Creative::TAB_ROW_DEPTH]);
-                areas.push([x, y + h, w, Creative::TAB_ROW_DEPTH]);
-                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
-            }
-            Screen::Inventory if self.title.is_none() => {
-                areas.extend(self.recipe_book_rect(batch));
-                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
-                    let (x, y) = self.inventory_origin(batch);
-                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
-                }
-            }
-            _ => {}
+        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            return Vec::new();
         }
-        areas
+        match self.built_container(batch) {
+            Some(layout) => layout.exclusion(),
+            None => self.container_layout(batch).exclusion(),
+        }
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {
@@ -3258,6 +3237,11 @@ impl Game<'_> {
         self.native_screen(&block, &mut screen);
         if let Some(screen) = screen {
             self.mod_screen = Some(OpenNativeScreen {
+                layout_revision: {
+                    static NEXT: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(1);
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                },
                 key,
                 window,
                 block,
@@ -5034,6 +5018,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
             block: "gtmod:machine".into(),
