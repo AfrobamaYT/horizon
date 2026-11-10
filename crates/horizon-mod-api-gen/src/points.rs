@@ -1729,15 +1729,27 @@ mod tests {
 name = 'horizon-client'
 ",
         );
-        put("crates/horizon-client/src/lib.rs", "mod game;
-");
-        put("crates/horizon-client/src/game.rs", "mod a;
+        put(
+            "crates/horizon-client/src/lib.rs",
+            "mod game;
+",
+        );
+        put(
+            "crates/horizon-client/src/game.rs",
+            "mod a;
 mod a_b;
-");
-        put("crates/horizon-client/src/game/a.rs", "fn b_c() {}
-");
-        put("crates/horizon-client/src/game/a_b.rs", "fn c() {}
-");
+",
+        );
+        put(
+            "crates/horizon-client/src/game/a.rs",
+            "fn b_c() {}
+",
+        );
+        put(
+            "crates/horizon-client/src/game/a_b.rs",
+            "fn c() {}
+",
+        );
         put(
             "crates/horizon-mod-points/Cargo.toml",
             "[package]

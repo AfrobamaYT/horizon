@@ -186,13 +186,25 @@ fn two_points_with_one_name_fail_the_build_naming_both() {
 /// refuses them, naming both, and nothing is refused when they differ.
 #[test]
 fn paths_that_snake_case_to_one_name_fail_the_build_naming_both() {
-    let dir = crate_with("clash-paths", "pub mod a;
+    let dir = crate_with(
+        "clash-paths",
+        "pub mod a;
 pub mod a_b;
-", "");
-    fs::write(dir.join("src/a.rs"), "pub fn b_c() {}
-").unwrap();
-    fs::write(dir.join("src/a_b.rs"), "pub fn c() {}
-").unwrap();
+",
+        "",
+    );
+    fs::write(
+        dir.join("src/a.rs"),
+        "pub fn b_c() {}
+",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/a_b.rs"),
+        "pub fn c() {}
+",
+    )
+    .unwrap();
     let error = mod_points(&dir, &WireTypes::new()).unwrap_err();
     assert!(
         error.contains("chemlib::a::b_c")
@@ -200,8 +212,12 @@ pub mod a_b;
             && error.contains("a_b_c"),
         "{error}"
     );
-    fs::write(dir.join("src/a_b.rs"), "pub fn d() {}
-").unwrap();
+    fs::write(
+        dir.join("src/a_b.rs"),
+        "pub fn d() {}
+",
+    )
+    .unwrap();
     assert!(mod_points(&dir, &WireTypes::new()).is_ok());
     let _ = fs::remove_dir_all(dir);
 }
