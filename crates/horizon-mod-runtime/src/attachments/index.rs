@@ -50,6 +50,8 @@ impl<H> std::ops::Deref for AttachmentSnapshot<H> {
 }
 impl<H: Copy + Eq + Hash> AttachmentSnapshot<H> {
     /// Build a captured bucket from transferred rows, preserving their order.
+    ///
+    /// rows must have distinct (holder, generation) keys.
     pub fn from_rows(rows: Vec<AttachmentRow<H>>) -> Self {
         let mut snapshot = Self::default();
         for row in rows {
@@ -59,8 +61,10 @@ impl<H: Copy + Eq + Hash> AttachmentSnapshot<H> {
     }
 
     fn push(&mut self, row: AttachmentRow<H>) {
-        self.slots
+        let previous = self
+            .slots
             .insert((row.holder, row.generation), self.rows.len());
+        debug_assert!(previous.is_none(), "duplicate attachment residency");
         self.rows.push(row);
     }
     fn replace(&mut self, slot: usize, row: AttachmentRow<H>) -> AttachmentRow<H> {
@@ -490,6 +494,14 @@ mod tests {
         rows.iter()
             .map(|row| (row.holder, *row.entry.read(&VALUE).unwrap()))
             .collect()
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate attachment residency")]
+    fn snapshot_from_rows_refuses_duplicate_residencies() {
+        let row = AttachmentOwner::from_parts(1u32, 7).into_row(entry(7));
+        AttachmentSnapshot::from_rows(vec![row.clone(), row]);
     }
 
     #[test]
