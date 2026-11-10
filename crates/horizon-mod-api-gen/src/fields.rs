@@ -13,6 +13,7 @@ use syn::{
 
 #[derive(Clone, Debug)]
 pub struct Declaration {
+    pub id: String,
     pub target: String,
     pub mod_id: String,
     pub name: String,
@@ -34,7 +35,10 @@ impl Declaration {
         )
     }
     fn error(&self, why: impl std::fmt::Display) -> String {
-        format!("E_INJECT_FIELD: {}: {}: {why}", self.mod_id, self.target)
+        format!(
+            "E_INJECT_FIELD: {}:{}: {}: {why}",
+            self.mod_id, self.id, self.target
+        )
     }
 }
 
@@ -93,6 +97,24 @@ fn field_type(d: &Declaration) -> Result<Type, String> {
         return Err(d.error(format!("field type {} is not reachable from the target engine crate; mod-defined types require attachments", d.ty)));
     }
     Ok(ty)
+}
+
+fn check_emitted_names(declarations: &[Declaration]) -> Result<(), String> {
+    let mut owners = BTreeMap::new();
+    for d in declarations {
+        let key = (&d.target, d.field());
+        if let Some(previous) = owners.insert(key, d) {
+            return Err(d.error(format!(
+                "emitted member {} collides between {}:{} and {}:{}",
+                d.field(),
+                previous.mod_id,
+                previous.id,
+                d.mod_id,
+                d.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 struct Rewriter<'a> {
@@ -445,6 +467,7 @@ pub fn rewrite(
     module: &str,
     declarations: &[Declaration],
 ) -> Result<(String, BTreeSet<String>), String> {
+    check_emitted_names(declarations)?;
     let mut out = source.to_owned();
     let mut found = BTreeSet::new();
     for d in declarations {
@@ -487,6 +510,7 @@ pub fn stage(root: &Path, declarations: &[Declaration]) -> Result<(), String> {
     if declarations.is_empty() {
         return Ok(());
     }
+    check_emitted_names(declarations)?;
     let mut files = BTreeMap::new();
     for entry in fs::read_dir(root.join("crates")).map_err(|e| e.to_string())? {
         let dir = entry.map_err(|e| e.to_string())?.path();

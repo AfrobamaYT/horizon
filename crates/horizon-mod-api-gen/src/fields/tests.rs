@@ -1,6 +1,7 @@
 use super::*;
 fn declaration(mod_id: &str) -> Declaration {
     Declaration {
+        id: "count-slot".into(),
         target: "fixture::S".into(),
         mod_id: mod_id.into(),
         name: "count".into(),
@@ -254,4 +255,17 @@ fn field_engine_type_uses_the_target_crates_namespace() {
     let mut d = declaration("m");
     d.ty = "fixture::Counter".into();
     execute(&rewrite(source, "fixture", &[d]).unwrap().0);
+}
+
+#[test]
+fn emitted_field_collision_names_both_declaration_owners() {
+    let mut a = declaration("m");
+    a.id = "first-slot".into();
+    a.name = "_count".into();
+    let mut b = declaration("m_");
+    b.id = "second-slot".into();
+    let error = stage(Path::new("nonexistent-no-io"), &[a, b]).unwrap_err();
+    assert!(error.contains("m___count"), "{error}");
+    assert!(error.contains("m:first-slot"), "{error}");
+    assert!(error.contains("m_:second-slot"), "{error}");
 }

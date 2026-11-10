@@ -122,6 +122,7 @@ pub(super) fn stage(
             }
             if inject.kind == Kind::Field {
                 fields.push(horizon_mod_api_gen::fields::Declaration {
+                    id: inject.id.clone(),
                     target: super::internals::plain_path(&inject.at),
                     mod_id: manifest.id.clone(),
                     name: inject.with.clone(),
