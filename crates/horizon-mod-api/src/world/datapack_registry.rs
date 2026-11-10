@@ -190,6 +190,7 @@ pub enum DatapackDecodeError {
 /// A decoded entry: one value per schema field, in the schema's order.
 #[derive(Clone, Debug, PartialEq)]
 // no wire: the game's decoded candidate; a mod reads it through registry handles
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct DatapackEntry {
     /// `(field name, value)` in schema order.
     pub values: Vec<(String, DatapackValue)>,
@@ -404,8 +405,12 @@ mod tests {
         }
     }
 
+    /// NeoForge's rule for a datapack registry outside `minecraft` (its Registries guide, "Datapack
+    /// Registries"): `data/<entry namespace>/<registry namespace>/<registry path>/<entry>.json`.
+    /// It is not vanilla's, which uses the registry's path only; registration refuses a
+    /// `minecraft` key, so no vanilla-path case exists.
     #[test]
-    fn entry_files_follow_the_registry_and_entry_namespaces() {
+    fn entry_files_follow_neoforges_namespaced_registry_folder() {
         assert_eq!(
             spell().entry_file("addon:fire").as_deref(),
             Some("data/addon/example/spell/fire.json")

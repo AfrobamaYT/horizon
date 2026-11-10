@@ -153,7 +153,8 @@ pub(crate) struct Installed {
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
-    pub(crate) datapack_registries: Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
+    pub(crate) datapack_registries:
+        Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
@@ -546,7 +547,8 @@ pub struct PartRegistrar {
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
-    pub(crate) datapack_registries: Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
+    pub(crate) datapack_registries:
+        Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
