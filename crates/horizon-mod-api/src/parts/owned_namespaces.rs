@@ -46,6 +46,7 @@ impl crate::RegistrationContext {
 /// The engine consumes block/item declaration ownership refusals before loading
 /// resources. Guest dispatch retains invalid output so the owning host boundary
 /// sees and refuses it as well, rather than silently dropping a declaration.
+// hidden: engine admission plumbing, re-exported through __private for the loader.
 #[doc(hidden)]
 pub fn take_declaration_refusals(context: &crate::RegistrationContext) -> Vec<String> {
     std::mem::take(
