@@ -9428,7 +9428,7 @@ impl Game<'_> {
             _ => Direction::East,
         };
         let player = self.use_context();
-        self.with_level(|b, level, _| {
+        self.with_block_use_level(|b, level, _| {
             let mut level = DryLevel::new(level);
             let hit = horizon_core::geometry::BlockHit {
                 block: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),

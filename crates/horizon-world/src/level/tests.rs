@@ -49,6 +49,8 @@ pub(crate) struct TestLevel {
     pub block_light: HashMap<BlockPos, i32>,
     /// `Level.isClientSide`.
     pub client_side: bool,
+    pub cake_answer: Option<bool>,
+    pub cake_asks: std::cell::Cell<u32>,
     pub tick_ready: bool,
     pub block_events_ready: bool,
     /// Positions that refuse fluids, fire and piston moves, as a land claim would.
@@ -107,6 +109,8 @@ impl TestLevel {
             analog_states: HashSet::new(),
             wire_connect: HashMap::new(),
             connect: HashMap::new(),
+            cake_answer: None,
+            cake_asks: Default::default(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -128,6 +132,10 @@ impl TestLevel {
     }
 }
 impl LevelAccess for TestLevel {
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        self.cake_asks.set(self.cake_asks.get() + 1);
+        self.cake_answer.unwrap_or(vanilla)
+    }
     fn should_tick_blocks_at(&self, _chunk: ChunkPos) -> bool {
         self.block_events_ready
     }
@@ -3644,6 +3652,41 @@ fn diodes_on_downward_pistons_survive_retraction() {
             assert_eq!(w.prop(base, "extended"), "false");
         }
     }
+}
+
+#[test]
+fn cake_eligibility_is_asked_only_for_a_bite_and_controls_the_written_state() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    w.level.cake_answer = Some(false);
+    for name in ["cake", "candle_cake"] {
+        let state = w.id(name, &[]);
+        w.put(pos, state);
+        let before = w.level.cake_asks.get();
+        assert_eq!(w.use_block(pos), InteractionResult::Pass);
+        assert_eq!(w.get(pos), state);
+        assert_eq!(w.level.cake_asks.get(), before + 1);
+    }
+    let cake = w.id("cake", &[]);
+    w.put(pos, cake);
+    let before = w.level.cake_asks.get();
+    assert_eq!(
+        w.use_item(pos, "minecraft:candle"),
+        InteractionResult::Success
+    );
+    assert_eq!(
+        w.level.cake_asks.get(),
+        before,
+        "adding a candle is not eating"
+    );
+    let stone = w.id("stone", &[]);
+    w.put(pos, stone);
+    w.use_block(pos);
+    assert_eq!(w.level.cake_asks.get(), before);
+    w.level.cake_answer = Some(true);
+    w.put(pos, cake);
+    assert_eq!(w.use_empty_hand(pos), InteractionResult::Success);
+    assert_eq!(w.prop(pos, "bites"), "1");
 }
 
 #[test]

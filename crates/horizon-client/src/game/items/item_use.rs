@@ -1127,7 +1127,7 @@ pub(super) mod interact_vibration_tests {
             with_game("minecraft:stick", |game| {
                 let use_block = |game: &mut Game<'_>, name: &str| {
                     let player = game.use_context();
-                    game.with_level(|b, level, ticks| {
+                    game.with_block_use_level(|b, level, ticks| {
                         let state = b.table.default_state(b.table.block_by_name(name).unwrap());
                         b.use_without_item(
                             level,
