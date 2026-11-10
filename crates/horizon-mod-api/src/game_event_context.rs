@@ -2,7 +2,6 @@ use crate::{BlockState, EntityRef};
 
 /// Vanilla's `GameEvent.Context`: optional source and affected block state.
 /// Source facts used by vibration listeners are captured when the event is emitted.
-// exhaustive: mirrors vanilla's complete two-field GameEvent.Context value for literal construction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, horizon_mod_api_macros::Wire)]
 // exhaustive: a plain pair of optional facts that mods build directly, like vanilla's GameEvent.Context
 pub struct GameEventContext {
