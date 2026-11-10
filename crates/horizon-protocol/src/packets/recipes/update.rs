@@ -87,6 +87,8 @@ mod tests {
             &[0, 127][..],
             // One stonecutter entry with i32::MIN as its holder-set count.
             &[0, 1, 128, 128, 128, 128, 8][..],
+            // Smithing trim display with i32::MIN as its pattern holder.
+            &[0, 1, 1, 8, 0, 0, 128, 128, 128, 128, 8][..],
         ] {
             assert!(UpdateRecipes::read(&mut Reader::new(bytes)).is_err());
         }

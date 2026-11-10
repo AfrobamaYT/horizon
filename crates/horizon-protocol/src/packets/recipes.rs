@@ -146,7 +146,8 @@ impl SlotDisplay {
                             description: r.nbt()?,
                             decal: r.bool()?,
                         },
-                        id => TrimPattern::Id(id - 1),
+                        id if id > 0 => TrimPattern::Id(id - 1),
+                        _ => return Err(crate::Error::new("negative trim pattern holder")),
                     };
                     Self::SmithingTrim {
                         base,
