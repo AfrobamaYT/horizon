@@ -6,11 +6,11 @@ pub(crate) fn installed_controllers() -> &'static [ControllerInfo] {
 
 /// The ticket controllers `mods` register, for a test's mods.
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
-    if mods.is_empty() {
-        return Vec::new();
-    }
-    register_all(mods, |_| false).controllers
+pub(crate) fn registered_controllers(
+    mods: &[ModEntry],
+) -> (Vec<ControllerInfo>, Vec<crate::client::arm_pose::PoseInfo>) {
+    let registered = register_all(mods, |_| false);
+    (registered.controllers, registered.arm_poses)
 }
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]

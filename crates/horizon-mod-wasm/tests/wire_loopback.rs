@@ -189,6 +189,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             registrar: &mut dyn mod_api::Registrar,
             _: &mod_api::RegistrationContext,
         ) {
+            arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
@@ -1665,3 +1666,6 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
     assert_eq!(flow, mod_api::Flow::Continue);
     assert!(!event.cancelled);
 }
+
+#[path = "wire_loopback/arm_pose_registration.rs"]
+mod arm_pose_registration;
