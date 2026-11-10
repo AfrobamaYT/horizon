@@ -510,6 +510,12 @@ fn a_disassembly_places_its_after_image_with_the_entity() {
         &chunk_root(Tag::String("minecraft:air".into()), &[]),
     );
     let mut store = fixture.store();
+    // A disassembly consumes a held carrier: list it first, as the
+    // assembly that created it would have.
+    store
+        .begin(OpKind::Assemble, 7, 1, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
     let op_id = store.next_op_id();
     let operation = Operation {
         op_id,
@@ -855,13 +861,13 @@ fn two_operations_replay_one_after_the_other() {
     let second_at = [8, 0, 8];
     let mut root = chunk_root(
         chest_state_tag(),
-        &[(first_at, vec![1; 4]), (second_at, vec![2; 4])],
+        &[(first_at, vec![7; 8]), (second_at, vec![7; 8])],
     );
     let _ = &mut root;
     put_chunk(&fixture, position, &root);
     let mut store = fixture.store();
 
-    let mut operation = assemble_chest(store.next_op_id(), first_at);
+    let operation = assemble_chest(store.next_op_id(), first_at);
     prepare(&mut store, &operation);
     let report = recover(
         &mut store,
@@ -873,7 +879,9 @@ fn two_operations_replay_one_after_the_other() {
     assert_eq!(report.applied, 1);
     assert!(store.journal().in_progress.is_none());
 
-    operation = assemble_chest(store.next_op_id(), second_at);
+    // The second operation carries a different UUID: the first owns 7.
+    let mut operation = assemble_chest(store.next_op_id(), second_at);
+    operation.uuid = 8;
     prepare(&mut store, &operation);
     let report = recover(
         &mut store,
@@ -961,3 +969,116 @@ fn a_prepared_assembly_recovery_owns_the_cargo_in_a_carrier_file() {
 }
 
 
+/// (c) A second assembly with an occupied UUID refuses; the first
+/// carrier keeps its payload.
+#[test]
+fn an_occupied_uuid_refuses_and_keeps_the_first_carrier() {
+    let fixture = Fixture::new("uuid");
+    let position = ChunkPos::new(0, 0);
+    let chest_at = [4, 0, 4];
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
+    );
+    let mut store = fixture.store();
+    let operation = assemble_chest(store.next_op_id(), chest_at);
+    prepare(&mut store, &operation);
+    recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
+    let carrier_path = fixture
+        .data()
+        .join(format!("horizon_carrier_{:032x}-1.nbt", 7_u128));
+    let first_bytes = fs::read(&carrier_path).unwrap();
+
+    // Another transfer names the same UUID while the index holds it.
+    let result = store.begin(OpKind::Assemble, 7, 1, "minecraft:overworld");
+    assert!(
+        result.is_err(),
+        "an occupied UUID must refuse a second operation"
+    );
+    // The first carrier is untouched and still owns its cargo.
+    assert_eq!(fs::read(&carrier_path).unwrap(), first_bytes);
+    assert!(store.journal().lists(7, 1));
+}
+
+
+/// (d) `Store::begin` refuses when an operation is already open.
+#[test]
+fn begin_refuses_an_already_open_operation() {
+    let fixture = Fixture::new("nested");
+    let mut store = fixture.store();
+    store
+        .begin(OpKind::Assemble, 1, 1, "minecraft:overworld")
+        .unwrap();
+    let second = store.begin(OpKind::Assemble, 2, 1, "minecraft:overworld");
+    assert!(second.is_err(), "a nested begin must refuse");
+    // The open operation is still the first, untouched.
+    let journal = store.journal();
+    let op = journal.in_progress.as_ref().unwrap();
+    assert_eq!(op.uuid, 1);
+    assert_eq!(op.op_id, 1);
+}
+
+
+/// (e) Recovery refuses when the operation file's id, kind, UUID or
+/// generation disagrees with the journal's prepared record.
+#[test]
+fn recovery_refuses_a_mismatched_operation_identity() {
+    for mismatch in ["op_id", "kind", "uuid", "generation"] {
+        let fixture = Fixture::new(&format!("identity-{mismatch}"));
+        let position = ChunkPos::new(0, 0);
+        let chest_at = [4, 0, 4];
+        put_chunk(
+            &fixture,
+            position,
+            &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
+        );
+        let mut store = fixture.store();
+        let operation = assemble_chest(store.next_op_id(), chest_at);
+        prepare(&mut store, &operation);
+        // Patch the operation file's identity field and re-encode; the
+        // journal still names the original.
+        let patched = match mismatch {
+            "op_id" => Operation {
+                op_id: operation.op_id + 5,
+                ..operation.clone()
+            },
+            "kind" => Operation {
+                kind: OpKind::Disassemble,
+                ..operation.clone()
+            },
+            "uuid" => Operation {
+                uuid: operation.uuid + 1,
+                ..operation.clone()
+            },
+            _ => Operation {
+                generation: operation.generation + 1,
+                ..operation.clone()
+            },
+        };
+        store
+            .write_operation(operation.op_id, &encode_operation(&patched).unwrap())
+            .unwrap();
+        match recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld",
+        ) {
+            Err(RecoveryRefused::IdentityDisagreement { field, .. }) => {
+                assert_eq!(field, mismatch, "the refusal names what disagreed");
+            }
+            other => panic!("{mismatch} mismatch must refuse with a reason, got {other:?}"),
+        }
+        // Nothing was touched.
+        let root = get_chunk(&fixture, position).unwrap();
+        assert_eq!(chest_items(&root, chest_at), Some(8));
+        assert!(store.journal().in_progress.is_some());
+    }
+}

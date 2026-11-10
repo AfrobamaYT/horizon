@@ -315,6 +315,16 @@ fn many_replacements_in_a_row_keep_the_newest_record() {
     let world = WorldDir::new("many-replacements");
     let mut store = world.first_use();
     for expected in 1..=100 {
+        // Each record leaves the previous operation open, so the next
+        // begin must reopen first — exactly the one-operation rule.
+        if expected > 1 {
+            let Opened::Live(reopened) = Store::open(&world.root).unwrap() else {
+                panic!("must reopen before record {expected}");
+            };
+            store = reopened;
+            // Close the open record by committing it, as recovery would.
+            store.commit().unwrap();
+        }
         store
             .begin(OpKind::Assemble, expected as u128, 1, "minecraft:overworld")
             .unwrap();
@@ -325,6 +335,7 @@ fn many_replacements_in_a_row_keep_the_newest_record() {
             reopened.journal().in_progress.as_ref().unwrap().op_id,
             expected
         );
+        store = reopened;
     }
     let Opened::Live(store) = Store::open(&world.root).unwrap() else {
         unreachable!();

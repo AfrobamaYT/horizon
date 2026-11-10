@@ -322,6 +322,31 @@ impl Store {
         generation: u32,
         dimension: &str,
     ) -> Result<u64, StoreIoError> {
+        // One operation at a time: a nested begin leaves the open one
+        // untouched and refuses.
+        if self.journal.in_progress.is_some() {
+            return Err(StoreIoError("an operation is already in progress".into()));
+        }
+        // Identity ownership, by kind:
+        // - an assembly creates a carrier, so the UUID must be free —
+        //   a second one would overwrite the first carrier's payload;
+        // - a disassembly consumes the carrier its handle names, so the
+        //   UUID and generation must be exactly the index's — a stale
+        //   handle refuses.
+        let listed = self.journal.lists(uuid, generation);
+        match (kind, listed) {
+            (OpKind::Assemble, true) => {
+                return Err(StoreIoError(format!(
+                    "carrier {uuid:032x} already exists at generation {generation}"
+                )));
+            }
+            (OpKind::Disassemble, false) => {
+                return Err(StoreIoError(format!(
+                    "carrier {uuid:032x} at generation {generation} is not held:                      a stale handle refuses"
+                )));
+            }
+            _ => {}
+        }
         let op_id = self.journal.next_op_id;
         self.journal.in_progress = Some(InProgress {
             op_id,
@@ -640,6 +665,13 @@ pub enum RecoveryRefused {
         /// What the operation file says.
         operation: String,
     },
+    /// The operation file's identity (id, kind, UUID or generation)
+    /// disagrees with the journal's prepared record: damage, so the
+    /// world's load refuses.
+    IdentityDisagreement {
+        /// Which field disagreed.
+        field: &'static str,
+    },
     /// Plain I/O.
     Io(String),
 }
@@ -674,6 +706,10 @@ impl fmt::Display for RecoveryRefused {
                 f,
                 "world load refused: the journal names {journal} but the operation file names {operation}"
             ),
+            Self::IdentityDisagreement { field } => write!(
+                f,
+                "world load refused: the operation file's {field} disagrees with the journal"
+            ),
             Self::Io(why) => write!(f, "recovery I/O: {why}"),
         }
     }
@@ -701,6 +737,23 @@ pub fn recover(
     })?;
     let operation = decode_operation(&bytes, states)
         .map_err(|e| RecoveryRefused::OperationUnreadable(e.to_string()))?;
+    // The operation file's identity must be exactly the journal's
+    // prepared record: id, kind, carrier and generation, not only the
+    // dimension.
+    if operation.op_id != op.op_id {
+        return Err(RecoveryRefused::IdentityDisagreement { field: "op_id" });
+    }
+    if operation.kind != op.kind {
+        return Err(RecoveryRefused::IdentityDisagreement { field: "kind" });
+    }
+    if operation.uuid != op.uuid {
+        return Err(RecoveryRefused::IdentityDisagreement { field: "uuid" });
+    }
+    if operation.generation != op.generation {
+        return Err(RecoveryRefused::IdentityDisagreement {
+            field: "generation",
+        });
+    }
     // The journal and the operation file must name one dimension, and
     // it must be the level recovery is running in: anything else is a
     // refusal that touches nothing.
