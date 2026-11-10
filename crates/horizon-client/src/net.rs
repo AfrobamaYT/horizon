@@ -1742,6 +1742,14 @@ mod tests {
                     .encode(),
                 )
                 .unwrap();
+            if server_brand == b"\xff" {
+                // A registered brand uses its own string codec: malformed
+                // bytes fail the session rather than continuing negotiation.
+                assert!(server.recv().unwrap_err().is_end_of_stream());
+                drop(server);
+                drop(session);
+                continue;
+            }
             server
                 .send(
                     &cfg::Clientbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
