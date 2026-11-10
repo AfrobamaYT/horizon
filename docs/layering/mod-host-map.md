@@ -138,7 +138,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | horizon-client | horizon-mod-render | 10 | 18 | 3 |
 | horizon-client | horizon-mod-runtime | 61 | 65 | 167 |
 | horizon-client | horizon-mod-wasm | 3 | 4 | 0 |
-| horizon-client-lib | horizon-mod-api | 60 | 245 | 97 |
+| horizon-client-lib | horizon-mod-api | 62 | 246 | 101 |
 | horizon-client-lib | horizon-mod-package | 8 | 46 | 46 |
 | horizon-client-lib | horizon-mod-runtime | 13 | 43 | 49 |
 | horizon-client-render | horizon-mod-api | 34 | 165 | 129 |
@@ -154,7 +154,7 @@ Counts are source references (one per `use` leaf or path), split into production
 |---|---|---|---|
 | game/modding | 177 | 1412 | 2196 |
 | game/native_hooks | 118 | 445 | 508 |
-| client (non-game) | 85 | 406 | 306 |
+| client (non-game) | 85 | 407 | 310 |
 | game/interface | 48 | 150 | 485 |
 | game/mobs | 28 | 165 | 444 |
 | game/network | 26 | 167 | 369 |
@@ -179,7 +179,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | slots | 8 | 0 | 0 |
 | attachments | 166 | 293 | 50 |
 | content_render | 306 | 412 | 175 |
-| hooks | 2628 | 3683 | 1473 |
+| hooks | 2629 | 3687 | 1473 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -188,7 +188,7 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 | highest tier | files |
 |---|---|
 | dispatch | 20 |
-| value | 146 |
+| value | 147 |
 | more | 48 |
 
 - **dispatch** items, by files using them: `__private::listened` (64), `HookId` (8), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1)
@@ -197,7 +197,7 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 
 - **more** items, by files using them: `__private::mods` (20), `__private::game::*` (8), `__private::ModPhase::Registration` (5), `__private::PhaseOwner::scope` (5), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext` (3), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `__private::game::RegistrationContextNew` (3), `HostSide` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::player_ref` (2), `__private::item_key_id` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `ModEntry` (1), `Registrar` (1)
 
-Outside the host areas, 2594 `mod_api` references are in test code; 245 of them name `testing`, `part_tests` or `with_test_packages`.
+Outside the host areas, 2598 `mod_api` references are in test code; 245 of them name `testing`, `part_tests` or `with_test_packages`.
 
 ### The host areas by strand (files under game/modding/ and game/native_hooks/)
 
