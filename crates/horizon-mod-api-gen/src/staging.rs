@@ -22,7 +22,7 @@ pub struct Staged {
 
 /// Mark points, expose internals and write their manifests in a disposable source copy.
 /// Internals precede points so their catalog contains only the original game items.
-/// A completed pass stamps the copy; staging it again refuses before modifying any files.
+/// A pass stamps the copy before edits; even a failed pass requires fresh source for a retry.
 pub fn stage(
     root: &Path,
     points_json: &Path,
@@ -33,6 +33,11 @@ pub fn stage(
     if stamp.exists() {
         return Err("source tree is already staged; use a fresh copy of the source".into());
     }
+    std::fs::write(
+        &stamp,
+        "Source staging started. Use a fresh copy to stage again.\n",
+    )
+    .map_err(|error| format!("{}: {error}", stamp.display()))?;
     let mut internals = match mode {
         Mode::Build => internals::widen(root)?,
         Mode::Discovery => internals::discover(root)?,
@@ -55,11 +60,6 @@ pub fn stage(
             sites,
         },
     )?;
-    std::fs::write(
-        &stamp,
-        "Source staging completed. Use a fresh copy to stage again.\n",
-    )
-    .map_err(|error| format!("{}: {error}", stamp.display()))?;
     Ok(Staged { points, internals })
 }
 
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn staging_preserves_return_authority_and_refuses_reuse() {
         // Each iteration starts from fresh source, not the preceding staged fixture.
-        for copy in 0..2 {
+        for copy in 0..3 {
             let root = std::env::temp_dir().join(format!(
                 "horizon-staging-return-{}-{copy}",
                 std::process::id()
@@ -110,17 +110,24 @@ mod tests {
             )
             .unwrap();
             let output = root.join("points.json");
-            stage(&root, &output, &root.join("internals.json"), Mode::Build).unwrap();
-            let bytes = std::fs::read(&output).unwrap();
-            assert_eq!(bytes.last(), Some(&b'\n'));
-            let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            let points = manifest["points"].as_array().unwrap();
-            for (name, expected) in [("unit", false), ("optional", true)] {
-                let point = points.iter().find(|point| point["name"] == name).unwrap();
-                assert_eq!(point["raw_shape"]["return_record_mutable"], expected);
+            if copy == 2 {
+                // Refuse retries even when a late output failure leaves edited source.
+                std::fs::create_dir(&output).unwrap();
+                assert!(stage(&root, &output, &root.join("internals.json"), Mode::Build).is_err());
+            } else {
+                stage(&root, &output, &root.join("internals.json"), Mode::Build).unwrap();
+                let bytes = std::fs::read(&output).unwrap();
+                assert_eq!(bytes.last(), Some(&b'\n'));
+                let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                let points = manifest["points"].as_array().unwrap();
+                for (name, expected) in [("unit", false), ("optional", true)] {
+                    let point = points.iter().find(|point| point["name"] == name).unwrap();
+                    assert_eq!(point["raw_shape"]["return_record_mutable"], expected);
+                }
+                assert!(manifest["sites"].is_array());
             }
-            assert!(manifest["sites"].is_array());
             let before = std::fs::read(&source).unwrap();
+            assert!(String::from_utf8_lossy(&before).contains("horizon_mod_api_macros"));
             for mode in [Mode::Build, Mode::Discovery] {
                 let error = stage(&root, &output, &root.join("internals.json"), mode)
                     .err()
