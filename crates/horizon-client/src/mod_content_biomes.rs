@@ -93,6 +93,97 @@ pub(super) struct Changes {
     temperature_modifier: Option<String>,
     /// `effects` colours by name, as 24-bit RGB.
     colours: Vec<(&'static str, u32)>,
+    /// Whole `attributes` values (ambient particles, ambient sounds, music), checked.
+    attributes: Vec<(&'static str, Value)>,
+}
+
+/// The `attributes` that `horizon:modify_biome` sets, each replacing the biome's value.
+const ATTRIBUTES: [&str; 4] = [
+    "minecraft:visual/ambient_particles",
+    "minecraft:audio/ambient_sounds",
+    "minecraft:audio/background_music",
+    "minecraft:audio/music_volume",
+];
+
+/// A namespaced id (`minecraft:ash`).
+fn id(s: &str) -> bool {
+    s.split_once(':')
+        .is_some_and(|(ns, path)| !ns.is_empty() && !path.is_empty())
+}
+
+/// A whole number of ticks or blocks, as an `i32`.
+fn count(v: Option<&Value>) -> Option<u64> {
+    v?.as_u64().filter(|n| i32::try_from(*n).is_ok())
+}
+
+/// A chance or volume, 0.0..=1.0.
+fn unit(v: Option<&Value>) -> bool {
+    v.and_then(Value::as_f64)
+        .is_some_and(|n| (0.0..=1.0).contains(&n))
+}
+
+/// One attribute's value as vanilla's biome JSON writes it, or why it is refused. Ambient
+/// particles may come in the `{"argument": [...]}` form; the list is what is kept.
+fn attribute(key: &str, v: &Value) -> std::result::Result<Value, String> {
+    let sound = |m: &Value| m.get("sound").and_then(Value::as_str).is_some_and(id);
+    let bad = |what: &str| format!("attributes.{key}: {what}");
+    match key {
+        "minecraft:visual/ambient_particles" => {
+            let list = v.get("argument").unwrap_or(v);
+            let entries = list.as_array().ok_or_else(|| bad("not a list"))?;
+            let entry = |e: &Value| {
+                let particle = e["particle"]["type"].as_str();
+                particle.is_some_and(id) && unit(e.get("probability"))
+            };
+            match entries.iter().all(entry) {
+                true => Ok(list.clone()),
+                false => Err(bad("a particle needs a type and a probability 0..=1")),
+            }
+        }
+        "minecraft:audio/ambient_sounds" => {
+            let object = v.as_object().ok_or_else(|| bad("not an object"))?;
+            let addition = |a: &Value| sound(a) && unit(a.get("tick_chance"));
+            for (name, value) in object {
+                let ok = match name.as_str() {
+                    "loop" => value.as_str().is_some_and(id),
+                    "additions" => match value {
+                        Value::Array(list) => list.iter().all(addition),
+                        one => addition(one),
+                    },
+                    "mood" => {
+                        sound(value)
+                            && count(value.get("tick_delay")).is_some()
+                            && count(value.get("block_search_extent")).is_some()
+                            && value.get("offset").is_some_and(Value::is_number)
+                    }
+                    _ => false,
+                };
+                if !ok {
+                    return Err(bad(&format!("{name} is not valid")));
+                }
+            }
+            Ok(v.clone())
+        }
+        "minecraft:audio/background_music" => {
+            let object = v.as_object().ok_or_else(|| bad("not an object"))?;
+            for (name, music) in object {
+                let (min, max) = (count(music.get("min_delay")), count(music.get("max_delay")));
+                let ok = matches!(name.as_str(), "default" | "creative" | "underwater")
+                    && sound(music)
+                    && min.zip(max).is_some_and(|(min, max)| min <= max);
+                if !ok {
+                    return Err(bad(&format!(
+                        "{name} needs a sound and min_delay <= max_delay"
+                    )));
+                }
+            }
+            Ok(v.clone())
+        }
+        _ => match unit(Some(v)) {
+            true => Ok(v.clone()),
+            false => Err(bad("not a number 0..=1")),
+        },
+    }
 }
 
 /// The colours of `effects` that `horizon:modify_biome` sets.
@@ -154,12 +245,27 @@ impl Changes {
             }
             Some(_) => return Err("effects: not an object".into()),
         }
+        let mut attributes = Vec::new();
+        match doc.get("attributes") {
+            None => {}
+            Some(Value::Object(map)) => {
+                for (key, value) in map {
+                    let name = ATTRIBUTES
+                        .iter()
+                        .find(|a| *a == key)
+                        .ok_or_else(|| format!("attributes: unknown attribute {key}"))?;
+                    attributes.push((*name, attribute(key, value)?));
+                }
+            }
+            Some(_) => return Err("attributes: not an object".into()),
+        }
         Ok(Self {
             temperature: num("temperature")?,
             downfall: num("downfall")?,
             has_precipitation,
             temperature_modifier,
             colours,
+            attributes,
         })
     }
 }
@@ -781,6 +887,18 @@ fn modify(biome: &mut J, changes: &Changes) {
         }
         if let Some(map) = biome.get_mut(section) {
             map.set(&key, J::Str(format!("#{rgb:06x}")));
+        }
+    }
+    for (key, value) in &changes.attributes {
+        if biome.get("attributes").is_none() {
+            biome.set("attributes", J::Obj(Vec::new()));
+        }
+        // A checked value always converts; the whole value replaces the biome's.
+        if let (Some(map), Ok(value)) = (
+            biome.get_mut("attributes"),
+            serde_json::from_value::<J>(value.clone()),
+        ) {
+            map.set(key, value);
         }
     }
 }

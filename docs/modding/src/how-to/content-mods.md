@@ -758,6 +758,36 @@ type, a colour out of range, an unknown colour name or a `temperature_modifier` 
 modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
 here, so the API names no phase for them.
 
+A modifier also sets the biome's ambient and music attributes, in an `attributes` object with the vanilla keys and
+values of a biome file (`warped_forest.json` has all of them). Each key present replaces the biome's whole value;
+the keys it leaves out stay:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "minecraft:plains",
+  "attributes": {
+    "minecraft:visual/ambient_particles": [{ "particle": { "type": "minecraft:ash" }, "probability": 0.25 }],
+    "minecraft:audio/ambient_sounds": {
+      "loop": "minecraft:ambient.warped_forest.loop",
+      "additions": { "sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111 },
+      "mood": { "sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000, "block_search_extent": 8, "offset": 2.0 }
+    },
+    "minecraft:audio/background_music": { "default": { "sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000 } },
+    "minecraft:audio/music_volume": 0.5
+  }
+}
+```
+
+The particle list may also be written `{ "argument": [...] }`. A particle or sound is a namespaced id and a chance or
+volume is 0 to 1; the mood needs its sound, `tick_delay`, `block_search_extent` and `offset`; `additions` is one
+object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and `min_delay` at most
+`max_delay`. Any other attribute, or a value that is not valid, skips the modifier with a warning naming the mod,
+file and attribute. A client plays these from the biome data the server sends. In code, `ModifyBiome` has
+`ambient_particles`, `ambient_loop`, `ambient_additions`, `ambient_mood`, `background_music` and `music_volume`; the
+three ambient sound fields together make the one `ambient_sounds` value, and a value out of range refuses the mods at
+startup.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
