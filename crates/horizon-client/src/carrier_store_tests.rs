@@ -114,6 +114,7 @@ fn sample_operation(op_id: u64, cells: usize, fill: usize) -> Operation {
         kind: OpKind::Assemble,
         uuid: 0x0011_2233_4455_6677_8899_aabb_ccdd_eeff,
         generation: 3,
+        dimension: "minecraft:overworld".to_string(),
         cells: (0..cells)
             .map(|i| OperationCell {
                 world: [i as i32, 64, -(i as i32)],
@@ -273,7 +274,9 @@ fn first_use_refuses_a_data_folder_created_this_session() {
 fn a_torn_newest_slot_falls_back_at_every_offset() {
     let world = WorldDir::new("torn-slot");
     let mut store = world.first_use();
-    store.begin(OpKind::Assemble, 7, 1).unwrap();
+    store
+        .begin(OpKind::Assemble, 7, 1, "minecraft:overworld")
+        .unwrap();
     let newest = fs::read(world.slot_path(1)).unwrap();
     // The newest record lives in slot 1; the first-use record in slot 0.
     assert!(fs::read(world.slot_path(0)).unwrap().len() < newest.len());
@@ -312,11 +315,16 @@ fn many_replacements_in_a_row_keep_the_newest_record() {
     let world = WorldDir::new("many-replacements");
     let mut store = world.first_use();
     for expected in 1..=100 {
-        store.begin(OpKind::Assemble, expected as u128, 1).unwrap();
+        store
+            .begin(OpKind::Assemble, expected as u128, 1, "minecraft:overworld")
+            .unwrap();
         let Opened::Live(reopened) = Store::open(&world.root).unwrap() else {
             panic!("must reopen after record {expected}");
         };
-        assert_eq!(reopened.journal().in_progress.unwrap().op_id, expected);
+        assert_eq!(
+            reopened.journal().in_progress.as_ref().unwrap().op_id,
+            expected
+        );
     }
     let Opened::Live(store) = Store::open(&world.root).unwrap() else {
         unreachable!();
@@ -413,7 +421,9 @@ fn cleanup_resolves_tombstones_and_deletes_orphans_and_stale_ops() {
     let mut store = world.first_use();
     let (uuid, generation) = (0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10_u128, 4);
     store.write_carrier(uuid, generation, b"carrier").unwrap();
-    store.begin(OpKind::Assemble, uuid, generation).unwrap();
+    store
+        .begin(OpKind::Assemble, uuid, generation, "minecraft:overworld")
+        .unwrap();
     store.commit().unwrap();
     assert!(store.journal().lists(uuid, generation));
     // A stale operation file from an interrupted run.
@@ -427,7 +437,9 @@ fn cleanup_resolves_tombstones_and_deletes_orphans_and_stale_ops() {
         }
     );
     // Disassembly tombstones the carrier; its file outlives the commit.
-    store.begin(OpKind::Disassemble, uuid, generation).unwrap();
+    store
+        .begin(OpKind::Disassemble, uuid, generation, "minecraft:overworld")
+        .unwrap();
     store.commit().unwrap();
     assert!(store.journal().tombstoned(uuid, generation));
     // The cleanup interrupted by that crash deletes the file, but this
@@ -473,8 +485,10 @@ fn cleanup_resolves_tombstones_and_deletes_orphans_and_stale_ops() {
     );
     assert!(!world.carrier_path(orphan, 9).exists());
     // The in-progress operation file survives every cleanup.
-    reopened.begin(OpKind::Assemble, 0x24, 1).unwrap();
-    let live = reopened.journal().in_progress.unwrap().op_id;
+    reopened
+        .begin(OpKind::Assemble, 0x24, 1, "minecraft:overworld")
+        .unwrap();
+    let live = reopened.journal().in_progress.as_ref().unwrap().op_id;
     reopened.write_operation(live, b"live").unwrap();
     assert_eq!(reopened.cleanup().unwrap(), Cleanup::default());
 }
@@ -640,11 +654,15 @@ fn a_thousand_operations_do_not_grow_the_store() {
         // One carrier, assembled and disassembled back: the index and
         // tombstone list return to empty, as they must for a repeated
         // transfer, and cleanup runs like every world open.
-        let op_id = store.begin(OpKind::Assemble, uuid, 1).unwrap();
+        let op_id = store
+            .begin(OpKind::Assemble, uuid, 1, "minecraft:overworld")
+            .unwrap();
         let encoded = encode_operation(&sample_operation(op_id, 2, 32)).unwrap();
         store.write_operation(op_id, &encoded).unwrap();
         store.commit().unwrap();
-        let op_id = store.begin(OpKind::Disassemble, uuid, 1).unwrap();
+        let op_id = store
+            .begin(OpKind::Disassemble, uuid, 1, "minecraft:overworld")
+            .unwrap();
         store
             .write_operation(
                 op_id,

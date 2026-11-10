@@ -165,6 +165,7 @@ fn assemble_chest(op_id: u64, world: [i32; 3]) -> Operation {
         kind: OpKind::Assemble,
         uuid: 7,
         generation: 1,
+        dimension: "minecraft:overworld".to_string(),
         cells: vec![OperationCell {
             world,
             local: [0, 0, 0],
@@ -188,7 +189,12 @@ fn prepare(store: &mut Store, operation: &Operation) {
     let encoded = encode_operation(operation).unwrap();
     store.write_operation(operation.op_id, &encoded).unwrap();
     store
-        .begin(operation.kind, operation.uuid, operation.generation)
+        .begin(
+            operation.kind,
+            operation.uuid,
+            operation.generation,
+            &operation.dimension,
+        )
         .unwrap();
 }
 
@@ -196,7 +202,13 @@ fn prepare(store: &mut Store, operation: &Operation) {
 fn a_world_without_transfers_recovers_as_nothing() {
     let fixture = Fixture::new("nothing");
     let mut store = fixture.store();
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 0);
     assert_eq!(report.verified, 0);
 }
@@ -217,7 +229,13 @@ fn a_crash_after_the_operation_file_but_before_prepared_replays_nothing() {
     store
         .write_operation(operation.op_id, &encode_operation(&operation).unwrap())
         .unwrap();
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 0);
     // The chest still owns its items in the chunk.
     let root = get_chunk(&fixture, position).unwrap();
@@ -238,7 +256,13 @@ fn a_crash_after_prepared_takes_the_before_image_to_the_after_image() {
     let operation = assemble_chest(store.next_op_id(), chest_at);
     prepare(&mut store, &operation);
     // The carrier wins: its file was durable before the world changed.
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 1);
     let root = get_chunk(&fixture, position).unwrap();
     let data = ChunkData::new(root).unwrap();
@@ -292,7 +316,13 @@ fn a_crash_mid_chunk_saves_finishes_only_the_untouched_side() {
         },
     });
     prepare(&mut store, &operation);
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     // The chest chunk replayed to air; the already-air chunk verified.
     assert_eq!(report.applied, 1);
     assert_eq!(report.verified, 1);
@@ -313,7 +343,13 @@ fn a_crash_after_every_chunk_before_committed_only_verifies() {
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
     prepare(&mut store, &operation);
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 0);
     assert!(store.journal().in_progress.is_none());
 }
@@ -331,7 +367,13 @@ fn a_block_placed_after_the_commit_survives() {
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
     prepare(&mut store, &operation);
-    let _ = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let _ = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     // A player's block lands on the vacated cell, then the world saves.
     let mut root = get_chunk(&fixture, position).unwrap();
     let mut data = ChunkData::new(root).unwrap();
@@ -349,7 +391,13 @@ fn a_block_placed_after_the_commit_survives() {
     let Opened::Live(mut reopened) = Store::open(&fixture.root).unwrap() else {
         panic!("must reopen");
     };
-    let report = recover(&mut reopened, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut reopened,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 0);
     let root = get_chunk(&fixture, position).unwrap();
     let data = ChunkData::new(root).unwrap();
@@ -371,13 +419,18 @@ fn a_cell_holding_neither_image_refuses_the_load() {
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
     prepare(&mut store, &operation);
-    match recover(&mut store, &fixture.region(), &AllStatesKnown) {
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
         Err(RecoveryRefused::CellMismatch { pos, .. }) => assert_eq!(pos, chest_at),
         other => panic!("expected a cell mismatch, got {other:?}"),
     }
     // The journal still holds the operation: nothing was half-applied.
     assert_eq!(
-        store.journal().in_progress.map(|op| op.op_id),
+        store.journal().in_progress.as_ref().map(|op| op.op_id),
         Some(operation.op_id)
     );
     let root = get_chunk(&fixture, position).unwrap();
@@ -405,6 +458,7 @@ fn a_disassembly_places_its_after_image_with_the_entity() {
         kind: OpKind::Disassemble,
         uuid: 7,
         generation: 1,
+        dimension: "minecraft:overworld".to_string(),
         cells: vec![OperationCell {
             world: target,
             local: [0, 0, 0],
@@ -421,7 +475,13 @@ fn a_disassembly_places_its_after_image_with_the_entity() {
         }],
     };
     prepare(&mut store, &operation);
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 1);
     let root = get_chunk(&fixture, position).unwrap();
     let data = ChunkData::new(root.clone()).unwrap();
@@ -450,8 +510,15 @@ fn an_unreadable_or_missing_operation_refuses_the_world_load() {
     store
         .write_operation(op_id, b"not an operation file")
         .unwrap();
-    store.begin(OpKind::Assemble, 7, 1).unwrap();
-    match recover(&mut store, &fixture.region(), &AllStatesKnown) {
+    store
+        .begin(OpKind::Assemble, 7, 1, "minecraft:overworld")
+        .unwrap();
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
         Err(RecoveryRefused::OperationUnreadable(_)) => {}
         other => panic!("expected an unreadable operation, got {other:?}"),
     }
@@ -461,7 +528,12 @@ fn an_unreadable_or_missing_operation_refuses_the_world_load() {
             .join(format!("horizon_carrier_op_{op_id}.nbt")),
     )
     .unwrap();
-    match recover(&mut store, &fixture.region(), &AllStatesKnown) {
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
         Err(RecoveryRefused::MissingOperation) => {}
         other => panic!("expected the missing operation to refuse, got {other:?}"),
     }
@@ -497,7 +569,12 @@ fn damaged_regions_refuse_without_generating_content() {
     fs::write(&region, &whole[..4096]).unwrap();
     let mut store = prepare_store();
     assert!(matches!(
-        recover(&mut store, &fixture.region(), &AllStatesKnown),
+        recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld"
+        ),
         Err(RecoveryRefused::Region {
             why: Strict::ShortHeader,
             ..
@@ -508,7 +585,12 @@ fn damaged_regions_refuse_without_generating_content() {
     fs::write(&region, vec![0_u8; 8192]).unwrap();
     let mut store = prepare_store();
     assert!(matches!(
-        recover(&mut store, &fixture.region(), &AllStatesKnown),
+        recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld"
+        ),
         Err(RecoveryRefused::Region {
             why: Strict::Missing,
             ..
@@ -520,7 +602,12 @@ fn damaged_regions_refuse_without_generating_content() {
     fs::write(&region, &past).unwrap();
     let mut store = prepare_store();
     assert!(matches!(
-        recover(&mut store, &fixture.region(), &AllStatesKnown),
+        recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld"
+        ),
         Err(RecoveryRefused::Region {
             why: Strict::EntryPastEof,
             ..
@@ -532,7 +619,12 @@ fn damaged_regions_refuse_without_generating_content() {
     fs::write(&region, &zeroed).unwrap();
     let mut store = prepare_store();
     assert!(matches!(
-        recover(&mut store, &fixture.region(), &AllStatesKnown),
+        recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld"
+        ),
         Err(RecoveryRefused::Region {
             why: Strict::EntryPastEof,
             ..
@@ -542,7 +634,12 @@ fn damaged_regions_refuse_without_generating_content() {
     fs::write(&region, &whole[..whole.len() - 2]).unwrap();
     let mut store = prepare_store();
     assert!(matches!(
-        recover(&mut store, &fixture.region(), &AllStatesKnown),
+        recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld"
+        ),
         Err(RecoveryRefused::Region {
             why: Strict::TruncatedPayload,
             ..
@@ -574,7 +671,12 @@ fn damaged_regions_refuse_without_generating_content() {
     fs::remove_file(&external).unwrap();
     let mut store = prepare_store();
     assert!(matches!(
-        recover(&mut store, &fixture.region(), &AllStatesKnown),
+        recover(
+            &mut store,
+            &fixture.region(),
+            &AllStatesKnown,
+            "minecraft:overworld"
+        ),
         Err(RecoveryRefused::Region {
             why: Strict::ExternalMissing,
             ..
@@ -588,13 +690,103 @@ fn an_affected_chunk_without_a_region_refuses() {
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), [4, 0, 4]);
     prepare(&mut store, &operation);
-    match recover(&mut store, &fixture.region(), &AllStatesKnown) {
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
         Err(RecoveryRefused::Region {
             why: Strict::NoRegion,
             ..
         }) => {}
         other => panic!("expected the missing region to refuse, got {other:?}"),
     }
+}
+
+#[test]
+fn a_journal_and_operation_from_different_dimensions_refuse() {
+    let fixture = Fixture::new("dim-disagree");
+    let position = ChunkPos::new(0, 0);
+    let chest_at = [4, 0, 4];
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+    );
+    let mut store = fixture.store();
+    // The operation file says the Overworld; the journal's prepared
+    // record names the Nether. The split is damage: the load refuses.
+    let op_id = store.next_op_id();
+    let operation = assemble_chest(op_id, chest_at);
+    store
+        .write_operation(op_id, &encode_operation(&operation).unwrap())
+        .unwrap();
+    store
+        .begin(
+            OpKind::Assemble,
+            operation.uuid,
+            operation.generation,
+            "minecraft:the_nether",
+        )
+        .unwrap();
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:the_nether",
+    ) {
+        Err(RecoveryRefused::DimensionDisagreement { journal, operation }) => {
+            assert_eq!(journal, "minecraft:the_nether");
+            assert_eq!(operation, "minecraft:overworld");
+        }
+        other => panic!("expected a disagreement, got {other:?}"),
+    }
+    // Nothing was touched: the chunk keeps its chest and items.
+    let root = get_chunk(&fixture, position).unwrap();
+    assert_eq!(chest_items(&root, chest_at), Some(8));
+}
+
+#[test]
+fn an_operation_of_another_dimension_leaves_this_level_untouched() {
+    let fixture = Fixture::new("dim-foreign");
+    let position = ChunkPos::new(0, 0);
+    let chest_at = [4, 0, 4];
+    // This level's cell matches the foreign operation's before-image
+    // exactly — same coordinates, same chest — but the operation runs
+    // in the Nether, so the Overworld is not touched.
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+    );
+    let mut store = fixture.store();
+    let op_id = store.next_op_id();
+    let mut operation = assemble_chest(op_id, chest_at);
+    operation.dimension = "minecraft:the_nether".to_string();
+    prepare(&mut store, &operation);
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
+        Err(RecoveryRefused::NotThisDimension(dimension)) => {
+            assert_eq!(dimension, "minecraft:the_nether");
+        }
+        other => panic!("expected a foreign dimension, got {other:?}"),
+    }
+    // The chunk is byte-for-byte as it was: the chest and its items
+    // still own this level's cell.
+    let root = get_chunk(&fixture, position).unwrap();
+    assert_eq!(chest_items(&root, chest_at), Some(8));
+    let data = ChunkData::new(root).unwrap();
+    assert_eq!(
+        data.block(BlockPos::new(4, 0, 4)).unwrap().unwrap().name,
+        "minecraft:chest"
+    );
+    // The operation is untouched for its own level's recovery.
+    assert!(store.journal().in_progress.is_some());
 }
 
 #[test]
@@ -613,13 +805,25 @@ fn two_operations_replay_one_after_the_other() {
 
     let mut operation = assemble_chest(store.next_op_id(), first_at);
     prepare(&mut store, &operation);
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 1);
     assert!(store.journal().in_progress.is_none());
 
     operation = assemble_chest(store.next_op_id(), second_at);
     prepare(&mut store, &operation);
-    let report = recover(&mut store, &fixture.region(), &AllStatesKnown).unwrap();
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap();
     assert_eq!(report.applied, 1);
     // Both cells are air now, and neither holds any items.
     let root = get_chunk(&fixture, position).unwrap();

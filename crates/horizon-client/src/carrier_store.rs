@@ -140,7 +140,7 @@ impl OpKind {
 }
 
 /// The one operation a journal may hold in progress.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InProgress {
     /// The operation's id, from `next_op_id`.
     pub op_id: u64,
@@ -150,6 +150,9 @@ pub struct InProgress {
     pub uuid: u128,
     /// The carrier's generation after this operation.
     pub generation: u32,
+    /// The dimension the operation runs in ('"minecraft:overworld"'), so
+    /// recovery enters that level and no other.
+    pub dimension: String,
 }
 
 /// The journal body: what the newest valid slot holds.
@@ -317,6 +320,7 @@ impl Store {
         kind: OpKind,
         uuid: u128,
         generation: u32,
+        dimension: &str,
     ) -> Result<u64, StoreIoError> {
         let op_id = self.journal.next_op_id;
         self.journal.in_progress = Some(InProgress {
@@ -324,6 +328,7 @@ impl Store {
             kind,
             uuid,
             generation,
+            dimension: dimension.to_string(),
         });
         self.journal.next_op_id = op_id + 1;
         self.write_slot()?;
@@ -335,7 +340,7 @@ impl Store {
     /// clears, the next slot publishes, and the operation file is durably
     /// deleted before the next transfer may start.
     pub fn commit(&mut self) -> Result<(), StoreIoError> {
-        let Some(op) = self.journal.in_progress else {
+        let Some(op) = self.journal.in_progress.clone() else {
             return Err(StoreIoError("no operation in progress".into()));
         };
         match op.kind {
@@ -403,7 +408,7 @@ impl Store {
         let mut journal_changed = false;
         for name in &names {
             if let Some(op_id) = parse_operation_name(name) {
-                let current = self.journal.in_progress.map(|op| op.op_id);
+                let current = self.journal.in_progress.as_ref().map(|op| op.op_id);
                 if current != Some(op_id) {
                     durable::remove(&self.data.join(name))
                         .map_err(|e| StoreIoError(e.to_string()))?;
@@ -624,6 +629,17 @@ pub enum RecoveryRefused {
     },
     /// The chunk NBT did not parse after a strict read.
     Chunk(String),
+    /// The operation belongs to another dimension than the level being
+    /// recovered; nothing was touched.
+    NotThisDimension(String),
+    /// The journal and the operation file name different dimensions:
+    /// damage, so the world's load refuses.
+    DimensionDisagreement {
+        /// What the journal says.
+        journal: String,
+        /// What the operation file says.
+        operation: String,
+    },
     /// Plain I/O.
     Io(String),
 }
@@ -650,6 +666,14 @@ impl fmt::Display for RecoveryRefused {
                 pos[0], pos[1], pos[2]
             ),
             Self::Chunk(why) => write!(f, "chunk data: {why}"),
+            Self::NotThisDimension(dimension) => write!(
+                f,
+                "world load refused: the operation belongs to {dimension}, not this level"
+            ),
+            Self::DimensionDisagreement { journal, operation } => write!(
+                f,
+                "world load refused: the journal names {journal} but the operation file names {operation}"
+            ),
             Self::Io(why) => write!(f, "recovery I/O: {why}"),
         }
     }
@@ -665,8 +689,9 @@ pub fn recover(
     store: &mut Store,
     region_dir: &Path,
     states: &dyn StateValidator,
+    dimension: &str,
 ) -> Result<Recovered, RecoveryRefused> {
-    let Some(op) = store.journal().in_progress else {
+    let Some(op) = &store.journal().in_progress else {
         return Ok(Recovered::default());
     };
     let op_path = store.operation_path(op.op_id);
@@ -676,6 +701,20 @@ pub fn recover(
     })?;
     let operation = decode_operation(&bytes, states)
         .map_err(|e| RecoveryRefused::OperationUnreadable(e.to_string()))?;
+    // The journal and the operation file must name one dimension, and
+    // it must be the level recovery is running in: anything else is a
+    // refusal that touches nothing.
+    if operation.dimension != op.dimension {
+        return Err(RecoveryRefused::DimensionDisagreement {
+            journal: op.dimension.clone(),
+            operation: operation.dimension.clone(),
+        });
+    }
+    if operation.dimension != dimension {
+        return Err(RecoveryRefused::NotThisDimension(
+            operation.dimension.clone(),
+        ));
+    }
     let mut chunks: Vec<[i32; 2]> = Vec::new();
     for cell in &operation.cells {
         let key = [cell.world[0] >> 4, cell.world[2] >> 4];
@@ -1071,7 +1110,7 @@ fn encode_journal(journal: &Journal) -> Result<Vec<u8>, String> {
     let mut body =
         Vec::with_capacity(8 + 30 + 8 + (journal.tombstones.len() + journal.carriers.len()) * 20);
     body.extend_from_slice(&journal.next_op_id.to_le_bytes());
-    match journal.in_progress {
+    match &journal.in_progress {
         None => body.push(0),
         Some(op) => {
             body.push(1);
@@ -1079,6 +1118,8 @@ fn encode_journal(journal: &Journal) -> Result<Vec<u8>, String> {
             body.push(op.kind.as_byte());
             body.extend_from_slice(&op.uuid.to_le_bytes());
             body.extend_from_slice(&op.generation.to_le_bytes());
+            body.extend_from_slice(&(op.dimension.len() as u16).to_le_bytes());
+            body.extend_from_slice(op.dimension.as_bytes());
         }
     }
     body.extend_from_slice(&(journal.tombstones.len() as u32).to_le_bytes());
@@ -1114,11 +1155,18 @@ fn decode_journal(body: &[u8]) -> Option<Journal> {
             let kind = OpKind::from_byte(take(&mut at, 1)?[0])?;
             let uuid = u128::from_le_bytes(take(&mut at, 16)?.try_into().unwrap());
             let generation = u32::from_le_bytes(take(&mut at, 4)?.try_into().unwrap());
+            let dimension_len = u16::from_le_bytes(take(&mut at, 2)?.try_into().unwrap()) as usize;
+            // Bounded before allocation: the length fits what remains.
+            if body.len() < at + dimension_len {
+                return None;
+            }
+            let dimension = String::from_utf8(take(&mut at, dimension_len)?.to_vec()).ok()?;
             Some(InProgress {
                 op_id,
                 kind,
                 uuid,
                 generation,
+                dimension,
             })
         }
         _ => return None,
@@ -1272,6 +1320,9 @@ pub struct Operation {
     pub uuid: u128,
     /// The carrier's generation after this operation.
     pub generation: u32,
+    /// The dimension the operation runs in; the journal's record must
+    /// name the same one or the world's load refuses.
+    pub dimension: String,
     /// The touched cells, at most [`MAX_OP_CELLS`].
     pub cells: Vec<OperationCell>,
 }
@@ -1483,6 +1534,12 @@ pub fn decode_operation(bytes: &[u8], states: &dyn StateValidator) -> Result<Ope
         | (long("carrier_uuid_lsb")? as u64) as u128;
     let generation = u32::try_from(int("carrier_generation")?)
         .map_err(|_| OpError::Malformed(leak_key("carrier_generation")))?;
+    let dimension = match root.get("dimension") {
+        Some(Tag::String(value)) => value
+            .to_string()
+            .map_err(|_| OpError::Malformed("dimension is not valid UTF-16"))?,
+        _ => return Err(OpError::Malformed(leak_key("dimension"))),
+    };
     let cells_tag = match root.get("cells") {
         Some(Tag::List(cells)) => cells,
         _ => return Err(OpError::Malformed(leak_key("cells"))),
@@ -1528,6 +1585,7 @@ pub fn decode_operation(bytes: &[u8], states: &dyn StateValidator) -> Result<Ope
         kind,
         uuid,
         generation,
+        dimension,
         cells,
     })
 }
@@ -1651,6 +1709,10 @@ fn operation_tag(operation: &Operation) -> Tag {
         ),
         ("carrier_uuid_lsb", Tag::Long(operation.uuid as u64 as i64)),
         ("carrier_generation", Tag::Int(operation.generation as i32)),
+        (
+            "dimension",
+            Tag::String(operation.dimension.as_str().into()),
+        ),
         ("cells", Tag::List(cells)),
     ])
 }
@@ -1669,6 +1731,7 @@ fn leak_key(key: &str) -> &'static str {
         "carrier_uuid_msb" => "carrier_uuid_msb is not a long",
         "carrier_uuid_lsb" => "carrier_uuid_lsb is not a long",
         "carrier_generation" => "carrier_generation is not an int",
+        "dimension" => "dimension is not a string",
         "cells" => "cells is not a list",
         "world" => "world is not three ints",
         "local" => "local is not three bytes",

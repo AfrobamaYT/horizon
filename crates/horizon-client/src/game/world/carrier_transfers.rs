@@ -255,6 +255,7 @@ impl Game<'_> {
             kind: OpKind::Assemble,
             uuid,
             generation,
+            dimension: self.dim.id().to_string(),
             cells: operation_cells.clone(),
         };
         let encoded = encode_operation(&operation).map_err(|_| TransferError::Envelope)?;
@@ -278,7 +279,7 @@ impl Game<'_> {
             .write_operation(op_id, &encoded)
             .map_err(|e| TransferError::Store(e.to_string()))?;
         store
-            .begin(OpKind::Assemble, uuid, generation)
+            .begin(OpKind::Assemble, uuid, generation, self.dim.id())
             .map_err(|e| TransferError::Store(e.to_string()))?;
         for pos in cells {
             let old = self.world.block(pos.x, pos.y, pos.z);
@@ -435,6 +436,7 @@ impl Game<'_> {
             kind: OpKind::Disassemble,
             uuid,
             generation,
+            dimension: self.dim.id().to_string(),
             cells: operation_cells.clone(),
         };
         let encoded = crate::carrier_store::encode_operation(&operation)
@@ -449,7 +451,7 @@ impl Game<'_> {
             .write_operation(op_id, &encoded)
             .map_err(|e| TransferError::Store(e.to_string()))?;
         store
-            .begin(OpKind::Disassemble, uuid, generation)
+            .begin(OpKind::Disassemble, uuid, generation, self.dim.id())
             .map_err(|e| TransferError::Store(e.to_string()))?;
         for cell in &operation_cells {
             let pos = BlockPos::new(cell.world[0], cell.world[1], cell.world[2]);
@@ -616,28 +618,45 @@ impl Game<'_> {
     /// while the store stays exactly as recovery found it.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn carrier_recover_all_levels(&mut self) -> crate::Result<()> {
+        // No pending operation: no level is touched at all.
+        let dimension = match crate::carrier_store::Store::open(&self.world_root) {
+            Ok(crate::carrier_store::Opened::Live(store)) => match store.journal().in_progress.as_ref() {
+                Some(op) => op.dimension.clone(),
+                None => return Ok(()),
+            },
+            Ok(crate::carrier_store::Opened::NeverUsed) => return Ok(()),
+            Err(error) => return Err(format!("world load refused: {error}").into()),
+        };
+        // Recovery enters the operation's own dimension and no other: a
+        // transfer in the Nether recovers in the Nether even when the
+        // world opens in the Overworld, and a dimension the world does
+        // not hold refuses the load.
+        let target = crate::game::Dim::from_id(&dimension);
         let back = self.dim;
-        let mut dims = vec![back];
-        dims.extend(self.levels.parked.keys().copied());
-        for dim in dims {
-            if dim != back {
-                self.enter_level(dim)
-                    .map_err(|e| format!("carrier recovery could not enter {dim:?}: {e}"))?;
-            }
-            if let Err(error) = self.carrier_recover_current() {
-                return Err(format!("world load refused: {error}").into());
-            }
+        if target != back && !self.levels.parked.contains_key(&target) {
+            return Err(format!(
+                "world load refused: the pending carrier operation names {dimension},                  which this world does not hold"
+            )
+            .into());
         }
-        if back != self.dim {
-            self.enter_level(back)
-                .map_err(|e| format!("carrier recovery could not return to {back:?}: {e}"))?;
+        if target != back {
+            self.enter_level(target).map_err(|e| {
+                format!("world load refused: carrier recovery could not enter {dimension}: {e}")
+            })?;
         }
+        let recovered = self.carrier_recover_current();
+        if target != back {
+            self.enter_level(back).map_err(|e| {
+                format!("world load refused: recovery could not return from {dimension}: {e}")
+            })?;
+        }
+        recovered.map_err(|e| format!("world load refused: {e}"))?;
         Ok(())
     }
 
     /// Recovers the level in place: no store means nothing to do; a live
     /// store's in-progress operation replays against this level's region
-    /// directory.
+    /// directory, and only if the operation names this level.
     fn carrier_recover_current(&mut self) -> Result<(), String> {
         let mut store = match crate::carrier_store::Store::open(&self.world_root) {
             Ok(crate::carrier_store::Opened::Live(store)) => store,
@@ -649,7 +668,7 @@ impl Game<'_> {
         }
         let region = self.save.root.clone();
         let states = crate::carrier_store::RegistryStates::new(self.pack.assets.registry);
-        crate::carrier_store::recover(&mut store, &region, &states)
+        crate::carrier_store::recover(&mut store, &region, &states, self.dim.id())
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
@@ -836,7 +855,7 @@ mod tests {
             };
             let region = root.join("dimensions/minecraft/overworld/region");
             let states = crate::carrier_store::RegistryStates::new(registry);
-            let report = crate::carrier_store::recover(&mut store, &region, &states).unwrap();
+            let report = crate::carrier_store::recover(&mut store, &region, &states, "minecraft:overworld").unwrap();
             // The interrupted save left the post-state on disk, so the
             // reopen verifies it rather than replaying — either way the
             // operation commits and exactly one side owns the chest.
