@@ -16,7 +16,8 @@ pub(super) fn points<'a>(
         .inject
         .iter()
         .filter(|entry| {
-            entry.access == Access::Internals
+            entry.kind != Kind::Field
+                && entry.access == Access::Internals
                 && entry.call.is_none()
                 && listed.iter().any(|point| {
                     super::internals::plain_path(&point.target)
@@ -152,7 +153,8 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             (_, Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
             (
                 Route::Source(_),
-                Kind::Head
+                Kind::Field
+                | Kind::Head
                 | Kind::Return
                 | Kind::BeforeCall
                 | Kind::ModifyLocal

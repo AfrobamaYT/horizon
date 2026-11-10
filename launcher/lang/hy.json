@@ -1187,7 +1187,7 @@
   "entities": "սուբյեկտներ",
   "environment": "միջավայրը",
   "equipment": "սարքավորումներ",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "ձախողվեց",
   "first build": "առաջին կառուցումը",
   "fonts": "տառատեսակներ",

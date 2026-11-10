@@ -1187,7 +1187,7 @@
   "entities": "entitateak",
   "environment": "ingurunea",
   "equipment": "ekipamendua",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "huts egin zuen",
   "first build": "lehenengo eraikuntza",
   "fonts": "letra tipoak",

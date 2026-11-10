@@ -49,7 +49,7 @@ fn no_slot_reason(reason: NoSlotReason) -> &'static str {
             tr("wasm does not support internals or call-site injections; use a hook")
         }
         NoSlotReason::LocalSourceOnly => tr("modify_local requires native internals source rebuilding; use internals, or request a hook"),
-        NoSlotReason::ExtensionSlotsPending => tr("extension slots pending (I6)"),
+        NoSlotReason::FieldRequiresSource => tr("field requires native internals source rebuild; use attachments for API, wasm, persistence or sync"),
         NoSlotReason::ApiSitesUnsupported => tr("API call-site injections require internals"),
         NoSlotReason::SourcePending => tr("source injects pending (U5)"),
         NoSlotReason::ReplacePending => tr("internals replace listeners pending (U9)"),
@@ -70,7 +70,7 @@ mod tests {
             NoSlotReason::NativeOnly,
             NoSlotReason::WasmSitesUnsupported,
             NoSlotReason::LocalSourceOnly,
-            NoSlotReason::ExtensionSlotsPending,
+            NoSlotReason::FieldRequiresSource,
             NoSlotReason::ApiSitesUnsupported,
             NoSlotReason::SourcePending,
             NoSlotReason::ReplacePending,

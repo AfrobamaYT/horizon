@@ -1187,7 +1187,7 @@
   "entities": "thực thể",
   "environment": "môi trường",
   "equipment": "thiết bị",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "thất bại",
   "first build": "xây dựng đầu tiên",
   "fonts": "phông chữ",

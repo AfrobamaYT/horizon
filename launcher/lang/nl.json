@@ -1187,7 +1187,7 @@
   "entities": "entiteiten",
   "environment": "omgeving",
   "equipment": "uitrusting",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "mislukt",
   "first build": "eerste bouw",
   "fonts": "lettertypen",

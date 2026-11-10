@@ -229,6 +229,16 @@ impl Internal {
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if m.wasm.is_some()
+            && let Some(field) = m.inject.iter().find(|i| i.kind == inject::Kind::Field)
+        {
+            return Err(inject::InjectError::NoSlot {
+                id: format!("{}:{}", m.id, field.id),
+                reason: inject::NoSlotReason::FieldRequiresSource,
+                declaration: format!("slots/{}.txt: type {}", m.id, field.at),
+            }
+            .to_string());
+        }
         Internal::check_all(&m.internals)?;
         if m.wasm.is_some()
             && m.internals.is_empty()
