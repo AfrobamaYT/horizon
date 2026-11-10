@@ -3034,7 +3034,7 @@ mod tests {
         game.world.set(key.0, key.1, key.2, state).unwrap();
         game.world
             .block_entities
-            .put(key, BlockEntity::Shelf(Box::default()));
+            .insert(key, BlockEntity::Shelf(Box::default()));
         let view = game
             .containers()
             .view(key, false)
