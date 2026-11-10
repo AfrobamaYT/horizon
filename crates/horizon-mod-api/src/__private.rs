@@ -14,3 +14,9 @@ pub fn install(mods: crate::Mods) {
     let _ = initialize();
     mod_vocab::__private::install(mods);
 }
+
+#[doc(hidden)]
+pub use crate::load_state::{install_packages, install_registration_data};
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub use crate::load_state::{with_test_packages, with_test_registration_data};

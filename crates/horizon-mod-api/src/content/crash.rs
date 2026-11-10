@@ -154,6 +154,11 @@ pub(crate) fn ensure_installed() -> Result<(), &'static str> {
             set_detail: |key, value| set_detail(key, value),
             clear_detail,
             details,
+            current_phase: crate::load_state::current_phase,
+            phase_state: crate::load_state::phase_snapshot,
+            set_phase: crate::load_state::set_phase,
+            packages: crate::load_state::current_packages,
+            registration_data: crate::load_state::registration_data,
         })
     })
 }

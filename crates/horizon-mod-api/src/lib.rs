@@ -27,3 +27,7 @@ pub mod content {
 /// Platform runtime operations and engine-owned vocabulary installations.
 #[doc(hidden)]
 pub mod __private;
+
+mod load_state;
+#[doc(hidden)]
+pub use load_state::install_guest_packages;

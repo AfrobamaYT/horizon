@@ -21,6 +21,11 @@ pub struct Backend {
     pub set_detail: fn(&'static str, String),
     pub clear_detail: fn(&'static str),
     pub details: fn() -> Vec<(&'static str, String)>,
+    pub current_phase: fn() -> crate::__private::ModPhase,
+    pub phase_state: fn() -> crate::__private::PhaseState,
+    pub set_phase: fn(crate::__private::PhaseState),
+    pub packages: fn() -> std::sync::Arc<[crate::PackageInfo]>,
+    pub registration_data: fn() -> Option<crate::__private::RegistrationData>,
 }
 
 /// Plain per-call instrumentation data. The platform must validate the pool

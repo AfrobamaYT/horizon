@@ -45,7 +45,7 @@ def main():
                      for p in (ROOT / OLD).rglob('*') if p.is_file()]
         # Platform ownership returned by #2587, not engine vocabulary.
         platform = {
-            'lib.rs', '__private.rs', 'wire/wire_guest.rs',
+            'lib.rs', '__private.rs', 'wire/wire_guest.rs', 'load_state.rs',
             'content/crash.rs', 'profiler.rs', 'profiler/firefox.rs',
             'wire/wire_resources.rs',
         }

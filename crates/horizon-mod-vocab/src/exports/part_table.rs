@@ -11,6 +11,8 @@ pub use parts::{
 };
 pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
 mod __private {
+    #[cfg(any(test, feature = "testing"))]
+    pub use crate::parts::tests as part_tests;
     pub use crate::parts::{
         AttributeDeclaration, EntityAttributeDeclaration, EntityAttributeModification, HookParts,
         ItemKeyError, KnownIds, PartsRef, ResolvePartsError, SpawnPlacementDeclaration,
@@ -20,10 +22,5 @@ mod __private {
         game_rules, has_entity_parts, has_part_hook, has_scoped_hook, install_parts,
         install_resolved_parts, item_listens, key_mappings, mark_game_thread, parts, prepare_parts,
         resolve_parts, setting, settings, spawn_placement_declarations, tooltip_appenders,
-    };
-    #[cfg(any(test, feature = "testing"))]
-    pub use crate::{
-        parts::tests as part_tests,
-        world::phase::{with_test_packages, with_test_registration_data},
     };
 }

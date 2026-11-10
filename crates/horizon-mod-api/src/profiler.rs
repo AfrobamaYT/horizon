@@ -342,6 +342,13 @@ pub(crate) fn leave(timing: mod_vocab::dispatch_scope::Timing) {
     if POOL_EPOCH.load(SeqCst) != timing.generation {
         return;
     }
+    if timing.record == OVERFLOW {
+        ACTIVE.fetch_sub(1, SeqCst);
+        return;
+    }
+    if timing.slot >= THREADS || timing.record >= CALLS {
+        return;
+    }
     let pointer = POOL.load(SeqCst);
     if pointer.is_null() {
         return;
@@ -351,9 +358,6 @@ pub(crate) fn leave(timing: mod_vocab::dispatch_scope::Timing) {
         reason = "The authentic timing token owns an ACTIVE reference to this epoch."
     )]
     let pool = unsafe { &*pointer };
-    if timing.slot >= pool.next_thread.load(SeqCst) {
-        return;
-    }
     if let Some(record) = pool
         .buffers
         .get(timing.slot)
