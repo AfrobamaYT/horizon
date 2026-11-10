@@ -46,7 +46,9 @@ class WorldInputCaptureTests(unittest.TestCase):
     def test_loading_completion_wiring(self):
         game = "".join((ROOT / "crates/horizon-client/src" / path).read_text(encoding="utf-8")
                        for path in ("game/world/player_spawn.rs", "game/runtime/window_handler.rs", "game.rs"))
-        remote = (next(ROOT.glob('crates/horizon-client/src/game/*/remote/mod.rs'))).read_text(encoding="utf-8")
+        remote_dir = next(ROOT.glob('crates/horizon-client/src/game/*/remote'))
+        remote = (remote_dir / "mod.rs").read_text(encoding="utf-8")
+        level_tick = (remote_dir / "client_level_tick.rs").read_text(encoding="utf-8")
         spawn = method(game, "spawn_player")
         self.assertLess(spawn.index("self.player = Some(player)"),
                         spawn.index("self.capture_loaded_world()"))
@@ -55,7 +57,8 @@ class WorldInputCaptureTests(unittest.TestCase):
         ready = remote[remote.index("    fn tick_client_load("):]
         self.assertLess(ready.index("r.loaded_sent = true"),
                         ready.index("self.capture_loaded_world()"))
-        self.assertIn("self.tick_remote_player(running, hold)", method(remote, "tick_remote_level"))
+        level_fn = level_tick[level_tick.index("    pub(in crate::game) fn tick_remote_level("):]
+        self.assertIn("self.tick_remote_player(running, hold)", level_fn)
         level = method(remote, "tick_remote_player")
         self.assertLess(level.index("self.tick_client_load()"),
                         level.index("self.tick_local_player("))

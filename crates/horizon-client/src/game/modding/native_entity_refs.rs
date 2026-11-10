@@ -177,6 +177,13 @@ impl Game<'_> {
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.key()))
     }
+    /// The client level in place as a handle: the level this window shows and
+    /// ticks. None before login, while reconfiguring, or with no world open.
+    pub(super) fn native_client_level(&self) -> Option<LevelRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let remote = self.remote.as_ref().filter(|r| r.has_level())?;
+        Some(LevelRef::new(epoch, remote.level_key))
+    }
     /// The name of a dimension's key.
     pub(in crate::game) fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::dimension_id(key).map(str::to_owned)
