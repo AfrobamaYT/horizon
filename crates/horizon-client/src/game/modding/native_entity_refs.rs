@@ -209,6 +209,28 @@ impl Game<'_> {
             .filter_map(|dim| self.level(dim.id()))
             .collect()
     }
+    /// All lookup members of the active server level, without spatial filtering.
+    /// Parts are not lookup members. Refuses remote, stale and parked levels.
+    pub(super) fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
+        if !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || level.dimension() != self.dim.key()
+        {
+            return None;
+        }
+        let ids = self
+            .resident_entities
+            .table
+            .borrow_mut()
+            .level_entities(level.dimension());
+        ids.into_iter()
+            .map(|id| {
+                let entity = EntityRef::new(level.epoch(), id);
+                self.native_entity_target(entity).map(|_| entity)
+            })
+            .collect()
+    }
+
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -506,13 +528,14 @@ impl Game<'_> {
             && self.world.loaded(pos[0], pos[2])
             && self.world.shape.contains_y(pos[1])
     }
-    /// Block-local outline or collision boxes with an empty context. Interaction,
-    /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a closed level. Unloaded blocks read
-    /// as air; collision errors return no boxes, like `block_collision`.
+    /// The supplied state's block-local outline or collision boxes at a level
+    /// position with an empty context. The world is never modified. Returns None
+    /// on a client, for a stale handle or for a closed level. Unloaded neighbors
+    /// read as air; collision errors return no boxes, like `block_collision`.
     pub(super) fn level_block_shape(
         &self,
         level: LevelRef,
+        state: BlockStateId,
         pos: [i32; 3],
         kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
@@ -532,15 +555,7 @@ impl Game<'_> {
                 self.levels.parked_anims(dim)?,
             )
         };
-        Some(match kind {
-            BlockShapeKind::Outline => self
-                .outline_boxes_in_context(world, anims, pos, false)
-                .into_iter()
-                .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
-                .collect(),
-            BlockShapeKind::Collision => self.native_block_collision_in(world, pos),
-            _ => unreachable!("BlockShapeKind: unhandled variant"),
-        })
+        Some(self.state_shape_boxes(world, anims, state, pos, kind))
     }
 
     /// Gameplay's face support in the current or a parked server level, including
@@ -937,6 +952,16 @@ pub(super) mod tests {
                 }
             }
         }
+    }
+
+    /// Bind the fixture body's canonical identity before configuring its acting context.
+    pub(in crate::game) fn bind_local_player(game: &mut super::Game<'_>, id: u32, uuid: u128) {
+        game.player.as_mut().expect("fixture player body").entity_id =
+            i32::try_from(id).expect("fixture entity ID fits the protocol");
+        game.level.player_uuid = Some(horizon_client::lan::playerdata::uuid_ints(uuid));
+        game.bind_local_player_residency();
+        game.lan_acting_entity = Some(id);
+        game.lan_acting_uuid = Some(uuid);
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
@@ -3530,17 +3555,18 @@ pub(super) mod tests {
         assert_eq!(host.levels().list_levels(), vec![level, nether]);
         let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
         assert_eq!(
-            game.level_block_shape(nether, [0, 64, 0], BlockShapeKind::Outline),
+            game.level_block_shape(nether, stone, [0, 64, 0], BlockShapeKind::Outline),
             Some(cube.clone())
         );
         assert_eq!(
-            game.level_block_shape(nether, [0, 64, 0], BlockShapeKind::Collision),
+            game.level_block_shape(nether, stone, [0, 64, 0], BlockShapeKind::Collision),
             Some(cube)
         );
         let shape = |game: &mut Game<'_>, name: &str, kind| {
             let state = game.pack.assets.registry.default_state(name).unwrap();
             game.world.set(0, 64, 0, state).unwrap();
-            game.level_block_shape(level, [0, 64, 0], kind).unwrap()
+            game.level_block_shape(level, state, [0, 64, 0], kind)
+                .unwrap()
         };
         game.inventory[game.selected] = Some(horizon_client::items::ItemStack {
             item: "minecraft:light".into(),

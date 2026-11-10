@@ -845,6 +845,9 @@ fn mismatch_error(list: &str) -> String {
 
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
 pub fn revision_of(version: &str) -> Result<String, String> {
+    if crate::developer_install::is_developer(version) {
+        return crate::developer_install::revision(version);
+    }
     let reference = match version.strip_prefix("nightly-") {
         // nightly-2026-10-28-0c02067: the commit is its last word.
         Some(rest) => rest.rsplit('-').next().unwrap_or(rest),
@@ -1570,6 +1573,46 @@ fn lock_crates(
 /// `.horizon-revision` (bundles pin it). A Nightly's commit stays downloadable after the Nightly
 /// is gone: its `nightly-source/…` tag keeps it (docs/release-flow.md). Links are left out:
 /// horizon-mixins refuses them, and none is needed to build.
+fn source_for(base: &str, revision: &str) -> Result<PathBuf, String> {
+    let archive = crate::developer_install::is_developer(base)
+        .then(|| backend::version_dir(base).join("developer-source.tar"));
+    source_or_local(
+        archive.as_deref(),
+        &root().join("developer-source").join(base),
+        revision,
+        || source(revision),
+    )
+}
+
+fn source_or_local(
+    archive: Option<&Path>,
+    destination: &Path,
+    revision: &str,
+    remote: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    match archive {
+        Some(archive) => local_source(archive, destination, revision),
+        None => remote(),
+    }
+}
+
+fn local_source(archive: &Path, destination: &Path, revision: &str) -> Result<PathBuf, String> {
+    if destination.join(".horizon-revision").is_file() {
+        return Ok(destination.to_owned());
+    }
+    let parent = destination.parent().unwrap();
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let partial = tempfile::Builder::new()
+        .prefix(".source-")
+        .tempdir_in(parent)
+        .map_err(|e| e.to_string())?;
+    let file = fs::File::open(archive).map_err(|e| e.to_string())?;
+    unpack_source(file, partial.path())?;
+    fs::write(partial.path().join(".horizon-revision"), revision).map_err(|e| e.to_string())?;
+    fs::rename(partial.path(), destination).map_err(|e| e.to_string())?;
+    Ok(destination.to_owned())
+}
+
 fn source(revision: &str) -> Result<PathBuf, String> {
     let dir = root().join("source").join(revision);
     if dir.join(".horizon-revision").is_file() {
@@ -1592,22 +1635,34 @@ fn source(revision: &str) -> Result<PathBuf, String> {
 
 /// GitHub's archive (`.tar.gz`) at `url`, unpacked into the fresh folder `partial`: the archive's
 /// one top folder, which is returned. Links are left out; at most `limit` bytes are unpacked.
+fn unpack_source(reader: impl std::io::Read, partial: &Path) -> Result<(), String> {
+    let mut archive = tar::Archive::new(reader);
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry =
+            entry.map_err(|e| trf("Source interrupted: {error}", &[("error", &e.to_string())]))?;
+        let kind = entry.header().entry_type();
+        // Match downloaded sources: horizon-mixins refuses links, which the build does not need.
+        if !(kind.is_file() || kind.is_dir()) {
+            continue;
+        }
+        if !entry.unpack_in(partial).map_err(|e| {
+            trf(
+                "Could not unpack the source: {error}",
+                &[("error", &e.to_string())],
+            )
+        })? {
+            return Err(tr("The source archive contains a path outside its folder.").into());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<PathBuf, String> {
     use std::io::Read;
     let _ = fs::remove_dir_all(partial);
     fs::create_dir_all(partial).map_err(|e| e.to_string())?;
     let reader = flate2::read::GzDecoder::new(backend::get(url)?.into_reader()).take(limit);
-    let mut tar = tar::Archive::new(reader);
-    for entry in tar.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| format!("Download interrupted: {e}"))?;
-        let kind = entry.header().entry_type();
-        if !(kind.is_file() || kind.is_dir()) {
-            continue;
-        }
-        entry
-            .unpack_in(partial)
-            .map_err(|e| format!("Could not unpack the source: {e}"))?;
-    }
+    unpack_source(reader, partial)?;
     // The archive's one top folder (<repo>-<commit>/) is the source's root.
     fs::read_dir(partial)
         .map_err(|e| e.to_string())?
@@ -1901,12 +1956,15 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
+    // Keep developer provenance distinct from a signed base at the same source commit.
+    let developer_key = crate::developer_install::is_developer(origin)
+        .then(|| format!("{}:{origin}", platform.cache_key().unwrap_or_default()));
     let version = version_for(
         &revision,
         &mixins,
         profile,
         target,
-        platform.cache_key(),
+        developer_key.as_deref().or(platform.cache_key()),
         &requested,
     )?;
     let now = Record {
@@ -1919,7 +1977,10 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists || profile != Profile::Optimized {
+    let prebuilt = if exists
+        || profile != Profile::Optimized
+        || crate::developer_install::is_developer(origin)
+    {
         None
     } else {
         let game = match prebuilt::refusal(&projects) {
@@ -2050,7 +2111,7 @@ fn pipeline(
             }
         }
         progress(Step::Source(revision.clone()));
-        let source = source(&revision)?;
+        let source = source_for(origin, &revision)?;
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
         // it refuses) and, on Windows, ASCII (which they can't read past), both by build_dir.
         let real = root();
@@ -2634,6 +2695,90 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn source_archive_escape_is_refused_without_writing_outside() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o644);
+        header.as_mut_bytes()[..10].copy_from_slice(b"../outside");
+        header.set_cksum();
+        let mut archive = tar::Builder::new(Vec::new());
+        archive.append(&header, &b"x"[..]).unwrap();
+        let bytes = archive.into_inner().unwrap();
+        let inside = folder.path().join("inside");
+        fs::create_dir(&inside).unwrap();
+        assert!(unpack_source(bytes.as_slice(), &inside).is_err());
+        assert!(!folder.path().join("outside").exists());
+    }
+
+    #[test]
+    fn developer_native_build_uses_local_only_commit_without_source_network() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("checkout");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        fs::write(repo.join("Cargo.toml"), "[workspace]\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("Cargo.toml", repo.join("CLAUDE.md")).unwrap();
+        git(&["add", "--all"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "local only",
+        ]);
+        let revision = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        // Git archive applies core.autocrlf even though the blob is LF. Exercise the real
+        // developer snapshot boundary with Windows-style config and keep the byte assertion.
+        git(&["config", "core.autocrlf", "true"]);
+        let (snapshot_revision, snapshot) =
+            crate::developer_install::committed_snapshot(&repo).unwrap();
+        assert_eq!(snapshot_revision, revision);
+        let archive = folder.path().join("source.tar");
+        fs::write(&archive, snapshot).unwrap();
+        let destination = folder.path().join("cache/source");
+        let result = source_or_local(Some(&archive), &destination, &revision, || {
+            panic!("developer source must never request GitHub")
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(result.join("Cargo.toml")).unwrap(),
+            "[workspace]\n"
+        );
+        assert_eq!(
+            fs::read_to_string(result.join(".horizon-revision")).unwrap(),
+            revision
+        );
+        assert!(!result.join("CLAUDE.md").exists());
+        assert!(source_or_local(
+            Some(&folder.path().join("missing.tar")),
+            &folder.path().join("missing-cache"),
+            &revision,
+            || panic!("missing local source must not fall back to GitHub")
+        )
+        .is_err());
+    }
 
     /// The player's route, from a fresh data folder with nothing registered by hand: the
     /// launcher's own install of a release, a native build on it, then an update to a newer
