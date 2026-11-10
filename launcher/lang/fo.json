@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} er ikki sett upp",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ella .mcp.json í verkætlan)",
   "← All servers": "← Allir ambætarar",
-  "← Newer": "← Nýggjari",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Nýggjari"
 }

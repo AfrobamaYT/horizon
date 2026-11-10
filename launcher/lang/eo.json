@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} ne estas instalita",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (aŭ .mcp.json en projekto)",
   "← All servers": "← Ĉiuj serviloj",
-  "← Newer": "← Pli nova",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Pli nova"
 }

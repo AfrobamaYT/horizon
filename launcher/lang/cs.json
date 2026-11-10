@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} není nainstalováno",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (nebo .mcp.json v projektu)",
   "← All servers": "← Všechny servery",
-  "← Newer": "← Novější",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Novější"
 }

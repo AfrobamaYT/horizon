@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} ยังไม่ได้ติดตั้ง",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (หรือ .mcp.json ในโปรเจ็กต์)",
   "← All servers": "← เซิร์ฟเวอร์ทั้งหมด",
-  "← Newer": "← ใหม่กว่า",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← ใหม่กว่า"
 }

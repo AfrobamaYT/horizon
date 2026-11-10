@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} நிறுவப்படவில்லை",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (அல்லது திட்டத்தில் .mcp.json)",
   "← All servers": "← அனைத்து சர்வர்கள்",
-  "← Newer": "← புதியது",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← புதியது"
 }

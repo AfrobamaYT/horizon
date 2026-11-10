@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} ni nameščen",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ali .mcp.json v projektu)",
   "← All servers": "← Vsi strežniki",
-  "← Newer": "← Novejše",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Novejše"
 }

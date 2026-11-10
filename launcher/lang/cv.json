@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} вырнаҫтарман",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (е .mcp.json проектра)",
   "← All servers": "← Пур серверсем те",
-  "← Newer": "← Ҫӗнӗрех",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Ҫӗнӗрех"
 }

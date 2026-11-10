@@ -1359,7 +1359,5 @@
   "{version} is not installed": "Chan eil {version} air a stàladh",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (no .mcp.json ann am pròiseact)",
   "← All servers": "← A h-uile frithealaiche",
-  "← Newer": "← Nas ùire",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Nas ùire"
 }

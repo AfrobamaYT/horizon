@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} neįdiegtas",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (arba .mcp.json projekte)",
   "← All servers": "← Visi serveriai",
-  "← Newer": "← Naujesnis",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Naujesnis"
 }

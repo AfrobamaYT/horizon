@@ -1359,7 +1359,5 @@
   "{version} is not installed": "ʻAʻole hoʻokomo ʻia ʻo {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (a i ʻole .mcp.json ma kahi papahana)",
   "← All servers": "← Nā kikowaena āpau",
-  "← Newer": "← Mea hou",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Mea hou"
 }

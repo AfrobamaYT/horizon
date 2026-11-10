@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} ບໍ່ໄດ້ຕິດຕັ້ງ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ຫຼື .mcp.json ໃນໂຄງການ)",
   "← All servers": "← ເຊີບເວີທັງໝົດ",
-  "← Newer": "← ໃໝ່ກວ່າ",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← ໃໝ່ກວ່າ"
 }

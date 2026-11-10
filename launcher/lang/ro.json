@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version} nu este instalat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (sau .mcp.json într-un proiect)",
   "← All servers": "← Toate serverele",
-  "← Newer": "← Mai nou",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Mai nou"
 }

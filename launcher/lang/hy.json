@@ -1359,7 +1359,5 @@
   "{version} is not installed": "{version}-ը տեղադրված չէ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (կամ .mcp.json նախագծում)",
   "← All servers": "← Բոլոր սերվերները",
-  "← Newer": "← Ավելի նոր",
-  "local slots pending (I5)": "local slots pending (I5)",
-  "wasm sites pending": "wasm sites pending"
+  "← Newer": "← Ավելի նոր"
 }
