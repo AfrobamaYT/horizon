@@ -141,7 +141,7 @@ exactly one entry. Reject malformed/oversized payloads before allocation or
 mutation, including duplicate snapshot keys. Rate-limit requests to 20 per
 second per player; excess requests are rejected and cannot alter flags. Client
 UI may show pending intent but only authoritative replies enter saved state.
-Single-player uses the same server apply operation without network serialization.
+The design called for single-player to use the same server apply operation without serialization; this build instead preserves the existing integrated server's byte-pipe connection and identical negotiated, rate-limited authority semantics, because a typed local route needs per-connection ordered queues bound to integrated player ownership and reconnect lifetime.
 
 ## Worked book and acceptance cases
 

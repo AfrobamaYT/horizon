@@ -8,6 +8,8 @@ pub const MAX_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
+    Hello,
+    Ready,
     Offer(Vec<String>),
     Snapshot {
         epoch: u64,
@@ -27,6 +29,33 @@ pub enum Message {
         flags: BookFlags,
     },
     Resnapshot,
+}
+
+/// Connection payload budget, checked before decoding or allocating replies.
+pub struct RequestBudget {
+    window: Instant,
+    count: u32,
+}
+impl Default for RequestBudget {
+    fn default() -> Self {
+        Self {
+            window: Instant::now(),
+            count: 0,
+        }
+    }
+}
+impl RequestBudget {
+    pub fn accept(&mut self, now: Instant) -> bool {
+        if now.saturating_duration_since(self.window) >= Duration::from_secs(1) {
+            self.window = now;
+            self.count = 0;
+        }
+        if self.count >= 20 {
+            return false;
+        }
+        self.count += 1;
+        true
+    }
 }
 
 /// A new value is required for every connection, including reconnects.
