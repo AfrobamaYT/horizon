@@ -17,6 +17,7 @@
 - [Wire types](how-to/wire-types.md)
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
 
 # How-to
 
