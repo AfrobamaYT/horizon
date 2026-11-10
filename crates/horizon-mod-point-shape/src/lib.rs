@@ -119,6 +119,9 @@ pub struct Shape {
     pub raw_only: bool,
     /// A free function (`free` in the attribute), not an associated one.
     pub free: bool,
+    /// The slot table module its expansion reaches (`table = "…"`): the game's `mod_points`, or a
+    /// mod crate's own generated table (`crate::__horizon_points`).
+    pub table: syn::Path,
 }
 
 /// Whether the staging pass gives a function with these `attrs` and `sig` a point: one predicate for
@@ -126,8 +129,9 @@ pub struct Shape {
 /// the hooks' own functions (`native_*`, whose bodies the generator reads), anything compiled only
 /// under a `cfg`, `const`, `async` and `unsafe` functions, methods taking `self` by value,
 /// `impl Trait` in the signature, `-> !`, `#[inline(always)]`, and parameters named `cancel` or
-/// `result`, which the record has its own of. A `Game` method also needs a `&self` or `&mut self`
-/// receiver: its listeners get the game as their host.
+/// `result`, which the record has its own of, and a mod crate's functions marked
+/// `#[no_point]` (`#[mod_api::no_point]`), which opt out. A `Game` method also needs a `&self` or
+/// `&mut self` receiver: its listeners get the game as their host.
 pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
     let impl_trait = |ty: &Type| matches!(ty, Type::ImplTrait(_));
     !sig.ident.to_string().starts_with("native_")
@@ -148,6 +152,10 @@ pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
             let path = attr.path();
             path.is_ident("cfg")
                 || path.is_ident("cfg_attr")
+                || path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "no_point")
                 || path.is_ident("test")
                 || (path.is_ident("inline")
                     && attr
@@ -209,6 +217,7 @@ pub fn raw_able(sig: &syn::Signature, impl_generics: Option<&syn::Generics>) -> 
 pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape> {
     let (mut name, mut side, mut raw, mut free) = (sig.ident.to_string(), None, false, false);
     let mut raw_only = false;
+    let mut table: syn::Path = syn::parse_quote!(mod_points);
     let mut mirrors = Vec::new();
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("raw") {
@@ -220,6 +229,8 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
             free = true;
         } else if meta.path.is_ident("name") {
             name = meta.value()?.parse::<syn::LitStr>()?.value();
+        } else if meta.path.is_ident("table") {
+            table = meta.value()?.parse::<syn::LitStr>()?.parse()?;
         } else if meta.path.is_ident("mirror") || meta.path.is_ident("api") {
             let convert = meta.path.is_ident("mirror");
             meta.parse_nested_meta(|mirror| {
@@ -246,7 +257,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
             });
         } else {
             return Err(meta.error(
-                "a point takes side = \"…\", name = \"…\", raw, free, api(…) and mirror(…)",
+                "a point takes side = \"…\", name = \"…\", table = \"…\", raw, free, api(…) and mirror(…)",
             ));
         }
         Ok(())
@@ -347,6 +358,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         raw,
         raw_only,
         free,
+        table,
     })
 }
 
@@ -747,17 +759,17 @@ impl Shape {
             (_, Some(_)) => (quote!(host: &dyn ::mod_api::Host,), quote!(host,), quote!()),
         };
         let forwarded_host = match (self.receiver, self.side) {
-            (_, None) => quote!(crate::__private::PointHost::None),
+            (_, None) => quote!(super::__private::PointHost::None),
             (Receiver::Mut, Some(Side::Server)) => {
-                quote!(crate::__private::PointHost::Server(&mut *host))
+                quote!(super::__private::PointHost::Server(&mut *host))
             }
             (Receiver::Mut, Some(Side::Client)) => {
-                quote!(crate::__private::PointHost::Client(&mut *host))
+                quote!(super::__private::PointHost::Client(&mut *host))
             }
             (Receiver::Mut, Some(Side::Both)) => {
-                quote!(crate::__private::PointHost::Side(host.reborrow()))
+                quote!(super::__private::PointHost::Side(host.reborrow()))
             }
-            (_, Some(_)) => quote!(crate::__private::PointHost::Read(host)),
+            (_, Some(_)) => quote!(super::__private::PointHost::Read(host)),
         };
         let wire_fields = self.wire_fields(quote!(args));
         let mut places = vec![(self.name.clone(), "head")];
@@ -773,22 +785,22 @@ impl Shape {
                 #[doc = #doc]
                 pub type #listener = fn(#host args: &mut #record);
                 #[doc = #doc]
-                pub const fn #method(id: &'static str, priority: i32, inject: &'static str, listener: #listener) -> crate::__private::SlotListener {
+                pub const fn #method(id: &'static str, priority: i32, inject: &'static str, listener: #listener) -> super::__private::SlotListener {
                     // SAFETY: the alias checks this place's host and record before erasure.
-                    unsafe { crate::__private::SlotListener::api(id, PointId::#variant, listener as *const ()) }.ordered(priority, inject)
+                    unsafe { super::__private::SlotListener::api(id, PointId::#variant.place(), listener as *const ()) }.ordered(priority, inject)
                 }
             });
             items.dispatch.extend(quote! {
                 #[doc = #doc]
                 pub fn #method(#host args: &mut #record) {
                     #reborrow
-                    crate::__private::fire_api(PointId::#variant, &mut |kind| match kind {
-                        crate::__private::ApiKind::Typed(function) => {
+                    super::__private::fire_api(PointId::#variant, &mut |kind| match kind {
+                        super::__private::ApiKind::Typed(function) => {
                             // SAFETY: the typed constructor checked this place's exact function type.
                             let function = unsafe { ::std::mem::transmute::<*const (), super::listeners::#listener>(function) };
                             function(#passed args);
                         }
-                        crate::__private::ApiKind::Forwarded(endpoint, id) => {
+                        super::__private::ApiKind::Forwarded(endpoint, id) => {
                             endpoint.forward(id, #forwarded_host, &mut ::mod_api::wire::Fields(#wire_fields));
                         }
                     });
