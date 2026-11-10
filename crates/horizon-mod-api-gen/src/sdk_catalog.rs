@@ -46,9 +46,9 @@ pub fn sdk_catalog(root: &Path, api_version: &str) -> Result<String, String> {
                 arguments.push(json!({"name": name, "type": ty}));
             }
         }
-        hooks.push(json!({"id": hook.name, "side": format!("{:?}", hook.side).to_lowercase(),
-            "scope": hook.scope.map(|scope| json!({"kind": format!("{:?}", scope.kind).to_lowercase(), "key": scope.key})),
-            "contract": format!("{:?}", hook.contract).to_lowercase(), "arguments": arguments, "output": output}));
+        hooks.push(json!({"id": hook.name, "side": match hook.side { crate::catalog::Side::Server => "server", crate::catalog::Side::Client => "client", crate::catalog::Side::Both => "both" },
+            "scope": hook.scope.map(|scope| json!({"kind": match scope.kind { crate::catalog::PartKind::Block => "block", crate::catalog::PartKind::BlockEntity => "blockentity", crate::catalog::PartKind::Item => "item", crate::catalog::PartKind::Menu => "menu", crate::catalog::PartKind::Fluid => "fluid" }, "key": scope.key})),
+            "contract": match hook.contract { crate::Contract::Listen => "listen", crate::Contract::Cancel => "cancel", crate::Contract::Collect => "collect", crate::Contract::Replace => "replace" }, "arguments": arguments, "output": output}));
     }
     let points = crate::points::game_points(root)?
         .into_iter()
