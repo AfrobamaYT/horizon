@@ -1,5 +1,5 @@
 #[derive(Debug, PartialEq, Eq)]
-enum BlockEntitySnapshotError {
+pub(in crate::game) enum BlockEntitySnapshotError {
     InvalidRevision,
     InvalidStack,
 }
@@ -32,7 +32,7 @@ fn apply_block_entity_snapshot(
 
 // Validation runs after all listeners return; dispatch does not retain per-mod provenance.
 // Bound diagnostics even when mods register many entity types.
-fn finish_block_entity_writeback<T>(
+pub(in crate::game) fn finish_block_entity_writeback<T>(
     entity: &mut crate::containers::ModBlockEntity,
     snapshot: &mod_api::ModBlockEntity,
     before: mod_api::item::containers::ModRevision,
@@ -70,4 +70,3 @@ fn finish_block_entity_writeback<T>(
     }
     result
 }
-

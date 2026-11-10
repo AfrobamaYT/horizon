@@ -50,6 +50,13 @@ pub trait ItemEntitiesBackendMut {
     /// stacks are refused: vanilla discards the item on its next tick. To
     /// remove an item entity, use the removal handle. False also for an
     /// unavailable item or outside a server.
+    ///
+    /// During a mod block-entity tick this write is proposed, not published:
+    /// later Parts read the proposal, and it commits only with the accepted
+    /// final block-entity snapshot. A stale item or rejected guest response
+    /// rejects the whole tick proposal. Outside that scope writes are immediate.
+    /// Pickup delay and target changes, spawning, motion, block changes and
+    /// non-item removals are deliberately immediate, not rolled back with it.
     #[access(WorldOnly)]
     fn item_entity_set_stack(
         &mut self,

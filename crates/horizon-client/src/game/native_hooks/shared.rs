@@ -3262,6 +3262,7 @@ impl Game<'_> {
         };
         // An empty id marks its place while the mod has it.
         let mut taken = std::mem::take(&mut **m);
+        let placeholder_identity = m.revision().identity();
         let state = self.world.block(pos.0, pos.1, pos.2).0;
         let slots = self
             .world
@@ -3278,15 +3279,26 @@ impl Game<'_> {
             let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
             taken.nbt.insert("Items".into(), items);
         }
+        let parent = (
+            self.block_entity_tick_key
+                .replace(super::block_entity_tick_items::Key {
+                    pos,
+                    placeholder_identity,
+                    failure_generation: self.wasm_dispatch_failures.get(),
+                    transaction_depth: self.transactions.len(),
+                    unbalanced: false,
+                }),
+            self.block_entity_tick_items.take(),
+        );
         self.api_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
-        self.put_back_mod_block_entity(pos, taken, &items);
+        self.finish_tick_item_writeback(pos, taken, &items, parent);
     }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
     pub(super) fn put_back_mod_block_entity(
         &mut self,
         pos: Pos,
-        mut taken: EngineBlockEntity,
+        taken: EngineBlockEntity,
         items: &[Option<ItemStack>],
     ) {
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos)
@@ -3300,17 +3312,8 @@ impl Game<'_> {
             if moved {
                 self.container_changed(pos);
             }
-        } else if taken.items.iter().any(Option::is_some) {
-            // The mod removed or replaced its own block during the call. Vanilla
-            // ticks it in the world and drops a container's contents on removal.
-            let lost = std::mem::take(&mut taken.items);
-            let at = BlockPos {
-                x: pos.0,
-                y: pos.1,
-                z: pos.2,
-            };
-            self.with_level(|_, level, _| level.drop_lost_contents(at, lost));
-            self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
+        } else {
+            self.drop_unreturned_mod_contents(pos, taken);
         }
     }
     /// Menu button `id` on the mod container at `pos` (`clickMenuButton`),

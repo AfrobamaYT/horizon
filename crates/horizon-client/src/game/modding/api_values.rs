@@ -1878,13 +1878,25 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_block_entity_tick(pos, &mut api);
+        if let Some(scope) = &mut self.block_entity_tick_items
+            && scope.items.is_some()
+        {
+            scope.snapshot = Some(Box::new((api, revision)));
+            return;
+        }
         let _ = finish_block_entity_writeback(
             entity,
             &api,
             revision,
             self.items(),
             "block_entity_tick",
-            Ok(()),
+            if self.block_entity_tick_key.as_ref().is_none_or(|key| {
+                !key.unbalanced && key.failure_generation == self.wasm_dispatch_failures.get()
+            }) {
+                Ok(())
+            } else {
+                Err(BlockEntitySnapshotError::InvalidRevision)
+            },
         );
     }
     pub(in crate::game) fn api_block_entity_update_tag(

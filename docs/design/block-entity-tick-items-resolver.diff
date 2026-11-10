@@ -1,0 +1,58 @@
+--- baseline
+
++++ unscoped_native_entity_target
+
+@@ -2,8 +2,8 @@
+
+ push   %rbx
+ sub    $0x28,%rsp
+ mov    %edx,%ecx
+-mov    0x25b20(%rdi),%rdx
+-mov    0x25b28(%rdi),%rax
++mov    0x25b50(%rdi),%rdx
++mov    0x25b58(%rdi),%rax
+ movabs $0x1ffffffffffffff0,%r8
+ and    %rax,%r8
+ je     TARGET
+@@ -42,11 +42,11 @@
+
+ mov    $0xffffffff,%eax
+ cmpb   $0x0,0x112ab(%rdi)
+ je     TARGET
+-cmpb   $0x2,0x273ab(%rdi)
++cmpb   $0x2,0x273db(%rdi)
+ je     TARGET
+-cmp    %rsi,0x27398(%rdi)
++cmp    %rsi,0x273c8(%rdi)
+ jne    TARGET
+-mov    0x1abb8(%rdi),%r14
++mov    0x1abe8(%rdi),%r14
+ cmpq   $0x0,(%r14)
+ jne    TARGET
+ mov    %rdi,%rbx
+@@ -69,10 +69,10 @@
+
+ cmp    $0x2,%eax
+ jb     TARGET
+ mov    0x18(%rsp),%ecx
+-mov    0x27298(%rbx),%esi
++mov    0x272c8(%rbx),%esi
+ cmp    $0x3,%esi
+ jne    TARGET
+-mov    0x2729c(%rbx),%esi
++mov    0x272cc(%rbx),%esi
+ cmp    %esi,%ecx
+ mov    $0xffffffff,%ecx
+ cmovne %ecx,%eax
+@@ -89,8 +89,8 @@
+
+ pop    %rbx
+ pop    %r14
+ ret
+-lea    0x5d71651(%rip),%rdi        # TARGET
+-call   *0x628f283(%rip)        # TARGET
++lea    0x5685331(%rip),%rdi        # TARGET
++call   *0x5ba6a43(%rip)        # TARGET
+ incq   (%r14)
+ mov    %rax,%rdi
+ call   TARGET

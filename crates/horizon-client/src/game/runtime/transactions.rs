@@ -196,6 +196,9 @@ impl Game<'_> {
     }
     /// Opens a transaction and gives back its write and close tokens.
     fn open_storage_transaction(&mut self) -> (u64, u64) {
+        if let Some(scope) = &mut self.block_entity_tick_items {
+            scope.open_transaction();
+        }
         let (token, close_token) = (frame_token(), frame_token());
         self.transactions.push(Level {
             token,
@@ -203,6 +206,9 @@ impl Game<'_> {
             dimension: Some(self.dim),
             ..Level::default()
         });
+        if let Some(key) = &mut self.block_entity_tick_key {
+            key.unbalanced = true;
+        }
         (token, close_token)
     }
     /// Closes the transaction `seal` ends, first aborting every one opened inside it and left
@@ -240,6 +246,12 @@ impl Game<'_> {
         let Some(level) = self.transactions.pop() else {
             return;
         };
+        if let Some(scope) = &mut self.block_entity_tick_items {
+            scope.close_transaction(commit);
+        }
+        if let Some(key) = &mut self.block_entity_tick_key {
+            key.unbalanced = self.transactions.len() != key.transaction_depth;
+        }
         debug_assert_eq!(
             level.dimension,
             Some(self.dim),
@@ -645,6 +657,8 @@ impl Game<'_> {
         }
     }
 }
+
+include!("transactions/item_entity.rs");
 
 #[cfg(test)]
 #[path = "transactions/player_tests.rs"]
@@ -1950,5 +1964,3 @@ mod mod_capability_tests {
         });
     }
 }
-
-include!("transactions/item_entity.rs");

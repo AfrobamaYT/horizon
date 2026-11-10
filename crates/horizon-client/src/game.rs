@@ -3496,6 +3496,9 @@ struct Game<'a> {
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
+    block_entity_tick_key: Option<block_entity_tick_items::Key>,
+    block_entity_tick_items: Option<Box<block_entity_tick_items::Scope>>,
+    wasm_dispatch_failures: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The open world's dimensions past vanilla's three. One per process, as a window
 /// and its server thread name the same dimensions.
@@ -16589,6 +16592,9 @@ impl<'a> Game<'a> {
             tnts: Default::default(),
             hoppers: HashMap::new(),
             transactions: Vec::new(),
+            block_entity_tick_key: None,
+            block_entity_tick_items: None,
+            wasm_dispatch_failures: horizon_mod_wasm::dispatch_failure_counter(),
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),

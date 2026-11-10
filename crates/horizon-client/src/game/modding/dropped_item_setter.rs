@@ -18,6 +18,11 @@ impl Game<'_> {
         {
             return false;
         }
+        if self.block_entity_tick_key.is_some() {
+            return self
+                .stage_tick_item(id, (stack.count != 0).then_some(stack))
+                .unwrap_or(false);
+        }
         let Some(i) = self.dropped.iter().position(|e| e.id == id) else {
             return false;
         };
