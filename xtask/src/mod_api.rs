@@ -16,6 +16,16 @@ pub fn run() -> Result<(), String> {
     horizon_mod_api_gen::crossing::write_foreign_layouts(&root)
 }
 
+/// Prints the wasm boundary coverage chapter for the book preprocessor, without writing a source
+/// file.
+pub fn coverage() -> Result<(), String> {
+    print!(
+        "{}",
+        horizon_mod_api_gen::generate_wire_coverage(&checkout()?)?
+    );
+    Ok(())
+}
+
 /// Prints the hook-notes chapter for the book preprocessor, without writing a source file.
 pub fn notes() -> Result<(), String> {
     print!(

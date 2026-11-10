@@ -73,7 +73,8 @@
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
-- [Wasm boundary coverage](wasm-coverage.md)
+<!-- The wasm-coverage preprocessor renders this chapter from the generator at its published URL. -->
+- [Wasm boundary coverage]()
 - [Legacy native hook API history (frozen)](reference/native-api-history.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
