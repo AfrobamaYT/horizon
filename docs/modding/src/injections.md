@@ -598,9 +598,70 @@ Use those aliases for the callback. The generated main adapts each kind to one w
 | `wrap_call` | Receiver, mutable arguments and mutable `original` continuation; returns the result |
 | `wrap_if` | Receiver and shared arguments; returns whether to call the original; unit output only |
 
+Native source `internals` calls also admit immutable borrowed arguments, such as `&str`.
+Their generated `Args<'a>` record borrows the original values for the call; no implicit
+owned-string conversion occurs. The listener is higher-ranked over that lifetime, so safe
+callbacks cannot retain the record or its references beyond the call, or mutate the referent
+through an immutable reference (ordinary interior mutability still follows Rust's rules).
+A callback may replace an argument with another reference valid for the same lifetime.
+Engine types are borrowed too: `&MobWorld` becomes a shared reference to the native
+`horizon_client_lib::mobs::MobWorld<'g>` in `Args<'g, 'a>`, keeping the world's own
+lifetime separate from the record's borrow. The facade re-exports the typed record;
+it does not convert the world into a mod API value or expose private fields. A callback
+can read the world's public fields and call its shared-reference methods using Rust's
+normal field projection, including public nested values, even without naming every type.
+Naming `MobWorld` itself requires its internals facade export. It cannot obtain exclusive
+access or extend either lifetime. Copy arrays of scalar values, such as `[i32; 3]`, can
+accompany these references in source records.
+`modify_value` still receives only the receiver and owned result, not the argument record.
+Mutable borrowed arguments remain refused, as do borrowed arguments on API/listed routes;
+this does not enable API source adapters or wasm call sites.
+
+### Owned arguments on native source calls
+
+A native source `internals` call can also move owned arguments, such as the `ItemStack`
+in `Game::dispense_item`, into its record. Argument expressions run once in their original
+order. No stack is implicitly cloned. A record with any owned non-Copy field selects the
+**single-use** listener contract; named value types are conservatively treated as owned,
+even when that particular type implements Copy. Non-generic private aliases are expanded
+from the catalog, so the record names the actual field types rather than an inaccessible alias
+in another implementation module. The existing scalar/shared-reference-only
+contract remains repeatable.
+
+`before_call` still receives `&mut Args`, allowing argument modification; an observing
+callback can inspect its fields through shared references. `after_call` and `modify_value`
+keep their result-only signatures. A single-use `wrap_call` instead receives `Args` **by
+value** and the site's generated `Original<'g, 'a, 'next>` capability (exported beside
+`Args`, `Receiver`, `Output` and `Listener` under the same canonical prefix):
+
+```rust,ignore
+pub fn wrap(receiver: Receiver<'_, '_>, mut args: Args, original: Original<'_, '_, '_>) -> Output {
+    inspect(&args.stack);
+    modify(&mut args.stack);
+    original.call(receiver, args)
+}
+```
+
+`original.call` consumes both the forwarding capability and the record. A second call,
+using the moved record again, or retaining the capability past this call fails to compile.
+A wrapper that does not forward must supply its own correctly typed output; its unconsumed
+arguments drop normally. `wrap_if` remains unit-output-only and drops the arguments when
+its condition is false. Panics unwind through ordinary Rust ownership: a value is not leaked
+or dropped twice by the engine, whether the listener panics before or after forwarding.
+No per-call heap allocation is needed for the capability.
+
+Borrowed and owned fields share one lifetime-bearing record. Forwarding moves owned fields
+and copies shared references; dropping the record does not drop their referents. Native
+`internals` callbacks are trusted code, not a sandbox: a callback may explicitly take an
+owned value through replacement or by owning Args, and may call `mem::forget`. The engine
+promises no hidden copies or leaks; it cannot prohibit these explicit mod-side transfers.
+Mutable-reference arguments, listed/prebuilt owned records and API/wasm routes remain refused.
+Owned shapes containing further borrows remain refused; direct immutable-reference fields
+can accompany owned fields.
+
 Listeners nest by descending priority, then mod ID, then injection ID; the first is outermost.
-A wrap may call `original` zero, one or several times. `cancellable` is refused: returning from the
-caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
+A repeatable wrap may call `original` zero, one or several times; a single-use wrap forwards
+at most once. `cancellable` is refused: returning from the caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
 and alias-dependent receiver arguments are refused with the declaration's file, line and reason.
 
 An unlisted canonical call can use native source routing after the same freshness checks.

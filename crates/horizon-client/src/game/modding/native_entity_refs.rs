@@ -12,6 +12,9 @@
 pub(in crate::game) mod dragon_parts_table;
 #[path = "native_entity_refs/dragon_query.rs"]
 mod dragon_query;
+#[cfg(test)]
+#[path = "native_entity_refs/roll_loot_tests.rs"]
+mod roll_loot_tests;
 #[path = "native_entity_refs/save_lending.rs"]
 mod save_lending;
 use super::{
@@ -328,6 +331,47 @@ impl Game<'_> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
         Some(self.with_level(|_, level, _| level.block_drops_of(at, state, tool, entity)))
+    }
+    /// One roll of the world's loot table `table` (`LootTable.getRandomItems`) with `origin` as
+    /// ORIGIN, `tool` as TOOL and `entity` as THIS_ENTITY when given: the context
+    /// `/loot … fish <table> <pos> <tool>` gives. It draws from the table's random sequence,
+    /// else the level random, and the stacks come split to their stack sizes. None for a
+    /// missing table, a stale handle or one of a parked level, a client, and an `entity` that
+    /// names nothing.
+    pub(super) fn level_roll_loot(
+        &mut self,
+        level: LevelRef,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Option<Vec<ItemStack>> {
+        if !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || self.dim.key() != level.dimension()
+            || !world_items!(self).has_loot_table(table)
+        {
+            return None;
+        }
+        if let Some(entity) = entity {
+            self.native_entity_target(entity)?;
+        }
+        let place = self.loot_place_at(origin, None);
+        horizon_world::loot::with_native_loot_place(place, || {
+            let this_entity = entity.is_some();
+            match world_items!(self).loot_sequence(table) {
+                Some(sequence) => {
+                    let random = self.rand_sequences.get(&sequence, self.level.seed);
+                    world_items!(self).roll_loot_table(table, tool, this_entity, random)
+                }
+                None => world_items!(self).roll_loot_table(
+                    table,
+                    tool,
+                    this_entity,
+                    &mut self.world.random,
+                ),
+            }
+        })
     }
     /// Set a block through Level.setBlock. Typed errors distinguish stale/unavailable
     /// levels; Ok(false) preserves vanilla's position/no-change refusal.

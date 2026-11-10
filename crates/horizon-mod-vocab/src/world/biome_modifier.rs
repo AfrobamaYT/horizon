@@ -76,6 +76,40 @@ pub enum BiomeModifierOperation {
         /// Entity type ids or tags.
         entity_types: Vec<String>,
     },
+    /// `add_carvers`: append configured carvers to the biome's `carvers`.
+    AddCarvers {
+        /// Configured carver ids (`mymod:pit`) or tags.
+        carvers: Vec<String>,
+    },
+    /// `remove_carvers`: take configured carvers out of the biome's `carvers`.
+    RemoveCarvers {
+        /// Configured carver ids or tags.
+        carvers: Vec<String>,
+    },
+    /// `horizon:modify_biome` (NeoForge's MODIFY phase): set single values of the biome, after
+    /// every addition and removal. A `None` leaves the value as it is.
+    ModifyBiome {
+        /// `temperature`.
+        temperature: Option<f64>,
+        /// `downfall`.
+        downfall: Option<f64>,
+        /// `has_precipitation`.
+        has_precipitation: Option<bool>,
+        /// `temperature_modifier`: `none` or `frozen`.
+        temperature_modifier: Option<String>,
+        /// `effects.sky_color`, 24-bit RGB (0..=0xFFFFFF).
+        sky_color: Option<u32>,
+        /// `effects.fog_color`, 24-bit RGB.
+        fog_color: Option<u32>,
+        /// `effects.water_color`, 24-bit RGB.
+        water_color: Option<u32>,
+        /// `effects.water_fog_color`, 24-bit RGB.
+        water_fog_color: Option<u32>,
+        /// `effects.foliage_color`, 24-bit RGB.
+        foliage_color: Option<u32>,
+        /// `effects.grass_color`, 24-bit RGB.
+        grass_color: Option<u32>,
+    },
 }
 
 /// A biome modifier: the biomes it applies to and what it does to them.
@@ -109,6 +143,9 @@ pub enum BiomeModifierError {
     InvalidSpawner,
     /// A spawn cost that is not a finite number.
     InvalidCost,
+    /// A climate number that is not finite, a colour above 0xFFFFFF, or a temperature modifier
+    /// other than `none` or `frozen`.
+    InvalidValue,
 }
 
 fn name_ok(name: &str, tags: bool) -> bool {
@@ -170,6 +207,40 @@ impl BiomeModifier {
             BiomeModifierOperation::RemoveSpawns { entity_types }
             | BiomeModifierOperation::RemoveSpawnCosts { entity_types } => {
                 names_ok(entity_types, true)
+            }
+            BiomeModifierOperation::AddCarvers { carvers }
+            | BiomeModifierOperation::RemoveCarvers { carvers } => names_ok(carvers, true),
+            BiomeModifierOperation::ModifyBiome {
+                temperature,
+                downfall,
+                temperature_modifier,
+                sky_color,
+                fog_color,
+                water_color,
+                water_fog_color,
+                foliage_color,
+                grass_color,
+                ..
+            } => {
+                let finite = [temperature, downfall]
+                    .iter()
+                    .all(|n| n.is_none_or(f64::is_finite));
+                let colours = [
+                    sky_color,
+                    fog_color,
+                    water_color,
+                    water_fog_color,
+                    foliage_color,
+                    grass_color,
+                ];
+                let modifier = temperature_modifier
+                    .as_deref()
+                    .is_none_or(|m| m == "none" || m == "frozen");
+                let colours_ok = colours.iter().all(|c| c.is_none_or(|c| c <= 0xFF_FFFF));
+                match finite && modifier && colours_ok {
+                    true => Ok(()),
+                    false => Err(BiomeModifierError::InvalidValue),
+                }
             }
             BiomeModifierOperation::AddSpawnCosts {
                 entity_types,
@@ -235,6 +306,55 @@ impl BiomeModifier {
                 "type": "neoforge:remove_spawn_costs",
                 "entity_types": set(entity_types),
             }),
+            BiomeModifierOperation::AddCarvers { carvers } => json!({
+                "type": "neoforge:add_carvers",
+                "carvers": set(carvers),
+            }),
+            BiomeModifierOperation::RemoveCarvers { carvers } => json!({
+                "type": "neoforge:remove_carvers",
+                "carvers": set(carvers),
+            }),
+            BiomeModifierOperation::ModifyBiome {
+                temperature,
+                downfall,
+                has_precipitation,
+                temperature_modifier,
+                sky_color,
+                fog_color,
+                water_color,
+                water_fog_color,
+                foliage_color,
+                grass_color,
+            } => {
+                let mut file = json!({"type": "horizon:modify_biome"});
+                for (key, value) in [
+                    ("temperature", json!(temperature)),
+                    ("downfall", json!(downfall)),
+                    ("has_precipitation", json!(has_precipitation)),
+                    ("temperature_modifier", json!(temperature_modifier)),
+                ] {
+                    if !value.is_null() {
+                        file[key] = value;
+                    }
+                }
+                let mut effects = serde_json::Map::new();
+                for (key, colour) in [
+                    ("sky_color", sky_color),
+                    ("fog_color", fog_color),
+                    ("water_color", water_color),
+                    ("water_fog_color", water_fog_color),
+                    ("foliage_color", foliage_color),
+                    ("grass_color", grass_color),
+                ] {
+                    if let Some(colour) = colour {
+                        effects.insert(key.into(), json!(colour));
+                    }
+                }
+                if !effects.is_empty() {
+                    file["effects"] = Value::Object(effects);
+                }
+                file
+            }
         };
         file["biomes"] = set(&self.biomes);
         file.to_string()
@@ -273,6 +393,62 @@ mod tests {
                 "step": "underground_ores",
             })
         );
+    }
+
+    #[test]
+    fn carver_operations_render_neoforges_field_names() {
+        let add = modifier(BiomeModifierOperation::AddCarvers {
+            carvers: strings(&["ruby:pit"]),
+        });
+        assert_eq!(add.check(), Ok(()));
+        let file: Value = serde_json::from_str(&add.json()).unwrap();
+        assert_eq!(file["type"], "neoforge:add_carvers");
+        assert_eq!(file["carvers"], "ruby:pit");
+        let remove = modifier(BiomeModifierOperation::RemoveCarvers {
+            carvers: strings(&["minecraft:cave", "ruby:pit"]),
+        });
+        let file: Value = serde_json::from_str(&remove.json()).unwrap();
+        assert_eq!(file["type"], "neoforge:remove_carvers");
+        assert_eq!(file["carvers"], json!(["minecraft:cave", "ruby:pit"]));
+        let empty = modifier(BiomeModifierOperation::AddCarvers { carvers: vec![] });
+        assert_eq!(empty.check(), Err(BiomeModifierError::EmptyList));
+    }
+
+    #[test]
+    fn modify_biome_renders_vanilla_biome_field_names_and_checks_values() {
+        let operation =
+            |temperature_modifier: Option<&str>, sky_color| BiomeModifierOperation::ModifyBiome {
+                temperature: Some(0.25),
+                downfall: None,
+                has_precipitation: Some(false),
+                temperature_modifier: temperature_modifier.map(String::from),
+                sky_color,
+                fog_color: None,
+                water_color: Some(0x3938c9),
+                water_fog_color: None,
+                foliage_color: None,
+                grass_color: None,
+            };
+        let ok = modifier(operation(Some("frozen"), Some(0xc8e0ff)));
+        assert_eq!(ok.check(), Ok(()));
+        let file: Value = serde_json::from_str(&ok.json()).unwrap();
+        assert_eq!(
+            file,
+            json!({
+                "type": "horizon:modify_biome",
+                "biomes": "#minecraft:is_forest",
+                "temperature": 0.25,
+                "has_precipitation": false,
+                "temperature_modifier": "frozen",
+                "effects": {"sky_color": 0xc8e0ff, "water_color": 0x3938c9},
+            })
+        );
+        for bad in [
+            operation(Some("warm"), None),
+            operation(None, Some(0x100_0000)),
+        ] {
+            assert_eq!(modifier(bad).check(), Err(BiomeModifierError::InvalidValue));
+        }
     }
 
     #[test]

@@ -20,6 +20,23 @@ global listener, so this is also how a mod edits vanilla or other mods' tooltips
 The global event supplies the stack, display settings, player IDs, and the
 request's `advanced` and `creative` flags on native and wasm alike.
 
+## Drawing a second world camera
+
+Native internals mods can request extra world cameras through `world_views` and
+consume their textures in `world_view_drawn`. These are raw renderer places, not
+portable API callbacks: wasm mods cannot use them. Construct a `WorldView` with a
+stable ID, camera, yaw, pitch, field of view and pixel size. Return the same
+requests whenever the frame asks; at most four valid, distinct IDs draw, with
+sides limited to 4096 pixels and the device limit.
+
+Use `world_view_drawn` to copy a still to your own buffer or draw into the supplied
+target with its encoder. Copy a picture you need to preserve: targets are reused
+while requested and retired when absent. Views draw before `world_drawn`, where
+you can composite their pictures into the player's frame. Extra cameras increase
+rendering work and do not include particles, weather, hands or shader-pack passes.
+See the generated `world_views` hook notes for the full rendering contract and
+`tools/run_world_views.py` for the offscreen fixture.
+
 ## Muffling sounds
 
 `ClientHost::muffle_sounds(amount, lowpass, ticks, exempt)` temporarily muffles the sound output, for example to accompany ringing ears after a nearby blast:
