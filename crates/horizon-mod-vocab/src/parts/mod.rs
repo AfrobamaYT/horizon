@@ -25,7 +25,6 @@ use std::{
 
 include!(concat!(env!("OUT_DIR"), "/parts_modules.rs"));
 
-impl Registrar for PartRegistrar {}
 
 impl CapabilityProviders for InstalledProviders {}
 
