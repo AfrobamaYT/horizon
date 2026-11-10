@@ -122,3 +122,36 @@ fn an_unknown_loader_bakes_only_the_elements_and_asks_nobody() {
     assert_eq!(quads.len(), 1, "the element's face only");
     assert_eq!(loaders.1.load(Ordering::Relaxed), 0);
 }
+
+#[test]
+fn inherited_loader_geometry_is_cached_per_model_identity() {
+    struct Named(std::sync::Mutex<Vec<String>>);
+    impl LoaderGeometry for Named {
+        fn quads(&self, _: &str, model: &str, _: &Value) -> Vec<LoaderQuad> {
+            self.0.lock().unwrap().push(model.to_owned());
+            let mut quad = post("side");
+            quad.tint_index = if model == "t:parent" { 1 } else { 7 };
+            vec![quad]
+        }
+    }
+    register(vec!["asmtest:named".into()]);
+    let callbacks = Arc::new(Named(std::sync::Mutex::new(Vec::new())));
+    let models = [
+        (
+            "t:parent",
+            r#"{"loader":"asmtest:named","textures":{"side":"block/post"}}"#,
+        ),
+        ("t:child", r#"{"parent":"t:parent"}"#),
+    ]
+    .into_iter()
+    .map(|(name, json)| (name.to_owned(), CuboidModel::from_json(json).unwrap()))
+    .collect();
+    let library = ModelLibrary::new(models)
+        .unwrap()
+        .with_loaders(callbacks.clone());
+    for _ in 0..2 {
+        assert_eq!(bake(&library, "t:parent", [0; 3])[0].tint_index, 1);
+        assert_eq!(bake(&library, "t:child", [0; 3])[0].tint_index, 7);
+    }
+    assert_eq!(*callbacks.0.lock().unwrap(), ["t:parent", "t:child"]);
+}

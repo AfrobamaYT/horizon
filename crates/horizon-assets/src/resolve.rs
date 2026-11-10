@@ -30,7 +30,7 @@ pub struct ModelLibrary {
     /// What registered loaders add ([`crate::model_loaders`]).
     loaders: Option<Arc<dyn LoaderGeometry>>,
     /// A registered loader's quads, keyed by the loader data they were asked for.
-    loader_quads: Mutex<BTreeMap<usize, Arc<[LoaderQuad]>>>,
+    loader_quads: Mutex<BTreeMap<(String, usize), Arc<[LoaderQuad]>>>,
     /// Models whose unknown loader was already logged.
     unknown_loaders: Mutex<BTreeSet<String>>,
 }
@@ -424,16 +424,20 @@ impl ModelLibrary {
         kind: &str,
         config: &Arc<serde_json::Value>,
     ) -> Arc<[LoaderQuad]> {
-        let key = Arc::as_ptr(config) as usize;
-        let mut cache = self.loader_quads.lock().unwrap_or_else(|e| e.into_inner());
+        let key = (model.to_owned(), Arc::as_ptr(config) as usize);
+        let cache = self.loader_quads.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(found) = cache.get(&key) {
             return Arc::clone(found);
         }
+        drop(cache);
         let quads: Arc<[LoaderQuad]> = match &self.loaders {
             Some(loaders) => loaders.quads(kind, model, config).into(),
             None => Arc::new([]),
         };
-        cache.insert(key, Arc::clone(&quads));
+        self.loader_quads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, Arc::clone(&quads));
         quads
     }
     /// Parse an obj and its materials once; a failure warns once and yields no geometry.
