@@ -56,8 +56,8 @@ fn fixture(run: impl FnOnce(&mut crate::game::Game<'_>, &Arc<AtomicBool>, &mut M
         .into(),
         || {
             with_game(|game| {
-                let root =
-                    std::env::temp_dir().join(format!("secondary-reload-{}", std::process::id()));
+                let scratch = tempfile::tempdir().unwrap();
+                let root = scratch.path().to_owned();
                 game.load_world(request(&root)).unwrap();
                 // Explicitly erase the complete sensor box so generated terrain cannot affect the fixture.
                 let registry = game.pack.assets.registry;
