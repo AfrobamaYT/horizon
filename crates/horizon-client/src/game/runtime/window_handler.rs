@@ -130,16 +130,6 @@ impl Game<'_> {
         {
             self.pad.keyboard_took_over = true;
         }
-        let pressed = match &event {
-            WindowEvent::KeyboardInput { event, .. } => {
-                event.state == ElementState::Pressed && !event.repeat
-            }
-            WindowEvent::MouseInput { state, .. } => *state == ElementState::Pressed,
-            _ => false,
-        };
-        if pressed && !self.pad.menu.synthetic {
-            self.pad_radial_cancel();
-        }
         if let WindowEvent::MouseInput { state, button, .. } = &event {
             if *state == ElementState::Pressed {
                 self.physical_buttons.insert(*button);
@@ -189,6 +179,16 @@ impl Game<'_> {
         event_loop: &dyn EventLoopCtl,
         mut event: WindowEvent,
     ) {
+        let pressed = match &event {
+            WindowEvent::KeyboardInput { event, .. } => {
+                event.state == ElementState::Pressed && !event.repeat
+            }
+            WindowEvent::MouseInput { state, .. } => *state == ElementState::Pressed,
+            _ => false,
+        };
+        if pressed && !self.pad.menu.synthetic {
+            self.pad_radial_cancel();
+        }
         if let WindowEvent::Focused(false) = &event {
             self.modifiers = winit::keyboard::ModifiersState::empty();
             self.physical_keys.clear();
@@ -204,10 +204,8 @@ impl Game<'_> {
                 &mut self.toggles,
                 [self.settings.toggle_crouch, self.settings.toggle_sprint],
                 [
-                    self.pad
-                        .holds_action(&self.settings.controller, "key.sneak"),
-                    self.pad
-                        .holds_action(&self.settings.controller, "key.sprint"),
+                    self.pad.holds_action("key.sneak"),
+                    self.pad.holds_action("key.sprint"),
                 ],
             );
             self.sync_toggle(SNEAK);

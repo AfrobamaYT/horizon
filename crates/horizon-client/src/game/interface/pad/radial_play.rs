@@ -521,7 +521,7 @@ impl Game<'_> {
 
     /// The toggles the overlay shows the state of.
     fn pad_radial_toggles(&self) -> Toggles {
-        use super::super::perspective::CameraType;
+        use horizon_client::camera::CameraType;
         Toggles {
             view: match self.camera_type {
                 CameraType::FirstPerson => View::FirstPerson,
