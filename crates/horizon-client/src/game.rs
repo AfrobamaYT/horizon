@@ -4167,8 +4167,6 @@ impl Game<'_> {
         (out, stars)
     }
 
-    /// Frame time in milliseconds, fixed to world time in still mode.
-
     /// `Level.canHaveWeather`, from the level's dimension type (sky light, no
     /// ceiling) and the End, which vanilla names by id. Every rain, thunder
     /// and lightning rule asks this, never the dimension's id.
