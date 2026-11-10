@@ -57,6 +57,7 @@
 - [Maths and network NBT](how-to/maths-and-network-nbt.md)
 - [Caching reload-stable recipe definitions](how-to/reload-recipes.md)
 - [Query attachment holders](how-to/attachments.md)
+- [Game events with context](how-to/game-events.md)
 - [Game rule categories](how-to/game-rule-categories.md)
 - [Declaring a machine's menu data](how-to/block-entities.md)
 - [Controlling spawns](how-to/spawning.md)
