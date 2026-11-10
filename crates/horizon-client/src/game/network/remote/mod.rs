@@ -1320,6 +1320,7 @@ impl Game<'_> {
         self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
         self.native_lifecycle.begin_close();
         self.native_lifecycle_world_closed();
+        self.recipe_ui.server_properties = Default::default();
     }
 
     /// Prepare a client session and remote state to receive packets from a studio replay.
@@ -5367,6 +5368,9 @@ impl Game<'_> {
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
             C::MountScreenOpen(p) => self.remote_open_mount(p),
+            C::UpdateRecipes(p) => {
+                self.recipe_ui.server_properties.replace(p);
+            }
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
