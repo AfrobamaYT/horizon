@@ -85,6 +85,8 @@ pub(super) struct ContainerLayout {
     pub(super) book: Option<[f32; 4]>,
     /// The effect panels' box beside the window.
     pub(super) effects: Option<[f32; 4]>,
+    pub(super) shows_effects: bool,
+    pub(super) effects_revision: u64,
     /// The `RenderInventoryMobEffects` answer the panel box was laid out with.
     pub(super) effects_layout: EffectsLayout,
     /// The creative tab rows above and below the window.
@@ -251,8 +253,8 @@ impl ScreenBuildState {
     /// drops it. A call that changes nothing allocates nothing, so the frame
     /// path checks it every frame, and a menu swap on the same screen keeps it.
     ///
-    /// `container` is the open container screen's layout, laid out from this
-    /// frame's state. The same screen can keep its panel while its layout
+    /// `container` is supplied only when the frame's allocation-free input
+    /// comparison found a change. The same screen can keep its panel while its layout
     /// moves under it (a book opens, the effects answer changes, a creative
     /// tab swaps the slots), so a different layout remakes the build in place.
     pub(super) fn sync(
@@ -345,8 +347,51 @@ impl Game<'_> {
                     framebuffer,
                     self.settings.gui_scale_inputs(),
                 );
-                self.container_layout(&batch)
+                self.container_layout_inputs(&batch)
             });
+        let container = container.and_then(|inputs| {
+            let unchanged = self
+                .screen_state
+                .build
+                .current
+                .as_ref()
+                .is_some_and(|build| {
+                    build.screen == self.screen
+                        && build.identity == identity
+                        && build.scale == gui.scale as f32
+                        && build
+                            .container(gui.size[0] as f32, gui.size[1] as f32)
+                            .is_some_and(|old| {
+                                old.image == inputs.image
+                                    && old.origin == inputs.origin
+                                    && old.book == inputs.book
+                                    && old.shows_effects == inputs.shows_effects
+                                    && old.effects_revision == inputs.effects_revision
+                                    && old.effects_layout == inputs.effects_layout
+                                    && old.tabs == inputs.tabs
+                                    && old.slots.len() == self.slot_count()
+                                    && old.slots.iter().all(|(slot, rect)| {
+                                        let (x, y) = self.slot_position(*slot);
+                                        *rect
+                                            == [
+                                                inputs.origin.0 + x - 1.0,
+                                                inputs.origin.1 + y - 1.0,
+                                                18.0,
+                                                18.0,
+                                            ]
+                                    })
+                            })
+                });
+            (!unchanged).then(|| {
+                self.build_container_layout(
+                    &horizon_client::hud::HudBatch::new(
+                        framebuffer,
+                        self.settings.gui_scale_inputs(),
+                    ),
+                    inputs,
+                )
+            })
+        });
         self.screen_state
             .build
             .sync(self.screen, shown, identity, gui, container);
@@ -388,6 +433,8 @@ mod tests {
             origin: (10.0, 20.0),
             book,
             effects,
+            shows_effects: effects.is_some(),
+            effects_revision: 0,
             effects_layout,
             tabs,
             slots: vec![(0, [9.0, 141.0, 18.0, 18.0])],

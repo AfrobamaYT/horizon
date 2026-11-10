@@ -1,14 +1,57 @@
 //! Container geometry constructed by the screen build seam.
-use super::{Creative, Game, Screen};
 use super::screen_build::ContainerLayout;
+use super::{Creative, Game, Screen};
 use horizon_client::inventory_effects::EffectsLayout;
 
+#[cfg(test)]
+thread_local! {
+    pub(in crate::game) static LAYOUT_CONSTRUCTIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 impl Game<'_> {
+    pub(super) fn container_layout(
+        &self,
+        batch: &horizon_client::hud::HudBatch,
+    ) -> ContainerLayout {
+        self.build_container_layout(batch, self.container_layout_inputs(batch))
+    }
+
+    pub(super) fn build_container_layout(
+        &self,
+        batch: &horizon_client::hud::HudBatch,
+        mut inputs: ContainerLayout,
+    ) -> ContainerLayout {
+        #[cfg(test)]
+        LAYOUT_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
+        let origin = inputs.origin;
+        let slots = self
+            .slots()
+            .into_iter()
+            .map(|slot| {
+                let (x, y) = self.slot_position(slot);
+                (slot, [origin.0 + x - 1.0, origin.1 + y - 1.0, 18.0, 18.0])
+            })
+            .collect();
+        inputs.effects = inputs
+            .shows_effects
+            .then(|| {
+                self.inventory_effects_rect(
+                    batch,
+                    [inputs.origin.0, inputs.origin.1],
+                    inputs.image[2],
+                    &inputs.effects_layout,
+                )
+            })
+            .flatten();
+        inputs.slots = slots;
+        inputs
+    }
+
     /// The open container screen's layout from the game's state: the panel it
     /// draws, the book and effect panels beside it, the creative tab rows and
     /// every slot's hover box. The build calls it when it makes the layout;
     /// nothing else does.
-    pub(super) fn container_layout(
+    pub(super) fn container_layout_inputs(
         &self,
         batch: &horizon_client::hud::HudBatch,
     ) -> ContainerLayout {
@@ -31,11 +74,6 @@ impl Game<'_> {
         } else {
             EffectsLayout::vanilla(space.available())
         };
-        let effects = shows_effects
-            .then(|| {
-                self.inventory_effects_rect(batch, [origin.0, origin.1], image[2], &effects_layout)
-            })
-            .flatten();
         let tabs = (self.screen == Screen::Creative).then(|| {
             [
                 [
@@ -52,23 +90,25 @@ impl Game<'_> {
                 ],
             ]
         });
-        let slots = self
-            .slots()
-            .into_iter()
-            .map(|slot| {
-                let (x, y) = self.slot_position(slot);
-                (slot, [origin.0 + x - 1.0, origin.1 + y - 1.0, 18.0, 18.0])
-            })
-            .collect();
         ContainerLayout {
             image,
             origin,
             book,
-            effects,
+            effects: None,
+            shows_effects,
+            effects_revision: {
+                use std::hash::{Hash, Hasher};
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                for effect in &self.potions.effects.list {
+                    effect.id.hash(&mut hash);
+                    effect.duration.hash(&mut hash);
+                    effect.amplifier.hash(&mut hash);
+                }
+                hash.finish()
+            },
             effects_layout,
             tabs,
-            slots,
+            slots: Vec::new(),
         }
     }
-
 }
