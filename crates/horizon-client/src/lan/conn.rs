@@ -1013,7 +1013,9 @@ fn login_and_configure(
     // Configuration.
     let sync_data = shared.sync();
     let sync: &SyncData = &sync_data;
-    let send = |c: &mut Connection, p: cfg::Clientbound| c.send(&p.encode()).map_err(e);
+    let send = |c: &mut Connection, p: cfg::Clientbound| {
+        p.try_encode().and_then(|body| c.send(&body)).map_err(e)
+    };
     send(
         c,
         cfg::Clientbound::CustomPayload(cfg::CustomPayload {

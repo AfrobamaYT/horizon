@@ -10,7 +10,6 @@ use horizon_protocol::{
         configuration::CustomPayload,
         play::{Clientbound as C, Serverbound as S},
     },
-    quiet,
 };
 use mod_api::{SendPacketError, ServerboundPlayPacket};
 use std::collections::HashMap;
@@ -235,16 +234,15 @@ impl Game<'_> {
             _ => None,
         }
         .ok_or(SendPacketError::UnknownPacket { id: packet.id })?;
-        let packet =
-            S::decode(id as i32, &packet.body).map_err(|_| SendPacketError::InvalidBody)?;
-        if let S::CustomPayload(payload) = &packet
-            && payload.data.len() > quiet::MAX_PAYLOAD
-        {
-            return Err(SendPacketError::PayloadTooLarge {
-                size: payload.data.len() as u64,
-                limit: quiet::MAX_PAYLOAD as u64,
-            });
-        }
+        let packet = S::decode(id as i32, &packet.body).map_err(|error| {
+            if let Some(detail) = error.payload_limit() {
+                return SendPacketError::PayloadTooLarge {
+                    size: detail.size as u64,
+                    limit: detail.limit as u64,
+                };
+            }
+            SendPacketError::InvalidBody
+        })?;
         self.send(packet);
         Ok(())
     }
@@ -255,7 +253,8 @@ mod tests {
     use super::super::{
         Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
     };
-    use super::{SendPacketError, ServerboundPlayPacket, quiet};
+    use super::{SendPacketError, ServerboundPlayPacket};
+    use horizon_protocol::quiet;
     use horizon_protocol::{buf::Writer, connection::Pipe};
     use mod_api::Identifier;
 

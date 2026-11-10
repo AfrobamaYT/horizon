@@ -415,12 +415,19 @@ impl Session {
         {
             eprintln!("[net] -> {packet:?}");
         }
+        let body = match packet.try_encode() {
+            Ok(body) => body,
+            Err(error) => {
+                eprintln!("[net] send refused: {error}");
+                return;
+            }
+        };
         let mut writer = self.writer.lock().unwrap();
         if self.configuring.load(Ordering::Relaxed) {
             return;
         }
         if let Some(w) = writer.as_mut()
-            && w.send(&packet.encode()).is_err()
+            && w.send(&body).is_err()
         {
             w.shutdown();
         }
@@ -1073,8 +1080,9 @@ fn configure(
     let mut content_verified = false;
     let reply = |p: cfg::Serverbound| -> Result<(), Reason> {
         match writer.lock().unwrap().as_mut() {
-            Some(w) => w
-                .send(&p.encode())
+            Some(w) => p
+                .try_encode()
+                .and_then(|body| w.send(&body))
                 .map_err(|e| Reason::plain(connection_lost(e, lang))),
             None => Err(Reason::plain("Disconnected")),
         }
