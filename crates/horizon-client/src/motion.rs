@@ -4733,6 +4733,13 @@ mod tests {
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.health(), if food <= 1 { 19.0 } else { 20.0 });
+                assert_eq!(
+                    player.events.iter().any(|event| matches!(
+                        event,
+                        MotionEvent::Health(crate::health::HealthEvent::StarvationDamage(1.0))
+                    )),
+                    food <= 1
+                );
             }
         }
     }

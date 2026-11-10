@@ -840,35 +840,32 @@ use horizon_world::poi::PoiType as Poi;
 pub fn poi_at(w: &MobWorld, x: i32, y: i32, z: i32) -> Option<Poi> {
     poi_of_state(w, w.world.block(x, y, z))
 }
-/// The POI a block state is, if any (`PoiTypes.forState`), from the table
-/// of every state built on first use.
+/// Cache only vanilla classification. Mod additions are process-wide and replaced
+/// on reload, so every live resource set consults the current extension table.
 fn poi_of_state(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
     let table = w.data.pois.get_or_init(|| {
         (0..w.registry.len())
-            .map(|i| state_poi(w, horizon_world::registry::BlockStateId(i as u32)))
+            .map(|i| vanilla_state_poi(w, horizon_world::registry::BlockStateId(i as u32)))
             .collect()
     });
-    match table.get(state.0 as usize) {
-        Some(poi) => *poi,
-        None => state_poi(w, state),
-    }
+    let vanilla = table
+        .get(state.0 as usize)
+        .copied()
+        .unwrap_or_else(|| vanilla_state_poi(w, state));
+    vanilla.or_else(|| horizon_world::poi::extension(w.registry.state(state)?))
 }
-fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
+/// Vanilla's job sites, bed heads and bells, without reloadable mod additions.
+fn vanilla_state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
     let name = &*w.facts.get(state).name;
     if name == "minecraft:bell" {
         return Some(Poi::Meeting);
     }
-    if name.ends_with("_bed") {
-        let part = w
-            .registry
-            .state(state)
-            .and_then(|s| s.properties.get("part"));
-        return runtime_bed_poi(name, part.map(String::as_str));
+    let state = w.registry.state(state)?;
+    let part = state.properties.get("part").map(String::as_str);
+    if let Some(home) = runtime_bed_poi(name, part) {
+        return Some(home);
     }
-    w.registry
-        .state(state)
-        .and_then(horizon_world::poi::saved_poi)
-        .filter(|p| p.is_job())
+    horizon_world::poi::vanilla_poi(state).filter(|p| p.is_job())
 }
 fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
     // PoiTypes.BEDS contains the colored Blocks.BED collection, not STRAW_BED.
@@ -4796,6 +4793,72 @@ mod poi_classification_tests {
                 "{row}"
             );
         }
+    }
+
+    /// A block a mod added to `minecraft:home` (`extend_poi_types`) is the bed a
+    /// villager's search finds, although vanilla gives hay bales no POI.
+    #[test]
+    fn a_block_a_mod_added_to_home_is_a_bed_to_a_villager() {
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        assert!(crate::mobs::world::with_resource_test_world(
+            std::path::Path::new(&root),
+            &[],
+            true,
+            true,
+            |world, registry| {
+                let hay = registry.default_state("minecraft:hay_block").unwrap();
+                if !world.chunks.contains_key(&(0, 0)) {
+                    world.chunks.insert(
+                        (0, 0),
+                        std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                    );
+                }
+                world.set(0, 64, 0, hay).unwrap();
+                world
+                    .set(1, 64, 0, registry.default_state("minecraft:stone").unwrap())
+                    .unwrap();
+            },
+            |w, _| {
+                let hay_states = (0..w.registry.len())
+                    .filter_map(|i| {
+                        w.registry
+                            .state(horizon_world::registry::BlockStateId(i as u32))
+                    })
+                    .filter(|state| state.name == "minecraft:hay_block")
+                    .map(|state| horizon_world::poi::PoiExtension {
+                        state: state.clone(),
+                        poi: "minecraft:home".into(),
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(hay_states.len(), 3);
+                let meeting_states = hay_states
+                    .iter()
+                    .cloned()
+                    .map(|mut state| {
+                        state.poi = "minecraft:meeting".into();
+                        state
+                    })
+                    .collect();
+                horizon_world::poi::with_extensions(hay_states, |refusals| {
+                    assert_eq!(refusals, Vec::<String>::new());
+                    assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Home));
+                    assert_eq!(poi_at(w, 1, 64, 0), None);
+                    let mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+                    assert!(poi_exists(&mob, w, [0, 64, 0], PoiFilter::Home));
+                    assert!(!poi_exists(&mob, w, [0, 64, 0], PoiFilter::Meeting));
+                    assert!(!poi_exists(&mob, w, [1, 64, 0], PoiFilter::Home));
+                });
+                horizon_world::poi::with_extensions(meeting_states, |refusals| {
+                    assert!(refusals.is_empty());
+                    assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Meeting));
+                });
+                horizon_world::poi::with_extensions(Vec::new(), |_| {
+                    assert_eq!(poi_at(w, 0, 64, 0), None);
+                });
+            },
+        ));
     }
 
     #[test]

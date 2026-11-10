@@ -55,6 +55,9 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             remote.joined = true;
             remote.menu.set(Some((1, "geometry:menu".into())));
             game.settings.gui_scale = 1;
+            // The fixture has no renderer; layout still needs the same viewport
+            // used by geometry() to evaluate toggle gutters and book placement.
+            game.recipe_ui.test_viewport = Some([1280, 720]);
             game.screen = Screen::Inventory;
             game.title = None;
             game.container = Some((i32::MIN, 0, 0));
@@ -74,6 +77,7 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
                     own_labels: false,
                     own_background: false,
                     recipe_book: Some(key.clone()),
+                    recipe_book_toggle: None,
                 },
             });
             // A snapshot may precede the first draw. The build itself must

@@ -534,8 +534,11 @@ mod stubs {
     pub(super) struct HudBatch(pub Vec<u32>);
     #[derive(Clone, Copy)]
     pub(super) struct TooltipPlace;
-    #[derive(Clone, Copy)]
-    pub(super) struct Hand;
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum Hand {
+        Main,
+        Off,
+    }
     #[derive(Clone, Copy)]
     pub(super) struct BlockHit;
     pub(super) struct BlockClick<'a>(pub &'a ());

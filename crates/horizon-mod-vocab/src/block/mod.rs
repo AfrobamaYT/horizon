@@ -17,5 +17,6 @@ pub(crate) mod fluid_capability;
 pub(crate) mod fluid_model;
 pub(crate) mod fluid_states;
 pub(crate) mod item_place;
+pub(crate) mod poi_types;
 pub(crate) mod types;
 pub(crate) mod unresolved_fluid;
