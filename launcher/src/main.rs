@@ -37,7 +37,6 @@ mod glass_ui;
 mod glass_versions;
 mod home;
 mod home_tabs;
-use horizon_launcher::identity;
 mod import_page;
 mod instance_icons;
 mod instance_mods;
@@ -94,13 +93,13 @@ use gpui::{
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
-use horizon_launcher::build_import;
 use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
 use horizon_launcher::storage;
 use horizon_launcher::telemetry;
+use horizon_launcher::{build_import, identity};
 use native_consent::PendingConsent;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
@@ -3092,11 +3091,7 @@ impl Launcher {
                 .child(
                     shell::text(theme::night::TITLE, shell::c(n.ink))
                         .font_family(theme::DISPLAY_FONT)
-                        .child(tr(if cfg!(horizon_fork_launcher) {
-                            identity::DISPLAY_NAME
-                        } else {
-                            "Horizon"
-                        })),
+                        .child(tr(identity::WINDOW_TITLE)),
                 )
         });
         shell::sidebar_plate(&t)

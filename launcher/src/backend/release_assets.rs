@@ -54,4 +54,3 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
         },
     ),
 ];
-
