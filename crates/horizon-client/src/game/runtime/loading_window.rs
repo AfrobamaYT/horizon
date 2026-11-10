@@ -381,12 +381,13 @@ pub(super) fn start_game<'a>(
         result?;
         return Ok(None);
     }
-    // The atlases the initial load stitched, then FMLClientSetupEvent: once per process, here in
-    // `run`, after the initial load applied.
+    // The atlases the initial load stitched, the models it baked, then FMLClientSetupEvent: once
+    // per process, here in `run`, after the initial load applied.
     // A dedicated server has no client and returned above; a splitscreen guest's `run` is
     // another local player of the same process.
     if game.options.is_client_start() {
         game.texture_atlases_stitched();
+        game.native_model_baking_completed();
         game.native_client_setup();
     }
     // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.
