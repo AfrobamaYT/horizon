@@ -107,7 +107,7 @@ mod tests {
             assert!(!enabled(&tag));
             let error = crate::backend::client_as(&tag, None).unwrap_err();
             assert!(
-                error.contains(&crate::i18n::tr(crate::backend::SIGN_IN_HINT).to_string()),
+                error.contains(crate::i18n::tr(crate::backend::SIGN_IN_HINT)),
                 "{error}"
             );
             return;
