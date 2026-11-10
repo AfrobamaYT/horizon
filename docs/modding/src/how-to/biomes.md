@@ -13,12 +13,12 @@ What a mod can do with biomes, by what it wants. Each row names the call or file
 | Run bone meal at a position | `LevelRef::bone_meal` | Server |
 | Tint foliage, grass or water by biome | The `register_color_resolvers` hook for new colour resolvers, and the `biome_colors` hook to change a biome's own colours | Client |
 
+Carver, climate and effects modifier support is implemented; that does not imply full custom serializers or phase ordering.
+
 ## What is not here yet
 
 - Placing a mod's own biomes among the Overworld's or the Nether's: a design note, not code ([arismoko/horizon#2554](https://github.com/arismoko/horizon/issues/2554)).
 - Full custom biome-modifier serializers and explicit phases between modifiers ([#2732](https://github.com/arismoko/horizon/issues/2732)).
-Carver, climate and effects modifier support is implemented; that does not imply full custom serializers or phase ordering.
-
 - A mod's own worldgen registry loaded into the world ([#811](https://github.com/arismoko/horizon/issues/811)), and per-biome client effects ([#2734](https://github.com/arismoko/horizon/issues/2734)).
 - Features and placers defined in code ([#815](https://github.com/arismoko/horizon/issues/815)).
 
