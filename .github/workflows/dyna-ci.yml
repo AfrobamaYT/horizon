@@ -432,8 +432,10 @@ jobs:
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
       # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
+      # success(), not !cancelled(): after an earlier step fails, the Rust install was skipped and tests that
+      # launch rustc would add a second, misleading failure.
       - name: Test offline research tooling
-        if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
+        if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
