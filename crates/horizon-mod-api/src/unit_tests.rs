@@ -582,6 +582,87 @@ fn an_inventory_tick_reaches_only_the_parts_of_the_ticked_item() {
 }
 
 #[test]
+fn an_ability_question_reaches_only_the_parts_of_the_asked_item_and_names_the_ability() {
+    /// Grants `granted` and denies everything else `denied` names; keeps what it is not asked about.
+    #[derive(Clone)]
+    struct Abilities {
+        granted: &'static str,
+        denied: &'static str,
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+    #[mod_api::horizon_part]
+    impl ItemPart for Abilities {
+        fn can_perform_action(&self, _: &dyn Host, event: &mut CanPerformActionEvent<'_>) {
+            self.asked.lock().unwrap().push(event.ability.to_owned());
+            if event.ability == self.granted {
+                event.can_perform = true;
+            } else if event.ability == self.denied {
+                event.can_perform = false;
+            }
+        }
+    }
+    struct Both(Abilities, Abilities);
+    #[mod_api::__subscriptions]
+    impl Hooks for Both {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+            r.item_part(stick, self.0.clone());
+            r.item_part(stone, self.1.clone());
+        }
+    }
+    // Another test installs parts with tags: a dispatch must run on a game thread.
+    mark_game_thread();
+    let sticks = Abilities {
+        granted: "minecraft:shield_block",
+        denied: "minecraft:shears_carve",
+        asked: Default::default(),
+    };
+    let stones = Abilities {
+        granted: "my_mod:chop",
+        denied: "my_mod:chop_not",
+        asked: Default::default(),
+    };
+    let mods: Mods = vec![ModEntry::new(
+        "abilities",
+        Box::new(Both(sticks.clone(), stones.clone())),
+    )]
+    .into();
+    install(mods.clone());
+    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    let host = FakeHost::new();
+    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let ask = |stack: &ItemStack, ability: &str, vanilla: bool| {
+        let mut can_perform = vanilla;
+        dispatch_can_perform_action(&host, stack, ability, &mut can_perform);
+        can_perform
+    };
+    // The part answers per ability: a grant, a denial and what it leaves alone.
+    assert!(ask(&stick(), "minecraft:shield_block", false));
+    assert!(!ask(&stick(), "minecraft:shears_carve", true));
+    assert!(ask(&stick(), "minecraft:shears_harvest", true));
+    assert!(!ask(&stick(), "minecraft:shears_harvest", false));
+    // Another item's part hears only its own item, a part-less item keeps vanilla's answer.
+    assert!(ask(&stone, "my_mod:chop", false));
+    assert!(!ask(&stone, "minecraft:shield_block", false));
+    assert!(ask(&diamond, "minecraft:shears_carve", true));
+    assert!(!ask(&diamond, "minecraft:shield_block", false));
+    assert_eq!(
+        *sticks.asked.lock().unwrap(),
+        [
+            "minecraft:shield_block",
+            "minecraft:shears_carve",
+            "minecraft:shears_harvest",
+            "minecraft:shears_harvest"
+        ]
+    );
+    assert_eq!(
+        *stones.asked.lock().unwrap(),
+        ["my_mod:chop", "minecraft:shield_block"]
+    );
+}
+
+#[test]
 #[should_panic(expected = "Commands::run_command")]
 fn an_unexpected_host_call_names_the_method() {
     /// A mod's own double, with only the services the hook reaches.

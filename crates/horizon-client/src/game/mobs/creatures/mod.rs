@@ -16,6 +16,7 @@ mod residency;
 mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
+use super::item_abilities::ability;
 use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
@@ -6986,7 +6987,7 @@ impl Game<'_> {
         }
         if self
             .held()
-            .is_some_and(|stack| &*stack.item == "minecraft:shears")
+            .is_some_and(|stack| self.stack_shears(stack, ability::SHEARS_HARVEST))
         {
             let mob = &self.mobs[index];
             let shearable = match mob.species() {
@@ -7043,6 +7044,10 @@ impl Game<'_> {
             .as_ref()
             .map(|h| h.item.to_string())
             .unwrap_or_default();
+        // Shears, or a stack whose item parts let it `shears_harvest`.
+        let shears = held
+            .as_ref()
+            .is_some_and(|stack| self.stack_shears(stack, ability::SHEARS_HARVEST));
         // Bucketable.bucketMobPickup: a water bucket scoops up a fish, a
         // tadpole or an axolotl, with the data its bucket carries.
         if item == "minecraft:water_bucket"
@@ -7154,7 +7159,7 @@ impl Game<'_> {
             self.swing_arm();
             return Ok(true);
         }
-        if self.interact_shear_mob(index, &item) {
+        if self.interact_shear_mob(index, shears) {
             self.swing_arm();
             return Ok(true);
         }
@@ -7295,7 +7300,7 @@ impl Game<'_> {
                     }
                 }
             }
-            Species::Mooshroom if item == "minecraft:shears" && !m.is_baby() => {
+            Species::Mooshroom if shears && !m.is_baby() => {
                 let player = Some(self.native_acting_id());
                 self.shear_mooshroom(index, player, held.as_ref().expect("held shears"));
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
@@ -7315,7 +7320,7 @@ impl Game<'_> {
                     stew_particles = Some(true);
                 }
             }
-            Species::Sheep if item == "minecraft:shears" && !m.extra.sheared && !m.is_baby() => {
+            Species::Sheep if shears && !m.extra.sheared && !m.is_baby() => {
                 self.audio.play_bound(
                     "minecraft:entity.sheep.shear",
                     7,
@@ -7917,9 +7922,9 @@ impl Game<'_> {
     /// `SnowGolem.mobInteract` and `Bogged.mobInteract` with shears: the
     /// pumpkin or the mushrooms come off (the shearing loot table), the shear
     /// game event is posted and the tool takes one damage.
-    fn interact_shear_mob(&mut self, index: usize, item: &str) -> bool {
+    fn interact_shear_mob(&mut self, index: usize, shears: bool) -> bool {
         let m = &self.mobs[index];
-        if item != "minecraft:shears" || !m.alive() || m.extra.sheared {
+        if !shears || !m.alive() || m.extra.sheared {
             return false;
         }
         let (sound, table, height) = match m.species() {
