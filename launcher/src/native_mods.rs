@@ -35,6 +35,7 @@ mod inject_cache;
 mod inject_text;
 mod internals;
 mod internals_sync;
+pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
 mod mod_points;
 mod package;
@@ -543,7 +544,6 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
     internals_sync::rustc_wrapper()
 }
 
-/// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
 ) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, Failed> {

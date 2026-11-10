@@ -100,15 +100,17 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     // Manifest::parse owns mod id, native pin and existing declaration validation.
     let manifest = Manifest::parse(&original)?;
+    let directory = crate::internals::catalog_directory(dir, &manifest)?;
     let native = manifest
         .native
         .as_ref()
         .ok_or("inject add needs a [native] mod")?;
-    let internals = crate::internals::load(dir, &native.horizon)?;
-    let points = dir
-        .join("target/horizon-mod/prebuilt")
-        .join(&native.horizon)
-        .join("points.json");
+    let internals = if native.module.is_empty() {
+        crate::internals::load(dir, &native.horizon)?
+    } else {
+        horizon_mod_package::internals::read(&directory.join("internals.json"))?
+    };
+    let points = directory.join("points.json");
     let catalog: Catalog =
         serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| format!("{}: {e}", points.display()))?;

@@ -803,6 +803,8 @@ enum Cmd {
         /// as JSON for cargo horizon-mod internals sync; never installs or selects a game
         #[arg(long, conflicts_with_all = ["server_output", "instance", "version", "update", "profile"], requires = "folder")]
         sync_internals: bool,
+        #[arg(long, requires = "folder", conflicts_with_all = ["sync_internals", "server_output", "instance", "version", "update", "profile"])]
+        catalog: bool,
         /// A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them
         /// (default: the native mods installed and turned on in the instance). Server exports
         /// also read wasm internals declarations from .hmod packages directly in this folder
@@ -1327,6 +1329,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
         }
         Cmd::NativeBuild {
             sync_internals,
+            catalog,
             folder,
             server_output,
             allow_jar_downloads,
@@ -1337,6 +1340,12 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             profile,
         } => {
             native_permission(trust_native_code)?;
+            if catalog {
+                let discovered =
+                    native_mods::pinned_catalog_with_modules(&folder.expect("required by clap"))?;
+                println!("{}", discovered.directory.display());
+                return Ok(0);
+            }
             if sync_internals {
                 let entries = native_mods::sync_internals(&folder.expect("required by clap"))?;
                 println!(
@@ -1815,7 +1824,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
     }
     Ok(0)
 }
-
 fn java(action: JavaCmd, as_json: bool) -> Result<(), String> {
     use horizon_launcher::java;
     match action {
@@ -1852,7 +1860,6 @@ fn java(action: JavaCmd, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn rust(action: RustCmd, as_json: bool) -> Result<(), String> {
     use horizon_launcher::rust_toolchain as rust;
     match action {
@@ -1900,7 +1907,6 @@ fn rust(action: RustCmd, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn update(check: bool, as_json: bool) -> Result<(), String> {
     let updates = backend::check_updates()?;
     if as_json && check {
@@ -1939,7 +1945,6 @@ fn update(check: bool, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// `account …`: names and UUIDs only; tokens are never printed.
 fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
     let mut accounts = Accounts::load();
@@ -2072,7 +2077,6 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// `data`: the same consent as Settings → Data collection.
 fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
     use horizon_launcher::telemetry;
@@ -2147,7 +2151,6 @@ fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
     use horizon_launcher::servers::{self, NewServer, World};
     let find = |which: &str| {
@@ -2253,7 +2256,6 @@ fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// Installs the native mods of `found` (a GitHub link, resolved) into the game folder `home`: the
 /// warning and the exact source link first, and nothing downloaded without `trust`.
 fn native_permission(trust: bool) -> Result<(), String> {
@@ -2262,7 +2264,6 @@ fn native_permission(trust: bool) -> Result<(), String> {
     }
     native_mods::require_consent().map_err(String::from)
 }
-
 fn github_native(
     home: &Path,
     java: bool,
@@ -2306,7 +2307,6 @@ fn github_native(
     );
     Ok(())
 }
-
 fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
     use horizon_launcher::browser::{horizon, installed, java_instance, Kind, Query, SourceId};
     use horizon_launcher::modpacks;
@@ -2740,7 +2740,6 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// The other launchers' instances in `folder`, else in their default folders.
 fn other_instances(folder: Option<&Path>) -> Result<Vec<other_launchers::Found>, String> {
     use horizon_launcher::sources::{Folders, Os};
@@ -2753,7 +2752,6 @@ fn other_instances(folder: Option<&Path>) -> Result<Vec<other_launchers::Found>,
         }
     })
 }
-
 /// Where `instance others` looked when it found nothing, and what it looks for.
 fn no_other_instances(folder: Option<&Path>) -> String {
     use horizon_launcher::sources::{Folders, Os};
@@ -2779,7 +2777,6 @@ fn no_other_instances(folder: Option<&Path>) -> String {
         }
     }
 }
-
 fn other_plays(f: &other_launchers::Found) -> String {
     match (&f.minecraft, &f.loader) {
         (None, _) => "Minecraft version not recorded: copy-from --minecraft <version>".into(),
@@ -2787,7 +2784,6 @@ fn other_plays(f: &other_launchers::Found) -> String {
         (Some(v), None) => format!("Minecraft {v}"),
     }
 }
-
 fn other_json(f: &other_launchers::Found) -> serde_json::Value {
     serde_json::json!({
         "launcher": f.launcher, "name": f.name, "minecraft": f.minecraft,
@@ -2796,7 +2792,6 @@ fn other_json(f: &other_launchers::Found) -> serde_json::Value {
         "game": f.game, "shared": f.shared,
     })
 }
-
 /// Runs the instance's post-exit command in this terminal, if it has one, and waits for it.
 fn after_exit(instance: &instances::Instance, vars: &[(&'static str, std::ffi::OsString)]) {
     let Some(mut cmd) =
@@ -4103,3 +4098,7 @@ mod tests {
         assert_eq!(native_mods::base_for(None, &[], false), None);
     }
 }
+
+#[cfg(test)]
+#[path = "cli_catalog_tests.rs"]
+mod catalog_tests;
