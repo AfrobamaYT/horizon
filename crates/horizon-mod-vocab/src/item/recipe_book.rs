@@ -1,4 +1,7 @@
 //! Recipe book declarations supplied by a custom recipe type.
+#[path = "recipe_book_layout.rs"]
+mod layout;
+pub use layout::RecipeBookLayout;
 #[path = "recipe_display.rs"]
 mod display;
 #[path = "recipe_book_settings.rs"]
