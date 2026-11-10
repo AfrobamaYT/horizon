@@ -11,7 +11,8 @@ pub trait ProjectilesServerHost {
     /// (vertical only while airborne), adds to the level and fires projectile_launch.
     /// Spread draws x, y, z triangular noise from the new projectile's own random.
     /// Does not consume the stack or apply item-use cooldowns or statistics.
-    /// None for an unavailable owner, unsupported type, invalid stack or non-finite
+    /// None for an unavailable owner or one in another level, unsupported type,
+    /// invalid stack or non-finite
     /// shot parameter. Also refuses a stack whose enchantments carry a nonempty
     /// `projectile_spawned` component: the engine does not yet implement those
     /// generic post-insertion effects. No random is drawn and nothing spawns on

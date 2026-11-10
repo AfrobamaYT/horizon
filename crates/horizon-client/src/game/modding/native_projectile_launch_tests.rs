@@ -131,6 +131,28 @@ fn owner_launch_reports_explicit_guest_to_launch_listeners() {
                 *observed.lock().unwrap(),
                 [(Some(12), "guest12".to_owned(), Some(12))]
             );
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| {
+                    guest.dimension = "minecraft:the_nether".to_owned();
+                })
+                .unwrap();
+            let count = game.creatures.projectiles.len();
+            let mut before = game.world.random.clone();
+            horizon_client::random_source::set_thread_uniquifier(2709830126447559882).unwrap();
+            assert!(
+                game.spawn_projectile_from_rotation(owner, &kind, &stack, 0.0, 1.5, 1.0)
+                    .is_none()
+            );
+            assert_eq!(game.creatures.projectiles.len(), count);
+            assert_eq!(game.world.random.next_long(), before.next_long());
+            assert_eq!(
+                horizon_client::random_source::create().next_double(),
+                0.6465821602909256
+            );
+            assert_eq!(observed.lock().unwrap().len(), 1);
         });
     });
 }

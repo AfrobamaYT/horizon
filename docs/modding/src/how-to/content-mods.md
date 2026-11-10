@@ -506,6 +506,7 @@ experience bottles and wind charges. Spread uses the projectile's own random in 
 order, and known owner movement is inherited (vertical movement only when airborne).
 It does not consume an item, award use statistics or apply cooldowns; invalid parameters
 or unsupported types return `None` without spawning or drawing random values.
+The owner must be in the current level; a guest in another dimension is refused.
 The carried item count is one; the supplied stack is unchanged. A stack whose
 enchantments contain a nonempty `projectile_spawned` component is also refused:
 generic post-insertion enchantment effects are not implemented yet (tracked in #2670),

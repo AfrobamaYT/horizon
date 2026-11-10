@@ -20,6 +20,13 @@ impl Game<'_> {
         if self.remote.is_some() || ![offset, power, inaccuracy].into_iter().all(f32::is_finite) {
             return None;
         }
+        let target = self.native_living_target(owner)?;
+        if self
+            .native_target_guest(target)
+            .is_some_and(|guest| guest.dimension != self.dim.id())
+        {
+            return None;
+        }
         // The engine has no generic EnchantmentHelper.onProjectileSpawned
         // interpreter yet (#2670). Refuse before constructing or drawing rather
         // than silently skipping an item's post-insertion effects.
@@ -36,7 +43,6 @@ impl Game<'_> {
                 return None;
             }
         }
-        let target = self.native_living_target(owner)?;
         let mut carried = stack.clone();
         carried.count = 1;
         let kind = match entity_type.to_string().as_str() {
