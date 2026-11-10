@@ -615,6 +615,23 @@ mod host_param;
 mod index;
 mod wire;
 pub use wire::generate as generate_wire;
+pub use wire::generate_coverage as generate_wire_coverage;
+
+static GENERATED_ON_STDOUT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// For a tool that prints generated text on stdout (`xtask mod-api coverage`): the generator's
+/// `cargo:rerun-if-changed` lines, meant for a build script's Cargo, are left out of it.
+pub fn generated_on_stdout() {
+    GENERATED_ON_STDOUT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tells the build script's Cargo to rerun it when `path` changes.
+pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
+    if !GENERATED_ON_STDOUT.load(std::sync::atomic::Ordering::Relaxed) {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_table;
@@ -1119,3 +1136,6 @@ mod tests {
         );
     }
 }
+
+/// Native source-only transient fields.
+pub mod fields;

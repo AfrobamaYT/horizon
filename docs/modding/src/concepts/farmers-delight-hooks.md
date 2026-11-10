@@ -16,6 +16,14 @@ Prefix **API** = `crates/horizon-mod-vocab/src/`; **Game** = `crates/horizon-cli
 | `LivingEntity#knockback` (both overloads), `@ModifyVariable` at HEAD, ordinal 0: changes the strength. | `living_knockback` (API `hooks/base.rs:2069`): `cancel`, with mutable `strength`, `x` and `z` on the raw strength before knockback resistance. | **Works** | Game `modding/native_knockback_tests.rs:91`: a listener doubles the strength (`:42`) and the push the game applies carries 0.8 for 0.4 (`:142`). The map's "contract mismatch" read the hook's name, as above. |
 | `MinecraftServer#onGameRuleChanged`, `@Inject` at HEAD: is told a rule changed. | `game_rule_changed` (API `hooks/game_rule_changed.rs:15`): `listen`, with the rule, the new value and the actor. | **Works** | Game `modding/native_level_world.rs:523`: setting `keep_inventory` tells a listener the rule, that no player caused it, and the whole rule set with the new value. The map found no candidate, because it tagged the method to two `Hub` setters rather than to the hook. |
 
+## Cake eligibility
+
+`can_eat` also supplies cake and candle cake's `Player.canEat(false)` answer.
+The event receives the currently held stack, or `None` for an empty
+hand, not a synthetic cake item. Answer `Some(false)` to refuse a bite even when
+hungry, or `Some(true)` to allow a full player to eat. Leaving the answer unset
+keeps vanilla hunger and creative-mode behavior.
+
 ## Gaps
 
 None among these rows. Farmer's Delight's open needs are the three mismatches above, each tracked in
