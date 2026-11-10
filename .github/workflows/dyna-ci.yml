@@ -351,14 +351,15 @@ jobs:
       - name: Check Dyna dependencies (install fallback without root)
         if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Install Rust toolchain and the ALSA and udev headers the client links against
+      - name: Install Rust toolchain and the ALSA and udev headers the client links against, and Xvfb
         if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
+        # Xvfb: GitHub's image has it, boat's does not; test_ci_xvfb's real-display tests need it.
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev xvfb
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
               curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
