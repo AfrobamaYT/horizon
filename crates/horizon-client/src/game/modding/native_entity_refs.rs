@@ -1048,6 +1048,116 @@ pub(super) mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::position::BlockPos;
+        use std::sync::Arc;
+
+        // The fixture's parts: glass sustains any plant, grass sustains none.
+        mod_api::__private::part_tests::sustain_plant_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let dandelion = state("minecraft:dandelion");
+            let survives = |game: &mut super::super::Game<'_>, soil: &str| {
+                game.world.set(5, 64, 5, state(soil)).unwrap();
+                game.with_level(|b, level, ticks| {
+                    b.can_survive(level, ticks, BlockPos::new(5, 65, 5), dandelion)
+                })
+            };
+            // Allow: vanilla refuses a dandelion on glass; the soil's part lets it stand.
+            assert!(survives(game, "minecraft:glass"));
+            // Deny: vanilla lets a dandelion stand on grass; the soil's part refuses it.
+            assert!(!survives(game, "minecraft:grass_block"));
+            // Default: soils with no part answer as vanilla's plant rule does.
+            assert!(survives(game, "minecraft:dirt"));
+            assert!(!survives(game, "minecraft:stone"));
+            // A client's copy of the level does not ask the part.
+            game.options.dedicated = None;
+            assert!(!survives(game, "minecraft:glass"));
+            assert!(survives(game, "minecraft:grass_block"));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_part_decides_whether_the_tool_harvests() {
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use horizon_core::{geometry::Vec3, position::ChunkPos};
+        use std::sync::Arc;
+
+        // The fixture's parts: stone is harvested by any tool, dirt by none.
+        mod_api::__private::part_tests::harvest_game_thread();
+        with_game(|game| {
+            let scratch = std::env::temp_dir().join(format!(
+                "horizon-harvest-part-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&scratch).unwrap();
+            game.world_root = scratch.clone();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 62.0, 4.5)).unwrap());
+            game.player.as_mut().unwrap().ground.on_ground = true;
+            game.creative = false;
+            game.build_registries();
+            game.set_allow_commands(true);
+            assert!(game.run_command("gamemode survival"));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            let registry = game.pack.assets.registry;
+            let pos = [5, 63, 4];
+            // The dig's progress and the drops of a break by bare hand: (block, its hardness, what
+            // vanilla drops by hand, and what the drop is). Vanilla's own rule: a block that
+            // requires a tool drops nothing by hand, and the dig is 3.33 times slower for it.
+            for (block, hardness, part, by_hand, drop) in [
+                // Stone needs a pickaxe; the part harvests it anyway.
+                (
+                    "minecraft:stone",
+                    1.5_f32,
+                    Some(true),
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                // Dirt needs none; the part refuses it.
+                ("minecraft:dirt", 0.5, Some(false), true, "minecraft:dirt"),
+                // No part: vanilla's rule alone, both ways.
+                (
+                    "minecraft:cobblestone",
+                    2.0,
+                    None,
+                    false,
+                    "minecraft:cobblestone",
+                ),
+                ("minecraft:grass_block", 0.6, None, true, "minecraft:dirt"),
+            ] {
+                let state = registry.default_state(block).unwrap();
+                let harvest = part.unwrap_or(by_hand);
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+                let divisor = if harvest { 30.0 } else { 100.0 };
+                assert_eq!(
+                    game.destroy_progress(pos),
+                    1.0 / hardness / divisor,
+                    "{block}"
+                );
+                game.dropped.clear();
+                game.break_block(pos).unwrap();
+                let dropped = game.dropped.iter().any(|item| &*item.stack.item == drop);
+                assert_eq!(dropped, harvest, "{block}: drops {drop}");
+            }
+            std::fs::remove_dir_all(scratch).unwrap();
+        });
+    }
+
     /// A world with block `support` at (5, 64, 5) and a powered lever on its east face.
     fn lever_on(game: &mut super::super::Game<'_>, support: &str) {
         use horizon_client::chunk::Chunk;

@@ -113,7 +113,7 @@ use loading_window::{
 };
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
-pub(crate) use api_values::{block_jump_factor, block_speed_factor};
+pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
 use horizon_client::actions::Action as Mapping;
 use horizon_client::held::Source;
 use horizon_client::spans::startup;
@@ -1557,6 +1557,17 @@ impl LevelAccess for GameLevel<'_> {
     fn before_can_survive(&self, pos: BlockPos, state: BlockStateId, survives: &mut Option<bool>) {
         if self.native_authoritative {
             self.native_can_survive(self.dimension, pos, state, survives);
+        }
+    }
+    fn before_can_sustain_plant(
+        &self,
+        state: BlockStateId,
+        ground: BlockStateId,
+        ground_pos: BlockPos,
+        sustains: &mut Option<bool>,
+    ) {
+        if self.native_authoritative {
+            self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
         }
     }
     fn before_may_place_on(
@@ -7095,14 +7106,8 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
-            && mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck)
         {
-            self.native_player_harvest_check(
-                self.own_entity_id() as u32,
-                pos,
-                state.0,
-                &mut correct_tool,
-            );
+            self.mod_harvest_check(pos, state, &mut correct_tool);
         }
         let source = self
             .lan_acting_uuid
@@ -7124,14 +7129,7 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
-                self.native_player_harvest_check(
-                    self.own_entity_id() as u32,
-                    pos,
-                    state.0,
-                    &mut harvest,
-                );
-            }
+            self.mod_harvest_check(pos, state, &mut harvest);
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);
             }
