@@ -5351,6 +5351,7 @@ impl Game<'_> {
             C::OpenScreen(p) => self.remote_open_screen(p),
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::UpdateRecipes(p) => self.remote_recipe_properties(p),
+
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
@@ -9344,7 +9345,7 @@ impl Game<'_> {
 
     /// The shared dry-level boundary for a normal block use or the empty
     /// method requested by a canceled `BLOCK` phase's `TryWithEmptyHand`.
-    fn remote_block_template(
+    pub(super) fn remote_block_template(
         &mut self,
         hit: &super::Hit,
         held: Option<&ItemStack>,
@@ -9360,7 +9361,7 @@ impl Game<'_> {
             _ => Direction::East,
         };
         let player = self.use_context();
-        self.with_level(|b, level, _| {
+        self.with_block_use_level(|b, level, _| {
             let mut level = DryLevel::new(level);
             let hit = horizon_core::geometry::BlockHit {
                 block: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
@@ -11864,15 +11865,8 @@ pub(super) fn input_ordinal(input: Input) -> i32 {
     }
 }
 
-/// The client's world for a guess at what a click does: reads go to the
-/// world, writes stay here and are dropped.
-struct DryLevel<'w> {
-    base: &'w dyn horizon_world::level::LevelAccess,
-    changed: HashMap<horizon_core::position::BlockPos, BlockStateId>,
-    random: horizon_core::random::LegacyRandom,
-    /// The sounds the use plays (a door's creak).
-    sounds: Vec<DrySound>,
-}
+mod dry_level;
+use dry_level::DryLevel;
 
 type DrySound = (
     horizon_core::position::BlockPos,
@@ -11897,95 +11891,6 @@ pub(super) fn hand_operated(name: &str) -> bool {
         || name.ends_with("_button")
         || name == "lever"
         || name.ends_with("cauldron")
-}
-
-impl<'w> DryLevel<'w> {
-    fn new(base: &'w dyn horizon_world::level::LevelAccess) -> Self {
-        Self {
-            base,
-            changed: HashMap::new(),
-            random: horizon_core::random::LegacyRandom::new(0),
-            sounds: Vec::new(),
-        }
-    }
-}
-
-impl horizon_world::level::LevelAccess for DryLevel<'_> {
-    fn emit(&mut self, event: horizon_world::level::LevelEvent) {
-        if let horizon_world::level::LevelEvent::Sound {
-            pos,
-            sound,
-            volume,
-            pitch,
-        } = event
-        {
-            self.sounds.push((pos, sound, volume, pitch));
-        }
-    }
-    fn block_state(&self, pos: horizon_core::position::BlockPos) -> BlockStateId {
-        self.changed
-            .get(&pos)
-            .copied()
-            .unwrap_or_else(|| self.base.block_state(pos))
-    }
-    fn set_raw(
-        &mut self,
-        pos: horizon_core::position::BlockPos,
-        state: BlockStateId,
-    ) -> Option<BlockStateId> {
-        let previous = self.block_state(pos);
-        self.changed.insert(pos, state);
-        Some(previous)
-    }
-    fn is_loaded(&self, pos: horizon_core::position::BlockPos) -> bool {
-        self.base.is_loaded(pos)
-    }
-    /// `Level.isClientSide`: the preview keeps its live level's side.
-    fn is_client_side(&self) -> bool {
-        self.base.is_client_side()
-    }
-    /// A block this guess changed has no block entity left, so it reads as a
-    /// missing one; every other position asks the level it stands in for.
-    fn shulker_is_closed(&self, pos: horizon_core::position::BlockPos) -> Option<bool> {
-        if self.changed.contains_key(&pos) {
-            return None;
-        }
-        self.base.shulker_is_closed(pos)
-    }
-    fn min_y(&self) -> i32 {
-        self.base.min_y()
-    }
-    fn max_y(&self) -> i32 {
-        self.base.max_y()
-    }
-    fn block_light(&self, pos: horizon_core::position::BlockPos) -> i32 {
-        self.base.block_light(pos)
-    }
-    fn sky_light(&self, pos: horizon_core::position::BlockPos) -> i32 {
-        self.base.sky_light(pos)
-    }
-    fn sky_darken(&self) -> i32 {
-        self.base.sky_darken()
-    }
-    fn is_unobstructed(&self, pos: horizon_core::position::BlockPos, state: BlockStateId) -> bool {
-        self.base.is_unobstructed(pos, state)
-    }
-    fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
-        &mut self.random
-    }
-    /// A mod's bone meal answer is read, never grown here: the preview asks
-    /// the level it stands in for, as `isValidBonemealTarget` is read on both
-    /// sides.
-    fn is_valid_bonemeal_target(
-        &self,
-        pos: horizon_core::position::BlockPos,
-        state: BlockStateId,
-    ) -> Option<bool> {
-        self.base.is_valid_bonemeal_target(pos, state)
-    }
-    fn game_time(&self) -> i64 {
-        self.base.game_time()
-    }
 }
 
 /// `InteractionHand` on the wire.
@@ -16852,6 +16757,7 @@ mod tests {
             loaded: bool,
             ceiling: i32,
         }
+        impl horizon_world::level::BlockEntityNeighbors for Level {}
         impl LevelAccess for Level {
             fn block_state(&self, pos: BlockPos) -> BlockStateId {
                 if pos == BlockPos::new(0, 0, 0) {

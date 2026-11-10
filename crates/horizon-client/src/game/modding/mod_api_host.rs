@@ -291,6 +291,22 @@ pub(super) fn level_side<'a>(level: &'a super::GameLevel<'_>) -> mod_api::LevelS
 }
 
 impl mod_api::LevelHost for super::GameLevel<'_> {
+    fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        use mod_api::__private::game::Fields;
+        let fields = entity.fields();
+        if self.api_level != Some(fields.level) {
+            return None;
+        }
+        let [x, y, z] = fields.position;
+        let key = (x, y, z);
+        if self.world.block_entities.generation(&key) != Some(fields.generation) {
+            return None;
+        }
+        let entity = self.world.block_entities.get(&key)?;
+        let name = &self.facts.get(self.world.block(x, y, z)).name;
+        super::native_block_entity_refs::save_without_metadata(self.world, key, entity, name)
+    }
+
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {
         super::native_block_states::parse(self.block_registries, self.registry, name)?
             .try_into_api()
@@ -642,7 +658,7 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
     }
 
     fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
-        self.level.native_remove_block(self.ticks, pos, moved)
+        self.level.remove_block_write(self.ticks, pos, moved)
     }
 
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {

@@ -915,11 +915,18 @@ pub trait LevelsBackendMut {
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
     /// Side: server.
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
-    /// `Level.gameEvent(null, event, at)` does: sculk sensors, shriekers,
-    /// wardens and allays in range hear it. False for an event vanilla
-    /// doesn't have.
+    /// `Level.gameEvent(event, at, context)` does: sculk sensors, shriekers,
+    /// wardens and allays receive the optional source and affected state.
+    /// Returns false without emitting for an unknown event, invalid position,
+    /// stale or foreign source, unregistered state, client or inactive level.
     #[access(WorldOnly)]
-    fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool;
+    fn level_game_event(
+        &mut self,
+        level: LevelRef,
+        event: &str,
+        at: [f64; 3],
+        context: GameEventContext,
+    ) -> bool;
     /// Side: server.
     /// Queues block event `a`, `b` for `block` at `pos`, as `ServerLevel.blockEvent(pos, block,
     /// a, b)` does: after this tick's scheduled ticks the level runs the block's

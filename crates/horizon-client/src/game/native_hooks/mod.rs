@@ -12,6 +12,7 @@ pub(in crate::game) use fire::{
     BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
     ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
+use mod_api::BlockEntityRef;
 
 use super::native_data_maps::DataMapType;
 use super::{
@@ -24,7 +25,6 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::block_contact::Pending;
-use horizon_client::creative::Creative;
 use horizon_client::{
     atlas_sources::qualified,
     biome::{BiomeColors, SpawnEntry},

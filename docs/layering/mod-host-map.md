@@ -105,16 +105,16 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | kind | mod crate's layer | Cargo.toml line | strand |
 |---|---|---|---|---|---|
-| horizon-client | horizon-mod-api | dev | platform | 196 | hooks |
-| horizon-client | horizon-mod-api | normal | platform | 23 | hooks |
-| horizon-client | horizon-mod-api-gen | build | platform | 14 | slots |
-| horizon-client | horizon-mod-api-macros | normal | platform | 25 | slots |
-| horizon-client | horizon-mod-package | normal | engine | 58 | loading |
-| horizon-client | horizon-mod-points | normal | platform | 24 | slots |
-| horizon-client | horizon-mod-render | normal | platform | 22 | content_render |
-| horizon-client | horizon-mod-runtime | dev | engine | 195 | content_render |
-| horizon-client | horizon-mod-runtime | normal | engine | 21 | content_render |
-| horizon-client | horizon-mod-wasm | normal | platform | 26 | loading |
+| horizon-client | horizon-mod-api | dev | platform | 197 | hooks |
+| horizon-client | horizon-mod-api | normal | platform | 24 | hooks |
+| horizon-client | horizon-mod-api-gen | build | platform | 15 | slots |
+| horizon-client | horizon-mod-api-macros | normal | platform | 26 | slots |
+| horizon-client | horizon-mod-package | normal | engine | 59 | loading |
+| horizon-client | horizon-mod-points | normal | platform | 25 | slots |
+| horizon-client | horizon-mod-render | normal | platform | 23 | content_render |
+| horizon-client | horizon-mod-runtime | dev | engine | 196 | content_render |
+| horizon-client | horizon-mod-runtime | normal | engine | 22 | content_render |
+| horizon-client | horizon-mod-wasm | normal | platform | 27 | loading |
 | horizon-client-lib | horizon-mod-api | dev | platform | 131 | hooks |
 | horizon-client-lib | horizon-mod-api | normal | platform | 18 | hooks |
 | horizon-client-lib | horizon-mod-package | normal | engine | 50 | loading |
@@ -132,17 +132,17 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 445 | 2623 | 4536 |
+| horizon-client | horizon-mod-api | 460 | 2649 | 4731 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 26 | 83 | 86 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
 | horizon-client | horizon-mod-render | 10 | 18 | 3 |
-| horizon-client | horizon-mod-runtime | 59 | 64 | 161 |
+| horizon-client | horizon-mod-runtime | 61 | 65 | 167 |
 | horizon-client | horizon-mod-wasm | 3 | 4 | 0 |
-| horizon-client-lib | horizon-mod-api | 51 | 227 | 71 |
+| horizon-client-lib | horizon-mod-api | 53 | 231 | 79 |
 | horizon-client-lib | horizon-mod-package | 8 | 46 | 44 |
 | horizon-client-lib | horizon-mod-runtime | 13 | 43 | 49 |
-| horizon-client-render | horizon-mod-api | 29 | 141 | 97 |
+| horizon-client-render | horizon-mod-api | 31 | 154 | 110 |
 | horizon-client-render | horizon-mod-package | 3 | 5 | 1 |
 | horizon-client-render | horizon-mod-render | 3 | 6 | 0 |
 | horizon-client-render | horizon-mod-runtime | 8 | 21 | 15 |
@@ -153,16 +153,16 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 156 | 1335 | 2108 |
-| game/native_hooks | 103 | 416 | 407 |
-| client (non-game) | 76 | 388 | 278 |
-| game/mobs | 26 | 163 | 444 |
+| game/modding | 157 | 1344 | 2136 |
+| game/native_hooks | 107 | 419 | 429 |
+| client (non-game) | 78 | 392 | 286 |
+| game/mobs | 28 | 165 | 444 |
 | game/interface | 45 | 146 | 439 |
-| game/network | 24 | 161 | 369 |
-| game/blocks | 26 | 101 | 307 |
-| game/world | 20 | 80 | 211 |
-| horizon-client-render | 39 | 173 | 113 |
-| game/entities | 25 | 45 | 132 |
+| game/network | 26 | 167 | 369 |
+| game/blocks | 28 | 107 | 318 |
+| game/world | 23 | 81 | 249 |
+| horizon-client-render | 42 | 186 | 126 |
+| game/entities | 26 | 45 | 234 |
 | game/items | 11 | 62 | 94 |
 | game/runtime | 8 | 28 | 117 |
 | game.rs | 1 | 134 | 0 |
@@ -175,12 +175,12 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 247 | 689 | 75 |
-| host | 108 | 380 | 79 |
+| loading | 249 | 726 | 75 |
+| host | 109 | 400 | 79 |
 | slots | 8 | 0 | 0 |
-| attachments | 165 | 282 | 49 |
-| content_render | 292 | 382 | 165 |
-| hooks | 2477 | 3333 | 1383 |
+| attachments | 166 | 293 | 50 |
+| content_render | 295 | 390 | 167 |
+| hooks | 2514 | 3479 | 1392 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -188,17 +188,17 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 
 | highest tier | files |
 |---|---|
-| dispatch | 17 |
-| value | 134 |
-| more | 45 |
+| dispatch | 19 |
+| value | 138 |
+| more | 46 |
 
-- **dispatch** items, by files using them: `__private::listened` (59), `HookId` (6), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::PlayerHarvestCheck` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1), `HookId::BlockBreakProgressUpdate` (1), `HookId::BlockDamageAbort` (1)
+- **dispatch** items, by files using them: `__private::listened` (63), `HookId` (7), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerHarvestCheck` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1)
 
-- **value** items, by files using them: `Identifier` (15), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (8), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `Transaction` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3), `LevelRef` (3), `PlayerRef` (3), `Pose` (3)
+- **value** items, by files using them: `Identifier` (16), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (8), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `Transaction` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3), `ItemStack` (3), `LevelRef` (3), `PlayerRef` (3)
 
-- **more** items, by files using them: `__private::mods` (20), `__private::game::*` (8), `__private::ModPhase::Registration` (4), `__private::PhaseOwner::scope` (4), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `HostSide` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::RegistrationContextNew` (2), `__private::game::player_ref` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `ModEntry` (1), `RegistrationContext` (1), `ServerHost` (1), `__private::LoadAccess::ClientSetup` (1)
+- **more** items, by files using them: `__private::mods` (20), `__private::game::*` (8), `__private::ModPhase::Registration` (5), `__private::PhaseOwner::scope` (5), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `__private::game::RegistrationContextNew` (3), `HostSide` (2), `RegistrationContext` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::player_ref` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `ModEntry` (1), `ServerHost` (1), `__private::LoadAccess::ClientSetup` (1)
 
-Outside the host areas, 2291 `mod_api` references are in test code; 207 of them name `testing`, `part_tests` or `with_test_packages`.
+Outside the host areas, 2458 `mod_api` references are in test code; 227 of them name `testing`, `part_tests` or `with_test_packages`.
 
 ### The move set by phase (files under game/modding/ and game/native_hooks/)
 
@@ -206,28 +206,29 @@ Outside the host areas, 2291 `mod_api` references are in test code; 207 of them 
 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
-| loading (phase 1) | 5 | 4020 | 5 | 0 | 49 | 101 | 26 |
-| host (phase 2) | 4 | 1442 | 3 | 11 | 44 | 13 | 9 |
+| loading (phase 1) | 5 | 4026 | 5 | 0 | 49 | 102 | 26 |
+| host (phase 2) | 4 | 1445 | 3 | 11 | 44 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
+| attachments (phase 4) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 43 | 17 |
-| hooks (phase 6) | 389 | 99446 | 359 | 18 | 573 | 1641 | 226 |
+| hooks (phase 6) | 397 | 100864 | 365 | 18 | 579 | 1660 | 231 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
 |  | files | lines |
 |---|---|---|
-| all | 944 | 68779 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 772 | 24624 |
+| all | 959 | 70005 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 782 | 25030 |
 | includes generator output (OUT_DIR) | 6 |  |
-| `unsafe` | 3 | 55 |
-| process state (static, thread_local, locks, atomics, cells) | 23 | 156 |
+| `unsafe` | 4 | 65 |
+| process state (static, thread_local, locks, atomics, cells) | 24 | 167 |
 
 Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-runtime` (normal, engine); build script: yes.
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
-- `src/__private.rs`: generated_include 83,91,107,474; state 420
+- `src/__private/points.rs`: unsafe 245,249,250,286,287,406,425,428,439,453; state 10,11,25,26,27,32,36,220,339,345,556
+- `src/__private.rs`: generated_include 83,91,107,476; state 420
 - `src/block/fluid_capability.rs`: state 143,144,316
 - `src/block/item_place.rs`: state 17,271
 - `src/block/unresolved_fluid.rs`: state 5,50
@@ -242,7 +243,7 @@ Blockers by file (generated includes, `unsafe`, state), lines:
 - `src/parts/effects.rs`: state 2,3
 - `src/parts/fluids.rs`: state 23,24
 - `src/parts/mod.rs`: generated_include 26; state 16,21,22
-- `src/parts/shared.rs`: state 157,158,159,160,161,162,173,174,178,181,193,200…
+- `src/parts/shared.rs`: state 158,159,160,161,162,163,174,175,179,182,194,201…
 - `src/profiler.rs`: unsafe 116,202,214,244,265,273; state 9,10,15,16,17,18,19,20,111,118,120,126…
 - `src/runtime.rs`: state 35,65,75
 - `src/testing/services.rs`: state 3,46
