@@ -85,6 +85,7 @@ pub mod mod_browser;
 pub mod mod_chunk_tickets;
 pub mod mod_list;
 pub mod mod_model_loaders;
+pub mod mod_pipelines;
 pub mod mod_sprite_sources;
 pub mod model_library;
 pub mod models;

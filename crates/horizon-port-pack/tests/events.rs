@@ -298,6 +298,14 @@ fn the_built_in_catalog_parses() {
         panic!("EntityJoinLevelEvent has no hook");
     };
     assert!(hooks.contains(&"mob_spawned".to_owned()), "{hooks:?}");
+    // A 1.21.1 mod's core shaders: answered by the hook of the event that replaced theirs.
+    assert_eq!(
+        c.status("RegisterShadersEvent"),
+        (
+            Status::Hooked(vec!["register_render_pipelines".to_owned()]),
+            Some("RegisterRenderPipelinesEvent".to_owned())
+        )
+    );
 }
 
 #[test]

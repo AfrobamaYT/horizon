@@ -44,6 +44,7 @@ pub(crate) mod particle_providers;
 #[doc(hidden)]
 pub mod particles;
 pub(crate) mod posed_parts;
+pub(crate) mod render_pipeline;
 pub(crate) mod scene;
 pub(crate) mod screenshot;
 pub(crate) mod terrain_draw;

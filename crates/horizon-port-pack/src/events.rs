@@ -30,8 +30,11 @@ pub const CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/hook-counterpa
 /// them. `AnvilRepairEvent` fired when the player took a repaired result out
 /// of the anvil and let a mod change the anvil's break chance; 26.1's
 /// `AnvilCraftEvent` fires on that take, `.Pre` before the inputs are used
-/// and the anvil is damaged, and has no break chance.
-const RENAMED: [(&str, &str); 7] = [
+/// and the anvil is damaged, and has no break chance. `RegisterShadersEvent`
+/// registered shader instances; vanilla replaced those with render pipelines,
+/// and `RegisterRenderPipelinesEvent` registers a pipeline: its shaders with
+/// the vertex format, blend and depth state it draws with.
+const RENAMED: [(&str, &str); 8] = [
     ("Capabilities.ItemHandler.", "Capabilities.Item."),
     ("Capabilities.EnergyStorage.", "Capabilities.Energy."),
     ("AddReloadListenerEvent", "AddServerReloadListenersEvent"),
@@ -42,6 +45,7 @@ const RENAMED: [(&str, &str); 7] = [
     ("RecipesUpdatedEvent", "RecipesReceivedEvent"),
     ("RenderTooltipEvent.Color", "RenderTooltipEvent.Texture"),
     ("AnvilRepairEvent", "AnvilCraftEvent.Pre"),
+    ("RegisterShadersEvent", "RegisterRenderPipelinesEvent"),
 ];
 
 /// Events that are only a parent of the events NeoForge documents under

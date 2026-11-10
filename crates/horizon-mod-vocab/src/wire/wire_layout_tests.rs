@@ -190,6 +190,7 @@ fn handle_records_have_declared_field_bytes() {
     fields(UnspawnedMobRef::new(epoch, 61), (epoch, 61u64));
     fields(ModelRef::from_parts(31, 7).unwrap(), (31u64, 7u32));
     fields(InstanceGroupRef::from_parts(37, 9).unwrap(), (37u64, 9u32));
+    fields(RenderPipelineRef::from_parts(41, 5).unwrap(), (41u64, 5u32));
     fields(AttachmentHolder::Entity(entity), (0u32, entity));
     fields(AttachmentHolder::Player(player), (1u32, player));
     fields(

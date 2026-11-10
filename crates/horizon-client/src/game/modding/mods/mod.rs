@@ -491,6 +491,7 @@ pub(super) fn register_client_presentations(role: ExecutionRole) {
     register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
+    register_render_pipelines(role);
 }
 
 /// Resolve client dimension-transition registrations once, before the first level opens.
@@ -520,6 +521,17 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     let mut editors = Vec::new();
     Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
     horizon_client::title::preset_editors::register(editors);
+}
+
+/// Keep the mods' render pipeline registrations once at startup, before resources load: every
+/// load builds them from its own shader files.
+pub(super) fn register_render_pipelines(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut pipelines = Vec::new();
+    Game::native_register_render_pipelines(&RegistrationContext::new(), &mut pipelines);
+    horizon_client_render::mod_pipelines::register(pipelines);
 }
 
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
