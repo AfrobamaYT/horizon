@@ -211,6 +211,11 @@ Measure no-listener, singleton, long-run and alternating-type scenes on both
 targets, including collection, memory, payload bytes, host calls and multi-listener
 order. Do not promise an improvement until those results include the cursor cost.
 
+Batching ships only with a measured total tick win on a real prepared-data scene
+in the optimized profile, including cursor crossings and GC. The no-mod tick must
+remain within measurement noise, and the build must change no saved data.
+These are shipping conditions, not optional performance claims.
+
 ## Acceptance matrix
 
 These are proposed implementation tests with literal expectations, not checks
