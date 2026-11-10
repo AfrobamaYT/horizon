@@ -592,12 +592,7 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
     assert_eq!(catalog.sites.len(), 1);
     let facade = catalog.facade(&bundle.manifest).unwrap();
     assert!(facade.source.contains(&catalog.sites[0].constructor()));
-    let main = api::main_rs(
-        "/* MOD_SLOTS */",
-        &[&bundle.manifest],
-        &catalog.points,
-        &catalog.sites,
-    );
+    let main = api::main_rs("/* MOD_SLOTS */", &[&bundle.manifest], &catalog);
     assert_eq!(main.matches("mod_0::callback(receiver)").count(), 2);
     assert!(main.contains("\"add\""));
     assert!(main.contains("\"multiply\""));
