@@ -118,13 +118,13 @@ fn field_refusals_name_target_field_and_type() {
     d.name = "a".into();
     assert_eq!(
         rewrite("struct S { a:i32 }", "fixture", &[d]).unwrap_err(),
-        "E_INJECT_FIELD: m: fixture::S: field a collides with an existing field"
+        "E_INJECT_FIELD: m:count-slot: fixture::S: field a collides with an existing field"
     );
     let mut d = declaration("m");
     d.ty = "m::Counter".into();
     assert_eq!(
         rewrite("struct S { a:i32 }", "fixture", &[d]).unwrap_err(),
-        "E_INJECT_FIELD: m: fixture::S: field type m::Counter is not reachable from the target engine crate; mod-defined types require attachments"
+        "E_INJECT_FIELD: m:count-slot: fixture::S: field type m::Counter is not reachable from the target engine crate; mod-defined types require attachments"
     );
     assert!(
         rewrite(
@@ -167,7 +167,7 @@ fn field_stage_unknown_target_is_atomic_and_names_type() {
     unknown.target = "fixture::T".into();
     assert_eq!(
         stage(&root, &[declaration("m"), unknown]).unwrap_err(),
-        "E_INJECT_FIELD: m: fixture::T: unknown target struct fixture::T"
+        "E_INJECT_FIELD: m:count-slot: fixture::T: unknown target struct fixture::T"
     );
     assert_eq!(fs::read_to_string(&file).unwrap(), source);
     stage(&root, &[declaration("m")]).unwrap();
@@ -190,7 +190,7 @@ fn field_serde_skip_and_wire_refusal() {
             &[declaration("m")]
         )
         .unwrap_err(),
-        "E_INJECT_FIELD: m: fixture::S: derive Wire cannot guarantee the field is never saved or synced"
+        "E_INJECT_FIELD: m:count-slot: fixture::S: derive Wire cannot guarantee the field is never saved or synced"
     );
 }
 
