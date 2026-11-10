@@ -29,7 +29,19 @@ impl Hooks for Mod {
         mod_api::Flow::Continue
     }
 
-    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
+        if cx.mods().get("refuse_registration").is_some() {
+            registrar.declare_fluid("before_refusal");
+            let kind = registrar
+                .block_entity_type("discarded_callback")
+                .blocks(&[])
+                .build();
+            registrar.block_entity_part(&kind, Counter).unwrap();
+            cx.refuse("guest bootstrap failed: café\nmissing recipe bridge");
+            cx.refuse("must not replace the first diagnostic");
+            registrar.declare_fluid("foreign:after_refusal");
+            return;
+        }
         let kind = registrar.block_entity_type("counter").blocks(&[]).build();
         registrar.block_entity_part(&kind, Counter).unwrap();
         let reads = registrar

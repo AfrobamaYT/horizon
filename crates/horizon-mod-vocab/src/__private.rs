@@ -2,6 +2,8 @@
 //! game fills for its hooks (`built`) and what it reads of handles and the API's own types
 //! (`game`). None of it is part of the API a mod is written against.
 use crate::*;
+#[path = "__private/registry_installation.rs"]
+mod registry_installation;
 
 /// The game's profiler control and reports, not a mod-facing API contract.
 #[path = "profiler.rs"]

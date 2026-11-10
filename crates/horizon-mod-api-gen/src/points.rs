@@ -15,6 +15,8 @@ use syn::{ImplItem, Item, Type};
 
 pub mod mod_crate;
 pub mod source;
+#[cfg(test)]
+mod target_tests;
 
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]

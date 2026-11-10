@@ -117,8 +117,26 @@ impl Game<'_> {
         }
         (0.2 * (1.0 + total)) as f32
     }
-    /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
+    /// The wear `ItemStack.hurtAndBreak` goes on to apply for `amount` points:
+    /// what Unbreaking leaves (`EnchantmentHelper.processDurabilityChange`),
+    /// then what the item's parts make of it (`IItemExtension.damageItem`).
     pub(super) fn durability_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        let loss = self.unbreaking_loss(stack, amount);
+        if loss == 0 || self.remote.is_some() {
+            return loss;
+        }
+        // One table lookup tells whether any part of this item listens; with none,
+        // the stack is not converted and no host is made.
+        if !mod_api::__private::item_listens(mod_api::HookId::DamageItem, &stack.item) {
+            return loss;
+        }
+        let mut points = loss.min(i32::MAX as u32) as i32;
+        let mut canceled = false;
+        self.native_damage_item(stack, &mut points, &mut canceled);
+        if canceled { 0 } else { points.max(0) as u32 }
+    }
+    /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
+    fn unbreaking_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         let e = &world_stations!(self).enchantments;
         if !e.has_component(stack, "minecraft:item_damage") {
             return amount;
@@ -140,29 +158,13 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let loss = self.modify_wear(stack, amount);
+        let loss = self.durability_loss(stack, amount);
         if loss > 0 {
             self.trigger_item_durability(stack, (stack.damage as i32).wrapping_add(loss as i32));
         }
         loss
     }
 
-    /// Enchantment and mod changes to a positive durability loss, before the
-    /// durability-changed advancement and the stack write.
-    pub(super) fn modify_wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let mut loss = self.durability_loss(stack, amount);
-        // The mods hear a server player's wear once Unbreaking has had its say,
-        // and may change it or stop it.
-        if loss > 0
-            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
-        {
-            let mut points = loss as i32;
-            let mut cancel = false;
-            self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
-            loss = if cancel { 0 } else { points.max(0) as u32 };
-        }
-        loss
-    }
     /// `getEnchantedDamage - base`: damage bonus of the held weapon against a mob type.
     pub(super) fn enchant_damage_bonus(&mut self, target: &str, victim: Option<u32>) -> f32 {
         self.enchanted_damage(target, 0.0, victim)
@@ -1643,6 +1645,51 @@ fn soul_speed_tick(
 
 #[cfg(test)]
 mod tests {
+    use crate::game::damage_item_tests::{Rule, with_wear_part};
+    use horizon_client::mobs::{Mob, finalize};
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn mob_armour_obeys_negative_cancel_and_breaking_answers() {
+        with_wear_part("minecraft:iron_helmet", Rule::Set(-1), |game, wear| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(901, kind, Vec3::ZERO, 0.0);
+            finalize::set_item_stack(&mut mob, 5, ItemStack::new("minecraft:iron_helmet", 1));
+            game.mobs.push(mob);
+            for rule in [Rule::Set(i32::MIN), Rule::Cancel] {
+                wear.set(rule);
+                game.wear_mob_piece(901, 5, 1);
+                assert_eq!(
+                    finalize::item_stack(game.mobs.last().unwrap(), 5)
+                        .unwrap()
+                        .damage,
+                    0
+                );
+                assert_eq!(wear.take_asked(), [1]);
+            }
+            wear.set(Rule::Set(164));
+            game.wear_mob_piece(901, 5, 1);
+            assert_eq!(
+                finalize::item_stack(game.mobs.last().unwrap(), 5)
+                    .unwrap()
+                    .damage,
+                164
+            );
+            wear.set(Rule::Set(i32::MAX));
+            game.wear_mob_piece(901, 5, 1);
+            assert!(finalize::item_stack(game.mobs.last().unwrap(), 5).is_none());
+            assert_eq!(wear.take_asked(), [1, 1]);
+            game.wear_mob_piece(901, 5, 1);
+            assert!(wear.take_asked().is_empty());
+        });
+    }
+
     use super::{armor_changes, block_break_speed_factor, pick_mending_slot, soul_speed_tick};
     use horizon_client::items::ItemStack;
     use horizon_core::random::{LegacyRandom, RandomSource};
