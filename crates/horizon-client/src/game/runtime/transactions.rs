@@ -128,6 +128,8 @@ pub(super) enum After {
     Changed(Pos),
     /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
     Updated(Pos),
+    /// `Level.sendBlockUpdated` alone, without marking the save dirty.
+    NotifyClients(Pos),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// Deferred interaction effects, replayed in the same root-commit order.
@@ -457,6 +459,7 @@ impl Game<'_> {
         match after {
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
+            After::NotifyClients(pos) => self.notify_block_clients(pos),
             After::Effect(effect) => match effect {
                 DeferredEffect::CustomStat {
                     player,

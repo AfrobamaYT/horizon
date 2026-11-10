@@ -17,3 +17,18 @@ that already has that kind of part warns, naming both mods, and the earlier mod'
 doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
+
+## Item wear
+
+`ItemPart::damage_item` is `IItemExtension.damageItem`: the wear a stack of the part's item is about to take
+(`ItemStack.hurtAndBreak`), after Unbreaking, as NeoForge passes it. The part reads `event.amount`, the points
+about to be lost, and changes it (0 or less leaves the item whole) or returns `Flow::Cancel` for no wear at all. It
+runs on every wear path: a player's tools, armour, shield and mace, a tool a dispenser uses, and a mob's armour. It is
+not asked when Unbreaking already saved the item or for a creative player's tools, and an item with no part costs
+one table lookup. With no part, the vanilla amount applies.
+
+The global `item_damaged` hook is gone: this method is its one moment, and a part acts only on its own item. What the
+global hook could do and a part cannot is change the wear of another mod's or vanilla's items, which no part is
+attached to. Do that with an enchantment effect in data (a `minecraft:item_damage` effect on the enchantment, the
+component Unbreaking uses), or with an injection. A part does not get the wearing entity;
+`host.players().acting_player()` names the player on the paths a player takes.

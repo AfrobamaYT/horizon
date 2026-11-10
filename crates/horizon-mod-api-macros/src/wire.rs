@@ -155,6 +155,16 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
     } else {
         quote!(Ok(#(#takes)*))
     };
+    let put = if nested {
+        quote!(out.nested(|out| { #(#puts)* }))
+    } else {
+        quote!(#(#puts)*)
+    };
+    let put_owned = if nested {
+        quote!(out.nested(|out| { #(#owned)* }))
+    } else {
+        quote!(#(#owned)*)
+    };
     // Explicit internal opt-in: do not emit a cfg(test) trait method in external
     // derives, whose mod_api dependency is compiled without cfg(test).
     let schema = internal_field_layouts.then(|| {
@@ -178,8 +188,8 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                 visiting.pop();
                 hash
             }
-            fn put(&self, out: &mut #w::Writer) { #(#puts)* }
-            fn put_owned(self, out: &mut #w::Writer) { #(#owned)* }
+            fn put(&self, out: &mut #w::Writer) { #put }
+            fn put_owned(self, out: &mut #w::Writer) { #put_owned }
             fn take(input: &mut #w::Reader<'_>) -> Result<Self, #w::WireError> { #take }
         }
     })

@@ -1613,7 +1613,7 @@ impl Game<'_> {
         self.score.board = Default::default();
         self.streaming = Streaming::new(Arc::new(NoTerrain), self.worker_context(), 1);
         self.streaming.paused = true;
-        self.world = World::new(self.res.facts().air, 0);
+        self.reset_client_world(0);
         self.remove_local_player_body();
         // The vehicle went with the level: an id kept here would seat the
         // next login on an entity that is not there.
@@ -2784,7 +2784,7 @@ impl Game<'_> {
                 self.world.day_time,
                 self.world.weather,
             );
-            self.world = World::new(self.res.facts().air, spawn.seed);
+            self.reset_client_world(spawn.seed);
             // Entity IDs belong to this ClientLevel, not the connection. A
             // same-level respawn keeps it; a replacement invalidates handles.
             self.native_lifecycle_open_started();
@@ -10357,8 +10357,7 @@ impl Game<'_> {
             }
             self.reset_attack_strength();
         }
-        self.swing_arm();
-        self.send(S::Punch(Empty));
+        self.remote_swing_packet();
         instant
     }
 
@@ -10526,15 +10525,13 @@ impl Game<'_> {
             }
             if let Some(swing) = canceled {
                 if swing {
-                    self.swing_arm();
-                    self.send(S::Punch(Empty));
+                    self.remote_swing_packet();
                 }
             } else if self.remote_break_restricted(hit.pos) {
                 // continueDestroyBlock returned false: no swing.
             } else if !air {
                 if self.remote_mining(false) {
-                    self.swing_arm();
-                    self.send(S::Punch(Empty));
+                    self.remote_swing_packet();
                 }
             } else {
                 if let Some(r) = self.remote.as_mut() {

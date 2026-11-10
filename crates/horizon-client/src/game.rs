@@ -8259,6 +8259,7 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
         }
@@ -11187,19 +11188,6 @@ impl Game<'_> {
         self.mark_stage(out.len(), "NONE");
     }
 
-    /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
-    /// (any other progress). Cracks not updated for 400 ticks are dropped.
-    pub(crate) fn destroy_block_progress(&mut self, breaker: i32, pos: [i32; 3], progress: i32) {
-        let now = self.world.game_time;
-        self.destroying
-            .retain(|_, c| now.saturating_sub(c.2) <= 400);
-        if (0..10).contains(&progress) {
-            self.destroying.insert(breaker, (pos, progress as u8, now));
-        } else {
-            self.destroying.remove(&breaker);
-        }
-    }
-
     /// `ServerLevel.destroyBlockProgress`: breaker `breaker`'s crack on `pos`
     /// (0..=9, anything else takes it away), for every player within 64 blocks.
     pub(super) fn server_destroy_block_progress(
@@ -13715,11 +13703,10 @@ impl Game<'_> {
                 rotation: [0.0; 3],
                 scale: 1.0,
             };
-            let mut canceled = false;
-            if snapshot.is_some() {
-                self.native_render_hand(&mut render, &mut canceled);
-            }
-            if canceled {
+            // RenderHandEvent: the mods pose the hand, draw in it or leave vanilla's out.
+            if snapshot.is_some()
+                && self.render_hand_cancelled(&mut render, to_world, packed, &mut out, &mut runs)
+            {
                 continue;
             }
             // No mod moved the hand (always so without one): no matrices to build.

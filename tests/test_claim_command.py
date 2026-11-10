@@ -87,16 +87,37 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(cc.parse("🤖 Agent: /unclaim @Some-One"), cc.Command("unclaim", "Some-One"))
 
     def test_not_commands(self):
-        for text in ("", "claim", "/claimed", "/claims", "thanks\n/claim", "/close", "/unclaimed"):
+        for text in ("", "claim", "/claimed", "/claims", "/claimed,", "/claims:", "🤖 Agent: /claimed", "thanks\n/claim", "/close", "/unclaimed"):
             self.assertIsNone(cc.parse(text), text)
 
-    def test_malformed(self):
-        for text in ("/claim this one", "/claim @other", "/unclaim @a b", "/unclaim @-bad", "/unclaim <x>"):
-            with self.assertRaises(cc.Refused, msg=text):
-                cc.parse(text)
+    def test_claim_ignores_text_after_the_first_word(self):
+        for prefix in ("", "🤖 Agent: "):
+            for punctuation in ("", ",", ":", ".", "!", ";", "?"):
+                for rest in ("", " for stage 1 only: this part", " @other", "\tthis one"):
+                    text = f"{prefix}/claim{punctuation}{rest}"
+                    with self.subTest(text=text):
+                        self.assertEqual(cc.parse(text), cc.Command("claim"))
+
+    def test_unclaim_only_targets_an_exact_login(self):
+        for prefix in ("", "🤖 Agent: "):
+            for punctuation in ("", ",", ":", "."):
+                for rest, who in (("", None), (" @Some-One", "Some-One"), (" some-one", "some-one"),
+                                  (" for stage 1 only", None), (" @a b", None), (" @-bad", None),
+                                  (" <x>", None), (" @Some-One,", None)):
+                    text = f"{prefix}/unclaim{punctuation}{rest}"
+                    with self.subTest(text=text):
+                        self.assertEqual(cc.parse(text), cc.Command("unclaim", who))
 
 
 class ClaimTests(unittest.TestCase):
+    def test_claim_with_explanation_still_assigns_the_commenter(self):
+        for body in ("/claim, for stage 1 only: this part", "🤖 Agent: /claim: @other"):
+            with self.subTest(body=body):
+                text, api = do(body)
+                self.assertIsNone(text)
+                self.assertIn(("assign", 5, "newcomer"), api.calls)
+                self.assertNotIn(("assign", 5, "other"), api.calls)
+
     def test_claim_a_free_issue(self):
         text, api = do("/claim")
         self.assertIsNone(text)  # the 👍 says it
@@ -321,6 +342,13 @@ class PaginationTests(unittest.TestCase):
 
 
 class UnclaimTests(unittest.TestCase):
+    def test_explanatory_text_releases_only_the_commenter(self):
+        for body in ("/unclaim, for stage 1 only", "🤖 Agent: /unclaim: @other and me"):
+            with self.subTest(body=body):
+                text, api = do(body, Fake({5: thread(holders=("NewComer", "other"))}))
+                self.assertIsNone(text)
+                self.assertEqual(api.calls, [("unassign", 5, "NewComer")])
+
     def test_own(self):
         text, api = do("/unclaim", Fake({5: thread(holders=("NewComer",))}))
         self.assertIsNone(text)
