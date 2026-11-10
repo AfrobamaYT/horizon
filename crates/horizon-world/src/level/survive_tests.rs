@@ -18,6 +18,8 @@ fn a_soils_answer_comes_before_the_plants_may_place_on() {
         plant: Option<(BlockId, BlockId)>,
         asked: RefCell<Vec<(BlockId, BlockId, BlockPos)>>,
     }
+    impl BlockEntityNeighbors for Soil {}
+
     impl LevelAccess for Soil {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
