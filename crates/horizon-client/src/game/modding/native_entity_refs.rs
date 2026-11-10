@@ -8,6 +8,10 @@
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
+#[path = "native_entity_refs/dragon_parts_table.rs"]
+pub(in crate::game) mod dragon_parts_table;
+#[path = "native_entity_refs/dragon_query.rs"]
+mod dragon_query;
 #[path = "native_entity_refs/save_lending.rs"]
 mod save_lending;
 use super::{
@@ -211,8 +215,9 @@ impl Game<'_> {
     /// its entity handles cannot resolve until the level is in place. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings, other special entities and the dragon
-    /// are not on the entity-list walk.
+    /// yet resolve; frames, paintings and other special entities
+    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     pub(super) fn level_entities_in(
@@ -238,6 +243,7 @@ impl Game<'_> {
                 ids.push(entity.id());
             }
         });
+        self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.fishing_hooks_here()
                 .filter(|(hook, _)| bounds.intersects(hook.bounds()))
@@ -269,6 +275,7 @@ impl Game<'_> {
                 ids.push(id);
             }
         }
+        self.append_dragon_query_ids(bounds, true, &mut ids);
         Some(
             ids.into_iter()
                 .map(|id| EntityRef::new(level.epoch(), id))

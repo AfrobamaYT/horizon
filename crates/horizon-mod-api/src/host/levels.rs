@@ -162,8 +162,9 @@ pub trait LevelsBackend {
     /// its entity handles cannot resolve until the level is in place. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; frames, paintings, other special entities and the dragon
-    /// are not on the entity-list walk.
+    /// yet resolve; frames, paintings and other special entities
+    /// are not on the entity-list walk. The dragon follows ordinary entities;
+    /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     #[access(WorldOnly)]
