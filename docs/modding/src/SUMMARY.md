@@ -18,6 +18,7 @@
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
 - [Design: vehicle health layout](concepts/vehicle-health-layout.md)
+- [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
 
 # How-to
 
