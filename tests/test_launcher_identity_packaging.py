@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ SPEC.loader.exec_module(STAGE)
 FIXTURES = ROOT / 'tests/fixtures/launcher-upstream'
 
 class PackagingIdentity(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("rustc"), "requires Rust for real compiled identity metadata")
     def test_compiled_namespace_metadata_preserves_upstream_and_isolates_fork(self):
         expected = json.loads((FIXTURES / 'identity.json').read_text())
         with tempfile.TemporaryDirectory() as temporary:
@@ -29,6 +31,8 @@ class PackagingIdentity(unittest.TestCase):
             source = temporary / 'metadata.rs'
             source.write_text(program)
             outputs = []
+            addresses = temporary / 'libhorizon_addresses.rlib'
+            subprocess.run(['rustc', '--edition=2024', '--crate-name=horizon_addresses', '--crate-type=rlib', str(ROOT / 'crates/horizon-addresses/src/lib.rs'), '-o', str(addresses)], check=True)
             build_script = temporary / 'build-script'
             subprocess.run(['rustc', '--edition=2021', str(ROOT / 'launcher/build.rs'), '-o', str(build_script)], check=True)
             for repository in (STAGE.UPSTREAM, STAGE.FORK):
@@ -41,7 +45,7 @@ class PackagingIdentity(unittest.TestCase):
                     if line.startswith('cargo:rustc-cfg='):
                         flags += ['--cfg', line.removeprefix('cargo:rustc-cfg=')]
                 binary = temporary / 'metadata'
-                subprocess.run(['rustc', '--edition=2021', str(source), '-o', str(binary), *flags], check=True)
+                subprocess.run(['rustc', '--edition=2021', str(source), '-o', str(binary), '--extern', f'horizon_addresses={addresses}', *flags], check=True)
                 output = subprocess.check_output([str(binary)], text=True)
                 outputs.append(dict(line.split('\t', 1) for line in output.splitlines()))
             self.assertEqual(outputs[0], expected)

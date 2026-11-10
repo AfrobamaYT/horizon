@@ -498,10 +498,7 @@ pub fn uninstall(remove_data: bool, progress: impl Fn(Step, f32)) -> Result<Vec<
         progress(Step::Data, 0.8);
         let data = backend::data_dir();
         // Only the folder the launcher itself names: `HORIZON_LAUNCHER_HOME` may point anywhere.
-        if data
-            .file_name()
-            .is_some_and(|n| n.eq_ignore_ascii_case(crate::identity::EXECUTABLE))
-        {
+        if crate::identity::owns_launcher_data_dir(&data) {
             remove_all(&data, &mut left);
             // A profile whose name isn't ASCII keeps the build folder in %ProgramData%
             // (`backend::build_dir`); it is the launcher's too. Already gone with `data` otherwise.
