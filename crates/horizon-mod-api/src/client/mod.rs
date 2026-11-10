@@ -52,3 +52,5 @@ pub mod widgets;
 pub(crate) mod world_draw;
 
 pub(crate) mod spectator_shader;
+
+pub(crate) mod arm_pose;

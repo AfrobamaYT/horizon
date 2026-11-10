@@ -220,7 +220,8 @@ pub fn update_recipes(
         }
     };
     let mut w = Writer::new();
-    w.varint(PROPERTY_SETS.len() as i32);
+    let custom: BTreeMap<_, _> = additions.custom().collect();
+    w.varint((PROPERTY_SETS.len() + custom.len()) as i32);
     for (key, kind, fields) in PROPERTY_SETS {
         let mut set = BTreeSet::new();
         for recipe in &chosen {
@@ -249,6 +250,14 @@ pub fn update_recipes(
         w.string(&format!("minecraft:{key}"));
         w.varint(set.len() as i32);
         for id in set {
+            w.varint(id);
+        }
+    }
+    for (key, names) in custom {
+        let ids: BTreeSet<_> = names.iter().filter_map(|name| item(name)).collect();
+        w.string(key);
+        w.varint(ids.len() as i32);
+        for id in ids {
             w.varint(id);
         }
     }
