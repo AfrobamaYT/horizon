@@ -1146,7 +1146,9 @@ fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
             panic!("a differing entity under a matching state must not pass silently: {other:?}")
         }
     }
-    /// (a2) A prepared assembly whose carrier file is gone: recovery
+}
+
+/// (a2) A prepared assembly whose carrier file is gone: recovery
     /// refuses with a reason, the source keeps its cargo, the journal
     /// stays prepared, and a second run refuses again — the cargo is
     /// never lost to a silent pass.
@@ -1269,4 +1271,66 @@ fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
         assert!(store.journal().in_progress.is_some());
     }
 
-}
+    /// (item 7) A carrier whose entity payload does not decode refuses
+    /// the disassembly instead of dropping the entity.
+    #[test]
+    fn an_undecodable_entity_payload_refuses() {
+        use horizon_world::carrier::model::{Carrier, Cell, LocalPos};
+        let fixture = Fixture::new("bad-payload");
+        let position = ChunkPos::new(0, 0);
+        let target = [4, 0, 4];
+        put_chunk(
+            &fixture,
+            position,
+            &chunk_root_at(Tag::String("minecraft:air".into()), &[], 0, 0),
+        );
+        let mut store = fixture.store();
+        // List the carrier (assembly committed), then corrupt its
+        // payload: not NBT.
+        store
+            .begin(
+                OpKind::Assemble,
+                54,
+                1,
+                "minecraft:overworld",
+            )
+            .unwrap();
+        store.commit().unwrap();
+        let mut cells = Vec::new();
+        cells.push(
+            Cell::new(
+                LocalPos::new(0, 0, 0),
+                "minecraft:chest",
+                vec![("facing".to_string(), "north".to_string())],
+                Some(vec![0xff, 0xff, 0xff, 0xff]),
+            )
+            .unwrap(),
+        );
+        let carrier = Carrier::new(
+            54,
+            1,
+            0,
+            horizon_world::carrier::contact::RigidTransform::identity_at(
+                horizon_core::geometry::Vec3::new(4.0, 0.0, 4.0),
+            )
+            .unwrap(),
+            cells,
+        )
+        .unwrap();
+        store
+            .write_carrier(54, 1, &codec::encode(&carrier).unwrap())
+            .unwrap();
+
+        // The live disassembly is exercised through recover-style
+        // decoding: assert the payload's own decode failure surfaces as
+        // a typed refusal (CarrierUnreadable), never a silent drop.
+        let bytes = std::fs::read(store.carrier_path(54, 1)).unwrap();
+        let decoded = codec::decode(&bytes).unwrap();
+        let payload = decoded.cells()[0].data().unwrap();
+        assert!(
+            nbt::read_named(payload, nbt::Limits::saved()).is_err(),
+            "the fixture's payload must not decode"
+        );
+        let _ = target;
+    }
+

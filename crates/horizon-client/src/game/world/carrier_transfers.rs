@@ -52,6 +52,8 @@ pub(crate) enum TransferError {
     /// The selection's span exceeds the local coordinate range, or its
     /// offsets overflowed the checked arithmetic.
     LocalRange,
+    /// An empty selection was refused before any indexing.
+    EmptySelection,
     /// A rotation other than identity needs a state-rotation adapter
     /// (slice 4's); without one facing properties would be rewritten
     /// silently.
@@ -87,6 +89,7 @@ impl std::fmt::Display for TransferError {
                 pos[0], pos[1], pos[2]
             ),
             Self::NotCubeSymmetry => write!(f, "the rotation is not a cube symmetry"),
+            Self::EmptySelection => write!(f, "an empty selection refuses"),
             Self::LocalRange => write!(
                 f,
                 "the selection's span exceeds the local coordinate range"
@@ -103,6 +106,25 @@ impl std::fmt::Display for TransferError {
             Self::Io(text) => write!(f, "carrier transfer I/O: {text}"),
         }
     }
+}
+
+/// Whether a block entity is passive cargo this slice carries: a
+/// container or a sign, banner, skull or bell — pure data, no ticker.
+/// Ticking machines (furnaces, brewing stands, spawners, sculk,
+/// jukeboxes, beacons, campfires, daylight detectors, conduits,
+/// gateways) and world-dependent ones refuse the assembly until
+/// slice 4's adapters exist.
+fn block_entity_is_passive(entity: &horizon_client::chunk::block_entity::BlockEntity) -> bool {
+    use horizon_client::chunk::block_entity::BlockEntity;
+    matches!(
+        entity,
+        BlockEntity::Chest(_)
+            | BlockEntity::Sign(_)
+            | BlockEntity::Banner(_)
+            | BlockEntity::Skull(_)
+            | BlockEntity::Bell
+            | BlockEntity::Lectern(_)
+    )
 }
 
 /// Whether a live block entity's serialized form carries exactly the
@@ -165,6 +187,10 @@ impl Game<'_> {
                 "a previous carrier transfer did not finish; reopen the world".into(),
             ));
         }
+        if cells.is_empty() {
+            // An empty assembly refuses before any indexing or lookup.
+            return Err(TransferError::EmptySelection);
+        }
         if cells.len() > MAX_CELLS {
             return Err(TransferError::TooManyCells(cells.len()));
         }
@@ -183,6 +209,15 @@ impl Game<'_> {
                 return Err(TransferError::CellNotLoaded([pos.x, pos.y, pos.z]));
             }
             if self.world.block(pos.x, pos.y, pos.z) == air {
+                return Err(TransferError::UnsupportedBlock([pos.x, pos.y, pos.z]));
+            }
+            // The passive-or-supported rule runs before anything is
+            // lifted: a block entity this slice does not carry (ticking
+            // machines, world-dependent ones) refuses in preflight, with
+            // the world untouched.
+            if let Some(entity) = self.world.block_entities.get(&(pos.x, pos.y, pos.z))
+                && !block_entity_is_passive(entity)
+            {
                 return Err(TransferError::UnsupportedBlock([pos.x, pos.y, pos.z]));
             }
         }
@@ -258,17 +293,24 @@ impl Game<'_> {
             .iter()
             .map(|cell| {
                 // The entity rides the carrier file whole: its NBT
-                // serialized once, so a later disassembly replays it.
-                let data = cell.before.entity.as_ref().and_then(|entity| {
-                    horizon_core::nbt::write_named(
-                        &horizon_core::nbt::NamedTag {
-                            name: "".into(),
-                            tag: entity.clone(),
-                        },
-                        horizon_core::nbt::Limits::saved(),
-                    )
-                    .ok()
-                });
+                // serialized once, so a later disassembly replays it. A
+                // serialization failure is a refusal — the entity is
+                // never silently dropped from the carrier.
+                let data = cell
+                    .before
+                    .entity
+                    .as_ref()
+                    .map(|entity| {
+                        horizon_core::nbt::write_named(
+                            &horizon_core::nbt::NamedTag {
+                                name: "".into(),
+                                tag: entity.clone(),
+                            },
+                            horizon_core::nbt::Limits::saved(),
+                        )
+                        .map_err(|e| TransferError::Io(e.to_string()))
+                    })
+                    .transpose()?;
                 Cell::new(
                     LocalPos::new(cell.local[0], cell.local[1], cell.local[2]),
                     &cell.before.name,
@@ -441,10 +483,23 @@ impl Game<'_> {
         // block entity. The images are built from the carrier itself.
         let mut operation_cells = Vec::with_capacity(carrier.cells().len());
         for cell in carrier.cells() {
+            // Destination arithmetic is checked: an overflowing
+            // placement refuses rather than wrapping the world.
+            let offset = [
+                i32::from(cell.pos().x()),
+                i32::from(cell.pos().y()),
+                i32::from(cell.pos().z()),
+            ];
             let world = [
-                translation[0] + i32::from(cell.pos().x()),
-                translation[1] + i32::from(cell.pos().y()),
-                translation[2] + i32::from(cell.pos().z()),
+                translation[0]
+                    .checked_add(offset[0])
+                    .ok_or(TransferError::LocalRange)?,
+                translation[1]
+                    .checked_add(offset[1])
+                    .ok_or(TransferError::LocalRange)?,
+                translation[2]
+                    .checked_add(offset[2])
+                    .ok_or(TransferError::LocalRange)?,
             ];
             if !self.world.chunks.contains_key(&(world[0] >> 4, world[2] >> 4)) {
                 return Err(TransferError::CellNotLoaded(world));
@@ -460,11 +515,16 @@ impl Game<'_> {
             if !replaceable || occupied {
                 return Err(TransferError::DestinationOccupied(world));
             }
-            let entity = cell.data().and_then(|bytes| {
-                nbt::read_named(bytes, horizon_core::nbt::Limits::saved())
-                    .ok()
-                    .map(|(named, _)| named.tag)
-            });
+            // An entity payload that does not decode refuses the whole
+            // disassembly — it is never silently dropped.
+            let entity = cell
+                .data()
+                .map(|bytes| {
+                    nbt::read_named(bytes, horizon_core::nbt::Limits::saved())
+                        .map(|(named, _)| named.tag)
+                        .map_err(|e| TransferError::CarrierUnreadable(e.to_string()))
+                })
+                .transpose()?;
             let properties = cell
                 .properties()
                 .iter()
@@ -927,6 +987,98 @@ mod tests {
             assert!(game.native_level_write_allowed(level, fenced));
             assert!(!game.refuse_locked_container((4, 64, 4), "minecraft:chest"));
         });
+    }
+
+    /// (item 7) An empty selection refuses before any indexing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_empty_assembly_refuses() {
+        with_game(|game| {
+            match game.carrier_assemble(51, &[]) {
+                Err(TransferError::EmptySelection) => {}
+                other => panic!("an empty selection must refuse, got {other:?}"),
+            }
+        });
+    }
+
+    /// (item 7) A destination arithmetic that overflows refuses instead
+    /// of wrapping the world.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_overflowing_destination_refuses() {
+        let root = transfer_root("overflow");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.carrier_assemble(52, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+            // A translation that overflows i32 on add refuses.
+            match game.carrier_disassemble(
+                52,
+                1,
+                [i32::MAX, 64, 4],
+                [1.0, 0.0, 0.0, 0.0],
+            ) {
+                Err(TransferError::LocalRange) => {}
+                other => panic!("an overflowing destination must refuse, got {other:?}"),
+            }
+            // The carrier stays whole.
+            assert!(root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 52_u128))
+                .is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// (item 7) An unsupported block entity in the selection refuses in
+    /// preflight — the world keeps the block and its entity.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_ticking_block_entity_refuses_before_the_lift() {
+        let root = transfer_root("passive");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let furnace = registry.default_state("minecraft:furnace").unwrap();
+            game.world.set(4, 64, 4, furnace).unwrap();
+            game.world.block_entities.insert(
+                (4, 64, 4),
+                horizon_client::chunk::block_entity::BlockEntity::Furnace(Default::default()),
+            );
+            match game.carrier_assemble(53, &[BlockPos::new(4, 64, 4)]) {
+                Err(TransferError::UnsupportedBlock(pos)) => assert_eq!(pos, [4, 64, 4]),
+                other => panic!("a furnace must refuse, got {other:?}"),
+            }
+            // The world is untouched: the block and its entity remain,
+            // and no store was created for this transfer.
+            assert_eq!(game.world.block(4, 64, 4), furnace);
+            assert!(game
+                .world
+                .block_entities
+                .contains_key(&(4, 64, 4)));
+            assert!(!root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 53_u128))
+                .is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// (item 2) Sparse, non-collinear selections keep their geometry:
