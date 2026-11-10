@@ -507,6 +507,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
+ "horizon-mod-point-shape",
  "horizon-port-pack",
  "libc",
  "rustc-demangle",
@@ -1810,6 +1811,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-dualsense",
  "horizon-friends",
+ "horizon-game-discovery",
  "horizon-hdr",
  "horizon-hooks",
  "horizon-items",
@@ -2080,6 +2082,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-game-discovery"
+version = "0.1.0"
+dependencies = [
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "horizon-hdr"
 version = "0.1.0"
 dependencies = [
@@ -2148,7 +2157,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
- "horizon-mod-package",
+ "horizon-game-discovery",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
@@ -2230,6 +2239,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "horizon-core",
+ "horizon-mod-point-shape",
  "horizon-shader-api",
  "libc",
  "log",
@@ -2267,6 +2277,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn 2.0.119",
 ]
 
@@ -2383,6 +2394,8 @@ version = "0.1.0"
 dependencies = [
  "horizon-core",
  "horizon-hooks",
+ "horizon-mod-api-gen",
+ "horizon-mod-point-shape",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-server-files",

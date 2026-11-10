@@ -125,13 +125,7 @@ def main():
     extension, prefix = (".dll", "") if windows else (".so", "lib")
 
     def extern(crate):
-        library = sdk_tools.dylib(deps, crate)
-        if library is None:
-            candidates = list(deps.glob(f"lib{crate}-*.rmeta"))
-            if len(candidates) != 1:
-                raise ValueError(f"expected exactly one SDK metadata for {crate}: {candidates}")
-            library = candidates[0]
-        return ["--extern", f"{crate}={library}"]
+        return sdk_tools.extern_args(deps, crate)
 
     def run(command, **kwargs):
         if command[0] == "rustc" and any(str(arg).startswith("horizon_client=") for arg in command):

@@ -846,7 +846,13 @@ fn every_game_mode_pose_animation_and_connection_case_has_declared_tag_type() {
         (ArmPose::Spear, 9),
         (ArmPose::Brush, 10),
     ] {
-        fields(value, (tag,));
+        let mut output = Writer::new();
+        output.put(&value);
+        assert_eq!(output.bytes(), tag.to_le_bytes());
+        assert_eq!(
+            Reader::new(output.bytes()).take::<ArmPose>().unwrap(),
+            value
+        );
     }
     for (value, tag) in [
         (UseAnimation::None, 0u32),

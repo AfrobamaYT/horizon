@@ -21,6 +21,7 @@
   ],
   "crates": {
     "horizon-assets": "engine",
+    "horizon-game-discovery": "engine",
     "horizon-client": "engine",
     "horizon-client-core": "engine",
     "horizon-client-input": "engine",
@@ -67,7 +68,7 @@
     "horizon-mod-api": "platform",
     "horizon-mod-api-macros": "platform",
     "horizon-mod-point-emit": "platform",
-    "horizon-mod-point-shape": "platform",
+    "horizon-mod-point-shape": "engine",
     "horizon-mod-points": "platform",
     "horizon-mod-render": "platform",
     "horizon-mod-wasm": "platform",
@@ -93,10 +94,12 @@
       "horizon-client-core",
       "horizon-command",
       "horizon-core",
+      "horizon-game-discovery",
       "horizon-items",
       "horizon-protocol",
       "horizon-world",
       "horizon-mod-package",
+      "horizon-mod-point-shape",
       "horizon-mod-runtime"
     ],
     "forbidden": [
@@ -174,7 +177,7 @@
     "horizon-mod-api": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-api-macros": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-point-emit": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
-    "horizon-mod-point-shape": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
+    "horizon-mod-point-shape": "Shared point grammar and serialized catalog values; no dependency on the mod host or engine internals.",
     "horizon-mod-points": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-render": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
     "horizon-mod-wasm": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",

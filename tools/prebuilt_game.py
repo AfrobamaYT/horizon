@@ -94,6 +94,55 @@ def cargo_features(server: bool, platform: str) -> list[str]:
     return features
 
 
+def copy_artifacts(messages: list[dict], deps: Path) -> None:
+    """Copy this Cargo run's compiler outputs, not stale files left by earlier builds."""
+    files = {
+        Path(name)
+        for message in messages if message["reason"] == "compiler-artifact"
+        for name in message["filenames"] if name.endswith(SUFFIXES)
+    }
+    for file in sorted(files):
+        shutil.copy2(file, deps / file.name)
+
+
+def runtime_crates(metadata: dict) -> set[str]:
+    """Normal library dependencies of the game, excluding build and proc-macro dependency trees."""
+    packages = {package["id"]: package for package in metadata["packages"]}
+    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+    pending = [package["id"] for package in metadata["packages"] if package["name"] == "horizon-client"]
+    visited = set()
+    names = set()
+    while pending:
+        package_id = pending.pop()
+        if package_id in visited:
+            continue
+        visited.add(package_id)
+        targets = packages[package_id]["targets"]
+        libraries = [target["name"] for target in targets
+                     if any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])]
+        if not libraries:
+            continue
+        names.update(libraries)
+        pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"]
+                       if any(kind["kind"] is None for kind in dependency["dep_kinds"]))
+    return names
+
+
+def facade_crates(deps: Path, runtime: set[str]) -> list[str]:
+    """Only runtime crates with a unique extern can be exposed by an internals facade."""
+    eligible = []
+    for crate in sorted(runtime):
+        if dylib(deps, crate) is not None or len(list(deps.glob(f"lib{crate}-*.rmeta"))) == 1:
+            eligible.append(crate)
+    return eligible
+
+
+def assert_externs(out: Path, eligible: list[str]) -> None:
+    """Runs in the SDK build on every OS, including macOS, before publication."""
+    for crate in set(eligible) | {"mod_api", "horizon_mod_package"}:
+        extern_args(out / "deps", crate)
+
+
 def build(out: Path, server: bool) -> None:
     # Resolved here: the staging and build steps run from the staged copy.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
@@ -113,23 +162,22 @@ def build(out: Path, server: bool) -> None:
         cwd=staged,
         env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
     )
+    artifacts = list(map(json.loads, messages.splitlines()))
     scripts = [
-        message for message in map(json.loads, messages.splitlines())
+        message for message in artifacts
         if message["reason"] == "build-script-executed"
     ]
     if out.exists():
         shutil.rmtree(out)
     deps = out / "deps"
     deps.mkdir(parents=True)
-    for file in sorted((target_dir / PROFILE / "deps").iterdir()):
-        # Metadata, proc macros, the game and the wasm runtime; other code lives inside the two dylibs.
-        # Old cached builds may leave the previous top-level engine dylib beside
-        # the metadata. It must not override the engine now embedded in the host.
-        if file.name.endswith(SUFFIXES) and file.name not in {
-            'libhorizon_client.so', 'libhorizon_client.dylib', 'horizon_client.dll',
-            'libhorizon_client.dll', 'libhorizon_client.dll.a',
-        }:
-            shutil.copy2(file, deps / file.name)
+    copy_artifacts(artifacts, deps)
+    metadata = json.loads(run([
+        "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", rustc_host(),
+        *features,
+    ], cwd=staged))
+    eligible = facade_crates(deps, runtime_crates(metadata))
+    assert_externs(out, eligible)
     native = out / NATIVE
     native.mkdir()
     # Only libraries that come with a crate (its source in Cargo's home, or its build script's output): a
@@ -163,6 +211,7 @@ def build(out: Path, server: bool) -> None:
         "side": "server" if server else "client",
         "rustflags": rustflags,
         "link_args": link_args,
+        "facade_crates": eligible,
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
@@ -173,6 +222,17 @@ def dylib(deps: Path, crate: str) -> Path | None:
     """A dylib carries its own metadata, so it has no `.rmeta` beside it."""
     names = {f"{prefix}{crate}.{ext}" for prefix in ("lib", "") for ext in ("so", "dll", "dylib")}
     return next((path for path in deps.iterdir() if path.name in names), None)
+
+
+def extern_args(deps: Path, crate: str) -> list[str]:
+    """Resolve a native SDK extern by name, refusing ambiguous metadata rather than choosing a variant."""
+    library = dylib(deps, crate)
+    if library is None:
+        candidates = list(deps.glob(f"lib{crate}-*.rmeta"))
+        if len(candidates) != 1:
+            raise ValueError(f"expected exactly one SDK metadata for {crate}: {candidates}")
+        library = candidates[0]
+    return ["--extern", f"{crate}={library}"]
 
 
 def check(out: Path) -> None:
@@ -193,11 +253,10 @@ def check(out: Path) -> None:
 def smoke(out: Path) -> None:
     """Build what a player's launcher builds: the starter mod and the generated executable, from OUT alone."""
     deps = out / "deps"
+    assert_externs(out, json.loads((out / IDENTITY).read_text())["facade_crates"])
 
     def extern(crate: str) -> list[str]:
-        prefix = f"lib{crate}-"
-        rmeta = next(path for path in deps.iterdir() if path.name.startswith(prefix) and path.suffix == ".rmeta")
-        return ["--extern", f"{crate}={rmeta}"]
+        return extern_args(deps, crate)
 
     common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=1", "-L", f"dependency={deps}",
               "-L", f"native={out / NATIVE}"]
