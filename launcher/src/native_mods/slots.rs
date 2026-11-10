@@ -176,7 +176,6 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 | Kind::WrapIf,
                 Access::Internals,
             ) => None,
-            (Route::Source(_), _, _) => Some(NoSlotReason::SourcePending),
             _ => None,
         };
         if let Some(reason) = pending {
