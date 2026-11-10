@@ -20,7 +20,7 @@ def main():
     args = parser.parse_args()
     source = SOURCE.read_text()
     if args.verify:
-        assert hashlib.sha256(DEST.read_text().removeprefix(HEADER).encode()).hexdigest() == HASH
+        assert hashlib.sha256(DEST.read_text().removeprefix(HEADER).split("impl Catalog {", 1)[0].encode()).hexdigest() == HASH
         assert "pub struct Catalog" not in source and "pub struct Point" not in source
         assert IMPORT in source and MODULE in LIB.read_text()
         return

@@ -10,7 +10,7 @@
 //! `#[derive(Wire)]` (or a hand-written `impl Wire`), as [`crate::wire_types`] finds them. Nothing adds the derive: any other parameter makes the point's API
 //! listeners refuse, naming it, and leaves its `internals` form.
 use super::{Found, GamePoint, WireTypes, file_functions, imports, module_files, unraw};
-pub use horizon_mod_package::manifest::inject::mod_points::Catalog;
+pub use point_shape::catalog::Catalog;
 use quote::{ToTokens, quote};
 use std::collections::BTreeSet;
 use std::fs;
@@ -276,22 +276,20 @@ fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog
         opted_out: opted_out(files),
         points: points
             .into_iter()
-            .map(
-                |point| horizon_mod_package::manifest::inject::mod_points::Point {
-                    hash: point.hash.unwrap_or_default(),
-                    signature: point.signature.unwrap_or_default(),
-                    raw: point.raw,
-                    at_return: point.at_return,
-                    api_refusal: point.api_refusal,
-                    returns: point.returns.to_owned(),
-                    host: point.host.to_owned(),
-                    return_ty: point.return_ty,
-                    listener: point.listener,
-                    return_listener: point.return_listener,
-                    name: point.name,
-                    target: point.target,
-                },
-            )
+            .map(|point| point_shape::catalog::Point {
+                hash: point.hash.unwrap_or_default(),
+                signature: point.signature.unwrap_or_default(),
+                raw: point.raw,
+                at_return: point.at_return,
+                api_refusal: point.api_refusal,
+                returns: point.returns.to_owned(),
+                host: point.host.to_owned(),
+                return_ty: point.return_ty,
+                listener: point.listener,
+                return_listener: point.return_listener,
+                name: point.name,
+                target: point.target,
+            })
             .collect(),
     }
 }

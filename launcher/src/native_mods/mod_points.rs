@@ -177,7 +177,7 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_mod_package::manifest::inject::mod_points::Point;
+    use point_shape::catalog::Point;
 
     const MANIFEST: &str = "name = 'Mod'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '0000000000000000000000000000000000000000'\nmixins = '0000000000000000000000000000000000000000'\n";
 

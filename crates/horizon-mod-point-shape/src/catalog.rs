@@ -47,3 +47,14 @@ pub struct Point {
     pub return_listener: Option<String>,
 }
 
+impl Catalog {
+    /// Parses a package's `mod-points.json`, strictly.
+    pub fn read(bytes: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(bytes).map_err(|e| format!("mod-points.json: {e}"))
+    }
+
+    /// Whether `at` names a function of this crate.
+    pub fn owns(&self, at: &str) -> bool {
+        at.split("::").next() == Some(self.krate.as_str())
+    }
+}

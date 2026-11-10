@@ -54,18 +54,6 @@ pub fn bound(bytes: Option<&[u8]>, pinned: Option<&str>) -> Result<Option<Catalo
     }
 }
 
-impl Catalog {
-    /// Parses a package's `mod-points.json`, strictly.
-    pub fn read(bytes: &[u8]) -> Result<Self, String> {
-        serde_json::from_slice(bytes).map_err(|e| format!("{FILE}: {e}"))
-    }
-
-    /// Whether `at` names a function of this crate.
-    pub fn owns(&self, at: &str) -> bool {
-        at.split("::").next() == Some(self.krate.as_str())
-    }
-}
-
 /// Where an injection listens in its library's table.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Routed<'a> {
