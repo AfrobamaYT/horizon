@@ -33,14 +33,14 @@ impl RecipeBooksRegistrar for PartRegistrar {
             {
                 return Err("nonempty lowercase resource-id namespace and path required".into());
             }
-            if namespace == "minecraft" || namespace != self.mod_id {
-                return Err("namespace must be owned by the registering mod, not minecraft".into());
-            }
             if let Some(owner) = self.recipe_book_types.get(id) {
                 return Err(format!(
                     "duplicate key declared by {owner} and {}",
                     self.mod_id
                 ));
+            }
+            if namespace == "minecraft" || namespace != self.mod_id {
+                return Err("namespace must be owned by the registering mod, not minecraft".into());
             }
             if self.recipe_book_types.len() >= 1024 {
                 return Err("registry exceeds 1024 custom books".into());
@@ -89,6 +89,18 @@ mod tests {
         );
         assert_eq!(registrar.recipe_book_types.len(), 1);
         assert_eq!(registrar.refused.len(), 9);
+    }
+
+    #[test]
+    fn cross_mod_duplicate_names_both_declarers() {
+        let mut registrar = PartRegistrar::new("first");
+        registrar.recipe_book_type("first:book").unwrap();
+        registrar.mod_id = "second";
+        let error = registrar.recipe_book_type("first:book").unwrap_err();
+        assert!(error.contains("duplicate"));
+        assert!(error.contains("first:book"));
+        assert!(error.contains("first and second"));
+        assert_eq!(registrar.recipe_book_types.len(), 1);
     }
 
     #[test]
