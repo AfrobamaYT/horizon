@@ -316,11 +316,8 @@ pub mod tests {
         )
         .unwrap_err();
         assert_eq!(errors.len(), 4);
-        assert!(
-            errors
-                .iter()
-                .all(|error| error.starts_with("mod test: invalid registry key"))
-        );
+        assert!(errors.iter().all(|error| error.contains("mod test")
+            && (error.contains("invalid identifier") || error.contains("unowned namespace"))));
     }
 
     /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and

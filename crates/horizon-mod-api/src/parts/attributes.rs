@@ -74,6 +74,13 @@ impl AttributesRegistrar for PartRegistrar {
         syncable: bool,
         sentiment: Sentiment,
     ) -> Result<(), crate::AttributeRegistrationError> {
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return Err(crate::AttributeRegistrationError::InvalidId);
+            }
+        };
         let result = (|| {
             if crate::world::phase::LoadedMods::new()
                 .get(self.mod_id)
@@ -81,10 +88,6 @@ impl AttributesRegistrar for PartRegistrar {
             {
                 return Err(crate::AttributeRegistrationError::WrongSide);
             }
-            let id = self.owned_declaration_id(path).map_err(|reason| {
-                self.refused.push(reason);
-                crate::AttributeRegistrationError::InvalidId
-            })?;
             if self.attributes.iter().any(|declared| declared.id == id) {
                 return Err(crate::AttributeRegistrationError::Duplicate);
             }

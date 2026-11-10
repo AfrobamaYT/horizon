@@ -127,11 +127,14 @@ impl SpawnPlacementsRegistrar for PartRegistrar {
         path: &str,
         rule: crate::SpawnPlacementRule,
     ) -> Result<(), crate::SpawnPlacementError> {
-        let result = (|| {
-            let id = self.owned_declaration_id(path).map_err(|reason| {
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
                 self.refused.push(reason);
-                crate::SpawnPlacementError::InvalidId
-            })?;
+                return Err(crate::SpawnPlacementError::InvalidId);
+            }
+        };
+        let result = (|| {
             if self.spawn_placements.iter().any(|d| d.id == id) {
                 return Err(crate::SpawnPlacementError::Duplicate);
             }

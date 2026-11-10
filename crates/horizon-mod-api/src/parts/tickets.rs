@@ -35,9 +35,12 @@ pub mod tests {
         r.register_ticket_controller("first:", true);
         r.register_ticket_controller("", true);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("first registered ticket controller \"second:quarry\""));
-        assert!(r.refused[0].contains("not its own"));
-        assert!(r.refused[1].contains("no name") && r.refused[2].contains("no name"));
+        assert!(r.refused[0].contains("first declares \"second:quarry\""));
+        assert!(r.refused[0].contains("unowned namespace \"second\""));
+        assert!(
+            r.refused[1].contains("invalid identifier")
+                && r.refused[2].contains("invalid identifier")
+        );
         assert_eq!(r.controllers.len(), 2);
     }
 

@@ -16,11 +16,11 @@ pub(crate) fn owned_declaration_id(owner: &str, name: &str) -> Result<String, St
         format!("{owner}:{name}")
     };
     let parsed = crate::Identifier::parse_namespaced(&id)
-        .ok_or_else(|| format!("{owner} declares invalid identifier {id:?}"))?;
+        .ok_or_else(|| format!("mod {owner} declares invalid identifier {id:?}"))?;
     let namespace = parsed.namespace();
     if !owns_namespace(owner, namespace) {
         return Err(format!(
-            "{owner} declares {id:?} in unowned namespace {namespace:?}"
+            "mod {owner} declares {id:?} in unowned namespace {namespace:?}"
         ));
     }
     Ok(id)

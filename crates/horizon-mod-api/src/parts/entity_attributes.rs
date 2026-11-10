@@ -223,11 +223,14 @@ impl EntityAttributesRegistrar for PartRegistrar {
         template: &str,
         attributes: Vec<(String, f64)>,
     ) -> Result<(), crate::EntityAttributeError> {
-        let result = (|| {
-            let id = self.owned_declaration_id(path).map_err(|reason| {
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
                 self.refused.push(reason);
-                crate::EntityAttributeError::InvalidId
-            })?;
+                return Err(crate::EntityAttributeError::InvalidId);
+            }
+        };
+        let result = (|| {
             let (template_ns, template_name) =
                 template.split_once(':').unwrap_or(("minecraft", template));
             if template_ns.is_empty() || template_name.is_empty() {

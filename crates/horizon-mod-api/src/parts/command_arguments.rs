@@ -143,6 +143,6 @@ pub mod tests {
         assert_eq!(errors.len(), 3);
         assert!(errors[0].contains("test registered command argument type test:mode twice"));
         assert!(errors[1].contains("namespace"));
-        assert!(errors[2].contains("no name"));
+        assert!(errors[2].contains("invalid identifier \"test:\""));
     }
 }
