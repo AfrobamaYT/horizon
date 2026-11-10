@@ -32,8 +32,11 @@ not implemented by this change. Packet splitting is out of scope.
 
 `packets::custom_payload::uses_registered_payload_codec` is the single seam for
 the subsequent transport's frozen registered-codec lookup. For now it recognizes
-only existing engine channels. No arbitrary namespace is exempted. A new mod id
-is unknown until that transport implements registration.
+only existing engine receiving codecs, keyed by phase and direction. No
+arbitrary namespace is exempted. Wrong-phase and wrong-direction ids use the
+discard fallback. A new mod id is unknown until that transport implements
+registration. The configuration clientbound quiet-command and mod-message
+advertisements have an empty-body codec; their play bodies are different.
 
 Existing codec constraints remain with their owners:
 
@@ -53,9 +56,14 @@ Existing codec constraints remain with their owners:
 | `horizon:recipe_book_settings` | `recipe_book::settings_codec`, 524,288 body bytes |
 
 This finite engine-only classification is replaced, not extended, by mod payload
-registration. It does not authorize sending to an unnegotiated peer. Phase and
-direction admission remain the receiving handler's responsibility until that
-transport installs the phase/direction-aware registered lookup.
+registration. It does not authorize sending to an unnegotiated peer. The current
+phase/direction matrix follows the engine's receiving handlers: mod lists are
+received only in serverbound configuration, identity digests in configuration
+both ways, LOD offers in clientbound configuration and LOD traffic in play,
+recipe-book settings and recipe transfers in play both ways, and attachment,
+menu, anvil and recipe-content bodies only in clientbound play. Quiet commands
+are serverbound play; mod messages are bidirectional play. The brand codec is
+common to both phases and directions.
 
 Unknown bodies are bounded before their owned `Vec` is created. Protocol errors
 retain structured `PayloadTooLarge` details (id, size and limit), so the public
