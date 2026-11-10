@@ -536,6 +536,20 @@ mod tests {
     }
 
     #[test]
+    fn explicit_hash_survives_pinned_filling() {
+        let (dir, mut bundle, catalog) = fixture("explicit-pin");
+        bundle.manifest.inject[0].hash = Some("explicit".into());
+        bundle.manifest.internals[0].hash = Some("explicit-internal".into());
+        let pinned = catalog.pinned(&bundle.manifest);
+        assert_eq!(pinned.inject[0].hash.as_deref(), Some("explicit"));
+        assert_eq!(
+            pinned.internals[0].hash.as_deref(),
+            Some("explicit-internal")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn absent_hashes_are_checked_against_the_pinned_catalog_and_recorded_from_it() {
         let (dir, mut bundle, mut catalog) = fixture("pinned");
         // An item a mod's own `[[native.module]]` adds is in the staged catalog the source build
