@@ -2,16 +2,35 @@
 use super::*;
 pub(in crate::game) struct DragonResidency {
     pub(super) lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
-    pub(in crate::game) part_uuids: [[i32; 4]; 8],
+}
+
+/// A real sub-entity: geometry, identity and attachment authority move and
+/// retire together with this part, never with a shared parent attachment map.
+pub(in crate::game) struct DragonPart(
+    pub Vec3,
+    pub Vec3,
+    pub(in crate::game) horizon_mod_runtime::attachments::AttachmentLifetime,
+    pub(in crate::game) [i32; 4],
+);
+impl Default for DragonPart {
+    fn default() -> Self {
+        Self(
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Default::default(),
+            horizon_client::save::insecure_uuid(&mut random_source::entity()),
+        )
+    }
+}
+impl horizon_mod_runtime::attachments::HasAttachmentLifetime for DragonPart {
+    fn attachment_lifetime(&mut self) -> &mut horizon_mod_runtime::attachments::AttachmentLifetime {
+        &mut self.2
+    }
 }
 impl Default for DragonResidency {
     fn default() -> Self {
         Self {
             lifetime: Default::default(),
-            // Independent entity streams, never the level or dragon's ongoing RNG.
-            part_uuids: std::array::from_fn(|_| {
-                horizon_client::save::insecure_uuid(&mut random_source::entity())
-            }),
         }
     }
 }
@@ -22,6 +41,24 @@ impl horizon_mod_runtime::attachments::HasAttachmentLifetime for Dragon {
 }
 
 impl Game<'_> {
+    /// Physical retirement must forget sidecar data before IDs can be reused,
+    /// not merely unregister the attachment index when the parts are dropped.
+    pub(in crate::game) fn discard_resident_dragon(&mut self) {
+        if let Some(id) = self
+            .dragon
+            .as_ref()
+            .map(|dragon| dragon.id)
+            .filter(|id| *id != 0)
+        {
+            for offset in 1..=8 {
+                if let Some(part) = id.checked_add(offset) {
+                    self.forget_entity(part);
+                }
+            }
+        }
+        self.dragon.discard();
+    }
+
     /// The dragon the level holds and the index (`getSubEntities` order) of
     /// its part with that entity id, while the dragon is there, dying or
     /// not: a part is an entity for as long as its parent is.

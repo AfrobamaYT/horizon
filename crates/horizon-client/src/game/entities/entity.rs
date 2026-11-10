@@ -1168,6 +1168,15 @@ impl Game<'_> {
             .chain(self.fangs.list.iter().map(|e| e.id))
             .chain(self.crystals.iter().map(|e| e.id))
             .chain(self.dragon.iter().map(|e| e.id))
+            .chain(
+                self.dragon
+                    .iter()
+                    .filter(|dragon| dragon.id != 0)
+                    .flat_map(|dragon| {
+                        (0..dragon.parts.len())
+                            .filter_map(move |offset| dragon.id.checked_add(offset as u32 + 1))
+                    }),
+            )
             .chain(self.ominous_spawners.iter().map(|e| e.id))
             .chain(self.resident_entities.knots.iter().map(|e| e.id))
             // Cast hooks live with their players, not in the saveable lists.
