@@ -101,6 +101,47 @@ class DynaRoutingTests(unittest.TestCase):
                 self.assertNotIn(key, exports)
             self.assertIn(str(cargo_home / "bin"), pathfile.read_text())
 
+    def run_deps_with_stub_apt(self, failures):
+        """Run the script with an apt-get that fails `failures` times per command, then succeeds."""
+        script = ROOT / "tools/ci/dyna_ci_deps.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stubs = root / "stubs"
+            stubs.mkdir()
+            (stubs / "apt-get").write_text(
+                '#!/usr/bin/env bash\n'
+                f'n=$(cat "{root}/count" 2>/dev/null || echo 0); echo $((n + 1)) > "{root}/count"\n'
+                f'if [ "$n" -lt {failures} ]; then echo "E: File has unexpected size (mirror sync)" >&2; exit 100; fi\n')
+            (stubs / "dpkg-deb").write_text("#!/usr/bin/env bash\n")
+            for stub in stubs.iterdir():
+                stub.chmod(0o755)
+            home = root / "home"
+            home.mkdir()
+            env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", HOME=str(home),
+                       DYNA_CI_BUILD=str(root / "build"), CARGO_HOME=str(root / "cargo"),
+                       GITHUB_ENV=str(root / "env"), GITHUB_PATH=str(root / "path"),
+                       DYNA_CI_APT_PAUSE="0", DYNA_CI_APT_TRIES="3")
+            (root / "build").mkdir()
+            result = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+            count = int((root / "count").read_text()) if (root / "count").exists() else 0
+            return result, count
+
+    @unittest.skipUnless(POSIX_BASH and os.name != "nt", "needs the runner's bash")
+    def test_apt_is_retried_a_bounded_number_of_times_and_then_succeeds(self):
+        # The first command (update) fails twice, then both commands pass: 2 failures + 2 successes.
+        result, count = self.run_deps_with_stub_apt(failures=2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(count, 4)
+        self.assertEqual(result.stderr.count("retrying in"), 2)
+
+    @unittest.skipUnless(POSIX_BASH and os.name != "nt", "needs the runner's bash")
+    def test_apt_that_keeps_failing_fails_with_the_real_error_after_the_last_try(self):
+        result, count = self.run_deps_with_stub_apt(failures=99)
+        self.assertEqual(result.returncode, 100)
+        self.assertEqual(count, 3)
+        self.assertEqual(result.stderr.count("E: File has unexpected size"), 3)
+        self.assertIn("apt-get failed after 3 tries (exit 100)", result.stderr)
+
     def test_workflow_wires_route_and_keeps_privileges_off_pool(self):
         from test_ci_runners import jobs
         workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
