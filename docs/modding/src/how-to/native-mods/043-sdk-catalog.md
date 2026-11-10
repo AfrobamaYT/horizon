@@ -8,8 +8,12 @@ source build's catalog directory. Converters, linters and IDE helpers must read
 this file rather than source paths. Internal source layout is not a tool API.
 
 Fork Nightlies also attach `mod-catalog.json` as a standalone release asset,
-listed in the signed `SHA256SUMS`. It is generated from the Nightly's exact
-published commit using the same generator as the SDK. Verify it with that
+listed in the signed `SHA256SUMS`. Download the current
+[catalog asset](https://github.com/arismoko/horizon/releases/download/nightly/mod-catalog.json)
+from the [fork Nightly release](https://github.com/arismoko/horizon/releases/tag/nightly),
+or use the corresponding dated release for an older pinned build.
+It is generated from the Nightly's exact published commit using the same
+generator as the SDK. Verify it with that
 release's checksums and build-specific signature; do not mix the latest catalog
 with an older pinned build. The catalog follows the release when it rotates to
 a dated Nightly tag and has the same retention as the other Nightly assets.
