@@ -251,6 +251,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),
@@ -360,6 +361,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),
@@ -546,6 +548,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                attachment_lifetime: Default::default(),
                 knot_check: None,
                 eye: None,
                 join: Default::default(),
