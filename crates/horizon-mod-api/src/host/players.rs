@@ -41,6 +41,16 @@ pub trait PlayersClientHost {
 #[horizon_mod_api_macros::host_area]
 pub trait PlayersBackend {
     /// Side: server.
+    /// Read one registered custom book's authoritative flags. A fresh book
+    /// returns the default pair; an unavailable player or unregistered key
+    /// returns None. This never reads a vanilla ordinal or pending client intent.
+    #[access(WorldOnly)]
+    fn player_recipe_book_settings(
+        &self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+    ) -> Option<RecipeBookSettings>;
+    /// Side: server.
     /// The IP address the player connects from, without the port (behind a
     /// Velocity proxy, the address the proxy forwards). Displaced connected
     /// players keep their address; an acting player with no known connection
@@ -273,6 +283,15 @@ pub trait PlayersBackend {
 #[horizon_mod_api_macros::host_area]
 pub trait PlayersClientBackend {
     /// Side: client.
+    /// The local player's last authoritative custom-book pair. None before
+    /// negotiation, while resynchronizing, or for a nonlocal/stale handle.
+    #[access(WorldOnly)]
+    fn player_synced_recipe_book_settings(
+        &self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+    ) -> Option<RecipeBookSettings>;
+    /// Side: client.
     /// The local player's predicted breaking state, including Idle. None for
     /// stale, nonlocal or fake handles and outside a logged-in client world.
     #[access(WorldOnly)]
@@ -283,11 +302,38 @@ pub trait PlayersClientBackend {
     #[access(WorldOnly)]
     fn player_ambient_mood(&self, player: PlayerRef) -> Option<f32>;
 }
+/// Client-only custom book intent, reached through player handles.
+// hidden: mods call PlayerRef methods, never the generated backend trait
+#[doc(hidden)]
+#[horizon_mod_api_macros::host_area]
+pub trait PlayersClientBackendMut {
+    /// Side: client.
+    /// Request a new pair for the local player's negotiated book. True means
+    /// queued, not accepted; only an authoritative reply changes saved state.
+    #[access(WorldOnly)]
+    fn player_request_recipe_book_settings(
+        &mut self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+        settings: RecipeBookSettings,
+    ) -> bool;
+}
 /// The handles' writes of the `players` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait PlayersBackendMut {
+    /// Side: server.
+    /// Set a registered custom book's authoritative pair and synchronize an
+    /// accepted change. Returns false for an unavailable player, unknown key
+    /// or exhausted storage. An unchanged pair succeeds without notification.
+    #[access(WorldOnly)]
+    fn player_set_recipe_book_settings(
+        &mut self,
+        player: PlayerRef,
+        book: &RecipeBookTypeKey,
+        settings: RecipeBookSettings,
+    ) -> bool;
     /// Side: server.
     /// A system line in that player's chat, also inside a player's hook for
     /// the acting player; false when they aren't on.
