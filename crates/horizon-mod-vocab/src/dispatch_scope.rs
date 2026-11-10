@@ -49,7 +49,6 @@ pub struct ModGuardFactory {
 }
 impl ModGuardFactory {
     /// Consume the capability, transferring the backend's per-call state.
-    #[inline]
     pub fn finish(self, state: State) -> ModGuard {
         ModGuard {
             leave: Some(self.leave),
@@ -68,7 +67,6 @@ pub struct ModGuard {
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
-    #[inline]
     fn drop(&mut self) {
         if let Some(leave) = self.leave {
             leave(&mut self.state);
@@ -85,7 +83,6 @@ pub fn install(backend: Backend) -> Result<(), &'static str> {
         .map_err(|_| "dispatch instrumentation is already sealed")
 }
 
-#[inline]
 pub(crate) fn enter(call: ModCall) -> ModGuard {
     match BACKEND.get_or_init(|| None) {
         Some(backend) => (backend.enter)(

@@ -110,7 +110,6 @@ pub fn current_native_mod() -> Option<&'static str> {
     current_native_call().map(|call| call.id)
 }
 /// Enter an instrumented native call, or an inert scope without a backend.
-#[inline]
 pub fn enter_native_mod(call: ModCall) -> ModGuard {
     crate::dispatch_scope::enter(call)
 }
