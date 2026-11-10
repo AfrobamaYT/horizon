@@ -235,6 +235,8 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 assert!(
                     game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
                 );
+                let stone = mod_api::__private::block_key("minecraft:stone").unwrap();
+                assert_eq!(game.block_in_tag(stone, "reload_order:derived"), Some(true));
                 assert_eq!(game.items().block_tag_order, old_order);
                 assert_eq!(game.items().block_tags, old_sets);
                 assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
