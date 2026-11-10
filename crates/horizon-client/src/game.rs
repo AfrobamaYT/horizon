@@ -8067,7 +8067,9 @@ impl Game<'_> {
                 self.native_queue_sound(level, sound, at, source, 1.0, 1.0, None)?;
                 true
             }
-            ConsumeEffect::Native { kind, data } => self.native_consume_effect(kind, data),
+            ConsumeEffect::Native { kind, data } => {
+                consume_effect_dispatch::dispatch(kind, || self.native_consume_effect(kind, data))
+            }
         })
     }
     /// `BundleItem.dropContent`: `removeOneItemFromBundle` and `Player.drop`,
