@@ -119,7 +119,7 @@ cargo run --release -p horizon-prepare -- sounds
 cargo run --release -p horizon-client -- --render-distance 12
 ```
 
-Development builds that link quickly: `cargo build --profile fast -p horizon-client`.
+Development builds that link quickly: `cargo build --profile fast -p horizon-game`.
 
 `HORIZON_OCCLUSION_PROFILE=1` enables detailed entity-occlusion phase and bounds-scan timings
 in `horizon-ctl stats` and `bench`. The normal benchmark keeps these CPU-clock reads disabled;
@@ -289,7 +289,7 @@ local socket; under control, losing window focus does not pause the game or
 release held keys, so a script can play while you use other windows.
 
 ```sh
-cargo build --release -p horizon-client -p horizon-client-lib --bins
+cargo build --release -p horizon-game -p horizon-client-lib --bins
 C=target/release/horizon-ctl
 $C launch --world Survival --seed 5 --wait   # start the game, open or create the world, wait for it
 $C state                                     # player, world, screen, crosshair target
@@ -424,7 +424,7 @@ To play on another machine without Rust, JDK or prepared resources,
 package a release build where they exist:
 
 ```sh
-cargo build --release -p horizon-client
+cargo build --release -p horizon-game
 python3 tools/package_native_client.py --out ~/builds/horizon
 ```
 
