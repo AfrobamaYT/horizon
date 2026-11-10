@@ -72,17 +72,17 @@ fn install_observer() {
         [
             SlotListener::new(
                 "fixture",
-                PointId::ModRenderRenderRenderNeeds,
+                PointId::ModRenderRenderRenderNeeds.place(),
                 observe_needs as native_render::__ModRenderRenderRenderNeedsListener as *const (),
             ),
             SlotListener::new(
                 "fixture",
-                PointId::ModRenderRenderWorldDrawn,
+                PointId::ModRenderRenderWorldDrawn.place(),
                 observe_world as native_render::__ModRenderRenderWorldDrawnListener as *const (),
             ),
             SlotListener::new(
                 "fixture",
-                PointId::ModRenderRenderHandDrawn,
+                PointId::ModRenderRenderHandDrawn.place(),
                 observe_hand as native_render::__ModRenderRenderHandDrawnListener as *const (),
             ),
         ]

@@ -49,7 +49,24 @@ fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
             && Some(&site.call) == entry.call.as_ref()
             && Some(&site.ctx) == entry.ctx.as_ref()
             && Some(site.ordinal) == entry.nth
+            && site.local.as_ref().map(|l| (&l.binding, &l.ty, l.after))
+                == entry.local.as_ref().map(|name| {
+                    (
+                        name,
+                        entry.local_type.as_ref().expect("validated type"),
+                        entry.position
+                            == Some(horizon_mod_package::manifest::inject::Position::After),
+                    )
+                })
     })
+}
+
+/// `manifest`'s injections at the game's own functions: not another mod's points.
+fn engine<'a>(catalog: &'a Catalog, manifest: &'a Manifest) -> impl Iterator<Item = &'a Inject> {
+    manifest
+        .inject
+        .iter()
+        .filter(|inject| catalog.mod_owner(&inject.at).is_none())
 }
 
 pub(super) fn check(catalog: &Catalog, manifest: &Manifest) -> Result<(), InjectError> {
@@ -106,7 +123,8 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         })
         .collect::<Vec<_>>();
     let mut decisions = Vec::new();
-    for inject in &manifest.inject {
+    // Injections at another mod's points route through that mod's table (`mod_points`).
+    for inject in engine(catalog, manifest) {
         // An API listener needs the point's record: every parameter with an API type.
         let refusal = catalog
             .points
@@ -141,6 +159,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 Kind::Head
                 | Kind::Return
                 | Kind::BeforeCall
+                | Kind::ModifyLocal
                 | Kind::AfterCall
                 | Kind::ModifyValue
                 | Kind::WrapCall
@@ -192,9 +211,7 @@ pub(super) fn report<'a>(
     catalog: &'a Catalog,
     manifest: &'a Manifest,
 ) -> impl Iterator<Item = String> + 'a {
-    manifest
-        .inject
-        .iter()
+    engine(catalog, manifest)
         .zip(routes(catalog, manifest).expect("checked routes"))
         .map(|(entry, route)| {
             if let Route::Source(reason) = route {
