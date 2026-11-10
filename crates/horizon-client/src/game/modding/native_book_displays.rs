@@ -38,6 +38,20 @@ impl DisplayResources for Resources<'_, '_> {
             .into_iter()
             .any(|key| mod_api::__private::menu_key_id(key).as_deref() == Some(id))
     }
+    fn menu_layout(
+        &self,
+        id: &str,
+    ) -> Option<horizon_client::recipe_book::menu_layout::MenuLayoutMetadata> {
+        let menu = horizon_client::containers::mod_menu_type(id)?;
+        Some(
+            horizon_client::recipe_book::menu_layout::MenuLayoutMetadata {
+                slots: u16::try_from(menu.slots).ok()?,
+                crafting: menu
+                    .crafting
+                    .map(|grid| (grid.grid as u16, grid.size as u16, grid.result as u16)),
+            },
+        )
+    }
     fn recipe_type(&self, kind: &str) -> bool {
         self.0.recipes().by_type.contains_key(kind)
     }
