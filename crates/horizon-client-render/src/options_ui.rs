@@ -8295,6 +8295,7 @@ mod tests {
                 Page::SplitSetup,
                 Page::Studio,
                 Page::Agent,
+                Page::ModBrowser,
             ]
         );
         // No AI hides the AI Agent page.
