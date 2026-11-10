@@ -1,4 +1,4 @@
-mod stubs {
+mod api {
     pub(super) enum RecipeBookIdentity {
         Crafting,
         Furnace,
