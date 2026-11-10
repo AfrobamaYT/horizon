@@ -464,13 +464,24 @@ pub fn probe() -> u32 {
         group
             .call(member, "horizon_mod_points_register", &[], &mut result)
             .unwrap();
-        assert_eq!(result[0].i32(), Some(1));
+        assert_eq!(result[0].i32(), Some(0));
     }
     for member in ["chemlib", "chem_addon"] {
         group
             .call(member, "horizon_mod_points_seal", &[], &mut [])
             .unwrap();
     }
+    // Sealed registries refuse the addon's first injection, reported as index plus one.
+    let mut refused = [wasmtime::Val::I32(0)];
+    group
+        .call(
+            "chem_addon",
+            "horizon_mod_points_register",
+            &[],
+            &mut refused,
+        )
+        .unwrap();
+    assert_eq!(refused[0].i32(), Some(1));
     let export = wasmparser::Parser::new(0)
         .parse_all(&addon_bytes)
         .filter_map(|p| match p.unwrap() {
