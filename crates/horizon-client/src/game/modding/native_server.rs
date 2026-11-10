@@ -1269,6 +1269,57 @@ impl Game<'_> {
         Some(self.online_player_record(player)?.name.clone())
     }
 
+    /// The dimension key of an online player (`ServerPlayer.level().dimension()`):
+    /// the dimension the player is placed in.
+    pub(super) fn player_dimension_key(&self, player: PlayerRef) -> Option<mod_api::DimensionKey> {
+        let epoch = self.native_lifecycle.epoch()?;
+        if epoch != player.fields().entity.epoch() {
+            return None;
+        }
+        if !self.is_logical_server() {
+            return (self.local_player()? == player).then(|| self.native_level_key());
+        }
+        if self.native_acting_player() == Some(player) {
+            let dim = match self.lan_acting {
+                Some(conn) => {
+                    let g = self.command_guest(conn)?;
+                    Dim::from_id(&g.dimension).key()
+                }
+                None => self.dim.key(),
+            };
+            return Some(dim);
+        }
+        if let Some(guest) = self.online_player_record(player) {
+            return Some(Dim::from_id(&guest.dimension).key());
+        }
+        if self.serving.is_some()
+            && self
+                .level
+                .player_uuid
+                .map(horizon_client::lan::playerdata::ints_uuid)
+                == Some(player.uuid())
+        {
+            return Some(self.dim.key());
+        }
+        None
+    }
+
+    /// The level the online player is in (`ServerPlayer.level`): on an integrated
+    /// server or dedicated server, the player's current dimension; on a client,
+    /// the client's level. None for a stale or unavailable player.
+    pub(super) fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
+        let dim = self.player_dimension_key(player)?;
+        Some(LevelRef::new(player.fields().entity.epoch(), dim))
+    }
+
+    /// The dimension the online player is in (`ServerPlayer.level().dimension()`):
+    /// `minecraft:overworld`, `minecraft:the_nether`, ... None for a stale
+    /// or unavailable player.
+    pub(super) fn player_dimension(&self, player: PlayerRef) -> Option<Identifier> {
+        let level = self.player_level(player)?;
+        Identifier::parse(level.dimension_id()).ok()
+    }
+
     /// The IP address the player connects from, without the port (behind a
     /// Velocity proxy, the address the proxy forwards). Displaced connected
     /// players keep their address; an acting player with no known connection

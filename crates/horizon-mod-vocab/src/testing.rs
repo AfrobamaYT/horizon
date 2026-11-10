@@ -363,6 +363,13 @@ impl crate::prelude::PlayersBackend for FakeHost {
     fn player_name(&self, player: PlayerRef) -> Option<String> {
         Some(self.players.get(player.uuid())?.name.clone())
     }
+    fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
+        Some(self.players.get(player.uuid())?.level)
+    }
+    fn player_dimension(&self, player: PlayerRef) -> Option<crate::Identifier> {
+        let level = self.player_level(player)?;
+        crate::Identifier::parse(level.dimension_id()).ok()
+    }
 }
 crate::impl_backend_areas!(
     FakeHost,

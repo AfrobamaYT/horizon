@@ -998,3 +998,20 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
     dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
     assert_eq!((rod_damage, cancel), (4, false));
 }
+
+#[test]
+fn player_level_and_dimension_reads() {
+    use crate::host::entities::EntitiesHost;
+    use crate::host::players::PlayersHost;
+    let mut host = FakeHost::new();
+    let overworld = host.level("minecraft:overworld").unwrap();
+    let nether = crate::LevelRef::new(overworld.epoch(), crate::DimensionKey::NETHER);
+    host.join(1, 10);
+    host.join(2, 20).level = nether;
+    let p1 = host.player(1).unwrap();
+    let p2 = host.player(2).unwrap();
+    assert_eq!(p1.level(&host), Some(overworld));
+    assert_eq!(p1.dimension(&host), Some(crate::Identifier::parse("minecraft:overworld").unwrap()));
+    assert_eq!(p2.level(&host), Some(nether));
+    assert_eq!(p2.dimension(&host), Some(crate::Identifier::parse("minecraft:the_nether").unwrap()));
+}
