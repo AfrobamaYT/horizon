@@ -370,7 +370,7 @@ impl Game<'_> {
         self.server_items = None;
         self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
-        self.recipe_tables.categories = None;
+        self.recipe_tables.books = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
         // Before the players are sent the reloaded data below.

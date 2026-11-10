@@ -28,6 +28,7 @@ pub use client::types::{
     SoundPlay, SoundRef, SoundSource, SoundState, Stack, ToastKind, Zoom,
 };
 pub use command::types::{Authority, Command, PermissionLevel};
+pub use entity::effect_category::EffectCategory;
 pub use entity::types::{
     ActiveEffect, AttributeModifier, AttributeOperation, AttributeRegistrationError, Billboard,
     ChannelRef, ChatVisibility, ClientInfo, Deflection, DisplayKind, DisplayRef, DragonPhase,

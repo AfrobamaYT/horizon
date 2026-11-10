@@ -77,6 +77,7 @@ pub(super) struct ScreenBuild {
 /// `clicked_outside` and `screen_exclusion`; never rebuilt per call.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ContainerLayout {
+    pub(super) slot_inputs: super::container_layout::SlotInputs,
     /// `leftPos`, `topPos`, `imageWidth`, `imageHeight` in GUI pixels.
     pub(super) image: [f32; 4],
     /// `getXOrigin`/`getYOrigin`: the player inventory's top-left corner.
@@ -369,17 +370,7 @@ impl Game<'_> {
                                     && old.effects_revision == inputs.effects_revision
                                     && old.effects_layout == inputs.effects_layout
                                     && old.tabs == inputs.tabs
-                                    && old.slots.len() == self.slot_count()
-                                    && old.slots.iter().all(|(slot, rect)| {
-                                        let (x, y) = self.slot_position(*slot);
-                                        *rect
-                                            == [
-                                                inputs.origin.0 + x - 1.0,
-                                                inputs.origin.1 + y - 1.0,
-                                                18.0,
-                                                18.0,
-                                            ]
-                                    })
+                                    && old.slot_inputs == inputs.slot_inputs
                             })
                 });
             (!unchanged).then(|| {
@@ -452,7 +443,12 @@ mod tests {
                 BuildLayout::Container(layout) => layout.slots.as_ptr(),
                 _ => panic!("container"),
             };
+            let positions = crate::game::inventory_slots::SLOT_POSITIONS.with(|count| count.get());
             game.build_screen();
+            assert_eq!(
+                crate::game::inventory_slots::SLOT_POSITIONS.with(|count| count.get()),
+                positions
+            );
             assert_eq!(game.screen_state.build.builds, before);
             assert_eq!(
                 crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|count| count.get()),
@@ -464,6 +460,47 @@ mod tests {
                 panic!("container")
             };
             assert_eq!(layout.slots.as_ptr(), slots);
+            // Each changed input builds once; its next frame does no slot work.
+            let check = |game: &mut crate::game::Game<'_>| {
+                let builds = crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get());
+                game.build_screen();
+                assert_eq!(
+                    crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get()),
+                    builds + 1
+                );
+                let positions = crate::game::inventory_slots::SLOT_POSITIONS.with(|c| c.get());
+                game.build_screen();
+                assert_eq!(
+                    crate::game::inventory_slots::SLOT_POSITIONS.with(|c| c.get()),
+                    positions
+                );
+            };
+            game.settings.gui_scale = 1;
+            check(game);
+            game.screen = Screen::Inventory;
+            check(game);
+            game.level.recipe_book.open[0] = true;
+            check(game);
+            game.potions.effects.list.clear();
+            check(game);
+            game.craft_size = 3;
+            check(game);
+            game.station = Some(crate::game::stations::Station::new_kind(
+                crate::game::stations::Kind::Merchant,
+                [0, 0, 0],
+            ));
+            check(game);
+            game.station = None;
+            game.screen = Screen::Creative;
+            check(game);
+            let inventory = game
+                .creative_screen
+                .tab_headers()
+                .iter()
+                .position(|tab| tab.inventory)
+                .unwrap();
+            game.creative_screen.select(inventory);
+            check(game);
         });
     }
 
@@ -479,6 +516,7 @@ mod tests {
         tabs: Option<[[f32; 4]; 2]>,
     ) -> ContainerLayout {
         ContainerLayout {
+            slot_inputs: Default::default(),
             image: [10.0, 20.0, 176.0, 166.0],
             origin: (10.0, 20.0),
             book,
