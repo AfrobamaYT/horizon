@@ -6,6 +6,13 @@
 use crate::content::crash::ModCall;
 use std::sync::OnceLock;
 
+static PROFILING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set the dispatch activity flag from the platform profiler control path.
+#[doc(hidden)]
+pub fn set_profiling(on: bool) {
+    PROFILING.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 
 /// Platform callbacks, installed once before dispatch starts.
@@ -31,6 +38,7 @@ pub struct Backend {
 /// Plain per-call instrumentation data. The platform must validate the pool
 /// generation and slot before accessing its profiler storage.
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct Timing {
     pub generation: usize,
     pub slot: usize,
@@ -50,12 +58,17 @@ pub struct State {
 #[doc(hidden)]
 pub struct ModGuardFactory {
     leave: fn(State),
+    owner: (Option<u64>, Option<ModCall>),
 }
 impl ModGuardFactory {
     /// Consume the capability, transferring the backend's per-call state.
     pub fn finish(self, state: State) -> ModGuard {
         ModGuard {
-            active: Some((self.leave, state)),
+            owner: self.owner,
+            _timing: state.timing.map(|timing| TimingGuard {
+                leave: self.leave,
+                timing,
+            }),
             _thread: std::marker::PhantomData,
         }
     }
@@ -65,14 +78,28 @@ impl ModGuardFactory {
 /// inert; otherwise Drop restores attribution, including during unwinding.
 #[must_use]
 pub struct ModGuard {
-    active: Option<(fn(State), State)>,
+    owner: (Option<u64>, Option<ModCall>),
+    _timing: Option<TimingGuard>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
+    #[inline]
     fn drop(&mut self) {
-        if let Some((leave, state)) = self.active.take() {
-            leave(state);
-        }
+        crate::content::crash::pop(self.owner.0, self.owner.1);
+    }
+}
+
+struct TimingGuard {
+    leave: fn(State),
+    timing: Timing,
+}
+impl Drop for TimingGuard {
+    fn drop(&mut self) {
+        (self.leave)(State {
+            outer_frame: None,
+            outer_call: None,
+            timing: Some(self.timing),
+        });
     }
 }
 
@@ -85,18 +112,24 @@ pub fn install(backend: Backend) -> Result<(), &'static str> {
         .map_err(|_| "dispatch instrumentation is already sealed")
 }
 
+#[inline]
 pub(crate) fn enter(call: ModCall) -> ModGuard {
-    match BACKEND.get_or_init(|| None) {
-        Some(backend) => (backend.enter)(
-            ModGuardFactory {
-                leave: backend.leave,
-            },
-            call,
-        ),
-        None => ModGuard {
-            active: None,
-            _thread: std::marker::PhantomData,
-        },
+    let owner = crate::content::crash::push(call);
+    if PROFILING.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some(backend) = BACKEND.get_or_init(|| None) {
+            return (backend.enter)(
+                ModGuardFactory {
+                    leave: backend.leave,
+                    owner,
+                },
+                call,
+            );
+        }
+    }
+    ModGuard {
+        owner,
+        _timing: None,
+        _thread: std::marker::PhantomData,
     }
 }
 
