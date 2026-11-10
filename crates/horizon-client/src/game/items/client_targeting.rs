@@ -342,7 +342,7 @@ mod tests {
                 );
                 let second = game.entity(32).unwrap();
                 *state.targets.lock().unwrap() = vec![entity, second, entity];
-                assert!(game.mod_attack_targets());
+                assert!(game.remote_start_attack());
                 assert_eq!(sent_attacks(game, &mut server), [31, 32]);
                 state
                     .cancel
