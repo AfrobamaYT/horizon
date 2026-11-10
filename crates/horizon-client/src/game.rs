@@ -1348,20 +1348,7 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        let mut canceled = false;
-        if self.native_authoritative {
-            let step = direction.normal();
-            self.native_piston_pre(mod_api::__private::PistonPreCall {
-                dimension: self.dimension,
-                piston,
-                direction: step,
-                extending,
-                push,
-                destroy,
-                canceled: &mut canceled,
-            });
-        }
-        !canceled
+        self.allow_piston_pre(piston, direction, extending, push, destroy)
     }
     fn observe_piston_moved(
         &self,
@@ -1384,25 +1371,13 @@ impl LevelAccess for GameLevel<'_> {
         source
     }
     fn adjust_is_slime_block(&self, state: BlockStateId, vanilla: bool) -> bool {
-        let mut slime = vanilla;
-        if self.native_authoritative {
-            self.native_is_slime_block(self.dimension, state, &mut slime);
-        }
-        slime
+        self.part_is_slime_block(state, vanilla)
     }
     fn adjust_is_sticky_block(&self, state: BlockStateId, vanilla: bool) -> bool {
-        let mut sticky = vanilla;
-        if self.native_authoritative {
-            self.native_is_sticky_block(self.dimension, state, &mut sticky);
-        }
-        sticky
+        self.part_is_sticky_block(state, vanilla)
     }
     fn adjust_can_stick_to(&self, state: BlockStateId, other: BlockStateId, vanilla: bool) -> bool {
-        let mut sticks = vanilla;
-        if self.native_authoritative {
-            self.native_can_stick_to(self.dimension, state, other, &mut sticks);
-        }
-        sticks
+        self.part_can_stick_to(state, other, vanilla)
     }
     fn has_weak_power_hook(&self) -> bool {
         self.native_authoritative
@@ -17533,7 +17508,7 @@ pub fn run_with(
     {
         return Ok(());
     }
-    let _ = horizon_client::block_contact::HOOKS.set(native_hooks::BLOCK_CONTACT_HOOKS);
+    native_hooks::install_block_contact_hooks();
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
     horizon_threads::put_helpers_behind();
