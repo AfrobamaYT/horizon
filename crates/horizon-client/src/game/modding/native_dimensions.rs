@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(errors.len(), 7, "{errors:?}");
         assert!(errors[0].contains("test registered dimension test:pocket twice"));
         assert!(errors[1].contains("namespace"));
-        assert!(errors[2].contains("no name"));
+        assert!(errors[2].contains("test declares invalid identifier \"test:\""));
         assert!(errors[3].contains("test:uneven"));
         assert!(errors[4].contains("test:low_ceiling"));
         assert!(errors[5].contains("test:too_tall"));
@@ -301,8 +301,8 @@ mod tests {
         let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
         assert_eq!(errors.len(), 3, "{errors:?}");
         assert!(errors[0].contains("test registered chunk generator test:void twice"));
-        assert!(errors[1].contains("test registered chunk generator \"other:void\""));
-        assert!(errors[2].contains("test registered a chunk generator with no name"));
+        assert!(errors[1].contains("test declares \"other:void\" in unowned namespace \"other\""));
+        assert!(errors[2].contains("test declares invalid identifier \"test:\""));
     }
 
     /// A mod with vanilla's id can't take over every noise level.

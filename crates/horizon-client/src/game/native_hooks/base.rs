@@ -3191,13 +3191,13 @@ impl Game<'_> {
     pub(in crate::game) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
         self.fire_player_stop_using_item(player, name);
     }
-    /// A server player's recipe book open or filter setting changed. `book`
-    /// is the book type's protocol id. The guest's state is not swapped in.
+    /// A server player's authoritative recipe book flags changed.
+    /// Typed identity keeps custom books separate from vanilla ordinals.
     pub(in crate::game) fn native_player_recipe_book_settings_change(
         &mut self,
         player: u128,
         name: &str,
-        book: i32,
+        book: mod_api::RecipeBookIdentity,
         open: bool,
         filtering: bool,
     ) {
