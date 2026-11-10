@@ -82,6 +82,20 @@ fn an_injection_routes_to_its_place_by_access_and_kind() {
 }
 
 #[test]
+fn mod_target_requires_an_explicit_hash() {
+    let catalog = catalog();
+    let mut entry = inject("chemlib::transfer", Kind::Head, Access::Api, "ignored");
+    entry.hash = None;
+    assert!(matches!(
+        route("addon", &entry, &library(&catalog)),
+        Err(Refusal::Inject(super::InjectError::Invalid {
+            field: "hash",
+            ..
+        }))
+    ));
+}
+
+#[test]
 fn each_refusal_names_what_changed_or_why() {
     let catalog = catalog();
     let same = library(&catalog);
