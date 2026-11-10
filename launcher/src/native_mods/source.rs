@@ -7,7 +7,7 @@ use horizon_mod_package::{
     manifest::inject::{route, Place, SlotKind},
     Manifest,
 };
-use point_shape::{raw_able, shape};
+use horizon_platform::mod_build::point_shape::{raw_able, shape};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::fmt::Write;
@@ -60,7 +60,7 @@ fn lower(
             "source listeners require a non-generic signature",
         ));
     }
-    if !point_shape::eligible(&[], signature) {
+    if !horizon_platform::mod_build::point_shape::eligible(&[], signature) {
         return Err(invalid(
             "at",
             "source listeners require a plain, safe, synchronous Rust signature",
@@ -311,8 +311,8 @@ fn source_adapter_inputs_compile_and_write_back() {
     ] {
         let adapter = adapt(&declaration("one", "test", "game::target", kind), vec![], signature).unwrap().unwrap();
         assert_eq!(adapter.kind, kind.to_uppercase());
-        let record = format!("__{}Raw", point_shape::camel(&adapter.identity));
-        let alias = format!("__{}{}Listener", point_shape::camel(&adapter.identity), if kind == "return" { "Return" } else { "" });
+        let record = format!("__{}Raw", horizon_platform::mod_build::point_shape::camel(&adapter.identity));
+        let alias = format!("__{}{}Listener", horizon_platform::mod_build::point_shape::camel(&adapter.identity), if kind == "return" { "Return" } else { "" });
         let arg = if kind == "return" { "i32".into() } else { format!("{record}<'_, {fields}>") };
         let code = format!(r#"
             pub struct Game {{ bias: i32 }}
