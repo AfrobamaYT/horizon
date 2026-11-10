@@ -93,6 +93,7 @@ fn module(body: &str) -> WasmMod {
             name: "test",
             module: &bytes,
         }],
+        None,
     )
     .unwrap()
     .remove(0)
@@ -330,6 +331,7 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
             name: "private",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -357,6 +359,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
                 module: &fixture,
             },
         ],
+        None,
     )
     .unwrap()
     .pop()
@@ -432,6 +435,7 @@ fn real_members_link_when_built() {
                 module: &fixture,
             },
         ],
+        None,
     );
     let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
     assert_eq!(modules.len(), 1);
@@ -561,6 +565,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
                 module: &bytes,
             },
         ],
+        None,
     )
     .unwrap();
     assert_eq!(modules.len(), 2);
@@ -581,6 +586,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
                 module: &bytes,
             },
         ],
+        None,
     )
     .err()
     .unwrap();
@@ -699,6 +705,7 @@ fn layout_mismatch_is_a_mods_page_refusal() {
             name: "test",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -727,6 +734,7 @@ fn point_record_layout_mismatch_is_refused() {
             name: "points",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -828,6 +836,72 @@ fn another_threads_hook_fails_fast_while_an_import_lends_the_group() {
         Some(7)
     );
     assert!(!module.is_stopped());
+}
+
+#[test]
+fn contended_calls_wait_for_the_group_and_workers_ignore_lending() {
+    for (class, lending) in [(CallClass::Hook, false), (CallClass::Worker, true)] {
+        let module = module("i64.const 2199023255556");
+        let group = module.running.group.lock().unwrap();
+        if lending {
+            module.running.lending.store(1, Ordering::Relaxed);
+        }
+        let (started, ready) = std::sync::mpsc::channel();
+        let (send, receive) = std::sync::mpsc::channel();
+        let other = module.clone();
+        let thread = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            let result = other.call(
+                class,
+                Frame::default(),
+                0,
+                None,
+                |w| w.put(&42u32),
+                |r| r.take::<u32>(),
+            );
+            send.send(result).unwrap();
+        });
+        ready.recv().unwrap();
+        let early = receive.recv_timeout(Duration::from_millis(100));
+        let waited = matches!(&early, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        module.running.lending.store(0, Ordering::Relaxed);
+        drop(group);
+        let result = match early {
+            Ok(value) => value,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                receive.recv_timeout(Duration::from_secs(5)).unwrap()
+            }
+            Err(error) => panic!("call thread failed: {error}"),
+        };
+        thread.join().unwrap();
+        assert!(
+            waited,
+            "a contended call returned before the lock was released"
+        );
+        assert_eq!(result, Some(42));
+        assert!(!module.is_stopped());
+    }
+}
+
+#[test]
+fn contended_hook_times_out_without_poisoning_the_group() {
+    let module = module("i64.const 2199023255556");
+    let group = module.running.group.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let other = module.clone();
+    let thread = std::thread::spawn(move || {
+        let start = Instant::now();
+        let result = call(&other);
+        send.send((result, start.elapsed())).unwrap();
+    });
+    let result = receive.recv_timeout(Duration::from_secs(10));
+    drop(group);
+    thread.join().unwrap();
+    let (answer, elapsed) = result.expect("contended hook did not time out");
+    assert_eq!(answer, None);
+    assert!(elapsed >= Duration::from_secs(5));
+    assert!(!module.is_stopped());
+    assert_eq!(call(&module), Some(42));
 }
 
 #[test]
@@ -1263,6 +1337,7 @@ fn registration_refusal_names_the_indexed_mod_injection() {
                 name: "libaddon.so",
                 module: &bytes,
             }],
+            None,
         )
         .err()
         .expect("registration must refuse");
@@ -1323,6 +1398,7 @@ fn a_mod_point_listener_without_its_bridge_or_its_library_seal_is_refused_at_loa
                     module: &addon_bytes,
                 },
             ],
+            None,
         )
         .map(|_| ())
         .map_err(|refusal| match refusal {
