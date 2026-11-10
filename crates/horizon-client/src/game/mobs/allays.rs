@@ -4,7 +4,6 @@
 use super::Game;
 use super::level_sounds::LevelSound;
 use horizon_client::{
-    containers::BlockEntity,
     first_person::Hand,
     items::ItemStack,
     mobs::{Species, allay},
@@ -98,26 +97,8 @@ impl Game<'_> {
                 continue;
             }
             let pos = self.mobs[i].position;
-            // Dancing: a playing jukebox within 10 blocks.
-            let jukeboxes = jukeboxes.get_or_insert_with(|| {
-                self.world
-                    .block_entities
-                    .iter()
-                    .filter(|(_, e)| matches!(e, BlockEntity::Jukebox(j) if j.playing))
-                    .map(|(k, _)| *k)
-                    .collect()
-            });
-            let nearest = jukeboxes
-                .iter()
-                .map(|k| {
-                    (f64::from(k.0) + 0.5 - pos.x).powi(2)
-                        + (f64::from(k.1) + 0.5 - pos.y).powi(2)
-                        + (f64::from(k.2) + 0.5 - pos.z).powi(2)
-                })
-                .fold(f64::INFINITY, f64::min);
-            // `Allay.setDancing` wants effective AI: a `NoAI` allay never dances.
-            let panicking = horizon_client::mobs::goals::should_panic(&self.mobs[i]);
-            self.mobs[i].extra.flag = allay::dances(self.mobs[i].no_ai, panicking, nearest);
+            // The dance follows the jukebox events the allay hears
+            // (`mob_listen`), `Allay.tick` and `aiStep`.
             let Some(held) = self.mobs[i].extra.main_hand_stack().cloned() else {
                 self.mobs[i].extra.point = None;
                 continue;
@@ -424,3 +405,7 @@ impl Game<'_> {
         false
     }
 }
+
+#[cfg(test)]
+#[path = "allay_jukebox_source_tests.rs"]
+mod allay_jukebox_source_tests;
