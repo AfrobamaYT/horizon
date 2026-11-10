@@ -969,6 +969,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::register_key_mapping` | crosses | Wire call |
 | `Registrar::attach_menu_part` | crosses | Wire call |
 | `Registrar::particle_key` | crosses | Wire call |
+| `Registrar::recipe_book_type` | crosses | Wire call |
 | `Registrar::register_setting` | crosses | Wire call |
 | `Registrar::declare_spawn_placement` | crosses | Wire call |
 | `Registrar::add_structure_type` | crosses | Wire call |
