@@ -41,3 +41,27 @@ fn decoration_and_feature_seeding_match_the_jar() {
     random.set_feature_seed(seed, 3, 2);
     assert_eq!((bound(&mut random, 16), bound(&mut random, 16)), (10, 4));
 }
+
+#[test]
+fn the_xoroshiro_root_matches_the_jar() {
+    // Java (with DataFixerUpper 9.0.19 on the class path): new XoroshiroRandomSource(0):
+    // nextInt(1)=0, nextInt(16)=2,2, nextLong=2160572957309072155.
+    let mut plain = XoroshiroRandom::new(0);
+    assert_eq!(bound(&mut plain, 1), 0);
+    assert_eq!(bound(&mut plain, 16), 2);
+    assert_eq!(bound(&mut plain, 16), 2);
+    assert_eq!(plain.next_long(), 2160572957309072155);
+    // Java: new WorldgenRandom(new XoroshiroRandomSource(0)): nextInt(1)=0, nextInt(16)=12,4,
+    // nextLong=2160572956399813066. The adapter reads the high bits of a long per draw.
+    let mut wrapped = WorldgenRandom::new(XoroshiroRandom::new(0));
+    assert_eq!(bound(&mut wrapped, 1), 0);
+    assert_eq!(bound(&mut wrapped, 16), 12);
+    assert_eq!(bound(&mut wrapped, 16), 4);
+    assert_eq!(wrapped.next_long(), 2160572956399813066);
+    // Java: setDecorationSeed(0, 16, -32)=-7422581477381670832, setFeatureSeed(.., 3, 2): 4,9.
+    let mut random = WorldgenRandom::new(XoroshiroRandom::new(0));
+    let seed = random.set_decoration_seed(0, 16, -32);
+    assert_eq!(seed, -7422581477381670832);
+    random.set_feature_seed(seed, 3, 2);
+    assert_eq!((bound(&mut random, 16), bound(&mut random, 16)), (4, 9));
+}
