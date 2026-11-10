@@ -1681,6 +1681,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockPart::is_pathfindable` | crosses | Wire call |
 | `BlockPart::item_after_vertical_collision` | crosses | Wire call |
 | `BlockPart::minecart_pass` | crosses | Wire call |
+| `BlockPart::remove_block` | crosses | Wire call |
 | `BlockPart::should_check_weak_power` | crosses | Wire call |
 | `BlockPart::should_redstone_wire_connect_to` | crosses | Wire call |
 | `BlockEntityPart::block_entity_subscribed` | crosses | Wire call |
