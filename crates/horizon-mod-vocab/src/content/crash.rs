@@ -12,6 +12,7 @@ thread_local! {
 pub fn native_frame() -> Option<u64> {
     FRAME.try_with(Cell::get).ok().flatten()
 }
+#[inline]
 pub(crate) fn push(call: ModCall) -> (Option<u64>, Option<ModCall>) {
     let frame = NEXT
         .try_with(|next| {
@@ -28,6 +29,7 @@ pub(crate) fn push(call: ModCall) -> (Option<u64>, Option<ModCall>) {
         OWNER.try_with(|c| c.replace(Some(call))).ok().flatten(),
     )
 }
+#[inline]
 pub(crate) fn pop(frame: Option<u64>, owner: Option<ModCall>) {
     let _ = FRAME.try_with(|c| c.set(frame));
     let _ = OWNER.try_with(|c| c.set(owner));
@@ -140,6 +142,7 @@ pub fn current_native_mod() -> Option<&'static str> {
     current_native_call().map(|call| call.id)
 }
 /// Enter an instrumented native call, or an inert scope without a backend.
+#[inline]
 pub fn enter_native_mod(call: ModCall) -> ModGuard {
     crate::dispatch_scope::enter(call)
 }

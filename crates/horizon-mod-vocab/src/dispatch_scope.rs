@@ -74,6 +74,7 @@ pub struct ModGuard {
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
+    #[inline]
     fn drop(&mut self) {
         crate::content::crash::pop(self.owner.0, self.owner.1);
         if let Some((leave, timing)) = self.timing.take() {
@@ -95,6 +96,7 @@ pub fn install(backend: Backend) -> Result<(), &'static str> {
         .map_err(|_| "dispatch instrumentation is already sealed")
 }
 
+#[inline]
 pub(crate) fn enter(call: ModCall) -> ModGuard {
     let owner = crate::content::crash::push(call);
     if PROFILING.load(std::sync::atomic::Ordering::Relaxed) {
