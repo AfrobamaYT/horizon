@@ -10,8 +10,9 @@
 
 A nightly builds main plus the pull requests the trusted reviewers picked (the set: tools/ci/nightly_set.py), merged
 in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is its newest commit where
-`checks` and `parity-main` passed, as for a release (release_train.green_main_head), or NIGHTLY_BASE when the caller
-gives that commit. It is published as the `nightly` pre-release; the previous one stays a week as nightly-<date>.
+this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity-main` upstream), as for a release
+(release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
+`nightly` pre-release; the previous one stays a week as nightly-<date>.
 Its notes list what reached main since the previous nightly, then the picked pull requests. Runs from main's
 checkout with `gh`; it reads and merges the branches with git and never runs anything from them.
 
@@ -207,11 +208,12 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
 
 
 def green_base(repo: str, issue: str) -> Ref:
-    """The main commit a nightly builds on: NIGHTLY_BASE, else main's newest commit where checks and parity-main
-    passed (what releases ship), so a merge that breaks main never reaches a nightly: it builds on the commit before."""
+    """NIGHTLY_BASE, else a green main commit from this repository's checks
+    (dyna-checks on the fork, checks plus parity-main upstream), never an untested fallback."""
     sha = os.environ.get("NIGHTLY_BASE", "").strip() or train.green_main_head(parity=True)
     if not sha:
-        stop(repo, issue, "the build stopped: no recent commit of main passed both checks and parity-main, so "
+        checks = "dyna-checks" if repo == "arismoko/horizon" else "checks and parity-main"
+        stop(repo, issue, f"the build stopped: no recent commit of main passed {checks}, so "
                           "none is green to build on. The next build after they pass takes it.")
     if not is_ancestor(sha, "refs/remotes/origin/main"):
         stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")

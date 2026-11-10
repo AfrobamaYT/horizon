@@ -109,6 +109,7 @@ jobs:
           NIGHTLY_BASE: ${{ inputs.base }}
           NIGHTLY_URGENT: ${{ inputs.urgent }}
         run: |
+          set -euo pipefail
           python3 tools/ci/nightly.py pick ${FORCE:+--force} | tee -a "$GITHUB_STEP_SUMMARY"
           { echo; cat nightly-notes.md; } >> "$GITHUB_STEP_SUMMARY"
       - name: Old nightly/build-* branches deleted (scheduled runs only)
@@ -290,7 +291,7 @@ jobs:
     needs: [pick, build, sign, publish]
     if: always() && inputs.issue != '' && needs.pick.result == 'success'
     # One comment, no checkout and no secret: one of our small runners (label horizon-light, docs/ci-runners.md).
-    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON(vars.NIGHTLY_BOOKKEEPING_RUNNER || '["self-hosted", "linux", "horizon-light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_BOOKKEEPING_RUNNER && fromJSON(vars.NIGHTLY_BOOKKEEPING_RUNNER)) || (vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "horizon-light"]')) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       issues: write

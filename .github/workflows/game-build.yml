@@ -51,7 +51,7 @@ jobs:
     # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
     # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
     # toJSON keeps an empty trusted runner as an invalid empty label, never a Nightly fallback.
-    runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && (vars.NIGHTLY_EXPORTERS_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_EXPORTERS_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "horizon-nightly"]') || '"ubuntu-latest"') }}
     # Three full preparations (two isolated, one batched) besides the compile.
     timeout-minutes: 60
     steps:
@@ -61,12 +61,17 @@ jobs:
           persist-credentials: false
           clean: true
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        if: runner.environment == 'github-hosted'
+        with:
+          python-version: '3.13'
       - uses: actions/setup-java@v4
-        if: runner.os == 'Linux' && runner.environment == 'self-hosted'
+        if: runner.environment == 'github-hosted' || runner.os == 'Linux'
         with:
           distribution: temurin
           java-version: '25'
-      - run: |
+      - if: runner.environment == 'self-hosted'
+        run: |
           if [[ -z "${DYNA_CI_BUILD:-}" ]]; then bash tools/ci/runner-env.sh; fi
         env:
           HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
@@ -155,7 +160,7 @@ jobs:
             target: x86_64-apple-darwin
             dir: horizon-macos-x64
             asset: horizon-macos-x64.zip
-    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && (vars.NIGHTLY_MAC_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || '"macos-15"') || (!inputs.trusted && vars.SELF_HOSTED_CI != 'off' && matrix.name == 'linux' && vars.NIGHTLY_LINUX_RUNNER && fromJSON(vars.NIGHTLY_LINUX_RUNNER)) || matrix.os }}
+    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "horizon-nightly"]') || '"macos-15"') || (!inputs.trusted && vars.DYNA_CI_SELF_HOSTED == 'true' && matrix.name == 'linux' && vars.NIGHTLY_LINUX_RUNNER && fromJSON(vars.NIGHTLY_LINUX_RUNNER)) || matrix.os }}
     # Notarizing the zip can take a few minutes.
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:
@@ -183,6 +188,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v6
+        if: runner.environment == 'github-hosted'
+        with:
+          python-version: '3.13'
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted' && !matrix.musl
         with:

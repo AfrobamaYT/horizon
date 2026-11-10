@@ -164,8 +164,9 @@ class UntrustedBuildTests(unittest.TestCase):
         nightly_default = "'[\"self-hosted\", \"macOS\", \"horizon-nightly\"]'"
         for line, variable in zip(runs_on, ("NIGHTLY_EXPORTERS_RUNNER", "NIGHTLY_MAC_RUNNER")):
             self.assertIn("inputs.trusted && toJSON(vars.MAC_RUNNER)", line)
-            self.assertIn(f"vars.SELF_HOSTED_CI != 'off' && (vars.{variable} || {nightly_default})", line)
-        self.assertIn("!inputs.trusted && vars.SELF_HOSTED_CI != 'off' && matrix.name == 'linux'", runs_on[1])
+            self.assertIn(f"vars.DYNA_CI_SELF_HOSTED == 'true' && vars.{variable}", line)
+            self.assertIn(f"vars.SELF_HOSTED_CI != 'off' && {nightly_default}", line)
+        self.assertIn("!inputs.trusted && vars.DYNA_CI_SELF_HOSTED == 'true' && matrix.name == 'linux'", runs_on[1])
 
     def test_a_trusted_build_never_reads_the_shared_sccache(self):
         calls = self.game.count("bash tools/ci/runner-env.sh")

@@ -54,29 +54,58 @@ console.log(JSON.stringify(eval(expression)));
             return json.loads(result.stdout)
         default_mac = ["self-hosted", "macOS", "horizon-nightly"]
         bookkeeping = re.search(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", NIGHTLY.read_text(), re.M).group(1)
-        for configured, release_runner, disabled, trusted in itertools.product([False, True], repeat=4):
+        for configured, release_runner, disabled, trusted, dyna in itertools.product(
+            [False, True], [False, True], [False, True], [False, True], [None, "false", "true"]
+        ):
             variables = {"SELF_HOSTED_CI": "off" if disabled else "all"}
+            if dyna is not None:
+                variables["DYNA_CI_SELF_HOSTED"] = dyna
+            override = configured and dyna == "true"
             if release_runner:
                 variables["MAC_RUNNER"] = "release-mac"
             if configured:
                 variables.update({"NIGHTLY_LINUX_RUNNER": '"dyna-large"', "NIGHTLY_MAC_RUNNER": '"macos-15"', "NIGHTLY_EXPORTERS_RUNNER": '"dyna-large"', "NIGHTLY_BOOKKEEPING_RUNNER": '"dyna-small"'})
             # An empty runs-on is rejected by Actions; never choose a shared runner instead.
             dedicated = "release-mac" if release_runner else ""
-            expected_exporter = dedicated if trusted else ("ubuntu-latest" if disabled else ("dyna-large" if configured else default_mac))
-            with self.subTest(configured=configured, release_runner=release_runner, disabled=disabled, trusted=trusted):
+            expected_exporter = dedicated if trusted else ("dyna-large" if override else ("ubuntu-latest" if disabled else default_mac))
+            with self.subTest(configured=configured, release_runner=release_runner, disabled=disabled, trusted=trusted, dyna=dyna):
                 self.assertEqual(evaluate(guard_if, {}, trusted), trusted and not release_runner)
                 self.assertEqual(evaluate(expressions[0], {}, trusted), expected_exporter)
-                expected_bookkeeping = "ubuntu-latest" if disabled else ("dyna-small" if configured else ["self-hosted", "linux", "horizon-light"])
+                expected_bookkeeping = "dyna-small" if override else ("ubuntu-latest" if disabled else ["self-hosted", "linux", "horizon-light"])
                 self.assertEqual(evaluate(bookkeeping, {}, trusted), expected_bookkeeping)
                 for row in rows:
                     if row.get("mac"):
-                        expected = dedicated if trusted else ("macos-15" if disabled or configured else default_mac)
-                    elif row["name"] == "linux" and not trusted and configured and not disabled:
+                        expected = dedicated if trusted else ("macos-15" if disabled or override else default_mac)
+                    elif row["name"] == "linux" and not trusted and override:
                         expected = "dyna-large"
                     else:
                         expected = row["os"]
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+
+    def test_hosted_runners_never_use_machine_specific_tool_setup(self):
+        steps = [block for block in GAME.read_text().split("\n      - ") if "bash tools/ci/runner-env.sh" in block]
+        self.assertEqual(len(steps), 2)
+        for step in steps:
+            condition = re.search(r"^\s*if:\s*(.*)$", step, re.M).group(1)
+            for environment in ["github-hosted", "self-hosted"]:
+                expression = condition.replace("runner.environment", repr(environment))
+                self.assertEqual(eval(expression, {"__builtins__": {}}), environment == "self-hosted")
+
+    @unittest.skipUnless(os.name == "posix", "The pick step runs in Bash on Linux")
+    def test_pick_failure_preserves_its_error_without_missing_notes_noise(self):
+        block = NIGHTLY.read_text().split("      - id: pick\n", 1)[1].split("      - name:", 1)[0]
+        shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "python3"
+            python.write_text("#!/bin/sh\necho 'no green dyna-checks main base'\nexit 23\n")
+            python.chmod(0o755)
+            summary = root / "summary"
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "FORCE": "", "GITHUB_STEP_SUMMARY": str(summary), "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 23)
+            self.assertIn("no green dyna-checks main base", summary.read_text())
+            self.assertNotIn("nightly-notes.md", result.stderr)
 
     @unittest.skipUnless(shutil.which("bash"), "The runner guard executes in Bash")
     def test_missing_release_runner_guard_fails_clearly(self):
