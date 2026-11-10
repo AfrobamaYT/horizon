@@ -280,23 +280,15 @@ fn client_tick_pre_and_post_hear_their_own_moment() {
 }
 
 #[test]
-fn client_level_tick_pre_and_post_hear_the_level_in_their_own_moment() {
+fn level_tick_pre_and_post_hear_the_level_in_their_own_moment() {
     use std::sync::Mutex;
     struct Ticks(Arc<Mutex<Vec<(&'static str, LevelRef)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Ticks {
-        fn client_level_tick_pre(
-            &self,
-            _: &mut dyn ClientHost,
-            event: &mut ClientLevelTickPreEvent,
-        ) {
+        fn level_tick_pre(&self, _: HostSide, event: &mut LevelTickPreEvent) {
             self.0.lock().unwrap().push(("pre", event.level));
         }
-        fn client_level_tick_post(
-            &self,
-            _: &mut dyn ClientHost,
-            event: &mut ClientLevelTickPostEvent,
-        ) {
+        fn level_tick_post(&self, _: HostSide, event: &mut LevelTickPostEvent) {
             self.0.lock().unwrap().push(("post", event.level));
         }
     }
@@ -305,8 +297,8 @@ fn client_level_tick_pre_and_post_hear_the_level_in_their_own_moment() {
     testing::with_mods(
         vec![ModEntry::new("ticks", Box::new(Ticks(heard.clone())))].into(),
         || {
-            dispatch_client_level_tick_pre(&mut FakeHost::new(), level);
-            dispatch_client_level_tick_post(&mut FakeHost::new(), level);
+            dispatch_level_tick_pre(HostSide::Client(&mut FakeHost::new()), level);
+            dispatch_level_tick_post(HostSide::Client(&mut FakeHost::new()), level);
         },
     );
     assert_eq!(*heard.lock().unwrap(), [("pre", level), ("post", level)]);

@@ -895,8 +895,8 @@ impl Game<'_> {
                 running,
                 packets_drained: false,
             };
-            if observe_level {
-                self.native_level_tick_pre(dim.id());
+            if observe_level && let Some(level) = self.level(dim.id()) {
+                self.native_level_tick_pre(level);
             }
             self.update_dedicated_streaming();
             self.update_world();
@@ -920,8 +920,8 @@ impl Game<'_> {
             if result.is_err() {
                 break;
             }
-            if observe_level {
-                self.native_level_tick_post(dim.id());
+            if observe_level && let Some(level) = self.level(dim.id()) {
+                self.native_level_tick_post(level);
             }
             self.publish_server_debug(dim);
             // An entity that crossed into a level that already ticked this

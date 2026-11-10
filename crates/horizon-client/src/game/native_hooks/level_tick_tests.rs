@@ -1,14 +1,3 @@
-use super::*;
-
-/// The hook points. Each does nothing in Horizon.
-impl Game<'_> {
-    /// Once a client level tick, before the level's own work runs
-    /// (`ClientTickEvents.START_LEVEL_TICK`).
-    pub(in crate::game) fn native_client_level_tick_pre(&mut self, level: LevelRef) {
-        self.fire_client_level_tick_pre(level);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::super::{
@@ -17,26 +6,28 @@ mod tests {
     use horizon_client::level_loading::Reason;
     use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
     use mod_api::{
-        ClientHost, ClientLevelTickPostEvent, ClientLevelTickPreEvent, Hooks, LevelRef, ModEntry,
+        HostSide, LevelTickPostEvent, LevelTickPreEvent, Hooks, LevelRef, ModEntry,
     };
     use std::sync::{Arc, Mutex};
 
-    struct Moments(Arc<Mutex<Vec<(&'static str, LevelRef)>>>);
+    struct Moments(Arc<Mutex<Vec<(&'static str, LevelRef, Option<i64>)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Moments {
-        fn client_level_tick_pre(
+        fn level_tick_pre(
             &self,
-            _: &mut dyn ClientHost,
-            event: &mut ClientLevelTickPreEvent,
+            _: &mut dyn HostSide,
+            event: &mut LevelTickPreEvent,
         ) {
-            self.0.lock().unwrap().push(("pre", event.level));
+            let time = match host { HostSide::Client(h) => h.level_game_time(event.level), HostSide::Server(h) => h.level_game_time(event.level) };
+            self.0.lock().unwrap().push(("pre", event.level, time));
         }
-        fn client_level_tick_post(
+        fn level_tick_post(
             &self,
-            _: &mut dyn ClientHost,
-            event: &mut ClientLevelTickPostEvent,
+            _: &mut dyn HostSide,
+            event: &mut LevelTickPostEvent,
         ) {
-            self.0.lock().unwrap().push(("post", event.level));
+            let time = match host { HostSide::Client(h) => h.level_game_time(event.level), HostSide::Server(h) => h.level_game_time(event.level) };
+            self.0.lock().unwrap().push(("post", event.level, time));
         }
     }
 
@@ -77,13 +68,13 @@ mod tests {
                 assert_eq!(after, before + 1, "the tick advanced the world's time");
                 assert_eq!(
                     *heard.lock().unwrap(),
-                    [("pre", level), ("post", level)],
+                    [("pre", level, Some(before)), ("post", level, Some(after))],
                     "the level's own work ran between them"
                 );
 
                 heard.lock().unwrap().clear();
                 game.tick_remote_level().unwrap();
-                assert_eq!(*heard.lock().unwrap(), [("pre", level), ("post", level)]);
+                assert_eq!(*heard.lock().unwrap(), [("pre", level, Some(after)), ("post", level, Some(after + 1))]);
             });
         });
     }

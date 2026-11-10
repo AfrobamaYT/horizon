@@ -2929,7 +2929,7 @@ registration path.
   emptied, and `native_attack_entity` a player's blow on an entity (an item frame, an armor stand, an animal, a
   player). Each may cancel, and nothing happens.
 
-- `native_level_tick_pre` and `native_level_tick_post`, server-side observations around each
+- `native_level_tick_pre` and `native_level_tick_post`, both-sided observations around each
   level tick pass. Each receives the dimension ID; neither can cancel the tick. Paused and held passes fire
   neither hook, and an error skips the post hook.
 

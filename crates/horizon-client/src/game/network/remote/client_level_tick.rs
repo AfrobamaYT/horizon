@@ -1,25 +1,17 @@
 use super::*;
 
-/// The client's per-level tick, `ClientLevel.tick`: the window's work for the
-/// level in place, bracketed by `ClientTickEvents.START_LEVEL_TICK` and
-/// `END_LEVEL_TICK`. A client with no level, or with no listener for either
-/// hook, pays one `listened` check a tick; a tick that fails returns before
-/// the end hook, as Fabric's injection at `ClientLevel.tick`'s RETURN does not
-/// run for an exception.
+/// Per-level client work bracketed by the shared LevelTickEvent hooks.
+/// No level means no event; failed ticks never emit the post event.
 impl Game<'_> {
     pub(in crate::game) fn tick_remote_level(&mut self) -> Result<()> {
-        // `ClientTickEvents.START_LEVEL_TICK`/`END_LEVEL_TICK`: the level is
-        // built and both hooks dispatched only for a level in place and a
-        // listener of either, so a client without a level or a mod pays one
-        // `listened` check a tick.
-        let level = (mod_api::__private::listened(mod_api::HookId::ClientLevelTickPre)
-            || mod_api::__private::listened(mod_api::HookId::ClientLevelTickPost))
+        let level = (mod_api::__private::listened(mod_api::HookId::LevelTickPre)
+            || mod_api::__private::listened(mod_api::HookId::LevelTickPost))
         .then(|| self.native_client_level())
         .flatten();
         if let Some(level) = level
-            && mod_api::__private::listened(mod_api::HookId::ClientLevelTickPre)
+            && mod_api::__private::listened(mod_api::HookId::LevelTickPre)
         {
-            self.native_client_level_tick_pre(level);
+            self.native_level_tick_pre(level);
         }
         self.ticks += 1;
         self.repro_tick();
@@ -73,9 +65,9 @@ impl Game<'_> {
         // `ClientLevel.tick`'s RETURN, which a failed tick does not reach.
         if result.is_ok()
             && let Some(level) = level
-            && mod_api::__private::listened(mod_api::HookId::ClientLevelTickPost)
+            && mod_api::__private::listened(mod_api::HookId::LevelTickPost)
         {
-            self.native_client_level_tick_post(level);
+            self.native_level_tick_post(level);
         }
         result
     }
