@@ -1,5 +1,6 @@
 """Execute the engine's item-scoped ability boundary with counted conversion."""
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class AbilityBoundary(unittest.TestCase):
     def test_unrelated_item_skips_conversion(self):
+        compiler = shutil.which("rustc")
+        if compiler is None:
+            self.skipTest("requires Rust to execute the production boundary fixture")
         source = (ROOT / 'crates/horizon-client/src/game/items/item_abilities.rs').read_text()
         start = source.index('    pub(in crate::game) fn stack_can_perform(')
         end = source.index('\n    ///', start)
@@ -39,5 +43,5 @@ impl Game {
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / 'test.rs').write_text(fixture)
-            subprocess.run(['rustc', '--edition=2024', '--test', str(path / 'test.rs'), '-o', str(path / 'test')], check=True)
+            subprocess.run([compiler, '--edition=2024', '--test', str(path / 'test.rs'), '-o', str(path / 'test')], check=True)
             subprocess.run([str(path / 'test')], check=True)
