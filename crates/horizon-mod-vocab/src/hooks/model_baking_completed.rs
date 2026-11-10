@@ -10,7 +10,15 @@ pub trait Hooks {
     /// right. Look the models a mod draws up here, once, through `render_assets().model`, and
     /// keep the `ModelRef`s until the next `model_baking_completed`, when the old ones answer
     /// `ModelError::StaleModel`. Never look them up by name every frame. Client-side.
-    #[notes = r#"- `native_model_baking_completed()` (NeoForge's `ModelEvent.BakingCompleted`) fires on the render thread once per successful model load, right after both atlases' `texture_atlas_stitched`: on the first load before `client_setup`, and after every successful reload before `client_resources_reloaded`. The store `render_assets().model(&id)` reads is already the new one, the standalone models included. Resolve the models a mod draws here, once, and keep the `ModelRef`s until the next `model_baking_completed`, when the old ones answer `ModelError::StaleModel`; a failed reload fires nothing and leaves them valid. It gives no view of the baked geometry and edits nothing (#861 is that). A dedicated server never fires it."#]
+    #[notes = r#"## Model baking completed
+
+`model_baking_completed` (NeoForge's `ModelEvent.BakingCompleted`) fires on the render thread once per successful model
+load, right after both atlases' `texture_atlas_stitched`: on the first load before `client_setup`, and after every
+successful resource reload before `client_resources_reloaded`. The store `render_assets().model(&id)` reads is already
+the new one, the standalone models included. Resolve the models a mod draws there, once, and keep the `ModelRef`s until
+the next `model_baking_completed`, when the old ones answer `ModelError::StaleModel`; a reload that fails fires nothing
+and leaves them valid. It gives no view of the baked geometry and edits nothing (that is #861). A dedicated server never
+fires it."#]
     #[hook(
         side = "client",
         contract = "listen",
