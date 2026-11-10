@@ -108,7 +108,7 @@ pub(super) fn machine_menu(
 }
 
 /// `load_player` back.
-fn store_player(menu: &mut Menu, g: &mut Guest) {
+pub(super) fn store_player(menu: &mut Menu, g: &mut Guest) {
     for i in 0..36 {
         g.inventory[i] = menu.player_item(i).cloned();
     }
@@ -1059,7 +1059,7 @@ impl Game<'_> {
     /// The containers recipe placement into guest `gi`'s mod crafting menu
     /// `t` at `pos` may also take from (`native_recipe_sources`): each block
     /// and its slots, chest-like or a mod's container, none twice, not `pos`.
-    fn lan_recipe_sources(
+    pub(super) fn lan_recipe_sources(
         &mut self,
         gi: usize,
         t: &ModMenuType,

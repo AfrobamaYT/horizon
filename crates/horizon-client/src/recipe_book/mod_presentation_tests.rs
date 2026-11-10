@@ -105,6 +105,7 @@ fn category(book: &str, id: &str, recipe: &str) -> RecipeBookCategory {
         displays: vec![mod_api::RecipeBookDisplayEntry {
             recipe: recipe.into(),
             displays: layouts(),
+            placement: None,
         }],
     }
 }
@@ -156,6 +157,7 @@ fn panel_search_selection_and_inventory_filter_are_isolated() {
         ["demo:one", "demo:two"]
     );
     assert_eq!(all.recipes[0].button.entries.len(), 5);
+    assert_eq!(all.recipes[0].sources, [4, 0, 1, 2, 3]);
     assert!(
         prepared
             .presentation(Some("demo:c"), "", false, 0, &Resolver)
@@ -172,6 +174,7 @@ fn panel_search_selection_and_inventory_filter_are_isolated() {
     let filtered = prepared.presentation(None, "SMITH", true, 0, &Resolver);
     assert_eq!(filtered.recipes.len(), 2);
     assert_eq!(filtered.recipes[0].button.entries.len(), 1);
+    assert_eq!(filtered.recipes[0].sources, [4]);
     assert!(filtered.recipes[0].button.has_craftable);
     assert!(
         prepared
@@ -212,6 +215,7 @@ fn stock_changes_only_materialize_visible_previews() {
     cat.displays = (0..1000)
         .map(|i| mod_api::RecipeBookDisplayEntry {
             recipe: format!("demo:r{i}"),
+            placement: None,
             displays: vec![Display::Stonecutter {
                 input: item("input"),
                 result: item("result"),
