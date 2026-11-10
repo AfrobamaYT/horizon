@@ -2786,6 +2786,7 @@ impl Game<'_> {
             return;
         };
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: None,
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: pos.map(|c| f64::from(c) + 0.5),
@@ -2825,6 +2826,7 @@ impl Game<'_> {
             return;
         };
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: None,
             table,
             dimension: self.dim.id(),
             origin,

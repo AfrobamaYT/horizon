@@ -569,7 +569,7 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   mob's worn, held and carried items and inventory too, not an enderman's carried block or a copper golem's preserved equipment).
   Add, change or take out stacks; empty ones don't drop. `LootDrops` says what dropped them: its own loot table (empty when
   none rolled), the dimension, the origin, the block's position and state or the mob's id and type, the player who broke or killed
-  it (a mob names one only while it remembers the player's hit, 100 ticks), the tool and an explosion's radius. It hears blocks
+  it (100-tick player kill credit), the tool and explosion radius. Deaths also carry `damage_source` (type, causing/direct IDs), and `tool` is the killer's full held snapshot, not a later inventory read. It hears blocks
   that a player, an explosion or a mob breaks, not other breaks (leaves decaying, a torch losing its wall, a piston,
   `/setblock ... destroy`), nor a creative break or a tool that can't harvest the block. A block's stacks get its block entity's data (a
   shulker box's items) after the hook, and a container's contents spill on their own, not through it. A player's use drops

@@ -1744,6 +1744,7 @@ impl Game<'_> {
             .remove(&m.id)
             .filter(|_| m.ai.last_hurt_by_player > 0)
             .and_then(|credit| self.resolve_player_credit(credit));
+        let killer_hand = self.death_killer_hand(m, killer);
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
@@ -1823,6 +1824,7 @@ impl Game<'_> {
             player,
             m.ai.last_hurt_by_player > 0,
             killer_entity,
+            killer_hand,
             consumed,
             pos,
             source,
@@ -2008,6 +2010,7 @@ impl Game<'_> {
         player_uuid: Option<u128>,
         player_killed: bool,
         killer: horizon_world::loot::LootEntity,
+        killer_hand: Option<ItemStack>,
         consumed: bool,
         pos: [f64; 3],
         source: Option<(&'static str, u32)>,
@@ -2162,14 +2165,16 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
+        let killer_hand = killer_hand.as_ref().try_into_api().ok().flatten();
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: hurt,
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: [m.position.x, m.position.y, m.position.z],
             block: None,
             entity: Some((m.id, &kind)),
             player: player_uuid,
-            tool: None,
+            tool: killer_hand.as_ref(),
             explosion: None,
             used: false,
         });
@@ -13929,3 +13934,8 @@ mod leash_without_item_postbaseline_controls;
 mod revenge_home_tests;
 
 mod knockback;
+
+#[cfg(test)]
+mod death_loot_context_tests;
+
+mod death_loot_context;

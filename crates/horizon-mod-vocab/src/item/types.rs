@@ -119,7 +119,14 @@ pub struct LootDrops<'a> {
     /// names one only while it remembers the player's hit (100 ticks), so one
     /// that dies to lava long after names none.
     pub player: Option<u128>,
-    /// What broke the block (`LootContextParams.TOOL`).
+    /// `LootContextParams.DAMAGE_SOURCE` of this death invocation. None for
+    /// non-death drops. Environmental deaths have a source but no causing entity.
+    /// `causing` and `direct` are the attacking and direct attacking entity IDs;
+    /// 0 means absent or unknown, as on the other damage hooks.
+    pub damage_source: Option<crate::entity::health::HurtSource<'a>>,
+    /// What broke the block (`LootContextParams.TOOL`), or the killing entity's
+    /// held stack captured at death, before loot listeners run. None when no
+    /// tool or killer hand is available; never read from later inventory state.
     pub tool: Option<&'a ItemStack>,
     /// The radius of the explosion that broke the block.
     pub explosion: Option<f32>,

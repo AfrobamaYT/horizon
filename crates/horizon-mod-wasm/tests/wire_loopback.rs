@@ -276,6 +276,14 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             assert_eq!(event.context.entity, Some((12, "test:mob")));
             assert_eq!(event.context.table.len(), 300);
+            let source = event.context.damage_source.unwrap();
+            assert_eq!(
+                (source.damage_type, source.causing, source.direct),
+                ("minecraft:arrow", 41, 73)
+            );
+            assert_eq!(source.position, Some([1.0, 2.0, 3.0]));
+            assert_eq!(event.context.tool.unwrap().count(), 7);
+            assert_eq!(event.context.tool.unwrap().damage(), 19);
             event.drops.clear();
         }
         fn item_stacked_on_other(
@@ -869,14 +877,22 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
     install_counter();
     let table = "t".repeat(300);
+    let mut hand = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 7).unwrap();
+    hand.set_damage(19);
     let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
+        damage_source: Some(mod_api::HurtSource {
+            damage_type: "minecraft:arrow",
+            causing: 41,
+            direct: 73,
+            position: Some([1.0, 2.0, 3.0]),
+        }),
         table: &table,
         dimension: "minecraft:overworld",
         origin: [0.; 3],
         block: None,
         entity: Some((12, "test:mob")),
         player: None,
-        tool: None,
+        tool: Some(&hand),
         explosion: None,
         used: false,
     }
