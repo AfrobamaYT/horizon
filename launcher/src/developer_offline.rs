@@ -95,6 +95,53 @@ pub fn selected() -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn account_gate_is_preserved_without_opt_in_and_for_signed_lineage() {
+        if let Ok(tag) = std::env::var("OFFLINE_GATE_TEST_TAG") {
+            assert!(!enabled(&tag));
+            let error = crate::backend::client_as(&tag, None).unwrap_err();
+            assert!(
+                error.contains(&crate::i18n::tr(crate::backend::SIGN_IN_HINT).to_string()),
+                "{error}"
+            );
+            return;
+        }
+        for (tag, opt_in) in [
+            ("developer-local", None),
+            ("v2026.11.10", Some("1")),
+            ("nightly-abcdef", Some("1")),
+            ("developer-local", Some("true")),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let version = root.path().join("versions").join(tag);
+            std::fs::create_dir_all(&version).unwrap();
+            std::fs::write(version.join(".installed"), "").unwrap();
+            std::fs::write(
+                version.join("developer.json"),
+                serde_json::json!({"revision":"a".repeat(40)}).to_string(),
+            )
+            .unwrap();
+            let mut child = Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "developer_offline::tests::account_gate_is_preserved_without_opt_in_and_for_signed_lineage", "--nocapture"])
+                .env("OFFLINE_GATE_TEST_TAG", tag)
+                .env("HORIZON_LAUNCHER_HOME", root.path())
+                .env("HORIZON_HOME", root.path().join("game"))
+                .env("XDG_CONFIG_HOME", root.path().join("config"))
+                .env("XDG_DATA_HOME", root.path().join("data"));
+            if let Some(value) = opt_in {
+                child.env(ENV, value);
+            } else {
+                child.env_remove(ENV);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+
+    #[test]
     fn legacy_and_malformed_capabilities_refuse() {
         for reply in [
             b"not json".as_slice(),
