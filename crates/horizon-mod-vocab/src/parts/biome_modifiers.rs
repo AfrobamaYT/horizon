@@ -62,6 +62,35 @@ pub mod tests {
     }
 
     #[test]
+    fn nonfinite_climate_is_refused_directly_and_at_registration() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for temperature in [true, false] {
+                let modifier = BiomeModifier {
+                    biomes: vec!["minecraft:plains".into()],
+                    operation: BiomeModifierOperation::ModifyBiome {
+                        temperature: temperature.then_some(value),
+                        downfall: (!temperature).then_some(value),
+                        has_precipitation: None,
+                        temperature_modifier: None,
+                        sky_color: None,
+                        fog_color: None,
+                        water_color: None,
+                        water_fog_color: None,
+                        foliage_color: None,
+                        grass_color: None,
+                    },
+                };
+                assert_eq!(modifier.check(), Err(BiomeModifierError::InvalidValue));
+                let mut registrar = super::PartRegistrar::new("ruby");
+                assert_eq!(
+                    registrar.declare_biome_modifier("climate", modifier),
+                    Err(BiomeModifierError::InvalidValue)
+                );
+            }
+        }
+    }
+
+    #[test]
     pub(crate) fn biome_modifier_declarations_validate_and_refuse_duplicates() {
         let mut registrar = super::PartRegistrar::new("ruby");
         registrar
@@ -104,16 +133,19 @@ pub trait BiomeModifiersRegistrar {
     /// operations as the data files in `data/<ns>/neoforge/biome_modifier/` (add and remove
     /// features, add and remove spawns, add and remove spawn costs) on the biomes it names.
     /// The game applies it with the data-file modifiers, once, when the world's tables build:
-    /// every addition first, then every removal, each in mod and registration order. A world
+    /// every addition first, then every removal, then every `ModifyBiome`, each in mod and
+    /// registration order. A world
     /// no modifier names generates exactly as before.
     ///
-    /// Carver, climate and effects operations are not here yet: the game has no such modifier.
+    /// `ModifyBiome` is NeoForge's MODIFY phase: it sets a biome's climate values and effects
+    /// colours (`horizon:modify_biome` in a file).
     /// A modifier naming a biome, feature or entity type the world lacks (another mod's, a
     /// convention tag) is skipped with a line in the log, as a data file is.
     ///
     /// An id outside the mod's namespace, a repeated id, an empty list, a name that is not
     /// namespaced, an unknown generation step, a spawner of weight 0 or with its smallest group
-    /// above its largest, and a spawn cost that is not finite refuse the mods, naming the mod.
+    /// above its largest, a spawn cost that is not finite, and a climate number that is not finite, a colour above
+    /// 0xFFFFFF or a temperature modifier other than `none` or `frozen` refuse the mods, naming the mod.
     fn declare_biome_modifier(
         &mut self,
         path: &str,

@@ -5558,7 +5558,7 @@ fn biome_modifiers_refuse_unknown_names() {
     let base = biome_base("biome-modifiers-errors");
     let scratch = base.parent().unwrap().to_owned();
     // A name the root doesn't have, or a type not read yet: that modifier is
-    // skipped with a warning (another mod's ids, `#c:` tags and `add_carvers`
+    // skipped with a warning (another mod's ids, `#c:` tags and its own serializers
     // are common in real mods), and the mods still load.
     for (i, (modifier, warning)) in [
         (
@@ -5587,8 +5587,8 @@ fn biome_modifiers_refuse_unknown_names() {
             "unknown entity type tag #minecraft:is_goblin",
         ),
         (
-            r#"{"type":"neoforge:add_carvers","biomes":"minecraft:plains","carvers":[]}"#,
-            "biome modifier type \"add_carvers\" skipped",
+            r#"{"type":"examplemod:custom","biomes":"minecraft:plains"}"#,
+            "biome modifier type \"examplemod:custom\" skipped",
         ),
         (
             r#"{"type":"neoforge:add_features","biomes":"minecraft:plains",

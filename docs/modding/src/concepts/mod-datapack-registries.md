@@ -86,6 +86,10 @@ Expected values below are proposals, not tests reported passing.
 
 File none. Stage 1: obtain exact public 26.3 contract and vanilla load/reload caller fixtures; settle the decisions below. Stage 2: generated registrar and bounded codec representation for native and wasm, duplicate/type validation and test-mod fixtures. Stage 3: candidate ownership, generation-checked reads and common atomic coordinator across every listed route, including listener failure. Stage 4: negotiation, snapshot transport, receive-side activation and absent-mod fixtures. Stage 5: acceptance matrix, route parity, adversarial limits and empty-path allocation measurements. No stage authorizes Rust work in this documentation task.
 
+## Stage 3 progress
+
+Built in `horizon-mod-api` (`world/datapack_registry_set.rs`), engine-neutral and tested without a world: `DatapackCandidate::build` decodes the winning file of every entry of every declared registry and resolves references against the whole candidate (forward references work, an absent target refuses everything, a reference to an undeclared registry is left to its owner); `DatapackRegistrySet` publishes it as generation 1 of a session, `reload` gives the next generation (once, even for identical content, never wrapping), and `DatapackHandle` reads check session then generation, answering `WrongSession`, `StaleGeneration`, `UnknownRegistry` or `MissingEntry`. Not built yet: feeding it the pack files in `build_world_tables` and the other routes in the table above, holding the set in `WorldTables` so it publishes with them, and the listener ordering. The size budgets proposed above are not enforced; stage 2 dropped them.
+
 ## Open questions
 
 - What does the exact 26.3 counterpart guarantee? Recommendation: require reachable public Javadoc before implementation; retain explicit Horizon proposals where public documentation is silent.

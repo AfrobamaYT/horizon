@@ -11,13 +11,24 @@ pub trait ProjectilesServerHost {
     /// shooting, inherits known movement
     /// (vertical only while airborne), adds to the level and fires projectile_launch.
     /// Spread draws x, y, z triangular noise from the new projectile's own random.
+    /// Once it is in the level, `stack`'s enchantments run their
+    /// `projectile_spawned` effects on it (`Projectile.applyOnProjectileSpawned`):
+    /// in the stack's order, each effect's requirements tested with the level
+    /// random just before it applies, its own draws from the projectile's random.
     /// Does not consume the stack or apply item-use cooldowns or statistics.
     /// None for an unavailable owner or one in another level, unsupported type,
-    /// invalid stack or non-finite
-    /// shot parameter. Also refuses a stack whose enchantments carry a nonempty
-    /// `projectile_spawned` component: the engine does not yet implement those
-    /// generic post-insertion effects. No random is drawn and nothing spawns on
-    /// those refusals. The original stack is unchanged; carried count is one.
+    /// invalid stack or non-finite shot parameter. Also refuses a stack with a
+    /// `projectile_spawned` effect the engine does not apply yet: `ignite`,
+    /// `apply_impulse`, `play_sound` and `all_of` of those apply
+    /// (`apply_mob_effect` and `apply_exhaustion` do nothing to a projectile,
+    /// as in vanilla); the block, damage, explosion, particle, summon,
+    /// function and item-damage effects are refused rather than skipped. No
+    /// random is drawn and nothing spawns on those refusals. Unsupported
+    /// requirement contexts (including entity flags) and invalid clamped
+    /// level-value ranges also refuse before insertion. Type predicates,
+    /// random chance and their boolean combinations are supported.
+    /// The original stack
+    /// is unchanged; carried count is one; the effects see the stack as given.
     #[access(WorldOnly)]
     fn spawn_projectile_from_rotation(
         &mut self,
