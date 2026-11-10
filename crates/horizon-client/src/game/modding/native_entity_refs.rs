@@ -476,10 +476,9 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
-        if let Some(log) = self.world.block_log.as_mut() {
-            log.push((pos[0], pos[1], pos[2]));
-        }
-        self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
+        self.after_commit(super::transactions::After::NotifyClients((
+            pos[0], pos[1], pos[2],
+        )));
         true
     }
     /// `LevelRenderer.destroyBlockProgress` for this client's own view only.
@@ -3794,7 +3793,20 @@ pub(super) mod tests {
             &vec![(3, 64, 0), (4, 64, 0)]
         );
         // `sendBlockUpdated` queues the block again without writing; out of height it queues nothing.
+        let dirty_before = game.world.modified.clone();
+        let block_before = game.world.block(5, 64, 0);
         assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert_eq!(game.world.modified, dirty_before);
+        assert_eq!(game.world.block(5, 64, 0), block_before);
+        use mod_api::prelude::*;
+        let host: &mut dyn mod_api::ServerHost = &mut game;
+        let aborted: Result<(), ()> = host.transaction(|host, _| {
+            assert!(level.send_block_updated(host, [6, 64, 0]));
+            Err(())
+        });
+        assert!(aborted.is_err());
+        assert!(!game.world.block_log.as_ref().unwrap().contains(&(6, 64, 0)));
         assert!(!game.level_send_block_updated(level, [5, 10_000, 0]));
         assert_eq!(
             game.world.block_log.as_ref().unwrap(),
@@ -3808,6 +3820,31 @@ pub(super) mod tests {
         assert_eq!(
             game.level_block_break_speed(level, [3, 10_000, 0], None),
             None
+        );
+        let mut pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&pickaxe)),
+            Some(6.0)
+        );
+        pickaxe.enchant("minecraft:efficiency", 5);
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&pickaxe)),
+            Some(6.0)
+        );
+        let mut custom_tool = ItemStack::new("minecraft:stick", 1);
+        let components = horizon_client::item_data::command_components(
+            r#"[tool={rules:[{blocks:"stone",speed:7.0f}],default_mining_speed:2.0f}]"#,
+        )
+        .unwrap();
+        (custom_tool.damage, custom_tool.extra) =
+            horizon_client::item_data::decode_components(Some(&components));
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&custom_tool)),
+            Some(7.0)
+        );
+        assert_eq!(
+            game.level_block_break_speed(level, [5, 64, 0], Some(&custom_tool)),
+            Some(2.0)
         );
         // Server-side game: the client-only crack is refused.
         assert!(!game.level_set_client_break_progress(level, 1, [3, 64, 0], 4));
