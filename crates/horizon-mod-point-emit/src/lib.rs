@@ -32,6 +32,10 @@ pub struct Point {
     /// is `()`.
     #[serde(default)]
     pub return_ty: Option<String>,
+    /// The table module its constructors are in: none for the game's `mod_points`, or a mod
+    /// point's (#2339) table as the generated code names it (`mod_0::__horizon_points`).
+    #[serde(default)]
+    pub table: Option<String>,
 }
 
 /// The part of a point's raw contract a `replace` refusal names.
@@ -70,19 +74,32 @@ pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<St
         .map(|(place, entry, point)| {
             let (id, priority, inject) = (&manifest.id, entry.priority, &entry.id);
             let listener = format!("{prefix}{}", entry.with);
+            let table = point.table.as_deref().unwrap_or("mod_points");
+            let constructor = format!("{table}::listeners::{place}");
             if entry.kind == Kind::Replace {
                 let host = if point.host == "none" { "none" } else { "host" };
                 format!(
-                    "mod_points::replace!({place}, {}, {host}, {id:?}, {priority}, {inject:?}, {listener})",
+                    "mod_points::replace!({constructor}, {}, {host}, {id:?}, {priority}, {inject:?}, {listener})",
                     point.returns
                 )
             } else {
-                format!(
-                    "mod_points::listeners::{place}({id:?}, {priority}, {inject:?}, {listener})"
-                )
+                format!("{constructor}({id:?}, {priority}, {inject:?}, {listener})")
             }
         })
         .collect())
+}
+
+/// An internals listener at a mod point (#2339): `table`'s typed constructor for `place`, which
+/// checks `listener` against the place's raw listener type, in the order its injection asks.
+pub fn mod_internals(
+    table: &str,
+    place: &str,
+    mod_id: &str,
+    listener: &str,
+    priority: i32,
+    inject: &str,
+) -> String {
+    format!("{table}::raw::{place}({mod_id:?}, {listener}).ordered({priority}, {inject:?})")
 }
 
 /// Place names selected by the same resolver as constructor emission. The wasm build passes
@@ -223,6 +240,7 @@ hash = "pin"
             host: "both".into(),
             raw_shape: None,
             return_ty: Some("()".into()),
+            table: None,
         }];
         let native = api(&manifest, &points, "mod_3::")
             .unwrap()
@@ -247,14 +265,14 @@ hash = "pin"
         replace.inject[0].kind = Kind::Replace;
         assert_eq!(
             api(&replace, &points, "mod_3::").unwrap()[0],
-            "mod_points::replace!(tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head)"
+            "mod_points::replace!(mod_points::listeners::tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head)"
         );
         let mut free = points[0].clone();
         free.returns = "result".into();
         free.host = "none".into();
         assert_eq!(
             api(&replace, &[free], "original_mod::").unwrap()[0],
-            "mod_points::replace!(tick, result, none, \"fixture\", 12, \"before\", original_mod::head)"
+            "mod_points::replace!(mod_points::listeners::tick, result, none, \"fixture\", 12, \"before\", original_mod::head)"
         );
         let mut opaque = points[0].clone();
         opaque.returns = "none".into();
@@ -278,6 +296,28 @@ hash = "pin"
         let mut untyped = points[0].clone();
         untyped.return_ty = None;
         assert!(api(&replace, &[untyped], "mod_3::").is_err());
+        // A mod point's constructor is in its own table.
+        let mut own = points[0].clone();
+        own.table = Some("mod_1::__horizon_points".into());
+        assert_eq!(
+            api(&manifest, &[own.clone()], "mod_3::").unwrap()[0],
+            "mod_1::__horizon_points::listeners::tick(\"fixture\", 12, \"before\", mod_3::head)"
+        );
+        assert_eq!(
+            api(&replace, &[own], "mod_3::").unwrap()[0],
+            "mod_points::replace!(mod_1::__horizon_points::listeners::tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head)"
+        );
+        assert_eq!(
+            mod_internals(
+                "mod_1::__horizon_points",
+                "tick_return",
+                "fixture",
+                "mod_3::seen",
+                -2,
+                "seen"
+            ),
+            "mod_1::__horizon_points::raw::tick_return(\"fixture\", mod_3::seen).ordered(-2, \"seen\")"
+        );
         let wasm = api(&manifest, &points, "original_mod::").unwrap();
         assert_eq!(
             wasm[0],
