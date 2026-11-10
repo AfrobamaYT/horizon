@@ -1,7 +1,6 @@
 //! `HumanoidModel.ArmPose`: how a humanoid model poses an arm, and the names an item declaration gives them.
 
 /// `HumanoidModel.ArmPose`'s constants, the arm poses a humanoid model has.
-// exhaustive: vanilla constants and a registered custom pose
 #[derive(
     horizon_mod_api_macros::Wire,
     Clone,
@@ -13,6 +12,7 @@
     serde::Serialize,
 )]
 #[serde(rename_all = "snake_case")]
+// exhaustive: vanilla constants and a registered custom pose
 pub enum ArmPose {
     /// No held item pose.
     Empty,
@@ -69,6 +69,7 @@ impl ArmPose {
     serde::Deserialize,
     horizon_mod_api_macros::Wire,
 )]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct CustomArmPose {
     pub(crate) slot: u32,
     pub(crate) both: bool,
@@ -83,6 +84,7 @@ pub(crate) struct PoseInfo {
 
 impl CustomArmPose {
     /// Resolve a slot against the current load's registrations.
+    // hidden: the game's renderer resolves the load-owned slot; not a mod-facing call
     #[doc(hidden)]
     pub fn from_slot(slot: u32) -> Option<Self> {
         table().get(slot as usize).map(|pose| Self {
@@ -92,6 +94,7 @@ impl CustomArmPose {
         })
     }
     /// Resolved flags for the renderer; absent for a refused or unknown registration.
+    // hidden: the game's renderer reads the resolved flags; not a mod-facing call
     #[doc(hidden)]
     pub fn flags(self) -> Option<(bool, bool)> {
         let table = table();
@@ -100,6 +103,7 @@ impl CustomArmPose {
             .map(|pose| (pose.both, pose.offhand))
     }
     /// Load-owned slot for the renderer.
+    // hidden: the game's renderer reads the load-owned slot; not a mod-facing call
     #[doc(hidden)]
     pub fn slot(self) -> u32 {
         self.slot
