@@ -481,6 +481,13 @@ impl SyncData {
                 }
                 pack_entries(path, overlay, &mut entries);
             }
+            if *key == BIOME_REGISTRY {
+                // A content mod's own biomes: no client has their files, so their data is sent.
+                for (id, v) in crate::biome::mod_biome_files(resources) {
+                    let (ns, p) = id.split_once(':').unwrap_or(("minecraft", &id));
+                    entries.push(((ns.to_owned(), p.to_owned()), v, true));
+                }
+            }
             entries.retain(|(_, value, _)| overlay.conditions.allows(value));
             // A biome the mods' modifiers changed is not the client's own file any more:
             // its data is sent, as a pack's biome is.
