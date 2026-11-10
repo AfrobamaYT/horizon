@@ -340,6 +340,50 @@ mod tests {
                 assert!(
                     matches!(game.crosshair_target(), Some(CrosshairTarget::Entity { entity: hit, .. }) if hit == entity)
                 );
+                let frame_kind = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:entity_type")
+                    .unwrap()
+                    .id("minecraft:item_frame")
+                    .unwrap();
+                game.handle_packet(C::AddEntity(play::AddEntity {
+                    id: 33,
+                    uuid: 33,
+                    kind: frame_kind,
+                    position: [2.5, 2.0, 0.5],
+                    velocity: [0.0; 3],
+                    pitch: 0,
+                    yaw: 0,
+                    head_yaw: 0,
+                    data: 0,
+                }))
+                .unwrap();
+                let frame = game.entity(33).unwrap();
+                assert!(game.targeting_entity_hit(frame).is_some());
+                let mut held = horizon_items::items::ItemStack::new("minecraft:stick", 1);
+                held.data_mut().set_other(
+                    "minecraft:attack_range",
+                    Some(horizon_core::nbt::Tag::Compound(vec![
+                        ("min_reach".into(), horizon_core::nbt::Tag::Float(0.0)),
+                        ("max_reach".into(), horizon_core::nbt::Tag::Float(0.25)),
+                        ("hitbox_margin".into(), horizon_core::nbt::Tag::Float(0.0)),
+                    ])),
+                );
+                game.inventory[0] = Some(held);
+                assert!(game.targeting_entity_hit(entity).is_none());
+                assert!(game.targeting_entity_hit(frame).is_none());
+                let mut frame_override = options;
+                frame_override.entity = Some(frame);
+                assert!(game.set_targeting(frame_override));
+                assert!(game.crosshair_target().is_none());
+                *state.targets.lock().unwrap() = vec![entity, frame];
+                assert!(game.mod_attack_targets());
+                assert!(sent_attacks(game, &mut server).is_empty());
+                game.inventory[0] = None;
+                assert!(game.set_targeting(options));
                 let second = game.entity(32).unwrap();
                 *state.targets.lock().unwrap() = vec![entity, second, entity];
                 assert!(game.remote_start_attack());
