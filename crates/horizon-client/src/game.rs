@@ -1385,8 +1385,6 @@ impl LevelAccess for GameLevel<'_> {
         }
         source
     }
-    fn observe_block_entity_neighbor(&self, pos: BlockPos, state: BlockStateId, neighbor: BlockPos) { self.block_entity_neighbor_notice(pos, state, neighbor); }
-    fn receives_weak_changes(&self, pos: BlockPos, state: BlockStateId) -> bool { self.block_entity_weak_changes(pos, state) }
     fn has_weak_power_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldCheckWeakPower)

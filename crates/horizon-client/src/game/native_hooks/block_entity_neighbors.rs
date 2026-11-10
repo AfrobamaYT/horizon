@@ -18,7 +18,10 @@ impl GameLevel<'_> {
     ) {
         self.fire_weak_changes(dimension, pos, state, receive);
     }
-    pub(in crate::game) fn block_entity_neighbor_notice(
+}
+
+impl horizon_world::level::BlockEntityNeighbors for GameLevel<'_> {
+    fn observe_block_entity_neighbor(
         &self,
         pos: BlockPos,
         state: BlockStateId,
@@ -28,11 +31,7 @@ impl GameLevel<'_> {
             self.native_on_neighbor_change(self.dimension, pos, state, neighbor);
         }
     }
-    pub(in crate::game) fn block_entity_weak_changes(
-        &self,
-        pos: BlockPos,
-        state: BlockStateId,
-    ) -> bool {
+    fn receives_weak_changes(&self, pos: BlockPos, state: BlockStateId) -> bool {
         let mut receive = false;
         if self.native_authoritative {
             self.native_weak_changes(self.dimension, pos, state, &mut receive);
@@ -40,4 +39,3 @@ impl GameLevel<'_> {
         receive
     }
 }
-

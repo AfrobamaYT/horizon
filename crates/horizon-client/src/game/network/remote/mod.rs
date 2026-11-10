@@ -63,7 +63,6 @@ use {
         stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
     },
 };
-
 type BuiltinCache = Vec<(std::path::PathBuf, Arc<Builtin>)>;
 static BUILTIN: std::sync::Mutex<BuiltinCache> = std::sync::Mutex::new(Vec::new());
 
@@ -11977,6 +11976,7 @@ impl<'w> DryLevel<'w> {
         }
     }
 }
+impl horizon_world::level::BlockEntityNeighbors for DryLevel<'_> {}
 
 impl horizon_world::level::LevelAccess for DryLevel<'_> {
     fn emit(&mut self, event: horizon_world::level::LevelEvent) {
@@ -16919,6 +16919,7 @@ mod tests {
             loaded: bool,
             ceiling: i32,
         }
+        impl horizon_world::level::BlockEntityNeighbors for Level {}
         impl LevelAccess for Level {
             fn block_state(&self, pos: BlockPos) -> BlockStateId {
                 if pos == BlockPos::new(0, 0, 0) {

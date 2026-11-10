@@ -9,6 +9,19 @@ fn block_entity_neighbor_notices_and_weak_changes() {
         seen: RefCell<Vec<(BlockPos, BlockPos)>>,
         weak: bool,
     }
+    impl BlockEntityNeighbors for Observer {
+        fn observe_block_entity_neighbor(
+            &self,
+            pos: BlockPos,
+            _: BlockStateId,
+            neighbor: BlockPos,
+        ) {
+            self.seen.borrow_mut().push((pos, neighbor));
+        }
+        fn receives_weak_changes(&self, _: BlockPos, _: BlockStateId) -> bool {
+            self.weak
+        }
+    }
     impl LevelAccess for Observer {
         fn block_state(&self, pos: BlockPos) -> BlockStateId {
             self.inner.block_state(pos)
@@ -25,14 +38,7 @@ fn block_entity_neighbor_notices_and_weak_changes() {
         fn game_time(&self) -> i64 {
             0
         }
-        fn observe_block_entity_neighbor(
-            &self,
-            pos: BlockPos,
-            _: BlockStateId,
-            neighbor: BlockPos,
-        ) {
-            self.seen.borrow_mut().push((pos, neighbor));
-        }
+
         fn observe_neighbor_changed(
             &self,
             _: &mut Ticks,
@@ -42,9 +48,6 @@ fn block_entity_neighbor_notices_and_weak_changes() {
             _: bool,
         ) {
             self.seen.borrow_mut().push((pos, BlockPos::new(-99, 0, 0)));
-        }
-        fn receives_weak_changes(&self, _: BlockPos, _: BlockStateId) -> bool {
-            self.weak
         }
     }
     let Some(f) = fixture() else { return };

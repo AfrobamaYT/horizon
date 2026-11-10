@@ -46,6 +46,7 @@
 //! use horizon_world::level::{self, Behaviours, LevelAccess, LevelEvent, PlaceContext, Ticks, flags};
 //!
 //! struct GameLevel { chunks: Chunks, random: LegacyRandom, time: i64, events: Vec<LevelEvent> }
+//! impl level::BlockEntityNeighbors for GameLevel {}
 //! impl LevelAccess for GameLevel {
 //!     fn block_state(&self, pos: BlockPos) -> BlockStateId { self.chunks.get(pos) }
 //!     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
@@ -397,8 +398,11 @@ pub enum Spread {
     Fire,
 }
 
+mod block_entity_neighbors;
+pub use block_entity_neighbors::BlockEntityNeighbors;
+
 /// The world as seen by block behaviour. Implemented by the game and tests.
-pub trait LevelAccess {
+pub trait LevelAccess: BlockEntityNeighbors {
     /// `WorldBorder.isWithinBounds(BlockPos)` for block movement.
     fn within_world_border(&self, _pos: BlockPos) -> bool {
         true
@@ -863,18 +867,6 @@ pub trait LevelAccess {
     /// answer to use. The default keeps it.
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
-    }
-    /// A block entity changed beside this cell, after vanilla comparator processing.
-    fn observe_block_entity_neighbor(
-        &self,
-        _pos: BlockPos,
-        _state: BlockStateId,
-        _neighbor: BlockPos,
-    ) {
-    }
-    /// Whether this cell receives changes through an intervening conductor.
-    fn receives_weak_changes(&self, _pos: BlockPos, _state: BlockStateId) -> bool {
-        false
     }
     /// Whether a signal query needs the weak-power block hook.
     fn has_weak_power_hook(&self) -> bool {
