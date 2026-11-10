@@ -36,3 +36,7 @@ mod brewing_dispatch_tests {
 mod item_model_dispatch_tests {
     include!("item/item_model_dispatch_tests.rs");
 }
+
+/// Engine-owned instrumentation registration.
+#[doc(hidden)]
+pub mod dispatch_scope;

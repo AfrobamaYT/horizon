@@ -1,9 +1,11 @@
 //! Moved here from the game so mods can name it.
 #[allow(unused_imports)]
 use crate::*;
-use std::borrow::Cow;
+pub use mod_vocab::content::crash::{
+    ConvertedCall, ConvertedPackage, ConvertedPackageGuard, ConvertedPackages, ConvertedScope,
+    ModCall, ModGuard,
+};
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 use std::sync::Mutex;
 
 thread_local! {
@@ -24,20 +26,13 @@ pub fn current_native_call() -> Option<ModCall> {
 }
 /// What the game is doing, set as it goes: graphics adapter, settings, packs, world.
 static DETAILS: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
-// no wire: process-local crash attribution uses static runtime identities; not a hook payload.
-/// A call into one hook of a native mod.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// exhaustive: the game builds it with a literal; mods only read it
-pub struct ModCall {
-    /// The mod's `[mod] id`.
-    pub id: &'static str,
-    pub hook: &'static str,
-    /// The part's type (`std::any::type_name`), when the call is to one of the mod's parts.
-    pub part: Option<&'static str>,
-}
 /// Marks this thread as inside `call` until the guard drops, which also happens while a panic
 /// unwinds. A hook called from a hook is named by the inner call.
 pub fn enter_native_mod(call: ModCall) -> ModGuard {
+    let _ = ensure_installed();
+    mod_vocab::content::crash::enter_native_mod(call)
+}
+fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
     let frame = NEXT_FRAME
         .try_with(|c| {
             let next = c.get().checked_add(1);
@@ -49,14 +44,14 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
         .ok()
         .flatten();
     let outer_frame = NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten();
-    ModGuard {
+    factory.finish(mod_vocab::dispatch_scope::State {
         outer_frame,
-        outer: IN_NATIVE_MOD
+        outer_call: IN_NATIVE_MOD
             .try_with(|c| c.replace(Some(call)))
             .ok()
             .flatten(),
-        _timing: crate::__private::profiler::enter(call),
-    }
+        timing: crate::__private::profiler::enter(call).map(|guard| guard.into_timing()),
+    })
 }
 /// The `[mod] id` of the native mod this thread is inside a hook of, if any.
 pub fn current_native_mod() -> Option<&'static str> {
@@ -65,21 +60,6 @@ pub fn current_native_mod() -> Option<&'static str> {
         .ok()
         .flatten()
         .map(|call| call.id)
-}
-
-// no wire: process-local crash attribution uses static runtime identities; not a hook payload.
-/// A call into one package a native runtime hosts, beside the runtime's own [`ModCall`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-// exhaustive: the game builds it with a literal; mods only read it
-pub struct ConvertedCall {
-    /// The hosting runtime's `[mod] id`, the owner the report names first.
-    pub runtime: &'static str,
-    /// The package the runtime declared it loaded.
-    pub package: Cow<'static, str>,
-    /// The guest export being run.
-    pub export: Cow<'static, str>,
-    /// Where in the guest code, as the runtime names it (`Foo.tick(Foo.java:42)`).
-    pub site: Cow<'static, str>,
 }
 
 /// The converted package this thread is executing, if any.
@@ -95,152 +75,52 @@ pub fn current_converted_call() -> Option<ConvertedCall> {
         .flatten()
 }
 
-// no wire: process-local crash attribution uses static runtime identities; not a hook payload.
-/// The packages one native runtime declared it loaded.
-///
-/// A runtime that hosts converted code (Portizon's wasm packages, a Java interpreter running
-/// jars) builds this once from the packages it loaded and keeps it while they run. A call into
-/// a package goes through the [`ConvertedPackage`] this registry hands out for an id it
-/// declared, so guest code cannot name a package from another mod. The runtime's own `[mod] id`
-/// stays the report's first name; a package and its call are told after it.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ConvertedPackages {
-    runtime: &'static str,
-    packages: Vec<Cow<'static, str>>,
-}
-
-impl ConvertedPackages {
-    /// Declares `packages` as the ones `runtime` (its `[mod] id`) loaded. Ids read from
-    /// manifests or module bytes are stored here. Entering clones an owned id on each call.
-    pub fn new<I>(runtime: &'static str, packages: I) -> Self
-    where
-        I: IntoIterator,
-        I::Item: Into<Cow<'static, str>>,
-    {
-        Self {
-            runtime,
-            packages: packages.into_iter().map(Into::into).collect(),
-        }
+fn enter_converted(call: ConvertedCall) -> Option<ConvertedPackageGuard> {
+    if current_native_mod() != Some(call.runtime) {
+        return None;
     }
-
-    /// The handle for `id`, or None when this runtime did not declare that package.
-    pub fn package(&self, id: &str) -> Option<ConvertedPackage<'_>> {
-        self.packages
-            .iter()
-            .find(|package| package.as_ref() == id)
-            .map(|package| ConvertedPackage {
-                runtime: self.runtime,
-                package,
-            })
-    }
-}
-
-// no wire: borrowed crash attribution entry tied to its package inventory.
-/// One package a [`ConvertedPackages`] declared; only that registry makes one.
-#[derive(Clone, Copy, Debug)]
-// exhaustive: its fields are private, so only a registry creates it
-pub struct ConvertedPackage<'a> {
-    runtime: &'static str,
-    package: &'a Cow<'static, str>,
-}
-
-impl ConvertedPackage<'_> {
-    /// Marks this thread as running `export` of this package at `site` until the guard drops:
-    /// a panic in that call names the runtime, the package, the export and the site. Nested
-    /// scopes restore the one they found, on a normal return and while a panic unwinds.
-    ///
-    /// None when this thread is not inside a call the package's runtime owns: another native
-    /// mod's hook never attributes its crash to this runtime's package.
-    pub fn enter(
-        &self,
-        export: impl Into<Cow<'static, str>>,
-        site: impl Into<Cow<'static, str>>,
-    ) -> Option<ConvertedPackageGuard> {
-        if current_native_mod() != Some(self.runtime) {
-            return None;
-        }
-        let call = ConvertedCall {
-            runtime: self.runtime,
-            package: self.package.clone(),
-            export: export.into(),
-            site: site.into(),
-        };
-        let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
-        let token = NEXT_SCOPE
-            .try_with(|c| {
-                let next = c.get().checked_add(1)?;
-                c.set(next);
-                Some(next)
-            })
-            .ok()
-            .flatten()?;
-        let scope = ConvertedScope { call, frame, token };
-        let outer = IN_CONVERTED_PACKAGE
-            .try_with(|current| current.replace(Some(scope)))
-            .ok()?;
-        Some(ConvertedPackageGuard {
-            outer,
-            token,
-            _thread: std::marker::PhantomData,
+    let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
+    let token = NEXT_SCOPE
+        .try_with(|c| {
+            let next = c.get().checked_add(1)?;
+            c.set(next);
+            Some(next)
         })
-    }
+        .ok()
+        .flatten()?;
+    let scope = ConvertedScope { call, frame, token };
+    let outer = IN_CONVERTED_PACKAGE
+        .try_with(|current| current.replace(Some(scope)))
+        .ok()?;
+    Some(ConvertedPackageGuard::new(leave_converted, token, outer))
 }
 
-struct ConvertedScope {
-    call: ConvertedCall,
-    frame: u64,
-    token: u64,
+fn leave_converted(token: u64, mut outer: Option<ConvertedScope>) {
+    let _ = IN_CONVERTED_PACKAGE.try_with(|current| {
+        let mut current = current.borrow_mut();
+        if current.as_ref().is_some_and(|s| s.token == token) {
+            let mut outer = outer.take();
+            let restored = ENDED_SCOPES.try_with(|ended| {
+                let mut ended = ended.borrow_mut();
+                while let Some(index) = outer
+                    .as_ref()
+                    .and_then(|scope| ended.iter().position(|(token, _)| *token == scope.token))
+                {
+                    outer = ended.swap_remove(index).1;
+                }
+            });
+            *current = if restored.is_ok() { outer } else { None };
+        } else {
+            let _ = ENDED_SCOPES.try_with(|ended| ended.borrow_mut().push((token, outer.take())));
+        }
+    });
 }
 
-// no wire: RAII crash attribution guard restores thread-local state on drop.
-/// Restores the previous live scope on this thread. This guard is not Send or Sync.
-/// Attribution ends when its native frame exits, even if the guard is retained.
-/// Worker threads have no scope unless the runtime enters one on that thread.
-#[must_use]
-// exhaustive: its field is private, so mods cannot build or destructure it
-pub struct ConvertedPackageGuard {
-    outer: Option<ConvertedScope>,
-    token: u64,
-    _thread: std::marker::PhantomData<Rc<()>>,
-}
-
-impl Drop for ConvertedPackageGuard {
-    fn drop(&mut self) {
-        let _ = IN_CONVERTED_PACKAGE.try_with(|current| {
-            let mut current = current.borrow_mut();
-            if current.as_ref().is_some_and(|s| s.token == self.token) {
-                let mut outer = self.outer.take();
-                let restored = ENDED_SCOPES.try_with(|ended| {
-                    let mut ended = ended.borrow_mut();
-                    while let Some(index) = outer
-                        .as_ref()
-                        .and_then(|scope| ended.iter().position(|(token, _)| *token == scope.token))
-                    {
-                        outer = ended.swap_remove(index).1;
-                    }
-                });
-                *current = if restored.is_ok() { outer } else { None };
-            } else {
-                let _ = ENDED_SCOPES
-                    .try_with(|ended| ended.borrow_mut().push((self.token, self.outer.take())));
-            }
-        });
-    }
-}
-
-// no wire: RAII crash attribution guard restores thread-local state on drop.
-/// Puts back the call that `enter_native_mod` found.
-#[must_use]
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ModGuard {
-    outer_frame: Option<u64>,
-    outer: Option<ModCall>,
-    _timing: Option<crate::__private::profiler::Guard>,
-}
-impl Drop for ModGuard {
-    fn drop(&mut self) {
-        let _ = NATIVE_FRAME.try_with(|c| c.replace(self.outer_frame.take()));
-        let _ = IN_NATIVE_MOD.try_with(|c| c.set(self.outer));
+fn leave_native(mut state: mod_vocab::dispatch_scope::State) {
+    let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
+    let _ = IN_NATIVE_MOD.try_with(|c| c.set(state.outer_call));
+    if let Some(timing) = state.timing {
+        crate::__private::profiler::leave(timing);
     }
 }
 /// Sets one line of the report's details (replacing the last value under `key`).
@@ -494,4 +374,20 @@ mod tests {
         assert_eq!(current_converted_call().unwrap().package, "example:outer");
         assert_eq!(current_native_mod(), Some("runtime"));
     }
+}
+
+pub(crate) fn ensure_installed() -> Result<(), &'static str> {
+    static INSTALLED: std::sync::OnceLock<Result<(), &'static str>> = std::sync::OnceLock::new();
+    *INSTALLED.get_or_init(|| {
+        mod_vocab::dispatch_scope::install(mod_vocab::dispatch_scope::Backend {
+            enter: enter_native,
+            leave: leave_native,
+            current_native: current_native_call,
+            current_converted: current_converted_call,
+            enter_converted,
+            set_detail: |key, value| set_detail(key, value),
+            clear_detail,
+            details,
+        })
+    })
 }

@@ -14,6 +14,8 @@ const THREADS: usize = 64;
 const CALLS: usize = 4096;
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static EPOCH: AtomicUsize = AtomicUsize::new(0);
+// Unlike the admission epoch, this remains valid while stop drains existing guards.
+static POOL_EPOCH: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static POOL: AtomicPtr<Pool> = AtomicPtr::new(std::ptr::null_mut());
 static CONTROL: Mutex<()> = Mutex::new(());
@@ -160,7 +162,7 @@ fn start_with_clock(clock: fn() -> u64) -> bool {
             .collect(),
     });
     POOL.store(Box::into_raw(pool), SeqCst);
-    EPOCH.fetch_add(1, SeqCst);
+    POOL_EPOCH.store(EPOCH.fetch_add(1, SeqCst) + 1, SeqCst);
     ENABLED.store(true, SeqCst);
     true
 }
@@ -231,10 +233,14 @@ pub(crate) fn stop_report() -> Report {
     report
 }
 pub(crate) struct Guard {
-    pool: *const Pool,
-    slot: usize,
-    call: ModCall,
-    began: u64,
+    timing: Option<mod_vocab::dispatch_scope::Timing>,
+}
+impl Guard {
+    pub(crate) fn into_timing(mut self) -> mod_vocab::dispatch_scope::Timing {
+        self.timing
+            .take()
+            .expect("live profiler guard owns its timing")
+    }
 }
 pub(crate) fn enter(call: ModCall) -> Option<Guard> {
     if !is_enabled() {
@@ -269,44 +275,63 @@ pub(crate) fn enter(call: ModCall) -> Option<Guard> {
         }
     });
     Some(Guard {
-        pool,
-        slot,
-        call,
-        began: (pool.clock)(),
+        timing: Some(mod_vocab::dispatch_scope::Timing {
+            generation: epoch,
+            slot,
+            call,
+            began: (pool.clock)(),
+        }),
     })
 }
 impl Drop for Guard {
     fn drop(&mut self) {
-        // This guard holds one ACTIVE reference, so stop cannot free the pool yet.
+        if let Some(timing) = self.timing.take() {
+            leave(timing);
+        }
+    }
+}
+pub(crate) fn leave(timing: mod_vocab::dispatch_scope::Timing) {
+    // Only a genuine guard created by enter reaches this private callback.
+    // Its ACTIVE reference pins this exact epoch; stale epochs are refused.
+    if POOL_EPOCH.load(SeqCst) != timing.generation {
+        return;
+    }
+    let pointer = POOL.load(SeqCst);
+    if pointer.is_null() {
+        return;
+    }
+    // This guard holds one ACTIVE reference, so stop cannot free the pool yet.
+    #[allow(
+        unsafe_code,
+        reason = "The guard retains an ACTIVE reference to the pool."
+    )]
+    let pool = unsafe { &*pointer };
+    if timing.slot >= pool.next_thread.load(SeqCst) {
+        return;
+    }
+    let ns = (pool.clock)().saturating_sub(timing.began);
+    let index = pool
+        .buffers
+        .get(timing.slot)
+        .map(|b| (b, b.next.fetch_add(1, SeqCst)));
+    if let Some((buffer, index)) = index.filter(|(_, i)| *i < CALLS) {
+        // Unique reserved index, and stop waits for our ACTIVE decrement before reading.
         #[allow(
             unsafe_code,
-            reason = "The guard retains an ACTIVE reference to the pool."
+            reason = "Each writer owns its reserved record until ACTIVE is decremented."
         )]
-        let pool = unsafe { &*self.pool };
-        let ns = (pool.clock)().saturating_sub(self.began);
-        let index = pool
-            .buffers
-            .get(self.slot)
-            .map(|b| (b, b.next.fetch_add(1, SeqCst)));
-        if let Some((buffer, index)) = index.filter(|(_, i)| *i < CALLS) {
-            // Unique reserved index, and stop waits for our ACTIVE decrement before reading.
-            #[allow(
-                unsafe_code,
-                reason = "Each writer owns its reserved record until ACTIVE is decremented."
-            )]
-            unsafe {
-                *buffer.records[index].get() = Some(Record {
-                    mod_id: self.call.id,
-                    hook: self.call.hook,
-                    part: self.call.part,
-                    nanoseconds: ns,
-                });
-            }
-        } else {
-            pool.dropped.fetch_add(1, SeqCst);
+        unsafe {
+            *buffer.records[index].get() = Some(Record {
+                mod_id: timing.call.id,
+                hook: timing.call.hook,
+                part: timing.call.part,
+                nanoseconds: ns,
+            });
         }
-        ACTIVE.fetch_sub(1, SeqCst);
+    } else {
+        pool.dropped.fetch_add(1, SeqCst);
     }
+    ACTIVE.fetch_sub(1, SeqCst);
 }
 
 #[cfg(test)]

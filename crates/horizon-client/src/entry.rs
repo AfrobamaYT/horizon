@@ -58,6 +58,10 @@ pub fn main_with(
     built: &'static [horizon_mod_package::runtime::BuiltMod],
     startup: Startup,
 ) {
+    // Platform instrumentation must precede registration and the first mod guard.
+    if let Err(error) = mod_api::__private::initialize() {
+        eprintln!("Horizon: mod instrumentation unavailable: {error}");
+    }
     let Startup {
         launch,
         options,

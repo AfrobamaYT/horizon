@@ -14,30 +14,6 @@ pub trait ResourceCodec {
     fn refused(&self, _handler: &str) {}
 }
 // exhaustive: wasm boundary plumbing that generated code builds field by field
-// hidden: wasm boundary plumbing used by generated code, not a mod's API
-/// A deliberate refusal to move an erased Rust capability between link groups.
-/// Typed resources never use this marker; their zero identity is still stale.
-#[doc(hidden)]
-#[derive(Debug)]
-// no wire: resource-table refusal sentinel, not an owned data value.
-pub struct Unsupported {
-    pub reason: &'static str,
-}
-impl Unsupported {
-    /// Slots never allocates generation zero. Only the erased Any view interprets it.
-    pub const ID: Id = Id(0);
-    pub const CROSS_GROUP: Self = Self {
-        reason: "cross-group capability",
-    };
-    pub fn shared() -> std::sync::Arc<dyn Any + Send + Sync> {
-        static MARKER: std::sync::OnceLock<std::sync::Arc<Unsupported>> =
-            std::sync::OnceLock::new();
-        MARKER
-            .get_or_init(|| std::sync::Arc::new(Self::CROSS_GROUP))
-            .clone()
-    }
-}
-// exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A lease's scope ended, or the caller left its owning thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // no wire: local resource-scope diagnostics.
@@ -127,6 +103,7 @@ pub struct ScopeLease {
 }
 impl ScopeLease {
     pub fn new() -> Self {
+        ensure_installed();
         let token = ACTIVE.with(|active| {
             let mut scopes = active.borrow_mut();
             while let Some(slot) = scopes.free {
@@ -306,7 +283,9 @@ pub(super) fn refused(handler: &str) {
 pub(super) fn store(value: Box<dyn Any>) -> Result<Id, WireError> {
     current()?.store(value)
 }
-pub(super) fn load<T: 'static>(id: Id) -> Result<T, WireError> {
+
+#[cfg(test)]
+fn load<T: 'static>(id: Id) -> Result<T, WireError> {
     current()?
         .load(id, TypeId::of::<T>())?
         .downcast::<T>()
@@ -476,4 +455,15 @@ mod tests {
             Err(WireError::Invalid("no resource context"))
         );
     }
+}
+
+fn ensure_installed() {
+    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        let _ = mod_vocab::wire::install_resource_access(mod_vocab::wire::ResourceAccess {
+            store,
+            load: |id, view| current()?.load(id, view),
+            refused,
+        });
+    });
 }

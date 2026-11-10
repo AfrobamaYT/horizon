@@ -24,9 +24,7 @@ pub use crate::wire::wire_slots::{Id, Slots, Stale};
 mod resources;
 // hidden: transport plumbing used by generated boundary code.
 #[doc(hidden)]
-pub use resources::{
-    ResourceCodec, ResourceScope, ScopeError, ScopeLease, ScopeToken, Unsupported, borrow_token,
-};
+pub use resources::{ResourceAccess, Unsupported, install_resource_access};
 
 /// The guest's start-up call: its input is the package list.
 // hidden: transport plumbing used by generated boundary code.
@@ -1447,49 +1445,7 @@ mod tests {
         bytes(vec!["ab".to_owned()], &[1, 0, 0, 0, 2, 0, 0, 0, 97, 98]);
         bytes(serde_json::json!(1), &[1, 0, 0, 0, 49]);
     }
-    #[test]
-    fn resource_context_is_scoped_and_encoding_keeps_first_error() {
-        use std::{
-            any::{Any, TypeId},
-            cell::RefCell,
-            rc::Rc,
-        };
-        struct Codec(RefCell<Option<Box<dyn Any>>>);
-        impl super::ResourceCodec for Codec {
-            fn store(&self, value: Box<dyn Any>) -> Result<super::Id, super::WireError> {
-                *self.0.borrow_mut() = Some(value);
-                Ok(super::Id(7))
-            }
-            fn load(&self, id: super::Id, _: TypeId) -> Result<Box<dyn Any>, super::WireError> {
-                if id != super::Id(7) {
-                    return Err(super::WireError::Invalid("stale resource"));
-                }
-                self.0
-                    .borrow_mut()
-                    .take()
-                    .ok_or(super::WireError::Invalid("stale resource"))
-            }
-        }
-        let mut out = super::Writer::new();
-        {
-            let _scope = super::ResourceScope::new(Rc::new(Codec(RefCell::new(None))));
-            out.put_resource(Box::new(42u32));
-            assert_eq!(out.error(), None);
-            assert_eq!(
-                super::Reader::new(out.bytes()).take_resource::<u32>(),
-                Ok(42)
-            );
-        }
-        assert_eq!(
-            super::Reader::new(out.bytes()).take_resource::<u32>(),
-            Err(super::WireError::Invalid("no resource context"))
-        );
-        out.fail(super::WireError::Trailing);
-        out.put_resource(Box::new(43u32));
-        assert_eq!(out.error(), Some(super::WireError::Trailing));
-        out.clear();
-        assert_eq!(out.error(), None);
-    }
+
     #[test]
     fn static_string_rows_roundtrip_through_intern() {
         let rows: Vec<(&'static str, &'static str)> =
