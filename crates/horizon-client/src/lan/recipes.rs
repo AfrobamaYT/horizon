@@ -314,6 +314,15 @@ pub struct ContentPart {
     pub recipes: Vec<(String, Value)>,
     pub last: Option<Vec<String>>,
 }
+impl ContentPart {
+    /// Decode a content part only within the same bound used by the sender.
+    pub fn decode(data: &[u8]) -> Result<Self, String> {
+        if data.len() > CONTENT_MAX {
+            return Err(format!("recipe content exceeds {CONTENT_MAX} bytes"));
+        }
+        serde_json::from_slice(data).map_err(|error| error.to_string())
+    }
+}
 
 /// The payloads for `types`' recipes among `sources` (`recipe_sources::sources`,
 /// vanilla's ids bare), ids made whole (`minecraft:<name>`). With no type
@@ -410,6 +419,38 @@ pub fn content() -> Arc<Vec<Vec<u8>>> {
 
 /// Horizon recipe viewer transfer channel.
 pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
+
+/// Decode a transfer request: container, bounded recipe id, optional all flag.
+pub fn decode_transfer_request(data: &[u8]) -> horizon_protocol::Result<(i32, String, bool)> {
+    let mut reader = horizon_protocol::buf::Reader::new(data);
+    let container = reader.varint()?;
+    let id = reader.string(512)?;
+    let all = match reader.remaining() {
+        0 => false,
+        1 => reader.u8()? == 1,
+        _ => {
+            return Err(horizon_protocol::Error::new(
+                "recipe transfer request: trailing bytes",
+            ));
+        }
+    };
+    Ok((container, id, all))
+}
+
+/// Decode a fixed-shape transfer result, or an empty feature advertisement.
+pub fn decode_transfer_reply(data: &[u8]) -> horizon_protocol::Result<Option<(i32, u8)>> {
+    if data.is_empty() {
+        return Ok(None);
+    }
+    let mut reader = horizon_protocol::buf::Reader::new(data);
+    let reply = (reader.varint()?, reader.u8()?);
+    if reader.remaining() != 0 {
+        return Err(horizon_protocol::Error::new(
+            "recipe transfer reply: trailing bytes",
+        ));
+    }
+    Ok(Some(reply))
+}
 
 #[cfg(test)]
 mod content_tests {
@@ -636,6 +677,15 @@ mod content_tests {
             parse(&file["key"]["a"]);
             parse(&file["shapes"]["star"]);
         });
+    }
+
+    #[test]
+    fn content_decode_bounds_before_deserializing() {
+        let mut body = br#"{"recipes":[],"last":null}"#.to_vec();
+        body.resize(1_047_552, b' ');
+        assert_eq!(ContentPart::decode(&body).unwrap().recipes, vec![]);
+        body.push(b' ');
+        assert!(ContentPart::decode(&body).unwrap_err().contains("exceeds"));
     }
 
     #[test]

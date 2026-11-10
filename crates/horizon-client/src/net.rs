@@ -926,7 +926,8 @@ fn run(
             channel: "minecraft:brand".into(),
             data: brand(),
         })
-        .encode(),
+        .try_encode()
+        .map_err(e)?,
     )
     .map_err(e)?;
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
@@ -1101,7 +1102,9 @@ fn configure(
                         .map_err(|_| {
                             Reason::plain(crate::content_identity::MISMATCH.to_string())
                         })?;
-                content_verified = p.data == hash;
+                content_verified = crate::content_identity::decode_payload(&p.data)
+                    .map_err(|error| Reason::plain(error.to_string()))?
+                    == Some(hash);
                 reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                     channel: crate::content_identity::CHANNEL.into(),
                     data: hash.to_vec(),
@@ -2056,6 +2059,47 @@ mod tests {
         writer.lock().unwrap().take().unwrap().shutdown();
         assert!(thread.join().unwrap().is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_send_rejects_unknown_oversize_payload_before_writing() {
+        let (client, server) = horizon_protocol::connection::Pipe::pair();
+        let (_, writer) = Connection::local(client).split();
+        let (_, events) = channel();
+        let session = Session {
+            events,
+            writer: Arc::new(Mutex::new(Some(writer))),
+            configuring: Arc::new(AtomicBool::new(false)),
+            thread: None,
+            address: "local".into(),
+            name: "Player".into(),
+            counters: Arc::new(Mutex::new(None)),
+            cookies: Cookies::default(),
+            debug: false,
+            far: Arc::default(),
+            recorder: Arc::new(Mutex::new(None)),
+            serial: next_serial(),
+        };
+        let mut server = Connection::local(server);
+        let payload = |size| {
+            play::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "test:opaque".into(),
+                data: vec![0x83; size],
+            })
+        };
+        session.send(payload(32_767));
+        let (id, bytes) = server.recv().unwrap();
+        assert_eq!(
+            play::Serverbound::decode(id, &bytes).unwrap(),
+            payload(32_767)
+        );
+        session.send(payload(32_768));
+        session.send(play::Serverbound::ClientTickEnd(Empty));
+        let (id, bytes) = server.recv().unwrap();
+        assert_eq!(
+            play::Serverbound::decode(id, &bytes).unwrap(),
+            play::Serverbound::ClientTickEnd(Empty)
+        );
     }
 
     #[test]

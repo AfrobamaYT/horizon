@@ -216,9 +216,9 @@ impl Game<'_> {
     /// or any other play packet. Nothing counts it, and the game doesn't apply
     /// it on its side: a packet that needs a sequence number, a signature or
     /// the client's own state is the mod's to get right. An error when the
-    /// player isn't in a server's play state, and for a custom payload past
-    /// `ServerboundCustomPayloadPacket.MAX_PAYLOAD_SIZE`, which a server
-    /// disconnects for. API 409.
+    /// player isn't in a server's play state, and for an unknown custom payload
+    /// past the serverbound discard limit. Registered engine channels retain
+    /// their own codec constraints. API 409.
     pub(super) fn send_packet(
         &mut self,
         packet: ServerboundPlayPacket,
