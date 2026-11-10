@@ -11,12 +11,9 @@ class ItemAttackBoundary(unittest.TestCase):
         source = (ROOT / 'crates/horizon-client/src/game/native_hooks/item_attack.rs').read_text()
         methods = source[source.index('    pub(in crate::game) fn native_left_click_entity_event'):]
         methods = methods.replace('pub(in crate::game)', 'pub')
-        remote = (ROOT / 'crates/horizon-client/src/game/network/remote/mod.rs').read_text()
-        send = remote.index('self.send(S::Punch(Empty));', remote.index('fn remote_attack'))
-        start = remote.rfind('if ', 0, send)
-        end = remote.index('self.send(S::Punch(Empty));', start) + len('self.send(S::Punch(Empty));')
-        end = remote.index('}', end) + 1
-        packet = remote[start:end]
+        remote = (ROOT / 'crates/horizon-client/src/game/network/swing_packet.rs').read_text()
+        start = remote.index('        if ')
+        packet = remote[start:remote.rfind('    }')].replace('horizon_protocol::packets::play::Serverbound', 'S').replace('horizon_protocol::packets::Empty', 'Empty')
         fixture = r'''
 use std::cell::Cell;
 thread_local! { static CLONES: Cell<u32> = const { Cell::new(0) }; }

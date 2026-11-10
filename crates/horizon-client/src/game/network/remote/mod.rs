@@ -10365,9 +10365,7 @@ impl Game<'_> {
             }
             self.reset_attack_strength();
         }
-        if self.try_swing_hand(self.hand, SwingAnimation::DEFAULT) {
-            self.send(S::Punch(Empty));
-        }
+        self.remote_swing_packet();
         instant
     }
 
@@ -10535,17 +10533,13 @@ impl Game<'_> {
             }
             if let Some(swing) = canceled {
                 if swing {
-                    if self.try_swing_hand(self.hand, SwingAnimation::DEFAULT) {
-                        self.send(S::Punch(Empty));
-                    }
+                    self.remote_swing_packet();
                 }
             } else if self.remote_break_restricted(hit.pos) {
                 // continueDestroyBlock returned false: no swing.
             } else if !air {
                 if self.remote_mining(false) {
-                    if self.try_swing_hand(self.hand, SwingAnimation::DEFAULT) {
-                        self.send(S::Punch(Empty));
-                    }
+                    self.remote_swing_packet();
                 }
             } else {
                 if let Some(r) = self.remote.as_mut() {
