@@ -563,6 +563,30 @@ only for attributes the template has; one it lacks stops the content root's buil
 { "template": "minecraft:zombie", "attributes": { "minecraft:max_health": 40.0, "minecraft:movement_speed": 0.3 } }
 ```
 
+A living type can set `sounds.ambient`, `sounds.hurt`, `sounds.death` and `sounds.step`:
+
+```json
+{
+  "template": "minecraft:wandering_trader",
+  "sounds": {
+    "ambient": "bird:entity.vulture.ambient",
+    "hurt": "bird:hurt",
+    "death": "bird:death",
+    "step": "none"
+  }
+}
+```
+
+Each omitted slot inherits the template's existing selection, including runtime choices
+such as a villager's trading voice and the supporting block's footstep sound. An explicit
+full `namespace:path` id selects that sound event from the resource packs; `"none"` mutes
+only that slot. Omission and `"none"` are different: a villager with no step override
+still plays `minecraft:block.stone.step` on stone. Invalid ids stop content admission,
+with the entity and sound slot in the error. These four slots cover ordinary ambient,
+hurt, death and footstep playback; additional events such as trading interactions or
+projectile attacks keep their existing sounds. Native and wasm packages use this same
+content definition and resource table.
+
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
 min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
 packages may declare attributes; client-only and server-only packages refuse with `WrongSide` so extra

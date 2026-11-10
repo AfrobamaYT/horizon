@@ -1537,7 +1537,7 @@ fn base_tick(
         m.ambient_timer += 1;
         if roll < t {
             m.ambient_timer = -m.ambient_interval();
-            play_ambient(m, w, events);
+            super::entity_sounds::ambient(m, w, events);
         }
     }
     // Entity.baseTick ends with Leashable.tickLeash.
@@ -1622,9 +1622,9 @@ pub fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
 }
 /// `Mob.playAmbientSound` on demand: a spawn egg or a mob bucket just placed `m`.
 pub fn ambient_sound(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
-    play_ambient(m, w, events);
+    super::entity_sounds::ambient(m, w, events);
 }
-fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+pub(super) fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if super::axolotl::is_playing_dead(m) {
         return;
     }
@@ -1719,7 +1719,7 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         Species::Hoglin => super::piglin::hoglin_ambient(m, w),
         // Zoglin.getAmbientSound: with an attack target, the angry sound.
         Species::Zoglin if m.ai.target.is_some() => "entity.zoglin.angry",
-        _ => voice_sounds(m)[0],
+        _ => super::entity_sounds::voices(m)[0],
     };
     let _ = w;
     if !sound.is_empty() {
@@ -2772,7 +2772,7 @@ pub fn speed_bonus(m: &Mob) -> f64 {
 /// (`getHurtSound` / `getDeathSound` overrides); the type's otherwise.
 /// `Goat.getAmbientSound`, `Goat.getHurtSound`, and `Goat.getDeathSound`
 /// select the screaming voices from the goat's saved flag.
-pub fn voice_sounds(m: &Mob) -> [&'static str; 3] {
+pub(super) fn inherited_voice_sounds(m: &Mob) -> [&'static str; 3] {
     match m.species() {
         Species::Goat if m.extra.screaming => [
             "entity.goat.screaming.ambient",
@@ -3714,7 +3714,7 @@ pub fn movement_sounds(m: &Mob) -> bool {
     )
 }
 /// `playStepSound`: the species' footstep, or the block's step sound at 15%.
-pub fn step_sound(
+pub(super) fn inherited_step_sound(
     m: &Mob,
     w: &MobWorld,
     pos: [i32; 3],

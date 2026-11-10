@@ -36,6 +36,7 @@ use horizon_client::{
     mobs::{
         Damage, DamageKind, Mob, MobEvent, MobWorld, PlayerView, Seen, SpawnSetup, Species, Who,
         ai::{eating_sound, eating_sound_is_bound, feed_animal, takes_food},
+        entity_sounds::full_id,
         farm::Climate,
         finalize::Group,
         spawning::{self, BiomeFacts},
@@ -2372,8 +2373,7 @@ impl Game<'_> {
                 for event in std::mem::take(&mut t.outbox) {
                     match event {
                         MobEvent::Sound(s, _, volume, pitch) => {
-                            self.audio
-                                .play(&format!("minecraft:{s}"), Some(center), volume, pitch);
+                            self.audio.play(&full_id(s), Some(center), volume, pitch);
                         }
                         MobEvent::Infested { at, velocities } => infested.push((at, velocities)),
                         other => {
@@ -2741,12 +2741,11 @@ impl Game<'_> {
                         .send_particles(&options, at, spread, speed, count);
                 }
                 MobEvent::Sound(name, at, volume, pitch) => {
-                    self.audio
-                        .play(&format!("minecraft:{name}"), Some(at), volume, pitch)
+                    self.audio.play(&full_id(name), Some(at), volume, pitch)
                 }
                 MobEvent::LocalSound(name, at, volume, pitch) => {
                     self.audio
-                        .play_unshared(&format!("minecraft:{name}"), Some(at), volume, pitch)
+                        .play_unshared(&full_id(name), Some(at), volume, pitch)
                 }
                 MobEvent::BoundSound {
                     mob,
@@ -2756,7 +2755,7 @@ impl Game<'_> {
                     volume,
                     pitch,
                 } => {
-                    let name = format!("minecraft:{sound}");
+                    let name = full_id(sound);
                     let sound = LevelSound::new(&name, at, volume, pitch).in_source(source);
                     self.play_bound_sound(sound, mob, None);
                 }
@@ -2777,8 +2776,7 @@ impl Game<'_> {
                             self.world.game_time.wrapping_mul(341_873_128_712),
                         );
                         let pitch = (r.next_float() - r.next_float()) * spread + 1.0;
-                        self.audio
-                            .play(&format!("minecraft:{sound}"), Some(at), volume, pitch)
+                        self.audio.play(&full_id(sound), Some(at), volume, pitch)
                     }
                 }
                 MobEvent::SoundId(name, at, volume, pitch) => {
@@ -3204,8 +3202,7 @@ impl Game<'_> {
                         let at = m.center();
                         let sound = horizon_client::mobs::finalize::variant_sound(m, "hiss")
                             .unwrap_or("entity.cat.hiss");
-                        self.audio
-                            .play(&format!("minecraft:{sound}"), Some(at), 1.0, 1.0);
+                        self.audio.play(&full_id(sound), Some(at), 1.0, 1.0);
                     }
                 }
                 MobEvent::Tamed { .. }
@@ -7764,7 +7761,7 @@ impl Game<'_> {
             // client played it; Horizon's own client plays it from the packet,
             // so every player gets it.
             Some(s @ ("entity.sheep.shear" | "item.dye.use")) => {
-                let name = format!("minecraft:{s}");
+                let name = full_id(s);
                 let id = self.mobs[index].id;
                 let sound = LevelSound::new(&name, feet, 1.0, 1.0).in_source(SoundSource::Players);
                 self.play_bound_sound(sound, id, None);
@@ -7772,13 +7769,12 @@ impl Game<'_> {
             Some(s) => {
                 let pitch =
                     (self.world.random.next_float() - self.world.random.next_float()) * 0.2 + 1.0;
-                self.audio
-                    .play(&format!("minecraft:{s}"), Some(center), 1.0, pitch);
+                self.audio.play(&full_id(s), Some(center), 1.0, pitch);
             }
             None => {}
         }
         if let Some((s, volume, pitch)) = eat {
-            let name = format!("minecraft:{s}");
+            let name = full_id(s);
             if eating_sound_is_bound(species) {
                 let id = self.mobs[index].id;
                 let sound =

@@ -35,6 +35,7 @@ pub mod dolphin;
 pub mod doors;
 pub mod drops;
 pub mod enderman;
+pub mod entity_sounds;
 pub mod equine;
 pub mod equip;
 pub mod farm;
@@ -502,9 +503,8 @@ pub struct MobType {
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
-    /// Ambient, hurt and death sound events (without the namespace).
     pub sounds: [&'static str; 3],
-    pub step_sound: Option<&'static str>,
+    pub sound_overrides: entity_sounds::Sounds,
     /// Animal.isFood items (resolved from the item tag).
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
@@ -841,7 +841,7 @@ impl MobTypes {
                     brain: def.brain(),
                     anim: def.anim,
                     sounds: def.sounds,
-                    step_sound: def.step_sound,
+                    sound_overrides: entity_sounds::Sounds::load(t),
                     food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
@@ -4634,7 +4634,7 @@ impl Mob {
             let sound = if absorbed {
                 "item.wolf_armor.damage"
             } else {
-                ai::voice_sounds(self)[if dead { 2 } else { 1 }]
+                entity_sounds::voices(self)[if dead { 2 } else { 1 }]
             };
             if !dead {
                 self.ambient_timer = -self.ambient_interval();
@@ -5751,7 +5751,7 @@ pub(crate) mod sensor_scan_tests {
             brain: Brain::Passive,
             anim: Anim::Rabbit,
             sounds: [""; 3],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Arc::default(),
             tempt: Arc::default(),
             passenger_attachments: Vec::new(),
