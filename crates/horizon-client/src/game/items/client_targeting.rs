@@ -31,7 +31,7 @@ impl Game<'_> {
             return Some(hit);
         }
         let (origin, dir) = self.aim()?;
-        self.clip_targeting_ray(origin, dir, self.block_reach.max(self.entity_reach))
+        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
     }
 
     pub(super) fn targeting(&self) -> ClientTargeting {
@@ -143,7 +143,7 @@ impl Game<'_> {
         }
         if distance > 0.0 && !self.targeting().hit_through_walls {
             let dir = std::array::from_fn(|i| (point[i] - eye[i]) / distance);
-            if self.clip_targeting_ray(eye, dir, distance).is_some() {
+            if self.clip_ray(eye, dir, distance).is_some() {
                 return None;
             }
         }
@@ -162,11 +162,12 @@ impl Game<'_> {
         let mut targets: Vec<_> = selected.into_iter().collect();
         let mut canceled = false;
         self.native_client_attack_target(&mut targets, &mut canceled);
-        if canceled || targets.len() > 64 {
+        if canceled {
             return true;
         }
-        for (index, &entity) in targets.iter().enumerate() {
-            if targets[..index].contains(&entity) {
+        let mut seen = std::collections::HashSet::new();
+        for &entity in &targets {
+            if !seen.insert(entity) {
                 continue;
             }
             if let Some((_, distance)) = self.targeting_entity_hit(entity) {
@@ -204,7 +205,6 @@ mod tests {
     struct AttackBatch {
         targets: std::sync::Mutex<Vec<EntityRef>>,
         cancel: std::sync::atomic::AtomicBool,
-        sent: std::sync::atomic::AtomicUsize,
     }
     struct Observer(std::sync::Arc<AttackBatch>);
     #[mod_api::__subscriptions]
@@ -221,17 +221,57 @@ mod tests {
                 mod_api::Flow::Continue
             }
         }
-        fn client_packet_send(
-            &self,
-            _: &dyn mod_api::ClientHost,
-            event: &mut mod_api::ClientPacketSendEvent<'_>,
-        ) -> mod_api::Flow {
-            if event.packet.id.path() == "attack" {
-                self.0
-                    .sent
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn finish_login(server: &mut horizon_protocol::connection::Connection) {
+        use horizon_protocol::packets::{Empty, configuration as cfg, login};
+        server.recv().unwrap(); // Intention.
+        server.recv().unwrap(); // Hello.
+        server
+            .send(
+                &login::Clientbound::LoginFinished(login::LoginFinished {
+                    profile: login::GameProfile {
+                        uuid: 42,
+                        name: "SessionReadTest".into(),
+                        properties: vec![],
+                    },
+                    session: 1,
+                })
+                .encode(),
+            )
+            .unwrap();
+        let (id, payload) = server.recv().unwrap();
+        assert!(matches!(
+            login::Serverbound::decode(id, &payload).unwrap(),
+            login::Serverbound::LoginAcknowledged(_)
+        ));
+        server.recv().unwrap(); // Brand.
+        server.recv().unwrap(); // Client information.
+        server
+            .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+            .unwrap();
+        let (id, payload) = server.recv().unwrap();
+        assert!(matches!(
+            cfg::Serverbound::decode(id, &payload).unwrap(),
+            cfg::Serverbound::FinishConfiguration(_)
+        ));
+    }
+
+    /// A FIFO swing packet fences the real connection's outgoing attack packets.
+    fn sent_attacks(
+        game: &Game<'_>,
+        server: &mut horizon_protocol::connection::Connection,
+    ) -> Vec<i32> {
+        use horizon_protocol::packets::{Empty, play::Serverbound as S};
+        game.send(S::Punch(Empty));
+        let mut ids = Vec::new();
+        loop {
+            let (id, payload) = server.recv().unwrap();
+            match S::decode(id, &payload).unwrap() {
+                S::Attack(attack) => ids.push(attack.id),
+                S::Punch(_) => return ids,
+                _ => {}
             }
-            mod_api::Flow::Continue
         }
     }
 
@@ -254,7 +294,13 @@ mod tests {
         mod_api::testing::with_mods(mods, || {
             with_client_game(|game| {
                 assert!(!game.set_targeting(ClientTargeting::default()));
-                let _server = logged_client(game);
+                let mut server =
+                    horizon_protocol::connection::Connection::local(logged_client(game));
+                server
+                    .reader
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                finish_login(&mut server);
                 game.native_lifecycle
                     .begin_open(mod_api::Authority::RemoteClient);
                 game.title = None;
@@ -297,23 +343,51 @@ mod tests {
                 let second = game.entity(32).unwrap();
                 *state.targets.lock().unwrap() = vec![entity, second, entity];
                 assert!(game.mod_attack_targets());
-                assert_eq!(state.sent.swap(0, std::sync::atomic::Ordering::Relaxed), 2);
+                assert_eq!(sent_attacks(game, &mut server), [31, 32]);
                 state
                     .cancel
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 assert!(game.mod_attack_targets());
-                assert_eq!(state.sent.load(std::sync::atomic::Ordering::Relaxed), 0);
+                assert!(sent_attacks(game, &mut server).is_empty());
                 state
                     .cancel
                     .store(false, std::sync::atomic::Ordering::Relaxed);
                 *state.targets.lock().unwrap() = vec![entity; 65];
                 assert!(game.mod_attack_targets());
-                assert_eq!(state.sent.load(std::sync::atomic::Ordering::Relaxed), 0);
+                assert_eq!(sent_attacks(game, &mut server), [31]);
+                let many = (0..65).flat_map(|_| [second, entity]).collect();
+                *state.targets.lock().unwrap() = many;
+                assert!(game.mod_attack_targets());
+                assert_eq!(sent_attacks(game, &mut server), [32, 31]);
+                for id in 100..165 {
+                    game.handle_packet(C::AddEntity(play::AddEntity {
+                        id,
+                        uuid: id as u128,
+                        kind,
+                        position: [2.5, 2.0, 0.5],
+                        velocity: [0.0; 3],
+                        pitch: 0,
+                        yaw: 0,
+                        head_yaw: 0,
+                        data: 0,
+                    }))
+                    .unwrap();
+                }
+                *state.targets.lock().unwrap() =
+                    (100..165).map(|id| game.entity(id).unwrap()).collect();
+                assert!(game.mod_attack_targets());
+                assert_eq!(
+                    sent_attacks(game, &mut server),
+                    (100..165).collect::<Vec<_>>()
+                );
                 *state.targets.lock().unwrap() = vec![entity];
+                game.yaw = 90.0; // The override is off the aiming ray.
+                assert!(game.entity_targeted());
                 game.entity_reach = 1.0;
+                assert!(!game.entity_targeted());
                 assert!(game.targeting_entity_hit(entity).is_none());
                 assert!(game.mod_attack_targets());
-                assert_eq!(state.sent.load(std::sync::atomic::Ordering::Relaxed), 0);
+                assert!(sent_attacks(game, &mut server).is_empty());
                 game.entity_reach = 3.0;
                 let stone = game
                     .pack
@@ -335,19 +409,23 @@ mod tests {
                     .unwrap();
                 game.world.set(1, 2, 0, water).unwrap();
                 assert!(game.set_targeting(ClientTargeting::default()));
-                assert!(
-                    game.clip_targeting_ray([0.5, 2.5, 0.5], [1.0, 0.0, 0.0], 3.0)
-                        .is_none()
-                );
+                game.yaw = -90.0;
+                game.pitch = 0.0;
+                game.pick_tick_targets(); // Cache the ordinary miss before enabling liquids.
+                assert!(game.pick().is_none());
                 let mut liquids = ClientTargeting::default();
                 liquids.pick_liquids = true;
                 assert!(game.set_targeting(liquids));
-                assert_eq!(
-                    game.clip_targeting_ray([0.5, 2.5, 0.5], [1.0, 0.0, 0.0], 3.0)
-                        .unwrap()
-                        .pos,
-                    [1, 2, 0]
-                );
+                assert_eq!(game.pick().unwrap().pos, [1, 2, 0]);
+                assert!(game.targeting_entity_hit(entity).is_some());
+                assert!(game.block_distance().is_none());
+                game.world.set(0, 2, 0, water).unwrap(); // Eyes inside water.
+                assert!(game.targeting_entity_hit(entity).is_some());
+                assert!(game.block_distance().is_none());
+                game.pick_tick_targets(); // Cache the fluid hit before disabling liquids.
+                assert!(game.set_targeting(ClientTargeting::default()));
+                assert!(game.pick().is_none());
+                game.release_tick_targets();
                 assert!(game.set_targeting(options));
                 let mut own = options;
                 own.entity = game.entity(7);
@@ -358,7 +436,7 @@ mod tests {
                 assert!(!game.set_targeting(options));
                 assert_eq!(game.targeting().entity, None);
                 assert!(game.mod_attack_targets());
-                assert_eq!(state.sent.load(std::sync::atomic::Ordering::Relaxed), 0);
+                assert!(sent_attacks(game, &mut server).is_empty());
             })
         });
     }
