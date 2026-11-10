@@ -120,6 +120,7 @@ fn game<'a>(
     .unwrap();
     std::fs::write(tables.join("sift.json"), SIFT).unwrap();
     std::fs::write(tables.join("sequence.json"), SEQUENCE).unwrap();
+    std::fs::write(tables.join("small.json"), r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:ender_pearl","modifier":[{"type":"minecraft:set_count","count":40},{"type":"minecraft:set_components","components":{"minecraft:max_stack_size":8}}]}]}]}"#).unwrap();
     std::fs::write(
         dir.join("datapacks.json"),
         r#"{"enabled":["file/sift"],"disabled":[]}"#,
@@ -252,7 +253,11 @@ fn weighted_pools_conditions_and_functions_roll_as_the_table_says() {
         extra_pool += count_of(&with_shovel, "minecraft:diamond").len();
         // Pearls only to the shovel: 40, split to their stack size.
         assert_eq!(count_of(&with_shovel, "minecraft:ender_pearl"), [16, 16, 8]);
-        assert_eq!(count_of(&with_shovel, "minecraft:gravel"), [1], "no Fortune");
+        assert_eq!(
+            count_of(&with_shovel, "minecraft:gravel"),
+            [1],
+            "no Fortune"
+        );
 
         // No tool: no diamond and no pearls; the alternatives give coal.
         let bare = game
@@ -322,4 +327,15 @@ fn a_missing_table_and_a_stale_handle_are_none() {
         game.level_roll_loot(level, "test:sift", ORIGIN, None, None)
             .is_some()
     );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn component_stack_capacity_is_preserved_on_every_split() {
+    let mut resources = crate::game::Resources::new();
+    let (mut game, level) = game(&mut resources, "component-split");
+    let stacks = game
+        .level_roll_loot(level, "test:small", ORIGIN, None, None)
+        .unwrap();
+    assert_eq!(count_of(&stacks, "minecraft:ender_pearl"), [8, 8, 8, 8, 8]);
 }

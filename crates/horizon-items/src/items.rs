@@ -1713,7 +1713,7 @@ impl Items {
         // LootTable.createStackSplitter.
         let mut out = Vec::with_capacity(raw.len());
         for stack in raw {
-            let max = self.get(&stack.item).map_or(64, |i| i.max_stack).max(1);
+            let max = crate::bundle::max_stack(self, &stack);
             let mut count = stack.count;
             while count > max {
                 let mut part = stack.clone();
