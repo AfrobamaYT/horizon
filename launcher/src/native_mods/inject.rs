@@ -55,6 +55,7 @@ impl ListedPoint {
             host: self.host.clone(),
             raw_shape: self.raw_shape.clone(),
             return_ty: self.return_ty.clone(),
+            table: None,
         }
     }
 
@@ -75,6 +76,9 @@ pub(super) const POINTS: &str = "points.json";
 pub(super) struct Catalog {
     pub points: Vec<ListedPoint>,
     pub sites: Vec<super::sites::Site>,
+    /// The `mod_api` types with a `Wire` layout: what a mod point's `api` record may hold.
+    #[serde(default)]
+    pub wire: std::collections::BTreeSet<String>,
 }
 
 pub(super) fn catalog(path: &Path) -> Result<Catalog, String> {

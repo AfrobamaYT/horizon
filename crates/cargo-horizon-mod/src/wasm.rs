@@ -64,7 +64,7 @@ fn rustup_found() -> bool {
     Command::new("rustup").arg("--version").output().is_ok()
 }
 
-fn output(mut command: Command) -> Result<String, String> {
+pub(crate) fn output(mut command: Command) -> Result<String, String> {
     let out = command.output().map_err(|e| format!("{command:?}: {e}"))?;
     if !out.status.success() {
         return Err(format!(
