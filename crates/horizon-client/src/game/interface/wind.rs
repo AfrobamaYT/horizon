@@ -7,6 +7,7 @@ use horizon_client::advancements::EntityView;
 use horizon_client::join_seq::Joined as _;
 use horizon_client::{
     Result,
+    items::ItemStack,
     mobs::{Damage, DamageKind, Species, Who},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Hit, Projectile, ProjectileKind},
@@ -78,7 +79,7 @@ fn triggers(name: &str) -> bool {
 }
 impl Game<'_> {
     /// `WindChargeItem.use`.
-    pub(super) fn throw_wind_charge(&mut self) -> Result<bool> {
+    pub(super) fn throw_wind_charge(&mut self, stack: &ItemStack) -> Result<bool> {
         let (Some(eye), Some(p)) = (self.eye_position(), self.player.as_ref()) else {
             return Ok(false);
         };
@@ -96,7 +97,7 @@ impl Game<'_> {
             velocity,
             on_ground,
         );
-        self.add_projectile(proj);
+        self.spawn_projectile(proj, stack);
         let pitch = 0.4 / (self.world.random.next_float() * 0.4 + 0.8);
         self.audio
             .play("minecraft:entity.wind_charge.throw", Some(eye), 0.5, pitch);
