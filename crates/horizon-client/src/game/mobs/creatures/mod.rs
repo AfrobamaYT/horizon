@@ -1736,7 +1736,6 @@ impl Game<'_> {
             .copied()
             .filter(|_| m.ai.last_hurt_by_player > 0)
             .and_then(|credit| self.resolve_player_credit(credit));
-        let killer_hand = self.death_killer_hand(m, killer);
         if self.mob_death_canceled(m) {
             return;
         }
@@ -1826,7 +1825,6 @@ impl Game<'_> {
             player,
             m.ai.last_hurt_by_player > 0,
             killer_entity,
-            killer_hand,
             consumed,
             pos,
             source,
@@ -2012,7 +2010,6 @@ impl Game<'_> {
         player_uuid: Option<u128>,
         player_killed: bool,
         killer: horizon_world::loot::LootEntity,
-        killer_hand: Option<ItemStack>,
         consumed: bool,
         pos: [f64; 3],
         source: Option<(&'static str, u32)>,
@@ -2167,7 +2164,6 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
-        let killer_hand = killer_hand.as_ref().try_into_api().ok().flatten();
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
             damage_source: hurt,
             table: table.as_deref().unwrap_or_default(),
@@ -2176,7 +2172,7 @@ impl Game<'_> {
             block: None,
             entity: Some((m.id, &kind)),
             player: player_uuid,
-            tool: killer_hand.as_ref(),
+            tool: None,
             explosion: None,
             used: false,
         });
@@ -13936,5 +13932,3 @@ mod knockback;
 
 #[cfg(test)]
 mod death_loot_context_tests;
-
-mod death_loot_context;

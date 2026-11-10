@@ -21,20 +21,22 @@ impl mod_api::Hooks for CancelOnce {
 }
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Probe {
-    fn loot_drops(&self, _: &mut dyn mod_api::ServerHost, event: &mut mod_api::LootDropsEvent<'_>) {
+    fn loot_drops(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::LootDropsEvent<'_>,
+    ) {
         let source = event.context.damage_source.unwrap();
-        if let Some(tool) = event.context.tool.filter(|s| s.count() == 3) {
-            assert_eq!(
-                tool.damage(),
-                19,
-                "nonplain captured components survive dispatch"
-            );
-        }
+        assert!(event.context.tool.is_none(), "entity context has no TOOL");
+        let hand = host
+            .entity(source.causing as u32)
+            .and_then(|entity| host.living(entity))
+            .and_then(|living| living.hand_item(host, mod_api::Hand::Main));
         self.0.lock().unwrap().push((
             source.damage_type.into(),
             source.causing,
             source.direct,
-            event.context.tool.map(|s| s.count()),
+            hand.as_ref().map(|s| s.count()),
         ));
     }
 }
@@ -173,17 +175,42 @@ impl mod_api::Hooks for ChangeKillerHand {
         host: &mut dyn mod_api::ServerHost,
         _: &mut mod_api::LivingDeathEvent<'_>,
     ) -> mod_api::Flow {
+        let entity = host.entity(12).unwrap();
+        let living = host.living(entity).unwrap();
         assert!(
-            host.commands()
-                .run_command("item replace entity guest12 weapon.mainhand with minecraft:stone")
+            living
+                .set_hand_item(host, mod_api::Hand::Main, Some(self.0.clone()))
+                .unwrap()
         );
         mod_api::Flow::Continue
     }
-    fn loot_drops(&self, _: &mut dyn mod_api::ServerHost, event: &mut mod_api::LootDropsEvent<'_>) {
+    fn loot_drops(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::LootDropsEvent<'_>,
+    ) {
+        assert!(event.context.tool.is_none());
+        let entity = host
+            .entity(event.context.damage_source.unwrap().causing as u32)
+            .unwrap();
+        let living = host.living(entity).unwrap();
         assert_eq!(
-            event.context.tool,
-            Some(&self.0),
-            "the complete original stack survives a real death callback hand change"
+            living.hand_item(host, mod_api::Hand::Main),
+            Some(self.0.clone()),
+            "loot sees the complete stack installed during living_death"
+        );
+        assert!(
+            living
+                .set_hand_item(
+                    host,
+                    mod_api::Hand::Main,
+                    Some({
+                        let mut later = self.0.clone();
+                        later.set_count(4).unwrap();
+                        later
+                    })
+                )
+                .unwrap()
         );
     }
 }
@@ -205,7 +232,10 @@ fn death_loot_killer_is_not_the_acting_guest() {
         let mut hand = ItemStack::new("minecraft:diamond_sword", 12);
         hand.damage = 19;
         hand.enchant("minecraft:looting", 2);
-        let expected = hand.try_into_api().unwrap();
+        let mut changed = hand.clone();
+        changed.count = 3;
+        changed.damage = 27;
+        let expected = changed.try_into_api().unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![
             mod_api::ModEntry::new("change_hand", Box::new(ChangeKillerHand(expected))),
@@ -240,8 +270,8 @@ fn death_loot_killer_is_not_the_acting_guest() {
         assert_eq!(
             *seen.lock().unwrap(),
             [
-                ("minecraft:player_attack".into(), 12, 12, Some(12)),
-                ("minecraft:player_attack".into(), 12, 12, Some(12))
+                ("minecraft:player_attack".into(), 12, 12, Some(4)),
+                ("minecraft:player_attack".into(), 12, 12, Some(4))
             ]
         );
     });
@@ -315,5 +345,40 @@ fn death_loot_nested_death_keeps_outer_context() {
                 ("minecraft:mob_attack".into(), 41, 41, Some(7))
             ]
         );
+    });
+}
+
+struct BlockTool(mod_api::ItemStack);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for BlockTool {
+    fn loot_drops(&self, _: &mut dyn mod_api::ServerHost, event: &mut mod_api::LootDropsEvent<'_>) {
+        assert!(event.context.damage_source.is_none());
+        assert!(event.context.block.is_some());
+        assert_eq!(event.context.tool, Some(&self.0));
+    }
+}
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_loot_change_preserves_block_tool() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.build_registries();
+        let mut tool = ItemStack::new("minecraft:diamond_pickaxe", 1);
+        tool.damage = 17;
+        tool.enchant("minecraft:fortune", 3);
+        let expected = tool.try_into_api().unwrap();
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        let mods = vec![mod_api::ModEntry::new(
+            "block_tool",
+            Box::new(BlockTool(expected)),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            game.native_block_loot([0, 64, 0], stone, None, Some(&tool), None, &mut Vec::new());
+        });
     });
 }

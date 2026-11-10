@@ -277,7 +277,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         }
         fn loot_drops(
             &self,
-            _: &mut dyn mod_api::ServerHost,
+            host: &mut dyn mod_api::ServerHost,
             event: &mut mod_api::LootDropsEvent<'_>,
         ) {
             assert_eq!(event.context.entity, Some((12, "test:mob")));
@@ -288,11 +288,14 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 ("minecraft:arrow", 41, 73)
             );
             assert_eq!(source.position, Some([1.0, 2.0, 3.0]));
+            assert!(event.context.tool.is_none());
             EXPECTED_LOOT_HAND.with(|expected| {
                 assert_eq!(
-                    event.context.tool,
-                    expected.borrow().as_ref(),
-                    "the complete nonplain stack crosses the generated boundary"
+                    host.entity(source.causing as u32)
+                        .and_then(|e| host.living(e))
+                        .and_then(|living| living.hand_item(host, mod_api::Hand::Main)),
+                    expected.borrow().clone(),
+                    "the complete live hand crosses the generated Host boundary"
                 )
             });
             event.drops.clear();
@@ -886,6 +889,37 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
+    struct World;
+    impl mod_api::Host for World {
+        fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
+            Some(mod_api::BackendRef::of(self))
+        }
+    }
+    mod_api::impl_host_areas!(World, except(entities, living));
+    impl mod_api::prelude::EntitiesHost for World {
+        fn entity(&self, id: u32) -> Option<mod_api::EntityRef> {
+            Some(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), id))
+        }
+    }
+    impl mod_api::prelude::LivingHost for World {
+        fn living(&self, entity: mod_api::EntityRef) -> Option<mod_api::LivingRef> {
+            Some(mod_api::LivingRef::new(entity))
+        }
+    }
+    impl mod_api::Backend for World {}
+    mod_api::impl_backend_areas!(World, except(living));
+    impl mod_api::prelude::LivingBackend for World {
+        fn living_hand_item(
+            &self,
+            _: mod_api::LivingRef,
+            _: mod_api::Hand,
+        ) -> Option<mod_api::ItemStack> {
+            EXPECTED_LOOT_HAND.with(|expected| expected.borrow().clone())
+        }
+    }
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+
     install_counter();
     let table = "t".repeat(300);
     let mut hand = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 7).unwrap();
@@ -912,7 +946,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
         block: None,
         entity: Some((12, "test:mob")),
         player: None,
-        tool: Some(&hand),
+        tool: None,
         explosion: None,
         used: false,
     }
@@ -925,7 +959,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
         corrupt: false,
     }
     .loot_drops(
-        &mut guest::Guest,
+        &mut World,
         &mut mod_api::LootDropsEvent {
             context: &context,
             drops: &mut drops,
