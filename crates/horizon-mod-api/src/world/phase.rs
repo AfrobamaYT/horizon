@@ -349,9 +349,17 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
             )
         })
         .collect();
-    TEST_PACKAGES.set(Some(packages.into()));
+    with_test_package_inventory(packages, f)
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn with_test_package_inventory<R>(
+    packages: Vec<PackageInfo>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let previous = TEST_PACKAGES.replace(Some(packages.into()));
     let result = f();
-    TEST_PACKAGES.set(None);
+    TEST_PACKAGES.set(previous);
     result
 }
 
@@ -565,6 +573,7 @@ impl std::error::Error for RegistrationReadError {}
 pub struct RegistrationContext {
     pub(crate) mods: LoadedMods,
     pub(crate) data: Option<RegistrationData>,
+    pub(crate) declaration_refusals: std::sync::Mutex<Vec<String>>,
 }
 
 impl RegistrationContext {
@@ -572,6 +581,7 @@ impl RegistrationContext {
         Self {
             mods: LoadedMods::new(),
             data: registration_data(),
+            declaration_refusals: Default::default(),
         }
     }
 

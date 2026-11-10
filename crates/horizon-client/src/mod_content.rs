@@ -864,9 +864,10 @@ pub fn accept_declared(
     let mut errors = Vec::new();
     for (ns, (blocks, items)) in by_namespace {
         let types = types.iter().filter(|t| namespace(&t.id) == ns).cloned();
-        let result = match mods.iter().position(|m| m.id == ns) {
+        let result = match mods.iter().position(|m| m.content.namespaces.contains(&ns)) {
             Some(i) => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&mods[i].id);
+                content.namespaces.clone_from(&mods[i].content.namespaces);
                 content.blocks.clone_from(&mods[i].content.blocks);
                 content.items.clone_from(&mods[i].content.items);
                 content

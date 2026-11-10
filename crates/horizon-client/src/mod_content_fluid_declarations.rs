@@ -5,7 +5,10 @@ use super::*;
 pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
     for fluid in fluids {
         let namespace = fluid.id.split_once(':').map_or("", |(ns, _)| ns);
-        let Some(owner) = mods.iter_mut().find(|m| m.id == namespace) else {
+        let Some(owner) = mods
+            .iter_mut()
+            .find(|m| m.content.namespaces.iter().any(|owned| owned == namespace))
+        else {
             continue;
         };
         match owner.content.fluids.iter_mut().find(|f| f.id == fluid.id) {
@@ -14,4 +17,3 @@ pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
         }
     }
 }
-

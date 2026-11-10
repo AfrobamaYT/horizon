@@ -5,7 +5,13 @@ Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-own
 `Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
-A block's `item` defaults to false in code.
+A block's `item` defaults to false in code. Each mod receives its own declaration
+batch. New identifiers from code—including block entity types and other registrar
+declarations—may use any namespace owned by that mod's manifest. Bare names use
+the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
+refuses registration with a diagnostic naming both the mod and namespace. This
+is identical for native and wasm mods. Attaching a Part to an existing vanilla or
+foreign block or item is a reference, not a new declaration, and remains allowed.
 
 Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
@@ -590,8 +596,12 @@ namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
 A listed namespace is the mod's as its id is: its `assets/` and `data/` files load, and the game reads its tags,
-recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types are declared in
-`data/<id>/horizon/` only. `minecraft`, `c` and
+recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types may be declared in
+`data/<owned_namespace>/horizon/`. The same owned set governs code declarations.
+For example, a package with ID `ported_farmersdelight` and
+`namespaces = ["farmersdelight"]` can declare `farmersdelight:cooking_pot`
+and its `farmersdelight:` block entity type without changing saved-world IDs.
+The namespace collision fence below still applies. `minecraft`, `c` and
 `horizon` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16

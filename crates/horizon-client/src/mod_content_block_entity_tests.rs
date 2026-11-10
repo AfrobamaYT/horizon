@@ -234,3 +234,37 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
     fs::remove_dir_all(cache).unwrap();
     fs::remove_dir_all(base).unwrap();
 }
+
+#[test]
+fn code_declarations_join_the_manifest_owner_of_a_secondary_namespace() {
+    let base = base("owned-namespace");
+    let mut content = Content::declared("porter");
+    content.namespaces.push("legacy".into());
+    let mut mods = vec![ContentMod {
+        id: "porter".into(),
+        content,
+        jars: vec![],
+    }];
+    let blocks = [Block {
+        id: "legacy:pot".into(),
+        template: "minecraft:stone".into(),
+        ..Block::default()
+    }];
+    let types = [kind("legacy:pot_type", &["legacy:pot"])];
+    let errors = accept_declared(&mut mods, &blocks, &[], &types, &BTreeSet::new());
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(
+        mods.len(),
+        1,
+        "the secondary namespace is not a synthetic second package"
+    );
+    assert_eq!(mods[0].id, "porter");
+    assert_eq!(mods[0].content.blocks[0].id, "legacy:pot");
+    let plan = Plan::new(&base, &mods).unwrap();
+    assert_eq!(
+        plan.block_entity_factories.get("legacy:pot"),
+        Some(&"legacy:pot_type")
+    );
+    drop(plan);
+    fs::remove_dir_all(base).unwrap();
+}

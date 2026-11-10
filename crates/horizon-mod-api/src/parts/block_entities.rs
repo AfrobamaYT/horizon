@@ -105,7 +105,7 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
 }
 
 impl dyn Registrar + '_ {
-    /// Declare a block entity type in this mod's namespace.
+    /// Declare a block entity type in a namespace owned by this mod's manifest.
     pub fn block_entity_type(&mut self, id: &str) -> crate::BlockEntityTypeBuilder<'_> {
         crate::BlockEntityTypeBuilder {
             id: id.to_owned(),
@@ -468,7 +468,7 @@ pub trait BlockEntitiesRegistrar {
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> crate::BlockEntityTypeKey;
 
-    /// Declare block entity type `path` in this mod's namespace, held by `blocks`; mods usually
+    /// Declare block entity type `path` in a namespace owned by this mod's manifest, held by `blocks`; mods usually
     /// reach it through `block_entity_type`.
     fn declare_block_entity_type(
         &mut self,
@@ -516,7 +516,13 @@ impl BlockEntitiesRegistrar for PartRegistrar {
         path: &str,
         blocks: Vec<String>,
     ) -> crate::BlockEntityTypeKey {
-        let id = format!("{}:{path}", self.mod_id);
+        let id = match self.owned_declaration_id(path) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.refused.push(reason);
+                return crate::BlockEntityTypeKey(u32::MAX);
+            }
+        };
         let key = self.block_entity_type_key(&id);
         self.block_entity_types
             .push(BlockEntityTypeDecl { id, blocks });
