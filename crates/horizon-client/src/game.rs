@@ -620,6 +620,11 @@ enum Screen {
     Studio,
 }
 impl Screen {
+    /// The screens whose layout is a container panel: the survival and
+    /// creative inventories and every container or station window.
+    fn is_container(self) -> bool {
+        matches!(self, Screen::Inventory | Screen::Creative)
+    }
     /// The id native mods see for this screen (`ScreenView.id`, the
     /// `screen_render_post` hook): one per variant, and a hook's contract, so
     /// it stays the same from release to release. A new variant must add one.
@@ -2600,8 +2605,6 @@ struct Game<'a> {
     gpu_passes: bool,
     screen: Screen,
     screen_state: screen_build::ScreenState,
-    /// The layout the last frame drew the inventory's effect panels with.
-    effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
     /// What `window_resize` last reported: the physical size and the GUI settings behind the scaled size.
     resize_state: Option<ResizeState>,
@@ -16463,7 +16466,6 @@ impl<'a> Game<'a> {
             gpu_passes: false,
             screen: Screen::Playing,
             screen_state: screen_build::ScreenState::default(),
-            effects_layout: std::cell::Cell::new(None),
             window: None,
             resize_state: None,
             renderer: None,
