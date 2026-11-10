@@ -514,7 +514,7 @@ id = "charged"
 name = "Charged"
 version = "1.0.0"
 api = "0.2"
-capabilities = []
+capabilities = ["registries"]
 [native]
 game = "26.3"
 horizon = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
