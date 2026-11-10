@@ -2124,7 +2124,6 @@ dependencies = [
  "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
- "horizon-mod-package",
  "horizon-mod-runtime",
  "log",
  "serde",
