@@ -28,6 +28,15 @@ class PrebuiltContentsTests(unittest.TestCase):
             (root / name).write_bytes(b"")
         return root
 
+    def test_native_extern_lookup_refuses_a_second_package_variant(self):
+        root = self.folder("libhorizon_mod_package-runtime.rmeta")
+        self.assertEqual(prebuilt_game.extern_args(root, "horizon_mod_package"), [
+            "--extern", f"horizon_mod_package={root / 'libhorizon_mod_package-runtime.rmeta'}",
+        ])
+        (root / "libhorizon_mod_package-build.rmeta").write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "expected exactly one SDK metadata for horizon_mod_package"):
+            prebuilt_game.extern_args(root, "horizon_mod_package")
+
     def test_compiler_outputs_pass(self):
         prebuilt_game.check(self.folder(
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",

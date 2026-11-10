@@ -169,6 +169,17 @@ def dylib(deps: Path, crate: str) -> Path | None:
     return next((path for path in deps.iterdir() if path.name in names), None)
 
 
+def extern_args(deps: Path, crate: str) -> list[str]:
+    """Resolve a native SDK extern by name, refusing ambiguous metadata rather than choosing a variant."""
+    library = dylib(deps, crate)
+    if library is None:
+        candidates = list(deps.glob(f"lib{crate}-*.rmeta"))
+        if len(candidates) != 1:
+            raise ValueError(f"expected exactly one SDK metadata for {crate}: {candidates}")
+        library = candidates[0]
+    return ["--extern", f"{crate}={library}"]
+
+
 def check(out: Path) -> None:
     """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
     stray = [
@@ -189,9 +200,7 @@ def smoke(out: Path) -> None:
     deps = out / "deps"
 
     def extern(crate: str) -> list[str]:
-        prefix = f"lib{crate}-"
-        rmeta = next(path for path in deps.iterdir() if path.name.startswith(prefix) and path.suffix == ".rmeta")
-        return ["--extern", f"{crate}={rmeta}"]
+        return extern_args(deps, crate)
 
     common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=1", "-L", f"dependency={deps}",
               "-L", f"native={out / NATIVE}"]
