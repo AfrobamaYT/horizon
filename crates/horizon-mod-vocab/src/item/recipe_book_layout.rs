@@ -28,6 +28,7 @@ pub enum RecipeBookLayout {
 
 impl RecipeBookLayout {
     /// Engine integration: frozen screen geometry, identical for native/wasm registrations.
+    // hidden: engine reads the frozen declaration; mods supply their screen through registration.
     #[doc(hidden)]
     pub fn registered_screen(menu: &str) -> Option<crate::Screen> {
         crate::parts::installed()?
@@ -36,6 +37,7 @@ impl RecipeBookLayout {
             .map(|binding| binding.screen.clone())
     }
     /// Engine integration: diagnostics retain the actual declaring mod identity.
+    // hidden: engine diagnostics need registration ownership, not a mod-facing lookup service.
     #[doc(hidden)]
     pub fn declaring_mod(menu: &str) -> Option<&'static str> {
         crate::parts::installed()?
