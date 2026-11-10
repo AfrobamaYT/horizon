@@ -24,7 +24,7 @@ def save(path, text):
 
 game_path = Path('crates/horizon-client/src/game.rs')
 game = game_path.read_text()
-game, read = cut(game, '    fn read(mut o: Self)', '    fn parse(')
+game, read = cut(game, '    fn read(mut o: Self)', '    /// The command line alone: no file is read and nothing changes.')
 read = read.replace('    fn read(', '    pub(super) fn read(', 1)
 game, validation = cut(game, '        if o.developer_single_player\n', '        Ok(Some(o))')
 game = game.replace('        Ok(Some(o))', '        o.validate_developer_single_player()?;\n        Ok(Some(o))', 1)

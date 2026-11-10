@@ -319,6 +319,9 @@ impl Options {
             )
         })
     }
+    /// The command line alone: no file is read and nothing changes. `None` for `--help` and
+    /// `--launch-api`, which print and end the run.
+    #[cfg(test)]
     fn parse(args: impl Iterator<Item = String>) -> Result<Option<Self>> {
         Self::from_launch(LaunchArguments::parse(
             args,

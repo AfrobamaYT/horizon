@@ -59,9 +59,6 @@ impl Options {
         }
         Ok(o)
     }
-    /// The command line alone: no file is read and nothing changes. `None` for `--help` and
-    /// `--launch-api`, which print and end the run.
-    #[cfg(test)]
     pub(super) fn validate_developer_single_player(&self) -> Result<()> {
         if self.developer_single_player
             && (self.server.is_some()
