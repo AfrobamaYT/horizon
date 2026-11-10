@@ -123,7 +123,12 @@ def build(out: Path, server: bool) -> None:
     deps.mkdir(parents=True)
     for file in sorted((target_dir / PROFILE / "deps").iterdir()):
         # Metadata, proc macros, the game and the wasm runtime; other code lives inside the two dylibs.
-        if file.name.endswith(SUFFIXES):
+        # Old cached builds may leave the previous top-level engine dylib beside
+        # the metadata. It must not override the engine now embedded in the host.
+        if file.name.endswith(SUFFIXES) and file.name not in {
+            'libhorizon_client.so', 'libhorizon_client.dylib', 'horizon_client.dll',
+            'libhorizon_client.dll', 'libhorizon_client.dll.a',
+        }:
             shutil.copy2(file, deps / file.name)
     native = out / NATIVE
     native.mkdir()
