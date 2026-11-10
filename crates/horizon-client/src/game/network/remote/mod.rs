@@ -264,7 +264,7 @@ impl ChunkGenerator for NoTerrain {
 }
 
 /// A server entity the client tracks (position as last sent).
-struct Tracked {
+pub(super) struct Tracked {
     kind: String,
     position: [f64; 3],
     /// `Entity.getPositionCodec`'s base: the position the server last
@@ -296,7 +296,7 @@ fn seat_passengers(entities: &mut HashMap<i32, Tracked>, vehicle: u32, passenger
 #[derive(Clone, Copy)]
 /// `LinearInterpolationHandler`'s target: a position and rotation (yRot,
 /// xRot) reached in `steps` ticks.
-struct Lerp {
+pub(super) struct Lerp {
     target: [f64; 3],
     rotation: Option<(f32, f32)>,
     steps: u32,
@@ -315,7 +315,7 @@ struct CartStep {
 /// The client's state of a minecart on `NewMinecartBehavior`: the steps the
 /// server sent (`lerpSteps`), the ones being played over 3 ticks
 /// (`currentLerpSteps`) and where the cart was when they began (`oldLerp`).
-struct CartLerp {
+pub(super) struct CartLerp {
     pending: Vec<CartStep>,
     current: Vec<CartStep>,
     total_weight: f64,
@@ -634,7 +634,7 @@ pub(super) struct Remote {
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
     /// follows (`horizon:menu_extra`).
     menu_extra: Option<horizon_protocol::menu_extra::Message>,
-    entities: HashMap<i32, Tracked>,
+    pub(super) entities: HashMap<i32, Tracked>,
     /// Per-tick remote entity scratch retained between frames.
     tick_fluids: Vec<Option<horizon_client::mobs::living::Fluids>>,
     tick_rain: Vec<bool>,
@@ -642,14 +642,14 @@ pub(super) struct Remote {
     tick_water_fx: Vec<horizon_client::mobs::MobEvent>,
     /// Complete network riding graph, including invisible plugin seat entities.
     pub(super) passenger_vehicles: HashMap<u32, u32>,
-    lerps: HashMap<i32, Lerp>,
+    pub(super) lerps: HashMap<i32, Lerp>,
     /// The minecarts the server moves with `ClientboundMoveMinecartPacket`
     /// (`NewMinecartBehavior`), which have no interpolation handler.
-    cart_lerps: HashMap<i32, CartLerp>,
+    pub(super) cart_lerps: HashMap<i32, CartLerp>,
     /// Living entities' `SteppedInterpolationHandler`s.
-    stepped: HashMap<i32, SteppedInterpolation>,
+    pub(super) stepped: HashMap<i32, SteppedInterpolation>,
     /// `LivingEntity.lerpHeadTo`: the head yaw and the ticks left to reach it.
-    head_lerps: HashMap<i32, (f32, u32)>,
+    pub(super) head_lerps: HashMap<i32, (f32, u32)>,
     /// The happy ghast the player just got off, until the server's teleport
     /// puts the player on top of it (`place_ghast_under`).
     pub(super) ghast_dismount: Option<u32>,
@@ -660,7 +660,7 @@ pub(super) struct Remote {
     pub(super) passenger_index: usize,
     /// Item entities waiting for their item data: where they are and their
     /// motion.
-    pending_items: HashMap<i32, ([f64; 3], Vec3)>,
+    pub(super) pending_items: HashMap<i32, ([f64; 3], Vec3)>,
     health: (f32, i32, f32),
     /// `LocalPlayer.flashOnSetHealth`: set by the first health the server
     /// sends; from then on a drop starts the hurt animation.
@@ -722,7 +722,7 @@ pub(super) struct Remote {
     /// `ClientPacketListener.levels()` hands to command suggestions.
     pub(super) levels: Vec<String>,
     /// Player entities in the level: entity id to profile UUID.
-    pub(super) level_players: HashMap<i32, u128>,
+    level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
     /// player-list entry, which servers remove to hide their NPCs from the list.
     level_player_names: HashMap<i32, String>,
@@ -732,7 +732,7 @@ pub(super) struct Remote {
     level_player_textures: HashMap<i32, horizon_client::skins::Textures>,
     /// Entities with shared flag 6 (`Entity.isCurrentlyGlowing` on a client); mobs keep
     /// theirs in `Mob::glowing`.
-    glowing: std::collections::HashSet<i32>,
+    pub(super) glowing: std::collections::HashSet<i32>,
     /// The player's own shared flag 5 (`Entity.isInvisible`) as the server
     /// last set it.
     pub(super) own_invisible: bool,
@@ -2878,7 +2878,7 @@ impl Game<'_> {
     /// view centre, `calculateStorageRange` (the server's radius, at least
     /// two, plus three) chunks each way.
     pub(super) fn remote_chunk_in_range(&self, x: i32, z: i32) -> bool {
-        if self.studio_replay.is_some() {
+        if self.replay.playing() {
             return true;
         }
         self.remote
@@ -3606,7 +3606,7 @@ impl Game<'_> {
         self.move_remote_text_display(id, position, rotation);
         self.turn_remote_projectile(id, rotation);
     }
-    fn detach_remote_tracking_entity(&mut self, id: i32) {
+    pub(super) fn detach_remote_tracking_entity(&mut self, id: i32) {
         let mobs = &self.mobs;
         let index = &mut self.mob_index;
         self.particles
@@ -3614,43 +3614,7 @@ impl Game<'_> {
                 index.get(mobs, id as u32).map(mob_tracking_body)
             });
     }
-    fn remove_entity(&mut self, id: i32) {
-        // A client-only camera selection has no server spectating state to reset it.
-        // Use the camera-packet path to restore control and the player's post effect.
-        if let Some(player) = self
-            .remote
-            .as_ref()
-            .filter(|r| r.camera == Some(id))
-            .map(|r| r.entity_id)
-        {
-            self.remote_set_camera(player);
-        }
-        self.detach_remote_tracking_entity(id);
-        self.audio.remove_sound_entity(id as u32);
-        // Entity.setRemoved detaches every passenger, even when no empty
-        // SetPassengers packet preceded the vehicle's removal. Otherwise
-        // mobs and other players keep their passenger pose after it is gone.
-        self.remote_set_passengers(id, &[]);
-        self.mobs.retain(|m| m.id != id as u32);
-        self.orbs.retain(|o| o.id != id as u32);
-        self.dropped.retain(|d| d.id != id as u32);
-        // Before the crystals go: the dragon's beam index follows them.
-        self.remove_remote_dragon(id);
-        self.remove_remote_object(id as u32);
-        self.remove_remote_projectile(id as u32);
-        self.persist.uuids.remove(&(id as u32));
-        if let Some(r) = self.remote.as_mut() {
-            r.glowing.remove(&id);
-            r.entities.remove(&id);
-            r.passenger_vehicles.remove(&(id as u32));
-            r.passenger_vehicles.retain(|_, v| *v != id as u32);
-            r.lerps.remove(&id);
-            r.cart_lerps.remove(&id);
-            r.stepped.remove(&id);
-            r.head_lerps.remove(&id);
-            r.pending_items.remove(&id);
-        }
-    }
+
     /// Map a menu slot to Horizon's inventory screen slot ids.
     pub(super) fn inventory_screen_slot(menu: &str, slot: i32) -> Option<usize> {
         let s = usize::try_from(slot).ok()?;
@@ -3979,7 +3943,9 @@ impl Game<'_> {
                 self.debug_entries.invalidate();
                 let old_player = self.remote.as_ref().map(|r| (r.entity_id, r.profile));
                 if let Some((_, uuid)) = old_player {
-                    self.forget_entity_initialization(Holder::Player(uuid));
+                    self.forget_entity_initialization(horizon_client::lan::playerdata::uuid_ints(
+                        uuid,
+                    ));
                 }
                 if let Some(r) = self.remote.as_ref() {
                     self.audio.remove_sound_entity(r.entity_id as u32);
@@ -4256,8 +4222,10 @@ impl Game<'_> {
                 self.move_remote_interaction(p.id, p.position);
             }
             C::RemoveEntities(p) => {
-                for id in p.ids {
-                    self.forget_remote_entity_construction(id);
+                for &id in &p.ids {
+                    if let Some(uuid) = self.persist.uuids.get(&(id as u32)).copied() {
+                        self.forget_entity_initialization(uuid);
+                    }
                     if let Some(r) = self.remote.as_mut() {
                         if let Some(uuid) = r.level_players.remove(&id) {
                             r.attachments.remove(&Holder::Player(uuid));
@@ -4266,8 +4234,8 @@ impl Game<'_> {
                         r.level_player_textures.remove(&id);
                         r.attachments.remove(&Holder::Entity(id as u32));
                     }
-                    self.remove_entity(id);
                 }
+                self.remove_entities(&p.ids);
             }
             C::MoveEntityPos(play::MoveEntityPos(m))
             | C::MoveEntityPosRot(play::MoveEntityPosRot(m))
@@ -6698,7 +6666,7 @@ impl Game<'_> {
                 self.resident_entities.local_player.renew();
                 self.player = Some(player);
                 self.bind_local_player_residency();
-                self.pad.player_replaced();
+                self.input_player_replaced();
                 self.sway = Default::default();
                 self.eye = 1.62;
                 self.previous_eye = 1.62;
@@ -6707,7 +6675,7 @@ impl Game<'_> {
                 self.apply_remote_abilities();
             }
         }
-        if self.studio_replay.is_none() {
+        if !self.replay.playing() {
             self.previous_position = position;
         }
         self.yaw = yaw;
@@ -7079,7 +7047,7 @@ impl Game<'_> {
             return Ok(());
         };
         player.fluids.boat = boat;
-        if !riding && self.studio_replay.is_none() {
+        if !riding && !self.replay.playing() {
             self.previous_position = player.position;
         }
         let before = (
@@ -7289,10 +7257,10 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         // The player's own model (third person, the inventory's preview).
-        if self.studio_replay.is_none() {
+        if !self.replay.playing() {
             self.tick_player_model();
         }
-        self.tick_emotes();
+        self.client_hooks_tick();
         if !dead {
             self.remote_tick_using();
         }
@@ -7369,24 +7337,24 @@ impl Game<'_> {
         let mut push = Vec3::ZERO;
         let order = |id: u32| r.ticked_before_player.contains(&id) == before_player;
         for m in self.mobs.iter().filter(|m| order(m.id)) {
-            let listed = r
-                .level_players
-                .get(&(m.id as i32))
-                .and_then(|uuid| r.tab_players.get(uuid));
-            let spectator = listed.is_some_and(|t| t.game_mode == SPECTATOR);
-            let mob_team = match listed {
-                Some(t) => board.players_team(&t.name),
-                None => teams.of(Who::Mob(m.id)),
-            };
-            // Bats never push; a spectator has no physics; passengers of the
-            // same vehicle never push each other.
+            // Bats never push, nor passengers of one vehicle, nor a spectator; the
+            // box test comes before the lookups that far mobs never need (#14053).
             if !m.alive()
-                || spectator
                 || m.species() == horizon_client::mobs::Species::Bat
                 || self
                     .riding
                     .is_some_and(|v| v == m.id || m.extra.mount == Some(v))
                 || !m.bounds().intersects(bounds)
+            {
+                continue;
+            }
+            let listed = r
+                .level_players
+                .get(&(m.id as i32))
+                .and_then(|uuid| r.tab_players.get(uuid));
+            let mob_team =
+                listed.map_or_else(|| teams.of(Who::Mob(m.id)), |t| board.players_team(&t.name));
+            if listed.is_some_and(|t| t.game_mode == SPECTATOR)
                 || !horizon_client::scoreboard::pushable_by(mob_team, player_team, true)
             {
                 continue;
@@ -7903,15 +7871,15 @@ impl Game<'_> {
             } else if m.alive() {
                 m.body_rotation_tick();
             }
-            // Squid.aiStep follows LivingEntity's interpolation and head turn.
+            // Squid.aiStep; WalkAnimationState.update from the horizontal distance.
             horizon_client::mobs::aquatic::squid_client_step(m, &mut mob_fx);
-            // WalkAnimationState.update from the horizontal distance moved.
-            let (dx, dz) = (m.position.x - m.previous.x, m.position.z - m.previous.z);
-            let (target, factor) = if horizon_client::mobs::camel::is_camel(m.species()) {
-                // Camel.updateWalkAnimation.
-                horizon_client::mobs::camel::walk_target(m, (dx * dx + dz * dz).sqrt() as f32)
+            let d = (m.position.x - m.previous.x).hypot(m.position.z - m.previous.z) as f32;
+            let (target, factor) = if m.species() == horizon_client::mobs::Species::Frog {
+                (horizon_client::mobs::frog::walk_target(m, d), 0.4)
+            } else if horizon_client::mobs::camel::is_camel(m.species()) {
+                horizon_client::mobs::camel::walk_target(m, d)
             } else {
-                ((((dx * dx + dz * dz).sqrt() * 4.0) as f32).min(1.0), 0.4)
+                ((d * 4.0).min(1.0), 0.4)
             };
             m.limb_speed += (target - m.limb_speed) * factor;
             m.limb_position += m.limb_speed;
@@ -10319,7 +10287,7 @@ impl Game<'_> {
                 KeyCode::KeyQ if !self.spectator() => {
                     // Minecraft.hasControlDown: the physical keys, so a toggled
                     // sprint on Left Control does not make Q drop the stack.
-                    let all = self.has_control_down() || std::mem::take(&mut self.pad.drop_stack);
+                    let all = self.has_control_down() || self.input_takes_stack_drop();
                     self.remote_drop(all);
                 }
                 KeyCode::KeyE
@@ -11444,7 +11412,7 @@ impl Game<'_> {
     /// A connection's screen is over the world: connecting, reconfiguring, or
     /// the level loading screen, a portal's included (`remote_overlay`).
     pub(super) fn remote_screen_up(&self) -> bool {
-        self.studio_replay.is_none()
+        !self.replay.playing()
             && self
                 .remote
                 .as_ref()
@@ -11538,7 +11506,7 @@ impl Game<'_> {
     /// Connected or connecting with no player yet: `ConnectScreen`, then
     /// `LevelLoadingScreen`, over the panorama with its blur.
     pub(super) fn remote_loading(&self) -> bool {
-        if self.studio_replay.is_some() {
+        if self.replay.playing() {
             return false;
         }
         use horizon_client::level_loading::Reason;
@@ -11640,11 +11608,7 @@ impl Game<'_> {
     /// The profile name of another player the server sent, by entity id.
     pub(super) fn remote_player_name(&self, id: u32) -> Option<&str> {
         let r = self.remote.as_ref()?;
-        let uuid = r.level_players.get(&(id as i32))?;
-        if *uuid == r.profile {
-            return None;
-        }
-        r.level_player_name(id as i32, uuid)
+        r.level_player_name(id as i32, &r.player_uuid(id)?)
     }
     pub(super) fn remote_player_uuid(&self, id: u32) -> Option<u128> {
         let remote = self.remote.as_ref()?;
@@ -12513,6 +12477,11 @@ impl Remote {
     pub(super) fn profile(&self) -> u128 {
         self.profile
     }
+    /// Another player's profile UUID, by their entity id (None for the local player).
+    pub(super) fn player_uuid(&self, id: u32) -> Option<u128> {
+        let uuid = *self.level_players.get(&(id as i32))?;
+        (uuid != self.profile).then_some(uuid)
+    }
     /// The entity id of a player in the level, by profile UUID.
     pub(super) fn player_entity(&self, uuid: u128) -> Option<u32> {
         self.level_players
@@ -12658,6 +12627,7 @@ fn in_storage_range(view_distance: i32, center: (i32, i32), x: i32, z: i32) -> b
     x.abs_diff(center.0) <= range && z.abs_diff(center.1) <= range
 }
 
+// A packet's removals (`RemoveEntities`), apart: this file may not grow.
 #[cfg(test)]
 mod interaction_event_tests;
 
@@ -17247,8 +17217,278 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "player_tick_tests.rs"]
-mod player_tick_tests;
+mod player_tick_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_client::items::ItemStack;
+    use mod_api::{Host, HostSide, PlayerRef};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, PartialEq)]
+    struct Snapshot {
+        phase: &'static str,
+        side: &'static str,
+        uuid: u128,
+        diamonds: u32,
+        xp: i32,
+        cooldown: Option<i32>,
+    }
+
+    struct Log(Arc<Mutex<Vec<Snapshot>>>);
+    impl Log {
+        fn record(&self, side: HostSide<'_>, player: PlayerRef, phase: &'static str) {
+            let (host, side, cooldown): (&dyn Host, _, _) = match side {
+                HostSide::Server(host) => {
+                    assert_eq!(
+                        host.players().acting_player().unwrap().uuid(),
+                        player.uuid()
+                    );
+                    let cooldown = player
+                        .item_cooldowns(host)
+                        .unwrap()
+                        .first()
+                        .map(|c| c.ticks_left);
+                    (host, "server", cooldown)
+                }
+                HostSide::Client(host) => {
+                    if host.local_player() != Some(player) {
+                        assert_eq!(player.uuid(), 789);
+                        assert_eq!(player.entity().id(), 66);
+                        assert!(player.inventory(host).is_none());
+                    }
+                    (host, "client", None)
+                }
+            };
+            self.0.lock().unwrap().push(Snapshot {
+                phase,
+                side,
+                uuid: player.uuid(),
+                diamonds: player
+                    .inventory(host)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|s| {
+                        mod_api::__private::item_key_id(s.item()).unwrap() == "minecraft:diamond"
+                    })
+                    .map(|s| s.count())
+                    .sum(),
+                xp: player.experience(host).map_or(0, |xp| xp.total),
+                cooldown,
+            });
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Log {
+        fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+            self.record(host, event.player, "pre");
+        }
+        fn player_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
+            self.record(host, event.player, "post");
+        }
+        fn can_continue_sleeping(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::CanContinueSleepingEvent<'_>,
+        ) -> Option<bool> {
+            // The sleep rule runs inside the tick, never ahead of Pre.
+            let heard = self.0.lock().unwrap();
+            assert_eq!(heard.last().unwrap().phase, "pre");
+            assert_eq!(heard.last().unwrap().uuid, event.entity);
+            Some(false)
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn guest_tick_brackets_sleep_cooldowns_pickups_and_death() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "log",
+            Box::new(Log(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                let mut g = guest(1);
+                g.loaded = true;
+                g.bed = Some([0, 0, 0]);
+                g.sleeping = true;
+                g.sleep_timer = 4;
+                let mut other = guest(2);
+                other.loaded = true;
+                other.position = [50.0, 0.0, 50.0];
+                let host = game.lan.as_mut().unwrap();
+                host.hub.guests.extend([g, other]);
+                host.play
+                    .entry(1)
+                    .or_default()
+                    .cooldowns
+                    .add("minecraft:ender_pearl".into(), 3);
+                let diamond = ItemStack::new("minecraft:diamond", 2);
+                game.spawn_item(diamond.clone(), [0.0; 3], [0.0; 3], 0);
+                let level = game.level("minecraft:overworld").unwrap();
+                assert!(game.level_award_experience(level, 0.0, 0.0, 0.0, 7));
+                game.tick_guests();
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations
+                        .iter()
+                        .map(|s| (s.phase, s.uuid))
+                        .collect::<Vec<_>>(),
+                    [("pre", 123), ("post", 123), ("pre", 124), ("post", 124)]
+                );
+                assert_eq!(
+                    observations[0],
+                    Snapshot {
+                        phase: "pre",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 0,
+                        xp: 0,
+                        cooldown: Some(3)
+                    }
+                );
+                assert_eq!(
+                    observations[1],
+                    Snapshot {
+                        phase: "post",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(observations[2].diamonds, 0);
+                drop(observations);
+                assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].sleep_timer, 100);
+                assert!(game.lan.as_ref().unwrap().hub.guests[0].bed.is_none());
+                assert!(game.inventory.iter().all(Option::is_none));
+                heard.lock().unwrap().clear();
+                // A real zero-health death-screen tick still gets both endpoints,
+                // without use/cooldown/pickup work re-enabled.
+                game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                    g.dead = true;
+                    g.health = 0.0;
+                });
+                game.spawn_item(diamond, [0.0; 3], [0.0; 3], 0);
+                assert!(game.level_award_experience(level, 0.0, 0.0, 0.0, 7));
+                game.tick_guests();
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations[0],
+                    Snapshot {
+                        phase: "pre",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(
+                    observations[1],
+                    Snapshot {
+                        phase: "post",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(observations.len(), 4);
+                assert_eq!(game.dropped.len(), 1);
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn client_player_ticks_on_the_death_screen_too() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "log",
+            Box::new(Log(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+                let (client, server) = horizon_protocol::connection::Pipe::pair();
+                game.connect_local(client, "tick-client").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                remote.logged_in = true;
+                remote.profile = 456;
+                remote.entity_id = 42;
+                game.player = horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .ok();
+                game.remote.as_mut().unwrap().level_players.insert(66, 789);
+                let kind = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .player_type
+                    .as_ref()
+                    .unwrap()
+                    .clone();
+                game.mobs.push(horizon_client::mobs::Mob::new(
+                    66,
+                    kind,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                ));
+                game.cooldowns.add("minecraft:ender_pearl".into(), 3);
+                game.sleep_timer = 4;
+                // LocalPlayer.tick waits for the client load and its chunk: only
+                // the other player's pair runs, and the level pass still ticks.
+                game.tick_remote().unwrap();
+                // Player.tick owns both counters, so they wait with it.
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 3);
+                assert_eq!(game.sleep_timer, 4);
+                let phases = || {
+                    std::mem::take(&mut *heard.lock().unwrap())
+                        .iter()
+                        .map(|s| (s.phase, s.side, s.uuid))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(phases(), [("pre", "client", 789), ("post", "client", 789)]);
+                game.remote.as_mut().unwrap().loaded_sent = true;
+                game.streaming
+                    .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(0, 0));
+                // The other player's tick ends before the local player's starts.
+                game.tick_remote().unwrap();
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 2);
+                assert_eq!(game.sleep_timer, 5);
+                game.screen = super::super::Screen::Dead;
+                game.player
+                    .as_mut()
+                    .unwrap()
+                    .set_health(0.0, false)
+                    .unwrap();
+                game.tick_remote().unwrap();
+                assert_eq!(
+                    phases(),
+                    [
+                        ("pre", "client", 789),
+                        ("post", "client", 789),
+                        ("pre", "client", 456),
+                        ("post", "client", 456),
+                        ("pre", "client", 789),
+                        ("post", "client", 789),
+                        ("pre", "client", 456),
+                        ("post", "client", 456)
+                    ]
+                );
+                server.shutdown();
+            })
+        });
+    }
+}
 
 /// Whether a synchronized dimension type's values are inside the codec's ranges
 /// (`DimensionType.java`: a coordinate scale of `1.0E-5F` to `3.0E7`, a monster spawn block light

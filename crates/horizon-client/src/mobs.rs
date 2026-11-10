@@ -60,6 +60,10 @@ pub mod mod_behaviors;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
+pub mod neutral_anger;
+pub use neutral_anger::{
+    adopt_anger_end, anger_left, persistent_anger, resume_anger, settle_anger_end,
+};
 pub mod nav;
 pub mod nether;
 pub mod panda;
@@ -108,8 +112,7 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-use living::totem_death_effects;
-pub use world::{TargetInfo, visual_clip};
+pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
@@ -1253,14 +1256,6 @@ pub struct Attrs {
 }
 /// `minecraft:wolf_armor`'s maximum damage.
 pub const WOLF_ARMOR_DURABILITY: i32 = 64;
-/// `NeutralMob.readPersistentAngerSaveData`: the anger runs until its end
-/// time, so a mob that is loaded again is angry for what is left of it.
-pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
-    if anger_end <= 0 {
-        return 0;
-    }
-    (anger_end - game_time).clamp(0, i64::from(i32::MAX)) as i32
-}
 
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
@@ -1375,6 +1370,8 @@ pub struct Extra {
     /// anger ends at, -1 when the mob is calm. The save keeps it, so the
     /// anger goes on while the chunk is unloaded.
     pub anger_end: i64,
+    /// Countdown and age when `anger_end` was last settled (`neutral_anger`).
+    pub anger_stamp: Option<(i32, u32)>,
     /// `NeutralMob.getPersistentAngerTarget`: the entity the mob is angry
     /// at, which the save keeps with it.
     pub angry_at: Option<Who>,
@@ -1697,6 +1694,31 @@ impl Extra {
     pub fn take_slot_id(&mut self, slot: usize) -> Option<Arc<str>> {
         self.equipment[slot].take().map(|s| s.item)
     }
+}
+
+/// `DeathProtection.TOTEM_EFFECTS`: clear, then regeneration II, absorption II
+/// and fire resistance.
+fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
+    use crate::items::{ConsumeEffect, ConsumeEffectSpec};
+    let spec = |id: &str, duration, amplifier| ConsumeEffectSpec {
+        id: id.to_owned(),
+        duration,
+        amplifier,
+        ambient: false,
+        show_particles: true,
+        show_icon: true,
+    };
+    vec![
+        ConsumeEffect::ClearAllEffects,
+        ConsumeEffect::ApplyEffects {
+            effects: vec![
+                spec("minecraft:regeneration", 900, 1),
+                spec("minecraft:absorption", 100, 1),
+                spec("minecraft:fire_resistance", 800, 0),
+            ],
+            probability: 1.0,
+        },
+    ]
 }
 
 /// How far the boxes of a set of mobs reach from their positions: the widest reach sideways, below
@@ -3639,8 +3661,6 @@ pub struct MobWorld<'a> {
     /// player in the level stands, alive or not (the despawn distance).
     pub nearest_player: Option<Vec3>,
     pub others: &'a [Seen],
-    /// Retained passenger objects for topology only, never targets or colliders.
-    pub passenger_objects: &'a [Seen],
     /// Disjoint live mob state, available only while an actor is ticked.
     pub live_mobs: Option<&'a dyn LiveMobs>,
     /// The separately simulated dragon, visible to revenge and melee goals.
@@ -4111,6 +4131,7 @@ impl Mob {
         if mob.species() == Species::Salmon {
             mob.extra.variant = 1;
         }
+        neutral_anger::init(&mut mob);
         // `Creeper.explosionRadius = 3` until a save or a command sets it.
         mob.extra.explosion_radius = 3;
         // The PathNavigation constructor: the base follow range.
@@ -4892,7 +4913,7 @@ impl Mob {
         events: &mut Vec<MobEvent>,
     ) -> bool {
         self.prepare_tick();
-        ai::tick(self, w, level, events)
+        neutral_anger::around_tick(self, w.game_time, |m| ai::tick(m, w, level, events))
     }
     /// A game-owned tick may pause before fox consumption to release its loans.
     pub fn tick_until_consumption(
@@ -5559,8 +5580,117 @@ impl Mob {
 }
 
 #[cfg(test)]
-#[path = "mobs/lighting_tests.rs"]
-mod lighting_tests;
+mod lighting_tests {
+    use super::*;
+    use glam::{Mat4, Vec3};
+    use serde_json::json;
+
+    fn plane(normal: [f32; 3]) -> Part {
+        Part::parse(
+            "root",
+            &json!({
+                "polygons": [[[0,0,0,0,0], [0,0,0,1,0], [0,0,0,1,1], [0,0,0,0,1]]],
+                "normals": [normal]
+            }),
+        )
+    }
+
+    #[test]
+    fn exported_normals_survive_collapsed_faces_and_mirroring() {
+        let part = plane([1.0, 0.0, 0.0]);
+        assert_eq!(
+            part.polygons[0].vertex_normal(ModelNormals::new(Mat4::IDENTITY)),
+            [127, 0, 0, -127]
+        );
+        assert_eq!(
+            part.polygons[0].vertex_normal(ModelNormals::new(Mat4::from_scale(Vec3::new(
+                -1.0, -1.0, 1.0
+            )))),
+            [-127, 0, 0, -127]
+        );
+    }
+
+    #[test]
+    fn normal_matrix_includes_parent_scale_and_child_rotation() {
+        let mut child = plane([1.0, 0.0, 0.0]);
+        child.pose[5] = std::f32::consts::FRAC_PI_4;
+        let parent = Part {
+            name: "parent".into(),
+            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.5],
+            polygons: Vec::new(),
+            children: vec![child],
+        };
+        let mut animated = Vec::new();
+        render::draw(
+            &parent,
+            Mat4::IDENTITY,
+            &anim::Poses::new(&parent),
+            [0.0, 0.0, 1.0, 1.0],
+            0x80402010,
+            240,
+            1,
+            &mut animated,
+        );
+        let mut direct = Vec::new();
+        render_model(
+            &parent,
+            Mat4::IDENTITY,
+            &|p| p.pose,
+            [0.0, 0.0, 1.0, 1.0],
+            240,
+            1,
+            &mut direct,
+        );
+        assert_eq!(animated.len(), 4);
+        for (a, b) in animated.iter().zip(&direct) {
+            assert_eq!(a.normal, [56, 113, 0, -127]);
+            assert_eq!(a.normal, b.normal);
+            assert_eq!(a.pos, b.pos);
+            assert_eq!(a.uv, b.uv);
+            assert_eq!((a.color, a.light, a.layer), (0x80402010, 240, 1));
+        }
+    }
+
+    #[test]
+    fn trusted_rotation_retains_native_quaternion_rounding() {
+        let mut part = plane([1.0, 0.0, 0.0]);
+        part.pose[3] = std::f32::consts::FRAC_PI_2;
+        let mut vertices = Vec::new();
+        render::draw(
+            &part,
+            Mat4::IDENTITY,
+            &anim::Poses::new(&part),
+            [0.0, 0.0, 1.0, 1.0],
+            0xffffffff,
+            240,
+            0,
+            &mut vertices,
+        );
+        assert_eq!(vertices[0].normal, [126, 0, 0, -127]);
+    }
+
+    #[test]
+    fn legacy_models_infer_non_degenerate_face_normals() {
+        let part = Part::parse(
+            "root",
+            &json!({"polygons": [
+                [[0,0,0,0,0], [1,0,0,1,0], [1,1,0,1,1], [0,1,0,0,1]]
+            ]}),
+        );
+        assert_eq!(part.polygons[0].normal, [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn packed_normal_uses_native_snorm_bytes_without_changing_vertex_offsets() {
+        assert_eq!(std::mem::offset_of!(Vertex, normal), 32);
+        assert_eq!(std::mem::size_of::<Vertex>(), 44);
+        let part = plane([0.0, 1.0, 0.0]);
+        assert_eq!(
+            part.polygons[0].vertex_normal(ModelNormals::new(Mat4::from_scale(Vec3::ZERO))),
+            [0, 0, 0, -127]
+        );
+    }
+}
 
 /// `LivingEntity.elytraAnimationState`: eased wing angles and render interpolation.
 #[derive(Clone, Copy, Debug, Default)]
