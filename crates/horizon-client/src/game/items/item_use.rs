@@ -1161,6 +1161,7 @@ pub(super) mod interact_vibration_tests {
             let mut info = items["minecraft:fishing_rod"].clone();
             info.id = std::sync::Arc::from("ruby:rod");
             info.template = Some(std::sync::Arc::from("minecraft:fishing_rod"));
+            assert!(super::super::remote::item_has_use(&info), "remote use accepts content rods");
             items.insert(info.id.clone(), info);
 
             let stick = ItemStack::new("minecraft:stick", 1);
