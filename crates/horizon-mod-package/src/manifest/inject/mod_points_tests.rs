@@ -153,6 +153,16 @@ fn each_refusal_names_what_changed_or_why() {
     let mut call = inject("chemlib::transfer", Kind::BeforeCall, Access::Api, &hash);
     call.call = Some("chemlib::helper".into());
     assert!(refused(call, &same).starts_with("E_INJECT_NO_SLOT"));
+    // Nothing records another mod's hash, so the declaration must carry it.
+    let mut unpinned = inject("chemlib::transfer", Kind::Head, Access::Api, &hash);
+    unpinned.hash = None;
+    let unpinned = refused(unpinned, &same);
+    assert!(
+        unpinned.contains("addon:listen")
+            && unpinned.contains("hash")
+            && unpinned.contains("inject add"),
+        "{unpinned}"
+    );
 }
 
 #[test]
