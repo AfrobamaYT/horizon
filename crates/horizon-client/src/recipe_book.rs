@@ -17,10 +17,13 @@ mod properties;
 pub use properties::ServerRecipeProperties;
 
 mod custom_books;
+pub mod menu_layout;
 mod mod_index;
+pub mod mod_presentation;
 pub mod settings_codec;
 pub mod settings_connection;
 pub mod settings_sync;
+pub mod slot_layout;
 pub use custom_books::{BookError, BookFlags, CustomBooks, read_saved};
 pub use mod_index::{DisplayLoadError, DisplayResources, ModBookIndex, ModBookPanel};
 
