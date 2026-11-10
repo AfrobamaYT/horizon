@@ -279,14 +279,18 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_fluid_flow(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec3>;
     /// Side: server.
-    /// Block-local outline or collision boxes with an empty context. Interaction,
-    /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a closed level. Unloaded blocks read
-    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// The supplied state's block-local outline or collision boxes at `pos`,
+    /// with an empty context (`BlockState.getShape` / `getCollisionShape`).
+    /// The state need not be the block stored there; level-dependent shapes
+    /// still read the real level. Pass `block_state(host, pos)` to query the
+    /// state at that position. Interaction, visual, occlusion and support shapes
+    /// are not exposed. Returns None on a client, for an unknown state, a stale
+    /// handle or a closed level. Collision errors return no boxes.
     #[access(WorldOnly)]
     fn level_block_shape(
         &self,
         level: LevelRef,
+        state: BlockState,
         pos: [i32; 3],
         kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>>;
