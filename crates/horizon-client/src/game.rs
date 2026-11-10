@@ -2219,7 +2219,7 @@ struct PreparedWorldReload {
     health: horizon_client::health::HealthResources,
     parts: PreparedParts,
     wire: Option<Arc<horizon_client::lan::data::SyncData>>,
-    datapack_candidate: Option<mod_api::DatapackCandidate>,
+    datapack_registries: Option<mod_api::DatapackRegistrySet>,
 }
 
 impl WorldTables {

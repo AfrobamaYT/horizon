@@ -409,28 +409,6 @@ impl Game<'_> {
         });
         Ok(())
     }
-    /// Publish a reload's candidate as the next generation of this world session's registries;
-    /// the previous set stays when the generation counter has run out, and nothing is
-    /// published when no mod declared a registry.
-    fn reload_datapack_registries(&mut self, candidate: Option<mod_api::DatapackCandidate>) {
-        let Some(candidate) = candidate else {
-            self.mods.datapack_registries = None;
-            return;
-        };
-        self.mods.datapack_registries = match self.mods.datapack_registries.take() {
-            Some(old) => match old.reload(candidate) {
-                Ok(next) => Some(next),
-                Err(error) => {
-                    log::error!("Horizon: datapack registries not reloaded: {error:?}");
-                    Some(old)
-                }
-            },
-            None => Some(mod_api::DatapackRegistrySet::first(
-                candidate,
-                next_datapack_session(),
-            )),
-        };
-    }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
     /// Publish tables before function admission, leaving advancement rewards queued
@@ -442,7 +420,7 @@ impl Game<'_> {
             health,
             parts,
             wire,
-            datapack_candidate,
+            datapack_registries,
         } = prepared;
         lan::forget_server_sources();
         if let Some(tables) = &tables
@@ -460,7 +438,7 @@ impl Game<'_> {
             );
         }
         self.world_tables = tables;
-        self.reload_datapack_registries(datapack_candidate);
+        self.mods.datapack_registries = datapack_registries;
         self.refresh_recipe_property_context();
         self.structure_spawns = structure_spawns;
         self.health_resources = health;
@@ -615,7 +593,20 @@ impl Game<'_> {
         data_switched: bool,
     ) -> Result<PreparedWorldReload> {
         let (tables, health) = self.build_world_tables(stack, true, root, data_switched)?;
-        let datapack_candidate = self.mods.datapack_candidate.take();
+        let datapack_registries = self
+            .mods
+            .datapack_candidate
+            .take()
+            .map(|candidate| match &self.mods.datapack_registries {
+                Some(old) => old
+                    .reload(candidate)
+                    .map_err(|error| format!("datapack registry reload: {error:?}")),
+                None => Ok(mod_api::DatapackRegistrySet::first(
+                    candidate,
+                    next_datapack_session(),
+                )),
+            })
+            .transpose()?;
         let items = tables
             .as_ref()
             .map_or_else(|| self.res.items(), |tables| &tables.items);
@@ -647,7 +638,7 @@ impl Game<'_> {
             health,
             parts,
             wire,
-            datapack_candidate,
+            datapack_registries,
         })
     }
 
