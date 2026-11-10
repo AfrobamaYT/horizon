@@ -262,6 +262,14 @@ fn owner_launch_applies_the_supplied_stacks_effects() {
     let defs = [
         ("hot", json!([{"effect": ignite(4.0)}])),
         (
+            "flags",
+            json!([{"requirements": {"condition":"minecraft:entity_properties", "entity":"this", "predicate":{"minecraft:flags":{"is_on_fire":true}}}, "effect": ignite(4.0)}]),
+        ),
+        (
+            "bad_clamp",
+            json!([{"effect":{"type":"minecraft:ignite", "duration":{"type":"minecraft:clamped", "value":1,"min":2,"max":0}}}]),
+        ),
+        (
             "boom",
             json!([{"effect": {"type": "minecraft:explode", "radius": 1,
             "block_interaction": "none", "small_particle": {"type": "minecraft:explosion"},
@@ -304,5 +312,15 @@ fn owner_launch_applies_the_supplied_stacks_effects() {
         );
         assert_eq!(game.creatures.projectiles.len(), count);
         assert_eq!(game.world.random.next_long(), before.next_long());
+        for enchantment in ["spawn_test:flags", "spawn_test:bad_clamp"] {
+            let invalid = enchanted("minecraft:snowball", 1, &[(enchantment, 1)]);
+            let mut before = game.world.random.clone();
+            assert!(
+                game.spawn_projectile_from_rotation(owner, &snowball, &invalid, 0.0, 1.5, 1.0)
+                    .is_none()
+            );
+            assert_eq!(game.creatures.projectiles.len(), count);
+            assert_eq!(game.world.random.next_long(), before.next_long());
+        }
     });
 }
