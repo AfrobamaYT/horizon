@@ -2,6 +2,7 @@
 
 /// Vanilla `MobEffectCategory`, read from a registered effect's type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
 pub enum EffectCategory {
     /// A beneficial effect, such as speed.
     Beneficial,
