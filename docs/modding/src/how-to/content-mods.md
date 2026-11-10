@@ -549,10 +549,18 @@ order, and known owner movement is inherited (vertical movement only when airbor
 It does not consume an item, award use statistics or apply cooldowns; invalid parameters
 or unsupported types return `None` without spawning or drawing random values.
 The owner must be in the current level; a guest in another dimension is refused.
-The carried item count is one; the supplied stack is unchanged. A stack whose
-enchantments contain a nonempty `projectile_spawned` component is also refused:
-generic post-insertion enchantment effects are not implemented yet (tracked in #2670),
-so this operation never silently discards them.
+The carried item count is one; the supplied stack is unchanged. Once the projectile is
+in the level, the stack's enchantments run their `projectile_spawned` effects on it, as
+vanilla's `Projectile.applyOnProjectileSpawned` does after a throw: in the stack's order,
+each effect's requirements tested with the level random just before it applies, and its
+own draws from the projectile's random. `ignite`, `apply_impulse`, `play_sound` and an
+`all_of` of them apply; `apply_mob_effect` and `apply_exhaustion` do nothing to a
+projectile, as in vanilla. A stack with any other `projectile_spawned` effect (blocks,
+damage, explosions, particles, summons, functions, item damage) is refused until the
+engine applies it too (#2670), so this operation never silently discards one.
+Owner launch also refuses unsupported requirement contexts (including entity flags),
+and invalid clamped level-value ranges before insertion. Supported requirements
+are entity type predicates, random chance, and their boolean combinations.
 
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`

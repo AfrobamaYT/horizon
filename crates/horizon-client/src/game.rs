@@ -13532,8 +13532,6 @@ impl Game<'_> {
             a.set_owner(Some(horizon_client::mobs::Who::Player));
             a.fired_from_weapon = weapon;
         }
-        // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
-        self.ignite_spawned_arrow(stack, &mut arrow);
         let (velocity, on_ground) = self.player.as_ref().map_or((Vec3::ZERO, true), |pl| {
             (self.known_player_movement(), pl.ground.on_ground)
         });
@@ -13547,7 +13545,7 @@ impl Game<'_> {
             velocity,
             on_ground,
         );
-        self.add_projectile(arrow);
+        self.spawn_projectile(arrow, &ammo);
         let (player, name, projectile) = (
             horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
             self.acting_player_name().to_owned(),

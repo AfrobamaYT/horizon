@@ -18,9 +18,37 @@ use horizon_mod_wasm::{WasmPackage, load};
 
 struct Quiet;
 impl mod_api::Host for Quiet {}
-mod_api::impl_host_areas!(Quiet);
+mod_api::impl_host_areas!(Quiet, except(items));
+impl mod_api::prelude::ItemsHost for Quiet {
+    fn item_key(&self, id: &mod_api::Identifier) -> Option<mod_api::ItemKey> {
+        mod_api::__private::item_key_by_identifier(id)
+    }
+}
 impl mod_api::ServerHost for Quiet {}
-mod_api::impl_server_host_areas!(Quiet);
+mod_api::impl_server_host_areas!(Quiet, except(projectiles));
+static OWNER_LAUNCH_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+impl mod_api::prelude::ProjectilesServerHost for Quiet {
+    fn spawn_projectile_from_rotation(
+        &mut self,
+        owner: mod_api::LivingRef,
+        kind: &mod_api::Identifier,
+        stack: &mod_api::ItemStack,
+        offset: f32,
+        power: f32,
+        spread: f32,
+    ) -> Option<mod_api::ProjectileRef> {
+        assert_eq!(
+            owner,
+            mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 21))
+        );
+        assert_eq!(kind.to_string(), "minecraft:snowball");
+        assert_eq!(stack.count(), 16);
+        assert_eq!((offset, power, spread), (0.0, 1.5, 1.0));
+        OWNER_LAUNCH_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // This lower-layer harness has no Game and therefore no live owner.
+        None
+    }
+}
 
 #[test]
 #[ignore = "needs HORIZON_WASM_STD or HORIZON_WASM_FIXTURE_RAW; prints a member's sections"]
@@ -106,6 +134,20 @@ fn real_member() {
             mod_api::ModBlockEntity::new("wasm_fixture:counter".into(), Default::default());
         mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut entity);
         assert_eq!(entity.data, [23]);
+        mod_api::__private::resolve_items(["minecraft:snowball"]).unwrap();
+        let mut launch =
+            mod_api::ModBlockEntity::new("wasm_fixture:owner_launch".into(), Default::default());
+        mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut launch);
+        assert_eq!(
+            launch.data,
+            [2],
+            "the real wasm guest receives the launch refusal"
+        );
+        assert_eq!(
+            OWNER_LAUNCH_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the guest must cross the owner-launch host boundary exactly once"
+        );
         assert_eq!(
             entity.nbt.get(&"counter".into()),
             Some(&mod_api::Tag::Int(17))

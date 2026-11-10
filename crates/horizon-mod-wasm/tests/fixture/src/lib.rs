@@ -2,6 +2,7 @@ use mod_api::Hooks;
 
 pub mod area_macros;
 pub mod matrix;
+pub mod projectile_owner;
 pub mod replace;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
@@ -42,6 +43,14 @@ impl Hooks for Mod {
             registrar.declare_fluid("foreign:after_refusal");
             return;
         }
+        registrar.item_key("minecraft:snowball");
+        let launch = registrar
+            .block_entity_type("owner_launch")
+            .blocks(&[])
+            .build();
+        registrar
+            .block_entity_part(&launch, projectile_owner::OwnerLaunch)
+            .unwrap();
         let kind = registrar.block_entity_type("counter").blocks(&[]).build();
         registrar.block_entity_part(&kind, Counter).unwrap();
         let reads = registrar
