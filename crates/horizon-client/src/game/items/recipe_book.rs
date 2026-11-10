@@ -126,12 +126,12 @@ fn sprite(name: &str) -> String {
 }
 
 impl Game<'_> {
-    /// The book the open screen has, if any.
+    /// The vanilla book the open screen has, if any.
     pub(super) fn active_book(&self) -> Option<BookType> {
         if self.screen != Screen::Inventory || self.station.is_some() {
             return None;
         }
-        // A mod's screen has no book.
+        // Explicitly assigned mod panels use their own identity and flags.
         if self.mount_active() || self.native_screen_height().is_some() {
             return None;
         }
