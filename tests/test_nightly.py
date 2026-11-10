@@ -1,5 +1,6 @@
 import datetime as dt
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from tools.ci import nightly
@@ -114,6 +115,27 @@ if __name__ == "__main__":
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 
 
+class FirstNightlyTests(unittest.TestCase):
+    def test_fetch_succeeds_with_or_without_an_existing_nightly_tag(self):
+        class ReachedGreenBase(Exception):
+            pass
+
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                calls = []
+                def git(*args):
+                    calls.append(args)
+                    if args[0] == "ls-remote":
+                        return "abc\\trefs/tags/nightly" if existing else ""
+                    return ""
+                with mock.patch.object(nightly, "git", side_effect=git), mock.patch.object(nightly, "green_base", side_effect=ReachedGreenBase):
+                    with self.assertRaises(ReachedGreenBase):
+                        nightly.pick(False)
+                fetched = next(args for args in calls if args[0] == "fetch")
+                self.assertIn("+refs/heads/main:refs/remotes/origin/main", fetched)
+                self.assertEqual("+refs/tags/nightly:refs/tags/nightly" in fetched, existing)
+
+
 class UntrustedBuildTests(unittest.TestCase):
     """A nightly can hold pull requests nobody reviewed: nothing its build leaves may reach a release (game-build.yml)."""
 
@@ -139,9 +161,10 @@ class UntrustedBuildTests(unittest.TestCase):
         runs_on = [line for line in self.game.splitlines() if "runs-on:" in line]
         self.assertEqual(len(runs_on), 2)
         # The nightly's own runner: never the release runner, and never behind pull requests' parity queue.
-        nightly_runner = "fromJSON('[\"self-hosted\", \"macOS\", \"horizon-nightly\"]')"
-        for line in runs_on:
-            self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || {nightly_runner}", line)
+        nightly_default = "'[\"self-hosted\", \"macOS\", \"horizon-nightly\"]'"
+        for line, variable in zip(runs_on, ("NIGHTLY_EXPORTERS_RUNNER", "NIGHTLY_MAC_RUNNER")):
+            self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || fromJSON(vars.{variable} || {nightly_default})", line)
+        self.assertIn("!inputs.trusted && matrix.os == 'ubuntu-latest' && !matrix.musl", runs_on[1])
 
     def test_a_trusted_build_never_reads_the_shared_sccache(self):
         calls = self.game.count("bash tools/ci/runner-env.sh")
