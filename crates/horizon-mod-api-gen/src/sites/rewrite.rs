@@ -368,7 +368,9 @@ pub fn rewrite(
                     fields,
                     types,
                     output,
-                } = resolve(expr, enclosing, found.sig, &lexical, entries, &rule)?;
+                } = resolve(
+                    expr, enclosing, found.sig, &lexical, entries, &rule, private,
+                )?;
                 let name = name(declaration, ordinal);
                 let record = format_ident!("__{name}Args");
                 let listener = format_ident!("__{name}Listener");
@@ -421,23 +423,59 @@ pub fn rewrite(
                             .parse()
                             .map_err(|_| Cause::Signature("invalid native type spelling").into())
                     };
+                let types = types
+                    .iter()
+                    .map(|ty| {
+                        local(ty.to_token_stream())
+                            .and_then(|tokens| syn::parse2::<Type>(tokens).map_err(Into::into))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
                 let receiver_type = local(receiver_type)?;
                 let output = local(output)?;
                 let mut alias_type: Type = syn::parse2(receiver_type.clone())?;
                 if let Type::Reference(reference) = &mut alias_type {
                     reference.lifetime = Some(syn::parse_quote!('r));
                 }
+                let borrows = types.iter().any(|ty| matches!(ty, Type::Reference(_)));
+                let inner_borrow = types
+                    .iter()
+                    .any(|ty| ty.to_token_stream().to_string().contains("'g"));
+                let lifetime = if inner_borrow {
+                    Some(quote!(<'g, 'a>))
+                } else {
+                    borrows.then(|| quote!(<'a>))
+                };
+                let record_type = quote!(#record #lifetime);
+                let macro_record = if inner_borrow {
+                    quote!(#record::<'g, 'a>)
+                } else if borrows {
+                    quote!(#record::<'a>)
+                } else {
+                    quote!(#record)
+                };
+                let inferred_record = if inner_borrow {
+                    quote!(#record<'_, '_>)
+                } else if borrows {
+                    quote!(#record<'_>)
+                } else {
+                    quote!(#record)
+                };
+                let listener_lifetimes = if borrows {
+                    quote!(for<'g, 'a>)
+                } else {
+                    quote!(for<'g>)
+                };
                 let raw = quote! {
-                    pub struct #record { #(pub #fields: #types,)* }
+                    pub struct #record #lifetime { #(pub #fields: #types,)* }
                     pub type #receiver_alias<'g, 'r> = #alias_type;
                     pub type #output_alias = #output;
-                    pub type #listener = for<'g> fn(#receiver_type, &mut #record, &mut dyn FnMut(#receiver_type, &mut #record) -> #output) -> #output;
+                    pub type #listener = #listener_lifetimes fn(#receiver_type, &mut #record_type, &mut dyn FnMut(#receiver_type, &mut #record_type) -> #output) -> #output;
                 };
                 let replacement = quote! {
                     if ::mod_points::__private::SITES[::mod_points::SiteId::#variant as usize].load(::std::sync::atomic::Ordering::Relaxed) {
                         #binding
                         let mut #args = #record { #(#fields: #arguments,)* };
-                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #record| #original)
+                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #inferred_record| #original)
                     } else { #expr }
                 };
                 let nth = ordinal;

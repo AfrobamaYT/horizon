@@ -598,6 +598,25 @@ Use those aliases for the callback. The generated main adapts each kind to one w
 | `wrap_call` | Receiver, mutable arguments and mutable `original` continuation; returns the result |
 | `wrap_if` | Receiver and shared arguments; returns whether to call the original; unit output only |
 
+Native source `internals` calls also admit immutable borrowed arguments, such as `&str`.
+Their generated `Args<'a>` record borrows the original values for the call; no implicit
+owned-string conversion occurs. The listener is higher-ranked over that lifetime, so safe
+callbacks cannot retain the record or its references beyond the call, or mutate the referent
+through an immutable reference (ordinary interior mutability still follows Rust's rules).
+A callback may replace an argument with another reference valid for the same lifetime.
+Engine types are borrowed too: `&MobWorld` becomes a shared reference to the native
+`horizon_client_lib::mobs::MobWorld<'g>` in `Args<'g, 'a>`, keeping the world's own
+lifetime separate from the record's borrow. The facade re-exports the typed record;
+it does not convert the world into a mod API value or expose private fields. A callback
+can read the world's public fields and call its shared-reference methods using Rust's
+normal field projection, including public nested values, even without naming every type.
+Naming `MobWorld` itself requires its internals facade export. It cannot obtain exclusive
+access or extend either lifetime. Copy arrays of scalar values, such as `[i32; 3]`, can
+accompany these references in source records.
+`modify_value` still receives only the receiver and owned result, not the argument record.
+Mutable borrowed arguments remain refused, as do borrowed arguments on API/listed routes;
+this does not enable API source adapters or wasm call sites.
+
 Listeners nest by descending priority, then mod ID, then injection ID; the first is outermost.
 A wrap may call `original` zero, one or several times. `cancellable` is refused: returning from the
 caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
