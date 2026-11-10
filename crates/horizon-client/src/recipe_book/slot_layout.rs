@@ -23,6 +23,10 @@ pub enum LayoutError {
 }
 
 impl CheckedSlotLayout {
+    /// The frozen destination declaration, for compiling authoritative placement.
+    pub fn declaration(&self) -> &SlotLayout {
+        &self.0
+    }
     /// Validate mod-controlled indices once before mapping any display.
     /// The menu limit is the existing 256 container slots, not a display cap.
     pub fn new(layout: SlotLayout, slot_count: u16) -> Result<Self, LayoutError> {

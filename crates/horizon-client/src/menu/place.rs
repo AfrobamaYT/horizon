@@ -134,6 +134,10 @@ impl Stacked {
 #[path = "place/picker.rs"]
 pub(super) mod picker;
 use picker::Picker;
+#[path = "place/custom.rs"]
+mod custom;
+#[path = "place/custom_plan.rs"]
+pub mod custom_plan;
 
 /// `RecipeBookMenu.PostPlaceAction`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,18 +360,8 @@ impl Menu {
             }
         }
         // calculateAmountToCraft
-        let amount = if use_max {
-            biggest
-        } else if matches {
-            let smallest = grid
-                .inputs
-                .iter()
-                .filter_map(|&s| self.slot(s))
-                .map(|s| s.count as i32)
-                .min();
-            smallest.map_or(i32::MAX, |n| n + 1)
-        } else {
-            1
+        let Some(amount) = self.recipe_place_amount(&grid.inputs, use_max, matches, biggest) else {
+            return;
         };
         let mut used = Vec::new();
         if !stacked.try_pick(&ingredients, amount, Some(&mut used)) {
