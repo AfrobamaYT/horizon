@@ -766,20 +766,20 @@ impl Game<'_> {
         self.fire_gui_layer_post(layer, draw);
     }
     /// A player right-clicks the entity `entity` (`Entity.getId`) of type
-    /// `kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an
+    /// `kind` (`minecraft:cow`) with `hand`, holding `stack` (none in an
     /// empty hand): where `Player.interactOn` starts, before the entity's own
     /// `interact` and the item's `interactLivingEntity`. Set `claimed` to take
     /// the click: the hand swings and neither runs. Asked once per hand, as
-    /// vanilla tries the main hand then the off hand. Server-side, for every
-    /// player of the world (the helpers read the acting one).
+    /// vanilla tries main then off hand. Server-side, for every acting player.
     pub(in crate::game) fn native_entity_interact(
         &mut self,
+        hand: Hand,
         entity: i32,
         kind: &str,
         stack: Option<&ItemStack>,
         claimed: &mut bool,
     ) {
-        self.fire_entity_interact(entity, kind, stack, claimed);
+        self.fire_entity_interact(hand, entity, kind, stack, claimed);
     }
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
     /// (`[0, 1, 0]` is the top): where `ServerPlayerGameMode.handleBlockBreakAction`
