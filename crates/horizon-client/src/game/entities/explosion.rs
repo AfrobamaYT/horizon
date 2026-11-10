@@ -245,11 +245,10 @@ fn hurt_mob(
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
-    (amount, source): (f32, horizon_client::mobs::Damage),
+    (amount, mut source): (f32, horizon_client::mobs::Damage),
 ) {
-    let shielded =
-        cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
-    if hurtable && !shielded {
+    source.attacker_species = cause;
+    if hurtable {
         m.damage(level, amount, source);
     }
 }
@@ -514,7 +513,7 @@ impl Game<'_> {
             + (feet[2] - center[2]).powi(2))
         .sqrt()
             / diameter;
-        if dist > 1.0 || p.health.dead_or_dying() {
+        if dist > 1.0 {
             return None;
         }
         // ServerPlayer.onExplosionHit: the blast that hit the player is theirs.
@@ -560,9 +559,8 @@ impl Game<'_> {
         if let Some(p) = self.player.as_mut()
             && let Some(id) = self.health_resources.damage.id(damage_type)
         {
-            // Creative players are invulnerable to explosions.
-            if !creative
-                && !spectator
+            // Creative damage is attempted and refused by Player.hurtServer, not here.
+            if !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
                     crate::game::entity::damage_level_of!(self, scoped),
@@ -697,7 +695,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| host.hub.here(g) && g.loaded && !g.dead)
+                .filter(|g| host.hub.here(g))
                 .map(|g| g.conn)
                 .collect();
             for conn in guests {
