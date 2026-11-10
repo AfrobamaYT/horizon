@@ -3,7 +3,7 @@
 //! Update it with: `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api`.
 
 /// The Launch API's version (docs/api/stability.md): an addition makes the next patch.
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.1.1";
 
 /// One option of the contract: its name, its value's placeholder (none for a flag), what it does.
 pub struct LaunchOption {
@@ -25,6 +25,11 @@ const fn option(
 /// What a launcher may pass. The game takes more (`--help` lists them), but only these are
 /// promised: they keep their meaning within a line of this API.
 pub const OPTIONS: &[LaunchOption] = &[
+    option(
+        "--developer-single-player",
+        None,
+        "Restricts this run to account-free single-player: no session loading, external connections or LAN hosting. Not a sandbox for native mods.",
+    ),
     option(
         "--resources",
         Some("DIR"),
