@@ -127,7 +127,7 @@ impl Catalog {
         let listed = inject::catalog(&dir.join(inject::POINTS))?;
         let mut points = listed.points;
         for point in horizon_platform::mod_build::api_gen::points::source::read(dir)? {
-            let name = point_shape::camel(&point.name);
+            let name = horizon_platform::mod_build::point_shape::camel(&point.name);
             points.push(inject::ListedPoint {
                 name: point.name,
                 target: point.target,
