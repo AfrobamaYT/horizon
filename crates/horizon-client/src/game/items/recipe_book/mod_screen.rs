@@ -534,6 +534,7 @@ mod tests {
             recipes: (0..21)
                 .map(|index| PresentedRecipe {
                     recipe: format!("test:r{index}"),
+                    sources: vec![0],
                     button: ButtonView {
                         has_craftable: true,
                         entries: vec![vec![ItemStack::new("minecraft:stone", 1)]],
