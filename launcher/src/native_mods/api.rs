@@ -134,8 +134,11 @@ pub(super) fn main_rs(
             .enumerate()
             .flat_map(|(index, manifest)| {
                 super::slots::sites(sites, manifest).map(move |(entry, site)| {
-                    let adapter =
-                        super::sites::adapter(entry.kind, &format!("mod_{index}::{}", entry.with));
+                    let adapter = super::sites::adapter(
+                        entry.kind,
+                        &format!("mod_{index}::{}", entry.with),
+                        site.once,
+                    );
                     format!(
                         "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
                         site.constructor(),
