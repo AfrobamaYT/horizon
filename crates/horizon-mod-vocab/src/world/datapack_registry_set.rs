@@ -52,7 +52,7 @@ pub struct DatapackLoadError {
 // no wire: the game's candidate; a mod reads the published set through handles
 // exhaustive: built only by [`DatapackCandidate::build`]
 pub struct DatapackCandidate {
-    registries: BTreeMap<String, BTreeMap<String, DatapackEntry>>,
+    pub(super) registries: BTreeMap<String, BTreeMap<String, DatapackEntry>>,
 }
 
 /// The id of the entry in `file` (`data/addon/example/spell/fire.json` is `addon:fire`), when
@@ -117,33 +117,7 @@ impl DatapackCandidate {
                     .insert(entry, decoded);
             }
         }
-        for declaration in declarations {
-            for (entry, decoded) in &registries[&declaration.key] {
-                for field in &declaration.fields {
-                    let DatapackFieldKind::Reference { registry } = &field.kind else {
-                        continue;
-                    };
-                    let Some(targets) = registries.get(registry) else {
-                        continue;
-                    };
-                    let Some(DatapackValue::Text(target)) = decoded.get(&field.name) else {
-                        continue;
-                    };
-                    if !targets.contains_key(target) {
-                        return Err(Box::new(DatapackLoadError {
-                            registry: declaration.key.clone(),
-                            entry: entry.clone(),
-                            file: declaration.entry_file(entry).unwrap_or_default(),
-                            reason: DatapackLoadReason::UnresolvedReference {
-                                field: field.name.clone(),
-                                registry: registry.clone(),
-                                target: target.clone(),
-                            },
-                        }));
-                    }
-                }
-            }
-        }
+        resolve_references(declarations, &registries)?;
         Ok(Self { registries })
     }
 }
@@ -161,6 +135,13 @@ pub enum DatapackReadError {
     UnknownRegistry,
     /// The registry has no such entry (a reload removed it, or no pack defines it).
     MissingEntry,
+    /// The game has no world open to read from, or no host answered.
+    Unavailable,
+}
+impl crate::NoBackend for DatapackReadError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
 }
 
 /// A reference to one entry of a published set. It checks its session and generation on every
@@ -187,6 +168,43 @@ impl DatapackHandle {
     }
 }
 
+/// Checks every reference to a declared registry against the whole `registries`, so a forward
+/// reference works and an absent target refuses everything. A reference to a registry no
+/// declaration covers (a vanilla one) is not checked.
+pub(super) fn resolve_references(
+    declarations: &[DatapackRegistryDeclaration],
+    registries: &BTreeMap<String, BTreeMap<String, DatapackEntry>>,
+) -> Result<(), Box<DatapackLoadError>> {
+    for declaration in declarations {
+        for (entry, decoded) in &registries[&declaration.key] {
+            for field in &declaration.fields {
+                let DatapackFieldKind::Reference { registry } = &field.kind else {
+                    continue;
+                };
+                let Some(targets) = registries.get(registry) else {
+                    continue;
+                };
+                let Some(DatapackValue::Text(target)) = decoded.get(&field.name) else {
+                    continue;
+                };
+                if !targets.contains_key(target) {
+                    return Err(Box::new(DatapackLoadError {
+                        registry: declaration.key.clone(),
+                        entry: entry.clone(),
+                        file: declaration.entry_file(entry).unwrap_or_default(),
+                        reason: DatapackLoadReason::UnresolvedReference {
+                            field: field.name.clone(),
+                            registry: registry.clone(),
+                            target: target.clone(),
+                        },
+                    }));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Why a set could not move to a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // no wire: the game's reload reports it
@@ -201,9 +219,9 @@ pub enum DatapackGenerationExhausted {
 // no wire: the game holds it; a mod reads through handles
 // exhaustive: built only by [`DatapackRegistrySet::first`] and [`DatapackRegistrySet::reload`]
 pub struct DatapackRegistrySet {
-    session: u64,
-    generation: u64,
-    registries: BTreeMap<String, BTreeMap<String, DatapackEntry>>,
+    pub(super) session: u64,
+    pub(super) generation: u64,
+    pub(super) registries: BTreeMap<String, BTreeMap<String, DatapackEntry>>,
 }
 
 impl DatapackRegistrySet {

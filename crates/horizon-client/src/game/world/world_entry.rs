@@ -2,13 +2,6 @@
 //! resources' background load, and the world's own content tables.
 use super::*;
 
-/// A new id for a world session's published datapack registries: a handle from an earlier
-/// session fails with `WrongSession` against the next one.
-fn next_datapack_session() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
 impl Game<'_> {
     /// The server's data-pack enchantments, or the local world's registry.
     pub(super) fn item_enchantments(&self) -> &Arc<horizon_client::enchant::Enchantments> {
@@ -363,29 +356,34 @@ impl Game<'_> {
             .iter()
             .filter_map(|declaration| declaration.key.split_once(':'))
             .collect();
-        let files: Vec<(String, Vec<Vec<u8>>)> = functions::registry_overlay(stack, &keys)
-            .into_iter()
-            .map(|(path, versions)| {
-                let versions = versions
-                    .into_iter()
-                    .filter_map(|bytes| {
-                        let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes)
-                        else {
-                            // Malformed: the decoder reports it, naming the file.
-                            return Some(bytes);
-                        };
-                        if !conditions.allows(&json) {
-                            return None;
-                        }
-                        if let Some(object) = json.as_object_mut() {
-                            object.remove("neoforge:conditions");
-                        }
-                        serde_json::to_vec(&json).ok()
-                    })
-                    .collect();
-                (path, versions)
-            })
+        // Content files come before the world's enabled packs, lowest priority first.
+        let packs: Vec<_> = std::iter::once(&stack.content)
+            .chain(stack.enabled_packs())
             .collect();
+        let files: Vec<(String, Vec<Vec<u8>>)> =
+            horizon_client::datapack::registry_files(&packs, &keys)
+                .into_iter()
+                .map(|(path, versions)| {
+                    let versions = versions
+                        .into_iter()
+                        .filter_map(|bytes| {
+                            let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                            else {
+                                // Malformed: the decoder reports it, naming the file.
+                                return Some(bytes);
+                            };
+                            if !conditions.allows(&json) {
+                                return None;
+                            }
+                            if let Some(object) = json.as_object_mut() {
+                                object.remove("neoforge:conditions");
+                            }
+                            serde_json::to_vec(&json).ok()
+                        })
+                        .collect();
+                    (path, versions)
+                })
+                .collect();
         mod_api::DatapackCandidate::build(declarations, &files)
             .map(Some)
             .map_err(|error| {
@@ -405,9 +403,43 @@ impl Game<'_> {
         (self.world_tables, self.health_resources) =
             self.build_world_tables(stack, false, root, self.mods.data_switched)?;
         self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
-            mod_api::DatapackRegistrySet::first(candidate, next_datapack_session())
+            Arc::new(mod_api::DatapackRegistrySet::first(
+                candidate,
+                horizon_client::datapack_net::next_session(),
+            ))
         });
+        horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
         Ok(())
+    }
+    /// Sends each joined Horizon client the snapshot of the set just published, built from the
+    /// offer it made at the join. A client that cannot be sent one keeps what it has.
+    fn send_datapack_snapshots(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        let payloads: Vec<(u32, Vec<u8>)> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| g.placed && g.participates_online() && g.brand == "horizon")
+            .filter_map(|g| {
+                Some((
+                    g.conn,
+                    horizon_client::datapack_net::reload_payload(g.uuid)?,
+                ))
+            })
+            .collect();
+        for (conn, data) in payloads {
+            host.hub.send_to(
+                conn,
+                &horizon_protocol::packets::play::Clientbound::CustomPayload(
+                    horizon_protocol::packets::configuration::CustomPayload {
+                        channel: horizon_client::datapack_net::CHANNEL.into(),
+                        data,
+                    },
+                ),
+            );
+        }
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
