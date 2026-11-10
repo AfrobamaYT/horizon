@@ -93,6 +93,7 @@ fn module(body: &str) -> WasmMod {
             name: "test",
             module: &bytes,
         }],
+        None,
     )
     .unwrap()
     .remove(0)
@@ -330,6 +331,7 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
             name: "private",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -357,6 +359,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
                 module: &fixture,
             },
         ],
+        None,
     )
     .unwrap()
     .pop()
@@ -432,6 +435,7 @@ fn real_members_link_when_built() {
                 module: &fixture,
             },
         ],
+        None,
     );
     let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
     assert_eq!(modules.len(), 1);
@@ -561,6 +565,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
                 module: &bytes,
             },
         ],
+        None,
     )
     .unwrap();
     assert_eq!(modules.len(), 2);
@@ -581,6 +586,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
                 module: &bytes,
             },
         ],
+        None,
     )
     .err()
     .unwrap();
@@ -699,6 +705,7 @@ fn layout_mismatch_is_a_mods_page_refusal() {
             name: "test",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -727,6 +734,7 @@ fn point_record_layout_mismatch_is_refused() {
             name: "points",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -1263,6 +1271,7 @@ fn registration_refusal_names_the_indexed_mod_injection() {
                 name: "libaddon.so",
                 module: &bytes,
             }],
+            None,
         )
         .err()
         .expect("registration must refuse");
@@ -1323,6 +1332,7 @@ fn a_mod_point_listener_without_its_bridge_or_its_library_seal_is_refused_at_loa
                     module: &addon_bytes,
                 },
             ],
+            None,
         )
         .map(|_| ())
         .map_err(|refusal| match refusal {

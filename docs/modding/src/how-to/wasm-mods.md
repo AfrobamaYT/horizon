@@ -207,3 +207,20 @@ and named on the Mods page.
 
 The game limits execution time, memory and table usage. A trap or limit hit disables the affected
 group. APIs marked `Not on wasm` in their Rust documentation cannot be used by wasm mods.
+
+## Compiled module cache
+
+The game caches compiled wasm modules in `<game_dir>/.horizon-cache/wasm/`, keyed by the
+wasm bytes, Wasmtime compatibility and engine settings. Hits map the compiled file into memory;
+files shipped beside a mod are never loaded as compiled code.
+
+On Unix, the game creates the cache folder with mode 0700 and entries with mode 0600. It checks
+folder ownership and permissions, then checks each opened entry is a regular file owned by the
+current user, not writable by group or others, and has only one hard link. Symlink entries are
+refused. On Windows, persistent caching is disabled until owner, DACL and inheritance trust
+can be verified for the cache folder and opened entries. Modules compile from wasm instead,
+with one warning explaining the fallback. The player's account is the trust boundary.
+
+A failed check logs the reason once per launch. Unavailable, corrupt or incompatible entries
+fall back to compiling the wasm. Writes replace entries atomically without changing files that
+running modules have mapped. Deleting the cache is always safe: the next launch rebuilds it.
