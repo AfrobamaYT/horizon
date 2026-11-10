@@ -3,7 +3,7 @@
 Design note for #2766 (interruption counted by work, not by wall clock) and #2761 (one failing mod shouldn't
 disable its whole group). Both come down to one question: when a call into a group fails, what is still safe to run?
 This note answers that question. It changes no code. The facts below are from `crates/horizon-mod-wasm` at main
-fbf4f06490, except where a later line says a stage has landed (`wasm-faults-s1`).
+fbf4f06490, except where a line says a stage has landed.
 
 ## Decisions
 
@@ -48,7 +48,7 @@ fbf4f06490, except where a later line says a stage has landed (`wasm-faults-s1`)
   interruptions, import errors, the guest's `u32::MAX` error reply (`invoke`), and replies the host can't decode or
   that have trailing bytes. Only a busy group (`Refusal::Busy`) returns `None` without stopping it. Nothing clears
   the flag.
-- **Stage 1 landed on `wasm-faults-s1`: refusals no longer stop the group.** `invoke` now classifies each `Err` as
+- **Stage 1 has landed: refusals no longer stop the group.** `invoke` now classifies each `Err` as
   `CallError::Refused` (guest code returned normally or never ran: the guest's error reply, a reply the host can't
   decode or that has trailing bytes, a host-side encoding failure, input past `u32::MAX`) or `CallError::Fault`
   (guest code cut off: a trap, the guest's panic, an import error, the epoch deadline). A refusal answers
