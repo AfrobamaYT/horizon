@@ -2599,7 +2599,7 @@ struct Game<'a> {
     /// `horizon-ctl gpu-passes`: time Horizon's own passes on the GPU with F3 shut.
     gpu_passes: bool,
     screen: Screen,
-    observed_screen: Option<native_hooks::ObservedScreen>,
+    screen_state: screen_build::ScreenState,
     /// The layout the last frame drew the inventory's effect panels with.
     effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
@@ -16462,7 +16462,7 @@ impl<'a> Game<'a> {
             debug: false,
             gpu_passes: false,
             screen: Screen::Playing,
-            observed_screen: None,
+            screen_state: screen_build::ScreenState::default(),
             effects_layout: std::cell::Cell::new(None),
             window: None,
             resize_state: None,
