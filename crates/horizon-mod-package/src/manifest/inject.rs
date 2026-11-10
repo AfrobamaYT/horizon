@@ -27,6 +27,17 @@ pub struct Inject {
     pub call: Option<String>,
     pub nth: Option<usize>,
     pub ctx: Option<String>,
+    pub local: Option<String>,
+    #[serde(rename = "type")]
+    pub local_type: Option<String>,
+    pub position: Option<Position>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Position {
+    Before,
+    After,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -103,6 +114,33 @@ impl Inject {
             {
                 return Err(invalid("with", "name a function in the mod's crate root"));
             }
+            for (field, present) in [
+                ("local", entry.local.is_some()),
+                ("type", entry.local_type.is_some()),
+                ("position", entry.position.is_some()),
+            ] {
+                if present != (entry.kind == Kind::ModifyLocal) {
+                    return Err(invalid(
+                        field,
+                        "local, type and position are required only for modify_local",
+                    ));
+                }
+            }
+            if entry.local.as_ref().is_some_and(|name| {
+                name.is_empty()
+                    || RESERVED.split_whitespace().any(|word| word == name)
+                    || name.as_bytes()[0].is_ascii_digit()
+                    || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            }) {
+                return Err(invalid("local", "name one local binding"));
+            }
+            if entry
+                .local_type
+                .as_ref()
+                .is_some_and(|ty| ty.trim().is_empty())
+            {
+                return Err(invalid("type", "name the local's Rust type"));
+            }
             let call = entry.call.as_ref().is_some_and(|s| !s.trim().is_empty());
             let ctx = entry.ctx.as_ref().is_some_and(|s| !s.trim().is_empty());
             if if entry.kind.needs_call() {
@@ -164,8 +202,8 @@ pub enum NoSlotReason {
     NotListed,
     KindHasNoSlot,
     NativeOnly,
-    WasmSitesPending,
-    LocalSlotsPending,
+    WasmSitesUnsupported,
+    LocalSourceOnly,
     ExtensionSlotsPending,
     ApiSitesUnsupported,
     SourcePending,
@@ -180,8 +218,10 @@ impl fmt::Display for NoSlotReason {
             Self::NotListed => "not listed",
             Self::KindHasNoSlot => "kind has no slot",
             Self::NativeOnly => "native-only place",
-            Self::WasmSitesPending => "wasm sites pending",
-            Self::LocalSlotsPending => "local slots pending (I5)",
+            Self::WasmSitesUnsupported => {
+                "wasm does not support internals or call-site injections; use a hook"
+            }
+            Self::LocalSourceOnly => "modify_local requires native internals source rebuilding; use internals, or request a hook",
             Self::ExtensionSlotsPending => "extension slots pending (I6)",
             Self::ApiSitesUnsupported => "API call-site injections require internals",
             Self::SourcePending => "source injects pending (U5)",
@@ -264,7 +304,7 @@ impl fmt::Display for InjectError {
 impl std::error::Error for InjectError {}
 
 /// Route a validated entry against a resolved catalog, without I/O or source inspection.
-/// Freshness failures never fall back to source. Wasm call/local slots await W3.
+/// Freshness failures never fall back to source. Wasm call-site injections are permanently unsupported.
 pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
     let inject = entry.inject;
     let id = format!("{}:{}", entry.mod_id, inject.id);
@@ -283,7 +323,11 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
         });
     }
     if let Some(reason) = match inject.kind {
-        Kind::ModifyLocal => Some(NoSlotReason::LocalSlotsPending),
+        Kind::ModifyLocal
+            if entry.target != Target::Native || inject.access != Access::Internals =>
+        {
+            Some(NoSlotReason::LocalSourceOnly)
+        }
         Kind::Field => Some(NoSlotReason::ExtensionSlotsPending),
         _ => None,
     } {
@@ -301,6 +345,9 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
                 inject.at
             ),
         });
+    }
+    if inject.kind == Kind::ModifyLocal {
+        return Ok(Route::Source(NoSlotReason::LocalSourceOnly));
     }
     let available = if inject.kind.needs_call() {
         // An unlisted native internals call is checked against source by U2 before compilation.
@@ -338,7 +385,7 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
     let reason = if entry.target == Target::Wasm && place.native_only {
         NoSlotReason::NativeOnly
     } else if entry.target == Target::Wasm && inject.kind.needs_call() {
-        NoSlotReason::WasmSitesPending
+        NoSlotReason::WasmSitesUnsupported
     } else if let Some(kind) = inject.kind.slot() {
         if available.contains(&kind) {
             return Ok(Route::Slot(kind));
@@ -521,8 +568,22 @@ mod tests {
                         p.slots.clear();
                         p.calls[0].slots.clear();
                     }
+                    if kind == Kind::ModifyLocal && access == Access::Internals {
+                        assert_eq!(
+                            run(&i, Target::Native, &[p.clone()]),
+                            Ok(Route::Source(NoSlotReason::LocalSourceOnly))
+                        );
+                        assert!(matches!(
+                            run(&i, Target::Wasm, &[p]),
+                            Err(InjectError::NoSlot {
+                                reason: NoSlotReason::LocalSourceOnly,
+                                ..
+                            })
+                        ));
+                        continue;
+                    }
                     if let Some(pending) = match kind {
-                        Kind::ModifyLocal => Some(NoSlotReason::LocalSlotsPending),
+                        Kind::ModifyLocal => Some(NoSlotReason::LocalSourceOnly),
                         Kind::Field => Some(NoSlotReason::ExtensionSlotsPending),
                         _ => None,
                     } {
@@ -544,7 +605,7 @@ mod tests {
                     let reason = if native_only {
                         Some(NoSlotReason::NativeOnly)
                     } else if matches!(expected, Some(Site | Local)) {
-                        Some(NoSlotReason::WasmSitesPending)
+                        Some(NoSlotReason::WasmSitesUnsupported)
                     } else {
                         reason
                     };
@@ -559,6 +620,78 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn modify_local_manifest_fields_and_permanent_api_refusal() {
+        let native = format!(
+            "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'",
+            "a".repeat(40),
+            "a".repeat(40)
+        );
+        let decl = DECL.replace("kind='head'", "kind='modify_local'\naccess='internals'\ncall='sink'\nnth=0\nctx='context'\nlocal='n'\ntype='i32'\nposition='before'");
+        let m = parse(&decl, &native).unwrap();
+        assert_eq!(m.inject[0].position, Some(Position::Before));
+        assert_eq!(m.inject[0].local.as_deref(), Some("n"));
+        assert_eq!(m.inject[0].local_type.as_deref(), Some("i32"));
+        assert!(parse(&decl.replace("'before'", "'after'"), &native).is_ok());
+        assert!(parse(&decl.replace("'before'", "'during'"), &native).is_err());
+        for (field, line) in [
+            ("local", "local='n'\n"),
+            ("type", "type='i32'\n"),
+            ("position", "position='before'\n"),
+        ] {
+            assert!(
+                parse(&decl.replace(line, ""), &native)
+                    .unwrap_err()
+                    .contains(field)
+            );
+            let extra = format!("{DECL}{line}");
+            assert!(parse(&extra, &native).unwrap_err().contains(field));
+        }
+        for kind in [
+            Kind::Head,
+            Kind::Return,
+            Kind::ModifyArg,
+            Kind::Replace,
+            Kind::BeforeCall,
+            Kind::AfterCall,
+            Kind::ModifyCallArg,
+            Kind::ModifyValue,
+            Kind::WrapCall,
+            Kind::WrapIf,
+            Kind::Field,
+            Kind::Expression,
+        ] {
+            for field in ["local", "type", "position"] {
+                let mut other = m.inject[0].clone();
+                other.kind = kind;
+                other.local = (field == "local").then(|| "n".into());
+                other.local_type = (field == "type").then(|| "i32".into());
+                other.position = (field == "position").then_some(Position::Before);
+                assert!(
+                    matches!(Inject::check_all(&[other], "sample", true), Err(InjectError::Invalid { field: actual, .. }) if actual == field)
+                );
+            }
+        }
+        let mut i = m.inject[0].clone();
+        i.at = "game::tick".into();
+        i.hash = "signature".into();
+        i.access = Access::Api;
+        assert_eq!(
+            run(&i, Target::Native, &[place()]).unwrap_err().to_string(),
+            "E_INJECT_NO_SLOT: sample:ground: modify_local requires native internals source rebuilding; use internals, or request a hook; slot declaration slots/sample.txt: game::tick; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook"
+        );
+    }
+
+    #[test]
+    fn wasm_call_site_refusal_is_permanent() {
+        let i = inject(Kind::BeforeCall);
+        let error = run(&i, Target::Wasm, &[place()]).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "E_INJECT_NO_SLOT: sample:ground: wasm does not support internals or call-site injections; use a hook; slot declaration slots/sample.txt: game::tick | self.callee | 0 | context; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook"
+        );
     }
 
     #[test]

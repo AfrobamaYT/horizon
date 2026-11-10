@@ -181,6 +181,9 @@ mod tests {
 
     fn inject(kind: Kind, at: &str) -> Inject {
         Inject {
+            local: None,
+            local_type: None,
+            position: None,
             id: "own".into(),
             at: at.into(),
             kind,

@@ -78,6 +78,7 @@
     "horizon-modding-examples": "tool",
     "horizon-hooks": "engine",
     "horizon-game": "platform",
+    "horizon-mod-host": "platform",
     "horizon-cosmetics": "horizon",
     "horizon-official": "horizon",
     "horizon-telemetry": "horizon",

@@ -3071,7 +3071,6 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
- "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",
