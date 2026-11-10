@@ -27,4 +27,5 @@ pub fn saw_moved(moved: &mut u32) {
 
 /// At `chemlib::tanks::record`'s head (`access = "internals"`): the ledger has no Wire form, but
 /// an internals listener gets it by reference, in its own type.
-pub fn mark_ledger(_: &mut chemlib::tanks::__TanksRecordRaw<'_, &mut chemlib::tanks::Ledger, u32>) {}
+pub fn mark_ledger(_: &mut chemlib::tanks::__TanksRecordRaw<'_, &mut chemlib::tanks::Ledger, u32>) {
+}
