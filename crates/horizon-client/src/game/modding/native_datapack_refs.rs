@@ -104,6 +104,16 @@ mod tests {
                         game.level_datapack_entries(level, "example:spell"),
                         Some(vec!["addon:fire".into()])
                     );
+                    for invalid in [
+                        LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension()),
+                        LevelRef::new(level.epoch(), DimensionKey::NETHER),
+                    ] {
+                        assert_eq!(game.level_datapack_entries(invalid, "example:spell"), None);
+                        assert_eq!(
+                            game.level_datapack_handle(invalid, "example:spell", "addon:fire"),
+                            Err(E::UnknownRegistry)
+                        );
+                    }
                     let handle = game
                         .level_datapack_handle(level, "example:spell", "addon:fire")
                         .unwrap();
