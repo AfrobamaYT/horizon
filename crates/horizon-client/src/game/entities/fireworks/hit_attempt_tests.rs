@@ -166,29 +166,22 @@ fn remaining_hit_callers_observe_refusals_and_zero_damage() {
             game.lan.as_mut().unwrap().hub.guests.push(guest);
             for dead in [true, false] {
                 fresh_player(game, GameMode::Spectator); // excluded from splash
-                let guest = game
-                    .lan
+                let mut body = Box::new(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+                if dead {
+                    body.set_health(0.0, false).unwrap();
+                }
+                game.lan
                     .as_mut()
                     .unwrap()
                     .hub
                     .guests
-                    .iter_mut()
-                    .find(|g| g.conn == 88)
+                    .update_connection(88, |guest| {
+                        guest.motion = Some(body);
+                        guest.dead = dead;
+                        guest.loaded = dead;
+                        guest.loading = !dead;
+                    })
                     .unwrap();
-                guest.motion = Some(Box::new(
-                    PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
-                ));
-                guest.dead = dead;
-                guest.loaded = dead;
-                guest.loading = !dead;
-                if dead {
-                    guest
-                        .motion
-                        .as_mut()
-                        .unwrap()
-                        .set_health(0.0, false)
-                        .unwrap();
-                }
                 let mut rocket = Rocket::remote(901, Vec3::ZERO, Vec3::ZERO);
                 rocket.explosions.push(FireworkExplosion::default());
                 game.explode_rocket(&rocket);
