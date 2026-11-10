@@ -567,3 +567,68 @@ fn a_jar_and_a_pack_are_ranked_by_how_many_mods_use_each_name() {
         ]
     );
 }
+
+#[test]
+fn all_api_mapping_targets_compile() {
+    let _ = <dyn mod_api::Registrar as mod_api::KeyMappingsRegistrar>::register_key_mapping;
+    let _ =
+        <dyn mod_api::Registrar as mod_api::EntityAttributesRegistrar>::declare_entity_attributes;
+    let _ =
+        <dyn mod_api::Registrar as mod_api::EntityAttributesRegistrar>::modify_entity_attributes;
+    let _ = <dyn mod_api::Registrar as mod_api::SpawnPlacementsRegistrar>::declare_spawn_placement;
+    let _ = <dyn mod_api::Registrar as mod_api::TicketsRegistrar>::register_ticket_controller;
+    let _ = (
+        mod_api::ITEMS,
+        mod_api::ENTITY_ITEMS,
+        mod_api::ENTITY_AUTOMATION,
+        mod_api::ITEM_ITEMS,
+        mod_api::FLUIDS,
+        mod_api::ENTITY_FLUIDS,
+        mod_api::ITEM_FLUIDS,
+        mod_api::ENERGY,
+        mod_api::ENTITY_ENERGY,
+        mod_api::ITEM_ENERGY,
+    );
+}
+
+#[test]
+fn every_api_mapping_has_the_expected_target() {
+    let catalog = Catalog::parse(r#"{"hooks":[]}"#).unwrap();
+    for (event, target) in [
+        (
+            "RegisterKeyMappingsEvent",
+            "Registrar::register_key_mapping",
+        ),
+        (
+            "EntityAttributeCreationEvent",
+            "Registrar::declare_entity_attributes",
+        ),
+        (
+            "EntityAttributeModificationEvent",
+            "Registrar::modify_entity_attributes",
+        ),
+        (
+            "RegisterSpawnPlacementsEvent",
+            "Registrar::declare_spawn_placement",
+        ),
+        (
+            "RegisterTicketControllersEvent",
+            "Registrar::register_ticket_controller",
+        ),
+        ("Capabilities.Item.BLOCK", "mod_api::ITEMS"),
+        ("Capabilities.Item.ENTITY", "mod_api::ENTITY_ITEMS"),
+        (
+            "Capabilities.Item.ENTITY_AUTOMATION",
+            "mod_api::ENTITY_AUTOMATION",
+        ),
+        ("Capabilities.Item.ITEM", "mod_api::ITEM_ITEMS"),
+        ("Capabilities.Fluid.BLOCK", "mod_api::FLUIDS"),
+        ("Capabilities.Fluid.ENTITY", "mod_api::ENTITY_FLUIDS"),
+        ("Capabilities.Fluid.ITEM", "mod_api::ITEM_FLUIDS"),
+        ("Capabilities.Energy.BLOCK", "mod_api::ENERGY"),
+        ("Capabilities.Energy.ENTITY", "mod_api::ENTITY_ENERGY"),
+        ("Capabilities.Energy.ITEM", "mod_api::ITEM_ENERGY"),
+    ] {
+        assert_eq!(catalog.status(event).0, Status::Api(target), "{event}");
+    }
+}
