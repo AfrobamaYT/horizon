@@ -951,18 +951,6 @@ impl Game<'_> {
     pub(in crate::game) fn native_camera_shake(&self, partial: f32, shake: &mut Shake) {
         self.fire_camera_shake(partial, shake);
     }
-    /// Before one first-person hand, item, map or empty arm is drawn
-    /// (`RenderHandEvent`, client). Adjust `render`'s pose or cancel the
-    /// default geometry. Equip progress includes the item's swap scale.
-    /// Unlike NeoForge, this does not expose the full pose stack or player
-    /// render state; to draw in the hand, use `native_hand_submit`.
-    pub(in crate::game) fn native_render_hand(
-        &self,
-        render: &mut HandRender<'_>,
-        canceled: &mut bool,
-    ) {
-        self.fire_render_hand(render, canceled);
-    }
     /// Final scaled third-person camera distance, before visual-shape collision clipping.
     /// `entity` includes its living scale/distance and optional mount scale/distance.
     /// Only finite requests in 0..=1024 blocks replace the vanilla distance.
