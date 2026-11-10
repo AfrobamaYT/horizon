@@ -73,6 +73,7 @@ To play, use [the launcher](../launcher/README.md); the project site is [playhor
 - [HUD kit](ui-kit.md): the pieces Horizon's own HUD overlays share: `Room`, which keeps the controller notice and splitscreen's join strip below the boss bars, and `Plate`, the box behind their text.
 - [Linear light for HDR and shader packs](design/hdr-linear-light.md): the proposed shader API 0.2 colour contract and frame format for HDR output.
 - [Live mod reloading](design/mod-hotload.md): loading, enabling and updating mods from inside the game without a restart.
+- [Wasm group faults](design/wasm-group-faults.md): what a wasm dependency group does after a trap or an interruption, and how interruption counts guest work.
 - [Mod registry v2](design/registry-v2.md): project kinds, metadata, installation locations and the registry rollout.
 
 ## Architecture: world generation
