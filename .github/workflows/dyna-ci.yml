@@ -205,9 +205,16 @@ jobs:
         run: exit 1
       - name: Documentation needs no Rust lint
         if: needs.changes.outputs.rust_required == 'false'
-        run: echo 'Rust lint is not selected; verify retains documentation hygiene and relevant contracts.'
+        run: echo 'Rust lint is not selected; repository hygiene still runs.'
+      # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.rust_required != 'false'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check repository artifacts and workflow YAML
+        run: |
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/hygiene" -r tools/ci/hygiene-requirements.txt
+          PYTHONPATH="$RUNNER_TEMP/hygiene" python3 tools/ci/check_repository_hygiene.py
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -433,6 +440,8 @@ jobs:
       - name: Test offline research tooling
         if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/hygiene-tests" -r tools/ci/hygiene-requirements.txt
+          export PYTHONPATH="$RUNNER_TEMP/hygiene-tests"
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
