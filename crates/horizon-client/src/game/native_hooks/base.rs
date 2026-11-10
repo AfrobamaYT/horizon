@@ -3517,9 +3517,8 @@ impl Game<'_> {
     ) {
         self.fire_use_animation(stack, animation);
     }
-    /// `Player.canEat` for the held `stack` (None for an empty hand), from
-    /// `Consumable.canConsume` and cake or candle cake block interaction.
-    /// Cake passes `can_always_eat` false. `vanilla_can_eat` is vanilla's answer (creative,
+    /// `Player.canEat` for held `stack` (None for an empty hand) for food and cake.
+    /// Cake uses `can_always_eat = false`; `vanilla_can_eat` is vanilla's answer (creative,
     /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
