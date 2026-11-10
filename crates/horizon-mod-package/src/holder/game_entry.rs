@@ -138,27 +138,23 @@ pub fn lease_paths(
     });
     let mut paths = vec![(install.to_path_buf(), complete)];
     let mut candidates = vec![
-        (selection.context.game_dir.clone(), true),
-        (selection.context.home.clone(), true),
+        selection.context.game_dir.clone(),
+        selection.context.home.clone(),
     ];
     for argument in &selection.rest {
         if let crate::selection::Argument::Value(name, value) = argument
             && name == "--resources"
         {
-            candidates.push((directory.join(value), false));
+            candidates.push(directory.join(value));
         }
     }
-    for (path, context_root) in candidates {
+    for path in candidates {
         let path = match path.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == io::ErrorKind::NotFound => path,
             Err(error) => return Err(error),
         };
-        // External instance/log roots still need identity claims: the immutable launch
-        // record binds both roots, even though they are not managed cache descendants.
-        if (context_root || path.starts_with(data))
-            && !paths.iter().any(|(existing, _)| *existing == path)
-        {
+        if path.starts_with(data) && !paths.iter().any(|(existing, _)| *existing == path) {
             paths.push((path, false));
         }
     }
@@ -171,6 +167,24 @@ pub fn lease_paths(
             if !paths.iter().any(|(existing, _)| existing == parent) {
                 paths.push((parent.to_owned(), false));
             }
+        }
+    }
+    Ok(paths)
+}
+
+/// Managed launches publish real context-root claims before creating the immutable record.
+/// Standalone entry uses `lease_paths` instead: it can only acquire already registered cache units.
+pub fn managed_lease_paths(
+    executable: &Path,
+    selection: &LaunchArguments,
+    data: &Path,
+    directory: &Path,
+) -> io::Result<Vec<(PathBuf, bool)>> {
+    let mut paths = lease_paths(executable, selection, data, directory)?;
+    for root in [&selection.context.game_dir, &selection.context.home] {
+        let root = root.canonicalize()?;
+        if !paths.iter().any(|(path, _)| *path == root) {
+            paths.push((root, false));
         }
     }
     Ok(paths)
@@ -202,7 +216,7 @@ mod tests {
             let mut command = Command::new(&executable);
             command.current_dir(&game).env("HORIZON_HOME", &home);
             let selection = LaunchArguments::for_command(&command).unwrap();
-            let trees = lease_paths(&executable, &selection, &data, &game).unwrap();
+            let trees = managed_lease_paths(&executable, &selection, &data, &game).unwrap();
             for context in [&game, &home] {
                 let matching: Vec<_> = trees.iter().filter(|(path, _)| path == context).collect();
                 assert_eq!(matching.len(), 1);
