@@ -1149,192 +1149,183 @@ fn a_state_match_with_a_different_entity_is_not_a_silent_pass() {
 }
 
 /// (a2) A prepared assembly whose carrier file is gone: recovery
-    /// refuses with a reason, the source keeps its cargo, the journal
-    /// stays prepared, and a second run refuses again — the cargo is
-    /// never lost to a silent pass.
-    #[test]
-    fn a_missing_carrier_file_refuses_and_keeps_the_source() {
-        let fixture = Fixture::new("missing-carrier");
-        let position = ChunkPos::new(0, 0);
-        let chest_at = [4, 0, 4];
-        put_chunk(
-            &fixture,
-            position,
-            &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
-        );
-        let mut store = fixture.store();
-        let operation = assemble_chest(store.next_op_id(), chest_at);
-        prepare_with_published_carrier(&mut store, &operation);
-        // The crash also lost the carrier file.
-        fs::remove_file(
-            fixture
-                .data()
-                .join(format!("horizon_carrier_{:032x}-1.nbt", 7_u128)),
-        )
-        .unwrap();
+/// refuses with a reason, the source keeps its cargo, the journal
+/// stays prepared, and a second run refuses again — the cargo is
+/// never lost to a silent pass.
+#[test]
+fn a_missing_carrier_file_refuses_and_keeps_the_source() {
+    let fixture = Fixture::new("missing-carrier");
+    let position = ChunkPos::new(0, 0);
+    let chest_at = [4, 0, 4];
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
+    );
+    let mut store = fixture.store();
+    let operation = assemble_chest(store.next_op_id(), chest_at);
+    prepare_with_published_carrier(&mut store, &operation);
+    // The crash also lost the carrier file.
+    fs::remove_file(
+        fixture
+            .data()
+            .join(format!("horizon_carrier_{:032x}-1.nbt", 7_u128)),
+    )
+    .unwrap();
 
-        for attempt in 1..=2 {
-            match recover(
-                &mut store,
-                &fixture.region(),
-                &AllStatesKnown,
-                "minecraft:overworld",
-            ) {
-                Err(RecoveryRefused::OperationUnreadable(why)) => {
-                    assert!(why.contains("carrier file"), "{attempt}: {why}");
-                }
-                other => panic!("{attempt}: a missing carrier must refuse, got {other:?}"),
-            }
-            // The journal is still prepared and the source untouched.
-            assert!(
-                store.journal().in_progress.is_some(),
-                "{attempt}: the operation stays prepared"
-            );
-            let root = get_chunk(&fixture, position).unwrap();
-            assert_eq!(chest_items(&root, chest_at), Some(8), "{attempt}");
-        }
-    }
-
-    /// (a3) Recovery verifies the cargo against the journal: the carrier
-    /// must carry exactly the operation's before-image cells — count,
-    /// positions, names and entity content — not merely agree on UUID
-    /// and generation.
-    #[test]
-    fn a_carrier_short_of_the_operations_cells_refuses() {
-        let fixture = Fixture::new("short-carrier");
-        let position = ChunkPos::new(0, 0);
-        let first = [4, 0, 4];
-        let second = [8, 0, 8];
-        put_chunk(
-            &fixture,
-            position,
-            &chunk_root_at(
-                chest_state_tag(),
-                &[(first, vec![7; 8]), (second, vec![7; 8])],
-                0,
-                0,
-            ),
-        );
-        let mut store = fixture.store();
-        // The operation strips two cells...
-        let mut operation = assemble_chest(store.next_op_id(), first);
-        operation.cells.push(OperationCell {
-            world: second,
-            local: [1, 0, 0],
-            before: CellImage {
-                name: "minecraft:chest".to_string(),
-                properties: vec![("facing".to_string(), "north".to_string())],
-                entity: Some(entity_with_items(8)),
-            },
-            after: CellImage {
-                name: "minecraft:air".to_string(),
-                properties: Vec::new(),
-                entity: None,
-            },
-        });
-        // ...but the published carrier carries only one (same UUID and
-        // generation, one cell short).
-        let mut short = operation.clone();
-        short.cells.pop();
-        store
-            .write_operation(operation.op_id, &encode_operation(&operation).unwrap())
-            .unwrap();
-        store
-            .write_carrier(
-                operation.uuid,
-                operation.generation,
-                &carrier_of(&short),
-            )
-            .unwrap();
-        store
-            .begin(
-                operation.kind,
-                operation.uuid,
-                operation.generation,
-                &operation.dimension,
-            )
-            .unwrap();
-
+    for attempt in 1..=2 {
         match recover(
             &mut store,
             &fixture.region(),
             &AllStatesKnown,
             "minecraft:overworld",
         ) {
-            Err(RecoveryRefused::CargoDisagreement { .. }) => {}
-            other => panic!("a short carrier must refuse, got {other:?}"),
+            Err(RecoveryRefused::OperationUnreadable(why)) => {
+                assert!(why.contains("carrier file"), "{attempt}: {why}");
+            }
+            other => panic!("{attempt}: a missing carrier must refuse, got {other:?}"),
         }
-        // Nothing was touched: both source cells keep their cargo.
+        // The journal is still prepared and the source untouched.
+        assert!(
+            store.journal().in_progress.is_some(),
+            "{attempt}: the operation stays prepared"
+        );
         let root = get_chunk(&fixture, position).unwrap();
-        assert_eq!(chest_items(&root, first), Some(8));
-        assert_eq!(chest_items(&root, second), Some(8));
-        assert!(store.journal().in_progress.is_some());
+        assert_eq!(chest_items(&root, chest_at), Some(8), "{attempt}");
     }
+}
 
-    /// (item 7) A carrier whose entity payload does not decode refuses
-    /// the disassembly instead of dropping the entity.
-    #[test]
-    fn an_undecodable_entity_payload_refuses() {
-        use horizon_world::carrier::model::{Carrier, Cell, LocalPos};
-        let fixture = Fixture::new("bad-payload");
-        let position = ChunkPos::new(0, 0);
-        let target = [4, 0, 4];
-        put_chunk(
-            &fixture,
-            position,
-            &chunk_root_at(Tag::String("minecraft:air".into()), &[], 0, 0),
-        );
-        let mut store = fixture.store();
-        // List the carrier (assembly committed), then corrupt its
-        // payload: not NBT.
-        store
-            .begin(
-                OpKind::Assemble,
-                54,
-                1,
-                "minecraft:overworld",
-            )
-            .unwrap();
-        store.commit().unwrap();
-        let mut cells = Vec::new();
-        cells.push(
-            Cell::new(
-                LocalPos::new(0, 0, 0),
-                "minecraft:chest",
-                vec![("facing".to_string(), "north".to_string())],
-                Some(vec![0xff, 0xff, 0xff, 0xff]),
-            )
-            .unwrap(),
-        );
-        let carrier = Carrier::new(
-            54,
-            1,
+/// (a3) Recovery verifies the cargo against the journal: the carrier
+/// must carry exactly the operation's before-image cells — count,
+/// positions, names and entity content — not merely agree on UUID
+/// and generation.
+#[test]
+fn a_carrier_short_of_the_operations_cells_refuses() {
+    let fixture = Fixture::new("short-carrier");
+    let position = ChunkPos::new(0, 0);
+    let first = [4, 0, 4];
+    let second = [8, 0, 8];
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root_at(
+            chest_state_tag(),
+            &[(first, vec![7; 8]), (second, vec![7; 8])],
             0,
-            horizon_world::carrier::contact::RigidTransform::identity_at(
-                horizon_core::geometry::Vec3::new(4.0, 0.0, 4.0),
-            )
-            .unwrap(),
-            cells,
+            0,
+        ),
+    );
+    let mut store = fixture.store();
+    // The operation strips two cells...
+    let mut operation = assemble_chest(store.next_op_id(), first);
+    operation.cells.push(OperationCell {
+        world: second,
+        local: [1, 0, 0],
+        before: CellImage {
+            name: "minecraft:chest".to_string(),
+            properties: vec![("facing".to_string(), "north".to_string())],
+            entity: Some(entity_with_items(8)),
+        },
+        after: CellImage {
+            name: "minecraft:air".to_string(),
+            properties: Vec::new(),
+            entity: None,
+        },
+    });
+    // ...but the published carrier carries only one (same UUID and
+    // generation, one cell short).
+    let mut short = operation.clone();
+    short.cells.pop();
+    store
+        .write_operation(operation.op_id, &encode_operation(&operation).unwrap())
+        .unwrap();
+    store
+        .write_carrier(operation.uuid, operation.generation, &carrier_of(&short))
+        .unwrap();
+    store
+        .begin(
+            operation.kind,
+            operation.uuid,
+            operation.generation,
+            &operation.dimension,
         )
         .unwrap();
-        store
-            .write_carrier(54, 1, &codec::encode(&carrier).unwrap())
-            .unwrap();
 
-        // The live disassembly is exercised through recover-style
-        // decoding: assert the payload's own decode failure surfaces as
-        // a typed refusal (CarrierUnreadable), never a silent drop.
-        let bytes = std::fs::read(store.carrier_path(54, 1)).unwrap();
-        let decoded = codec::decode(&bytes).unwrap();
-        let payload = decoded.cells()[0].data().unwrap();
-        assert!(
-            nbt::read_named(payload, nbt::Limits::saved()).is_err(),
-            "the fixture's payload must not decode"
-        );
-        let _ = target;
+    match recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    ) {
+        Err(RecoveryRefused::CargoDisagreement { .. }) => {}
+        other => panic!("a short carrier must refuse, got {other:?}"),
     }
+    // Nothing was touched: both source cells keep their cargo.
+    let root = get_chunk(&fixture, position).unwrap();
+    assert_eq!(chest_items(&root, first), Some(8));
+    assert_eq!(chest_items(&root, second), Some(8));
+    assert!(store.journal().in_progress.is_some());
+}
 
-    /// A carrier file without a prepared operation is an orphan: the
+/// (item 7) A carrier whose entity payload does not decode refuses
+/// the disassembly instead of dropping the entity.
+#[test]
+fn an_undecodable_entity_payload_refuses() {
+    use horizon_world::carrier::model::{Carrier, Cell, LocalPos};
+    let fixture = Fixture::new("bad-payload");
+    let position = ChunkPos::new(0, 0);
+    let target = [4, 0, 4];
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root_at(Tag::String("minecraft:air".into()), &[], 0, 0),
+    );
+    let mut store = fixture.store();
+    // List the carrier (assembly committed), then corrupt its
+    // payload: not NBT.
+    store
+        .begin(OpKind::Assemble, 54, 1, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
+    let mut cells = Vec::new();
+    cells.push(
+        Cell::new(
+            LocalPos::new(0, 0, 0),
+            "minecraft:chest",
+            vec![("facing".to_string(), "north".to_string())],
+            Some(vec![0xff, 0xff, 0xff, 0xff]),
+        )
+        .unwrap(),
+    );
+    let carrier = Carrier::new(
+        54,
+        1,
+        0,
+        horizon_world::carrier::contact::RigidTransform::identity_at(
+            horizon_core::geometry::Vec3::new(4.0, 0.0, 4.0),
+        )
+        .unwrap(),
+        cells,
+    )
+    .unwrap();
+    store
+        .write_carrier(54, 1, &codec::encode(&carrier).unwrap())
+        .unwrap();
+
+    // The live disassembly is exercised through recover-style
+    // decoding: assert the payload's own decode failure surfaces as
+    // a typed refusal (CarrierUnreadable), never a silent drop.
+    let bytes = std::fs::read(store.carrier_path(54, 1)).unwrap();
+    let decoded = codec::decode(&bytes).unwrap();
+    let payload = decoded.cells()[0].data().unwrap();
+    assert!(
+        nbt::read_named(payload, nbt::Limits::saved()).is_err(),
+        "the fixture's payload must not decode"
+    );
+    let _ = target;
+}
+
+/// A carrier file without a prepared operation is an orphan: the
 /// cleanup deletes it at the next open.
 #[test]
 fn an_orphan_carrier_file_is_deleted_by_the_cleanup() {
@@ -1346,9 +1337,7 @@ fn an_orphan_carrier_file_is_deleted_by_the_cleanup() {
         .begin(OpKind::Assemble, 71, 1, "minecraft:overworld")
         .unwrap();
     store.commit().unwrap();
-    store
-        .write_carrier(71, 1, b"owned carrier bytes")
-        .unwrap();
+    store.write_carrier(71, 1, b"owned carrier bytes").unwrap();
     let carrier = fixture
         .data()
         .join(format!("horizon_carrier_{:032x}-1.nbt", 71_u128));
@@ -1365,11 +1354,59 @@ fn an_orphan_carrier_file_is_deleted_by_the_cleanup() {
     // 72 is not in the index and not tombstoned: an orphan.
     let report = orphan.cleanup().unwrap();
     assert_eq!(report.orphan_carriers, 1);
-    assert!(!fixture
-        .data()
-        .join(format!("horizon_carrier_{:032x}-1.nbt", 72_u128))
-        .is_file());
+    assert!(
+        !fixture
+            .data()
+            .join(format!("horizon_carrier_{:032x}-1.nbt", 72_u128))
+            .is_file()
+    );
     // The listed carrier (71) survives: it is owned, not orphaned.
     assert!(carrier.is_file());
 }
 
+/// Round-1 tail: a re-assembly of a disassembled UUID takes the next
+/// generation with checked arithmetic; a stale handle on the old
+/// generation refuses; and a remembered u32::MAX refuses rather than
+/// wrapping.
+#[test]
+fn generations_advance_checked_and_stale_handles_refuse() {
+    let fixture = Fixture::new("generations");
+    let mut store = fixture.store();
+    // First assembly: generation 1, committed (the index remembers it).
+    assert_eq!(store.next_generation(81).unwrap(), 1);
+    store
+        .begin(OpKind::Assemble, 81, 1, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
+    // The index holds (81,1): a re-assembly of the same UUID is an
+    // occupied name, but next_generation reads the remembered one.
+    assert_eq!(store.next_generation(81).unwrap(), 2);
+    // Disassemble it: the tombstone remembers generation 1.
+    store
+        .begin(OpKind::Disassemble, 81, 1, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
+    assert!(store.journal().tombstoned(81, 1));
+    // A stale handle on the old generation refuses: 1 is no longer held.
+    assert!(
+        store
+            .begin(OpKind::Disassemble, 81, 1, "minecraft:overworld")
+            .is_err()
+    );
+    // The re-assembly takes generation 2 — one past the tombstone.
+    assert_eq!(store.next_generation(81).unwrap(), 2);
+    // Overflow: a tombstone at u32::MAX refuses instead of wrapping.
+    let mut maxed = fixture.store();
+    maxed
+        .begin(OpKind::Assemble, 82, u32::MAX, "minecraft:overworld")
+        .unwrap();
+    maxed.commit().unwrap();
+    maxed
+        .begin(OpKind::Disassemble, 82, u32::MAX, "minecraft:overworld")
+        .unwrap();
+    maxed.commit().unwrap();
+    match maxed.next_generation(82) {
+        Err(error) => assert!(error.to_string().contains("generation limit"), "{error}"),
+        Ok(generation) => panic!("u32::MAX must refuse, got {generation}"),
+    }
+}

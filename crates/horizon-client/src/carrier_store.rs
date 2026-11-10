@@ -312,6 +312,29 @@ impl Store {
         self.journal.next_op_id
     }
 
+    /// The generation a re-assembly of `uuid` takes: one past the
+    /// highest generation the journal remembers for it — index entry or
+    /// tombstone — computed with checked arithmetic; a carrier whose
+    /// remembered generation is `u32::MAX` refuses rather than
+    /// wrapping. A UUID the journal has never seen starts at one.
+    pub fn next_generation(&self, uuid: u128) -> Result<u32, StoreIoError> {
+        let remembered = self
+            .journal
+            .carriers
+            .iter()
+            .chain(self.journal.tombstones.iter())
+            .filter(|(u, _)| *u == uuid)
+            .map(|(_, generation)| *generation)
+            .max();
+        match remembered {
+            None => Ok(1),
+            Some(u32::MAX) => Err(StoreIoError(format!(
+                "carrier {uuid:032x} reached the generation limit"
+            ))),
+            Some(last) => Ok(last + 1),
+        }
+    }
+
     /// Records the operation as in progress and publishes the next slot.
     /// Called after the operation file is durable, before the world
     /// changes.
@@ -804,20 +827,13 @@ pub fn recover(
         // short of cells, or carries different ones, never strips a
         // source it cannot put back.
         if carrier.cells().len() != operation.cells.len() {
-            return Err(RecoveryRefused::CargoDisagreement {
-                what: "cell count",
-            });
+            return Err(RecoveryRefused::CargoDisagreement { what: "cell count" });
         }
         for cell in &operation.cells {
-            let local = [
-                cell.local[0],
-                cell.local[1],
-                cell.local[2],
-            ];
+            let local = [cell.local[0], cell.local[1], cell.local[2]];
             let Some(carried) = carrier.cells().iter().find(|c| {
                 [c.pos().x(), c.pos().y(), c.pos().z()] == local && c.name() == cell.before.name
-            })
-            else {
+            }) else {
                 return Err(RecoveryRefused::CargoDisagreement { what: "cell state" });
             };
             let carried_entity = carried.data().map(|data| {
@@ -830,7 +846,9 @@ pub fn recover(
                 _ => false,
             };
             if !same_entity {
-                return Err(RecoveryRefused::CargoDisagreement { what: "entity content" });
+                return Err(RecoveryRefused::CargoDisagreement {
+                    what: "entity content",
+                });
             }
         }
     }

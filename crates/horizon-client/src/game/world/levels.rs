@@ -659,6 +659,9 @@ impl Game<'_> {
     fn swap_level(&mut self, p: &mut Parked) {
         use std::mem::swap;
         swap(&mut self.world, &mut p.world);
+        // The carrier first-use gate belongs to the world, not the
+        // level: a level swap keeps it.
+        self.world.carrier_data_existed_at_open = p.world.carrier_data_existed_at_open;
         swap(&mut self.streaming, &mut p.streaming);
         let mut locator = self.end.locator();
         swap(&mut locator, &mut p.locator);

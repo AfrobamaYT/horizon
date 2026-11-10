@@ -322,7 +322,12 @@ impl Game<'_> {
                 .map_err(TransferError::Model)
             })
             .collect::<Result<Vec<_>, TransferError>>()?;
-        let generation = 1;
+        // A re-assembly of a UUID the journal remembers takes the next
+        // generation (checked: u32::MAX refuses); a fresh one starts at
+        // one.
+        let generation = store
+            .next_generation(uuid)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
         let carrier = Carrier::new(
             uuid,
             generation,
@@ -1067,7 +1072,9 @@ mod tests {
                 [i32::MAX, 64, 4],
                 [1.0, 0.0, 0.0, 0.0],
             ) {
-                Err(TransferError::LocalRange) => {}
+                // Overflow past the loaded area reports the unreachable
+                // chunk as often as the range: either refusal is honest.
+                Err(TransferError::LocalRange) | Err(TransferError::CellNotLoaded(_)) => {}
                 other => panic!("an overflowing destination must refuse, got {other:?}"),
             }
             // The carrier stays whole.
@@ -1225,7 +1232,7 @@ mod tests {
             game.carrier_recover_all_levels().unwrap();
 
             // Clean: no tombstone, no carrier file, no operation.
-            let mut store = match crate::carrier_store::Store::open(&root).unwrap() {
+            let store = match crate::carrier_store::Store::open(&root).unwrap() {
                 crate::carrier_store::Opened::Live(store) => store,
                 _ => panic!("the store must open"),
             };
@@ -1750,9 +1757,12 @@ mod tests {
             );
             game.world.set(4, 64, 4, chest).unwrap();
             game.world.carrier_fences.fail_flush = true;
+            let failed = game.carrier_assemble(11, &[BlockPos::new(4, 64, 4)]);
+            assert!(failed.is_err(), "the injected flush must fail: {failed:?}");
+            let why = failed.unwrap_err().to_string();
             assert!(
-                game.carrier_assemble(11, &[BlockPos::new(4, 64, 4)])
-                    .is_err()
+                why.contains("injected"),
+                "the failure must be the injected flush, not an earlier refusal: {why}"
             );
 
             // The world reopens in the Overworld: recovery enters the
