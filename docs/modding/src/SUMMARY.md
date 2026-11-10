@@ -21,6 +21,7 @@
 - [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
 - [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
 - [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
+- [Design: villager professions and trades](concepts/villager-professions.md)
 
 # How-to
 
