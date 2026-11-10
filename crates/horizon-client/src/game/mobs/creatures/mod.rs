@@ -3677,16 +3677,7 @@ impl Game<'_> {
                         let entity = by.or(breaker);
                         let mut drops = self.roll_block_loot(pos, old, entity, Default::default());
                         self.native_block_loot(pos, old, None, None, None, &mut drops);
-                        let dropped = self.with_level(|_, level, _| {
-                            level.block_dropped(
-                                BlockPos::new(pos[0], pos[1], pos[2]),
-                                old,
-                                None,
-                                None,
-                                drops,
-                                None,
-                            )
-                        });
+                        let dropped = self.entity_block_dropped(pos, old, entity, drops);
                         let canceled = dropped.canceled;
                         self.spawn_block_drops(pos, dropped);
                         // InfestedBlock.spawnAfterBreak runs after the drops,

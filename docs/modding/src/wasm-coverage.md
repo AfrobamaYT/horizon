@@ -878,6 +878,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `WorldDrawContext::draw_model_instances` | crosses | Wire call |
 | `CameraDrawContext::quad` | crosses | Wire call |
 | `CameraDrawContext::sprite` | crosses | Wire call |
+| `LevelHost::block_entity_data` | crosses | Wire call |
 | `LevelHost::block_state` | crosses | Wire call |
 | `LevelHost::state_block` | crosses | Wire call |
 | `LevelHost::block_state_id` | crosses | Wire call |
@@ -1678,9 +1679,11 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockPart::contents_changed` | crosses | Wire call |
 | `BlockPart::dispense_method` | crosses | Wire call |
 | `BlockPart::entity_inside` | crosses | Wire call |
+| `BlockPart::exp_drop` | crosses | Wire call |
 | `BlockPart::is_pathfindable` | crosses | Wire call |
 | `BlockPart::item_after_vertical_collision` | crosses | Wire call |
 | `BlockPart::minecart_pass` | crosses | Wire call |
+| `BlockPart::on_block_exploded` | crosses | Wire call |
 | `BlockPart::should_check_weak_power` | crosses | Wire call |
 | `BlockPart::should_redstone_wire_connect_to` | crosses | Wire call |
 | `BlockEntityPart::block_entity_subscribed` | crosses | Wire call |

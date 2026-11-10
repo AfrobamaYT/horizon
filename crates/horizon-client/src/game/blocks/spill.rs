@@ -630,11 +630,18 @@ impl GameLevel<'_> {
         // amount; a spawner's experience ignores the tool.
         let name = self.facts.get(state).name.clone();
         let silk = tool.is_some_and(|tool| tool.enchantment_level("minecraft:silk_touch") > 0);
-        let experience = exp_to_drop.unwrap_or_else(|| {
-            removal::break_experience(&mut self.world.random, &name)
-                .filter(|_| !silk || &*name == "minecraft:spawner")
-                .unwrap_or(0)
-        });
+        let experience = exp_to_drop
+            .or_else(|| self.part_break_experience(pos, state, breaker, tool))
+            .unwrap_or_else(|| {
+                removal::break_experience(&mut self.world.random, &name)
+                    .filter(|_| !silk || &*name == "minecraft:spawner")
+                    .unwrap_or(0)
+            });
+        let experience = if silk && &*name != "minecraft:spawner" {
+            0
+        } else {
+            experience
+        };
         self.block_drops_ready(
             pos,
             state,
