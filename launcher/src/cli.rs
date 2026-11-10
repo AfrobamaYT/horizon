@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 #[derive(Parser)]
 #[command(
-    name = "horizon-launcher",
+    name = crate::identity::EXECUTABLE,
     version = backend::VERSION,
     about = "Installs, prepares and starts Horizon. Without a subcommand, opens the window."
 )]

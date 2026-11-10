@@ -5,6 +5,7 @@
 #[cfg(feature = "runtime-fixture")]
 pub mod fixture;
 pub mod link;
+mod module_cache;
 #[cfg(test)]
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
@@ -343,6 +344,7 @@ pub fn refusal(id: &str) -> Option<Refusal> {
 /// startup: the same selection as content mods (`horizon_mod_package::selection`), so a wasm mod's
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
 pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
+    let cache = module_cache::ModuleCache::new(game_dir.join(".horizon-cache/wasm"));
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused: Vec<_> = horizon_mod_package::selection::package_errors(
         horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::DIR))
@@ -397,7 +399,7 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
         .ok()
         .and_then(|exe| std::fs::read(exe.with_file_name("horizon-wasm-std.wasm")).ok())
     {
-        Some(std) => load(&std, packages),
+        Some(std) => load_with_cache(&std, packages, Some(&cache)),
         None => Loaded {
             modules: Vec::new(),
             mods: Vec::new(),
@@ -500,6 +502,14 @@ fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -
 }
 
 pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
+    load_with_cache(std_member, packages, None)
+}
+
+fn load_with_cache(
+    std_member: &[u8],
+    packages: Vec<WasmPackage>,
+    cache: Option<&module_cache::ModuleCache>,
+) -> Loaded {
     let (groups, refused) = groups(&packages);
     let mut loaded = Loaded {
         refused,
@@ -534,7 +544,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             .zip(&names)
             .map(|(&i, name)| (name.as_str(), &packages[i].manifest))
             .collect();
-        let result = WasmMod::instantiate(&engine, &manifests, &members).and_then(|mods| {
+        let result = WasmMod::instantiate(&engine, &manifests, &members, cache).and_then(|mods| {
             if mods.len() != indices.len() {
                 return Err(Refusal::Runtime("missing mod boundary exports".into()));
             }
