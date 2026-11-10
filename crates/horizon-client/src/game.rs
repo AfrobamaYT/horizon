@@ -757,6 +757,9 @@ struct InteractTarget {
 
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
+    cake_probe: bool,
+    cake_requested: std::cell::Cell<bool>,
+    cake_answer: Option<bool>,
     gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
         [i32; 3],
         horizon_client::block_entity_anim::EndGateway,
@@ -1015,6 +1018,15 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        if self.cake_probe {
+            self.cake_requested.set(true);
+            false
+        } else {
+            self.cake_answer.unwrap_or(vanilla)
+        }
+    }
+
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border
             .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
@@ -5609,6 +5621,9 @@ impl Game<'_> {
         }
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
+            cake_probe: false,
+            cake_requested: std::cell::Cell::new(false),
+            cake_answer: None,
             command_block_transition: None,
             gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),
@@ -7504,7 +7519,7 @@ impl Game<'_> {
                     } else {
                         empty_template_ran = true;
                         let player = self.use_context();
-                        self.with_level(|b, level, ticks| {
+                        self.with_block_use_level(|b, level, ticks| {
                             b.use_without_item(level, ticks, state, block_hit, player)
                         })
                     };
@@ -18139,23 +18154,6 @@ mod escape_tests {
 }
 
 impl Game<'_> {
-    fn dark_outside(&self) -> bool {
-        !self.dimension_type().has_fixed_time && self.sky_darken() >= 4
-    }
-    fn can_have_weather(&self) -> bool {
-        level_can_have_weather(
-            self.world.shape.sky_light,
-            self.world.shape.has_ceiling,
-            self.dim == Dim::End,
-        )
-    }
-    fn weather_levels(&self, partial: f32) -> (f32, f32) {
-        if self.can_have_weather() {
-            self.world.weather.levels(partial)
-        } else {
-            (0.0, 0.0)
-        }
-    }
     fn held_mut(&mut self) -> &mut Option<ItemStack> {
         self.stack_in_mut(self.held_slot())
     }
@@ -18308,12 +18306,6 @@ impl Game<'_> {
             self.flash -= 1;
         }
         // The rain sounds come with the rain splashes (`tick_particles`).
-    }
-}
-
-impl Game<'_> {
-    fn held(&self) -> Option<&ItemStack> {
-        self.stack_in(self.held_slot())
     }
 }
 

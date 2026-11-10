@@ -3517,15 +3517,15 @@ impl Game<'_> {
     ) {
         self.fire_use_animation(stack, animation);
     }
-    /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
-    /// when eating starts: `vanilla_can_eat` is vanilla's answer (creative,
+    /// `Player.canEat` for held `stack` (None for an empty hand) for food and cake.
+    /// Cake uses `can_always_eat = false`; `vanilla_can_eat` is vanilla's answer (creative,
     /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
     /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
     /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
     pub(in crate::game) fn native_can_eat(
         &self,
-        stack: &ItemStack,
+        stack: Option<&ItemStack>,
         vanilla_can_eat: bool,
         can_eat: &mut Option<bool>,
     ) {
