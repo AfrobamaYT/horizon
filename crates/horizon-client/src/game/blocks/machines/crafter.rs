@@ -478,7 +478,7 @@ mod part_remainder_tests {
                 ];
                 let mut crafter = Crafter::default();
                 for (slot, item) in crafter.items.iter_mut().zip(grid) {
-                    *slot = Some(ItemStack::new(format!("minecraft:{item}"), 1));
+                    *slot = Some(ItemStack::new(&format!("minecraft:{item}"), 1));
                 }
                 game.world
                     .block_entities

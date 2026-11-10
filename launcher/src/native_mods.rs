@@ -3987,7 +3987,11 @@ mod tests {
             denied(build(base, &folder, &instances::selected(), choice, |_| {}));
         }
         denied(sync_internals(&folder));
-        assert!(pinned_catalog_with_modules(&folder).is_err());
+        let expected = require_consent().unwrap_err().to_string();
+        assert_eq!(
+            pinned_catalog_with_modules(&folder).err().unwrap(),
+            expected
+        );
         let preview = root().join("installed.routes");
         fs::create_dir_all(&preview).unwrap();
         let marker = preview.join("permission-sentinel");
