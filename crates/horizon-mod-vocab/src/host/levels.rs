@@ -92,6 +92,14 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_biome_effects(&self, level: LevelRef, biome: &str) -> Option<BiomeEffects>;
     /// Side: both.
+    /// Whether a biome is in a biome tag (`Holder.is(TagKey)`), by the level's tag tables: the
+    /// vanilla tags, the world's data packs and mods' biome tags merged. `tag` is a namespaced
+    /// id (`minecraft:is_forest`), with or without a leading `#`. A tag no pack defines holds
+    /// nothing, so false. None for a stale handle, an unknown biome or a level that has no tag
+    /// tables loaded. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_biome_in_tag(&self, level: LevelRef, biome: &str, tag: &str) -> Option<bool>;
+    /// Side: both.
     /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
     /// from build height. Reads active and parked server levels or the client's current level.
     /// None for a stale or unavailable level. Does not load chunks.
