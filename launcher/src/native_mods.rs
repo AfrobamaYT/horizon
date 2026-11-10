@@ -1638,17 +1638,20 @@ fn source(revision: &str) -> Result<PathBuf, String> {
 fn unpack_source(reader: impl std::io::Read, partial: &Path) -> Result<(), String> {
     let mut archive = tar::Archive::new(reader);
     for entry in archive.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| format!("Source interrupted: {e}"))?;
+        let mut entry =
+            entry.map_err(|e| trf("Source interrupted: {error}", &[("error", &e.to_string())]))?;
         let kind = entry.header().entry_type();
         // Match downloaded sources: horizon-mixins refuses links, which the build does not need.
         if !(kind.is_file() || kind.is_dir()) {
             continue;
         }
-        if !entry
-            .unpack_in(partial)
-            .map_err(|e| format!("Could not unpack the source: {e}"))?
-        {
-            return Err("The source archive contains a path outside its folder.".into());
+        if !entry.unpack_in(partial).map_err(|e| {
+            trf(
+                "Could not unpack the source: {error}",
+                &[("error", &e.to_string())],
+            )
+        })? {
+            return Err(tr("The source archive contains a path outside its folder.").into());
         }
     }
     Ok(())
@@ -2694,6 +2697,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn source_archive_escape_is_refused_without_writing_outside() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o644);
+        header.as_mut_bytes()[..10].copy_from_slice(b"../outside");
+        header.set_cksum();
+        let mut archive = tar::Builder::new(Vec::new());
+        archive.append(&header, &b"x"[..]).unwrap();
+        let bytes = archive.into_inner().unwrap();
+        let inside = folder.path().join("inside");
+        fs::create_dir(&inside).unwrap();
+        assert!(unpack_source(bytes.as_slice(), &inside).is_err());
+        assert!(!folder.path().join("outside").exists());
+    }
+
+    #[test]
     fn developer_native_build_uses_local_only_commit_without_source_network() {
         let folder = tempfile::tempdir().unwrap();
         let repo = folder.path().join("checkout");
@@ -2729,8 +2749,14 @@ mod tests {
             .unwrap()
             .trim()
             .to_owned();
+        // Git archive applies core.autocrlf even though the blob is LF. Exercise the real
+        // developer snapshot boundary with Windows-style config and keep the byte assertion.
+        git(&["config", "core.autocrlf", "true"]);
+        let (snapshot_revision, snapshot) =
+            crate::developer_install::committed_snapshot(&repo).unwrap();
+        assert_eq!(snapshot_revision, revision);
         let archive = folder.path().join("source.tar");
-        fs::write(&archive, git(&["archive", "--format=tar", "HEAD"])).unwrap();
+        fs::write(&archive, snapshot).unwrap();
         let destination = folder.path().join("cache/source");
         let result = source_or_local(Some(&archive), &destination, &revision, || {
             panic!("developer source must never request GitHub")

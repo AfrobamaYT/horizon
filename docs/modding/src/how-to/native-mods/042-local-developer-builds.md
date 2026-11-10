@@ -1,3 +1,6 @@
+<!-- chapter: A local unsigned developer base -->
+<!-- separator: 1 -->
+
 ## A local unsigned developer base
 
 A fresh launcher home can use a game built from a trusted checkout without installing a signed release first.

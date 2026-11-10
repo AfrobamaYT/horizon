@@ -159,7 +159,7 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
     Ok(tag)
 }
 
-fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), String> {
+pub(crate) fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), String> {
     let revision = Command::new("git")
         .current_dir(checkout)
         .args(["rev-parse", "HEAD"])
@@ -182,7 +182,15 @@ fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), String> {
     }
     let snapshot = Command::new("git")
         .current_dir(checkout)
-        .args(["archive", "--format=tar", "HEAD"])
+        .args([
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "archive",
+            "--format=tar",
+            "HEAD",
+        ])
         .output()
         .map_err(|e| e.to_string())?;
     if !snapshot.status.success() {
