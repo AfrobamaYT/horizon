@@ -1060,3 +1060,16 @@ pub(super) fn saved_bytes(
     }
     std::fs::read(root.join(super::MODIFIERS)).ok()
 }
+
+/// The ids of the biomes the biome modifiers of the content root `root` changed
+/// (`write_state`'s `unmodified`): a client has none of their changes in its own files.
+pub fn modified(root: &Path) -> BTreeSet<String> {
+    let saved = std::fs::read(root.join(super::MODIFIERS))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    saved
+        .as_ref()
+        .and_then(|saved| saved.get("unmodified")?.as_object())
+        .map(|ids| ids.keys().cloned().collect())
+        .unwrap_or_default()
+}
