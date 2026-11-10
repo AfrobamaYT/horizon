@@ -948,7 +948,7 @@ mod tests {
             }
         }
         let expected = [
-            "Ok(true)", "register", "config", "reload", "reload", "config", "reload", "reload",
+            "register", "config", "reload", "reload", "config", "reload", "reload",
         ]
         .into_iter()
         .flat_map(|moment| ["lib", "z", "a"].map(|id| (moment, id)))
@@ -1226,6 +1226,7 @@ mod tests {
         .into();
         crate::install(mods.clone());
         let expected = [
+            "Ok(true)",
             r#"Ok(["minecraft:air", "minecraft:stone"])"#,
             r#"Err(UnknownRegistry("minecraft:missing"))"#,
             r#"Err(InvalidRegistryName("item"))"#,
