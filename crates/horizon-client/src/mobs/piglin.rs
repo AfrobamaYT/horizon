@@ -854,15 +854,13 @@ fn hoglin_hurt(
 /// `HoglinAi.setAttackTargetIfCloserThanCurrent` for a hoglin that received a
 /// broadcast: nothing while pacified; otherwise `BehaviorUtils.getNearestTarget`,
 /// the new target unless the current one is strictly nearer
-/// (`getTargetNearestMe`). `position` gives a live mob target's place; a
-/// current target it cannot place counts as absent. A player on either side
-/// is not compared (`Who::Player` is each mob's own player): the current
-/// target stays. Returns a proposal for the event dispatcher to approve before
+/// (`getTargetNearestMe`). `position` gives the current (true) or incoming (false) target's place; a
+/// current target it cannot place counts as absent. Player positions must resolve the corresponding concrete identity. Returns a proposal for the event dispatcher to approve before
 /// committing the target, without changing the receiving mob.
 pub fn receive_attack_target(
     m: &Mob,
     target: Who,
-    position: impl Fn(Who) -> Option<Vec3>,
+    position: impl Fn(Who, bool) -> Option<Vec3>,
 ) -> Option<Who> {
     if m.extra.ints[0] > 0 {
         return None;
@@ -870,13 +868,10 @@ pub fn receive_attack_target(
     let Some(current) = m.ai.target else {
         return Some(target);
     };
-    if current == Who::Player || target == Who::Player {
-        return None;
-    }
-    let Some(now) = position(current) else {
+    let Some(now) = position(current, true) else {
         return Some(target);
     };
-    let new = position(target)?;
+    let new = position(target, false)?;
     (m.distance_sqr(now) >= m.distance_sqr(new)).then_some(target)
 }
 /// `PiglinAi.stopHoldingOffHandItem` without bartering (`wasHurtBy`): a gold
@@ -2438,9 +2433,10 @@ mod hurt_broadcast_tests {
         let mut receiver = mob(1, Species::Hoglin, Vec3::ZERO);
         let near = Who::Mob(2);
         let far = Who::Mob(3);
-        let position = |who| match who {
+        let position = |who, _current| match who {
             Who::Mob(2) => Some(Vec3::new(2.0, 0.0, 0.0)),
             Who::Mob(3) => Some(Vec3::new(4.0, 0.0, 0.0)),
+            Who::Player => Some(Vec3::new(4.0, 0.0, 0.0)),
             _ => None,
         };
         assert_eq!(receive_attack_target(&receiver, far, position), Some(far));
@@ -2454,7 +2450,7 @@ mod hurt_broadcast_tests {
         assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
         assert_eq!(receiver.ai.target, Some(far));
         assert_eq!(
-            receive_attack_target(&receiver, near, |_| position(near)),
+            receive_attack_target(&receiver, near, |_, _| position(near, false)),
             Some(near)
         );
         assert_eq!(
@@ -2464,11 +2460,11 @@ mod hurt_broadcast_tests {
         receiver.ai.target = Some(Who::Mob(4));
         assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
         receiver.ai.target = Some(Who::Player);
-        assert_eq!(receive_attack_target(&receiver, near, position), None);
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
         receiver.ai.target = Some(far);
         assert_eq!(
             receive_attack_target(&receiver, Who::Player, position),
-            None
+            Some(Who::Player)
         );
     }
 
