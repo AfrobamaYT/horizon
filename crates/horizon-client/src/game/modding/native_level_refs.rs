@@ -174,7 +174,7 @@ impl Game<'_> {
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && level.dimension() == self.native_level_key())
         .then_some(())?;
-        self.datapack_registries.as_ref()
+        self.mods.datapack_registries.as_ref()
     }
 
     /// The entry ids of a mod's datapack registry as the world last loaded it.
