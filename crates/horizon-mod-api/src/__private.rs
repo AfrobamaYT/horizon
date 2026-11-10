@@ -4,7 +4,6 @@
 use crate::*;
 #[path = "__private/registry_installation.rs"]
 mod registry_installation;
-pub use registry_installation::registry_installation_identity;
 
 /// The game's profiler control and reports, not a mod-facing API contract.
 #[path = "profiler.rs"]
