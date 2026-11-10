@@ -17,8 +17,31 @@ pub fn uses_developer(version: &str) -> bool {
 }
 
 pub fn label(version: &str) -> Option<String> {
-    uses_developer(version)
-        .then(|| trf("Local unsigned developer build · {id}", &[("id", version)]))
+    uses_developer(version).then(|| {
+        let base = crate::native_mods::about(version)
+            .map(|a| a.base)
+            .or_else(|| crate::build_import::about(version).map(|a| a.base))
+            .unwrap_or_else(|| version.to_owned());
+        let commit = revision(&base).unwrap_or_else(|_| tr("Unknown commit").into());
+        trf(
+            "Local unsigned developer build · {commit} · {id}",
+            &[("commit", &commit), ("id", version)],
+        )
+    })
+}
+
+/// The instance row keeps the trust warning even before resources have been prepared.
+pub fn instance_status(version: &str, prepared: bool) -> Option<String> {
+    label(version).map(|label| {
+        format!(
+            "{label} · {}",
+            if prepared {
+                tr("Ready")
+            } else {
+                tr("Needs preparing")
+            }
+        )
+    })
 }
 
 pub fn revision(version: &str) -> Result<String, String> {
@@ -92,18 +115,7 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
     if !missing.is_empty() {
         return Err(trf("Missing developer packaging inputs: {files}. Build companions with cargo build -p horizon-client-lib --bin horizon-ctl -p horizon-prepare -p horizon-server. Run horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/.", &[("files", &missing.join(", "))]));
     }
-    let revision = Command::new("git")
-        .current_dir(&checkout)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !revision.status.success() {
-        return Err(tr("The developer checkout has no HEAD commit.").into());
-    }
-    let revision = String::from_utf8(revision.stdout)
-        .map_err(|e| e.to_string())?
-        .trim()
-        .to_owned();
+    let (revision, snapshot) = committed_snapshot(&checkout)?;
     let _publication =
         crate::run_leases::installation().map_err(crate::native_mods::cache_error)?;
     let root = backend::version_dir("");
@@ -126,11 +138,15 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
         )
         .into());
     }
+    if !horizon_prepare::exporters::available(&package) {
+        return Err(tr("The packaged exporters are missing, changed or do not match the checkout sources. Recompile the exporters before installing.").into());
+    }
     fs::write(
         package.join("developer.json"),
         serde_json::json!({"revision": revision}).to_string(),
     )
     .map_err(|e| e.to_string())?;
+    fs::write(package.join("developer-source.tar"), snapshot).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
     digest_tree(&package, &mut hash)?;
     let tag = format!("developer-{:x}", hash.finalize());
@@ -143,6 +159,38 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
     Ok(tag)
 }
 
+fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), String> {
+    let revision = Command::new("git")
+        .current_dir(checkout)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !revision.status.success() {
+        return Err(tr("The developer checkout has no HEAD commit.").into());
+    }
+    let revision = String::from_utf8(revision.stdout)
+        .map_err(|e| e.to_string())?
+        .trim()
+        .to_owned();
+    let clean = Command::new("git")
+        .current_dir(checkout)
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !clean.status.success() || !clean.stdout.is_empty() {
+        return Err(tr("The developer checkout has dirty tracked inputs. Commit your changes first, then rebuild the game and retry.").into());
+    }
+    let snapshot = Command::new("git")
+        .current_dir(checkout)
+        .args(["archive", "--format=tar", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !snapshot.status.success() {
+        return Err(tr("Could not snapshot the developer checkout's committed source.").into());
+    }
+    Ok((revision, snapshot.stdout))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +198,44 @@ mod tests {
         let mut hash = Sha256::new();
         digest_tree(root, &mut hash).unwrap();
         hash.finalize().to_vec()
+    }
+    #[test]
+    fn dirty_tracked_checkout_is_refused_but_local_commit_is_snapshotted() {
+        let folder = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .current_dir(folder.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q"]);
+        fs::write(folder.path().join("input"), "committed").unwrap();
+        git(&["add", "input"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "local only",
+        ]);
+        let (commit, snapshot) = committed_snapshot(folder.path()).unwrap();
+        assert_eq!(commit.len(), 40);
+        let output = tempfile::tempdir().unwrap();
+        tar::Archive::new(snapshot.as_slice())
+            .unpack(output.path())
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(output.path().join("input")).unwrap(),
+            "committed"
+        );
+        fs::write(folder.path().join("input"), "dirty").unwrap();
+        assert!(committed_snapshot(folder.path())
+            .unwrap_err()
+            .contains("Commit your changes first"));
     }
     #[test]
     fn consent_precedes_checkout_access() {

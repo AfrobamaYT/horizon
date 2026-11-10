@@ -3352,7 +3352,8 @@ pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) 
         None => true,
         Some(s) if crate::nightly::date_of(s).is_some() => true,
         Some(s)
-            if crate::build_import::is_imported(s) || crate::developer_install::is_developer(s) =>
+            if crate::build_import::is_imported(s)
+                || crate::developer_install::uses_developer(s) =>
         {
             false
         }
@@ -6187,6 +6188,8 @@ pub fn {f}("
         assert!(select_after_update(Some("v2026.10.12"), &installed));
         assert!(!select_after_update(Some("v2026.10.1"), &installed));
         assert!(select_after_update(None, &installed));
+        assert!(!select_after_update(Some("developer-abc"), &[]));
+        assert!(!select_after_update(Some("developer-abc"), &installed));
         assert!(!select_after_update(
             Some("imported-2026-11-01-abcdef0"),
             &["imported-2026-11-01-abcdef0".to_string()]

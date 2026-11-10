@@ -1573,6 +1573,48 @@ fn lock_crates(
 /// `.horizon-revision` (bundles pin it). A Nightly's commit stays downloadable after the Nightly
 /// is gone: its `nightly-source/…` tag keeps it (docs/release-flow.md). Links are left out:
 /// horizon-mixins refuses them, and none is needed to build.
+fn source_for(base: &str, revision: &str) -> Result<PathBuf, String> {
+    let archive = crate::developer_install::is_developer(base)
+        .then(|| backend::version_dir(base).join("developer-source.tar"));
+    source_or_local(
+        archive.as_deref(),
+        &root().join("developer-source").join(base),
+        revision,
+        || source(revision),
+    )
+}
+
+fn source_or_local(
+    archive: Option<&Path>,
+    destination: &Path,
+    revision: &str,
+    remote: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    match archive {
+        Some(archive) => local_source(archive, destination, revision),
+        None => remote(),
+    }
+}
+
+fn local_source(archive: &Path, destination: &Path, revision: &str) -> Result<PathBuf, String> {
+    if destination.join(".horizon-revision").is_file() {
+        return Ok(destination.to_owned());
+    }
+    let parent = destination.parent().unwrap();
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let partial = tempfile::Builder::new()
+        .prefix(".source-")
+        .tempdir_in(parent)
+        .map_err(|e| e.to_string())?;
+    let file = fs::File::open(archive).map_err(|e| e.to_string())?;
+    tar::Archive::new(file)
+        .unpack(partial.path())
+        .map_err(|e| e.to_string())?;
+    fs::write(partial.path().join(".horizon-revision"), revision).map_err(|e| e.to_string())?;
+    fs::rename(partial.path(), destination).map_err(|e| e.to_string())?;
+    Ok(destination.to_owned())
+}
+
 fn source(revision: &str) -> Result<PathBuf, String> {
     let dir = root().join("source").join(revision);
     if dir.join(".horizon-revision").is_file() {
@@ -1904,12 +1946,15 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
+    // Keep developer provenance distinct from a signed base at the same source commit.
+    let developer_key = crate::developer_install::is_developer(origin)
+        .then(|| format!("{}:{origin}", platform.cache_key().unwrap_or_default()));
     let version = version_for(
         &revision,
         &mixins,
         profile,
         target,
-        platform.cache_key(),
+        developer_key.as_deref().or(platform.cache_key()),
         &requested,
     )?;
     let now = Record {
@@ -1922,7 +1967,10 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists || profile != Profile::Optimized {
+    let prebuilt = if exists
+        || profile != Profile::Optimized
+        || crate::developer_install::is_developer(origin)
+    {
         None
     } else {
         let game = match prebuilt::refusal(&projects) {
@@ -2053,7 +2101,7 @@ fn pipeline(
             }
         }
         progress(Step::Source(revision.clone()));
-        let source = source(&revision)?;
+        let source = source_for(origin, &revision)?;
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
         // it refuses) and, on Windows, ASCII (which they can't read past), both by build_dir.
         let real = root();
@@ -2637,6 +2685,64 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn developer_native_build_uses_local_only_commit_without_source_network() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = folder.path().join("checkout");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        fs::write(repo.join("Cargo.toml"), "[workspace]\n").unwrap();
+        git(&["add", "Cargo.toml"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "local only",
+        ]);
+        let revision = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let archive = folder.path().join("source.tar");
+        fs::write(&archive, git(&["archive", "--format=tar", "HEAD"])).unwrap();
+        let destination = folder.path().join("cache/source");
+        let result = source_or_local(Some(&archive), &destination, &revision, || {
+            panic!("developer source must never request GitHub")
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(result.join("Cargo.toml")).unwrap(),
+            "[workspace]\n"
+        );
+        assert_eq!(
+            fs::read_to_string(result.join(".horizon-revision")).unwrap(),
+            revision
+        );
+        assert!(source_or_local(
+            Some(&folder.path().join("missing.tar")),
+            &folder.path().join("missing-cache"),
+            &revision,
+            || panic!("missing local source must not fall back to GitHub")
+        )
+        .is_err());
+    }
 
     /// The player's route, from a fresh data folder with nothing registered by hand: the
     /// launcher's own install of a release, a native build on it, then an update to a newer

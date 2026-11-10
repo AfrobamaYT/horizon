@@ -36,7 +36,7 @@ MCP: `install`.
 
 ## `horizon-launcher developer-install`
 
-Install a local unsigned developer build. Runs the trusted checkout\'s build code through cargo run -p xtask -- package; requires companion binaries and compiled exporters.
+Install a local unsigned developer build. Runs the trusted checkout\'s build code through cargo run -p xtask -- package; requires companion binaries and compiled exporters. Commit tracked changes first and rebuild. Native builds use a snapshot of this local commit, even when it has never been pushed. Select this base explicitly with settings selected-version.
 
     horizon-launcher developer-install --program <PROGRAM> <CHECKOUT>
 
