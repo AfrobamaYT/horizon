@@ -17561,9 +17561,7 @@ pub(crate) fn run_with(
     }
     mod_points::__private::seal();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
-    if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
-        panic!("Mod parts refused:\n{}", refused.join("\n"));
-    }
+    crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before
     // any world opens, as its StructureRegistry reads them.
     if horizon_world::worldgen::structure::mod_types::install_mod_structure_types(
