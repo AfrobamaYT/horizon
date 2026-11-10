@@ -960,6 +960,7 @@ pub(in crate::game) mod tests {
     pub(in crate::game) fn test_hub(
         label: &str,
         particle_names: Vec<String>,
+        supplied_sync: Option<std::sync::Arc<data::SyncData>>,
     ) -> (
         Hub,
         std::sync::mpsc::Receiver<Out>,
@@ -974,7 +975,7 @@ pub(in crate::game) mod tests {
             "minecraft:particle_type".to_string(),
             horizon_protocol::registry::Ids::from_names(particle_names),
         );
-        let sync = std::sync::Arc::new(sync);
+        let sync = supplied_sync.unwrap_or_else(|| std::sync::Arc::new(sync));
         let lan = Lan::start_with(sync.clone(), config).unwrap();
         let encoder = ChunkEncoder::new(
             [] as [(std::sync::Arc<str>, bool); 0],
@@ -1059,7 +1060,8 @@ pub(in crate::game) mod tests {
     /// are sent to tracking players within 32 blocks.
     #[test]
     fn hitting_shulker_bullet_sends_15_crit_particles_to_players() {
-        let (hub, rx_near, rx_far) = test_hub("ShulkerBulletTest", vec!["minecraft:crit".into()]);
+        let (hub, rx_near, rx_far) =
+            test_hub("ShulkerBulletTest", vec!["minecraft:crit".into()], None);
 
         let at = [0.0, 64.0, 0.0];
         let options = ParticleOptions::simple(ParticleType::from_name("crit").unwrap());
@@ -1088,7 +1090,7 @@ pub(in crate::game) mod tests {
         // `Particle::read` reads a vibration's data from its pinned id, 58.
         let mut names = vec!["minecraft:empty".to_string(); 58];
         names.push("minecraft:vibration".to_string());
-        let (hub, rx_near, rx_far) = test_hub("VibrationTest", names);
+        let (hub, rx_near, rx_far) = test_hub("VibrationTest", names, None);
 
         let source = PositionSource::Block([3, 64, -7]);
         let at = [1.25, 64.0, 3.75];

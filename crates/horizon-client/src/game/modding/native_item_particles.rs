@@ -9,10 +9,6 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "item_particle_send_tests.rs"]
-mod send_tests;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::game::api_values::TryIntoApi;

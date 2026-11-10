@@ -1715,7 +1715,7 @@ pub(super) fn mod_particles_ok(
         T::Block | T::BlockMarker | T::FallingDust | T::DustPillar | T::BlockCrumble => {
             state.is_some_and(state_ok)
         }
-        T::Item | T::Trail | T::Vibration => super::super::item_particle_send::supported(options),
+        T::Item | T::Trail | T::Vibration => crate::game::item_particle_send::supported(options),
         T::Geyser | T::GeyserPlume | T::GeyserBase | T::GeyserPoof => options
             .geyser
             .is_some_and(|(_, impulse)| impulse.is_finite()),
