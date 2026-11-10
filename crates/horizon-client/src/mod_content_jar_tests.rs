@@ -506,7 +506,7 @@ fn modify_biome_sets_climate_and_colours() {
         &[
             (
                 "chill",
-                r##"{"type":"horizon:modify_biome","biomes":"minecraft:plains","temperature":-0.5,"has_precipitation":true,"temperature_modifier":"frozen","effects":{"sky_color":13160703,"grass_color":"#80a0ff"}}"##,
+                r##"{"type":"horizon:modify_biome","biomes":"minecraft:plains","temperature":-0.5,"has_precipitation":true,"temperature_modifier":"frozen","effects":{"sky_color":13164799,"grass_color":"#80a0ff"}}"##,
             ),
             (
                 "ore",
