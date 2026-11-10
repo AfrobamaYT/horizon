@@ -28,6 +28,24 @@ class PrebuiltContentsTests(unittest.TestCase):
             (root / name).write_bytes(b"")
         return root
 
+    def test_only_current_cargo_artifacts_enter_the_archive(self):
+        root = self.folder(
+            "cache/libpoint_shape-old.rmeta", "cache/libpoint_shape-host.rmeta",
+            "cache/libpoint_shape-target.rmeta", "cache/libpoint_shape-target.rlib",
+            "cache/libderive.so", "cache/libhorizon_client.so",
+        )
+        output = root / "sdk"
+        output.mkdir()
+        current = ["libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+                   "libpoint_shape-target.rlib", "libderive.so", "libhorizon_client.so"]
+        prebuilt_game.copy_artifacts([
+            {"reason": "compiler-artifact", "filenames": [str(root / "cache" / name) for name in current]},
+            {"reason": "build-finished", "success": True},
+        ], output)
+        self.assertEqual({path.name for path in output.iterdir()}, {
+            "libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta", "libderive.so", "libhorizon_client.so",
+        })
+
     def test_native_extern_lookup_refuses_a_second_package_variant(self):
         root = self.folder("libhorizon_mod_package-runtime.rmeta")
         self.assertEqual(prebuilt_game.extern_args(root, "horizon_mod_package"), [

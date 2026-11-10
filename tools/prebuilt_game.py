@@ -93,6 +93,17 @@ def cargo_features(server: bool, platform: str) -> list[str]:
     return features
 
 
+def copy_artifacts(messages: list[dict], deps: Path) -> None:
+    """Copy this Cargo run's compiler outputs, not stale files left by earlier builds."""
+    files = {
+        Path(name)
+        for message in messages if message["reason"] == "compiler-artifact"
+        for name in message["filenames"] if name.endswith(SUFFIXES)
+    }
+    for file in sorted(files):
+        shutil.copy2(file, deps / file.name)
+
+
 def build(out: Path, server: bool) -> None:
     # Resolved here: the staging and build steps run from the staged copy.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
@@ -112,18 +123,16 @@ def build(out: Path, server: bool) -> None:
         cwd=staged,
         env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
     )
+    artifacts = list(map(json.loads, messages.splitlines()))
     scripts = [
-        message for message in map(json.loads, messages.splitlines())
+        message for message in artifacts
         if message["reason"] == "build-script-executed"
     ]
     if out.exists():
         shutil.rmtree(out)
     deps = out / "deps"
     deps.mkdir(parents=True)
-    for file in sorted((target_dir / PROFILE / "deps").iterdir()):
-        # Metadata, proc macros, the game and the wasm runtime; other code lives inside the two dylibs.
-        if file.name.endswith(SUFFIXES):
-            shutil.copy2(file, deps / file.name)
+    copy_artifacts(artifacts, deps)
     native = out / NATIVE
     native.mkdir()
     # Only libraries that come with a crate (its source in Cargo's home, or its build script's output): a
