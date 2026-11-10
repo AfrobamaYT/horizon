@@ -515,6 +515,11 @@ as vanilla's; without one it draws as the missing texture). It does nothing on i
 attribute modifiers. A world opened without the mod drops the effect from its players and mobs. Clients join a server
 only with the same mods' effects, as with its blocks.
 
+Code mods read a registered type's classification with `effect_key.category(host)`,
+which returns `EffectCategory::Beneficial`, `Harmful` or `Neutral`. For an active
+instance, use `active_effect.id.category(host)`. The read works on both sides and
+returns `None` before the effect registry is complete; it never guesses a category.
+
 A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type:
 `minecraft:snowball`, a thrown item projectile, or a living mob (below). A thrown type's `item` is one of the mod's own
 items (one type per item), and `damage` (0 by default) is what a hit deals to anything it hits, as `thrown` damage from
