@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "增量",
   "installed": "已安装",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "物品",
   "its MCP settings (a stdio server)": "其 MCP 设置（一个 stdio 服务器）",
   "just now": "刚刚",
@@ -1228,7 +1227,6 @@
   "optimization": "优化",
   "played by {names}": "{names} 在使用",
   "realistic": "写实",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "退出后运行 {command}",
   "runs {command} first": "先运行 {command}",
   "simplistic": "简约",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} 未安装",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json（或项目中的 .mcp.json）",
   "← All servers": "← 所有服务器",
-  "← Newer": "← 较新"
+  "← Newer": "← 较新",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

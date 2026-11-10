@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "afikun",
   "installed": "fi sori ẹrọ",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "awọn ohun kan",
   "its MCP settings (a stdio server)": "Awọn eto MCP rẹ (olupin sitẹrio kan)",
   "just now": "ni bayi bayi",
@@ -1228,7 +1227,6 @@
   "optimization": "iṣapeye",
   "played by {names}": "ti a ṣe nipasẹ {names}",
   "realistic": "bojumu",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "nṣiṣẹ {command} lẹhin",
   "runs {command} first": "nṣiṣẹ {command} akọkọ",
   "simplistic": "rọrun",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} ko fi sori ẹrọ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (tabi .mcp.json ninu ise agbese kan)",
   "← All servers": "← Gbogbo olupin",
-  "← Newer": "← Tuntun"
+  "← Newer": "← Tuntun",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

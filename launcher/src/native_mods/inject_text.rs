@@ -52,9 +52,8 @@ fn no_slot_reason(reason: NoSlotReason) -> &'static str {
         NoSlotReason::ExtensionSlotsPending => tr("extension slots pending (I6)"),
         NoSlotReason::ApiSitesUnsupported => tr("API call-site injections require internals"),
         NoSlotReason::SourcePending => tr("source injects pending (U5)"),
-        NoSlotReason::ReplacePending => tr("internals replace listeners pending (U9)"),
         NoSlotReason::NoApiRecord => tr("no API record: a parameter has no API type yet"),
-        NoSlotReason::ReplaceWithoutValue => tr("replace needs a return the API carries"),
+        NoSlotReason::ReplaceWithoutValue => tr("replace needs a return its record carries"),
     }
 }
 
@@ -73,7 +72,6 @@ mod tests {
             NoSlotReason::ExtensionSlotsPending,
             NoSlotReason::ApiSitesUnsupported,
             NoSlotReason::SourcePending,
-            NoSlotReason::ReplacePending,
             NoSlotReason::NoApiRecord,
             NoSlotReason::ReplaceWithoutValue,
         ];

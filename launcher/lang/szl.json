@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "przirostowy",
   "installed": "zainstalowane",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "przedmioty",
   "its MCP settings (a stdio server)": "jego ustawiynia MCP (serwer stdio)",
   "just now": "teraz",
@@ -1228,7 +1227,6 @@
   "optimization": "ôptymalizacyjo",
   "played by {names}": "grany bez {names}",
   "realistic": "realistyczne",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "biygnie {command} po",
   "runs {command} first": "biygnie {command} piyrszy",
   "simplistic": "uproszczōny",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} niy ma zainstalowane",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.jsōn (abo .mcp.jsōn w projektie)",
   "← All servers": "← Wszyske serwery",
-  "← Newer": "← Nowszy"
+  "← Newer": "← Nowszy",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

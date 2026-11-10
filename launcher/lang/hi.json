@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "वृद्धिशील",
   "installed": "इंस्टॉल है",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "आइटम्स",
   "its MCP settings (a stdio server)": "इसके MCP सेटिंग्स (एक stdio सर्वर)",
   "just now": "अभी",
@@ -1228,7 +1227,6 @@
   "optimization": "अनुकूलन",
   "played by {names}": "{names} खेलते हैं",
   "realistic": "यथार्थवादी",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "बाद में {command} चलाता है",
   "runs {command} first": "पहले {command} चलाता है",
   "simplistic": "सरल",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} इंस्टॉल नहीं है",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (या किसी प्रोजेक्ट में .mcp.json)",
   "← All servers": "← सभी सर्वर",
-  "← Newer": "← नया"
+  "← Newer": "← नया",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

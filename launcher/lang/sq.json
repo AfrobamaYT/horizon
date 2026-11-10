@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "në rritje",
   "installed": "instaluar",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "artikujt",
   "its MCP settings (a stdio server)": "cilësimet e tij MCP (një server stdio)",
   "just now": "tani",
@@ -1228,7 +1227,6 @@
   "optimization": "optimizimi",
   "played by {names}": "luajtur nga {names}",
   "realistic": "realiste",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "shkon {command} pas",
   "runs {command} first": "shkon së pari {command}",
   "simplistic": "e thjeshtuar",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} nuk është i instaluar",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ose .mcp.json në një projekt)",
   "← All servers": "← Të gjithë serverët",
-  "← Newer": "← Më të reja"
+  "← Newer": "← Më të reja",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

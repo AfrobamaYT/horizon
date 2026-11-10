@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "арту",
   "installed": "урнаштырылган",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "әйберләр",
   "its MCP settings (a stdio server)": "аның MCP көйләүләре (stdio сервер)",
   "just now": "яңа гына",
@@ -1228,7 +1227,6 @@
   "optimization": "оптимизация",
   "played by {names}": "{names} уйнады",
   "realistic": "реалистик",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "{command} эшли",
   "runs {command} first": "башта {command} эшли",
   "simplistic": "гади",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} урнаштырылмаган",
   "~/.claude.json (or .mcp.json in a project)": "~ / .claude.json (яки .mcp.json проектта)",
   "← All servers": "← Барлык серверлар",
-  "← Newer": "← яңарак"
+  "← Newer": "← яңарак",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

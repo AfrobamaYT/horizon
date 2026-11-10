@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "σταδιακά",
   "installed": "εγκατασταθεί",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "είδη",
   "its MCP settings (a stdio server)": "τις ρυθμίσεις του MCP (διακομιστής stdio)",
   "just now": "μόλις τώρα",
@@ -1228,7 +1227,6 @@
   "optimization": "βελτιστοποίηση",
   "played by {names}": "παίζεται από {names}",
   "realistic": "ρεαλιστικό",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "τρέχει {command} μετά",
   "runs {command} first": "τρέχει {command} πρώτα",
   "simplistic": "απλοϊκή",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "Το {version} δεν έχει εγκατασταθεί",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ή .mcp.json σε ένα έργο)",
   "← All servers": "← Όλοι οι διακομιστές",
-  "← Newer": "← Νεότερο"
+  "← Newer": "← Νεότερο",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

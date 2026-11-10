@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "அதிகரிக்கும்",
   "installed": "நிறுவப்பட்டது",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "பொருட்கள்",
   "its MCP settings (a stdio server)": "அதன் MCP அமைப்புகள் (ஒரு stdio சர்வர்)",
   "just now": "இப்போதுதான்",
@@ -1228,7 +1227,6 @@
   "optimization": "உகப்பாக்கம்",
   "played by {names}": "விளையாடியது {names}",
   "realistic": "யதார்த்தமான",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "{command} பிறகு ஓடுகிறது",
   "runs {command} first": "முதலில் {command} ஓடுகிறது",
   "simplistic": "எளிமையான",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} நிறுவப்படவில்லை",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (அல்லது திட்டத்தில் .mcp.json)",
   "← All servers": "← அனைத்து சர்வர்கள்",
-  "← Newer": "← புதியது"
+  "← Newer": "← புதியது",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

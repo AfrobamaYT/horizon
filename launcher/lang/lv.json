@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "pakāpeniski",
   "installed": "uzstādīta",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "preces",
   "its MCP settings (a stdio server)": "tā MCP iestatījumi (stdio serveris)",
   "just now": "tikko",
@@ -1228,7 +1227,6 @@
   "optimization": "optimizācija",
   "played by {names}": "spēlēja {names}",
   "realistic": "reālistisks",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "darbojas {command} pēc",
   "runs {command} first": "vispirms darbojas {command}",
   "simplistic": "vienkāršots",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} nav instalēts",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vai .mcp.json projektā)",
   "← All servers": "← Visi serveri",
-  "← Newer": "← Jaunāks"
+  "← Newer": "← Jaunāks",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

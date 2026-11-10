@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "inkremental",
   "installed": "terpasang",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "item",
   "its MCP settings (a stdio server)": "pengaturan MCP-nya (server stdio)",
   "just now": "baru saja",
@@ -1228,7 +1227,6 @@
   "optimization": "optimalisasi",
   "played by {names}": "dimainkan oleh {names}",
   "realistic": "realistis",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "menjalankan {command} setelahnya",
   "runs {command} first": "menjalankan {command} terlebih dahulu",
   "simplistic": "sederhana",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} tidak diinstal",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (atau .mcp.json di dalam proyek)",
   "← All servers": "← Semua server",
-  "← Newer": "← Lebih baru"
+  "← Newer": "← Lebih baru",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

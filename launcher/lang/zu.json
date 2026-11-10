@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "ngokwandayo",
   "installed": "efakiwe",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "izinto",
   "its MCP settings (a stdio server)": "izilungiselelo zayo ze-MCP (iseva ye-stdio)",
   "just now": "manje nje",
@@ -1228,7 +1227,6 @@
   "optimization": "ukwenza kahle",
   "played by {names}": "idlalwe ngu-{names}",
   "realistic": "namaqiniso",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "igijima {command} ngemva",
   "runs {command} first": "isebenzisa {command} kuqala",
   "simplistic": "elula",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} ayifakiwe",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (noma .mcp.json kuphrojekthi)",
   "← All servers": "← Wonke amaseva",
-  "← Newer": "← Okusha"
+  "← Newer": "← Okusha",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

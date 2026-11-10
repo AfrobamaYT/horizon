@@ -127,7 +127,28 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites are refused; internals `replace` and extension fields are also refused. Locals use the native source route described below.
+
+An internals `replace` (native only; wasm refuses it at load with the internals refusal) has the same
+contract through the point's raw form. Its function takes the real receiver and the raw record,
+`&mut` to every argument in its engine type, and returns the function's own return type, `()` at a
+unit point, where the cancel is forced:
+
+```rust,ignore
+pub fn own_tick(game: &mut internals::game::Game<'_>, raw: &mut internals::raw::__TickRaw<'_>) {
+    // the body of `Game::tick` never runs; this does instead
+}
+```
+
+A free or associated function has no receiver: the function takes the raw record alone. It runs after
+every API and internals head listener at the point, whatever its priority: they may change its
+arguments, and an internals head that sets `result` or `cancel` before it is overruled by it. One
+replace owns a point whatever the tier: an API and an internals replace, or two internals ones, at the
+same point refuse the second at registration, naming both mods. A replacing mod that stops or is
+disabled hands the function back. The point must be listed with a raw form whose record carries the
+outcome: a borrowed return (no raw `result`) and a `Result<(), E>` (whose cancel answers `Ok(())`)
+refuse it at load, naming the point and type, and an unlisted function refuses it naming the slot row
+to add. The launcher emits it as `mod_points::replace!(internals …)`.
+API call sites and extension fields are refused. Locals use the native source route described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 

@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "incrementeel",
   "installed": "geïnstalleerd",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "artikelen",
   "its MCP settings (a stdio server)": "de MCP-instellingen (een stdio-server)",
   "just now": "zojuist",
@@ -1228,7 +1227,6 @@
   "optimization": "optimalisatie",
   "played by {names}": "gespeeld door {names}",
   "realistic": "realistisch",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "loopt {command} na",
   "runs {command} first": "loopt eerst {command}",
   "simplistic": "simplistisch",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} is niet geïnstalleerd",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (of .mcp.json in een project)",
   "← All servers": "← Alle servers",
-  "← Newer": "← Nieuwer"
+  "← Newer": "← Nieuwer",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

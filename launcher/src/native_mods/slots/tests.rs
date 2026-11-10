@@ -13,6 +13,7 @@ fn fixture() -> (Manifest, Catalog) {
         points: serde_json::from_value(serde_json::json!([{
             "name":"run", "target":"game::run", "raw":true, "at_return":true,
             "returns":"cancel", "host":"none", "return_ty":"()",
+            "raw_shape":{"return_ty":"()", "outcome":"cancel", "receiver":{"kind":"none"}},
             "listener":"game::__RunListener", "return_listener":"game::__RunReturnListener"
         }])).unwrap(),
         sites: serde_json::from_value(serde_json::json!([{
@@ -108,7 +109,6 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
                 (Kind::Expression, Access::Api) => Some(NoSlotReason::KindHasNoSlot),
                 (Kind::Expression, _) => Some(NoSlotReason::SourcePending),
-                (Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
                 (_, Access::Api) if call => Some(NoSlotReason::ApiSitesUnsupported),
                 _ => None,
             };
@@ -139,7 +139,9 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             assert_eq!(main.matches("mod_0_internals::raw::").count(), 1, "{main}");
             assert!(main.contains("mod_0::listen"), "{main}");
             assert!(
-                main.contains(if call {
+                main.contains(if kind == Kind::Replace {
+                    "mod_points::replace!(internals mod_0_internals::raw::run, cancel, none, \"example\", 7, \"test\", mod_0::listen)"
+                } else if call {
                     "(\"example\", 7, \"test\","
                 } else {
                     ".ordered(7, \"test\")"
@@ -204,6 +206,7 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
     catalog.points[0].returns = "none".into();
     catalog.points[0].raw_shape = Some(horizon_mod_point_emit::RawReturn {
         return_ty: "Frame<'_>".into(),
+        ..Default::default()
     });
     manifest.inject.push(Inject {
         local: None,
@@ -253,6 +256,55 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
     // A head listener at the same point is unaffected: it need not produce the value.
     manifest.inject[0].kind = Kind::Head;
     check(&catalog, &manifest).unwrap();
+}
+
+#[test]
+fn an_internals_replace_needs_a_listed_point_whose_raw_record_carries_the_outcome() {
+    let (mut manifest, mut catalog) = fixture();
+    manifest.inject.push(Inject {
+        local: None,
+        local_type: None,
+        position: None,
+        expr: None,
+        id: "own".into(),
+        at: "game::run".into(),
+        kind: Kind::Replace,
+        with: "listen".into(),
+        access: Access::Internals,
+        priority: 0,
+        hash: "signature".into(),
+        call: None,
+        nth: None,
+        ctx: None,
+    });
+    check(&catalog, &manifest).unwrap();
+    let refused = |catalog: &Catalog, manifest: &Manifest, reason: NoSlotReason| match check(
+        catalog, manifest,
+    ) {
+        Err(error @ InjectError::NoSlot { reason: actual, .. }) if actual == reason => {
+            error.to_string()
+        }
+        other => panic!("{other:?}"),
+    };
+    // A `Result<(), E>` raw cancel answers `Ok(())`; a borrowed return has no raw `result`.
+    for (outcome, ty) in [
+        ("cancel", "Result < (), StoreError >"),
+        ("none", "&mut usize"),
+    ] {
+        let raw = catalog.points[0].raw_shape.as_mut().unwrap();
+        raw.outcome = outcome.into();
+        raw.return_ty = ty.into();
+        let text = refused(&catalog, &manifest, NoSlotReason::ReplaceWithoutValue);
+        assert!(
+            text.contains("example:own") && text.contains(&format!("`{ty}`")),
+            "{text}"
+        );
+    }
+    // An unlisted function takes no internals replace on the source route: the refusal names the
+    // slot row that lists it.
+    catalog.points.clear();
+    let text = refused(&catalog, &manifest, NoSlotReason::NotListed);
+    assert!(text.contains("slots/example.txt: game::run"), "{text}");
 }
 
 #[test]

@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "inkrementala",
   "installed": "instalatuta",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "elementuak",
   "its MCP settings (a stdio server)": "bere MCP ezarpenak (stdio zerbitzaria)",
   "just now": "oraintxe",
@@ -1228,7 +1227,6 @@
   "optimization": "optimizazioa",
   "played by {names}": "{names}k jokatuta",
   "realistic": "errealista",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "korrika {command} ondoren",
   "runs {command} first": "{command} doa lehenengo",
   "simplistic": "sinplista",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} ez dago instalatuta",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (edo .mcp.json proiektu batean)",
   "← All servers": "← Zerbitzari guztiak",
-  "← Newer": "← Berriagoa"
+  "← Newer": "← Berriagoa",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

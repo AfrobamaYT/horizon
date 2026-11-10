@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "تدريجي",
   "installed": "مثبّت",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "عناصر",
   "its MCP settings (a stdio server)": "إعدادات MCP الخاصة به (خادم stdio)",
   "just now": "الآن",
@@ -1228,7 +1227,6 @@
   "optimization": "تحسين الأداء",
   "played by {names}": "يلعبه {names}",
   "realistic": "واقعي",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "يشغل {command} بعد ذلك",
   "runs {command} first": "يشغل {command} أولاً",
   "simplistic": "بسيط",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "الإصدار {version} غير مثبت",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (أو .mcp.json في المشروع)",
   "← All servers": "← جميع الخوادم",
-  "← Newer": "← الأحدث"
+  "← Newer": "← الأحدث",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

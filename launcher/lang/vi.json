@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "tăng dần",
   "installed": "đã cài đặt",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "đồ vật",
   "its MCP settings (a stdio server)": "cài đặt MCP của nó (máy chủ stdio)",
   "just now": "vừa xong",
@@ -1228,7 +1227,6 @@
   "optimization": "tối ưu hóa",
   "played by {names}": "do {names} chơi",
   "realistic": "thực tế",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "chạy {command} sau",
   "runs {command} first": "chạy {command} trước",
   "simplistic": "đơn giản",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} chưa được cài đặt",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (hoặc .mcp.json trong một dự án)",
   "← All servers": "← Tất cả máy chủ",
-  "← Newer": "← Mới hơn"
+  "← Newer": "← Mới hơn",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

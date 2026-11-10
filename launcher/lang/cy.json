@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "cynyddrannol",
   "installed": "gosod",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "eitemau",
   "its MCP settings (a stdio server)": "ei osodiadau MCP (gweinydd stdio)",
   "just now": "nawr",
@@ -1228,7 +1227,6 @@
   "optimization": "optimeiddio",
   "played by {names}": "chwarae gan {names}",
   "realistic": "realistig",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "yn rhedeg {command} ar ôl",
   "runs {command} first": "yn rhedeg {command} gyntaf",
   "simplistic": "gor-syml",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "Nid yw {version} wedi'i osod",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (neu .mcp.json mewn prosiect)",
   "← All servers": "← Pob gweinydd",
-  "← Newer": "← Newyddach"
+  "← Newer": "← Newyddach",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

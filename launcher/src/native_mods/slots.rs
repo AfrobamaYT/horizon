@@ -154,6 +154,9 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 Some(NoSlotReason::ApiSitesUnsupported)
             }
             (_, Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
+            // An internals replace is built from the listed point's raw shape: an unlisted
+            // function needs its slot row first, which the declaration names.
+            (Route::Source(reason), Kind::Replace, Access::Internals) => Some(reason),
             (
                 Route::Source(_),
                 Kind::Head
@@ -167,7 +170,6 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 Access::Internals,
             ) => None,
             (Route::Source(_), _, _) => Some(NoSlotReason::SourcePending),
-            (_, Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
             _ => None,
         };
         if let Some(reason) = pending {
@@ -183,8 +185,19 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             .iter()
             .find(|point| plain(&point.target) == plain(&inject.at))
             .filter(|_| inject.kind == Kind::Replace)
-            .and_then(|point| {
-                horizon_mod_point_emit::replaceable(&inject.id, &inject.at, &point.emitted()).err()
+            .and_then(|point| match inject.access {
+                Access::Api => {
+                    horizon_mod_point_emit::replaceable(&inject.id, &inject.at, &point.emitted())
+                        .err()
+                }
+                Access::Internals => horizon_mod_point_emit::internals_replace(
+                    inject,
+                    &manifest.id,
+                    &point.emitted(),
+                    "raw",
+                    &inject.with,
+                )
+                .err(),
             });
         if let Some(why) = replace_refusal {
             return Err(InjectError::NoSlot {

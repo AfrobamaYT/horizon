@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "mean air mhean",
   "installed": "air a stàladh",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "nithean",
   "its MCP settings (a stdio server)": "na roghainnean MCP aige (frithealaiche stdio)",
   "just now": "an-dràsta fhèin",
@@ -1228,7 +1227,6 @@
   "optimization": "oirbheachadh",
   "played by {names}": "air a chluich le {names}",
   "realistic": "fìrinneach",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "ruith {command} às deidh",
   "runs {command} first": "a’ ruith {command} an toiseach",
   "simplistic": "simplidh",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "Chan eil {version} air a stàladh",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (no .mcp.json ann am pròiseact)",
   "← All servers": "← A h-uile frithealaiche",
-  "← Newer": "← Nas ùire"
+  "← Newer": "← Nas ùire",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

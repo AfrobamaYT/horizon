@@ -1200,7 +1200,6 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "incremental": "astmeline",
   "installed": "paigaldatud",
-  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "items": "esemed",
   "its MCP settings (a stdio server)": "selle MCP seaded (stdio server)",
   "just now": "just praegu",
@@ -1228,7 +1227,6 @@
   "optimization": "optimeerimine",
   "played by {names}": "mängis {names}",
   "realistic": "realistlik",
-  "replace needs a return the API carries": "replace needs a return the API carries",
   "runs {command} after": "jookseb {command} pärast",
   "runs {command} first": "jookseb {command} esimesena",
   "simplistic": "lihtsustatud",
@@ -1359,5 +1357,6 @@
   "{version} is not installed": "{version} pole installitud",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (või projektis .mcp.json)",
   "← All servers": "← Kõik serverid",
-  "← Newer": "← Uuem"
+  "← Newer": "← Uuem",
+  "replace needs a return its record carries": "replace needs a return its record carries"
 }

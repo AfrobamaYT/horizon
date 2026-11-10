@@ -155,7 +155,7 @@ impl Inject {
     }
 }
 
-/// Compiled listener forms; replace uses Head with forced cancellation and a result.
+/// Compiled listener forms; replace uses Head with forced cancellation or a result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotKind {
     Head,
@@ -207,7 +207,6 @@ pub enum NoSlotReason {
     ExtensionSlotsPending,
     ApiSitesUnsupported,
     SourcePending,
-    ReplacePending,
     NoApiRecord,
     ReplaceWithoutValue,
 }
@@ -225,9 +224,8 @@ impl fmt::Display for NoSlotReason {
             Self::ExtensionSlotsPending => "extension slots pending (I6)",
             Self::ApiSitesUnsupported => "API call-site injections require internals",
             Self::SourcePending => "source injects pending (U5)",
-            Self::ReplacePending => "internals replace listeners pending (U9)",
             Self::NoApiRecord => "no API record: a parameter has no API type yet",
-            Self::ReplaceWithoutValue => "replace needs a return the API carries",
+            Self::ReplaceWithoutValue => "replace needs a return its record carries",
         })
     }
 }

@@ -139,6 +139,17 @@ fn each_refusal_names_what_changed_or_why() {
     let mut call = inject("chemlib::transfer", Kind::BeforeCall, Access::Api, &hash);
     call.call = Some("chemlib::helper".into());
     assert!(refused(call, &same).starts_with("E_INJECT_NO_SLOT"));
+    // Routed as a head, an internals replace would run beside the body instead of replacing it.
+    let replace = refused(
+        inject("chemlib::transfer", Kind::Replace, Access::Internals, &hash),
+        &same,
+    );
+    assert!(
+        replace.starts_with("E_INJECT_NO_SLOT")
+            && replace.contains("addon:listen")
+            && replace.contains("api replace only"),
+        "{replace}"
+    );
 }
 
 #[test]
