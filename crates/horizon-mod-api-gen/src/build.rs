@@ -3,6 +3,19 @@ use super::{Catalog, Target, free_function_source, host, native_hook_files, sour
 use quote::ToTokens;
 use std::{fs, path::Path};
 
+/// Preserve output timestamps when generation produces identical bytes.
+pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let bytes = bytes.as_ref();
+    match fs::read(path) {
+        Ok(previous) if previous == bytes => return Ok(()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::write(path, bytes)
+}
+
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
@@ -72,7 +85,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         }
     };
     for (name, code) in outputs {
-        fs::write(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
@@ -143,7 +156,7 @@ pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
         records.push('\n');
     }
     syn::parse_file(&records).map_err(|error| error.to_string())?;
-    fs::write(out_dir.join("native_render_generated.rs"), records)
+    write_if_changed(out_dir.join("native_render_generated.rs"), records)
         .map_err(|error| error.to_string())
 }
 
@@ -208,6 +221,10 @@ pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<Strin
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
+    crate::interface_cache::with_cache(out_dir, || generate_points_inner(root, out_dir))
+}
+
+pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
     crate::rerun_if_changed(&src.join("game.rs").display());
     crate::rerun_if_changed(&src.join("game").display());
@@ -238,7 +255,7 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
         code.push_str(&item.to_token_stream().to_string());
         code.push('\n');
     }
-    fs::write(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
+    write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
 }
 
 pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
