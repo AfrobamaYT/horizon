@@ -823,12 +823,15 @@ mod biome_source_tests {
             offset: 1.0,
         };
         let points = |edit: fn(&mut BiomePoint)| {
-            let mut settings = DimensionSettings::default();
-            settings.biome_source = BiomeSourceKind::Points;
             let mut p = point();
             edit(&mut p);
-            settings.biome_points = vec![p];
-            settings.invalid_biome_source().unwrap_or_default()
+            DimensionSettings {
+                biome_source: BiomeSourceKind::Points,
+                biome_points: vec![p],
+                ..Default::default()
+            }
+            .invalid_biome_source()
+            .unwrap_or_default()
         };
         assert_eq!(points(|_| {}), "");
         assert!(refused(|s| s.biome_source = BiomeSourceKind::Points).contains("at least one"));
@@ -839,12 +842,17 @@ mod biome_source_tests {
         assert!(points(|p| p.offset = 1.5).contains("biome point"));
         assert!(points(|p| p.offset = -0.1).contains("biome point"));
         assert!(points(|p| p.biome.clear()).contains("biome point"));
+        // A valid points source still refuses a chunk generator of the mod's own.
         assert!(
-            refused(|s| {
-                s.biome_source = BiomeSourceKind::Points;
-                s.generator = "mymod:void".into();
-            })
-            .contains("at least one")
+            DimensionSettings {
+                biome_source: BiomeSourceKind::Points,
+                biome_points: vec![point()],
+                generator: "mymod:void".into(),
+                ..Default::default()
+            }
+            .invalid_biome_source()
+            .unwrap_or_default()
+            .contains("fixed biome source")
         );
     }
 }
