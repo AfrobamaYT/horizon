@@ -473,6 +473,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Record data-leg start and compiler cache
+        run: |
+          date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -497,9 +501,15 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: stable
           SHARD: ${{ matrix.shard }}
+          HORIZON_DATA_LEG_TIMING: '1'
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
+      - name: Record data-leg end and compiler cache
+        if: always()
+        run: |
+          date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
