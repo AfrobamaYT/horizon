@@ -6,6 +6,10 @@ mod display;
 #[path = "persist/loaded_pass.rs"]
 mod loaded_pass;
 
+#[cfg(test)]
+#[path = "persist/anger_tests.rs"]
+mod anger_tests;
+
 use super::{FallingBlock, Game};
 use horizon_client::{
     Result,
