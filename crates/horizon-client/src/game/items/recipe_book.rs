@@ -1304,9 +1304,8 @@ impl Game<'_> {
             }
             return;
         }
-        let mut reader = horizon_protocol::buf::Reader::new(data);
-        if let (Ok(container), Ok(result)) = (reader.varint(), reader.u8())
-            && reader.remaining() == 0
+        if let Ok(Some((container, result))) =
+            horizon_client::lan::recipes::decode_transfer_reply(data)
             && container == self.remote_menu_id()
             && self.mod_recipe_screen()
             && self.panel.recipes.is_some()
