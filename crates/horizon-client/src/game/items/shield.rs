@@ -181,7 +181,15 @@ impl Game<'_> {
             if let Some((from, disable)) = self.combat.player_attacker {
                 let fully = outcome.fully_blocked;
                 let attacker = ([from[0], from[2]], disable);
-                self.blocked_by_attacker(&component, attacker, fully, at, source, attack);
+                self.blocked_by_attacker(
+                    &component,
+                    attacker,
+                    fully,
+                    at,
+                    source,
+                    attack,
+                    outcome.blocked,
+                );
             }
             return;
         };
@@ -226,7 +234,15 @@ impl Game<'_> {
             let _ = self.handle_mob_events(events);
             return;
         }
-        self.blocked_by_attacker(&component, ([mx, mz], disable), fully, at, source, attack);
+        self.blocked_by_attacker(
+            &component,
+            ([mx, mz], disable),
+            fully,
+            at,
+            source,
+            attack,
+            outcome.blocked,
+        );
     }
 
     /// What a blocked melee hit does to the defender once the shield took
@@ -241,12 +257,13 @@ impl Game<'_> {
         at: Option<[f64; 3]>,
         source: HurtSource<'_>,
         attack: &Attack,
+        damage: f32,
     ) {
         // LivingEntity.blockedByItem: defender.knockback(0.5, defender - attacker,
         // source), which moves the defender along -(xd, zd).
         if !fully && let Some(p) = self.player.as_ref() {
             let (xd, zd) = (p.position.x - mx, p.position.z - mz);
-            self.knock_back_player(0.5, xd, zd, source, attack);
+            self.knock_back_player(0.5, xd, zd, source, attack, damage);
         }
         // BlocksAttacks.disable: item cooldown and stopUsingItem.
         let ticks = disable * component.disable_scale;

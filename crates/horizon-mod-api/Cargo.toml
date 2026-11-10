@@ -10,6 +10,7 @@ description = "The mod API: hooks, hosts, handles and parts, for native and WebA
 name = "mod_api"
 
 [dependencies]
+horizon-mod-vocab = { path = "../horizon-mod-vocab" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 horizon-core = { path = "../horizon-core" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
@@ -28,7 +29,7 @@ horizon-items = { path = "../horizon-items", features = ["test-support"] }
 
 [features]
 # Scoped mod installation for other crates' tests (`mod_api::testing`).
-testing = []
+testing = ["horizon-mod-vocab/testing"]
 # The mod side of the wasm boundary on a native build, for the boundary's tests.
 wasm-guest = []
 
