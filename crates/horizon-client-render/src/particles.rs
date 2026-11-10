@@ -34,6 +34,8 @@ mod groups;
 mod mod_behaviour;
 mod native;
 mod spawn;
+pub use groups::register_particle_groups;
+use mod_behaviour::{ModBehaviour, mod_curve};
 pub use native::{ParticleController, ParticleUpdate, register_particle_providers};
 pub mod polytone;
 mod polytone_gpu;
