@@ -709,3 +709,5 @@ A list of exactly three plain numbers is **one** `[x, y, z]` point, not three he
 For multiple seats use nested points, for example `[[1, 2, 3], [-1, 4, 5]]`.
 Seats follow passenger order; extra passengers use the last point. Offsets scale with
 the entity and rotate with its yaw.
+
+Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.

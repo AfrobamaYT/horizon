@@ -1161,11 +1161,19 @@ pub(super) mod interact_vibration_tests {
             let mut info = items["minecraft:fishing_rod"].clone();
             info.id = std::sync::Arc::from("ruby:rod");
             info.template = Some(std::sync::Arc::from("minecraft:fishing_rod"));
-            assert!(super::super::remote::item_has_use(&info), "remote use accepts content rods");
+            assert!(
+                super::super::remote::item_has_use(&info),
+                "remote use accepts content rods"
+            );
             items.insert(info.id.clone(), info);
 
-            let stick = ItemStack::new("minecraft:stick", 1);
-            assert!(!game.use_fishing_rod(&stick), "a stick is no rod");
+            let items = &mut game.world_tables.as_mut().unwrap().items.items;
+            let mut stick_info = items["minecraft:stick"].clone();
+            stick_info.id = std::sync::Arc::from("ruby:stick");
+            stick_info.template = Some(std::sync::Arc::from("minecraft:stick"));
+            items.insert(stick_info.id.clone(), stick_info);
+            let stick = ItemStack::new("ruby:stick", 1);
+            assert!(!game.use_fishing_rod(&stick), "a content stick is no rod");
             assert!(game.hook.is_none());
             let rod = ItemStack::new("ruby:rod", 1);
             *game.held_mut() = Some(rod.clone());
@@ -1174,14 +1182,23 @@ pub(super) mod interact_vibration_tests {
             let vanilla_before = game.stats.get("used", "minecraft:fishing_rod");
             assert!(game.use_fishing_rod(&rod), "the mod's rod casts");
             assert_eq!(game.stats.get("used", "ruby:rod"), used_before + 1);
-            assert_eq!(game.stats.get("used", "minecraft:fishing_rod"), vanilla_before);
+            assert_eq!(
+                game.stats.get("used", "minecraft:fishing_rod"),
+                vanilla_before
+            );
             assert!(game.hook.is_some());
             assert_eq!(game.cast_rod(), Some(&rod), "drawn cast");
             game.tick_fishing();
-            assert!(game.hook.is_some(), "the content rod keeps its hook when ticked");
+            assert!(
+                game.hook.is_some(),
+                "the content rod keeps its hook when ticked"
+            );
             assert!(game.use_fishing_rod(&rod), "and reels in");
             assert_eq!(game.stats.get("used", "ruby:rod"), used_before + 1);
-            assert_eq!(game.stats.get("used", "minecraft:fishing_rod"), vanilla_before);
+            assert_eq!(
+                game.stats.get("used", "minecraft:fishing_rod"),
+                vanilla_before
+            );
             assert!(game.hook.is_none());
             assert_eq!(game.cast_rod(), None);
             std::fs::remove_dir_all(&dir).unwrap();
