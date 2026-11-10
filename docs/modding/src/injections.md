@@ -8,7 +8,7 @@ Choose `access = "api"` for API-owned records, or `access = "internals"` for a d
 internals facade. API injections never rebuild the game: a missing prebuilt slot is refused, and source rebuilds and call-site injections require internals access or a hook request. Both use the same `[[inject]]` fields. Native internals listeners use a
 compiled slot when available; an unlisted function or supported call requires a source rebuild.
 The launcher generates the private horizon-mixins input; mods name a Rust `with` function,
-not a source payload file or expression selector.
+not a source payload file.
 
 An API point injection names a crate-root `with` function and listens at an admitted head or return
 slot ([shape rules](#which-functions-are-points)). The prebuilt game fills those slots at load with the
@@ -602,10 +602,10 @@ Each callback's types come from the mod's facade (`internals::raw`).
 | `@ModifyArg` | `MODIFY_ARG` | `kind = "before_call"` | [one call argument](#one-call-argument) |
 | `@ModifyArgs` | `MODIFY_ARGS` | `kind = "before_call"` | [all call arguments](#all-call-arguments) |
 | `@ModifyVariable` on a parameter | `MODIFY_VARIABLE` | `kind = "head"` | [a parameter](#a-parameter) |
-| `@ModifyVariable` on a local | `MODIFY_VARIABLE` | `kind = "modify_local"` (pending: #2577) | [a local](#a-local) |
-| `@ModifyConstant` | `MODIFY_CONSTANT` | `kind = "expression"` (pending) | [constants and field reads](#constants-and-field-reads) |
+| `@ModifyVariable` on a local | `MODIFY_VARIABLE` | `kind = "modify_local"` | [a local](#a-local) |
+| `@ModifyConstant` | `MODIFY_CONSTANT` | `kind = "expression"` | [constants and field reads](#constants-and-field-reads) |
 | `@ModifyExpressionValue` on a call | `MODIFY_EXPRESSION_VALUE` | `kind = "modify_value"` | [modify_value](#modify_value) |
-| `@ModifyExpressionValue` on a field read | `MODIFY_EXPRESSION_VALUE` | `kind = "expression"` (pending) | [constants and field reads](#constants-and-field-reads) |
+| `@ModifyExpressionValue` on a field read | `MODIFY_EXPRESSION_VALUE` | `kind = "expression"` | [constants and field reads](#constants-and-field-reads) |
 | `@WrapOperation`, `@Redirect` | `WRAP_OPERATION` | `kind = "wrap_call"` | [wrap_call](#wrap_call) |
 | `@WrapWithCondition` | `WrapWithCondition` | `kind = "wrap_if"` | [wrap_if](#wrap_if) |
 | `@Unique` fields | state fields | `kind = "field"` (pending: #2582) | [state](#state) |
@@ -761,13 +761,13 @@ pub fn turn_angle(args: &mut mod_points::GameCommandsWrapDegreesArgs) {
 ### a local
 
 `@ModifyVariable` on a local is `kind = "modify_local"`: the listener gets the binding itself, before
-or after a selected call. It lands with #2577; until then it is refused with a typed reason.
+or after a selected call ([mutable locals](#mutable-locals-native-source-rebuild-only)).
 
 ### constants and field reads
 
 `@ModifyConstant`, and `@ModifyExpressionValue` on a field read, are `kind = "expression"`: the
-listener takes the selected value and returns the one used. Its selector and value type are being
-specified; until it lands it is refused with a typed reason.
+listener takes the selected value and returns the one used
+([expressions](#expressions-native-source-rebuild-only)).
 
 ### wrap_call
 
@@ -881,3 +881,42 @@ This may refuse bindings that Rust's borrow checker could otherwise accept.
 API access and wasm permanently refuse mutable locals; use native internals or request
 a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when
 no mod declares a local injection, so an unused local injection has zero runtime cost.
+
+### Expressions (native source rebuild only)
+
+`expression` replaces one value the function reads: a literal (`64.0`, `-1`, `"name"`), a
+constant's path (`MAX_REACH`) or a field read (`self.speed`). It requires
+`access = "internals"` and a rebuild from source, and takes `expr`, `type`, `nth` and `ctx`;
+`call`, `local` and `position` are refused:
+
+```toml
+[[inject]]
+id = "farther"
+at = "horizon_client::game::Game<'_>::reach"
+kind = "expression"
+access = "internals"
+with = "farther"
+hash = "<function hash>"
+expr = "64.0"
+type = "f64"
+nth = 0
+ctx = "<statement context>"
+```
+
+The callback `fn farther(value: f64) -> f64` gets the value the game would use and returns the
+one it uses instead; listeners chain in the usual priority order, and no Host is passed. `expr`
+is matched as Rust tokens, so spacing doesn't matter. `nth` counts the matching reads in the
+function from 0, in source order, and `ctx` pins the statement it sits in, as for call sites.
+Reads a value can't stand in for are not counted: an assignment's place, a borrow's operand
+(`&LIMIT`) and a method's receiver (`4u32.max(1)`), along with constant contexts and nested items.
+
+`type` is the value's Rust type: a copied scalar (`i8` … `u128`, `isize`, `usize`, `f32`, `f64`,
+`bool`, `char`) or `&'static str`. A suffixed literal whose suffix differs is refused before the
+build. An unsuffixed literal, a constant or a field takes the declared type as written; when the
+game uses another type there, the build fails with `E_INJECT_EXPRESSION_TYPE`, naming each mod
+and inject id that declared the site, the type, the expression and the function.
+
+When the function changes and `ctx` no longer matches, the refusal (`E_INJECT_LOST`) lists every
+matching read now in the function as `nth = …, ctx = "…"`, so the declaration can be fixed without
+staging the game. Mods declaring the same read with the same type share one site. API access and
+wasm permanently refuse it; use native internals or request a hook.
