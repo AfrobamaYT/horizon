@@ -1,47 +1,6 @@
 --- baseline
-
 +++ unscoped_item_entity_stack
-
-@@ -6,18 +6,18 @@
-
- sub    $0x20,%rsp
- mov    %rsi,%r14
- mov    %rdi,%rbx
--mov    0x191e8(%rsi),%r15
--mov    0x191f0(%rsi),%r12
-+mov    0x19218(%rsi),%r15
-+mov    0x19220(%rsi),%r12
- mov    %rsi,%rdi
- mov    %rdx,%rsi
- mov    %ecx,%edx
- call   TARGET
- cmp    $0x3,%eax
- jne    TARGET
--mov    0x191f0(%r14),%rax
-+mov    0x19220(%r14),%rax
- test   %rax,%rax
- je     TARGET
--mov    0x191e8(%r14),%rcx
-+mov    0x19218(%r14),%rcx
- mov    %rax,%rsi
- shl    $0x8,%rsi
- lea    (%rsi,%rax,8),%rsi
-@@ -44,10 +44,10 @@
-
- mov    0x28(%r15,%rax,1),%r15
- test   %r15,%r15
- je     TARGET
--call   *0x6246468(%rip)        # TARGET
-+call   *0x5b9eff8(%rip)        # TARGET
- mov    $0x2d8,%edi
- mov    $0x8,%esi
--call   *0x6246460(%rip)        # TARGET
-+call   *0x5b9eff0(%rip)        # TARGET
- test   %rax,%rax
- je     TARGET
- mov    %rax,%r14
 @@ -56,7 +56,6 @@
-
  call   TARGET
  jmp    TARGET
  movq   $0x0,(%rbx)
@@ -49,26 +8,3 @@
  add    $0x20,%rsp
  pop    %rbx
  pop    %r12
-@@ -73,17 +72,17 @@
-
- jmp    TARGET
- mov    $0x8,%edi
- mov    $0x2d8,%esi
--call   *0x6246412(%rip)        # TARGET
-+call   *0x5b9efa5(%rip)        # TARGET
- ud2
- mov    %rax,%rbx
- mov    %r14,%rdi
--call   *0x62463ec(%rip)        # TARGET
-+call   *0x5b9ef7f(%rip)        # TARGET
- jmp    TARGET
- mov    %rax,%rbx
- lock decq (%r12)
- jne    TARGET
- mov    %rsp,%rdi
--call   *0x624646f(%rip)        # TARGET
-+call   *0x5b9f002(%rip)        # TARGET
- mov    %rbx,%rdi
- call   TARGET
--call   *0x62463e9(%rip)        # TARGET
-+call   *0x5b9ef7c(%rip)        # TARGET
