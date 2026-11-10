@@ -85,6 +85,8 @@ impl KnownRecipes for &[&str] {
 /// What a menu needs to know about items and recipes.
 #[derive(Clone, Copy)]
 pub struct Env<'a> {
+    /// Authoritative stack query; absent for data-only consumers.
+    pub crafting_remainder: Option<&'a dyn crate::crafting::CraftingRemainder>,
     /// UUID of the player operating this menu, when a player is available.
     pub player: Option<u128>,
     pub player_entity_id: Option<i32>,
@@ -2318,18 +2320,11 @@ impl Menu {
         let remaining = env
             .recipes
             .find_with(env.loop_context, &grid, n, &map_scale)
-            .map(|(id, _)| env.recipes.remainders(id, &grid, n))
+            .map(|(id, _)| env.recipes.remainders(id, &grid, n, &|s| env.remainder(s)))
             .unwrap_or_else(|| {
                 // CraftingRecipe.defaultCraftingReminder
                 grid.iter()
-                    .map(|cell| {
-                        cell.as_ref().and_then(|stack| {
-                            env.items
-                                .get(&stack.item)
-                                .and_then(|i| i.crafting_remainder.as_deref())
-                                .map(|r| ItemStack::new(r, 1))
-                        })
-                    })
+                    .map(|cell| cell.as_ref().and_then(|stack| env.remainder(stack)))
                     .collect()
             });
         for cell in 0..n * n {
@@ -3879,6 +3874,14 @@ impl Menu {
     }
 }
 
+impl Env<'_> {
+    fn remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
+        self.crafting_remainder
+            .unwrap_or(self.items)
+            .crafting_remainder(stack)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -3958,6 +3961,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -4089,6 +4093,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -4135,6 +4140,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -4329,6 +4335,87 @@ pub(crate) mod tests {
 
     /// A test `Env` with no vanilla data: the anvil's and grindstone's own
     /// results don't matter where the mods answer.
+    #[test]
+    fn crafting_remainder_consumption_and_quick_move() {
+        use crate::crafting::{CraftingRemainder, Ingredient, Recipe, Template};
+        struct Tool;
+        impl CraftingRemainder for Tool {
+            fn crafting_remainder(&self, s: &ItemStack) -> Option<ItemStack> {
+                (s.damage < 4).then(|| ItemStack {
+                    count: 1,
+                    damage: s.damage + 1,
+                    ..s.clone()
+                })
+            }
+        }
+        bare_env(|base| {
+            let mut recipes = Recipes::empty();
+            recipes.crafting.push((
+                "tool".into(),
+                Recipe::Shapeless {
+                    ingredients: vec![Ingredient::of(vec!["test:tool".into()])],
+                    result: Template {
+                        item: Some("test:result".into()),
+                        count: 1,
+                        damage: 0,
+                        extra: None,
+                        components: None,
+                    },
+                },
+            ));
+            let env = Env {
+                recipes: &recipes,
+                crafting_remainder: Some(&Tool),
+                ..*base
+            };
+            for (kind, cell) in [(Kind::Crafting, 4), (Kind::Inventory, 3)] {
+                let mut menu = Menu::new(kind);
+                menu.set_slot(
+                    &env,
+                    cell + 1,
+                    Some(ItemStack {
+                        damage: 2,
+                        ..ItemStack::new("test:tool", 1)
+                    }),
+                );
+                menu.click(&env, 0, 0, Input::Pickup).unwrap();
+                assert_eq!(
+                    menu.slot(cell + 1).map(|s| (s.damage, s.count)),
+                    Some((3, 1))
+                );
+                menu.carried = None;
+                menu.click(&env, 0, 0, Input::Pickup).unwrap();
+                assert_eq!(
+                    menu.slot(cell + 1).map(|s| (s.damage, s.count)),
+                    Some((4, 1))
+                );
+                menu.carried = None;
+                menu.click(&env, 0, 0, Input::Pickup).unwrap();
+                assert!(menu.slot(cell + 1).is_none());
+                let mut menu = Menu::new(kind);
+                menu.set_slot(
+                    &env,
+                    cell + 1,
+                    Some(ItemStack {
+                        damage: 2,
+                        ..ItemStack::new("test:tool", 1)
+                    }),
+                );
+                menu.click(&env, 0, 0, Input::QuickMove).unwrap();
+                assert!(menu.slot(cell + 1).is_none());
+                assert_eq!(
+                    menu.containers[PLAYER]
+                        .iter()
+                        .flatten()
+                        .filter(|s| &*s.item == "test:result")
+                        .map(|s| s.count)
+                        .sum::<u32>(),
+                    3
+                );
+            }
+        });
+    }
+
     fn bare_env(test: impl FnOnce(&Env)) {
         bare_env_in(&crate::test_resources::loop_context(LoopSide::Server), test)
     }
@@ -4351,6 +4438,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Default::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         test(&Env {
+            crafting_remainder: None,
             player: Some(7),
             player_entity_id: Some(41),
             loop_context,
@@ -5208,6 +5296,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -5296,6 +5385,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),
@@ -5700,6 +5790,7 @@ pub(crate) mod tests {
         let names = crate::creative::Names::default();
 
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5753,6 +5844,7 @@ pub(crate) mod tests {
 
         let known = ["minecraft:stick"];
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5806,6 +5898,7 @@ pub(crate) mod tests {
 
         let known = ["minecraft:oak_planks"];
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5863,6 +5956,7 @@ pub(crate) mod tests {
 
         let known: [&str; 0] = [];
         let env = Env {
+            crafting_remainder: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -5910,6 +6004,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Default::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            crafting_remainder: None,
             player: Some(7),
             player_entity_id: Some(41),
             loop_context: &crate::test_resources::loop_context(LoopSide::Server),

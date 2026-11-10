@@ -3368,7 +3368,7 @@ impl Game<'_> {
         &mut self,
         pos: (i32, i32, i32),
     ) -> horizon_client::Result<()> {
-        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get(&pos) else {
             return Ok(());
         };
         let was_idle = b.brew_time <= 0;
@@ -3376,10 +3376,27 @@ impl Game<'_> {
         let fuel_item = was_unfueled
             .then(|| b.items[4].as_ref().map(|s| s.item.clone()))
             .flatten();
+        let fuel_remainder = b.items[4]
+            .as_ref()
+            .filter(|s| {
+                b.fuel <= 0
+                    && mod_api::__private::item_listens(mod_api::HookId::CraftingRemainder, &s.item)
+                    && horizon_client::brewing::brewing_fuel(world_items!(self), s).is_some()
+            })
+            .map(|s| self.crafting_remainder(s));
+        let items = world_items!(self);
+        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+            return Ok(());
+        };
         let (mut out, due) = b.tick_to_brew(
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
+            &|s| {
+                fuel_remainder.clone().unwrap_or_else(|| {
+                    crate::crafting::CraftingRemainder::crafting_remainder(items, s)
+                })
+            },
         );
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
@@ -3397,13 +3414,23 @@ impl Game<'_> {
             });
             // A cancelled Pre fires Post itself, with the slots the mods left.
             let cancelled = matches!(asked, Some((_, true)));
+            let ingredient_remainder = if cancelled {
+                None
+            } else {
+                match self.world.block_entities.get(&pos) {
+                    Some(BlockEntity::Brewing(b)) => {
+                        b.items[3].as_ref().and_then(|s| self.crafting_remainder(s))
+                    }
+                    _ => None,
+                }
+            };
             let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
                 return Ok(());
             };
             b.brew_after_pre(
                 asked,
                 &world_stations!(self).brewing,
-                world_items!(self),
+                &|_| ingredient_remainder.clone(),
                 &mut out,
             );
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));

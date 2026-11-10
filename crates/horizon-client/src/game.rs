@@ -10223,6 +10223,7 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let env = Env {
+            crafting_remainder: Some(self),
             player: self
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
@@ -10536,11 +10537,6 @@ impl Game<'_> {
                 let taken = result.clone();
                 let cells = self.craft_size * self.craft_size;
                 let ingredients = self.craft_grid[..cells].to_vec();
-                let remainders = world_recipes!(self).remainders(
-                    &recipe,
-                    &self.craft_grid[..cells],
-                    self.craft_size,
-                );
                 if shift {
                     if self.add_stack_to_inventory(result).is_some() {
                         break;
@@ -10557,6 +10553,12 @@ impl Game<'_> {
                         _ => return,
                     }
                 }
+                let remainders = world_recipes!(self).remainders(
+                    &recipe,
+                    &self.craft_grid[..cells],
+                    self.craft_size,
+                    &|s| self.crafting_remainder(s),
+                );
                 for cell in self.craft_grid.iter_mut() {
                     if let Some(s) = cell {
                         s.count -= 1;

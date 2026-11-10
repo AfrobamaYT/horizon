@@ -16889,6 +16889,7 @@ mod tests {
         let enchantments = Enchantments::default();
         let names = Names::default();
         let env = Env {
+            crafting_remainder: None,
             player: None,
             player_entity_id: None,
             loop_context: &crate::game::test_server_load()

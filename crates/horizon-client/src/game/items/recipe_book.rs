@@ -291,6 +291,7 @@ impl Game<'_> {
                 Kind::Inventory
             });
             let env = Env {
+                crafting_remainder: Some(self),
                 player: None,
                 player_entity_id: None,
                 loop_context: &self.loop_context,

@@ -3154,6 +3154,17 @@ registration path.
 converted at load by the shared JsonOps-to-NbtOps boundary; mod code matches
 `Tag` variants rather than JSON fields. Nested null refuses the recipe as an
 unclaimed kind does; numeric and heterogeneous arrays remain lists. Matching
-borrows the retained compound and never converts metadata on the tick."#]
+borrows the retained compound and never converts metadata on the tick.
+
+### Per-stack crafting remainders
+`crafting_remainder` is an item Part listen query on the authoritative server,
+with a read-only `Host`. Its event starts with the item's data remainder; changing
+it to `None` leaves nothing. Grid consumption (including repeated quick moves),
+the crafter, furnace fuel, and brewing fuel/ingredients use the same stack-aware resolver. Book and banner
+recipe copies remain recipe-owned. `Host::item_crafting_remainder` reads data only.
+The resolver checks the prepared item subscription table before converting or
+cloning stack components. Invalid returned stacks are refused at `ItemBoundary`,
+retaining the initial data remainder; native panics retain normal Part attribution.
+"#]
     fn general();
 }

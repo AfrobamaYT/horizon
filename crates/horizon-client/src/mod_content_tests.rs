@@ -1633,7 +1633,9 @@ fn content_root_loads_with_every_table() {
         .find(crate::test_resources::server_loop_context(), &grid, 2)
         .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
-    let rest = recipes.remainders(id, &grid, 2);
+    let rest = recipes.remainders(id, &grid, 2, &|s| {
+        crate::crafting::CraftingRemainder::crafting_remainder(&items, s)
+    });
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
     assert!(!items.items.contains_key("ruby:ruby_glass"));
     let pickaxe = &items.block_tags["minecraft:mineable/pickaxe"];
