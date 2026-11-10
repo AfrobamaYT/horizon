@@ -2740,7 +2740,7 @@ impl Game<'_> {
                     self.save_guest(&mut guest);
                     let host = self.lan.as_mut()?;
                     host.play.remove(&guest.conn);
-                    self.guest_combat.remove(&guest.conn);
+                    self.clear_guest_book_connection(guest.conn);
                     // A held player was recorded as joined at its login: it leaves too.
                     if self.options.dedicated.is_some() && (guest.placed || guest.held) {
                         super::dedicated::events::record(
@@ -2861,9 +2861,7 @@ impl Game<'_> {
                 } => {
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
                         let (uuid, name) = (g.uuid, g.name.clone());
-                        self.native_player_recipe_book_settings_change(
-                            uuid, &name, book, open, filtering,
-                        );
+                        self.notify_vanilla_book_settings(uuid, &name, book, open, filtering);
                     }
                 }
                 HostEvent::Packet(conn, packet) => {
