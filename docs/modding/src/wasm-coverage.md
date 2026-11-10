@@ -1438,8 +1438,6 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::client_chat` | crosses | Wire call |
 | `Hooks::client_chat_received` | crosses | Wire call |
 | `Hooks::client_information_updated` | crosses | Wire call |
-| `Hooks::client_level_tick_post` | crosses | Wire call |
-| `Hooks::client_level_tick_pre` | crosses | Wire call |
 | `Hooks::client_mining_predict` | crosses | Wire call |
 | `Hooks::client_packet` | crosses | Wire call |
 | `Hooks::client_packet_send` | crosses | Wire call |
