@@ -197,11 +197,11 @@ Outside the host areas, 2291 `mod_api` references are in test code; 207 of them 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
 | loading (phase 1) | 5 | 4001 | 5 | 0 | 49 | 101 | 26 |
-| host (phase 2) | 20 | 9271 | 7 | 12 | 53 | 159 | 39 |
+| host (phase 2) | 4 | 1442 | 3 | 11 | 44 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 43 | 17 |
-| hooks (phase 6) | 373 | 91490 | 355 | 17 | 572 | 1493 | 224 |
+| hooks (phase 6) | 389 | 99319 | 359 | 18 | 573 | 1639 | 226 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
