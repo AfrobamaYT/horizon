@@ -256,7 +256,8 @@ impl Manifest {
             })
         {
             return Err(format!(
-                "{MANIFEST}: a wasm internals listener needs declared internals"
+                "{MANIFEST}: a wasm internals listener needs declared internals, or a declared \
+                 dependency whose mod id, with `-` as `_`, starts its `at`"
             ));
         }
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {

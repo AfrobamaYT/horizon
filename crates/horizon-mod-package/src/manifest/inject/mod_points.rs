@@ -139,6 +139,10 @@ impl fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
+/// Why an `at` in a library whose crate isn't named after its mod id is refused.
+pub const CRATE_NAMED_AFTER_ID: &str =
+    "a mod point library's crate must be named after its mod id, with `-` as `_`";
+
 /// Routes `inject`, an `[[inject]]` of mod `mod_id` whose `at` the `library` owns, to its place, or
 /// refuses it with the reason a player sees.
 pub fn route<'a>(
@@ -149,6 +153,15 @@ pub fn route<'a>(
     let id = format!("{mod_id}:{}", inject.id);
     let plain = |path: &str| path.replace(' ', "");
     let catalog = library.catalog;
+    // An addon's manifest names a library by mod id, and an `at` by crate, so both targets reach
+    // a library's points through the one rule `Manifest::mod_point_dependency` applies.
+    if catalog.krate != library.id.replace('-', "_") {
+        return Err(Refusal::Inject(InjectError::Invalid {
+            id,
+            field: "at",
+            fix: CRATE_NAMED_AFTER_ID,
+        }));
+    }
     let Some(point) = catalog
         .points
         .iter()

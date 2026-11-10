@@ -23,6 +23,22 @@ pub(super) fn prepare(
         let parsed = horizon_mod_package::Manifest::parse(&manifest.to_string())?;
         let mut registration = String::new();
         let is_mod = |at: &str| parsed.mod_point_dependency(at).is_some();
+        // Native refuses these in `mod_points::route`; here the manifest never names them as mod
+        // points, so the same reason is given before they could fall to the game's catalog.
+        if let Some(injection) = parsed
+            .inject
+            .iter()
+            .find(|i| !is_mod(&i.at) && libraries.iter().any(|p| p.owns(&i.at)))
+        {
+            return Err(
+                horizon_mod_package::manifest::inject::InjectError::Invalid {
+                    id: format!("{}:{}", parsed.id, injection.id),
+                    field: "at",
+                    fix: mod_points::CRATE_NAMED_AFTER_ID,
+                }
+                .to_string(),
+            );
+        }
         for (index, injection) in parsed.inject.iter().filter(|i| is_mod(&i.at)).enumerate() {
             let owner = libraries
                 .iter()
