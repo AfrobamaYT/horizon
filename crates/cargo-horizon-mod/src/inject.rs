@@ -197,7 +197,7 @@ fn library(
     horizon_mod_api_gen::points::mod_crate::mod_points(root, wire).map(Some)
 }
 
-type ModPoints = horizon_mod_package::manifest::inject::mod_points::Catalog;
+type ModPoints = point_shape::catalog::Catalog;
 
 /// The `[[inject]]` for a mod point: its head or return, pinned to the function's hash.
 fn append_mod_point(

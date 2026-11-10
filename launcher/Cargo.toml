@@ -10,8 +10,6 @@ description = "Downloads, prepares and starts Horizon builds"
 [dependencies]
 horizon-addresses = { path = "../crates/horizon-addresses" }
 # The catalog and mod-owned trait injections share their generation rules.
-horizon-mod-api-gen = { path = "../crates/horizon-mod-api-gen" }
-horizon-mod-point-shape = { path = "../crates/horizon-mod-point-shape" }
 horizon-mod-point-emit = { path = "../crates/horizon-mod-point-emit" }
 # GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
 # its own name. wgpu renders on Linux, not blade (#3812).
@@ -50,7 +48,7 @@ horizon-protocol = { path = "../crates/horizon-protocol" }
 horizon-theme = { path = "../crates/horizon-theme" }
 # The engine, through the platform's public API (docs/layers.md): the pinned version, No AI, the preparer,
 # level.dat and servers.dat (the worlds and server lists of instances), and the official server's SRV record.
-horizon-platform = { path = "../crates/horizon-platform", features = ["prepare", "protocol", "world"] }
+horizon-platform = { path = "../crates/horizon-platform", features = ["prepare", "protocol", "world", "mod-build"] }
 horizon-cosmetics = { path = "../crates/horizon-cosmetics" }
 glam = "0.30"
 # `horizon-launcher mcp`: the Model Context Protocol, shared with horizon-ctl and horizon-server.
