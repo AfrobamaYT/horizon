@@ -1407,6 +1407,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::armor_hurt` | crosses | Wire call |
 | `Hooks::arrow_nock` | crosses | Wire call |
 | `Hooks::baby_entity_spawn` | crosses | Wire call |
+| `Hooks::bake_model_loader` | crosses | Wire call |
 | `Hooks::block_drops` | crosses | Wire call |
 | `Hooks::block_entity_type_add_blocks` | crosses | Wire call |
 | `Hooks::block_grow_feature` | crosses | Wire call |
@@ -1581,6 +1582,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
 | `Hooks::register_layer_definitions` | crosses | Wire call |
+| `Hooks::register_model_loaders` | crosses | Wire call |
 | `Hooks::register_particle_providers` | crosses | Wire call |
 | `Hooks::register_preset_editors` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
