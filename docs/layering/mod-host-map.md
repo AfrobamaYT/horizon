@@ -21,10 +21,13 @@ How to read the numbers:
 startup and takes `ModEntry`, `NativeSlot` and `BuiltMod`: it splits into an engine start that takes what the host
 loaded through one registration call, and the host's load step that runs before it. The engine keeps one start call.
 
-**Host (phase 2): move behind a wrapper.** `horizon-mod-host` can't write `impl mod_api::Host for Game`: the trait
-and the type are both foreign to it (orphan rule), and `struct Game` is private to `horizon_client::game`. The impls
-move onto `ModHost<'g>(&'g mut Game)` in `horizon-mod-host`; what they read and write of the engine becomes accessors
-on `Game` named for what they do, never a blanket `pub` on fields.
+**Host (phase 2): not built.** The generated `Host` impls forward each of the 899 host trait methods to an inherent
+`Game` function in the hook-body files, which stay in the engine. Under option B the `Host` traits are engine-layer
+vocabulary, so the engine implements its own interface, which the layer rule allows. A socket would move only the
+forwarders and `mod_api_host.rs` (under 1,000 lines). It would make the 899 functions public, and engine unit tests
+couldn't use a host implemented above the engine: a dev-dependency cycle gives the test build a different `Game`.
+The engine↔`mod_api` value conversions (`game/modding/api_values`) are counted with the hook bodies: 117 engine
+files that stay use them.
 
 **Slots (phase 3): socket.** Eight production references: `entry.rs` (`mod_points::register`, `SlotListener`,
 `PointId`), `game.rs` (`seal`), `build.rs` and the `include!`s of generator output. The engine owns the slot table
@@ -46,11 +49,52 @@ the mod API's vocabulary in a crate below the engine (#2534); nothing in this st
 
 ## What a script can do
 
-- Phases 1–3: a move map (file → destination, with the rewrite of `impl Game` blocks into `ModHost` methods or free
-  functions over `&mut Game`) is mechanical. The accessors `Game` grows are listed by the scan ("to make public") and
-  named by hand.
+- Phases 1 and 3: a move map (file → destination) is mechanical once each moved file's production references from
+  files that stay in the engine are handled, and its unit tests have a home: every phase PR lists both. The
+  accessors `Game` grows are listed by the scan ("to make public") and named by hand.
 - Phase 6, if it happens: sockets generated from the hook catalog.
 - Hand design: the attachment field (phase 4), the registry and render sockets (phase 5), and the vocabulary split.
+
+## The mod API's vocabulary: can it sit below the engine?
+
+The question (#2534): could the engine keep one mod dependency, on a crate that holds only the mod API's vocabulary
+and dispatch table, the way it depends on `horizon-hooks`? The vocabulary table at the end gives the per-file
+answer for `horizon-mod-api` (non-test files). Summary:
+
+- **Plain already:** 772 of 944 files (24,619 lines): types, traits and functions with no generator include, no
+  `unsafe`, no process state and no crate path besides `horizon-core`.
+- **Blocker 1, the derive and attribute macros:** 150 files use `horizon-mod-api-macros` (517 `Wire` derives, 86
+  `host_area`, 1 `__subscriptions`). In 137 of them it is the only blocker. Relayering `horizon-mod-api-macros` and
+  its one dependency `horizon-mod-point-shape` to the engine layer clears them.
+- **Blocker 2, the build script:** `build.rs` runs `horizon-mod-api-gen` (platform, depends on
+  `horizon-mod-point-shape`). The generator writes the hook vocabulary itself: `mod_api_generated.rs` (events,
+  `HookId`, `Hooks`, Parts traits, the dispatch functions; about 680 types, no `unsafe`, no state),
+  `mod_api_generated_host.rs` (the `Host` traits), `wire_generated.rs`, the export lists and `parts_modules.rs`.
+  `wire_guest_generated.rs` (wasm guest glue, 6 `unsafe`) is not vocabulary. There are two ways: relayer the
+  generator to the engine layer (it runs only at build time, but build dependencies count), or commit its output
+  with a freshness check. Committing it adds a large generated file that every hook change touches.
+- **Not vocabulary; it stays in `horizon-mod-api` or goes to the host:** `wire/wire_guest.rs` and
+  `wire/wire_resources.rs` (`unsafe`, wasm guest), `profiler.rs` (`unsafe`, state), `content/crash.rs` (panic
+  marks), `content/registry_keys.rs`, `world/{phase,reload,server_reload}.rs`, `client/client_reload.rs`,
+  `parts/*` (installed Parts tables) and `testing/`. `runtime.rs` is the dispatch table and belongs with the
+  vocabulary. Whether the generated dispatch functions also need the Parts tables (`parts/shared.rs`) is open:
+  the split's first step settles it by compiling.
+- **Other crates:** `horizon-mod-runtime` (engine layer; attachments, registry keys, subscribers: 63 references in
+  17 files) can stay a dependency of a crate below the engine. `horizon-mod-package` is declared, but nothing in
+  the source uses it: remove it.
+- **Engine types in the surface:** `exports/horizon_core.rs` and `exports/horizon_world.rs` re-export
+  `horizon-core` types (`Identifier`, `Compound`, `Tag`, `LegacyRandom`, `BoundingBox`...) and
+  `horizon-mod-runtime` attachment types. Both crates sit below the engine, so this doesn't block a split. It is
+  the same exposure as today.
+
+**A clean split is possible** with three relayerings (`horizon-mod-api-macros`, `horizon-mod-point-shape`,
+`horizon-mod-api-gen` to the engine layer, or committed generator output instead of the last), the dead
+`horizon-mod-package` dependency removed, and the state-bearing files above kept out. The edges it needs:
+`horizon-mod-vocab` (engine) → `horizon-core`, `horizon-mod-runtime`, `horizon-mod-api-macros`, and as a build
+dependency `horizon-mod-api-gen`; then `horizon-mod-api` (platform) → `horizon-mod-vocab`, re-exporting it, so mods
+keep the `mod_api::` paths; the engine → `horizon-mod-vocab` replacing `-mod-api`, `-mod-api-macros` and part of
+`-mod-api-gen`. Whether the engine's uses outside the host stay within the vocabulary is shown in the
+"what they need of `mod_api`" table: the `more` tier (45 files) is what a split must still route through the host.
 
 ## Generated tables
 
@@ -61,16 +105,16 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | kind | mod crate's layer | Cargo.toml line | strand |
 |---|---|---|---|---|---|
-| horizon-client | horizon-mod-api | dev | platform | 197 | hooks |
-| horizon-client | horizon-mod-api | normal | platform | 24 | hooks |
-| horizon-client | horizon-mod-api-gen | build | platform | 15 | slots |
-| horizon-client | horizon-mod-api-macros | normal | platform | 26 | slots |
-| horizon-client | horizon-mod-package | normal | engine | 59 | loading |
-| horizon-client | horizon-mod-points | normal | platform | 25 | slots |
-| horizon-client | horizon-mod-render | normal | platform | 23 | content_render |
-| horizon-client | horizon-mod-runtime | dev | engine | 196 | content_render |
-| horizon-client | horizon-mod-runtime | normal | engine | 22 | content_render |
-| horizon-client | horizon-mod-wasm | normal | platform | 27 | loading |
+| horizon-client | horizon-mod-api | dev | platform | 196 | hooks |
+| horizon-client | horizon-mod-api | normal | platform | 23 | hooks |
+| horizon-client | horizon-mod-api-gen | build | platform | 14 | slots |
+| horizon-client | horizon-mod-api-macros | normal | platform | 25 | slots |
+| horizon-client | horizon-mod-package | normal | engine | 58 | loading |
+| horizon-client | horizon-mod-points | normal | platform | 24 | slots |
+| horizon-client | horizon-mod-render | normal | platform | 22 | content_render |
+| horizon-client | horizon-mod-runtime | dev | engine | 195 | content_render |
+| horizon-client | horizon-mod-runtime | normal | engine | 21 | content_render |
+| horizon-client | horizon-mod-wasm | normal | platform | 26 | loading |
 | horizon-client-lib | horizon-mod-api | dev | platform | 131 | hooks |
 | horizon-client-lib | horizon-mod-api | normal | platform | 18 | hooks |
 | horizon-client-lib | horizon-mod-package | normal | engine | 50 | loading |
@@ -163,86 +207,49 @@ Outside the host areas, 2291 `mod_api` references are in test code; 207 of them 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
 | loading (phase 1) | 5 | 4001 | 5 | 0 | 49 | 101 | 26 |
-| host (phase 2) | 20 | 9271 | 7 | 12 | 53 | 159 | 39 |
+| host (phase 2) | 4 | 1442 | 3 | 11 | 44 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 43 | 17 |
-| hooks (phase 6) | 373 | 91490 | 355 | 17 | 572 | 1493 | 224 |
+| hooks (phase 6) | 389 | 99319 | 359 | 18 | 573 | 1639 | 226 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
 |  | files | lines |
 |---|---|---|
 | all | 944 | 68433 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 760 | 18605 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 772 | 24619 |
 | includes generator output (OUT_DIR) | 6 |  |
 | `unsafe` | 3 | 55 |
-| process state (static, thread_local, locks, atomics, cells) | 61 | 352 |
+| process state (static, thread_local, locks, atomics, cells) | 23 | 143 |
 
-Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-package` (normal, engine), `horizon-mod-runtime` (normal, engine); build script: yes.
+Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-runtime` (normal, engine); build script: yes.
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
-- `src/__private.rs`: generated_include 83,91,107,474; state 27,63,270,420
-- `src/block/block_entity_type.rs`: state 21
+- `src/__private.rs`: generated_include 83,91,107,474; state 420
 - `src/block/fluid_capability.rs`: state 143,144,316
-- `src/block/item_place.rs`: state 17,106,148,155,271,274
+- `src/block/item_place.rs`: state 17,271
 - `src/block/unresolved_fluid.rs`: state 5,50
-- `src/built.rs`: state 135
 - `src/client/client_reload.rs`: state 13,27,28,34,35,40,41
-- `src/client/extras.rs`: state 21,29
-- `src/client/hud_layout.rs`: state 28
-- `src/client/model_instance.rs`: state 134
-- `src/client/model_layers.rs`: state 382
-- `src/client/music.rs`: state 53
-- `src/client/particle_keys.rs`: state 3,11,12,85
-- `src/client/posed_parts.rs`: state 55
-- `src/client/types.rs`: state 433,644,690,957,1002
-- `src/content/crash.rs`: state 5,7,9,11,12,13,15,16,18,26,33,34…
-- `src/content/registry_keys.rs`: state 51,52,53,73,74,75,79,111,182,192,272,301…
-- `src/content/resource.rs`: state 37,42,47,83
-- `src/entity/behaviors.rs`: state 189,204,205,213,214,270,272
-- `src/entity/entity_capability.rs`: state 19,26,220
-- `src/entity/goals.rs`: state 134
-- `src/entity/types.rs`: state 509,544,755,789,818
-- `src/game.rs`: state 114
-- `src/host/config.rs`: state 36,41
-- `src/host/entities.rs`: state 284,463
-- `src/host/levels.rs`: state 377
-- `src/host/tags.rs`: state 59
+- `src/client/particle_keys.rs`: state 3,11,12
+- `src/content/crash.rs`: state 5,7,9,11,12,13,15,16,18,26
+- `src/content/registry_keys.rs`: state 51,52,53,73,74,75
 - `src/host.rs`: generated_include 6
-- `src/item/capability.rs`: state 19,44,72
-- `src/item/recipe_rule.rs`: state 23
-- `src/item/types.rs`: state 12,185,479
 - `src/lib.rs`: generated_include 15,23,26,27; state 9
-- `src/parts/block_entities.rs`: state 30,31,483,491,529,554,584,593
-- `src/parts/blocks.rs`: state 773,778,800,819
-- `src/parts/capabilities.rs`: generated_include 56; state 2,13,44,92,128
+- `src/parts/block_entities.rs`: state 30,31
+- `src/parts/capabilities.rs`: generated_include 56
 - `src/parts/effects.rs`: state 2,3
-- `src/parts/entities.rs`: state 320,326,335,341,369,378
-- `src/parts/fluids.rs`: state 23,24,592,666
-- `src/parts/items.rs`: state 4,14,85,1949,1954,1960,1968,2003,2022,2029,2048,2122…
-- `src/parts/key_mappings.rs`: state 3
-- `src/parts/menus.rs`: state 21,25
+- `src/parts/fluids.rs`: state 23,24
 - `src/parts/mod.rs`: generated_include 26; state 16,21,22
-- `src/parts/settings.rs`: state 3,8
-- `src/parts/shared.rs`: state 8,15,31,36,75,77,101,157,158,159,160,161…
-- `src/profiler/firefox.rs`: state 44
-- `src/profiler.rs`: unsafe 116,202,214,244,265,273; state 9,10,15,16,17,18,19,20,25,26,27,50…
-- `src/runtime.rs`: state 8,14,23,35,65,75,82,91,155,165,166,173…
-- `src/testing/level.rs`: state 28
-- `src/testing/registries.rs`: state 30
+- `src/parts/shared.rs`: state 157,158,159,160,161,162,173,174,178,181,193,200…
+- `src/profiler.rs`: unsafe 116,202,214,244,265,273; state 9,10,15,16,17,18,19,20,111,118,120,126…
+- `src/runtime.rs`: state 35,65,75
 - `src/testing/services.rs`: state 3,46
-- `src/testing.rs`: state 65,88,89
-- `src/wire/mod.rs`: state 71,72,73,78,116,621,807,840,882,899,916,933…
-- `src/wire/wire_guest.rs`: generated_include 14; unsafe 18,32,37,39,51,199,223,278,313,314,315,319…; state 7,9,24,25,60,78,99,112,169,170,173,176…
-- `src/wire/wire_resources.rs`: unsafe 256,350,377,379; state 5,24,33,34,119
-- `src/wire/wire_types.rs`: state 1205,1262
-- `src/world/dimension.rs`: state 346
-- `src/world/mod_chunk_tickets.rs`: state 89,106
-- `src/world/phase.rs`: state 25,54,55,216,330,441
-- `src/world/reload.rs`: state 69,74,98,100,132,205,323,340,377
+- `src/wire/mod.rs`: state 72,73,78
+- `src/wire/wire_guest.rs`: generated_include 14; unsafe 18,32,37,39,51,199,223,278,313,314,315,319…; state 7,9,25,169,170,173,176,177,202,206,207,220…
+- `src/wire/wire_resources.rs`: unsafe 256,350,377,379; state 5,33,34,119
+- `src/world/phase.rs`: state 25,54,55,330,441
+- `src/world/reload.rs`: state 69,74
 - `src/world/server_reload.rs`: state 15,25,26,32,33,38,39
-- `src/world/ticket_controller.rs`: state 10,34,59,68,78
-- `src/world/types.rs`: state 309
 <!-- generated: end -->

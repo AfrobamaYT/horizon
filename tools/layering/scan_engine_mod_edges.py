@@ -71,7 +71,9 @@ GENERATED = {
 }
 # File rules for the move set, before the edges' majority decides.
 FILE_RULES = [
-    ("host", re.compile(r"/game/(modding/(mod_api_host|api_values)|host/)")),
+    # api_values is the engine↔mod_api value conversion the hook bodies use: it stays with them.
+    ("hooks", re.compile(r"/game/modding/api_values")),
+    ("host", re.compile(r"/game/(modding/mod_api_host|host/)")),
     ("attachments", re.compile(r"/game/modding/(attachment_\w+|entity_initialization)")),
     ("loading", re.compile(r"/game/modding/mods/")),
     ("hooks", re.compile(r"/game/native_hooks/")),
@@ -82,7 +84,7 @@ TYPE_DEF = re.compile(r"(?<![\w])(pub(?:\s*\([^)]*\))?\s+)?(struct|enum|trait|ty
 METHOD_CALL = re.compile(r"(?:\.|\bSelf::|\bGame::|\bGameLevel::)\s*(\w+)\s*(?:::\s*<[^;{}]*?>\s*)?\(")
 FIELD = re.compile(r"\b(self|game|level|g)\s*\.\s*([a-z_]\w*)\b(?!\s*(?:\(|::\s*<))")
 IMPL = re.compile(r"(?<![\w])impl\b")
-STATE = re.compile(r"(?<![\w])(static\s+(?:mut\s+)?\w+|thread_local!|OnceLock|LazyLock|OnceCell|Mutex|RwLock"
+STATE = re.compile(r"(?<!['\w])(static\s+(?:mut\s+)?\w+|thread_local!|OnceLock|LazyLock|OnceCell|Mutex|RwLock"
                    r"|Atomic[A-Z]\w*|RefCell|Cell\s*<)")
 
 
