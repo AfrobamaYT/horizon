@@ -1153,7 +1153,7 @@ impl Game<'_> {
                     a.pickup = horizon_client::arrows::Pickup::Allowed;
                 }
                 shot.shoot(&mut own, dir, power, uncertainty);
-                self.add_projectile(shot);
+                self.spawn_projectile(shot, &one);
             }
         }
     }

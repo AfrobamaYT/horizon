@@ -11,10 +11,9 @@ use horizon_client::{
     enchant::{EffectContext, Enchantments, level_value},
     items::ItemStack,
     mobs::{Damage, DamageKind, Who},
-    projectiles::Projectile,
     random_source,
 };
-use horizon_core::{position::BlockPos, random::RandomSource};
+use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
 use horizon_world::{fluid::FluidKind, level::LevelAccess, registry::BlockStateId};
 use serde_json::Value;
 
@@ -77,6 +76,25 @@ impl PlayerSlot {
     }
 }
 
+/// `ApplyEntityImpulse`'s impulse for an entity looking along `yaw` and
+/// `pitch`: the effect's `direction` turned by the look
+/// (`Entity.getLookQuaternion`: pitch about x, then yaw about y), scaled by
+/// `coordinate_scale` and the level's `magnitude`.
+pub(super) fn look_impulse(effect: &Value, level: u32, yaw: f32, pitch: f32) -> Vec3 {
+    let vec3 = |key: &str| [0, 1, 2].map(|i| effect[key][i].as_f64().unwrap_or(0.0));
+    let (d, scale) = (vec3("direction"), vec3("coordinate_scale"));
+    let magnitude = f64::from(level_value(&effect["magnitude"], level));
+    let (yaw, pitch) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
+    let (y1, z1) = (
+        d[1] * pitch.cos() - d[2] * pitch.sin(),
+        d[1] * pitch.sin() + d[2] * pitch.cos(),
+    );
+    Vec3::new(
+        (d[0] * yaw.cos() - z1 * yaw.sin()) * scale[0] * magnitude,
+        y1 * scale[1] * magnitude,
+        (d[0] * yaw.sin() + z1 * yaw.cos()) * scale[2] * magnitude,
+    )
+}
 /// `Player.getDestroySpeed` multiplies by `BLOCK_BREAK_SPEED`; a player
 /// without the attribute keeps the vanilla default of 1.0.
 fn block_break_speed_factor(value: Option<f64>) -> f32 {
@@ -475,22 +493,7 @@ impl Game<'_> {
             // and the magnitude, added to the velocity (the guest's client
             // is told of it by `guest_hit_by`).
             Some("minecraft:apply_impulse") => {
-                let vec3 = |key: &str| [0, 1, 2].map(|i| effect[key][i].as_f64().unwrap_or(0.0));
-                let (d, scale) = (vec3("direction"), vec3("coordinate_scale"));
-                let magnitude = f64::from(level_value(&effect["magnitude"], level));
-                let (yaw, pitch) = (
-                    f64::from(self.yaw).to_radians(),
-                    f64::from(self.pitch).to_radians(),
-                );
-                let (y1, z1) = (
-                    d[1] * pitch.cos() - d[2] * pitch.sin(),
-                    d[1] * pitch.sin() + d[2] * pitch.cos(),
-                );
-                let impulse = horizon_core::geometry::Vec3::new(
-                    (d[0] * yaw.cos() - z1 * yaw.sin()) * scale[0] * magnitude,
-                    y1 * scale[1] * magnitude,
-                    (d[0] * yaw.sin() + z1 * yaw.cos()) * scale[2] * magnitude,
-                );
+                let impulse = look_impulse(effect, level, self.yaw, self.pitch);
                 if let Some(p) = self.player.as_mut() {
                     p.velocity = p.velocity.add_vector(impulse);
                 }
@@ -1049,55 +1052,6 @@ impl Game<'_> {
                 1.0,
             ) == 0.0;
         (power, infinity)
-    }
-    /// `EnchantmentHelper.onProjectileSpawned`, which `AbstractArrow`'s
-    /// constructor runs for every arrow fired from a weapon, bow or crossbow:
-    /// the weapon's `projectile_spawned` ignite effects (Flame) spawn the arrow
-    /// burning.
-    pub(super) fn ignite_spawned_arrow(&mut self, weapon: &ItemStack, arrow: &mut Projectile) {
-        if let Some(seconds) = self.projectile_spawned_ignite(weapon)
-            && let Some(a) = arrow.arrow.as_mut()
-        {
-            a.ignite_for_seconds(seconds);
-        }
-    }
-    /// The `projectile_spawned` ignite effects of `weapon` (Flame): the seconds
-    /// the new arrow burns for, the longest when several apply.
-    fn projectile_spawned_ignite(&mut self, weapon: &ItemStack) -> Option<f32> {
-        let ctx = EffectContext {
-            this: Some("minecraft:arrow"),
-            items: Some(world_items!(self)),
-            ..Default::default()
-        };
-        let mut ignite: Option<f32> = None;
-        for (id, level) in weapon.all_enchantments().iter() {
-            let Some(def) = world_stations!(self).enchantments.get(id) else {
-                continue;
-            };
-            for effect in def.effects["minecraft:projectile_spawned"]
-                .as_array()
-                .into_iter()
-                .flatten()
-            {
-                if effect["effect"]["type"] != "minecraft:ignite" {
-                    continue;
-                }
-                let ok = effect.get("requirements").is_none_or(|r| {
-                    world_stations!(self).enchantments.condition(
-                        r,
-                        *level,
-                        &ctx,
-                        &mut self.world.random,
-                    )
-                });
-                if ok {
-                    let seconds =
-                        horizon_client::enchant::level_value(&effect["effect"]["duration"], *level);
-                    ignite = Some(ignite.map_or(seconds, |s: f32| s.max(seconds)));
-                }
-            }
-        }
-        ignite
     }
     /// Soul Speed (`data/minecraft/enchantment/soul_speed.json`), the parts of
     /// `Enchantment.runLocationChangedEffects` and `tick` that file uses. The

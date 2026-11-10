@@ -2513,8 +2513,8 @@ impl Game<'_> {
         dropped
     }
     /// Adds a projectile, giving it an id from the entity counter
-    /// (`Entity.id`, the same counter as the rest) when it has none.
-    pub(super) fn add_projectile(&mut self, mut p: horizon_client::projectiles::Projectile) {
+    /// (`Entity.id`, the same counter as the rest) when it has none. Its id.
+    pub(super) fn add_projectile(&mut self, mut p: horizon_client::projectiles::Projectile) -> u32 {
         if p.id == 0 {
             self.next_entity += 1;
             p.id = self.next_entity;
@@ -2545,6 +2545,7 @@ impl Game<'_> {
         }
         self.creatures.projectiles.push(p);
         self.native_projectile_launch(player, &name, id, kind);
+        id
     }
     /// `MushroomCow.shear`'s `sendParticles(EXPLOSION, x, getY(0.5), z, 1, 0, 0, 0, 0)`:
     /// one puff over a sheared mooshroom, half its `height` up, shown here and to
@@ -2594,7 +2595,13 @@ impl Game<'_> {
         }
         // Projectile.tick posts on the first tick, through the shared arrow-state
         // continuation for ordinary arrows and tridents, including loaded ones.
-        self.add_projectile(p);
+        // A mob's arrow is made from its ammo; its other projectiles come from
+        // fresh stacks with no enchantments.
+        let ammo = p.arrow.as_ref().map(|a| a.pickup_item.clone());
+        let id = self.add_projectile(p);
+        if let Some(ammo) = ammo {
+            self.apply_on_projectile_spawned(id, &ammo);
+        }
     }
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
@@ -8024,7 +8031,7 @@ impl Game<'_> {
             "minecraft:egg" | "minecraft:blue_egg" | "minecraft:brown_egg" => ProjectileKind::Egg,
             "minecraft:ender_pearl" => ProjectileKind::EnderPearl,
             "minecraft:wind_charge" => {
-                let thrown = self.throw_wind_charge()?;
+                let thrown = self.throw_wind_charge(stack)?;
                 if thrown {
                     self.apply_use_cooldown(stack);
                 }
@@ -8058,7 +8065,7 @@ impl Game<'_> {
             velocity,
             on_ground,
         );
-        self.add_projectile(proj);
+        self.spawn_projectile(proj, stack);
         // SnowballItem.use / EggItem.use / EnderpearlItem.use: awardStat(ITEM_USED).
         self.award_stat("used", item, 1);
         // ItemStack.use's applyAfterUseComponentSideEffects: the pearl's
