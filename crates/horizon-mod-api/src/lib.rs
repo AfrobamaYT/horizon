@@ -7,6 +7,10 @@ pub mod wire {
     pub use mod_vocab::wire::*;
     #[path = "wire_resources.rs"]
     mod resources;
+    mod static_strings;
+    pub(crate) fn initialize() {
+        resources::ensure_installed();
+    }
     #[doc(hidden)]
     pub use resources::{
         ResourceCodec, ResourceScope, ScopeError, ScopeLease, ScopeToken, borrow_token,

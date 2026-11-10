@@ -14,7 +14,7 @@ OLD = pathlib.Path('crates/horizon-mod-api/src')
 NEW = pathlib.Path('crates/horizon-mod-vocab/src')
 BASE = 'e96c76c0b9'
 STAY = {
-    'wire/wire_guest.rs', 'wire/wire_resources.rs',
+    'wire/wire_guest.rs', 'wire/wire_resources.rs', 'wire/static_strings.rs',
     'world/phase.rs', 'world/reload.rs', 'world/server_reload.rs',
     'client/client_reload.rs', 'content/registry_keys.rs',
     'testing.rs', 'parts/shared.rs',
@@ -47,7 +47,7 @@ def main():
         platform = {
             'lib.rs', '__private.rs', 'wire/wire_guest.rs', 'load_state.rs',
             'content/crash.rs', 'profiler.rs', 'profiler/firefox.rs',
-            'wire/wire_resources.rs',
+            'wire/wire_resources.rs', 'wire/static_strings.rs',
         }
         unexpected = set(remaining) - platform
         if unexpected:

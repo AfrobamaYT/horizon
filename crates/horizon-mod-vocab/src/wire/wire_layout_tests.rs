@@ -3,7 +3,30 @@ use super::*;
 use crate::*;
 use horizon_core::nbt::{Compound, JavaString};
 
+fn install_layout_resources() {
+    let _ = crate::wire::install_resource_access(crate::wire::ResourceAccess {
+        intern: |value| {
+            if value.len() > crate::wire::MAX_STATIC_STRING_BYTES {
+                return Err(WireError::Invalid("static string too long"));
+            }
+            Ok(Box::leak(value.to_owned().into_boxed_str()))
+        },
+        store: |value| {
+            let provider = value
+                .downcast::<std::sync::Arc<dyn std::any::Any + Send + Sync>>()
+                .map_err(|_| WireError::Invalid("no resource context"))?;
+            if provider.downcast_ref::<u32>() != Some(&73) {
+                return Err(WireError::Invalid("no resource context"));
+            }
+            Ok(crate::wire::Id(0x100000007))
+        },
+        load: |_, _| Err(WireError::Invalid("no resource context")),
+        refused: |_| {},
+    });
+}
+
 fn fields<T: Wire, F: Wire + std::fmt::Debug + PartialEq>(value: T, expected: F) {
+    install_layout_resources();
     assert_eq!(decode::<T, F>(value), expected);
 }
 fn id(s: &str) -> Identifier {
@@ -880,19 +903,6 @@ fn every_attachment_error_and_write_case_has_declared_tag_type() {
 #[test]
 fn erased_provider_record_uses_active_resource_scope() {
     // Pin the layout at this layer; platform tests own active codec lifetimes.
-    let _ = crate::wire::install_resource_access(crate::wire::ResourceAccess {
-        store: |value| {
-            let provider = value
-                .downcast::<std::sync::Arc<dyn std::any::Any + Send + Sync>>()
-                .map_err(|_| WireError::Invalid("no resource context"))?;
-            if provider.downcast_ref::<u32>() != Some(&73) {
-                return Err(WireError::Invalid("no resource context"));
-            }
-            Ok(crate::wire::Id(0x100000007))
-        },
-        load: |_, _| Err(WireError::Invalid("no resource context")),
-        refused: |_| {},
-    });
     fields(
         OwnProvider {
             handler: "example:handler".into(),

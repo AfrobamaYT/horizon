@@ -30,6 +30,7 @@ impl Unsupported {
 /// Platform-owned access to resources across the Wire boundary.
 #[doc(hidden)]
 pub struct ResourceAccess {
+    pub intern: fn(&str) -> Result<&'static str, WireError>,
     pub store: fn(Box<dyn Any>) -> Result<Id, WireError>,
     pub load: fn(Id, TypeId) -> Result<Box<dyn Any>, WireError>,
     pub refused: fn(&str),
@@ -62,4 +63,12 @@ pub(super) fn load<T: 'static>(id: Id) -> Result<T, WireError> {
         .downcast::<T>()
         .map(|value| *value)
         .map_err(|_| WireError::Invalid("wrong resource view"))
+}
+
+/// Delegate static-string lifetime storage without allocating in the vocabulary.
+pub(super) fn intern(value: &str) -> Result<&'static str, WireError> {
+    let access = ACCESS.get().ok_or(WireError::Invalid(
+        "static string interning requires the platform runtime",
+    ))?;
+    (access.intern)(value)
 }

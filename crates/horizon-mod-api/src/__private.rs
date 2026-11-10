@@ -6,7 +6,9 @@ pub mod profiler;
 /// A first guard entry seals the socket; late initialization is refused without
 /// replacing a backend or disturbing an in-flight call.
 pub fn initialize() -> Result<(), &'static str> {
-    crate::content::crash::ensure_installed()
+    crate::content::crash::ensure_installed()?;
+    crate::wire::initialize();
+    Ok(())
 }
 
 /// Install instrumentation before publishing the process-wide mod list.

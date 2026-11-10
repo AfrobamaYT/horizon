@@ -13,6 +13,7 @@ fn unregistered_refusal_allows_retry_but_installed_access_is_not_replaced() {
     );
 
     install_resource_access(ResourceAccess {
+        intern: |_| Ok("fixture"),
         store: |value| {
             assert_eq!(*value.downcast::<u32>().unwrap(), 42);
             Ok(Id(7))
@@ -27,6 +28,7 @@ fn unregistered_refusal_allows_retry_but_installed_access_is_not_replaced() {
     .unwrap();
     assert!(
         install_resource_access(ResourceAccess {
+            intern: |_| Ok("fixture"),
             store: |_| panic!("second backend replaced the first"),
             load: |_, _| panic!("second backend replaced the first"),
             refused: |_| panic!("second backend replaced the first"),

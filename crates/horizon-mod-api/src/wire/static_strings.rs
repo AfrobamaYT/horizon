@@ -1,8 +1,8 @@
 //! Platform-owned bounded storage for static Wire strings.
-use super::{WireError, MAX_STATIC_STRINGS, MAX_STATIC_STRING_BYTES};
+use super::{MAX_STATIC_STRING_BYTES, MAX_STATIC_STRINGS, WireError};
 use std::collections::HashSet;
 
-pub fn intern(value: &str) -> Result<&'static str, WireError> {
+pub(super) fn intern(value: &str) -> Result<&'static str, WireError> {
     use std::sync::{Mutex, OnceLock};
     static STRINGS: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
     if value.len() > MAX_STATIC_STRING_BYTES {

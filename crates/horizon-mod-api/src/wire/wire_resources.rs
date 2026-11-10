@@ -284,10 +284,11 @@ pub(super) fn store(value: Box<dyn Any>) -> Result<Id, WireError> {
     current()?.store(value)
 }
 
-fn ensure_installed() {
+pub(super) fn ensure_installed() {
     static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     INSTALLED.get_or_init(|| {
         let _ = mod_vocab::wire::install_resource_access(mod_vocab::wire::ResourceAccess {
+            intern: super::static_strings::intern,
             store,
             load: |id, view| current()?.load(id, view),
             refused,

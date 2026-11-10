@@ -1,10 +1,11 @@
-pub use mod_api::*;
 pub use mod_api::wire::*;
+pub use mod_api::*;
 
 mod tests {
     use super::*;
     #[test]
     fn static_string_rows_roundtrip_through_intern() {
+        mod_api::__private::initialize().unwrap();
         let rows: Vec<(&'static str, &'static str)> =
             vec![("test:block", "test:glow"), ("test:block", "test:shade")];
         let mut out = super::Writer::new();
@@ -23,6 +24,7 @@ mod tests {
 
     #[test]
     fn attachment_refusals_use_bounded_interned_static_text() {
+        mod_api::__private::initialize().unwrap();
         round(crate::AttachmentError::HolderBusy);
         round(crate::AttachmentError::UnsupportedHolder("dragonpart"));
         round(crate::AttachmentRowError::HolderBusy);
