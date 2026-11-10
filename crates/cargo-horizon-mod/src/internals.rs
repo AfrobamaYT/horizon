@@ -58,7 +58,11 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
         .native
         .as_ref()
         .ok_or("internals add needs a [native] mod")?;
-    let catalog = load(dir, &native.horizon)?;
+    let catalog = if native.module.is_empty() {
+        load(dir, &native.horizon)?
+    } else {
+        internals::read(&catalog_directory(dir, &manifest)?.join(CATALOG))?
+    };
     // Resolve every request before editing: any unavailable or ambiguous path leaves the file alone.
     let entries = paths
         .iter()
@@ -125,6 +129,35 @@ fn upsert(
         }
     }
     Ok(())
+}
+
+/// Module discovery uses the launcher's source and toolchain management.
+pub(crate) fn catalog_directory(dir: &Path, manifest: &Manifest) -> Result<PathBuf, String> {
+    let native = manifest
+        .native
+        .as_ref()
+        .ok_or("catalog needs a native mod")?;
+    if native.module.is_empty() {
+        return Ok(dir
+            .join("target/horizon-mod/prebuilt")
+            .join(&native.horizon));
+    }
+    let launcher =
+        std::env::var_os("HORIZON_LAUNCHER").unwrap_or_else(|| "horizon-launcher".into());
+    let output = std::process::Command::new(launcher)
+        .args(["native-build", "--catalog", "--trust-native-code"])
+        .arg(dir.canonicalize().map_err(|e| e.to_string())?)
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("Module catalog discovery failed".into());
+    }
+    Ok(PathBuf::from(
+        String::from_utf8(output.stdout)
+            .map_err(|e| e.to_string())?
+            .trim(),
+    ))
 }
 
 /// The launcher owns source staging and compiler diagnostics; this tool owns manifest edits.

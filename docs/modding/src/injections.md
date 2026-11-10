@@ -383,10 +383,24 @@ used by normal builds or published prebuilt games. The source must be cached or 
 manifest or falling back to a different pin. Any compiler or catalog error also leaves the
 manifest alone. Discovery checks the mod's library on the current host with default features;
 configuration-gated catalog entries are still refused. Mods with source-spliced helper files
-or module injections are refused with `E_INTERNAL_SOURCE_INJECTION`: declare their internals
+or source listeners are refused with `E_INTERNAL_SOURCE_INJECTION`: declare their internals
 explicitly with `internals add` instead. This invocation stages one mod project; required mod
 dependencies that are not in that project are refused by the dependency resolver, not silently
 omitted.
+
+### Discovering module items
+
+`internals add`, `inject add` and `internals sync` discover items in the mod's own
+`[[native.module]]` tables. Module discovery downloads the pinned game source and uses the
+launcher's managed Rust toolchain and pinned horizon-mixins, with the same module application
+as a native source build. Install `horizon-launcher` on PATH or set `HORIZON_LAUNCHER`.
+The cargo tools request the catalog pair using `native-build --catalog --trust-native-code`.
+The launcher applies only this mod's modules to a fresh source copy before discovery staging;
+it never applies modules to an already staged tree. Each invocation regenerates module catalogs,
+so editing a module cannot reuse stale fingerprints. Paths refer to the destination game crate,
+for example `horizon_client::game::ported_level::PortedGame::tick`, including in `with` callback declarations.
+Mods without modules retain the pinned prebuilt catalog path for the cargo add commands.
+Compiler discovery still refuses source listeners that require source rewriting.
 
 `cargo horizon-mod internals add <path>` remains useful for those explicit declarations and
 writes the path and hash from the pinned game's `internals.json`; don't invent hashes. When several member kinds share a path (such as a field
