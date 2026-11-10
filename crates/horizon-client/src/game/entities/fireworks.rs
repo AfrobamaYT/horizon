@@ -774,7 +774,7 @@ impl Game<'_> {
                 .fireworks(at, v, r.explosions.clone(), camera.unwrap_or(at));
         }
     }
-    /// `dealExplosionDamage` on a player that is not the rocket's
+    /// `FireworkRocketEntity.dealExplosionDamage` on a player that is not the rocket's
     /// `attachedToEntity`: within 5 blocks, when the rocket sees its feet or
     /// its middle (`ClipContext.Block.COLLIDER`, no fluids).
     fn rocket_blast_player(&mut self, from: Vec3, damage: f32) {

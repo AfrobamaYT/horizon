@@ -38,6 +38,8 @@ impl Hooks for Probe {
 fn fresh_player(game: &mut Game<'_>, mode: GameMode) {
     game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
     bind_local_player(game, 7, 7);
+    game.lan_acting_name = Some("attempts".into());
+    game.lan_acting_permission = Some(4);
     game.set_game_mode(GameMode::Survival);
     game.set_game_mode(mode);
     game.remove_player_effects(None);
@@ -133,6 +135,77 @@ fn remaining_hit_callers_observe_refusals_and_zero_damage() {
             assert_eq!(game.mobs.iter().find(|m| m.id == 903).unwrap().health, 0.0);
             game.mobs.clear();
 
+            fresh_player(game, GameMode::Spectator);
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.chat_capture = Some(Vec::new());
+            assert!(
+                !game
+                    .run_command("damage 00000000-0000-0000-0000-000000000007 4 minecraft:generic")
+            );
+            let feedback = game.chat_capture.take().unwrap();
+            assert_eq!(
+                count.swap(0, Ordering::Relaxed),
+                1,
+                "spectator damage command asks before its error: {feedback:?}"
+            );
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+
+            static ZERO: ThrownType = ThrownType {
+                id: "remaining:zero",
+                item: "minecraft:snowball",
+                damage: 0.0,
+            };
+            for mode in [GameMode::Survival, GameMode::Creative] {
+                for kind in [
+                    ProjectileKind::Snowball,
+                    ProjectileKind::Egg,
+                    ProjectileKind::EnderPearl,
+                    ProjectileKind::Thrown(&ZERO),
+                ] {
+                    fresh_player(game, mode);
+                    let shot = Projectile::new(kind, Vec3::ZERO, None);
+                    game.projectile_hit(
+                        &shot,
+                        Hit::Entity {
+                            who: Who::Player,
+                            at: Vec3::ZERO,
+                        },
+                    )
+                    .unwrap();
+                    check(
+                        1,
+                        "zero-damage projectile still enters the player predicate",
+                    );
+                    assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+                }
+            }
+            fresh_player(game, GameMode::Survival);
+            assert!(
+                game.native_acting_player().is_some(),
+                "fixture pearl owner has a live handle"
+            );
+            let mut pearl = Projectile::new(
+                ProjectileKind::EnderPearl,
+                Vec3::new(2.0, 1.0, 0.0),
+                Some(Who::Player),
+            );
+            pearl.previous = Vec3::new(2.0, 1.0, 0.0);
+            game.projectile_hit(
+                &pearl,
+                Hit::Entity {
+                    who: Who::Player,
+                    at: Vec3::ZERO,
+                },
+            )
+            .unwrap();
+            check(
+                2,
+                "zero collision and listener-zeroed teleport fall damage are separate attempts",
+            );
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+            assert_eq!(game.player.as_ref().unwrap().position, pearl.previous);
+
             // A blast's entity query includes resident dead and not-yet-loaded
             // network players, unlike the combat-target helper formerly used here.
             use horizon_client::lan::{NetConfig, hub::HubConfig};
@@ -190,65 +263,6 @@ fn remaining_hit_callers_observe_refusals_and_zero_damage() {
                     "resident dead or unloaded guest is still a rocket damage target",
                 );
             }
-
-            fresh_player(game, GameMode::Spectator);
-            assert!(!game.run_command("damage @s 4 minecraft:generic"));
-            check(
-                1,
-                "spectator damage command asks before returning its invulnerable error",
-            );
-            assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
-
-            static ZERO: ThrownType = ThrownType {
-                id: "remaining:zero",
-                item: "minecraft:snowball",
-                damage: 0.0,
-            };
-            for mode in [GameMode::Survival, GameMode::Creative] {
-                for kind in [
-                    ProjectileKind::Snowball,
-                    ProjectileKind::Egg,
-                    ProjectileKind::EnderPearl,
-                    ProjectileKind::Thrown(&ZERO),
-                ] {
-                    fresh_player(game, mode);
-                    let shot = Projectile::new(kind, Vec3::ZERO, None);
-                    game.projectile_hit(
-                        &shot,
-                        Hit::Entity {
-                            who: Who::Player,
-                            at: Vec3::ZERO,
-                        },
-                    )
-                    .unwrap();
-                    check(
-                        1,
-                        "zero-damage projectile still enters the player predicate",
-                    );
-                    assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
-                }
-            }
-            fresh_player(game, GameMode::Survival);
-            let mut pearl = Projectile::new(
-                ProjectileKind::EnderPearl,
-                Vec3::new(2.0, 1.0, 0.0),
-                Some(Who::Player),
-            );
-            pearl.previous = Vec3::new(2.0, 1.0, 0.0);
-            game.projectile_hit(
-                &pearl,
-                Hit::Entity {
-                    who: Who::Player,
-                    at: Vec3::ZERO,
-                },
-            )
-            .unwrap();
-            check(
-                2,
-                "zero collision and listener-zeroed teleport fall damage are separate attempts",
-            );
-            assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
-            assert_eq!(game.player.as_ref().unwrap().position, pearl.previous);
         })
     });
 }
