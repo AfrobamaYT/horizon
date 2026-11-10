@@ -213,13 +213,12 @@ impl Game<'_> {
                     log::error!("mod recipe-book placement load refused: {reason:?}");
                 }
             }
-            sync::Frame::Invalidate { epoch } => {
+            sync::Frame::Invalidate { epoch }
                 if self.native_net.placement.client.catalog().is_some()
-                    && self.native_net.placement.client.invalidate(epoch)
-                {
-                    self.clear_mod_book_placement_screen();
-                    self.ensure_mod_book_catalog();
-                }
+                    && self.native_net.placement.client.invalidate(epoch) =>
+            {
+                self.clear_mod_book_placement_screen();
+                self.ensure_mod_book_catalog();
             }
             _ => {}
         }
