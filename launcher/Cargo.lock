@@ -2780,6 +2780,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-game-discovery"
+version = "0.1.0"
+dependencies = [
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "horizon-hooks"
 version = "0.1.0"
 
@@ -2864,6 +2871,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
+ "horizon-game-discovery",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
@@ -3069,7 +3077,6 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
- "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",
