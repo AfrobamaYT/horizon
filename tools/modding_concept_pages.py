@@ -184,7 +184,7 @@ def discover(book, src, contents):
             if relative not in listed:
                 text = path.read_text()
                 found.append((page_title(text, path), relative, text))
-        found.sort(key=lambda page: page[0].casefold())
+        found.sort(key=lambda page: (page[0].casefold(), page[1]))
         for title, relative, text in found:
             validate(text, relative, src, contents)
         items[end:end] = [{"Chapter": dict(name=title.replace("`", ""), content=text, path=relative,

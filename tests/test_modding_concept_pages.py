@@ -59,6 +59,16 @@ class ConceptPages(unittest.TestCase):
         self.assertEqual(result["sections"][2]["Chapter"]["path"], "concepts/alpha.md")
         self.assertEqual(result["sections"][5]["Chapter"]["sub_items"][1]["Chapter"]["number"], [4, 2])
 
+    def test_equal_titles_use_filename_order_not_directory_iteration_order(self):
+        for name in ("zeta", "alpha"):
+            (self.src / f"concepts/{name}.md").write_text("# Same title\n")
+        glob = Path.glob
+        with patch.object(Path, "glob", lambda path, pattern: iter(sorted(glob(path, pattern), reverse=True))):
+            result = pages.expand(copy.deepcopy(self.book), self.src)
+        found = [c["path"] for c in pages.chapters(result["sections"])
+                 if c["path"] in {"concepts/alpha.md", "concepts/zeta.md"}]
+        self.assertEqual(found, ["concepts/alpha.md", "concepts/zeta.md"])
+
     def test_discovered_page_links_are_checked(self):
         (self.src / "how-to/broken.md").write_text("# Broken\n\n[gone](missing.md)\n")
         with self.assertRaisesRegex(AssertionError, "how-to/broken.md: missing link target"):
