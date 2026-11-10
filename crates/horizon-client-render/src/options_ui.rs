@@ -2881,7 +2881,9 @@ impl OptionsUi {
                 // Two to a row, as vanilla's OptionsList.addSmall lays out
                 // buttons; each opens one of Horizon's settings pages. Each page has
                 // one way in: graphics and shader packs are Video Settings' (the graphics
-                // screen), the controller is Controls', mods are the Options screen's.
+                // screen), the controller is Controls', mods are the Options screen's. The
+                // registry's mod browser is Horizon's own and opens from here, not from the
+                // two-button Mods footer.
                 let open =
                     |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
                 vec![
@@ -2907,7 +2909,7 @@ impl OptionsUi {
                         } else {
                             open("horizon.pages.open.agent", Page::Agent)
                         },
-                        None,
+                        Some(open("horizon.mods.browse", Page::ModBrowser)),
                     ),
                 ]
                 .into_iter()
@@ -6096,7 +6098,7 @@ mod tests {
         }
     }
 
-    /// The Mods page is NeoForge's list screen: no switches, a footer of folder, browser and
+    /// The Mods page is NeoForge's list screen: no switches, a footer of folder and
     /// Back, and Config on the selected native mod. Positions are the layout at 480x240:
     /// 150 px buttons 4 px apart, centred 27 px above the bottom; the sidebar at x 41 with its
     /// list at y 32 and 28 px rows; the panel at x 188 with its buttons at y 182, 84 px apart.
@@ -8793,6 +8795,36 @@ mod tests {
             events.contains(&Event::ButtonClick),
             "Enter on FocusId::Act must emit Event::ButtonClick"
         );
+    }
+
+    /// Browse Mods is on the Horizon settings page (the Mods footer has only Open Mods Folder
+    /// and Back): clicking it lists the registry's mods and opens the browser.
+    #[test]
+    fn browse_mods_opens_the_registry_browser_from_the_horizon_page() {
+        let atlas = atlas();
+        let size = (960.0, 540.0);
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Horizon);
+        let (widgets, ..) = ui.layout(&s, size.0, size.1);
+        let browse = widgets
+            .into_iter()
+            .find(|w| {
+                matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Push(Page::ModBrowser))
+            })
+            .expect("Browse Mods... on the Horizon page");
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            browse.x + browse.w / 2.0,
+            browse.y + browse.h / 2.0,
+            size,
+            [854, 480],
+            false,
+            false,
+        );
+        assert_eq!(events, vec![Event::ButtonClick, Event::BrowseMods]);
+        assert_eq!(ui.page(), Page::ModBrowser);
     }
 
     #[test]

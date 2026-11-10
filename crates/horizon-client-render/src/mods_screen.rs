@@ -1239,6 +1239,20 @@ mod tests {
         assert_eq!(actions, [(Action::OpenFolder, true), (Action::Back, true)]);
     }
 
+    /// Literal rectangles, not `geo()` read back: two 150 px buttons 4 px apart, centred, 11 px
+    /// below the footer separator's row (`height - 38`); narrow screens shrink both equally.
+    #[test]
+    fn the_footer_buttons_sit_at_fixed_rectangles() {
+        let footer = |w, h| {
+            ModsScreen::new(w, h, false, &ModList::default())
+                .geo()
+                .footer
+        };
+        assert_eq!(footer(427, 240), [[61, 213, 150, 20], [215, 213, 150, 20]]);
+        // Too narrow for 150 px: (240 - 4) / 2 = 118 each, flush to the edges.
+        assert_eq!(footer(240, 180), [[0, 153, 118, 20], [122, 153, 118, 20]]);
+    }
+
     #[test]
     fn a_click_on_the_id_or_the_version_copies_it() {
         let atlas = atlas();
