@@ -1170,12 +1170,18 @@ pub(super) mod interact_vibration_tests {
             let rod = ItemStack::new("ruby:rod", 1);
             *game.held_mut() = Some(rod.clone());
             assert!(game.main_hand_rod());
+            let used_before = game.stats.get("used", "ruby:rod");
+            let vanilla_before = game.stats.get("used", "minecraft:fishing_rod");
             assert!(game.use_fishing_rod(&rod), "the mod's rod casts");
+            assert_eq!(game.stats.get("used", "ruby:rod"), used_before + 1);
+            assert_eq!(game.stats.get("used", "minecraft:fishing_rod"), vanilla_before);
             assert!(game.hook.is_some());
             assert_eq!(game.cast_rod(), Some(&rod), "drawn cast");
             game.tick_fishing();
             assert!(game.hook.is_some(), "the content rod keeps its hook when ticked");
             assert!(game.use_fishing_rod(&rod), "and reels in");
+            assert_eq!(game.stats.get("used", "ruby:rod"), used_before + 1);
+            assert_eq!(game.stats.get("used", "minecraft:fishing_rod"), vanilla_before);
             assert!(game.hook.is_none());
             assert_eq!(game.cast_rod(), None);
             std::fs::remove_dir_all(&dir).unwrap();
