@@ -32,6 +32,8 @@ pub(super) fn game_package(stage: &Path, target: super::Target, has_api: bool) -
         PACKAGE
     } else if target == super::Target::Client && has_official(stage) {
         OFFICIAL
+    } else if stage.join("crates/horizon-game/src/main.rs").is_file() {
+        "horizon-game"
     } else {
         "horizon-client"
     }
@@ -134,8 +136,11 @@ pub(super) fn main_rs(
             .enumerate()
             .flat_map(|(index, manifest)| {
                 super::slots::sites(sites, manifest).map(move |(entry, site)| {
-                    let adapter =
-                        super::sites::adapter(entry.kind, &format!("mod_{index}::{}", entry.with));
+                    let adapter = super::sites::adapter(
+                        entry.kind,
+                        &format!("mod_{index}::{}", entry.with),
+                        site.once,
+                    );
                     format!(
                         "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
                         site.constructor(),
@@ -599,6 +604,15 @@ pub(super) fn stage(
         dep.insert("optional".into(), true.into());
         deps.insert(OFFICIAL.into(), toml::Value::Table(dep));
     }
+    if stage.join("crates/horizon-mod-host/Cargo.toml").is_file() {
+        deps.insert(
+            "horizon-mod-host".into(),
+            toml::Value::Table(toml::Table::from_iter([
+                ("path".into(), "../horizon-mod-host".into()),
+                ("default-features".into(), false.into()),
+            ])),
+        );
+    }
     manifest.insert("dependencies".into(), toml::Value::Table(deps));
     manifest.insert(
         "features".into(),
@@ -653,6 +667,31 @@ pub(super) fn stage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_only_revisions_keep_their_executable_package() {
+        let stage = super::super::tests::dir("game-package-owner");
+        fs::create_dir_all(stage.join("crates/horizon-game/src")).unwrap();
+        fs::write(
+            stage.join("crates/horizon-game/Cargo.toml"),
+            "[package]\nname='horizon-game'\n",
+        )
+        .unwrap();
+        assert_eq!(
+            game_package(&stage, super::super::Target::Server, false),
+            "horizon-client"
+        );
+        fs::write(
+            stage.join("crates/horizon-game/src/main.rs"),
+            "fn main() {}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            game_package(&stage, super::super::Target::Server, false),
+            "horizon-game"
+        );
+        fs::remove_dir_all(stage).unwrap();
+    }
 
     fn fixture() -> std::path::PathBuf {
         let name = std::thread::current().name().unwrap().replace(':', "-");
