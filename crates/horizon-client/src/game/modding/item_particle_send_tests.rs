@@ -6,7 +6,7 @@ use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn stack_particle_crosses_server_packet_and_resolves_apple() {
-    crate::game::native_entity_refs::tests::with_game(|game| {
+    crate::game::native_entity_refs::tests::with_client_game(|game| {
         mod_api::__private::resolve_particles(["minecraft:item"], |id| {
             horizon_client::particles::ParticleType::from_name(id)
                 .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
