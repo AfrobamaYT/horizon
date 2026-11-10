@@ -364,6 +364,7 @@ impl crate::prelude::PlayersBackend for FakeHost {
         Some(self.players.get(player.uuid())?.name.clone())
     }
     fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
+        (self.players.handle(player.uuid())? == player).then_some(())?;
         Some(self.players.get(player.uuid())?.level)
     }
     fn player_dimension(&self, player: PlayerRef) -> Option<crate::Identifier> {
