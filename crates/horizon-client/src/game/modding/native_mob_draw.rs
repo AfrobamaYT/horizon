@@ -107,7 +107,7 @@ impl Game<'_> {
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
-        parts: Option<&mod_api::PosedParts>,
+        parts: Option<mod_api::PosedParts>,
         partial: f32,
         camera: DVec3,
         light: u32,
@@ -118,7 +118,7 @@ impl Game<'_> {
             return;
         }
         self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
-            self.native_mob_layer(render, who.as_ref(), parts, draw);
+            self.native_mob_layer(render, who.as_ref(), parts.as_ref(), draw);
             true
         });
     }

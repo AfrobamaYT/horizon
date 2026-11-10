@@ -860,15 +860,7 @@ impl Game<'_> {
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
             // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(
-                m,
-                Some(who),
-                parts.as_ref(),
-                alpha as f32,
-                camera,
-                packed,
-                out,
-            );
+            self.mod_mob_layer_geometry(m, Some(who), parts, alpha as f32, camera, packed, out);
         }
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         let vanilla = self

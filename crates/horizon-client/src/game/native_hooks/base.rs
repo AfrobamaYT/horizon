@@ -1301,9 +1301,8 @@ impl Game<'_> {
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
-    /// `parts` is a humanoid model's parts as vanilla posed them this frame,
-    /// taken from the body's own draw (a part `native_player_submit` hid reads
-    /// as not visible), None for a model that isn't humanoid.
+    /// `parts` is a humanoid model's parts as its draw posed them this frame (a part
+    /// `native_player_submit` hid is not visible), None for a model that isn't humanoid.
     /// Not asked for what a mod drew itself (`native_mob_submit`,
     /// `native_player_submit`) nor for a mob that isn't drawn at all.
     pub(in crate::game) fn native_mob_layer(
