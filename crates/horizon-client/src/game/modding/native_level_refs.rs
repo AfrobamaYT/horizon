@@ -187,6 +187,21 @@ impl Game<'_> {
         world_biomes!(self).effects(biome)
     }
 
+    /// Whether a biome is in a biome tag, by the world's live tag tables.
+    pub(super) fn level_biome_in_tag(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        tag: &str,
+    ) -> Option<bool> {
+        self.native_level_read_world(level)?;
+        if !world_biomes!(self).contains(biome) {
+            return None;
+        }
+        let features = self.res.behaviours().live_features()?;
+        Some(features.biome_in_tag(biome, tag.strip_prefix('#').unwrap_or(tag)))
+    }
+
     /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
     pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
         Some(self.native_level_read_world(level)?.shape.logical_height)
