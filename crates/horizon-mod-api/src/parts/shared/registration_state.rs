@@ -4,6 +4,8 @@ use super::*;
 /// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
 pub(crate) struct Installed {
+    pub(crate) menu_recipe_books:
+        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
@@ -37,6 +39,8 @@ pub(crate) struct Installed {
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    pub(crate) menu_recipe_books:
+        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,

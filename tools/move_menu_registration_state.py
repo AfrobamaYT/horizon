@@ -4,7 +4,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 source = root / 'crates/horizon-mod-api/src/parts/shared.rs'
-target = source.with_name('registration_state.rs')
+target = source.parent / 'shared/registration_state.rs'
+target.parent.mkdir(exist_ok=True)
 text = source.read_text()
 blocks = []
 for start_marker, end_marker in [
@@ -16,4 +17,4 @@ for start_marker, end_marker in [
     blocks.append(text[start:end])
     text = text[:start] + text[end:]
 target.write_text('//! Registration state, separate from dispatch operations.\nuse super::*;\n\n' + '\n'.join(blocks))
-source.write_text(text + '\n#[path = "registration_state.rs"]\nmod registration_state;\npub use registration_state::PartRegistrar;\npub(crate) use registration_state::Installed;\n')
+source.write_text(text + '\n#[path = "shared/registration_state.rs"]\nmod registration_state;\npub use registration_state::PartRegistrar;\npub(crate) use registration_state::Installed;\n')

@@ -60,6 +60,10 @@ impl Game<'_> {
         let mut screen = None;
         self.native_screen(&block, &mut screen);
         if let Some(screen) = screen {
+            if let Err(error) = validate_book_geometry(menu, &screen) {
+                log::error!("mod menu {menu} screen refused: {error}");
+                return;
+            }
             self.mod_screen = Some(OpenNativeScreen {
                 layout_revision: {
                     static NEXT: std::sync::atomic::AtomicU64 =
@@ -73,6 +77,49 @@ impl Game<'_> {
                 data: Vec::new(),
                 extra,
             });
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ScreenBookError {
+    WrongBook,
+    UnknownMenu,
+    InvalidLayout(horizon_client::recipe_book::slot_layout::LayoutError),
+}
+
+fn validate_book_geometry(menu: &str, screen: &mod_api::Screen) -> Result<(), ScreenBookError> {
+    use horizon_client::recipe_book::{
+        menu_layout::{MenuLayoutMetadata, compile},
+        slot_layout::LayoutError,
+    };
+    let Some((book, _, layout)) = mod_api::RecipeBookLayout::registered(menu) else {
+        return Ok(());
+    };
+    if screen.recipe_book.as_ref() != Some(&book) {
+        return Err(ScreenBookError::WrongBook);
+    }
+    let menu =
+        horizon_client::containers::mod_menu_type(menu).ok_or(ScreenBookError::UnknownMenu)?;
+    let metadata = MenuLayoutMetadata {
+        slots: u16::try_from(menu.slots)
+            .map_err(|_| ScreenBookError::InvalidLayout(LayoutError::InvalidSlotCount))?,
+        crafting: menu
+            .crafting
+            .map(|grid| (grid.grid as u16, grid.size as u16, grid.result as u16)),
+    };
+    let layout = compile(layout, metadata).map_err(ScreenBookError::InvalidLayout)?;
+    layout
+        .validate_geometry(&screen.slots)
+        .map_err(ScreenBookError::InvalidLayout)
+}
+
+impl std::fmt::Display for ScreenBookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongBook => f.write_str("screen book differs from menu declaration"),
+            Self::UnknownMenu => f.write_str("content menu is unavailable"),
+            Self::InvalidLayout(error) => write!(f, "{error:?}"),
         }
     }
 }

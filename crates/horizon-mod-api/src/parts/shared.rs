@@ -139,7 +139,6 @@ pub(crate) struct TagParts {
     pub(crate) items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
 }
 
-
 pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::Requests {
     static EMPTY: LazyLock<horizon_mod_runtime::registry_keys::Requests> =
         LazyLock::new(Default::default);
@@ -496,11 +495,11 @@ pub(crate) fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
-
 impl PartRegistrar {
     pub(crate) fn new(mod_id: &'static str) -> Self {
         Self {
             recipe_book_types: HashMap::new(),
+            menu_recipe_books: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
             mod_id,
@@ -646,6 +645,7 @@ pub(crate) fn install_registrar(
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let mut installed = Installed {
         recipe_book_types: registrar.recipe_book_types,
+        menu_recipe_books: registrar.menu_recipe_books,
         game_rule_slots,
         game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,
@@ -1106,7 +1106,7 @@ pub mod tests {
     }
 }
 
-#[path = "registration_state.rs"]
+#[path = "shared/registration_state.rs"]
 mod registration_state;
-pub use registration_state::PartRegistrar;
 pub(crate) use registration_state::Installed;
+pub use registration_state::PartRegistrar;
