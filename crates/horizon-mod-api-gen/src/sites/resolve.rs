@@ -74,6 +74,7 @@ pub(crate) struct Resolved<'a> {
     pub fields: Vec<syn::Ident>,
     pub types: Vec<Type>,
     pub output: proc_macro2::TokenStream,
+    pub once: bool,
 }
 
 /// Identity facts, independent of whether the call can be lowered into a repeatable record.
@@ -213,7 +214,51 @@ fn copy_shape(shape: &Shape, structural: bool) -> bool {
     }
 }
 
-/// Resolve a selected call and refuse shapes that cannot have a repeatable raw continuation.
+/// Expand a non-generic source alias without naming its private lexical definition.
+/// Cyclic and generic aliases remain opaque and follow the existing record refusal.
+fn source_shape(
+    rule: &Rule,
+    entries: &[Internal],
+    module: &str,
+    this: Option<&str>,
+    ty: &Type,
+) -> Shape {
+    let mut shape = rule.shape(module, this, ty);
+    let mut current = ty.clone();
+    let mut module = module.to_owned();
+    let mut seen = std::collections::BTreeSet::new();
+    while matches!(shape, Shape::Opaque(_)) {
+        let Type::Path(path) = &current else { break };
+        let Some(path) = rule.resolve(&module, &path.path) else {
+            break;
+        };
+        if !seen.insert(path.clone()) {
+            break;
+        }
+        let Some(entry) = entries
+            .iter()
+            .find(|e| e.path == path && e.kind == "type" && e.cfg.is_empty())
+        else {
+            break;
+        };
+        let Ok(syn::Item::Type(alias)) = syn::parse_str::<syn::Item>(&entry.signature) else {
+            break;
+        };
+        if !alias.generics.params.is_empty() {
+            break;
+        }
+        module = path
+            .rsplit_once("::")
+            .expect("resolved alias module")
+            .0
+            .to_owned();
+        current = *alias.ty;
+        shape = rule.shape(&module, None, &current);
+    }
+    shape
+}
+
+/// Resolve a selected call and choose a repeatable or consuming source record.
 pub(crate) fn resolve<'a>(
     expr: &'a Expr,
     enclosing: &Internal,
@@ -252,22 +297,41 @@ pub(crate) fn resolve<'a>(
         .ok_or(Cause::Missing("unresolved callee scope"))?;
     let mut types = Vec::new();
     let mut fields = Vec::new();
+    let mut once = false;
     for arg in &sig.inputs {
         if let FnArg::Typed(arg) = arg {
             let syn::Pat::Ident(pat) = &*arg.pat else {
                 return Err(Cause::Record("destructured callee parameter").into());
             };
-            let shape = rule.shape(&callee_module, callee_this.as_deref(), &arg.ty);
+            let shape = if private {
+                source_shape(
+                    rule,
+                    entries,
+                    &callee_module,
+                    callee_this.as_deref(),
+                    &arg.ty,
+                )
+            } else {
+                rule.shape(&callee_module, callee_this.as_deref(), &arg.ty)
+            };
             // Owned non-Copy fields cannot implement a repeatable original. Shared
             // references are Copy; source records bind their referents to the call.
             let borrowed = private && matches!(shape, Shape::Ref { mutable: false, .. });
-            if !borrowed && !copy_shape(&shape, private) {
+            let owned = private
+                && !shape.may_borrow()
+                && !matches!(
+                    shape,
+                    Shape::Slice(_) | Shape::DynError | Shape::Scalar(crate::crossing::Scalar::Str)
+                )
+                && !copy_shape(&shape, true);
+            once |= owned;
+            if !borrowed && !owned && !copy_shape(&shape, private) {
                 return Err(Cause::Record(
                     "argument record requires a borrowing or non-Copy field",
                 )
                 .into());
             }
-            let ty = if borrowed {
+            let ty = if borrowed || owned || (private && matches!(&*arg.ty, Type::Path(_))) {
                 let spelling = crate::internals_table::spell(&shape).ok_or(Cause::Record(
                     "argument record requires a borrowing or non-Copy field",
                 ))?;
@@ -330,6 +394,7 @@ pub(crate) fn resolve<'a>(
         fields,
         types,
         output,
+        once,
     })
 }
 
