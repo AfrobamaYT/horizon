@@ -1320,6 +1320,7 @@ impl Game<'_> {
         self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
         self.native_lifecycle.begin_close();
         self.native_lifecycle_world_closed();
+        self.recipe_ui.server_properties = Default::default();
     }
 
     /// Prepare a client session and remote state to receive packets from a studio replay.
