@@ -293,7 +293,10 @@ pub fn mouse_button(name: &str) -> Option<MouseButton> {
         _ => return None,
     })
 }
-pub use horizon_client_core::key_display::display_name;
+pub use horizon_client_core::key_display::{
+    clear_action_bindings, clear_action_resolver, display_name, reset_action_bindings,
+    set_action_binding, set_action_bindings, set_action_resolver,
+};
 
 /// A key event: what the layout writes on its key, without modifiers, names
 /// that key from now on (`key_display::learn_layout`), so an AZERTY player's
@@ -359,7 +362,14 @@ impl KeyBinds {
     pub fn set(&mut self, name: &str, key: &str) {
         if let Some((n, _, _)) = all_mappings().find(|m| m.0 == name) {
             self.keys.insert(n, key.to_owned());
+            horizon_client_core::key_display::set_action_binding(n, key);
         }
+    }
+    /// Sync the current key bindings to `horizon_client_core::key_display`.
+    pub fn sync_action_bindings(&self) {
+        horizon_client_core::key_display::set_action_bindings(
+            self.keys.iter().map(|(n, d)| (*n, d.as_str())),
+        );
     }
     /// The bindings `options.txt` holds: vanilla's mappings only.
     pub fn saved(&self) -> Vec<(&'static str, String)> {
@@ -377,6 +387,7 @@ impl KeyBinds {
     }
     pub fn reset_all(&mut self) {
         *self = Self::default();
+        self.sync_action_bindings();
     }
     /// Mappings sharing `name`'s key (KeyMapping.same), for conflict marks.
     pub fn conflicts(&self, name: &str) -> Vec<&'static str> {
@@ -652,5 +663,12 @@ mod tests {
     fn display_names() {
         assert_eq!(display_name("key.keyboard.w").plain(), "W");
         assert_eq!(display_name("key.keyboard.slash").plain(), "/");
+        assert_eq!(display_name("key.forward").plain(), "W");
+
+        let mut k = KeyBinds::default();
+        k.set("key.forward", "key.keyboard.up");
+        assert_eq!(display_name("key.forward").plain(), "key.keyboard.up");
+        k.set("key.forward", "key.keyboard.w");
+        assert_eq!(display_name("key.forward").plain(), "W");
     }
 }

@@ -1093,6 +1093,34 @@ mod tests {
     }
 
     #[test]
+    fn keybind_components_decode_assigned_key_and_reflect_rebinding() {
+        let ((), _) = crate::lang::scoped(
+            crate::lang::Language::of(
+                "en_us",
+                [
+                    ("key.jump".into(), "Jump".into()),
+                    ("key.keyboard.space".into(), "Space".into()),
+                    ("key.keyboard.up".into(), "Up Arrow".into()),
+                    ("key.keyboard.unknown".into(), "None".into()),
+                ],
+            ),
+            || {
+                let v = serde_json::json!({"keybind": "key.jump"});
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Space");
+
+                crate::key_display::set_action_binding("key.jump", "key.keyboard.up");
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Up Arrow");
+
+                crate::key_display::set_action_binding("key.jump", "key.keyboard.unknown");
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "None");
+
+                crate::key_display::reset_action_bindings();
+                assert_eq!(to_text(&v, &mut |_| Text::empty()).plain(), "Space");
+            },
+        );
+    }
+
+    #[test]
     fn hex_color_follows_text_color_parse_color() {
         for bad in [
             "#1000000",
