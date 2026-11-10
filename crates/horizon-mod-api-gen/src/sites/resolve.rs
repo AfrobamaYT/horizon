@@ -193,6 +193,26 @@ pub(crate) fn callee<'a>(
     })
 }
 
+// These structural shapes are Copy independently of any engine type's derives.
+fn copy_shape(shape: &Shape, structural: bool) -> bool {
+    match shape {
+        Shape::Scalar(
+            crate::crossing::Scalar::Bool
+            | crate::crossing::Scalar::Char
+            | crate::crossing::Scalar::Signed(_)
+            | crate::crossing::Scalar::Unsigned(_)
+            | crate::crossing::Scalar::Float(_)
+            | crate::crossing::Scalar::Wide(_),
+        )
+        | Shape::Unit => true,
+        Shape::Array(element, _) if structural => copy_shape(element, true),
+        Shape::Tuple(elements) if structural => {
+            elements.iter().all(|element| copy_shape(element, true))
+        }
+        _ => false,
+    }
+}
+
 /// Resolve a selected call and refuse shapes that cannot have a repeatable raw continuation.
 pub(crate) fn resolve<'a>(
     expr: &'a Expr,
@@ -201,6 +221,7 @@ pub(crate) fn resolve<'a>(
     lexical: &super::analysis::Scope,
     entries: &'a [Internal],
     rule: &Rule,
+    private: bool,
 ) -> Result<Resolved<'a>, Error> {
     let Callee {
         callee,
@@ -237,25 +258,28 @@ pub(crate) fn resolve<'a>(
                 return Err(Cause::Record("destructured callee parameter").into());
             };
             let shape = rule.shape(&callee_module, callee_this.as_deref(), &arg.ty);
-            // Moving an owned field out of &mut Args cannot implement a repeatable
-            // original. Borrowing fields need a separate alias analysis, not guesses.
-            if !matches!(
-                shape,
-                Shape::Scalar(
-                    crate::crossing::Scalar::Bool
-                        | crate::crossing::Scalar::Char
-                        | crate::crossing::Scalar::Signed(_)
-                        | crate::crossing::Scalar::Unsigned(_)
-                        | crate::crossing::Scalar::Float(_)
-                        | crate::crossing::Scalar::Wide(_)
-                ) | Shape::Unit
-            ) {
+            // Owned non-Copy fields cannot implement a repeatable original. Shared
+            // references are Copy; source records bind their referents to the call.
+            let borrowed = private && matches!(shape, Shape::Ref { mutable: false, .. });
+            if !borrowed && !copy_shape(&shape, private) {
                 return Err(Cause::Record(
                     "argument record requires a borrowing or non-Copy field",
                 )
                 .into());
             }
-            types.push((*arg.ty).clone());
+            let ty = if borrowed {
+                let spelling = crate::internals_table::spell(&shape).ok_or(Cause::Record(
+                    "argument record requires a borrowing or non-Copy field",
+                ))?;
+                let mut ty: Type = syn::parse_str(&spelling.to_string().replace("'static", "'g"))?;
+                if let Type::Reference(reference) = &mut ty {
+                    reference.lifetime = Some(syn::parse_quote!('a));
+                }
+                ty
+            } else {
+                (*arg.ty).clone()
+            };
+            types.push(ty);
             fields.push(pat.ident.clone());
         }
     }
