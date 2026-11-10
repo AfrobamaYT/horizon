@@ -1404,9 +1404,7 @@ impl Game<'_> {
             }
         }
         self.set_mode(mode);
-        if self.screen == Screen::Inventory && (self.creative || self.spectator()) {
-            self.set_screen(Screen::Playing);
-        }
+
         true
     }
     fn cmd_gamemode(&mut self, ctx: &Context) -> R<i32> {

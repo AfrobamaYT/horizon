@@ -561,7 +561,7 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         "[package]\nname='horizon-mod-points'\n",
     )
     .unwrap();
-    let source = "fn f() -> i32 { let mut n = 3; sink(n); n * 2 } fn sink(n: i32) {}";
+    let source = "fn f() -> i32 { let mut n: i32 = 3; sink(n); n * 2 } fn sink(n: i32) {}";
     let metadata = serde_json::json!([
         {"path":"horizon_client::game::f", "kind":"fn", "signature":"fn f() -> i32", "hash":"fingerprint"},
         {"path":"horizon_client::game::sink", "kind":"fn", "signature":"fn sink(n: i32)", "hash":"sink"}
