@@ -49,10 +49,10 @@ handle; it cannot directly mutate server state. Do not add player-id helpers to
 
 Book identities are separate from `RecipeBookCategory` in
 `crates/horizon-mod-api/src/item/recipe_book.rs`. Categories group recipes and provide
-icons; a book owns two flags. A screen can associate categories with a registered
-book explicitly. Neither category registration nor recipe-type registration
-implicitly registers a book. Display layout, unlocking and custom recipe displays
-remain separate work; this proposal supplies settings only.
+icons; a book owns two flags. A screen associates categories with a registered
+book explicitly through `Screen.recipe_book`. Neither category registration nor
+recipe-type registration implicitly registers a book. Recipe unlocking and
+placement remain separate from displaying the declared recipe layouts.
 
 ### Registration API
 
@@ -67,8 +67,8 @@ the generated Wire boundary; the key explicitly derives `Wire`.
 
 This registration does not create a category, settings handle, UI or network
 payload. Successful installation freezes the registry; resource reload does
-not reopen it. The settings and synchronization operations below are the
-contract for the remaining implementation, not callable methods yet.
+not reopen it. The settings and synchronization operations described here are
+implemented on the typed player handle.
 
 ## Storage, persistence, copy and replace
 
@@ -204,7 +204,8 @@ schema on mod recipes.
 smithing layouts. `RecipeSlotDisplay` describes slots using API-owned values:
 items, stacks, tags, fuel, potion/component transforms, dyeing, trimming,
 remainders and composites. All three display types explicitly derive `Wire`.
-Named resource references are resolved at load, not while drawing.
+Named resource references are validated against the owning resource generation
+at load. Display stacks are materialized when the panel's content changes.
 
 The engine's `ModBookIndex::build` boundary validates declarations atomically
 against resource tables. Unknown resources, invalid layouts, duplicate recipe
@@ -220,12 +221,32 @@ the cache. Multiple categories may share a recipe type. The engine's panel
 projection requires both the declared target menu and registered book key,
 and a category selected in another book cannot be reused as a tab here.
 
-This is display/index infrastructure, **not screen integration**. Existing
-screens do not yet render these declarations. A declaration's `book` is a
-registered `RecipeBookTypeKey` from #2415; it does not implicitly register
-a book or create settings. The index checks the key against the frozen registry. Enabling
-custom book screens still requires the registration and negotiated settings
-route described above. No vanilla book ordinal or packet meaning changes.
+### Hosting the panel in a mod screen
+
+Set `Screen.recipe_book` to `Some(key.clone())` in the existing `native_screen`
+declaration. Leave it `None` for a screen without a recipe book. The key must
+belong to the categories' `target_menu`; a different menu cannot display that
+book. The green book button sits just outside the menu's right edge so it does
+not cover slots chosen by the mod. The open panel uses the normal narrow-window
+coverage and wide-window menu shift.
+
+The panel is disabled until the connection has an authoritative settings
+snapshot for the registered key. Opening and filtering submit requests through
+the shared custom-settings route; neither click optimistically changes the
+saved flags. Tabs show this book's category icons, with a search tab aggregating
+only this book. Search matches displayed result names. The craftable filter
+matches the display's required input alternatives against player inventory and
+visible menu contents, not the custom recipe's opaque JSON logic.
+
+Recipe buttons cycle through their declared result displays. Clicking a button
+opens a display preview using the shared recipe-book overlay painter, including
+stonecutter and smithing ingredient layouts. These previews do not place recipes,
+create ghost slots, or send a custom id through vanilla placement packets;
+placement and ghosts are tracked separately in #2599.
+
+A declaration's `book` is a registered `RecipeBookTypeKey` from #2415; it does not
+implicitly register a book or create settings. The index checks the key against
+the frozen registry. No vanilla book ordinal or packet meaning changes.
 
 ## Transport and cost
 

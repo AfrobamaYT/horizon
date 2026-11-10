@@ -1,0 +1,27 @@
+use super::*;
+
+impl Game<'_> {
+    /// The mod screen showing now, if any.
+    pub(super) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
+        self.mod_screen
+            .as_ref()
+            .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
+    }
+    /// Whether a mod's screen places the current container and player slots.
+    pub(in crate::game) fn native_screen_shown(&self) -> bool {
+        self.shown_native_screen().is_some()
+    }
+    /// The open mod screen's height.
+    pub(in crate::game) fn native_screen_height(&self) -> Option<f32> {
+        self.shown_native_screen().map(|s| s.screen.height)
+    }
+    pub(in crate::game) fn native_screen_menu(&self) -> Option<&str> {
+        let screen = self.shown_native_screen()?;
+        self.remote_menu_type()
+            .or_else(|| self.mod_menu_at(screen.key))
+    }
+    /// The explicitly assigned book; declarations bind it to the actual menu.
+    pub(in crate::game) fn native_screen_book(&self) -> Option<&mod_api::RecipeBookTypeKey> {
+        self.shown_native_screen()?.screen.recipe_book.as_ref()
+    }
+}
