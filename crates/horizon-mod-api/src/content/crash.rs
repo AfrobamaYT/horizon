@@ -32,7 +32,7 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
     let _ = ensure_installed();
     mod_vocab::content::crash::enter_native_mod(call)
 }
-fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
+fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory<'_>, call: ModCall) {
     let frame = NEXT_FRAME
         .try_with(|c| {
             let next = c.get().checked_add(1);
