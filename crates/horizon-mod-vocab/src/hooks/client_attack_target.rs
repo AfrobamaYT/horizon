@@ -8,6 +8,9 @@ pub trait Hooks {
     /// it; an untouched empty list keeps vanilla's block/miss path. Server checks and cooldowns
     /// still apply to every attack. Returning `Flow::Cancel` cancels the whole batch.
     /// No NeoForge bus counterpart; client-side only.
+    #[notes = r#"### Client attack targeting
+
+`client_attack_target` runs with a ClientHost from the remote client's start-attack input path after interaction cancellation and before ordinary melee dispatch. Spear jabs bypass it. Cancellation suppresses attacks; an explicit target batch is deduplicated in first-occurrence order and each handle is checked for lifetime, reach, held-item range and occlusion. The server remains authoritative."#]
     #[hook(
         side = "client",
         contract = "cancel",
