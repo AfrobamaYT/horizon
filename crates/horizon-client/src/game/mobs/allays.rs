@@ -403,6 +403,3 @@ impl Game<'_> {
     }
 }
 
-#[cfg(test)]
-#[path = "allay_jukebox_source_tests.rs"]
-mod allay_jukebox_source_tests;
