@@ -119,14 +119,14 @@ impl Game<'_> {
         if !right && self.sort_press() {
             return;
         }
-        if self.native_screen_press(right) {
-            self.inv_clicks.skip_release();
-            return;
-        }
         // AbstractRecipeBookScreen lets the book handle its buttons before
         // AbstractContainerScreen starts a drag or chooses an outside slot.
         // Toggling it can move the inventory under the pointer before release.
         if self.recipe_book_click(right) {
+            self.inv_clicks.skip_release();
+            return;
+        }
+        if self.native_screen_press(right) {
             self.inv_clicks.skip_release();
             return;
         }

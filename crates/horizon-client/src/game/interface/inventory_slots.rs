@@ -2,6 +2,9 @@
 //! slot positions and hit tests, highlights, and the crafting result slot.
 use super::*;
 
+#[cfg(test)]
+thread_local! { pub(in crate::game) static SLOT_POSITIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+
 impl Game<'_> {
     /// A screen closed or lost its pointer: discard the unfinished click gesture.
     pub(super) fn reset_inventory_clicks(&mut self) {
@@ -169,6 +172,8 @@ impl Game<'_> {
     }
     /// InventoryMenu / CraftingMenu slot layouts.
     pub(super) fn slot_position(&self, i: usize) -> (f32, f32) {
+        #[cfg(test)]
+        SLOT_POSITIONS.with(|count| count.set(count.get() + 1));
         if self.creative_inventory_open()
             && let Some(position) = Creative::inventory_slot_position(i)
         {

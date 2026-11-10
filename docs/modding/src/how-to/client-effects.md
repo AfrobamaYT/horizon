@@ -9,6 +9,17 @@ Read `ClientHost::gui_options().advanced_item_tooltips` for the current
 setting on native and wasm; request a new snapshot after a toggle. This is separate
 from the advanced flag supplied to an individual tooltip request.
 
+## Adding tooltip lines
+
+Use `ItemPart::tooltip` for an attached item's own lines at the vanilla
+`Item.appendHoverText` position, after the name and before component lines.
+Use `Hooks::item_tooltip` for NeoForge's global `ItemTooltipEvent` moment: it
+receives every item's finished tooltip, including the parts' earlier lines,
+component lines and advanced information. No attached part is needed for a
+global listener, so this is also how a mod edits vanilla or other mods' tooltips.
+The global event supplies the stack, display settings, player IDs, and the
+request's `advanced` and `creative` flags on native and wasm alike.
+
 ## Muffling sounds
 
 `ClientHost::muffle_sounds(amount, lowpass, ticks, exempt)` temporarily muffles the sound output, for example to accompany ringing ears after a nearby blast:
