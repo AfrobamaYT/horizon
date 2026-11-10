@@ -431,9 +431,9 @@ jobs:
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
-      # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
-      # success(), not !cancelled(): after an earlier step fails, the Rust install was skipped and tests that
-      # launch rustc would add a second, misleading failure.
+      # Last, so a tooling failure never skips the Rust tests. Only after every earlier step succeeded (success(),
+      # not !cancelled()): after a failure the Rust install was skipped, and tests that launch rustc would add a
+      # second, misleading failure.
       - name: Test offline research tooling
         if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
