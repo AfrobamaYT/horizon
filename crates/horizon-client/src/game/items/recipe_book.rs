@@ -912,6 +912,12 @@ impl Game<'_> {
         if self.pad.menu.held != [false; 2] {
             return;
         }
+        if self.native_screen_shown() {
+            if self.mod_book_open() && !self.spectator() {
+                self.recipe_ui.custom.turn_page(next);
+            }
+            return;
+        }
         let pages = self.recipe_ui.view.buttons.len().div_ceil(20);
         let page = self.recipe_ui.page;
         let Some(to) = (if next {

@@ -1,6 +1,7 @@
 //! A mod menu's book uses the shared painter, but never vanilla storage ordinals.
 use super::*;
 use horizon_client::recipe_book::mod_presentation::ModPresentation;
+#[path = "mod_screen/resolve.rs"]
 mod resolve;
 
 #[derive(Default)]
@@ -11,8 +12,27 @@ pub(super) struct ModRecipeUi {
     presentation: Option<ModPresentation>,
     overlay: Option<OverlayView>,
     stocks: Vec<ItemStack>,
+    inventory_len: usize,
     query: String,
     filtering: bool,
+}
+
+impl ModRecipeUi {
+    pub(super) fn turn_page(&mut self, next: bool) -> bool {
+        let pages = self
+            .presentation
+            .as_ref()
+            .map_or(0, |p| p.recipes.len().div_ceil(20));
+        let page = if next {
+            self.page.checked_add(1).filter(|p| *p < pages)
+        } else {
+            self.page.checked_sub(1)
+        };
+        let Some(page) = page else { return false };
+        self.page = page;
+        self.overlay = None;
+        true
+    }
 }
 
 impl Game<'_> {
@@ -65,6 +85,7 @@ impl Game<'_> {
             .map_or("", |s| s.value.as_str())
             .to_owned();
         let mut stocks: Vec<_> = self.inventory.iter().flatten().cloned().collect();
+        let inventory_len = stocks.len();
         for slot in self.native_screen_slots().unwrap_or_default() {
             if let Some(stack) = self.slot_mut(slot).clone() {
                 stocks.push(stack);
@@ -75,10 +96,20 @@ impl Game<'_> {
             && ui.query == query
             && ui.filtering == filtering
             && ui.stocks == stocks
+            && ui.inventory_len == inventory_len
         {
             return;
         }
-        let resolver = resolve::Resolver::new(self, &stocks);
+        let mut stacked = Stacked::default();
+        for (index, stack) in stocks.iter().enumerate() {
+            let max = horizon_client::menu::item_max_stack(self.items(), stack);
+            if index < inventory_len {
+                stacked.account_simple(stack, max);
+            } else {
+                stacked.account_stack(stack, max);
+            }
+        }
+        let resolver = resolve::Resolver::new(self, &stacked);
         let Some(panel) = self.mod_book_panel() else {
             return;
         };
@@ -87,6 +118,7 @@ impl Game<'_> {
         ui.query = query;
         ui.filtering = filtering;
         ui.stocks = stocks;
+        ui.inventory_len = inventory_len;
         ui.page = ui
             .page
             .min(presentation.recipes.len().div_ceil(20).saturating_sub(1));
@@ -241,12 +273,10 @@ impl Game<'_> {
         };
         let pages = presentation.recipes.len().div_ceil(20);
         if ui.page + 1 < pages && inside(cursor, xo + 93.0, yo + 137.0, 12.0, 17.0) {
-            ui.page += 1;
-            return true;
+            return ui.turn_page(true);
         }
         if ui.page > 0 && inside(cursor, xo + 38.0, yo + 137.0, 12.0, 17.0) {
-            ui.page -= 1;
-            return true;
+            return ui.turn_page(false);
         }
         for (n, id) in presentation.tab_ids.iter().enumerate() {
             if inside(cursor, xo - 30.0, yo + 3.0 + 27.0 * n as f32, 35.0, 27.0) {
@@ -356,5 +386,50 @@ impl Game<'_> {
             targets.push(button([xo + 93.0, yo + 137.0, 12.0, 17.0]));
         }
         targets
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_client::recipe_book::mod_presentation::PresentedRecipe;
+
+    #[test]
+    fn paging_stays_within_the_current_view_and_dismisses_preview() {
+        let mut ui = ModRecipeUi::default();
+        assert!(!ui.turn_page(true));
+        assert!(!ui.turn_page(false));
+        ui.presentation = Some(ModPresentation {
+            tab_ids: vec!["test:search".into()],
+            tabs: vec![TabView {
+                icons: ("minecraft:compass".into(), None),
+                selected: true,
+                anim: 0.0,
+            }],
+            recipes: (0..21)
+                .map(|index| PresentedRecipe {
+                    recipe: format!("test:r{index}"),
+                    button: ButtonView {
+                        has_craftable: true,
+                        entries: vec![vec![ItemStack::new("minecraft:stone", 1)]],
+                        anim: 0.0,
+                    },
+                    overlay: Vec::new(),
+                })
+                .collect(),
+        });
+        ui.overlay = Some(OverlayView {
+            x: 0,
+            y: 0,
+            recipes: Vec::new(),
+        });
+        assert!(ui.turn_page(true));
+        assert_eq!(ui.page, 1);
+        assert!(ui.overlay.is_none());
+        assert!(!ui.turn_page(true));
+        assert_eq!(ui.page, 1);
+        assert!(ui.turn_page(false));
+        assert_eq!(ui.page, 0);
+        assert!(!ui.turn_page(false));
     }
 }
