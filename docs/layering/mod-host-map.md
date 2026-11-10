@@ -14,6 +14,16 @@ How to read the numbers:
   a private engine function counts as one.
 - Strands come from the `RULES` table in the scanner, the first matching pattern winning; correct a strand there.
 
+## Current vocabulary ownership (#2587)
+
+The [checked state inventory](mod-vocab-state.md) records every production static/TLS declaration
+and its ownership reason. The concrete Parts authoring implementation, diagnostic warning history,
+profiling, resource access and load snapshots live above the engine. Descriptor vocabulary and direct
+installed lookup reads stay below it. The unchanged points machinery is the temporary unsafe/state
+exception pending #2697; the first #2587 PR retains `deny`, not `forbid`, and is only part of that issue.
+The proposals and generated audit counts below describe the original split, not a claim that the
+current vocabulary contains no process state.
+
 ## Strands and their proposals
 
 **Loading (phase 1): move.** `mod_list.rs`, package reading (`horizon-mod-package`), the wasm start

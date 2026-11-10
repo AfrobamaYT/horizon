@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from check_mod_vocabulary_state import declarations, violations
+from check_mod_vocabulary_state import declarations, violations, unsafe_violations
 
 
 class VocabularyStateGate(unittest.TestCase):
@@ -45,6 +45,27 @@ class VocabularyStateGate(unittest.TestCase):
     def test_feature_gate_is_not_a_test_only_exemption(self):
         for attribute in ('#[cfg(feature = "testing")]', '#[cfg(any(test, feature = "testing"))]'):
             self.assertEqual(len(declarations(attribute + '\nstatic EXTRA: AtomicBool = x;')), 1)
+
+    def test_only_explicit_test_module_edges_exempt_fixture_files(self):
+        files = {'parent.rs': '#[cfg(test)]\n#[path = "fixture.rs"] mod fixture;',
+                 'fixture.rs': 'static FIXTURE: AtomicBool = x;'}
+        self.assertEqual(violations(files, {}), [])
+        files['parent.rs'] = '#[cfg(feature = "testing")]\n#[path = "fixture.rs"] mod fixture;'
+        self.assertEqual(len(violations(files, {})), 1)
+        files['parent.rs'] = '#[cfg(test)]\n#[path = "fixture.rs"] mod fixture;'
+        files['other.rs'] = '#[path = "fixture.rs"] pub(crate) mod live;'
+        self.assertEqual(len(violations(files, {})), 1)
+
+    def test_unsafe_exception_cannot_spread_to_other_source(self):
+        files = {'lib.rs': '#![deny(unsafe_code)]',
+                 '__private/points.rs': '#[expect(unsafe_code)] unsafe impl Send for Raw {}'}
+        self.assertEqual(unsafe_violations(files), [])
+        files['value.rs'] = '#[allow(unsafe_code)] unsafe fn added() {}'
+        self.assertEqual(len(unsafe_violations(files)), 2)
+        files['value.rs'] = '// unsafe fn text() {}\nconst HELP: &str = "unsafe";'
+        self.assertEqual(unsafe_violations(files), [])
+        files['lib.rs'] = ''
+        self.assertIn('must retain', unsafe_violations(files)[0])
 
     def test_changed_cache_type_and_stale_permission_are_rejected(self):
         allowed = {'value.rs::cache::VALUE': {'type': 'OnceLock<String>'}}
