@@ -113,6 +113,9 @@ impl Game<'_> {
         let index = &world_stations!(self).recipe_index;
         let removed = self.level.recipe_book.remove_recipes(index, recipes);
         let count = removed.len() as i32;
+        if count != 0 {
+            self.invalidate_mod_book_placement_knowledge();
+        }
         // A network player's client drops them from its book.
         if self.lan_acting.is_some() && !removed.is_empty() {
             self.guest_packets.push(C::RecipeBookRemove(
@@ -286,9 +289,6 @@ impl Game<'_> {
                 let attack = self.current_attack();
                 self.for_player(target, |g| {
                     g.with_attack(attack, |g| {
-                        if g.spectator() {
-                            return false;
-                        }
                         if let Some(name) = named {
                             g.note_direct_entity(ty, name);
                         }

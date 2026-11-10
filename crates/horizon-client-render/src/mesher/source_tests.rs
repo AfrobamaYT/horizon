@@ -168,6 +168,7 @@ fn fixture() -> (Scratch, Assets, RenderAssets, MeshTables, Biomes) {
         water_colormap: None,
         mod_fluids: vec![],
         mod_tints: Default::default(),
+        section_geometry: std::sync::Arc::new([]),
     };
     let maps = path.join("assets/minecraft/textures/colormap");
     std::fs::create_dir_all(&maps).unwrap();

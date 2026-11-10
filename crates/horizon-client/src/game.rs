@@ -228,6 +228,7 @@ pub(crate) struct Options {
     distance: i32,
     distance_override: Option<i32>,
     seed: i64,
+    developer_single_player: bool,
     creative: bool,
     test_terrain: bool,
     /// `--pregen`: enable the command even when the saved Extras switch is off.
@@ -318,57 +319,6 @@ impl Options {
             )
         })
     }
-    fn read(mut o: Self) -> Result<Self> {
-        if o.pregen {
-            horizon_client::command::vanilla::set_horizon_commands(true);
-        }
-        // The launcher's account: online-mode servers need it. A bad file
-        // only leaves the game offline.
-        let session = if o.session_stdin {
-            let mut text = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
-                .map_err(|e| e.to_string())
-                .and_then(|_| horizon_client::auth::AuthSession::parse(&text))
-                .map(Some)
-        } else {
-            o.session_file
-                .take()
-                .filter(|p| !p.is_empty())
-                .map(|path| horizon_client::auth::AuthSession::load(path.as_ref()))
-                .transpose()
-        };
-        match session {
-            Ok(Some(session)) => {
-                o.player_name = Some(session.name.clone());
-                horizon_client::auth::set_current(session);
-                // The chat key pair, ready before the first join.
-                horizon_client::auth::prepare_chat_keys(true);
-            }
-            Ok(None) => {}
-            Err(e) => eprintln!("Horizon: not signed in: {e}"),
-        }
-        split::launcher::read_now();
-        if let Some(dir) = o.game_dir.take() {
-            std::fs::create_dir_all(&dir)
-                .and_then(|()| std::env::set_current_dir(&dir))
-                .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
-        }
-        // Vanilla's quick play (Main, QuickPlay.joinSingleplayerWorld): only a
-        // world that exists opens; else the title screen. --world also creates one.
-        if let Some(world) = o.quick_play.take() {
-            if std::env::current_dir()?
-                .join("saves")
-                .join(&world)
-                .join("level.dat")
-                .is_file()
-            {
-                o.world = Some(world);
-            } else {
-                eprintln!("Quick play: there is no world {world} in saves/");
-            }
-        }
-        Ok(o)
-    }
     /// The command line alone: no file is read and nothing changes. `None` for `--help` and
     /// `--launch-api`, which print and end the run.
     #[cfg(test)]
@@ -394,6 +344,7 @@ impl Options {
             distance: 12,
             distance_override: None,
             seed: 0,
+            developer_single_player: false,
             creative: false,
             test_terrain: false,
             pregen: false,
@@ -452,6 +403,7 @@ impl Options {
                     }
                     "--fullscreen" => o.fullscreen = true,
                     "--session-stdin" => o.session_stdin = true,
+                    "--developer-single-player" => o.developer_single_player = true,
                     "--creative" => o.creative = true,
                     "--test-terrain" => o.test_terrain = true,
                     "--no-pause" => o.no_pause = true,
@@ -569,6 +521,7 @@ impl Options {
                 }
             }
         }
+        o.validate_developer_single_player()?;
         Ok(Some(o))
     }
 }
@@ -2219,6 +2172,7 @@ struct PreparedWorldReload {
     health: horizon_client::health::HealthResources,
     parts: PreparedParts,
     wire: Option<Arc<horizon_client::lan::data::SyncData>>,
+    datapack_registries: Option<mod_api::DatapackRegistrySet>,
 }
 
 impl WorldTables {
@@ -3326,7 +3280,7 @@ struct Game<'a> {
     /// `Minecraft.hitResult` while the clicks of a tick act (game/network/remote/mod.rs
     /// `remote_handle_input`): picked once, so a creative break does not
     /// move the use that follows it past the broken block.
-    tick_hit: Option<Option<Hit>>,
+    tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// The mob of that `hitResult`, picked with the item held at the pick
     /// (`LocalPlayer.raycastHitResult`: a spear's `attack_range`), before the
     /// tick's number keys change it.
@@ -3339,6 +3293,7 @@ struct Game<'a> {
     /// +2): the pick helpers' `&self` reach.
     entity_reach: f64,
     block_reach: f64,
+    client_targeting: std::cell::Cell<mod_api::ClientTargeting>,
     /// The part of a right click a guest's packet asks for (game/network/lan_actions/interaction.rs).
     guest_use: Option<GuestUse>,
     /// The last `use_hand` that ended the click did so with `FAIL`, which
@@ -4409,28 +4364,18 @@ impl Game<'_> {
         if let Some(hit) = self.forced_hit {
             return Some(hit);
         }
-        if let Some(hit) = self.tick_hit {
+        if let Some(hit) = self.tick_hit.get() {
             return hit;
         }
         let (origin, dir) = self.aim()?;
         // GameRenderer.pick: the block ray runs out to the larger of the two
         // interaction ranges; filterHitResult then drops a hit past the
         // block's.
-        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
+        self.clip_targeting_ray(origin, dir, self.block_reach.max(self.entity_reach))
             .filter(|hit| {
                 let distance: [f64; 3] = std::array::from_fn(|i| hit.point[i] - origin[i]);
                 distance.iter().map(|v| v * v).sum::<f64>() <= self.block_reach.powi(2)
             })
-    }
-    /// The same traversal without `filterHitResult`: the block hit that
-    /// bounds the entity ray in `GameRenderer.pick`, out to the larger
-    /// interaction range — a wall between the two still hides the entity.
-    fn pick_unfiltered(&self) -> Option<Hit> {
-        if let Some(hit) = self.forced_hit {
-            return Some(hit);
-        }
-        let (origin, dir) = self.aim()?;
-        self.clip_ray(origin, dir, self.block_reach.max(self.entity_reach))
     }
     /// The first block outline hit within `reach` along the unit `dir`.
     fn clip_ray(&self, origin: [f64; 3], dir: [f64; 3], reach: f64) -> Option<Hit> {
@@ -7611,7 +7556,7 @@ impl Game<'_> {
                 }
                 return Ok(answer.consumes_action());
             }
-            self.native_use_item(&stack, &mut claimed);
+            self.use_item_in_hand(&stack, &mut claimed);
         }
         if claimed {
             self.swing_arm();
@@ -8306,6 +8251,7 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
         }
@@ -11234,19 +11180,6 @@ impl Game<'_> {
         self.mark_stage(out.len(), "NONE");
     }
 
-    /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
-    /// (any other progress). Cracks not updated for 400 ticks are dropped.
-    pub(crate) fn destroy_block_progress(&mut self, breaker: i32, pos: [i32; 3], progress: i32) {
-        let now = self.world.game_time;
-        self.destroying
-            .retain(|_, c| now.saturating_sub(c.2) <= 400);
-        if (0..10).contains(&progress) {
-            self.destroying.insert(breaker, (pos, progress as u8, now));
-        } else {
-            self.destroying.remove(&breaker);
-        }
-    }
-
     /// `ServerLevel.destroyBlockProgress`: breaker `breaker`'s crack on `pos`
     /// (0..=9, anything else takes it away), for every player within 64 blocks.
     pub(super) fn server_destroy_block_progress(
@@ -11777,8 +11710,7 @@ impl Game<'_> {
         self.score = Default::default();
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
         let root = self.options.resources.clone();
-        (self.world_tables, self.health_resources) =
-            self.build_world_tables(&stack, false, &root, self.mods.data_switched)?;
+        self.open_world_tables(&stack, &root)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
         // A code-mod switch can have rebuilt the root since `Game::new`.
@@ -13544,8 +13476,6 @@ impl Game<'_> {
             a.set_owner(Some(horizon_client::mobs::Who::Player));
             a.fired_from_weapon = weapon;
         }
-        // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
-        self.ignite_spawned_arrow(stack, &mut arrow);
         let (velocity, on_ground) = self.player.as_ref().map_or((Vec3::ZERO, true), |pl| {
             (self.known_player_movement(), pl.ground.on_ground)
         });
@@ -13559,7 +13489,7 @@ impl Game<'_> {
             velocity,
             on_ground,
         );
-        self.add_projectile(arrow);
+        self.spawn_projectile(arrow, &ammo);
         let (player, name, projectile) = (
             horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
             self.acting_player_name().to_owned(),
@@ -13762,11 +13692,10 @@ impl Game<'_> {
                 rotation: [0.0; 3],
                 scale: 1.0,
             };
-            let mut canceled = false;
-            if snapshot.is_some() {
-                self.native_render_hand(&mut render, &mut canceled);
-            }
-            if canceled {
+            // RenderHandEvent: the mods pose the hand, draw in it or leave vanilla's out.
+            if snapshot.is_some()
+                && self.render_hand_cancelled(&mut render, to_world, packed, &mut out, &mut runs)
+            {
                 continue;
             }
             // No mod moved the hand (always so without one): no matrices to build.
@@ -16719,11 +16648,12 @@ impl<'a> Game<'a> {
             frame_drawn: true,
             world_icon: None,
             forced_hit: None,
-            tick_hit: None,
+            tick_hit: Default::default(),
             tick_mob: None,
             hotbar_presses: Vec::new(),
             entity_reach: 3.0,
             block_reach: 4.5,
+            client_targeting: Default::default(),
             guest_use: None,
             use_failed: false,
             lan_events: Vec::new(),
@@ -17557,7 +17487,7 @@ pub(crate) fn run_with(
         use mod_api::__private::game::RegistrationContextNew;
         let context = mod_api::RegistrationContext::new();
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
-        horizon_mod_wasm::initialize(&inventory);
+        crate::entry::initialize_code(&inventory);
     }
     mod_points::__private::seal();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
@@ -17600,8 +17530,7 @@ pub(crate) fn run_with(
     mods::register_resource_sources(options.execution_role);
     mods::register_enchantment_damage_effects();
     mods::register_client_presentations(options.execution_role);
-    mods::register_color_resolvers(options.execution_role);
-    mods::register_block_tint_sources(options.execution_role);
+    mods::register_meshing(options.execution_role);
     mods::register_particles(options.execution_role);
     mods::freeze_declarations()?;
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;

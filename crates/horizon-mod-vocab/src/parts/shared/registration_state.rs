@@ -4,8 +4,7 @@ use super::*;
 /// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
 pub(crate) struct Installed {
-    pub(crate) menu_recipe_books:
-        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
+    pub(crate) menu_recipe_books: HashMap<String, crate::parts::menus::MenuBookDeclaration>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
@@ -18,6 +17,9 @@ pub(crate) struct Installed {
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
+    pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
+    pub(crate) datapack_registries:
+        Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
@@ -39,8 +41,7 @@ pub(crate) struct Installed {
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
-    pub(crate) menu_recipe_books:
-        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
+    pub(crate) menu_recipe_books: HashMap<String, crate::parts::menus::MenuBookDeclaration>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
@@ -56,6 +57,9 @@ pub struct PartRegistrar {
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
+    pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
+    pub(crate) datapack_registries:
+        Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
@@ -65,4 +69,5 @@ pub struct PartRegistrar {
     pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
     pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) refused: Vec<String>,
+    pub(crate) self_refusal: Option<String>,
 }

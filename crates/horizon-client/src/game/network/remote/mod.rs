@@ -6,6 +6,7 @@
 //! clicks). The player still moves with the local physics, as the vanilla
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
+mod attack_target;
 mod recipe_properties;
 
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
@@ -979,15 +980,7 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// Join single player's integrated server through memory.
-    pub(super) fn connect_local(
-        &mut self,
-        pipe: horizon_protocol::connection::Pipe,
-        name: &str,
-    ) -> Result<()> {
-        self.join_server("local", name, Some(pipe), None, false, false)
-    }
-    fn join_server(
+    pub(super) fn connect_remote_session(
         &mut self,
         address: &str,
         name: &str,
@@ -1621,7 +1614,7 @@ impl Game<'_> {
         self.score.board = Default::default();
         self.streaming = Streaming::new(Arc::new(NoTerrain), self.worker_context(), 1);
         self.streaming.paused = true;
-        self.world = World::new(self.res.facts().air, 0);
+        self.reset_client_world(0);
         self.remove_local_player_body();
         // The vehicle went with the level: an id kept here would seat the
         // next login on an entity that is not there.
@@ -2792,7 +2785,7 @@ impl Game<'_> {
                 self.world.day_time,
                 self.world.weather,
             );
-            self.world = World::new(self.res.facts().air, spawn.seed);
+            self.reset_client_world(spawn.seed);
             // Entity IDs belong to this ClientLevel, not the connection. A
             // same-level respawn keeps it; a replacement invalidates handles.
             self.native_lifecycle_open_started();
@@ -10242,7 +10235,7 @@ impl Game<'_> {
         }
     }
 
-    fn remote_start_attack(&mut self) -> bool {
+    pub(in crate::game) fn remote_start_attack(&mut self) -> bool {
         if self.clicks.miss_time > 0 || self.hands_busy() {
             return false;
         }
@@ -10289,6 +10282,11 @@ impl Game<'_> {
             self.play_at_feet(kinetic.attack_sound);
             return true;
         }
+        if self.mod_attack_targets() {
+            self.swing_arm();
+            self.send(S::Punch(Empty));
+            return false;
+        }
         let mut instant = false;
         // A ghast's fireball or a wind charge nearer than any mob: the
         // server turns it (game/items/deflect.rs).
@@ -10297,43 +10295,16 @@ impl Game<'_> {
             && self.before_block(distance)
             && self.creatures.projectiles[i].id != 0
         {
-            self.send(S::Attack(play::Attack {
-                id: self.creatures.projectiles[i].id as i32,
-            }));
-            // Player.deflectProjectile takes a redirectable one; a shulker bullet
-            // is attacked.
-            if !super::deflect::redirectable(&self.creatures.projectiles[i]) {
-                self.remote_sweep_event("minecraft:shulker_bullet", false);
-            }
-            self.reset_attack_strength();
+            self.remote_attack_entity(self.creatures.projectiles[i].id as i32, distance);
         } else if let Some(hit) = self.remote_object_hit(true)
             && self.mob_hit().is_none_or(|(_, d, _)| hit.distance < d)
             && self.before_block(hit.distance)
         {
-            // VehicleEntity.hurtServer, ItemFrame and ArmorStand hurtServer,
-            // a painting broken or an EndCrystal hurtServer: the server decides.
-            self.send(S::Attack(play::Attack { id: hit.id }));
-            if let Some((kind, living)) = self.remote_attacked_object(hit.id) {
-                self.remote_sweep_event(&kind, living);
-            }
-            self.reset_attack_strength();
+            self.remote_attack_entity(hit.id, hit.distance);
         } else if let Some((i, distance, _)) = self.mob_hit()
             && self.before_block(distance)
         {
-            // Minecraft.startAttack: an item's attack_range must hold the hit.
-            if self.held_range_allows(distance) {
-                self.send(S::Attack(play::Attack {
-                    id: self.mobs[i].id as i32,
-                }));
-                let kind = format!(
-                    "minecraft:{}",
-                    self.mobs[i].kind.id.trim_start_matches("minecraft:")
-                );
-                self.remote_sweep_event(&kind, true);
-                self.pvp_attacked(self.mobs[i].id as i32, distance);
-                self.remote_player_attack(i);
-                self.reset_attack_strength();
-            }
+            self.remote_attack_entity(self.mobs[i].id as i32, distance);
         } else if !self.entity_targeted()
             && let Some(hit) = self.pick()
         {
@@ -10365,8 +10336,7 @@ impl Game<'_> {
             }
             self.reset_attack_strength();
         }
-        self.swing_arm();
-        self.send(S::Punch(Empty));
+        self.remote_swing_packet();
         instant
     }
 
@@ -10534,15 +10504,13 @@ impl Game<'_> {
             }
             if let Some(swing) = canceled {
                 if swing {
-                    self.swing_arm();
-                    self.send(S::Punch(Empty));
+                    self.remote_swing_packet();
                 }
             } else if self.remote_break_restricted(hit.pos) {
                 // continueDestroyBlock returned false: no swing.
             } else if !air {
                 if self.remote_mining(false) {
-                    self.swing_arm();
-                    self.send(S::Punch(Empty));
+                    self.remote_swing_packet();
                 }
             } else {
                 if let Some(r) = self.remote.as_mut() {
@@ -12686,12 +12654,12 @@ mod tests {
                     .default_state("minecraft:stone")
                     .unwrap();
                 game.world.set(0, 64, 0, stone).unwrap();
-                game.tick_hit = Some(Some(Hit {
+                game.tick_hit.set(Some(Some(Hit {
                     pos,
                     face: [0, 1, 0],
                     point: [0.5, 65.0, 0.5],
                     inside: false,
-                }));
+                })));
                 let held = game.main_hand_key();
                 let remote = game.remote.as_mut().unwrap();
                 remote.destroying = Some((pos, 1, 0.5));

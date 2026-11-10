@@ -133,7 +133,7 @@ pub enum ProvidedBy {
 }
 
 /// The parts attached by tag, by tag name, in registration order.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct TagParts {
     pub(crate) blocks: Vec<(Box<str>, Attached<dyn BlockPart>)>,
     pub(crate) items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
@@ -512,7 +512,9 @@ impl PartRegistrar {
             world_fluids: Vec::new(),
             entity_attribute_modifications: Vec::new(),
             attributes: Vec::new(),
+            datapack_registries: Vec::new(),
             spawn_placements: Vec::new(),
+            biome_modifiers: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -522,6 +524,7 @@ impl PartRegistrar {
             dimension_shape: |_| false,
             chunk_generators: Vec::new(),
             refused: Vec::new(),
+            self_refusal: None,
         }
     }
     /// `part`, of kind `kind`, for tag `tag`; none if it is refused.
@@ -610,11 +613,25 @@ pub(crate) fn register_all(
         }
     }
     let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
-    let context = crate::RegistrationContext::new();
     for (index, hooks) in crate::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
         registrar.mod_index = index;
+        let context = crate::RegistrationContext::new();
+        let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
+        let reason = context
+            .self_refusal
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .or_else(|| registrar.self_refusal.take());
+        if let Some(reason) = reason {
+            rollback(&mut registrar);
+            registrar.refused.push(format!(
+                "mod {} refused registration: {reason}",
+                mods[index].id
+            ));
+        }
     }
     registrar.expand_block_entity_parts();
     registrar.refuse_unknown_dimension_generators();
@@ -655,8 +672,10 @@ pub(crate) fn install_registrar(
         entity_attributes: registrar.entity_attributes,
         world_fluids: registrar.world_fluids,
         attributes: registrar.attributes,
+        datapack_registries: registrar.datapack_registries,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
+        biome_modifiers: registrar.biome_modifiers,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))

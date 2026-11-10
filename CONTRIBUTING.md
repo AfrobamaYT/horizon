@@ -31,7 +31,7 @@ here.
 
   ```sh
   cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
-  cargo run --release -p horizon-client
+  cargo run --release -p horizon-game
   ```
 
 - **Launcher:** its own Cargo workspace in `launcher/` (`cd launcher && cargo run`; on NixOS, `nix-shell` first).
@@ -135,6 +135,11 @@ claimed whole: claim one of the issues a tracker lists, or open one for the part
 
 A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
 5 days, with a comment: open a draft early. Agents claim the same way.
+
+You can hold at most 5 claimed issues that no open pull request of yours links. A sixth `/claim` is refused with a
+comment that gives the count; opening a pull request for one of them, or `/unclaim` on one, frees a slot. The
+repository's collaborators, and the trusted contributors listed in the repository variable `CLAIM_LIMIT_EXEMPT`, are
+not limited.
 
 When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
 it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.

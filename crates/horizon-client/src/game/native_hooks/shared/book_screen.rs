@@ -1,6 +1,8 @@
 use super::*;
 #[path = "book_screen/open.rs"]
 mod open;
+#[path = "book_screen/placement.rs"]
+mod placement;
 
 #[cfg(test)]
 #[path = "book_screen/lifecycle_tests.rs"]
@@ -25,6 +27,12 @@ impl Game<'_> {
         let screen = self.shown_native_screen()?;
         self.remote_menu_type()
             .or_else(|| self.mod_menu_at(screen.key))
+    }
+    pub(in crate::game) fn native_screen_toggle(&self) -> Option<[f32; 2]> {
+        self.shown_native_screen()?.screen.recipe_book_toggle
+    }
+    pub(in crate::game) fn native_screen_block(&self) -> Option<&str> {
+        Some(&self.shown_native_screen()?.block)
     }
     /// The explicitly assigned book; declarations bind it to the actual menu.
     pub(in crate::game) fn native_screen_book(&self) -> Option<&mod_api::RecipeBookTypeKey> {

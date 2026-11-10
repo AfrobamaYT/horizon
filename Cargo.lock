@@ -508,6 +508,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-point-shape",
+ "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
  "rustc-demangle",
@@ -519,6 +520,7 @@ dependencies = [
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
+ "wasmtime",
  "zip",
 ]
 
@@ -1822,7 +1824,6 @@ dependencies = [
  "horizon-mod-points",
  "horizon-mod-render",
  "horizon-mod-runtime",
- "horizon-mod-wasm",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -2073,8 +2074,14 @@ name = "horizon-game"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-core",
+ "horizon-mod-host",
  "horizon-mod-package",
+ "horizon-protocol",
  "horizon-threads",
+ "serde_json",
+ "tempfile",
+ "winresource",
 ]
 
 [[package]]
@@ -2139,7 +2146,6 @@ dependencies = [
  "bytemuck",
  "glam",
  "horizon-core",
- "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
@@ -2163,6 +2169,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "syn 2.0.119",
+ "tempfile",
  "toml",
  "wit-parser",
 ]
@@ -2210,6 +2217,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client",
  "horizon-mod-api",
+ "horizon-mod-host",
  "horizon-mod-package",
  "log",
 ]
@@ -2219,6 +2227,11 @@ name = "horizon-mod-host"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-mod-api",
+ "horizon-mod-package",
+ "horizon-mod-wasm",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -2335,7 +2348,10 @@ dependencies = [
  "horizon-mod-points",
  "horizon-mod-runtime",
  "log",
+ "rustix 1.1.5",
  "serde_json",
+ "sha2",
+ "tempfile",
  "wasmparser 0.261.0",
  "wasmtime",
  "wat",
@@ -2424,6 +2440,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "serde",

@@ -105,7 +105,8 @@ impl HiddenParts {
 }
 
 /// One humanoid part as posed this frame: its pose relative to its parent, and whether it draws
-/// (`ModelPart.visible`, after Skin Customization).
+/// (`ModelPart.visible` as the body drew it: after Skin Customization and the parts
+/// `player_submit` hid).
 #[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]
 pub struct PosedPart {

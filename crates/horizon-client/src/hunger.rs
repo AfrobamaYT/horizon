@@ -179,8 +179,6 @@ impl FoodWorld for TickWorld<'_> {
             .damage
             .id("minecraft:starve")
             .expect("validated starvation source");
-        self.events
-            .push(MotionEvent::Health(HealthEvent::StarvationDamage(amount)));
         let mut environment = Environment {
             level: self.level.reborrow(),
             invulnerability_checked: None,
@@ -221,6 +219,9 @@ impl FoodWorld for TickWorld<'_> {
         if ServerPlayerCombat::new(self.attributes, self.data, food, self.ids, &mut environment)?
             .hurt(self.hurt, amount)?
         {
+            environment
+                .events
+                .push(MotionEvent::Health(HealthEvent::StarvationDamage(amount)));
             *self.hurt_animation_time = self.hurt.hurt_time;
         }
         Ok(())

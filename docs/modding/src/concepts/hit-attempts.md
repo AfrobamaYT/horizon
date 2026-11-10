@@ -15,12 +15,25 @@ PvP-refused player wrappers do not suppress it. Ordinary mob hits also deliver i
 fire resistance, shield and cooldown refusal. Ghast and warden overrides deliver their complete
 invulnerability decision, including flagged ghasts, reflected fireballs and digging wardens.
 
+Zero-damage snowball, egg, ender-pearl and custom thrown collisions still enter the player
+predicate before the zero-damage refusal. A successfully teleported player's pearl also attempts
+its separate fall damage when a listener changes that damage to zero. Wither-skull impact and
+its subsequent explosion are separate attempts. `/damage` asks the predicate even for spectators.
+
+Firework damage to the attached entity is a direct attempt, including creative, spectator or dead
+targets. Its splash query excludes spectators, but includes creative, dead and not-yet-loaded
+resident players and dead resident mobs. Ability, death and client-loaded refusals occur inside
+the damage pipeline, after the observation.
+
 A damage-generating precondition is not itself an invulnerability query. In particular:
 
 - Poison at health at or below one does not call vanilla `hurtServer` and produces no observation.
 - Spectators are absent from vanilla's explosion entity query; team damage restrictions can also
   prevent an explosion damage call. Neither generates an observation. Creative players remain in
   the query and their attempted explosion damage is observed before ability refusal.
+- Falling-block damage selects only living, alive, non-creative, non-spectator entities. Evoker
+  fangs select living, alive entities. Pufferfish contact comes from the player's alive,
+  non-spectator contact selection. Targets omitted by those vanilla queries have no attempt.
 - A sulfur cube with a body item can consume body-immune damage in its `hurtServer` override,
   performing its special push and returning without entering the living invulnerability predicate.
   That path produces no observation, matching the absence of a vanilla predicate call. Ordinary
@@ -39,6 +52,7 @@ health, refused fireballs restore prior fire, and only successful shulker hits g
 A decision-changing case checks that the modified answer survives continuations and a new attempt
 asks again. The test uses prepared resources.
 
-Coverage is not yet universal: caller prefilters remain for creative wither-skull and firework
-victims and spectator `/damage` targets. These are implementation gaps tracked by #2752, not
-vanilla non-attempt exclusions.
+The additional native `remaining_hit_callers_observe_refusals_and_zero_damage` regression enters
+actual skull, rocket, command and zero-damage projectile routes. It distinguishes attached from
+splash spectator targets and checks resident dead mobs and dead or unloaded LAN guests. These
+caller checks supplement the shared damage-pipeline tests rather than synthesizing hook calls.
