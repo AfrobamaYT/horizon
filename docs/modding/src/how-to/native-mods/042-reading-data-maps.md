@@ -10,7 +10,13 @@ what the server made of them, so a server pack can rebalance a mod's numbers wit
 Describe the map once with `DataMap`: its id, the registry its entries are in (`Entry`, an
 `ItemKey` or a `BlockKey`), and how a value decodes. Values arrive as the NBT form of the JSON a
 file held: a whole number is an `Int`, or a `Long` past `i32`, a fraction a `Double`, a boolean a
-`Byte`, an object a `Compound` and an array a `List`.
+`Byte`, an object a `Compound` and an array a `List`. Integer tokens must fit signed
+64-bit NBT `Long`; larger unsigned integers return `DataMapError::Undecodable`,
+never a rounded `Double`. Fractional/exponent tokens use the JSON parser's `f64`
+value (including an integral value written as `1.0`). A JSON `null` anywhere in a
+value also refuses the entire read as `Undecodable`; it is not an empty string.
+Empty and heterogeneous arrays preserve their elements as in-memory `List` values.
+These rules are identical for native and wasm readers.
 
 ```rust,ignore
 use mod_api::{DataMap, DataMapTypesEvent, ItemKey, ServerHost, Tag};

@@ -9,7 +9,10 @@ use horizon_core::nbt::Tag;
 /// Register it in `data_map_types` with [`DataMap::ty`], then read an entry's value with
 /// [`ItemKey::data`] or [`BlockKey::data`]. A value arrives as the NBT form of the JSON a file
 /// held: a whole number is an `Int`, or a `Long` past `i32`, a fraction a `Double`, a boolean a
-/// `Byte`, an object a `Compound` and an array a `List`.
+/// `Byte`, an object a `Compound` and an array a `List`. Integers outside signed
+/// 64-bit range and `null` at any nesting depth return [`DataMapError::Undecodable`]
+/// rather than changing the value. Fractional/exponent JSON tokens use the parser's
+/// `f64` value; empty and heterogeneous arrays retain their elements.
 ///
 /// ```
 /// use mod_api::{DataMap, ItemKey, Tag};

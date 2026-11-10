@@ -10,7 +10,7 @@
 //! merged each time the server's tables are built: a world's first open and
 //! every `/reload`.
 use super::Game;
-use horizon_client::scoreboard::json_to_tag;
+use super::data_map_json::to_tag;
 use horizon_core::nbt::Tag;
 pub use mod_api::game::DataMapType;
 use serde_json::Value;
@@ -201,7 +201,7 @@ impl DataMaps {
             .get(registry)
             .and_then(|maps| maps.get(type_id))
             .ok_or(mod_api::DataMapError::UnknownType)?;
-        Ok(map.get(entry).map(json_to_tag))
+        map.get(entry).map(to_tag).transpose()
     }
 }
 
