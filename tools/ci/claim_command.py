@@ -13,7 +13,12 @@ A comment on an issue, on its first line:
 An assigned issue is taken, and so is one claimed on Discord (Kira's `in progress` label). Trackers and proposals
 (labels `tracker`, `proposal`, `not claimable`, set by maintainers) are never claimed whole. Refused with a one-line
 answer: a pull request (claim the issue it fixes), a closed or locked issue, or an issue someone else holds.
-A success answers with a 👍 on the comment; the assignment shows in the thread.
+A success answers with a 👍 on the comment; the assignment shows in the thread, and the issue's `help wanted` label
+becomes `claimed` (and back when its last holder unclaims).
+A contributor holds at most 5 claimed issues without an open pull request of theirs that links one: a `/claim`
+past that is refused with the count (owner, 2026-11-10). Claims already over the limit stay. The repository's owner,
+members and collaborators (the comment's author association), the trusted reviewers and the logins in the repository
+variable `CLAIM_LIMIT_EXEMPT` (comma-separated) are not limited.
 A claim made here is released after 5 days unless an open pull request links the issue (`Fixes #N`, a mention, or the
 sidebar's link); assignments made by hand are never released. No code of any pull request is read or run: only the
 comment's text, its author and the API's answers, which reach this script as env vars.
@@ -42,6 +47,10 @@ BOT_LOGINS = ("github-actions", "github-actions[bot]")
 KIRA_LABEL = "in progress"
 # Issues nobody claims whole (ari, 2026-11-02): a tracker lists other issues, a proposal waits for a decision.
 UNCLAIMABLE = ("tracker", "proposal", "not claimable")
+# Claimed issues a contributor may hold with no open pull request of theirs linking them (owner, 2026-11-10).
+LIMIT = 5
+# Author associations GitHub gives the repository's own people: they are not limited.
+STAFF = ("OWNER", "MEMBER", "COLLABORATOR")
 
 
 class Refused(Exception):
@@ -107,6 +116,22 @@ def gh(*args: str, check: bool = True, stdin: str | None = None) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+HELD_ISSUES = """
+query($owner: String!, $name: String!, $login: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 50, states: OPEN, filterBy: {assignee: $login}, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number
+        closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { nodes { state author { login } } }
+        timelineItems(last: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
+          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { state author { login } } } } }
+        }
+      }
+    }
+  }
+}"""
+
 ASSIGNED_ISSUES = """
 query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -147,6 +172,26 @@ class Api:
     def unassign(self, n: int, login: str) -> None:
         gh("api", "-X", "DELETE", f"repos/{self.repo}/issues/{n}/assignees", "-f", f"assignees[]={login}")
 
+    def label(self, n: int, add: str, remove: str) -> None:
+        """Swaps one label for another; removing a label the issue lacks is not an error."""
+        gh("api", f"repos/{self.repo}/issues/{n}/labels", "-f", f"labels[]={add}")
+        gh("api", "-X", "DELETE", f"repos/{self.repo}/issues/{n}/labels/{remove.replace(' ', '%20')}", check=False)
+
+    def held_issues(self, login: str) -> list[dict]:
+        """The open issues assigned to `login`, with the open pull requests that link each."""
+        owner, name = self.repo.split("/")
+        out, cursor = [], None
+        while True:
+            args = ["api", "graphql", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"login={login}",
+                    "-f", f"query={HELD_ISSUES}"]
+            if cursor:
+                args += ["-F", f"cursor={cursor}"]
+            page = json.loads(gh(*args))["data"]["repository"]["issues"]
+            out += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                return out
+            cursor = page["pageInfo"]["endCursor"]
+
     def react(self, comment_id: int) -> None:
         gh("api", f"repos/{self.repo}/issues/comments/{comment_id}/reactions", "-f", "content=+1")
 
@@ -167,9 +212,27 @@ class Api:
             cursor = page["pageInfo"]["endCursor"]
 
 
-def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers) -> str | None:
+def exempt_logins(raw: str) -> set[str]:
+    """The logins of `CLAIM_LIMIT_EXEMPT`, comma-separated, compared without case as GitHub does."""
+    return {login.strip().lstrip("@").lower() for login in raw.split(",") if login.strip().lstrip("@")}
+
+
+def without_pull_request(issues: list[dict], login: str) -> list[int]:
+    """The numbers of `issues` (GraphQL nodes from HELD_ISSUES) that no open pull request by `login` links."""
+    def by_them(pr: dict | None) -> bool:
+        pr = pr or {}
+        return pr.get("state") == "OPEN" and ((pr.get("author") or {}).get("login") or "").lower() == login.lower()
+    return [i["number"] for i in issues
+            if not any(by_them(pr) for pr in i["closedByPullRequestsReferences"]["nodes"])
+            and not any(by_them(e.get("source")) for e in i["timelineItems"]["nodes"])]
+
+
+def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers,
+        association: str = "NONE", exempt: frozenset[str] | set[str] = frozenset()) -> str | None:
     """Does the command; returns the comment to post, or None when a 👍 says it. Raises Refused for a refusal.
-    Claims are GitHub assignees, so they are held by login; who may act for others is decided by ID."""
+    Claims are GitHub assignees, so they are held by login; who may act for others is decided by ID.
+    `association` is the comment's author association, which exempts the repository's own people from the limit, and
+    `exempt` the lowercased logins of `CLAIM_LIMIT_EXEMPT`."""
     login = actor.login
     issue = api.issue(number)
     if issue is None:
@@ -191,8 +254,16 @@ def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers
         if KIRA_LABEL in labels:
             raise Refused(f"someone claimed this issue on Discord (Kira's `{KIRA_LABEL}` label): pick another, or ask "
                           "in the thread.")
+        if association not in STAFF and login.lower() not in exempt and not is_team(actor, reviewers, api.repo):
+            open_claims = without_pull_request(api.held_issues(login), login)
+            if len(open_claims) >= LIMIT:
+                listed = ", ".join(f"#{n}" for n in sorted(open_claims))
+                raise Refused(f"you already hold {len(open_claims)} claimed issues with no open pull request of yours "
+                              f"({listed}), and the limit is {LIMIT}. Opening a pull request that links one of them, "
+                              "or `/unclaim` on one, frees a slot.")
         if login.lower() not in {a.lower() for a in api.assign(number, login)}:
             raise Refused("GitHub didn't assign you; nothing changed.")
+        api.label(number, "claimed", "help wanted")
         return None
     who = cmd.who or login
     if who.lower() != login.lower() and not is_team(actor, reviewers, api.repo):
@@ -202,6 +273,8 @@ def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers
         raise Refused("You don't hold this issue." if who.lower() == login.lower() else f"`{safe(who)}` doesn't hold this issue.")
     real = next(h for h in holders if h.lower() == who.lower())
     api.unassign(number, real)
+    if len(holders) == 1:
+        api.label(number, "help wanted", "claimed")
     if who.lower() == login.lower():
         return None
     return f"{PREFIX}released @{real}'s claim, on behalf of @{login}. `/claim` takes it."
@@ -220,7 +293,8 @@ def command() -> int:
         except ns.Refused as e:
             raise Refused(str(e)) from e
         reviewers = ns.read_reviewers(Path(ns.REVIEWERS).read_text())
-        text = run(api, cmd, actor, number, reviewers)
+        text = run(api, cmd, actor, number, reviewers, os.environ.get("AUTHOR_ASSOCIATION", "NONE"),
+                   exempt_logins(os.environ.get("CLAIM_LIMIT_EXEMPT", "")))
     except Refused as e:
         text = f"{PREFIX}refused, {e} (asked by @{safe(login)})"
     except RuntimeError as e:

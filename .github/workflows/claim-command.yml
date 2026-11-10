@@ -1,7 +1,7 @@
 name: claim command
-# `/claim` and `/unclaim` comments: anyone takes an issue before working on it, and a daily run releases the claims
-# older than 5 days that no open pull request links (CONTRIBUTING.md "Claim before you start",
-# tools/ci/claim_command.py).
+# `/claim` and `/unclaim` comments: anyone takes an issue before working on it (swapping `help wanted` for `claimed`),
+# up to 5 claimed issues without an open pull request of theirs, and a daily run releases the claims older than 5 days
+# that no open pull request links (CONTRIBUTING.md "Claim before you start", tools/ci/claim_command.py).
 #
 # Why no pull request's code runs here, though the token can write:
 # - `issue_comment` and `schedule` always run this file from main, whoever comments and wherever.
@@ -52,6 +52,10 @@ jobs:
           AUTHOR: ${{ github.event.comment.user.login }}
           # Who may act is decided by this numeric ID: a login can be claimed by someone else after a rename.
           AUTHOR_ID: ${{ github.event.comment.user.id }}
+          # OWNER, MEMBER or COLLABORATOR: the repository's own people, whom the claim limit doesn't apply to.
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          # Trusted contributors the claim limit doesn't apply to: comma-separated logins, set by the maintainers.
+          CLAIM_LIMIT_EXEMPT: ${{ vars.CLAIM_LIMIT_EXEMPT }}
           ISSUE: ${{ github.event.issue.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
           REPO: ${{ github.repository }}

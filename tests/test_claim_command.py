@@ -35,10 +35,16 @@ def thread(state="open", holders=(), pr=False, locked=False):
 
 
 class Fake:
-    def __init__(self, threads=None, assignable=True):
+    def __init__(self, threads=None, assignable=True, held=()):
         self.repo = "arismoko/horizon"
         self.threads = {5: thread()} if threads is None else threads
-        self.assignable, self.calls = assignable, []
+        self.assignable, self.calls, self.held = assignable, [], list(held)
+
+    def held_issues(self, login):
+        return self.held
+
+    def label(self, n, add, remove):
+        self.calls.append(("label", n, add, remove))
 
     def issue(self, n):
         return self.threads.get(n)
@@ -54,9 +60,17 @@ class Fake:
         self.calls.append(("comment", n, text))
 
 
-def do(text, api=None, login="newcomer", reviewers=LIST, n=5):
+def do(text, api=None, login="newcomer", reviewers=LIST, n=5, association="NONE", exempt=""):
     api = api or Fake()
-    return cc.run(api, cc.parse(text), actor(login), n, reviewers), api
+    return cc.run(api, cc.parse(text), actor(login), n, reviewers, association, cc.exempt_logins(exempt)), api
+
+
+def held(number, *prs):
+    """An issue the claimant holds; each pr is (state, author, how), how being `closing` or `mention`."""
+    closing = [{"state": s, "author": {"login": a}} for s, a, how in prs if how == "closing"]
+    mentions = [{"source": {"state": s, "author": {"login": a}}} for s, a, how in prs if how == "mention"]
+    return {"number": number, "closedByPullRequestsReferences": {"nodes": closing},
+            "timelineItems": {"nodes": mentions}}
 
 
 class ParseTests(unittest.TestCase):
@@ -84,7 +98,7 @@ class ClaimTests(unittest.TestCase):
     def test_claim_a_free_issue(self):
         text, api = do("/claim")
         self.assertIsNone(text)  # the 👍 says it
-        self.assertEqual(api.calls, [("assign", 5, "newcomer")])
+        self.assertEqual(api.calls, [("assign", 5, "newcomer"), ("label", 5, "claimed", "help wanted")])
 
     def test_taken(self):
         with self.assertRaisesRegex(cc.Refused, "@other already claimed"):
@@ -125,10 +139,75 @@ class ClaimTests(unittest.TestCase):
             do("/claim", Fake(assignable=False))
 
 
+class LimitTests(unittest.TestCase):
+    def test_under_the_limit_claims(self):
+        text, api = do("/claim", Fake(held=[held(n) for n in range(1, 5)]))
+        self.assertIsNone(text)
+        self.assertIn(("assign", 5, "newcomer"), api.calls)
+
+    def test_at_the_limit_is_refused_naming_the_count(self):
+        api = Fake(held=[held(n) for n in (12, 3, 40, 7, 9)])
+        with self.assertRaises(cc.Refused) as refused:
+            do("/claim", api)
+        self.assertEqual(str(refused.exception),
+                         "you already hold 5 claimed issues with no open pull request of yours (#3, #7, #9, #12, #40), "
+                         "and the limit is 5. Opening a pull request that links one of them, or `/unclaim` on one, "
+                         "frees a slot.")
+        self.assertEqual(api.calls, [])
+
+    def test_over_the_limit_is_refused_and_nothing_is_released(self):
+        api = Fake(held=[held(n) for n in range(1, 8)])
+        with self.assertRaisesRegex(cc.Refused, "hold 7 claimed issues"):
+            do("/claim", api)
+        self.assertEqual(api.calls, [])
+
+    def test_issues_with_an_open_pull_request_of_theirs_do_not_count(self):
+        mine = [held(1, ("OPEN", "NewComer", "closing")), held(2, ("OPEN", "newcomer", "mention"))]
+        text, api = do("/claim", Fake(held=mine + [held(n) for n in range(3, 7)]))
+        self.assertIsNone(text)
+        self.assertIn(("assign", 5, "newcomer"), api.calls)
+
+    def test_closed_or_someone_elses_pull_requests_still_count(self):
+        others = [held(1, ("OPEN", "someone", "closing")), held(2, ("CLOSED", "newcomer", "mention")),
+                  held(3, ("MERGED", "newcomer", "closing"))]
+        with self.assertRaisesRegex(cc.Refused, "hold 5 claimed"):
+            do("/claim", Fake(held=others + [held(4), held(6)]))
+
+    def test_the_repositorys_people_and_trusted_reviewers_are_not_limited(self):
+        full = [held(n) for n in range(10, 20)]
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            text, api = do("/claim", Fake(held=full), association=association)
+            self.assertIn(("assign", 5, "newcomer"), api.calls, association)
+        text, api = do("/claim", Fake(held=full), login="kacpherek")
+        self.assertIn(("assign", 5, "kacpherek"), api.calls)
+        with self.assertRaises(cc.Refused):
+            do("/claim", Fake(held=full), association="CONTRIBUTOR")
+
+    def test_an_exempt_login_over_the_limit_claims(self):
+        full = [held(n) for n in range(10, 20)]
+        for listing in ("NewComer", " other , newcomer ", "@NEWCOMER,other"):
+            text, api = do("/claim", Fake(held=full), exempt=listing)
+            self.assertIn(("assign", 5, "newcomer"), api.calls, listing)
+
+    def test_an_empty_or_unrelated_exempt_list_exempts_nobody(self):
+        full = [held(n) for n in range(10, 20)]
+        for listing in ("", " ", ",", "other", "newcomer2"):
+            with self.assertRaises(cc.Refused, msg=listing):
+                do("/claim", Fake(held=full), exempt=listing)
+
+    def test_pull_requests_are_matched_to_the_claimant(self):
+        issues = [held(1, ("OPEN", "a", "closing")), held(2, ("OPEN", "b", "mention")), held(3)]
+        self.assertEqual(cc.without_pull_request(issues, "A"), [2, 3])
+
+
 class UnclaimTests(unittest.TestCase):
     def test_own(self):
         text, api = do("/unclaim", Fake({5: thread(holders=("NewComer",))}))
         self.assertIsNone(text)
+        self.assertEqual(api.calls, [("unassign", 5, "NewComer"), ("label", 5, "help wanted", "claimed")])
+
+    def test_a_remaining_holder_keeps_the_claimed_label(self):
+        text, api = do("/unclaim", Fake({5: thread(holders=("NewComer", "other"))}))
         self.assertEqual(api.calls, [("unassign", 5, "NewComer")])
 
     def test_not_held(self):
@@ -142,12 +221,12 @@ class UnclaimTests(unittest.TestCase):
         self.assertEqual(api.calls, [])
         text, api = do("/unclaim @other", Fake({5: thread(holders=("Other",))}), login="kacpherek")
         self.assertIn("released @Other's claim, on behalf of @kacpherek", text)
-        self.assertEqual(api.calls, [("unassign", 5, "Other")])
+        self.assertEqual(api.calls, [("unassign", 5, "Other"), ("label", 5, "help wanted", "claimed")])
 
     def test_repository_owner_releases_another_claim(self):
         text, api = do("/unclaim @other", Fake({5: thread(holders=("Other",))}), login="Arismoko")
         self.assertIn("released @Other's claim", text)
-        self.assertEqual(api.calls, [("unassign", 5, "Other")])
+        self.assertEqual(api.calls, [("unassign", 5, "Other"), ("label", 5, "help wanted", "claimed")])
 
     def test_someone_who_holds_nothing(self):
         with self.assertRaisesRegex(cc.Refused, "`ghost` doesn't hold"):
