@@ -1101,7 +1101,7 @@ fn configure(
                 }))?;
             }
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::datapack_net::CHANNEL => {
-                crate::datapack_net::accept(&p.data).map_err(Reason::plain)?;
+                crate::datapack_net::accept_chunk(&p.data).map_err(Reason::plain)?;
             }
             cfg::Clientbound::CustomPayload(p) => {
                 // Horizon servers use the client brand to negotiate their extensions.
@@ -1190,6 +1190,7 @@ fn configure(
             }
             cfg::Clientbound::Disconnect(d) => return Err(Reason::tag(&d.reason, lang)),
             cfg::Clientbound::FinishConfiguration(_) => {
+                crate::datapack_net::finish_transfer().map_err(Reason::plain)?;
                 registries.custom_components = content_verified;
                 let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
                 let w = w.as_mut().ok_or_else(|| Reason::plain("Disconnected"))?;

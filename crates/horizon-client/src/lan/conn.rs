@@ -1232,13 +1232,17 @@ fn login_and_configure(
     // The mods' datapack registries this client has, or the reason it cannot play (#811).
     match crate::datapack_net::server_step(brand == "horizon", datapack_offer.as_deref()) {
         crate::datapack_net::Step::Nothing => {}
-        crate::datapack_net::Step::Send(data) => send(
-            c,
-            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
-                channel: crate::datapack_net::CHANNEL.into(),
-                data,
-            }),
-        )?,
+        crate::datapack_net::Step::Send(data) => {
+            for data in crate::datapack_net::chunks(&data)? {
+                send(
+                    c,
+                    cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: crate::datapack_net::CHANNEL.into(),
+                        data,
+                    }),
+                )?;
+            }
+        }
         crate::datapack_net::Step::Refuse(text) => {
             let reason =
                 horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(text.as_str()));

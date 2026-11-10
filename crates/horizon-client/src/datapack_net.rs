@@ -8,7 +8,7 @@
 //! published and the set a client received are held here, for the lan thread and the game.
 //!
 //! A `/reload` that publishes the next generation sends each joined Horizon client a new snapshot
-//! on the same channel, built from the offer it made at the join (kept here by player). The
+//! on the same channel, built from the offer owned by its live connection. The
 //! client checks it as at the join and swaps its set in one step, or ends the connection. See
 //! `docs/modding/src/concepts/mod-datapack-registries.md`.
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
@@ -62,6 +62,7 @@ pub fn received() -> Option<Arc<mod_api::DatapackRegistrySet>> {
 /// Forgets what an earlier join received, as a new join starts.
 pub fn clear_received() {
     put(&RECEIVED, None);
+    clear_transfer();
 }
 
 /// What the client sends its server: its synchronized registries and their schemas, or `None`
@@ -126,7 +127,10 @@ fn step_for(
         Ok(snapshot) if snapshot.registries.is_empty() => Step::Nothing,
         Ok(snapshot) => match snapshot.encode() {
             Some(bytes) => Step::Send(bytes),
-            None => Step::Refuse("The server's mod registries are too large to send.".into()),
+            None => Step::Refuse(
+                "The server's datapack registry snapshot exceeds the 64 MiB transport limit."
+                    .into(),
+            ),
         },
     }
 }
@@ -328,3 +332,7 @@ mod tests {
 #[path = "datapack_delivery.rs"]
 mod delivery;
 pub use delivery::reload_connection;
+
+#[path = "datapack_transport.rs"]
+mod transport;
+pub use transport::{accept_chunk, chunks, clear_transfer, finish_transfer};

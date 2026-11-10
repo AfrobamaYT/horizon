@@ -203,3 +203,6 @@ fn remote_reload_never_decodes_local_registry_files() {
 }
 #[path = "datapack_host_read_tests.rs"]
 mod datapack_host_read_tests;
+
+#[path = "datapack_game_delivery_tests.rs"]
+mod datapack_game_delivery_tests;

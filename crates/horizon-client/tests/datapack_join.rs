@@ -380,18 +380,20 @@ fn a_reload_snapshot_gives_the_client_generation_two_and_stales_old_handles() {
     ) else {
         panic!("a snapshot for Mage");
     };
-    host.hub.send_to(
-        host.joined[0],
-        &play::Clientbound::CustomPayload(cfg::CustomPayload {
-            channel: datapack_net::CHANNEL.into(),
-            data,
-        }),
-    );
+    for data in datapack_net::chunks(&data).unwrap() {
+        host.hub.send_to(
+            host.joined[0],
+            &play::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: datapack_net::CHANNEL.into(),
+                data,
+            }),
+        );
+    }
     // The game keeps what its play packet carries with `datapack_net::accept`.
     drive(&mut host, &session, |_, event| match event {
         Event::Packet(packet) => match *packet {
             play::Clientbound::CustomPayload(p) if p.channel == datapack_net::CHANNEL => {
-                datapack_net::accept(&p.data).unwrap();
+                datapack_net::accept_chunk(&p.data).unwrap();
                 Some(())
             }
             _ => None,

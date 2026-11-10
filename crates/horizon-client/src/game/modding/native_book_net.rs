@@ -90,7 +90,7 @@ impl Game<'_> {
             self.remote_book_settings(data);
         } else if channel == horizon_client::datapack_net::CHANNEL {
             // The server's next generation of the mods' registries: all of it or the connection.
-            horizon_client::datapack_net::accept(data)?;
+            horizon_client::datapack_net::accept_chunk(data)?;
         } else {
             self.remote_native_net(data);
         }
