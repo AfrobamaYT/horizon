@@ -1,4 +1,6 @@
 use super::*;
+#[path = "book_screen/open.rs"]
+mod open;
 
 #[cfg(test)]
 #[path = "book_screen/lifecycle_tests.rs"]
