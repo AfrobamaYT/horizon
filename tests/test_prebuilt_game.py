@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import struct
 import subprocess
@@ -37,6 +38,9 @@ class AllocatorSelectionTests(unittest.TestCase):
 
 class ExecutableLinkPolicyTests(unittest.TestCase):
     def test_windows_sdk_identity_keeps_the_source_executable_stack_policy(self):
+        compiler = shutil.which("rustc")
+        if compiler is None:
+            self.skipTest("requires Rust to build and run the engine's build script")
         target = prebuilt_game.ROOT / "target"
         target.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=target) as directory:
@@ -59,11 +63,11 @@ class ExecutableLinkPolicyTests(unittest.TestCase):
                 source = root / f"{name}.rs"
                 source.write_text(code)
                 library = root / f"lib{name}.rlib"
-                subprocess.run(["rustc", "--edition=2024", "--crate-type=rlib", str(source),
+                subprocess.run([compiler, "--edition=2024", "--crate-type=rlib", str(source),
                                 "-o", str(library)], check=True)
                 externs.extend(["--extern", f"{name}={library}"])
             binary = root / ("producer.exe" if sys.platform == "win32" else "producer")
-            subprocess.run(["rustc", "--edition=2024",
+            subprocess.run([compiler, "--edition=2024",
                             str(prebuilt_game.ROOT / "crates/horizon-client/build.rs"),
                             *externs, "-o", str(binary)], check=True)
             for target_os, env, expected in [("windows", "msvc", ["/STACK:8388608"]),
