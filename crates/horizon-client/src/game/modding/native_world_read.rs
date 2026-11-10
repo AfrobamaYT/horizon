@@ -33,11 +33,9 @@ thread_local! {
 /// Bind the world's merged tags alongside its block mappings, including the resource-only case.
 /// Never cache on Items: its string tables also serve tools and client network snapshots.
 pub(super) fn prepare_block_tags(
-    items: &Items,
+    tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
 ) -> std::collections::HashMap<String, std::collections::HashSet<BlockKey>> {
-    items
-        .block_tags
-        .iter()
+    tags.iter()
         .map(|(tag, members)| {
             let mut set = std::collections::HashSet::<BlockKey>::default();
             for name in members {
@@ -179,7 +177,7 @@ impl Game<'_> {
         &self,
         items: &Items,
     ) -> std::collections::HashMap<String, std::collections::HashSet<BlockKey>> {
-        prepare_block_tags(items)
+        prepare_block_tags(&items.block_tags)
     }
 
     /// Whether the resolved block is in the world's merged block tag, on a client the tag its
@@ -464,7 +462,7 @@ mod tests {
             // Build reordered numeric registries from the same API definitions.
             let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
             crate::game::api_values::resolve_block_definitions(&registry).unwrap();
-            install_block_tags(prepare_block_tags(&items));
+            install_block_tags(prepare_block_tags(&items.block_tags));
             assert_eq!(block_in_tag(machine, "test:machines"), Some(true));
             assert_eq!(block_in_tag(stone, "test:machines"), Some(false));
             assert_eq!(block_in_tag(stone, "base_stone_overworld"), Some(true));
@@ -479,7 +477,7 @@ mod tests {
         items
             .block_tags
             .insert("test:machines".into(), ["minecraft:stone".into()].into());
-        install_block_tags(prepare_block_tags(&items));
+        install_block_tags(prepare_block_tags(&items.block_tags));
         assert_eq!(block_in_tag(machine, "test:machines"), Some(false));
         assert_eq!(block_in_tag(stone, "test:machines"), Some(true));
         // Valid key, no owning world: never answer false using another thread's tags.
