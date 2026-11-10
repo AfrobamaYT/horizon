@@ -1,6 +1,6 @@
 use super::*;
 
-fn settings_json(s: &backend::Settings) -> serde_json::Value {
+pub(super) fn settings_json(s: &backend::Settings) -> serde_json::Value {
     serde_json::json!({
         "selected_version": backend::resolve_version(None).ok(),
         "game_architecture": s.game_architecture.name(),
@@ -21,4 +21,3 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "no_ai": backend::no_ai(),
     })
 }
-

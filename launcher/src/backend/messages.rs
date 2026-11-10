@@ -68,4 +68,3 @@ pub enum Msg {
         Result<(Command, crate::launch::Vars), String>,
     ),
 }
-

@@ -4,7 +4,7 @@ impl Launcher {
     /// Builds the selected instance's native mods, once the player accepted the warning. The
     /// build stays on the Horizon the instance plays (`native_mods::base_for`), unless the
     /// warning was Update's: then it moves to that newer Horizon.
-    fn build_native(&mut self) {
+    pub(super) fn build_native(&mut self) {
         if self.native_step.is_some() {
             return;
         }
@@ -54,5 +54,4 @@ impl Launcher {
             let _ = tx.send(Msg::Native(result));
         });
     }
-
 }
