@@ -1707,9 +1707,10 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
                 guest.vehicle = Some(held);
             });
-            game.world
-                .chunks
-                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            super::super::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+                game,
+                horizon_core::position::ChunkPos::new(0, 0),
+            );
             game.tickets.add_portal((0, 0));
             game.update_chunk_tickets();
             assert!(game.entity_ticking_area()(1, 2));

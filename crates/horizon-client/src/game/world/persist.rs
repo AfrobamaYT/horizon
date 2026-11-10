@@ -3889,14 +3889,10 @@ mod h262_enderman_absolute_anger_tests {
             .unwrap();
         assert!(game.run_command("difficulty normal"));
         assert!(game.run_command("forceload add 0 0"));
-        for (x, z) in [(0, 1), (1, 0), (1, 1)] {
-            game.world
-                .chunks
-                .insert((x, z), Arc::new(Chunk::empty(x, z)));
-            game.block_ticks
-                .add_empty_chunk(ChunkPos::new(x, z))
-                .unwrap();
-        }
+        crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            &mut game,
+            ChunkPos::new(0, 0),
+        );
         game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
         game.creative = true;
         assert!(game.run_command("fill 0 199 0 31 199 31 stone"));
