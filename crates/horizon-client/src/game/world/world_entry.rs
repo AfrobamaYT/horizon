@@ -405,31 +405,33 @@ impl Game<'_> {
         (self.world_tables, self.health_resources) =
             self.build_world_tables(stack, false, root, self.mods.data_switched)?;
         self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
-            mod_api::DatapackRegistrySet::first(candidate, next_datapack_session())
+            Arc::new(mod_api::DatapackRegistrySet::first(
+                candidate,
+                next_datapack_session(),
+            ))
         });
+        horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
         Ok(())
     }
     /// Publish a reload's candidate as the next generation of this world session's registries;
     /// the previous set stays when the generation counter has run out, and nothing is
     /// published when no mod declared a registry.
     fn reload_datapack_registries(&mut self, candidate: Option<mod_api::DatapackCandidate>) {
-        let Some(candidate) = candidate else {
-            self.mods.datapack_registries = None;
-            return;
-        };
-        self.mods.datapack_registries = match self.mods.datapack_registries.take() {
-            Some(old) => match old.reload(candidate) {
-                Ok(next) => Some(next),
+        self.mods.datapack_registries = match (candidate, self.mods.datapack_registries.take()) {
+            (None, _) => None,
+            (Some(candidate), Some(old)) => match old.reload(candidate) {
+                Ok(next) => Some(Arc::new(next)),
                 Err(error) => {
                     log::error!("Horizon: datapack registries not reloaded: {error:?}");
                     Some(old)
                 }
             },
-            None => Some(mod_api::DatapackRegistrySet::first(
+            (Some(candidate), None) => Some(Arc::new(mod_api::DatapackRegistrySet::first(
                 candidate,
                 next_datapack_session(),
-            )),
+            ))),
         };
+        horizon_client::datapack_net::serve(self.mods.datapack_registries.clone());
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).

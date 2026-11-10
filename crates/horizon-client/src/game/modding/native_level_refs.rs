@@ -167,14 +167,17 @@ impl Game<'_> {
         self.native_read_biome(level, pos)
     }
 
-    /// The datapack registry set of this server level's world session, when the level is the
-    /// open one and this is a server.
-    fn level_datapack_set(&self, level: LevelRef) -> Option<&mod_api::DatapackRegistrySet> {
-        (self.is_logical_server()
-            && self.native_lifecycle.epoch() == Some(level.epoch())
+    /// The datapack registry set of this level's world session, when the level is the open one:
+    /// the server's own, or on a client the one its server sent at the join.
+    fn level_datapack_set(&self, level: LevelRef) -> Option<std::sync::Arc<mod_api::DatapackRegistrySet>> {
+        (self.native_lifecycle.epoch() == Some(level.epoch())
             && level.dimension() == self.native_level_key())
         .then_some(())?;
-        self.mods.datapack_registries.as_ref()
+        if self.is_logical_server() {
+            self.mods.datapack_registries.clone()
+        } else {
+            horizon_client::datapack_net::received()
+        }
     }
 
     /// The entry ids of a mod's datapack registry as the world last loaded it.

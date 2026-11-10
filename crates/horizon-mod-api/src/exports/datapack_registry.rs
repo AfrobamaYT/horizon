@@ -7,6 +7,6 @@ pub use world::datapack_registry_set::{
     DatapackLoadReason, DatapackReadError, DatapackRegistrySet,
 };
 pub use world::datapack_snapshot::{
-    DatapackSnapshot, DatapackSnapshotEntry, DatapackSnapshotError, DatapackSnapshotRegistry,
-    MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ENTRIES, MAX_SNAPSHOT_REGISTRIES,
+    DatapackNegotiationError, DatapackSnapshot, DatapackSnapshotEntry, DatapackSnapshotError,
+    DatapackSnapshotRegistry, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ENTRIES, MAX_SNAPSHOT_REGISTRIES,
 };

@@ -93,6 +93,23 @@ pub enum DatapackSnapshotError {
     Unresolved(Box<DatapackLoadError>),
 }
 
+/// Why a server refuses to send a client its registries: a registry the server declared as
+/// required is not one the client offered with the same schema.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// no wire: the game turns it into a disconnect reason before any payload
+#[non_exhaustive]
+pub enum DatapackNegotiationError {
+    /// The client did not offer the required registry, or offered it with another schema.
+    RequiredRegistry {
+        /// The registry's key.
+        registry: String,
+        /// The mod that declared it.
+        mod_id: String,
+    },
+    /// The client's offer is not readable, or is over the bounds.
+    UnreadableOffer,
+}
+
 impl DatapackRegistrySet {
     /// The snapshot of this set a peer receives: the registries `declarations` list as
     /// synchronized and `accepts` lets through (the game passes what the peer negotiated).
@@ -129,6 +146,31 @@ impl DatapackRegistrySet {
         }
     }
 
+    /// The snapshot for a client that `offered` these registries (`offer`): a registry goes
+    /// out when the client offered the same key with the same schema. A required registry the
+    /// client did not offer so refuses it before any payload; an optional one it did not offer
+    /// is left out, with nothing sent in its place.
+    pub fn snapshot_for(
+        &self,
+        declarations: &[DatapackRegistryDeclaration],
+        offered: &[DatapackRegistryDeclaration],
+    ) -> Result<DatapackSnapshot, DatapackNegotiationError> {
+        let matches = |declaration: &DatapackRegistryDeclaration| {
+            offered
+                .iter()
+                .any(|o| o.key == declaration.key && o.fields == declaration.fields)
+        };
+        if let Some(missing) = declarations.iter().find(|declaration| {
+            declaration.sync == DatapackRegistrySync::Required && !matches(declaration)
+        }) {
+            return Err(DatapackNegotiationError::RequiredRegistry {
+                registry: missing.key.clone(),
+                mod_id: missing.mod_id.clone(),
+            });
+        }
+        Ok(self.snapshot(declarations, matches))
+    }
+
     /// Publishes a snapshot's candidate on a client at the generation the server sent. The
     /// session is this client's own, so a handle from an earlier world fails as on a server.
     pub fn received(
@@ -145,6 +187,33 @@ impl DatapackRegistrySet {
 }
 
 impl DatapackSnapshot {
+    /// What a client offers its server: the registries `declarations` list as synchronized,
+    /// with their schemas, as wire bytes.
+    pub fn encode_offer(declarations: &[DatapackRegistryDeclaration]) -> Option<Vec<u8>> {
+        let offer: Vec<DatapackRegistryDeclaration> = declarations
+            .iter()
+            .filter(|declaration| declaration.sync != DatapackRegistrySync::ServerOnly)
+            .cloned()
+            .collect();
+        let mut writer = Writer::new();
+        writer.limit(MAX_SNAPSHOT_BYTES);
+        offer.put(&mut writer);
+        writer.error().is_none().then(|| writer.into_bytes())
+    }
+
+    /// Reads a client's offer, refusing more than [`MAX_SNAPSHOT_REGISTRIES`] registries.
+    pub fn decode_offer(
+        bytes: &[u8],
+    ) -> Result<Vec<DatapackRegistryDeclaration>, DatapackNegotiationError> {
+        if bytes.len() > MAX_SNAPSHOT_BYTES {
+            return Err(DatapackNegotiationError::UnreadableOffer);
+        }
+        Reader::decode::<Vec<DatapackRegistryDeclaration>>(bytes)
+            .ok()
+            .filter(|offer| offer.len() <= MAX_SNAPSHOT_REGISTRIES)
+            .ok_or(DatapackNegotiationError::UnreadableOffer)
+    }
+
     /// The wire bytes, or `None` when the snapshot is more than [`MAX_SNAPSHOT_BYTES`].
     pub fn encode(&self) -> Option<Vec<u8>> {
         let mut writer = Writer::new();
@@ -417,6 +486,61 @@ mod tests {
             }),
             DatapackSnapshotError::SchemaMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn a_server_sends_a_client_only_what_it_offered() {
+        let required = spell(DatapackRegistrySync::Required);
+        let server = set(&required);
+        let declarations = std::slice::from_ref(&required);
+        let offer = DatapackSnapshot::encode_offer(declarations).unwrap();
+        let offered = DatapackSnapshot::decode_offer(&offer).unwrap();
+        assert_eq!(offered, declarations);
+        let snapshot = server.snapshot_for(declarations, &offered).unwrap();
+        assert_eq!(snapshot.registries.len(), 1);
+        // A client without the mod, or with another schema, is refused before any payload.
+        let refused = DatapackNegotiationError::RequiredRegistry {
+            registry: "example:spell".into(),
+            mod_id: "example".into(),
+        };
+        assert_eq!(server.snapshot_for(declarations, &[]), Err(refused.clone()));
+        let mut other = required.clone();
+        other.fields.pop();
+        assert_eq!(server.snapshot_for(declarations, &[other]), Err(refused));
+        // An optional registry the client lacks is left out; the join goes on.
+        let optional = spell(DatapackRegistrySync::Optional);
+        let snapshot = set(&optional)
+            .snapshot_for(std::slice::from_ref(&optional), &[])
+            .unwrap();
+        assert!(snapshot.registries.is_empty());
+        // A server-only registry is not in a client's offer.
+        let only = spell(DatapackRegistrySync::ServerOnly);
+        let offer = DatapackSnapshot::encode_offer(std::slice::from_ref(&only)).unwrap();
+        assert!(DatapackSnapshot::decode_offer(&offer).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_offer_that_is_not_one_is_refused() {
+        let required = spell(DatapackRegistrySync::Required);
+        let mut bytes = DatapackSnapshot::encode_offer(std::slice::from_ref(&required)).unwrap();
+        bytes.push(0);
+        assert_eq!(
+            DatapackSnapshot::decode_offer(&bytes),
+            Err(DatapackNegotiationError::UnreadableOffer)
+        );
+        // More registries than the bound is refused.
+        let many: Vec<DatapackRegistryDeclaration> = (0..=MAX_SNAPSHOT_REGISTRIES)
+            .map(|n| DatapackRegistryDeclaration {
+                key: format!("example:spell_{n}"),
+                ..required.clone()
+            })
+            .collect();
+        let mut writer = Writer::new();
+        many.put(&mut writer);
+        assert_eq!(
+            DatapackSnapshot::decode_offer(&writer.into_bytes()),
+            Err(DatapackNegotiationError::UnreadableOffer)
+        );
     }
 
     #[test]
