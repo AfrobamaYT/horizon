@@ -116,10 +116,10 @@ fn leave_converted(token: u64, mut outer: Option<ConvertedScope>) {
     });
 }
 
-fn leave_native(state: &mut mod_vocab::dispatch_scope::State) {
+fn leave_native(mut state: mod_vocab::dispatch_scope::State) {
     let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
     let _ = IN_NATIVE_MOD.try_with(|c| c.set(state.outer_call));
-    if let Some(timing) = state.timing.take() {
+    if let Some(timing) = state.timing {
         crate::__private::profiler::leave(timing);
     }
 }
