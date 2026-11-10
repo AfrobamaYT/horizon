@@ -10,9 +10,7 @@ use std::sync::Mutex;
 
 thread_local! {
     /// The native mod hook this thread is inside, for the panic hook to name.
-    static IN_NATIVE_MOD: Cell<Option<ModCall>> = const { Cell::new(None) };
-    static NATIVE_FRAME: Cell<Option<u64>> = const { Cell::new(None) };
-    static NEXT_FRAME: Cell<u64> = const { Cell::new(0) };
+
     /// The converted package this thread is executing, for the panic hook to name.
     static IN_CONVERTED_PACKAGE: RefCell<Option<ConvertedScope>> = const { RefCell::new(None) };
     static NEXT_SCOPE: Cell<u64> = const { Cell::new(0) };
@@ -22,7 +20,7 @@ thread_local! {
 
 /// The native mod hook this thread is inside, if any.
 pub fn current_native_call() -> Option<ModCall> {
-    IN_NATIVE_MOD.try_with(Cell::get).ok().flatten()
+    mod_vocab::content::crash::current_native_call()
 }
 /// What the game is doing, set as it goes: graphics adapter, settings, packs, world.
 static DETAILS: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
@@ -33,33 +31,15 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
     mod_vocab::content::crash::enter_native_mod(call)
 }
 fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
-    let frame = NEXT_FRAME
-        .try_with(|c| {
-            let next = c.get().checked_add(1);
-            if let Some(next) = next {
-                c.set(next);
-            }
-            next
-        })
-        .ok()
-        .flatten();
-    let outer_frame = NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten();
     factory.finish(mod_vocab::dispatch_scope::State {
-        outer_frame,
-        outer_call: IN_NATIVE_MOD
-            .try_with(|c| c.replace(Some(call)))
-            .ok()
-            .flatten(),
+        outer_frame: None,
+        outer_call: None,
         timing: crate::__private::profiler::enter(call).map(|guard| guard.into_timing()),
     })
 }
 /// The `[mod] id` of the native mod this thread is inside a hook of, if any.
 pub fn current_native_mod() -> Option<&'static str> {
-    IN_NATIVE_MOD
-        .try_with(Cell::get)
-        .ok()
-        .flatten()
-        .map(|call| call.id)
+    current_native_call().map(|call| call.id)
 }
 
 /// The converted package this thread is executing, if any.
@@ -68,7 +48,7 @@ pub fn current_converted_call() -> Option<ConvertedCall> {
         .try_with(|current| {
             let current = current.borrow();
             let scope = current.as_ref()?;
-            let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
+            let frame = mod_vocab::content::crash::native_frame()?;
             (scope.frame == frame).then(|| scope.call.clone())
         })
         .ok()
@@ -79,7 +59,7 @@ fn enter_converted(call: ConvertedCall) -> Option<ConvertedPackageGuard> {
     if current_native_mod() != Some(call.runtime) {
         return None;
     }
-    let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
+    let frame = mod_vocab::content::crash::native_frame()?;
     let token = NEXT_SCOPE
         .try_with(|c| {
             let next = c.get().checked_add(1)?;
@@ -116,9 +96,7 @@ fn leave_converted(token: u64, mut outer: Option<ConvertedScope>) {
     });
 }
 
-fn leave_native(mut state: mod_vocab::dispatch_scope::State) {
-    let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
-    let _ = IN_NATIVE_MOD.try_with(|c| c.set(state.outer_call));
+fn leave_native(state: mod_vocab::dispatch_scope::State) {
     if let Some(timing) = state.timing {
         crate::__private::profiler::leave(timing);
     }

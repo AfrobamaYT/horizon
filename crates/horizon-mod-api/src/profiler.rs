@@ -178,6 +178,7 @@ fn start_with_clock(clock: fn() -> u64) -> bool {
     POOL.store(Box::into_raw(pool), SeqCst);
     POOL_EPOCH.store(EPOCH.fetch_add(1, SeqCst) + 1, SeqCst);
     ENABLED.store(true, SeqCst);
+    mod_vocab::dispatch_scope::set_profiling(true);
     true
 }
 static REPORT: Mutex<Option<Report>> = Mutex::new(None);
@@ -214,6 +215,7 @@ pub(crate) fn stop_report() -> Report {
     if !ENABLED.swap(false, SeqCst) {
         return Report::default();
     }
+    mod_vocab::dispatch_scope::set_profiling(false);
     EPOCH.fetch_add(1, SeqCst);
     while ACTIVE.load(SeqCst) != 0 {
         std::thread::yield_now();
