@@ -1321,6 +1321,7 @@ impl Game<'_> {
         self.native_lifecycle.begin_close();
         self.native_lifecycle_world_closed();
         self.recipe_ui.server_properties = Default::default();
+        self.refresh_recipe_property_context();
     }
 
     /// Prepare a client session and remote state to receive packets from a studio replay.
@@ -5370,6 +5371,7 @@ impl Game<'_> {
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::UpdateRecipes(p) => {
                 self.recipe_ui.server_properties.replace(p);
+                self.refresh_recipe_property_context();
             }
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),

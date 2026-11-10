@@ -4,6 +4,9 @@
 //! (the `Hooks` dispatch, the Host traits, the game's entry points, the rustdoc, the mixin hook
 //! names) reads these types.
 
+#[cfg(test)]
+mod collect_validation_tests;
+
 use quote::ToTokens;
 use serde::Deserialize;
 use std::{collections::HashSet, fmt, fs, path::Path};
@@ -296,12 +299,12 @@ impl Hook {
         if api.owner.is_some() && (api.contract != Contract::Listen || scope.is_some()) {
             return Err(CatalogError::OwnerNeedsGlobalListener(name));
         }
-        if let Some(validator) = &api.collect_validator {
-            if api.contract != Contract::Collect || scope.is_some()
-                || syn::parse_str::<syn::Path>(validator).is_err()
-            {
-                return Err(CatalogError::InvalidContract(name));
-            }
+        if let Some(validator) = &api.collect_validator
+            && (api.contract != Contract::Collect
+                || scope.is_some()
+                || syn::parse_str::<syn::Path>(validator).is_err())
+        {
+            return Err(CatalogError::InvalidContract(name));
         }
         let counterparts = Counterparts {
             neoforge: counterparts(&name, "neoforge", entry.neoforge)?,
@@ -525,7 +528,15 @@ impl Declared {
                         }
                         // The contract's arguments are the entry's `mod_api` object.
                         let mut api = serde_json::Map::new();
-                        for key in ["contract", "out", "scope", "key", "answered_by", "owner", "collect_validator"] {
+                        for key in [
+                            "contract",
+                            "out",
+                            "scope",
+                            "key",
+                            "answered_by",
+                            "owner",
+                            "collect_validator",
+                        ] {
                             if let Some(value) = entry.remove(key) {
                                 api.insert(key.into(), value);
                             }
