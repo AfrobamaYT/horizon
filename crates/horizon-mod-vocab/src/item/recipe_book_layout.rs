@@ -27,6 +27,67 @@ pub enum RecipeBookLayout {
 }
 
 impl RecipeBookLayout {
+    /// Engine integration: frozen screen geometry, identical for native/wasm registrations.
+    #[doc(hidden)]
+    pub fn registered_screen(menu: &str) -> Option<crate::Screen> {
+        crate::parts::installed()?
+            .menu_recipe_books
+            .get(menu)
+            .map(|binding| binding.screen.clone())
+    }
+    /// Engine integration: diagnostics retain the actual declaring mod identity.
+    #[doc(hidden)]
+    pub fn declaring_mod(menu: &str) -> Option<&'static str> {
+        crate::parts::installed()?
+            .menu_recipe_books
+            .get(menu)
+            .map(|binding| binding.owner)
+    }
+    /// Validate typed screen geometry at the same registration boundary as roles.
+    pub fn validate_screen(&self, screen: &crate::Screen) -> Result<(), String> {
+        if ![screen.width, screen.height]
+            .into_iter()
+            .all(|size| size.is_finite() && size > 0.0)
+            || ![screen.inventory_x, screen.inventory_y]
+                .into_iter()
+                .all(f32::is_finite)
+            || screen.slots.len() > 256
+            || screen
+                .slots
+                .iter()
+                .flatten()
+                .any(|pos| pos.iter().any(|n| !n.is_finite()))
+        {
+            return Err("screen dimensions, inventory coordinates and slot geometry must be finite and fit the menu bound".into());
+        }
+        let roles = match self {
+            Self::Crafting { slots, result, .. } => {
+                slots.iter().copied().chain([*result]).collect::<Vec<_>>()
+            }
+            Self::Furnace {
+                input,
+                fuel,
+                result,
+            } => vec![*input, *fuel, *result],
+            Self::Stonecutter { input, result } => vec![*input, *result],
+            Self::Smithing {
+                template,
+                base,
+                addition,
+                result,
+            } => vec![*template, *base, *addition, *result],
+        };
+        for slot in roles {
+            if screen
+                .slots
+                .get(usize::from(slot))
+                .is_none_or(Option::is_none)
+            {
+                return Err(format!("screen omits mapped slot {slot}"));
+            }
+        }
+        Ok(())
+    }
     /// Menus with declarations, for content-load validation, never per tick.
     pub fn registered_menus() -> Vec<String> {
         let mut menus = crate::parts::installed()
@@ -41,7 +102,13 @@ impl RecipeBookLayout {
         crate::parts::installed()?
             .menu_recipe_books
             .get(menu)
-            .cloned()
+            .map(|binding| {
+                (
+                    binding.book.clone(),
+                    binding.recipe_type.clone(),
+                    binding.layout.clone(),
+                )
+            })
     }
 
     /// Check role indices against the content menu's container slot count.

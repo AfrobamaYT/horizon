@@ -11,12 +11,19 @@ pub(super) fn validate_registered(menus: &[&MenuType]) -> Result<(), String> {
         let Some((_, _, layout)) = RecipeBookLayout::registered(&menu) else {
             continue;
         };
-        validate(menus, &menu, layout)?;
+        let screen = RecipeBookLayout::registered_screen(&menu)
+            .ok_or_else(|| format!("recipe book menu {menu:?}: registered screen missing"))?;
+        validate(menus, &menu, layout, &screen)?;
     }
     Ok(())
 }
 
-fn validate(menus: &[&MenuType], id: &str, layout: RecipeBookLayout) -> Result<(), String> {
+fn validate(
+    menus: &[&MenuType],
+    id: &str,
+    layout: RecipeBookLayout,
+    screen: &mod_api::Screen,
+) -> Result<(), String> {
     let menu = menus
         .iter()
         .find(|menu| menu.id == id)
@@ -29,12 +36,31 @@ fn validate(menus: &[&MenuType], id: &str, layout: RecipeBookLayout) -> Result<(
     };
     compile(layout, metadata)
         .map_err(|error: LayoutError| format!("recipe book menu {id:?}: {error:?}"))?;
+    if let Some((slot, _)) = screen
+        .slots
+        .iter()
+        .enumerate()
+        .skip(usize::from(menu.slots))
+        .find(|(_, position)| position.is_some())
+    {
+        return Err(format!(
+            "recipe book menu {id:?}: screen defines nonexistent container slot {slot}"
+        ));
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn screen() -> mod_api::Screen {
+        mod_api::Screen {
+            width: 176.0,
+            height: 166.0,
+            slots: vec![Some([8.0, 8.0]); 3],
+            ..Default::default()
+        }
+    }
     fn menu() -> MenuType {
         MenuType {
             id: "demo:pot".into(),
@@ -53,17 +79,33 @@ mod tests {
             fuel: 1,
             result: 2,
         };
-        assert!(validate(&[&menu], "demo:pot", roles.clone()).is_ok());
+        assert!(validate(&[&menu], "demo:pot", roles.clone(), &screen()).is_ok());
         assert!(
-            validate(&[], "demo:pot", roles.clone())
+            validate(&[], "demo:pot", roles.clone(), &screen())
                 .unwrap_err()
                 .contains("unknown content menu")
         );
         let short = MenuType { slots: 2, ..menu };
         assert!(
-            validate(&[&short], "demo:pot", roles)
+            validate(&[&short], "demo:pot", roles, &screen())
                 .unwrap_err()
                 .contains("OutOfRange(2)")
+        );
+    }
+    #[test]
+    fn screen_cannot_define_slots_outside_actual_storage() {
+        let menu = menu();
+        let mut geometry = screen();
+        geometry.slots.push(Some([8.0, 26.0]));
+        let roles = RecipeBookLayout::Furnace {
+            input: 0,
+            fuel: 1,
+            result: 2,
+        };
+        assert!(
+            validate(&[&menu], "demo:pot", roles, &geometry)
+                .unwrap_err()
+                .contains("nonexistent container slot 3")
         );
     }
     #[test]
@@ -76,7 +118,7 @@ mod tests {
             result: 2,
         };
         assert!(
-            validate(&[&menu], "demo:pot", roles)
+            validate(&[&menu], "demo:pot", roles, &screen())
                 .unwrap_err()
                 .contains("InvalidGrid")
         );

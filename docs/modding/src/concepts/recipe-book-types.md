@@ -274,8 +274,9 @@ amplification without leaving a lost resnapshot or pending UI intent unresolved.
 
 ## Menu-owned destination roles
 
-During shared registration, `r.menu_recipe_book(menu, &book, recipe_type, layout)`
-binds a content menu to a registered book and a recipe type. The menu namespace
+During shared registration,
+`r.menu_recipe_book(menu, &book, recipe_type, layout, screen)` binds a content
+menu to a registered book, a recipe type and its existing typed `Screen` value. The menu namespace
 must belong to the registering mod. Duplicate bindings and unknown books refuse
 installation even when the registration error is ignored. The declaration is
 frozen with the other registrations and explicitly derives `Wire`, for the
@@ -295,12 +296,13 @@ Book loading checks against the actual content menu size. A declared crafting
 map must exactly agree with the menu's existing `MenuCrafting` storage and result.
 An incompatible display or one that does not fit refuses the declaration
 generation rather than truncating ingredients. All mapped slots need finite
-coordinates in `Screen.slots`; opening an incompatible screen is refused. This
-is currently an open-time check, not an atomic screen-registration error:
-`native_screen` returns geometry at runtime, after the server has opened the
-menu. The adapter/rendering follow-up must move the required geometry contract
-to startup before enabling placement. The foundation does not introduce a new
-screen registration system.
+coordinates in `Screen.slots`. Registration rejects missing or nonfinite
+coordinates, nonpositive/nonfinite panel sizes and a screen bound to another
+book. Startup also rejects geometry for slots beyond the actual content menu.
+The screen is frozen in this same declaration, not a second registry. For these
+book-enabled menus, both the client layout and server hidden-slot policy use
+that registered screen; `native_screen` is not consulted. Other mod menus still
+obtain their screens dynamically.
 
 The shared mapper uses vanilla `PlaceRecipeHelper`: a 1 by 1 shaped recipe in
 a 3 by 3 grid is centered; a 2 by 2 recipe starts at the upper left and retains

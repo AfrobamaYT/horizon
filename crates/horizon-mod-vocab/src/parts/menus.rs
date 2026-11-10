@@ -1,4 +1,14 @@
 use super::*;
+
+// no wire: frozen registration storage; each boundary value has its own Wire derive.
+pub(crate) struct MenuBookDeclaration {
+    pub(crate) owner: &'static str,
+    pub(crate) book: crate::RecipeBookTypeKey,
+    pub(crate) recipe_type: String,
+    pub(crate) layout: crate::RecipeBookLayout,
+    pub(crate) screen: crate::Screen,
+}
+
 #[cfg(test)]
 #[path = "menus/book_tests.rs"]
 mod book_tests;
@@ -22,15 +32,20 @@ impl dyn Registrar + '_ {
 pub trait MenusRegistrar {
     /// Declare this menu's book, authoritative recipe type and destination roles.
     /// The menu remains content-owned; loading checks these roles against its
-    /// actual container slots and crafting declaration. This does not enable
-    /// placement or turn display candidates into ingredient predicates.
-    /// Invalid ownership, unknown books and duplicate menus refuse installation.
+    /// actual container slots and crafting declaration. `screen` is the existing
+    /// typed screen value, frozen here: mapped slots need finite coordinates and
+    /// its book must equal `book`. This screen owns client geometry and server
+    /// hidden-slot policy; these menus do not call the dynamic screen hook.
+    /// This does not turn display candidates into ingredient predicates.
+    /// Invalid ownership, unknown books, duplicate menus or malformed screen
+    /// geometry refuse installation, even when the caller ignores the error.
     fn menu_recipe_book(
         &mut self,
         menu: &str,
         book: &crate::RecipeBookTypeKey,
         recipe_type: &str,
         layout: crate::RecipeBookLayout,
+        screen: crate::Screen,
     ) -> Result<(), String>;
     /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
@@ -43,6 +58,7 @@ impl MenusRegistrar for PartRegistrar {
         book: &crate::RecipeBookTypeKey,
         recipe_type: &str,
         layout: crate::RecipeBookLayout,
+        screen: crate::Screen,
     ) -> Result<(), String> {
         let result: Result<(), String> = (|| {
             if installed().is_some() {
@@ -67,8 +83,20 @@ impl MenusRegistrar for PartRegistrar {
                 return Err("explicit recipe type namespace required".into());
             }
             layout.validate(256)?;
-            self.menu_recipe_books
-                .insert(menu.into(), (book.clone(), recipe_type.into(), layout));
+            layout.validate_screen(&screen)?;
+            if screen.recipe_book.as_ref() != Some(book) {
+                return Err("screen book differs from menu book".into());
+            }
+            self.menu_recipe_books.insert(
+                menu.into(),
+                MenuBookDeclaration {
+                    owner: self.mod_id,
+                    book: book.clone(),
+                    recipe_type: recipe_type.into(),
+                    layout,
+                    screen,
+                },
+            );
             Ok(())
         })();
         result.map_err(|reason| {
