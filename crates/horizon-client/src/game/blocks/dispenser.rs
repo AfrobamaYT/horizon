@@ -2538,6 +2538,29 @@ mod tests {
         });
     }
 
+    /// `IItemExtension.damageItem` on the wear of a tool a dispenser uses: a brush (16 points a
+    /// brushing) whose part halves it loses 8, one whose part cancels it keeps its durability, and
+    /// the shears, which have no part, lose the whole point.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn a_damage_item_part_changes_the_wear_of_a_dispensed_tool() {
+        use crate::game::damage_item_tests::{Rule, with_wear_part};
+        with_wear_part("minecraft:brush", Rule::Halve, |game, wear| {
+            let damage = |game: &mut Game<'_>, item: &str, points| {
+                game.hurt_and_break(ItemStack::new(item, 1), points)
+                    .unwrap()
+                    .damage
+            };
+            assert_eq!(damage(game, "minecraft:brush", 16), 8);
+            assert_eq!(wear.take_asked(), [16]);
+            wear.set(Rule::Cancel);
+            assert_eq!(damage(game, "minecraft:brush", 16), 0);
+            assert_eq!(wear.take_asked(), [16]);
+            assert_eq!(damage(game, "minecraft:shears", 1), 1);
+            assert!(wear.take_asked().is_empty());
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn sulfur_cube_dispenser_replacement_drops_the_full_old_stack() {

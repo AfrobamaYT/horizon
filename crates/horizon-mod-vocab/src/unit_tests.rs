@@ -593,6 +593,63 @@ fn an_inventory_tick_reaches_only_the_parts_of_the_ticked_item() {
 }
 
 #[test]
+fn a_damage_reaches_only_the_parts_of_the_worn_item_and_changes_its_wear() {
+    #[derive(Clone)]
+    struct Worn(Arc<Mutex<Vec<i32>>>, i32, bool);
+    #[mod_api::horizon_part]
+    impl ItemPart for Worn {
+        fn damage_item(&self, _: &mut dyn ServerHost, event: &mut DamageItemEvent<'_>) -> Flow {
+            self.0.lock().unwrap().push(event.amount);
+            event.amount *= self.1;
+            if self.2 { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+    struct Both(Worn, Worn);
+    #[mod_api::__subscriptions]
+    impl Hooks for Both {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+            r.item_part(stick, self.0.clone());
+            r.item_part(stone, self.1.clone());
+        }
+    }
+    // Another test installs parts with tags: a dispatch must run on a game thread.
+    mark_game_thread();
+    // The stick's part triples the wear and the stone's cancels it.
+    let sticks = Worn(Default::default(), 3, false);
+    let stones = Worn(Default::default(), 1, true);
+    let mods: Mods = vec![ModEntry::new(
+        "wearers",
+        Box::new(Both(sticks.clone(), stones.clone())),
+    )]
+    .into();
+    install(mods.clone());
+    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    let mut host = FakeHost::new();
+    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let mut wear = |stack: &ItemStack, points: i32| {
+        let (mut amount, mut canceled) = (points, false);
+        dispatch_damage_item(&mut host, stack, &mut amount, &mut canceled);
+        (amount, canceled)
+    };
+    assert_eq!(wear(&stick(), 4), (12, false));
+    assert_eq!(wear(&stone, 7), (7, true));
+    assert_eq!(wear(&diamond, 5), (5, false));
+    assert_eq!(wear(&stick(), 1), (3, false));
+    assert_eq!(*sticks.0.lock().unwrap(), [4, 1]);
+    assert_eq!(*stones.0.lock().unwrap(), [7]);
+    assert!(crate::__private::item_listens(
+        HookId::DamageItem,
+        "minecraft:stick"
+    ));
+    assert!(!crate::__private::item_listens(
+        HookId::DamageItem,
+        "minecraft:diamond"
+    ));
+}
+
+#[test]
 fn an_item_update_reaches_only_the_parts_of_the_ticked_item_and_cancels_for_its_own() {
     #[derive(Clone)]
     struct Updated(Arc<Mutex<Vec<EntityRef>>>, bool);
