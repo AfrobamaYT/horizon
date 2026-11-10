@@ -45,13 +45,13 @@ impl ArmPose {
     /// Both hands hold the item (`BOW_AND_ARROW`'s and the crossbow's two).
     pub fn two_handed(self) -> bool {
         matches!(self, Self::Bow | Self::CrossbowHold | Self::CrossbowCharge)
-            || matches!(self, Self::Custom(pose) if pose.flags().is_some_and(|flags| flags.0))
+            || matches!(self, Self::Custom(pose) if pose.both)
     }
 
     /// The other hand's pose gives way to this one.
     pub fn affects_offhand(self) -> bool {
         match self {
-            Self::Custom(pose) => pose.flags().is_some_and(|flags| flags.1),
+            Self::Custom(pose) => pose.offhand,
             _ => self.two_handed() || self == Self::ThrowTrident,
         }
     }
@@ -71,6 +71,8 @@ impl ArmPose {
 )]
 pub struct CustomArmPose {
     pub(crate) slot: u32,
+    pub(crate) both: bool,
+    pub(crate) offhand: bool,
 }
 
 pub(crate) struct PoseInfo {
@@ -83,8 +85,11 @@ impl CustomArmPose {
     /// Resolve a slot against the current load's registrations.
     #[doc(hidden)]
     pub fn from_slot(slot: u32) -> Option<Self> {
-        let pose = Self { slot };
-        pose.flags().map(|_| pose)
+        table().get(slot as usize).map(|pose| Self {
+            slot,
+            both: pose.both,
+            offhand: pose.offhand,
+        })
     }
     /// Resolved flags for the renderer; absent for a refused or unknown registration.
     #[doc(hidden)]
@@ -93,10 +98,6 @@ impl CustomArmPose {
         table
             .get(self.slot as usize)
             .map(|pose| (pose.both, pose.offhand))
-    }
-    /// Registered namespaced id, absent for an unknown registration.
-    pub fn id(self) -> Option<&'static str> {
-        table().get(self.slot as usize).map(|pose| pose.id.as_str())
     }
     /// Load-owned slot for the renderer.
     #[doc(hidden)]

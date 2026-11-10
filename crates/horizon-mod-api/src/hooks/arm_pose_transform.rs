@@ -3,7 +3,9 @@
 pub trait Hooks {
     /// Apply a registered pose (`HumanoidModel.ArmPose`'s transformer).
     /// Asked only for a selected registered pose, once per model and arm during
-    /// humanoid extraction. `right_arm` identifies the physical arm, not the hand.
+    /// humanoid extraction, in vanilla's physical-arm application order. Suppressed
+    /// poses do not call the transformer. `humanoid` contains the selected poses
+    /// after `get_arm_pose` answers. `right_arm` identifies the physical arm, not the hand.
     /// Write absolute pitch, yaw and roll in radians into `angles`; initially all
     /// components are non-finite, meaning preserve the base model angle. Each
     /// non-finite component is ignored. The ordinary swing and species animations

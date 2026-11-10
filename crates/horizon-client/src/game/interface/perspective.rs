@@ -1303,18 +1303,8 @@ impl Game<'_> {
             {
                 *pose = Some(answer);
             }
-            if let Some(horizon_core::arm_pose::ArmPose::Custom { slot, angles, .. }) = pose
-                && let Some(registered) = mod_api::CustomArmPose::from_slot(*slot)
-            {
-                let mut value = mod_api::ArmAngles {
-                    right: [f32::NAN; 3],
-                    left: [f32::NAN; 3],
-                };
-                let right = (hand == Hand::Main) != m.main_arm_left();
-                self.native_arm_pose_transform(registered, &humanoid, right, &mut value);
-                *angles = [value.right.map(f32::to_bits), value.left.map(f32::to_bits)];
-            }
         }
+        self.transform_selected_arm_poses(m, &mut poses, humanoid);
         poses
     }
     /// The entity id the local player has on its server: the one it was

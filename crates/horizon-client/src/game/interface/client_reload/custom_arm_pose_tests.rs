@@ -115,3 +115,74 @@ fn registered_angles_reach_local_remote_and_humanoid_before_species_animation() 
         assert_eq!(game.mobs.iter().map(arms).collect::<Vec<_>>(), baseline);
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn suppressed_custom_offhand_never_calls_its_transformer() {
+    use std::sync::{Arc, Mutex};
+    struct PosesMod {
+        main: OnceLock<CustomArmPose>,
+        off: OnceLock<CustomArmPose>,
+        calls: Arc<Mutex<Vec<bool>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for PosesMod {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            self.main
+                .set(registrar.register_arm_pose("skillet:main", false, true))
+                .unwrap();
+            self.off
+                .set(registrar.register_arm_pose("skillet:off", false, false))
+                .unwrap();
+        }
+        fn get_arm_pose(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::GetArmPoseEvent<'_>,
+        ) -> Option<ArmPose> {
+            Some(ArmPose::Custom(
+                *if event.hand == mod_api::Hand::Main {
+                    self.main.get()
+                } else {
+                    self.off.get()
+                }
+                .unwrap(),
+            ))
+        }
+        fn arm_pose_transform(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ArmPoseTransformEvent<'_>,
+        ) {
+            assert_eq!(event.pose, *self.main.get().unwrap());
+            assert_eq!(event.humanoid.main_arm_pose, ArmPose::Custom(event.pose));
+            assert_eq!(event.humanoid.off_arm_pose, ArmPose::Empty);
+            self.calls.lock().unwrap().push(event.right_arm);
+        }
+    }
+    with_client_game(|game| {
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+        game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
+        game.offhand = Some(ItemStack::new("minecraft:stick", 1));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        mod_api::testing::with_mods(
+            vec![ModEntry::new(
+                "skillet",
+                Box::new(PosesMod {
+                    main: OnceLock::new(),
+                    off: OnceLock::new(),
+                    calls: calls.clone(),
+                }),
+            )]
+            .into(),
+            || {
+                game.tick_player_model();
+                assert_eq!(*calls.lock().unwrap(), [true]);
+            },
+        );
+    });
+}

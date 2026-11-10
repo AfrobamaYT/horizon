@@ -44,6 +44,7 @@ mod tests {
     fn forged_pose_slots_are_refused_at_the_engine_boundary() {
         let mut data = 11u32.to_le_bytes().to_vec();
         data.extend(u32::MAX.to_le_bytes());
+        data.extend([0u8, 0u8]);
         let pose = mod_api::wire::Reader::new(&data).take::<Api>().unwrap();
         assert!(pose.try_into_engine(&()).is_err());
     }

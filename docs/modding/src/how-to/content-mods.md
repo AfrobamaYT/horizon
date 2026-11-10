@@ -372,11 +372,14 @@ Code mods can also register a namespaced custom pose once in `Hooks::register` t
 `Registrar::register_arm_pose("mymod:flip", uses_both_arms, affects_offhand)`. Keep its
 `CustomArmPose` token and return `ArmPose::Custom(token)` from `get_arm_pose`. The two
 flags independently control the humanoid's two-arm ordering and whether the other
-hand's pose gives way. Duplicate, malformed and foreign-namespace ids refuse registration.
+hand's pose gives way. The token carries these flags as Wire data, so the pose's
+flag getters do not require a registration table inside a wasm guest. Duplicate, malformed and foreign-namespace ids refuse registration.
 
 In `arm_pose_transform`, match `event.pose` to that token and set `event.angles.right`
 or `event.angles.left` to absolute `[pitch, yaw, roll]` in radians. `event.right_arm`
-identifies the physical arm; `event.humanoid` supplies both stacks and the use state.
+identifies the physical arm; `event.humanoid` supplies both stacks, the use state,
+and the poses selected after `get_arm_pose` answers. Transformers follow vanilla's
+physical-arm application order and do not run for a suppressed pose.
 Each non-finite angle leaves the base model component unchanged. The transform runs
 only for selected registered poses, on local players, remote players and humanoid mobs;
 swing and mob-specific animations still run afterward and can change those angles.

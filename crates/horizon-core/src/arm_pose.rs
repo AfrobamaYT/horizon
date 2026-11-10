@@ -51,9 +51,45 @@ impl ArmPose {
     }
 }
 
+/// Physical arm call order in `HumanoidModel.setupAnim`, omitting the arm whose
+/// pose gives way. `true` is right, `false` is left.
+pub fn application_order(right: ArmPose, left: ArmPose) -> [Option<bool>; 2] {
+    if left.two_handed() {
+        [Some(true), (!right.affects_offhand()).then_some(false)]
+    } else {
+        [Some(false), (!left.affects_offhand()).then_some(true)]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ArmPose;
+    #[test]
+    fn custom_flags_select_only_the_arms_vanilla_applies_and_keep_their_order() {
+        let custom = |both, offhand| ArmPose::Custom {
+            slot: 0,
+            both,
+            offhand,
+            angles: [[0; 3]; 2],
+        };
+        assert_eq!(
+            super::application_order(custom(false, false), custom(false, true)),
+            [Some(false), None]
+        );
+        assert_eq!(
+            super::application_order(custom(false, true), custom(true, false)),
+            [Some(true), None]
+        );
+        assert_eq!(
+            super::application_order(custom(false, false), custom(true, false)),
+            [Some(true), Some(false)]
+        );
+        assert_eq!(
+            super::application_order(custom(false, false), custom(false, false)),
+            [Some(false), Some(true)]
+        );
+    }
+
     #[test]
     fn registered_pose_flags_remain_independent_in_the_engine() {
         let pose = ArmPose::Custom {

@@ -678,16 +678,11 @@ pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
     }
     // The main arm is the right one: the off-hand pose goes first unless it
     // needs both hands.
-    if h.left.two_handed() {
-        pose_arm(p, h.right, true, h);
-        if !h.right.affects_offhand() {
-            pose_arm(p, h.left, false, h);
-        }
-    } else {
-        pose_arm(p, h.left, false, h);
-        if !h.left.affects_offhand() {
-            pose_arm(p, h.right, true, h);
-        }
+    for right in horizon_core::arm_pose::application_order(h.right, h.left)
+        .into_iter()
+        .flatten()
+    {
+        pose_arm(p, if right { h.right } else { h.left }, right, h);
     }
     // setupAttackAnimation: a WHACK or STAB swing of the swinging hand's arm.
     let hx = p.get("head")[3];
