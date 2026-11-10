@@ -2088,3 +2088,7 @@ mod tests {
         assert!((c[1] - (51.0 / 255.0)).abs() < 0.01);
     }
 }
+
+#[cfg(test)]
+#[path = "animate_tick_biome_tests.rs"]
+mod biome_particle_tests;
