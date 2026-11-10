@@ -18,13 +18,18 @@ pub fn transfer(from: &mut Tank, to: &mut Tank, rate: u32) -> u32 {
     if from.amount == 0 || (to.amount > 0 && to.chemical != from.chemical) {
         return 0;
     }
-    let moved = (rate / from.chemical.viscosity.max(1))
+    let moved = flow(rate, from.chemical.viscosity)
         .min(from.amount)
         .min(to.capacity - to.amount);
     from.amount -= moved;
     to.amount += moved;
     to.chemical = from.chemical;
     moved
+}
+
+/// How much `rate` moves of a chemical this viscous: a private helper, a point all the same.
+fn flow(rate: u32, viscosity: u32) -> u32 {
+    rate / viscosity.max(1)
 }
 
 /// One network tick: each tank passes chemical to the next. Returns the total moved.

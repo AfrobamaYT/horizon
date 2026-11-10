@@ -11,7 +11,7 @@
 //! listeners refuse, naming it, and leaves its `internals` form.
 use super::{Found, GamePoint, WireTypes, file_functions, imports, module_files, unraw};
 pub use horizon_mod_package::manifest::inject::mod_points::Catalog;
-use quote::quote;
+use quote::{ToTokens, quote};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -381,7 +381,24 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
         code.parse::<proc_macro2::TokenStream>()
             .expect("generated points")
     };
-    let records = points.iter().map(|point| parse(&point.record_item));
+    // A record crosses to a wasm guest with its `Wire` form. The game's records also derive it
+    // under the game's `wasm-guest` feature; a mod crate has no such feature, so its records
+    // derive it on wasm32 alone and the staged crate builds clean under `-D unexpected_cfgs`.
+    let records = points.iter().map(|point| {
+        let mut file: syn::File = syn::parse_str(&point.record_item).expect("point record");
+        for item in &mut file.items {
+            if let syn::Item::Struct(record) = item {
+                for attr in &mut record.attrs {
+                    if attr.path().is_ident("cfg_attr") {
+                        *attr = syn::parse_quote!(
+                            #[cfg_attr(target_arch = "wasm32", derive(::mod_api::Wire))]
+                        );
+                    }
+                }
+            }
+        }
+        file.into_token_stream()
+    });
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));

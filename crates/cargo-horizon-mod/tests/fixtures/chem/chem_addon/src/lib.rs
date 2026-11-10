@@ -5,10 +5,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// The amount every transfer moved, as the internals return listener saw it.
 pub static MOVED: AtomicU32 = AtomicU32::new(0);
 
+/// The rate chemlib's private `flow` last ran with, as its api listener saw it.
+pub static FLOW_RATE: AtomicU32 = AtomicU32::new(0);
+
 /// At `chemlib::transfer`'s head (`access = "api"`): the record holds copies of the tanks and
 /// the rate; changing the rate changes what the function runs with.
 pub fn double_rate(args: &mut chemlib::__horizon_points::TransferArgs) {
     args.rate *= 2;
+}
+
+/// At the head of `chemlib::flow`, a private function (`access = "api"`): private functions are
+/// points too.
+pub fn saw_flow(args: &mut chemlib::__horizon_points::FlowArgs) {
+    FLOW_RATE.store(args.rate, Ordering::Relaxed);
 }
 
 /// At `chemlib::transfer`'s return (`access = "internals"`): the library's own value, by reference.

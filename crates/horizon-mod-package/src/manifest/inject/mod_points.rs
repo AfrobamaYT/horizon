@@ -1,4 +1,4 @@
-//! A mod's own injection points (#2339), as the `points.json` its build writes lists them, and the
+//! A mod's own injection points (#2339), as the `mod-points.json` its build writes lists them, and the
 //! routing of an addon's `[[inject]]` to them. Mod points mirror the game's: the same declarations,
 //! `api` and `internals` levels and refusals, plus a signature hash an addon pins, checked when it
 //! loads: a library rebuilt with a changed function refuses the addon instead of running it
@@ -66,7 +66,7 @@ pub struct Library<'a> {
     pub catalog: &'a Catalog,
 }
 
-/// Reads a package's `points.json` bytes, bounded: package metadata is untrusted.
+/// Reads a package's `mod-points.json` bytes, bounded: package metadata is untrusted.
 pub fn read_bytes(reader: impl Read) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     reader
@@ -80,7 +80,7 @@ pub fn read_bytes(reader: impl Read) -> Result<Vec<u8>, String> {
 }
 
 /// A wasm package's catalog, checked against the hash its `[wasm]` section pins: a missing,
-/// unpinned or changed `points.json` is refused, so an addon routes only through the catalog the
+/// unpinned or changed `mod-points.json` is refused, so an addon routes only through the catalog the
 /// library's build wrote. No pin and no file: a package without mod points.
 pub fn bound(bytes: Option<&[u8]>, pinned: Option<&str>) -> Result<Option<Catalog>, String> {
     match (bytes, pinned) {
@@ -101,7 +101,7 @@ pub fn bound(bytes: Option<&[u8]>, pinned: Option<&str>) -> Result<Option<Catalo
 }
 
 impl Catalog {
-    /// Parses a package's `points.json`, strictly.
+    /// Parses a package's `mod-points.json`, strictly.
     pub fn read(bytes: &[u8]) -> Result<Self, String> {
         serde_json::from_slice(bytes).map_err(|e| format!("{FILE}: {e}"))
     }

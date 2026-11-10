@@ -540,6 +540,11 @@ impl Package {
                 Err(e) => return Err(format!("{}: {e}", inject::mod_points::FILE)),
             };
             package.points = inject::mod_points::bound(bytes.as_deref(), wasm.points())?;
+        } else if std::fs::symlink_metadata(path.join(inject::mod_points::FILE)).is_ok() {
+            return Err(format!(
+                "{}: only a wasm package carries its points",
+                inject::mod_points::FILE
+            ));
         }
         if let Some(wasm) = &package.manifest.wasm {
             let bytes = std::fs::read(path.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?;
@@ -846,13 +851,6 @@ impl Package {
     pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
         let manifest = Manifest::parse(manifest_text)?;
-        if let Some(wasm) = &manifest.wasm {
-            let points = files
-                .iter()
-                .find(|(name, _)| *name == inject::mod_points::FILE)
-                .map(|(_, bytes)| *bytes);
-            inject::mod_points::bound(points, wasm.points())?;
-        }
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         let err = |e: zip::result::ZipError| e.to_string();
@@ -1579,23 +1577,34 @@ issues = \"http://example.org/issues\"
         );
         assert_eq!(archive(&manifest(None), None).unwrap(), None);
         let tampered = br#"{"crate":"attacker","table":"other","points":[]}"#;
-        for (text, catalog, error) in [
-            (&pinned, None, "mod-points.json: missing; [wasm] pins one"),
+        for (case, text, catalog, error) in [
             (
+                "missing but pinned",
+                &pinned,
+                None,
+                "mod-points.json: missing; [wasm] pins one",
+            ),
+            (
+                "changed after the build",
                 &pinned,
                 Some(tampered.as_slice()),
                 "mod-points.json: does not match the hash [wasm] pins: changed after the build",
             ),
             (
+                "present but unpinned",
                 &manifest(None),
                 Some(points.as_slice()),
                 "mod-points.json: [wasm] pins no points; only the build writes mod-points.json",
             ),
         ] {
-            assert_eq!(archive(text, catalog).err().unwrap(), error);
+            assert_eq!(archive(text, catalog).err().unwrap(), error, "read: {case}");
             let mut files = vec![(WASM, module.as_slice())];
             files.extend(catalog.map(|bytes| (inject::mod_points::FILE, bytes)));
-            assert_eq!(Package::write_files(text, &files).unwrap_err(), error);
+            assert_eq!(
+                Package::write_files(text, &files).unwrap_err(),
+                error,
+                "write: {case}"
+            );
         }
         // A pinned but malformed catalog is refused by its parse.
         let malformed = b"{";
@@ -1618,6 +1627,19 @@ issues = \"http://example.org/issues\"
         let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
         assert_eq!(
             Package::read_zip(&mut archive).err().unwrap(),
+            "mod-points.json: only a wasm package carries its points"
+        );
+        // The folder reader holds the same rule.
+        let folder = std::env::temp_dir().join(format!("mod-points-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(MANIFEST), EXAMPLE).unwrap();
+        assert!(Package::read(&folder).is_ok());
+        std::fs::write(folder.join(inject::mod_points::FILE), points).unwrap();
+        let refused = Package::read(&folder).err();
+        std::fs::remove_dir_all(&folder).unwrap();
+        assert_eq!(
+            refused.unwrap(),
             "mod-points.json: only a wasm package carries its points"
         );
     }

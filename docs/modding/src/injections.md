@@ -17,7 +17,8 @@ mods' listeners, without changing game source.
 There are two access tiers, and they never mix:
 
 - **`access = "api"`: native and `mod.wasm` alike.** A point is a hook whose signature comes from the
-  engine function. The listener gets the side's host and the point's record: a copy of **every**
+  engine function. The listener gets the point's record (and the side's host at a `Game` method's
+  point, [below](#which-functions-are-points)): a copy of **every**
   parameter as an API value (scalars, text, std containers, `mod_api` types, and the engine types
   with a `mod_api` mirror, such as `Text` and `BlockStateId`), plus `cancel` or `result`. A `&mut`
   parameter is copied in and its place gets the listener's value back; by-value and `&T` parameters
@@ -354,14 +355,14 @@ A library's crate name is its mod id with `-` as `_`.
   the game's points: `at` is the function's path in its crate.
 - **`access = "api"`.** The listener gets the point's record, `<crate>::__horizon_points::<Point>Args`:
   a copy of every parameter, `&mut` ones copied back, and `cancel` or `result`. Every parameter needs
-  a `Wire` form: scalars, text, std containers, `mod_api`'s types, and the library's own `pub` types
-  that carry `#[derive(mod_api::Wire)]`. Nothing adds the derive; a parameter without one refuses the
+  a `Wire` form: scalars, text, std containers, `mod_api`'s types, and the library's own publicly
+  reachable types that carry `#[derive(mod_api::Wire)]`. Nothing adds the derive; a parameter without one refuses the
   point's API listeners, naming it. A method of the library's own types has no API record (its
   `self` has no handle), as on the game.
 - **No Host.** As on the game, only a `Game` method's point gets a `Host`; free functions and
   methods of other types get none, and a mod crate's functions have no `Game` receiver. A mod
-  point's `api` listener gets its record alone. A library that wants its addons to reach the host
-  takes a value that reaches it as a parameter.
+  point's `api` listener gets its record and nothing else; an addon that acts on the game does it
+  from its own hooks, which get a `Host`.
 - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in
   their own types, through the raw form declared beside the function. It works from the library's
   own target: the same binary on native, the same dependency group on wasm. A wasm listener
