@@ -1922,6 +1922,9 @@ enum Screen {
 }
 
 impl Game<'_> {
+    pub(super) fn machine_layout_selector(&self) -> Option<bool> {
+        self.machine_screen().map(|s| s == Screen::Hopper)
+    }
     fn machine_screen(&self) -> Option<Screen> {
         let key = self.container?;
         // A mod's screen over a hopper or dispenser menu lays out its own slots.

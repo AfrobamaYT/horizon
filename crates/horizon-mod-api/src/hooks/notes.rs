@@ -972,8 +972,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `block_entity.viewers(host)` lists the players with its container open on the server, read from their open menus
   when called: players in its level, not spectators or fake players, a double chest's menu on both halves. `None` for
   a stale handle or a client.
-- `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
-  `None` for a client, a stale handle, or a closed level; parked levels can be read.
+- `level.block_shape(host, state, pos, kind)` reads a supplied state's block-local outline or collision boxes with an empty context, without changing the world's state; pass `level.block_state(host, pos)` for the stored state.
+  `None` for a client, unknown state, stale handle or closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
 - `level.pop_resource(host, pos, stack)` drops a stack as a broken block does (`Block.popResource`), `spawn_item(host, x, y, z,
   stack, pickup_delay)` and `spawn_item_with_motion` spawn a plain item entity and give its handle, with the pickup delay
@@ -2740,7 +2740,7 @@ registration path.
 
 - A server player released a drawn bow, by the use-item key or a mod's `release_using_item`, with `native_player_ready_arrow(player, name, arrow)`: the name of the selected projectile item.
 
-- A server player's recipe book open or filter setting changed: `native_player_recipe_book_settings_change(player, name, book, open, filtering)`, where `book` is its protocol id.
+- A server player's recipe book open or filter setting changed: `native_player_recipe_book_settings_change(player, name, book, open, filtering)`, where `book` is its typed `RecipeBookIdentity`.
 
 - A server player released the use-item key, or a mod's `release_using_item` did, before the item finished being used: `native_player_stop_using_item(player, name)`.
 

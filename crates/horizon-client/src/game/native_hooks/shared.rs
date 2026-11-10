@@ -1,6 +1,7 @@
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+use screen_chars::chars_to_type;
 
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
@@ -546,6 +547,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// the server sent them, and what the server sent before the menu opened
 /// (`horizon:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
+    pub(super) layout_revision: u64,
     key: Pos,
     window: i32,
     block: String,
@@ -776,19 +778,6 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
         return None;
     }
     Some(left)
-}
-
-/// What of a key press's text is characters for the
-/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
-/// handling takes those, and vanilla fires no `charTyped` for them).
-/// With the edit modifier held the key is a shortcut and its characters are
-/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
-/// gets none for Ctrl+A.
-fn chars_to_type(text: &str, types_text: bool) -> String {
-    if !types_text {
-        return String::new();
-    }
-    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// The hook points. Each does nothing in Horizon.
@@ -3245,6 +3234,11 @@ impl Game<'_> {
         self.native_screen(&block, &mut screen);
         if let Some(screen) = screen {
             self.mod_screen = Some(OpenNativeScreen {
+                layout_revision: {
+                    static NEXT: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(1);
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                },
                 key,
                 window,
                 block,
@@ -3255,7 +3249,7 @@ impl Game<'_> {
         }
     }
     /// The mod screen showing now, if any.
-    fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
+    pub(super) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
         self.mod_screen
             .as_ref()
             .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
@@ -5037,6 +5031,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
             block: "gtmod:machine".into(),

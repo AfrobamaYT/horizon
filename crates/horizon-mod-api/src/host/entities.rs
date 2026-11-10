@@ -751,6 +751,17 @@ pub trait EntitiesBackendMut {
     #[access(WorldOnly)]
     fn entity_clear_fire(&mut self, entity: EntityRef) -> bool;
     /// Side: server.
+    /// `Entity.extinguishFire`: plays the ordinary extinguish sound when the
+    /// entity is burning, then clears positive fire ticks. Fire-immune mobs
+    /// and fire-resistant dropped stacks do not play a sound; negative
+    /// fire-immunity countdowns are retained.
+    /// Uses the engine's entity/cosmetic random and normal sound route.
+    /// Supports players, guests, mobs, armor stands and dropped items. False
+    /// for a stale or unsupported entity.
+    /// Unlike this operation, `clear_fire` is always silent and draws no random.
+    #[access(WorldOnly)]
+    fn entity_extinguish_fire(&mut self, entity: EntityRef) -> bool;
+    /// Side: server.
     /// Sets the entity's air (`Entity.setAirSupply`).
     #[access(WorldOnly)]
     fn entity_set_air_supply(&mut self, entity: EntityRef, air: i32) -> bool;
