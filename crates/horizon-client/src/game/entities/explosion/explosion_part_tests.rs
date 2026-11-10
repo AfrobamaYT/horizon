@@ -25,10 +25,16 @@ impl BlockPart for Xp {
     }
 }
 #[derive(Clone, Default)]
-struct Blast(Arc<Mutex<Vec<[i32; 3]>>>);
+struct Blast(Arc<Mutex<Vec<[i32; 3]>>>, Arc<AtomicI32>);
 #[mod_api::horizon_part]
 impl BlockPart for Blast {
     fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
+        if self.1.load(Ordering::Relaxed) == 1 {
+            panic!("adversarial part failure");
+        }
+        if self.1.load(Ordering::Relaxed) == 3 {
+            std::panic::panic_any("native trap-equivalent refusal");
+        }
         let pos = [event.pos.x, event.pos.y, event.pos.z];
         let entity = event.block_entity.expect("live chest before removal");
         let data = entity.data(host).expect("readable live chest");
@@ -49,6 +55,9 @@ impl BlockPart for Blast {
                 .set_block(host, pos, state, mod_api::BlockUpdateFlags::CLIENTS)
                 .unwrap()
         );
+        if self.1.load(Ordering::Relaxed) == 2 {
+            panic!("failure after reentrant replacement");
+        }
         self.0.lock().unwrap().push(pos);
     }
 }
@@ -156,6 +165,13 @@ fn block_parts_xp_and_explosion_contract() {
                 .push(("minecraft:silk_touch".into(), 1));
             assert_eq!(drop(game, ore, Some(&silk), None), 0);
             assert_eq!(drop(game, ore, Some(&silk), xp), 10);
+            *game.held_mut() = Some(silk.clone());
+            xp = None;
+            game.native_break_block([1, 64, 1], ore, &mut canceled, &mut xp);
+            assert_eq!(seen.lock().unwrap().last(), Some(&Some(0)));
+            assert_eq!(xp, Some(3));
+            assert_eq!(drop(game, ore, Some(&silk), xp), 3);
+            *game.held_mut() = None;
             assert_eq!(drop(game, spawner, Some(&silk), None), 7);
             for (answer, expected) in [(-1, 0), (i32::MAX, 32767), (7, 7)] {
                 amount.store(answer, Ordering::Relaxed);
@@ -232,6 +248,40 @@ fn block_parts_xp_and_explosion_contract() {
             game.with_level(|_, level, _| {
                 assert!(mod_api::LevelHost::block_entity_data(level, chest_handle).is_none());
             });
+            for mode in 1..=3 {
+                game.level_set([1, 64, 1], chest).unwrap();
+                let mut contents = vec![None; 27];
+                contents[0] = Some(horizon_client::items::ItemStack::new(
+                    "minecraft:diamond",
+                    3,
+                ));
+                game.world.block_entities.insert(
+                    (1, 64, 1),
+                    horizon_client::containers::BlockEntity::Chest(contents),
+                );
+                blast.1.store(mode, Ordering::Relaxed);
+                let mut drops = ExplosionDrops::default();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    game.explosion_hit_block(
+                        [1, 64, 1],
+                        4.0,
+                        BlockInteraction::Destroy,
+                        &start,
+                        &mut drops,
+                    )
+                    .unwrap();
+                }));
+                assert_eq!(
+                    game.world.block(1, 64, 1),
+                    game.world.air,
+                    "failed callback must not leave a collected block: mode {mode}"
+                );
+                assert!(!game.world.block_entities.contains_key(&(1, 64, 1)));
+                assert!(
+                    result.is_ok(),
+                    "part failure must be contained: mode {mode}"
+                );
+            }
         });
     });
 }

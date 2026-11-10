@@ -29,7 +29,7 @@ impl Game<'_> {
         let block_entity = self
             .level(self.dim.id())
             .and_then(|level| self.block_entity(level, pos));
-        self.native_on_block_exploded(
+        self.contained_block_exploded(
             BlockPos::new(pos[0], pos[1], pos[2]),
             state,
             block_entity,
