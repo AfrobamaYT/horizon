@@ -206,10 +206,8 @@ fn append_mod_point(
 ) -> Result<String, String> {
     use horizon_mod_package::manifest::inject::mod_points::Refusal;
     let id = format!("{}:{}", manifest.id, request.with);
-    if !matches!(
-        request.kind,
-        Kind::Head | Kind::Return | Kind::Replace
-    ) || request.call.is_some()
+    if !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace)
+        || request.call.is_some()
         || request.nth.is_some()
     {
         return Err(format!(
