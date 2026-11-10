@@ -1309,7 +1309,6 @@ impl Game<'_> {
         Ok(())
     }
 
-
     /// Prepare a client session and remote state to receive packets from a studio replay.
     pub(super) fn init_remote_for_replay(&mut self) -> Result<()> {
         self.realm_session = false;
@@ -11893,7 +11892,6 @@ pub(super) fn hand_operated(name: &str) -> bool {
         || name == "lever"
         || name.ends_with("cauldron")
 }
-
 
 /// `InteractionHand` on the wire.
 fn hand_id(hand: Hand) -> i32 {
