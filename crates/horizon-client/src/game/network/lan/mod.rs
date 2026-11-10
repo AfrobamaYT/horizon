@@ -1617,7 +1617,9 @@ impl Game<'_> {
         config: HubConfig,
     ) -> Result<()> {
         if self.options.developer_single_player && net.listen {
-            return Err(horizon_client::lang::get("multiplayer.disabled").into());
+            return Err(
+                horizon_client::lang::get("horizon.developer_offline.single_player").into(),
+            );
         }
         let mut sync = sync_data(
             &self.options.resources,

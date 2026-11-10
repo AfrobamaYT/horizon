@@ -582,7 +582,9 @@ impl Options {
                 || o.session_file.is_some()
                 || !o.execution_role.is_client())
         {
-            return Err(horizon_client::lang::get("multiplayer.disabled").into());
+            return Err(
+                horizon_client::lang::get("horizon.developer_offline.single_player").into(),
+            );
         }
         Ok(Some(o))
     }
