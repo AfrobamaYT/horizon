@@ -1627,12 +1627,9 @@ pub(in crate::game) fn collect_poi_extensions(
                 .state(horizon_world::registry::BlockStateId(index as u32))
                 .expect("registry index is in bounds");
             if state.name == name
-                && record
-                    .constraints
-                    .iter()
-                    .all(|constraint| {
-                        state.properties.get(constraint.name.as_str()) == Some(&constraint.value)
-                    })
+                && record.constraints.iter().all(|constraint| {
+                    state.properties.get(constraint.name.as_str()) == Some(&constraint.value)
+                })
             {
                 additions.push(horizon_world::poi::PoiExtension {
                     state: state.clone(),

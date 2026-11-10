@@ -96,8 +96,7 @@ mod tests {
         with_mods(
             vec![ModEntry::new("poi_test", Box::new(TestMod))].into(),
             || {
-                let (additions, refusals) =
-                    crate::game::mods::collect_poi_extensions(&registry);
+                let (additions, refusals) = crate::game::mods::collect_poi_extensions(&registry);
                 let addition = |name: &str, properties: &[(&str, &str)], poi: &str| PoiExtension {
                     state: state(name, properties),
                     poi: poi.into(),
@@ -108,8 +107,16 @@ mod tests {
                         addition("minecraft:hay_block", &[("axis", "x")], "minecraft:home"),
                         addition("minecraft:hay_block", &[("axis", "y")], "minecraft:home"),
                         addition("minecraft:hay_block", &[("axis", "z")], "minecraft:home"),
-                        addition("minecraft:bell", &[("attachment", "floor")], "minecraft:home"),
-                        addition("minecraft:red_bed", &[("part", "foot")], "minecraft:meeting"),
+                        addition(
+                            "minecraft:bell",
+                            &[("attachment", "floor")],
+                            "minecraft:home"
+                        ),
+                        addition(
+                            "minecraft:red_bed",
+                            &[("part", "foot")],
+                            "minecraft:meeting"
+                        ),
                         addition("minecraft:stone", &[], "minecraft:nowhere"),
                     ]
                 );
