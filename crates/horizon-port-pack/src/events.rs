@@ -31,6 +31,10 @@ pub const CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/hook-counterpa
 /// drawn; their `Extract…` successors fire when its render state is
 /// extracted, and cancelling either still drops what vanilla draws.
 ///
+/// `EntityTeleportEvent.ChorusFruit` became `EntityTeleportEvent.ItemConsumption`:
+/// it now covers any `teleport_randomly` consume effect, for a living consumer
+/// (player or fox), and carries the captured consumed stack.
+///
 /// The rest changed what they carry, and a port of them is not a rename.
 /// `RecipesUpdatedEvent`: 1.21.1's documentation doesn't name it, only that
 /// the client has "a full copy of the `RecipeManager`". 26.1's client gets
