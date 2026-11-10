@@ -253,6 +253,10 @@ impl ResourceScope {
     /// and must fail closed with typed Stale on expiry. Locators into mutable containers must
     /// be resolved afresh; neither lease makes element addresses stable.
     #[doc(hidden)]
+    #[allow(
+        unsafe_code,
+        reason = "The caller owns the native resource frame lifetime."
+    )]
     pub unsafe fn native_root(codec: Rc<dyn ResourceCodec>) -> Self {
         let scope = Self::new(codec);
         ACTIVE.with(|active| active.borrow_mut().slots[scope.slot].native_root = true);
@@ -311,6 +315,10 @@ pub(super) fn load<T: 'static>(id: Id) -> Result<T, WireError> {
 }
 
 #[cfg(test)]
+#[allow(
+    unsafe_code,
+    reason = "Fixtures own the native resource frame lifetime."
+)]
 mod tests {
     use super::*;
     struct Codec(u64);
