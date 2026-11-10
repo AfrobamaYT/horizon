@@ -831,6 +831,72 @@ fn another_threads_hook_fails_fast_while_an_import_lends_the_group() {
 }
 
 #[test]
+fn contended_calls_wait_for_the_group_and_workers_ignore_lending() {
+    for (class, lending) in [(CallClass::Hook, false), (CallClass::Worker, true)] {
+        let module = module("i64.const 2199023255556");
+        let group = module.running.group.lock().unwrap();
+        if lending {
+            module.running.lending.store(1, Ordering::Relaxed);
+        }
+        let (started, ready) = std::sync::mpsc::channel();
+        let (send, receive) = std::sync::mpsc::channel();
+        let other = module.clone();
+        let thread = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            let result = other.call(
+                class,
+                Frame::default(),
+                0,
+                None,
+                |w| w.put(&42u32),
+                |r| r.take::<u32>(),
+            );
+            send.send(result).unwrap();
+        });
+        ready.recv().unwrap();
+        let early = receive.recv_timeout(Duration::from_millis(100));
+        let waited = matches!(&early, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        module.running.lending.store(0, Ordering::Relaxed);
+        drop(group);
+        let result = match early {
+            Ok(value) => value,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                receive.recv_timeout(Duration::from_secs(5)).unwrap()
+            }
+            Err(error) => panic!("call thread failed: {error}"),
+        };
+        thread.join().unwrap();
+        assert!(
+            waited,
+            "a contended call returned before the lock was released"
+        );
+        assert_eq!(result, Some(42));
+        assert!(!module.is_stopped());
+    }
+}
+
+#[test]
+fn contended_hook_times_out_without_poisoning_the_group() {
+    let module = module("i64.const 2199023255556");
+    let group = module.running.group.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let other = module.clone();
+    let thread = std::thread::spawn(move || {
+        let start = Instant::now();
+        let result = call(&other);
+        send.send((result, start.elapsed())).unwrap();
+    });
+    let result = receive.recv_timeout(Duration::from_secs(10));
+    drop(group);
+    thread.join().unwrap();
+    let (answer, elapsed) = result.expect("contended hook did not time out");
+    assert_eq!(answer, None);
+    assert!(elapsed >= Duration::from_secs(5));
+    assert!(!module.is_stopped());
+    assert_eq!(call(&module), Some(42));
+}
+
+#[test]
 fn nested_load_calls_do_not_extend_the_outer_deadline() {
     let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
     let module = module(&format!(

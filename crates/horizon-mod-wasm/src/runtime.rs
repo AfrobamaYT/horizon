@@ -640,7 +640,8 @@ impl WasmMod {
         let mut resumed = Resumed::take(key);
         let mut locked = None;
         if resumed.is_none() {
-            let start = Instant::now();
+            // Start the busy timeout on contention, not on the uncontended hot path.
+            let mut start = None;
             loop {
                 match self.running.group.try_lock() {
                     Ok(group) => {
@@ -654,7 +655,8 @@ impl WasmMod {
                     Err(_)
                         if class != CallClass::Worker
                             && (self.running.lending.load(Ordering::Relaxed) != 0
-                                || start.elapsed() >= Duration::from_secs(5)) =>
+                                || start.get_or_insert_with(Instant::now).elapsed()
+                                    >= Duration::from_secs(5)) =>
                     {
                         log::warn!("wasm mod {}: {}", self.id, Refusal::Busy);
                         return None;
