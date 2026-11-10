@@ -102,8 +102,12 @@ impl ClientHost for TestHost {}
 #[allow(dead_code)]
 mod generated {
     pub(super) mod mod_api {
-        pub struct Block;
-        pub struct Item;
+        pub struct Block {
+            pub id: String,
+        }
+        pub struct Item {
+            pub id: String,
+        }
         pub(super) use super::super::ItemStack;
         pub(super) use super::super::{
             Command, Config, Dispensed, InteractionResult, MapDecoration, MapInfo, Minimap, Screen,
