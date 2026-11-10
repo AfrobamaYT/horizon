@@ -49,10 +49,10 @@ handle; it cannot directly mutate server state. Do not add player-id helpers to
 
 Book identities are separate from `RecipeBookCategory` in
 `crates/horizon-mod-vocab/src/item/recipe_book.rs`. Categories group recipes and provide
-icons; a book owns two flags. A screen can associate categories with a registered
-book explicitly. Neither category registration nor recipe-type registration
-implicitly registers a book. Display layout, unlocking and custom recipe displays
-remain separate work; this proposal supplies settings only.
+icons; a book owns two flags. A screen associates categories with a registered
+book explicitly through `Screen.recipe_book`. Neither category registration nor
+recipe-type registration implicitly registers a book. Recipe unlocking and
+placement remain separate from displaying the declared recipe layouts.
 
 ### Registration API
 
@@ -67,8 +67,8 @@ the generated Wire boundary; the key explicitly derives `Wire`.
 
 This registration does not create a category, settings handle, UI or network
 payload. Successful installation freezes the registry; resource reload does
-not reopen it. The settings and synchronization operations below are the
-contract for the remaining implementation, not callable methods yet.
+not reopen it. The settings and synchronization operations described here are
+implemented on the typed player handle.
 
 ## Storage, persistence, copy and replace
 
@@ -204,7 +204,8 @@ schema on mod recipes.
 smithing layouts. `RecipeSlotDisplay` describes slots using API-owned values:
 items, stacks, tags, fuel, potion/component transforms, dyeing, trimming,
 remainders and composites. All three display types explicitly derive `Wire`.
-Named resource references are resolved at load, not while drawing.
+Named resource references are validated against the owning resource generation
+at load. Display stacks are materialized when the panel's content changes.
 
 The engine's `ModBookIndex::build` boundary validates declarations atomically
 against resource tables. Unknown resources, invalid layouts, duplicate recipe
@@ -220,12 +221,34 @@ the cache. Multiple categories may share a recipe type. The engine's panel
 projection requires both the declared target menu and registered book key,
 and a category selected in another book cannot be reused as a tab here.
 
-This is display/index infrastructure, **not screen integration**. Existing
-screens do not yet render these declarations. A declaration's `book` is a
-registered `RecipeBookTypeKey` from #2415; it does not implicitly register
-a book or create settings. The index checks the key against the frozen registry. Enabling
-custom book screens still requires the registration and negotiated settings
-route described above. No vanilla book ordinal or packet meaning changes.
+### Hosting the panel in a mod screen
+
+Set `Screen.recipe_book` to `Some(key.clone())` in the existing `native_screen`
+declaration. Leave it `None` for a screen without a recipe book. The key must
+belong to the categories' `target_menu`; a different menu cannot display that
+book. The green book button sits just outside the menu's right edge so it does
+not cover slots chosen by the mod. The open panel uses the normal narrow-window
+coverage and wide-window menu shift.
+
+The panel is disabled until the connection has an authoritative settings
+snapshot for the registered key. Opening and filtering submit requests through
+the shared custom-settings route; neither click optimistically changes the
+saved flags. Tabs show this book's category icons, with a search tab aggregating
+only this book. Four category tabs fit on each tab page; separate arrows reach
+additional categories while search stays visible. Search matches displayed result names. The craftable filter
+matches the display's required input alternatives against player inventory and
+visible menu contents, not the custom recipe's opaque JSON logic.
+
+Recipe buttons cycle through their declared result displays. Clicking a button
+opens a display preview using the shared recipe-book overlay painter, including
+stonecutter and smithing ingredient layouts. Larger ingredient grids scale to fit
+the preview instead of spilling into adjacent alternatives. These previews do not place recipes,
+create ghost slots, or send a custom id through vanilla placement packets;
+placement and ghosts are tracked separately in #2599.
+
+A declaration's `book` is a registered `RecipeBookTypeKey` from #2415; it does not
+implicitly register a book or create settings. The index checks the key against
+the frozen registry. No vanilla book ordinal or packet meaning changes.
 
 ## Transport and cost
 
@@ -248,3 +271,68 @@ control reply instead of another large snapshot. The client disables the custom
 view and coalesces a retry after one second; a busy response schedules the next
 retry, and a successful authoritative snapshot cancels it. This bounds response
 amplification without leaving a lost resnapshot or pending UI intent unresolved.
+
+## Toggle layout and large books
+
+`Screen.recipe_book_toggle` optionally reserves a 20 × 18 GUI-pixel toggle at
+an `[x, y]` offset from the menu origin. Like vanilla's screen-specific button
+positions, this is space the screen author must keep clear of slots and labels.
+Both native and wasm declarations carry the same optional value over Wire.
+
+Without an anchor, the client tries an external right, left, then above-menu
+gutter, rejecting positions covered by the overlay panel. Menus wider than 176
+GUI pixels, windows narrower than 379 GUI pixels, or windows narrower than the
+menu width plus 202 GUI pixels use overlay mode instead of shifting slots. If
+the toggle does not fit in the viewport in the closed layout or in the open
+layout, the book is refused with a diagnostic identifying the mod block and menu.
+The diagnostic requests `Screen.recipe_book_toggle` when absent, or reports an
+anchored toggle outside the viewport when the declared anchor does not fit. The menu still opens unchanged; the
+engine never clamps a toggle onto mod slots or clips the menu to make room.
+
+The client caches resolved result/search metadata for the screen binding.
+Stock changes re-evaluate craftability and filtering, but only the selected
+page's twenty recipes materialize ingredient previews. Search still considers
+the entire declared book, not just the visible page.
+
+## Menu-owned destination roles
+
+During shared registration, `r.menu_recipe_book(menu, &book, recipe_type, layout)`
+binds a content menu to a registered book and a recipe type. The menu namespace
+must belong to the registering mod. Duplicate bindings and unknown books refuse
+installation even when the registration error is ignored. The declaration is
+frozen with the other registrations and explicitly derives `Wire`, for the
+same native and wasm transport.
+
+`RecipeBookLayout` declares one of four destination maps:
+
+- `Crafting { width, height, slots, result }` supports shaped and shapeless
+  displays. Slots are row-major container indices.
+- `Furnace { input, fuel, result }` supports cooking displays.
+- `Stonecutter { input, result }` supports stonecutting displays.
+- `Smithing { template, base, addition, result }` supports smithing displays.
+
+These are container slots, not the appended player inventory. Overlapping roles,
+invalid dimensions and indices outside the 256-slot menu bound refuse registration.
+Book loading checks against the actual content menu size. A declared crafting
+map must exactly agree with the menu's existing `MenuCrafting` storage and result.
+An incompatible display or one that does not fit refuses the declaration
+generation rather than truncating ingredients. All mapped slots need finite
+coordinates in `Screen.slots`; opening an incompatible screen is refused. This
+is currently an open-time check, not an atomic screen-registration error:
+`native_screen` returns geometry at runtime, after the server has opened the
+menu. The adapter/rendering follow-up must move the required geometry contract
+to startup before enabling placement. The foundation does not introduce a new
+screen registration system.
+
+The shared mapper uses vanilla `PlaceRecipeHelper`: a 1 by 1 shaped recipe in
+a 3 by 3 grid is centered; a 2 by 2 recipe starts at the upper left and retains
+its holes. Shapeless ingredients occupy consecutive cells. Furnace fuel is
+included in a preview only when its slot is empty. Station icons never map to
+menu ingredients. Result display stacks retain their components and counts.
+
+This foundation does not activate ghost rendering or click-to-place requests.
+Those require the authoritative recipe type's placement information and a
+server missing-ingredients response. Displays are pictures, not ingredient
+predicates; declaring a result ghost never grants a real stack. NeoForge 26.3
+public documentation names no registration counterpart for vanilla's internal
+`GhostSlots.setInput` and `setResult`; these declaration names are Horizon's.

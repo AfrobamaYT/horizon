@@ -13,9 +13,9 @@ impl Game<'_> {
             .is_some_and(|radius| self.spawn_protects(radius, &g.dimension, pos))
     }
 
-    pub(super) fn spawn_protection_for(&self, host: &LanHost, uuid: u128) -> Option<i32> {
+    pub(in crate::game) fn spawn_protection_for(&self, host: &LanHost, uuid: u128) -> Option<i32> {
         let radius = host.hub.spawn_protection;
-        (self.options.dedicated.is_some()
+        (self.is_dedicated_server()
             && radius > 0
             && !host.hub.ops.is_empty()
             && !host.hub.ops.contains_key(&uuid))

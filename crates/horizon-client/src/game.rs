@@ -8318,6 +8318,7 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        self.expire_client_cracks();
         if self.agent.hold_server {
             return Ok(());
         }
@@ -11246,19 +11247,6 @@ impl Game<'_> {
         self.mark_stage(out.len(), "NONE");
     }
 
-    /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
-    /// (any other progress). Cracks not updated for 400 ticks are dropped.
-    pub(crate) fn destroy_block_progress(&mut self, breaker: i32, pos: [i32; 3], progress: i32) {
-        let now = self.world.game_time;
-        self.destroying
-            .retain(|_, c| now.saturating_sub(c.2) <= 400);
-        if (0..10).contains(&progress) {
-            self.destroying.insert(breaker, (pos, progress as u8, now));
-        } else {
-            self.destroying.remove(&breaker);
-        }
-    }
-
     /// `ServerLevel.destroyBlockProgress`: breaker `breaker`'s crack on `pos`
     /// (0..=9, anything else takes it away), for every player within 64 blocks.
     pub(super) fn server_destroy_block_progress(
@@ -12220,66 +12208,6 @@ impl Game<'_> {
                 self.hurt_armor(*source, *amount);
             }
         }
-    }
-    /// Run equipment continuations with the acting player installed on the real host.
-    #[allow(clippy::too_many_arguments)]
-    fn hurt_player_equipment(
-        &mut self,
-        source: horizon_world::damage_source::DamageTypeId,
-        amount: f32,
-        blocking: Option<horizon_client::health::Blocking>,
-        living_cause: bool,
-        causing: i32,
-        creative_source: bool,
-        attack: &horizon_client::health::Attack,
-    ) -> horizon_client::Result<horizon_client::health::BlockOutcome> {
-        let rules = self.world.health_rules;
-        let helmet = self.armor[0]
-            .as_ref()
-            .is_some_and(|s| s.count > 0 && &*s.item != "minecraft:air");
-        let mut hit = self
-            .player
-            .as_mut()
-            .ok_or("missing damage target")?
-            .start_hurt(
-                crate::game::entity::damage_level_of!(self, attack),
-                &self.motion.health,
-                rules,
-                source,
-                amount,
-                blocking,
-                living_cause,
-                causing,
-                creative_source,
-                helmet,
-            )?;
-        if let Some(damage) = hit.helmet_damage() {
-            self.hurt_helmet(source, damage);
-            self.refresh_armor_protection();
-        }
-        let armor_damage = self
-            .player
-            .as_mut()
-            .ok_or("missing damage target")?
-            .select_equipment_hurt(
-                crate::game::entity::damage_level_of!(self, attack),
-                &self.motion.health,
-                rules,
-                &mut hit,
-            )?;
-        if let Some(damage) = armor_damage {
-            self.hurt_armor(source, damage);
-            self.refresh_armor_protection();
-        }
-        self.player
-            .as_mut()
-            .ok_or("missing damage target")?
-            .finish_hurt(
-                crate::game::entity::damage_level_of!(self, attack),
-                &self.motion.health,
-                rules,
-                hit,
-            )
     }
     /// `Player.hurtArmor`: every armor slot wears.
     fn hurt_armor(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
@@ -13837,11 +13765,10 @@ impl Game<'_> {
                 rotation: [0.0; 3],
                 scale: 1.0,
             };
-            let mut canceled = false;
-            if snapshot.is_some() {
-                self.native_render_hand(&mut render, &mut canceled);
-            }
-            if canceled {
+            // RenderHandEvent: the mods pose the hand, draw in it or leave vanilla's out.
+            if snapshot.is_some()
+                && self.render_hand_cancelled(&mut render, to_world, packed, &mut out, &mut runs)
+            {
                 continue;
             }
             // No mod moved the hand (always so without one): no matrices to build.

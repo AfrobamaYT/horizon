@@ -430,7 +430,7 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
-        let console = self.options.dedicated.is_some()
+        let console = self.is_dedicated_server()
             && self
                 .ui
                 .rules
@@ -465,7 +465,7 @@ impl Game<'_> {
         // MinecraftServer.sendSystemMessage, unless the server is the source.
         let console = self.console_broadcast.is_none()
             && self.lan_acting.is_some()
-            && self.options.dedicated.is_some()
+            && self.is_dedicated_server()
             && self
                 .ui
                 .rules
@@ -3826,7 +3826,7 @@ impl Game<'_> {
             self.game_rule_changed(&rule.name, value, actor);
         }
         self.sync_rules();
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             let (value_type, json) = match value {
                 Value::Bool(b) => ("boolean", serde_json::json!(b)),
                 Value::Int(i) => ("integer", serde_json::json!(i)),
@@ -4589,7 +4589,7 @@ impl Game<'_> {
             }
         };
         if id == "say" {
-            if self.lan.is_some() && self.options.dedicated.is_some() {
+            if self.lan.is_some() && self.is_dedicated_server() {
                 self.lan_log_event(horizon_client::lan::hub::HostEvent::Chat {
                     line: line.plain(),
                     secure: false,

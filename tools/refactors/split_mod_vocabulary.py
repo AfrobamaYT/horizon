@@ -46,6 +46,8 @@ def main():
         unexpected = set(remaining) - {'lib.rs', 'wire/wire_guest.rs'}
         if unexpected:
             raise SystemExit(f'vocabulary left in facade: {sorted(unexpected)}')
+        print('facade holds only lib.rs and wire/wire_guest.rs')
+        return
     paths = files(args.source_base)
     if args.new_since:
         previous = set(subprocess.check_output(
