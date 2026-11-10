@@ -10,6 +10,9 @@ PATTERNS = [
 ]
 
 for path in sorted((ROOT / 'crates/horizon-client/src/game/modding').glob('native_*.rs')):
+    # This statistics fixture has an acting service context but no living body.
+    if path.name == 'native_player_stats.rs':
+        continue
     original = path.read_text()
     text = original
     for pattern in PATTERNS:
