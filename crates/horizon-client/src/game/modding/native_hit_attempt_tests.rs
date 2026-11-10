@@ -126,7 +126,7 @@ fn hit_attempts_reach_the_listener_once_including_refusals() {
                         "refused fireball restores prior fire"
                     );
                     assert_eq!(
-                        game.potions.effects.get("minecraft:levitation").is_some(),
+                        game.potions.effects.get("levitation").is_some(),
                         shulker && !refused,
                         "levitation requires successful shulker damage"
                     );
