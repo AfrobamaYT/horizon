@@ -43,6 +43,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::recipe_result` | crosses | Wire call |
 | `Host::known_recipes` | crosses | Wire call |
 | `Host::recipe_book_category` | crosses | Wire call |
+| `Host::resource` | crosses | Wire call |
 | `Host::unresolved_fluid_id` | crosses | Wire call |
 | `Host::block_in_tag` | crosses | Wire call |
 | `Host::state_outline` | crosses | Wire call |
