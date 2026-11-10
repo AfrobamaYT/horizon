@@ -116,7 +116,7 @@ verified, it is reused and the named files aren't read. Two things no such launc
 ```sh
 cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
 cargo run --release -p horizon-prepare -- sounds
-cargo run --release -p horizon-client -- --render-distance 12
+cargo run --release -p horizon-game -- --render-distance 12
 ```
 
 Development builds that link quickly: `cargo build --profile fast -p horizon-game`.
@@ -174,7 +174,7 @@ The native Rust adapter recognizes 26.2, 26.1.x, 1.21.11, 1.21.9/1.21.10,
 the adapter. The client still needs its prepared **26.3** resources.
 
 ```sh
-HORIZON_OLDER_SERVERS=1 cargo run --profile fast -p horizon-client -- --server 127.0.0.1:25565
+HORIZON_OLDER_SERVERS=1 cargo run --profile fast -p horizon-game -- --server 127.0.0.1:25565
 ```
 
 In PowerShell, set `$env:HORIZON_OLDER_SERVERS = '1'`, then run the same Cargo
