@@ -156,6 +156,20 @@ pub trait LevelsBackend {
         inputs: &RecipeInput,
     ) -> Result<Option<RecipeMatch>, RecipeLookupError>;
     /// Side: server.
+    /// Every available member of the server level's entity lookup
+    /// (`ServerLevel.getAllEntities`), including spectators and entities outside
+    /// any spatial query. Dragon parts are not lookup members.
+    /// Returns None on a remote client, for a stale handle or a parked level.
+    /// Temporarily extracted entities are unavailable until restored.
+    /// Order is lookup admission order, preserved across temporary extraction;
+    /// removal and re-admission moves an entity to the end. On initial world
+    /// load, admission follows the engine's storage-family loading order, which
+    /// can differ from vanilla's chunk entity loading order.
+    /// Allocates a result buffer, not one allocation per entity; sorting is
+    /// O(n log n), followed by one authoritative handle lookup per candidate.
+    #[access(WorldOnly)]
+    fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>>;
+    /// Side: server.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
