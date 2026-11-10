@@ -471,6 +471,46 @@ impl Game<'_> {
         self.server_destroy_block_progress(breaker, pos, progress);
         true
     }
+    /// `Level.sendBlockUpdated`: queue the block at `pos` to be sent to the clients again.
+    pub(super) fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+            return false;
+        }
+        if let Some(log) = self.world.block_log.as_mut() {
+            log.push((pos[0], pos[1], pos[2]));
+        }
+        self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
+        true
+    }
+    /// `LevelRenderer.destroyBlockProgress` for this client's own view only.
+    pub(super) fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool {
+        if self.is_logical_server() || self.native_level_read_world(level).is_none() {
+            return false;
+        }
+        self.destroy_block_progress(breaker, pos, progress);
+        true
+    }
+    /// `ItemStack.getDestroySpeed` of `tool` on the block at `pos`.
+    pub(super) fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32> {
+        let world = self.native_level_read_world(level)?;
+        if !world.loaded(pos[0], pos[2]) || !world.shape.contains_y(pos[1]) {
+            return None;
+        }
+        let state = world.block(pos[0], pos[1], pos[2]);
+        let name = &self.res.facts().get(state).name;
+        Some(self.items().mining_speed(tool, name))
+    }
     /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
     /// `growWaterPlant`): the mods' `bonemeal` hook first, level event 1505 when something grew.
     /// False for a refused write, a stale or parked handle, a client, and a block that did not
@@ -3743,6 +3783,24 @@ pub(super) mod tests {
             game.world.block_log.as_ref().unwrap(),
             &vec![(3, 64, 0), (4, 64, 0)]
         );
+        // `sendBlockUpdated` queues the block again without writing; out of height it queues nothing.
+        assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert!(!game.level_send_block_updated(level, [5, 10_000, 0]));
+        assert_eq!(
+            game.world.block_log.as_ref().unwrap(),
+            &vec![(3, 64, 0), (4, 64, 0), (5, 64, 0)]
+        );
+        // A bare hand mines at the base speed; an unloaded position has none.
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], None),
+            Some(1.0)
+        );
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 10_000, 0], None),
+            None
+        );
+        // Server-side game: the client-only crack is refused.
+        assert!(!game.level_set_client_break_progress(level, 1, [3, 64, 0], 4));
         game.world.block_log = None;
         let waterlogged = game
             .pack

@@ -889,6 +889,40 @@ pub trait LevelsBackendMut {
         progress: i32,
     ) -> bool;
     /// Side: server.
+    /// Tell the clients the block at `pos` changed (`Level.sendBlockUpdated`): its state and
+    /// block entity data are sent again at the end of the tick, without writing anything, for
+    /// a mod that changed what a block shows by other means than a block write. False, with
+    /// nothing queued, for a stale or parked handle, a client, and an unloaded or out-of-height
+    /// position.
+    #[access(WorldOnly)]
+    fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: client.
+    /// Show or clear the crack of `breaker` on the block at `pos` in this client's own view
+    /// (`LevelRenderer.destroyBlockProgress`): stages 0..9 show a crack, any other stage removes
+    /// it. Nothing is sent to the server or to other players, and a crack not updated for 400
+    /// ticks goes away. False for a stale or foreign level or before login.
+    #[access(WorldOnly)]
+    fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool;
+    /// Side: both.
+    /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
+    /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool or a block it has no
+    /// rule for), before the player's enchantments, attributes, water, ground and
+    /// `player_break_speed` hooks, which `player_break_speed` itself hears. None for a stale
+    /// handle or an unloaded or out-of-height position. Reads no chunks.
+    #[access(WorldOnly)]
+    fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32>;
+    /// Side: server.
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
     /// `ServerLevel.playSound(null, ...)` does, under `source`'s volume
