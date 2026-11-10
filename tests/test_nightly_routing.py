@@ -1,4 +1,5 @@
 """Exercise workflow routing expressions and smoke commands with actual matrix entries."""
+import itertools
 import json
 import os
 from pathlib import Path
@@ -31,26 +32,41 @@ class NightlyRoutingTests(unittest.TestCase):
                 value = value.strip()
                 rows[-1][key] = {"true": True, "false": False}.get(value, value)
         self.assertEqual({row["name"] for row in rows}, {"linux", "linux-musl", "windows", "windows-arm64", "macos", "macos-x64"})
-        variables = {"NIGHTLY_LINUX_RUNNER": '"dyna-large"', "NIGHTLY_MAC_RUNNER": '"macos-15"', "NIGHTLY_EXPORTERS_RUNNER": '"dyna-large"', "MAC_RUNNER": "release-mac"}
         script = """const fs = require('fs');
-const {expression, matrix, inputs, vars} = JSON.parse(fs.readFileSync(0, 'utf8'));
-const fromJSON = JSON.parse;
+const state = JSON.parse(fs.readFileSync(0, 'utf8'));
+// Actions returns an empty string for absent context properties, not undefined.
+const context = values => new Proxy(values, {get: (values, key) => values[key] ?? ''});
+const matrix = context(state.matrix), vars = context(state.vars), inputs = state.inputs;
+const expression = state.expression, fromJSON = JSON.parse, toJSON = JSON.stringify;
 console.log(JSON.stringify(eval(expression)));
 """
         def evaluate(expression, matrix, trusted):
             result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables}), text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
-        for trusted in [False, True]:
-            self.assertEqual(evaluate(expressions[0], {}, trusted), "release-mac" if trusted else "dyna-large")
-            for row in rows:
-                with self.subTest(trusted=trusted, entry=row["name"]):
+        default_mac = ["self-hosted", "macOS", "horizon-nightly"]
+        bookkeeping = re.search(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", NIGHTLY.read_text(), re.M).group(1)
+        for configured, release_runner, disabled, trusted in itertools.product([False, True], repeat=4):
+            variables = {"SELF_HOSTED_CI": "off" if disabled else "all"}
+            if release_runner:
+                variables["MAC_RUNNER"] = "release-mac"
+            if configured:
+                variables.update({"NIGHTLY_LINUX_RUNNER": '"dyna-large"', "NIGHTLY_MAC_RUNNER": '"macos-15"', "NIGHTLY_EXPORTERS_RUNNER": '"dyna-large"', "NIGHTLY_BOOKKEEPING_RUNNER": '"dyna-small"'})
+            # An empty runs-on is rejected by Actions; never choose a shared runner instead.
+            dedicated = "release-mac" if release_runner else ""
+            expected_exporter = dedicated if trusted else ("ubuntu-latest" if disabled else ("dyna-large" if configured else default_mac))
+            with self.subTest(configured=configured, release_runner=release_runner, disabled=disabled, trusted=trusted):
+                self.assertEqual(evaluate(expressions[0], {}, trusted), expected_exporter)
+                expected_bookkeeping = "ubuntu-latest" if disabled else ("dyna-small" if configured else ["self-hosted", "linux", "horizon-light"])
+                self.assertEqual(evaluate(bookkeeping, {}, trusted), expected_bookkeeping)
+                for row in rows:
                     if row.get("mac"):
-                        expected = "release-mac" if trusted else "macos-15"
-                    elif row["name"] == "linux" and not trusted:
+                        expected = dedicated if trusted else ("macos-15" if disabled or configured else default_mac)
+                    elif row["name"] == "linux" and not trusted and configured and not disabled:
                         expected = "dyna-large"
                     else:
                         expected = row["os"]
-                    self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+                    with self.subTest(entry=row["name"]):
+                        self.assertEqual(evaluate(expressions[1], row, trusted), expected)
 
     @unittest.skipUnless(os.name == "posix", "The smoke command runs on Linux and macOS")
     def test_smoke_runs_from_relative_or_absolute_binary_directory(self):
@@ -67,6 +83,19 @@ console.log(JSON.stringify(eval(expression)));
                     result = subprocess.run(["bash", "-c", command + '\n"$client"'], cwd=root, env={**os.environ, "BIN": directory}, text=True, capture_output=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout, "smoke ran")
+
+    @unittest.skipUnless(shutil.which("Xvfb"), "Xvfb is required for the Linux smoke display")
+    def test_linux_smoke_gets_a_ready_display(self):
+        text = GAME.read_text()
+        client = next(line.strip() for line in text.splitlines() if line.strip().startswith("client="))
+        display = "display=()" + text.split("          display=()", 1)[1].split('          (cd "$home"', 1)[0]
+        with tempfile.TemporaryDirectory() as folder:
+            binary = Path(folder) / "horizon-client"
+            binary.write_text("#!/bin/sh\nprintf '%s|%s' \"$DISPLAY\" \"${WAYLAND_DISPLAY-unset}\"\n")
+            binary.chmod(0o755)
+            result = subprocess.run(["bash", "-c", client + "\n" + display + '\n"${display[@]}" "$client"'], cwd=ROOT, env={**os.environ, "BIN": folder, "RUNNER_OS": "Linux", "DISPLAY": ":invalid", "WAYLAND_DISPLAY": "invalid"}, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertRegex(result.stdout, r"^:[0-9]+\|unset$")
 
     @unittest.skipUnless(os.name == "posix", "The signing gate runs in Bash on Linux")
     def test_fork_dry_run_cannot_pass_without_real_smoke_report(self):

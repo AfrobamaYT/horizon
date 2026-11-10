@@ -41,7 +41,8 @@ jobs:
     # goes to the Mac mini's nightly runner (macOS + horizon-nightly: ludovics-mac-mini-nightly, beside the one that
     # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
     # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
-    runs-on: ${{ inputs.trusted && vars.MAC_RUNNER || fromJSON(vars.NIGHTLY_EXPORTERS_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]') }}
+    # toJSON keeps an empty trusted runner as an invalid empty label, never a Nightly fallback.
+    runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && (vars.NIGHTLY_EXPORTERS_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || '"ubuntu-latest"') }}
     # Three full preparations (two isolated, one batched) besides the compile.
     timeout-minutes: 60
     steps:
@@ -145,7 +146,7 @@ jobs:
             target: x86_64-apple-darwin
             dir: horizon-macos-x64
             asset: horizon-macos-x64.zip
-    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON(vars.NIGHTLY_MAC_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || (!inputs.trusted && matrix.name == 'linux' && vars.NIGHTLY_LINUX_RUNNER && fromJSON(vars.NIGHTLY_LINUX_RUNNER)) || matrix.os }}
+    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && (vars.NIGHTLY_MAC_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || '"macos-15"') || (!inputs.trusted && vars.SELF_HOSTED_CI != 'off' && matrix.name == 'linux' && vars.NIGHTLY_LINUX_RUNNER && fromJSON(vars.NIGHTLY_LINUX_RUNNER)) || matrix.os }}
     # Notarizing the zip can take a few minutes.
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:
@@ -304,11 +305,15 @@ jobs:
           version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' research-lock.json | head -1)
           client="$(cd "$BIN" && pwd)/horizon-client"
           resources="$PWD/.local/horizon-client/$version"
+          display=()
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            display=(python3 "$PWD/tools/ci/with_xvfb.py")
+          fi
           (cd "$home" && HORIZON_HOME="$home" HORIZON_NO_AUDIO=1 \
             HORIZON_LAUNCHER_HOME="$home/launcher" XDG_DATA_HOME="$home/data" XDG_CONFIG_HOME="$home/config" \
             HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_LAUNCHER_TRASH="$home/trash" \
             HORIZON_LAUNCHER_CLIPBOARD="$home/clipboard" HORIZON_LAUNCHER_DESKTOP="$home/desktop" \
-            "$client" --resources "$resources" --offscreen \
+            "${display[@]}" "$client" --resources "$resources" --offscreen \
             --world smoke --seed 1 --render-distance 4 --world-frames 1500 --timeout-seconds 180 \
             --smoke-report "$home/smoke.json" > "$home/client.log" 2>&1) || { tail -40 "$home/client.log"; exit 1; }
           python3 - "$home/smoke.json" <<'EOF'

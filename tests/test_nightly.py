@@ -163,8 +163,9 @@ class UntrustedBuildTests(unittest.TestCase):
         # The nightly's own runner: never the release runner, and never behind pull requests' parity queue.
         nightly_default = "'[\"self-hosted\", \"macOS\", \"horizon-nightly\"]'"
         for line, variable in zip(runs_on, ("NIGHTLY_EXPORTERS_RUNNER", "NIGHTLY_MAC_RUNNER")):
-            self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || fromJSON(vars.{variable} || {nightly_default})", line)
-        self.assertIn("!inputs.trusted && matrix.name == 'linux'", runs_on[1])
+            self.assertIn("inputs.trusted && toJSON(vars.MAC_RUNNER)", line)
+            self.assertIn(f"vars.SELF_HOSTED_CI != 'off' && (vars.{variable} || {nightly_default})", line)
+        self.assertIn("!inputs.trusted && vars.SELF_HOSTED_CI != 'off' && matrix.name == 'linux'", runs_on[1])
 
     def test_a_trusted_build_never_reads_the_shared_sccache(self):
         calls = self.game.count("bash tools/ci/runner-env.sh")
