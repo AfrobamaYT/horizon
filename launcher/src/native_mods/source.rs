@@ -611,9 +611,10 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         local: Some(local),
     };
     std::fs::write(&file, source).unwrap();
-    let discovered = horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
-        .unwrap()
-        .remove(0);
+    let discovered =
+        horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
+            .unwrap()
+            .remove(0);
     std::fs::write(&file, source).unwrap();
     let dir = root.join("catalog");
     std::fs::create_dir_all(&dir).unwrap();
@@ -684,9 +685,10 @@ fn expression_source_stage_shares_one_site_and_adapts_each_listener() {
         origin: "discovery".into(),
     };
     std::fs::write(&file, source).unwrap();
-    let discovered = horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
-        .unwrap()
-        .remove(0);
+    let discovered =
+        horizon_platform::mod_build::api_gen::sites::source::stage(&root, &entries, &[request])
+            .unwrap()
+            .remove(0);
     std::fs::write(&file, source).unwrap();
     let dir = root.join("catalog");
     std::fs::create_dir_all(&dir).unwrap();

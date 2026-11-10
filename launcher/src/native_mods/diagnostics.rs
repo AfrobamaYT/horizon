@@ -54,7 +54,9 @@ impl Declared {
 
     /// Each staged `expression` site: an error inside its binding block means the declared
     /// `type` doesn't match how the game uses the read.
-    pub(super) fn expressions(sites: &[horizon_platform::mod_build::api_gen::sites::Site]) -> Vec<Self> {
+    pub(super) fn expressions(
+        sites: &[horizon_platform::mod_build::api_gen::sites::Site],
+    ) -> Vec<Self> {
         sites
             .iter()
             .filter_map(|site| {

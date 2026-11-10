@@ -2375,6 +2375,8 @@ version = "0.1.0"
 dependencies = [
  "horizon-core",
  "horizon-hooks",
+ "horizon-mod-api-gen",
+ "horizon-mod-point-shape",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-server-files",

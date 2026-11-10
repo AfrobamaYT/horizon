@@ -46,7 +46,11 @@ impl Site {
         if self.local.is_some() || self.expression.is_some() {
             return self.name.clone();
         }
-        horizon_platform::mod_build::api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
+        horizon_platform::mod_build::api_gen::sites::source::facade_name(
+            &self.target,
+            &self.call,
+            self.ordinal,
+        )
     }
 
     pub(super) fn facade(
