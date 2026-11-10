@@ -15,16 +15,13 @@ impl Game<'_> {
             || mod_api::__private::listened(mod_api::HookId::LevelTickPost))
         .then(|| self.native_client_level())
         .flatten();
-        if let Some(level) = level
-            && mod_api::__private::listened(mod_api::HookId::LevelTickPre)
-        {
+        if let Some(level) = level {
             self.native_level_tick_pre(level);
         }
         let result = body(self);
         // `ClientLevel.tick`'s RETURN, which a failed tick does not reach.
         if result.is_ok()
             && let Some(level) = level
-            && mod_api::__private::listened(mod_api::HookId::LevelTickPost)
         {
             self.native_level_tick_post(level);
         }
