@@ -614,6 +614,8 @@ impl Game<'_> {
         // A stack able to `shears_harvest` is dispensed as shears are, whatever its item.
         let shears = self.stack_shears(&stack, ability::SHEARS_HARVEST);
         let (left, event) = match item.as_str() {
+            _ if shears => self.dispense_shears(pos, facing, stack)?,
+
             "minecraft:arrow"
             | "minecraft:tipped_arrow"
             | "minecraft:spectral_arrow"
@@ -647,7 +649,6 @@ impl Game<'_> {
             "minecraft:carved_pumpkin" => self.dispense_carved_pumpkin(pos, facing, stack)?,
             "minecraft:glass_bottle" => self.dispense_glass_bottle(pos, facing, stack)?,
             "minecraft:glowstone" => self.dispense_glowstone(pos, facing, stack)?,
-            _ if shears => self.dispense_shears(pos, facing, stack)?,
             "minecraft:brush" => self.dispense_brush(pos, facing, stack),
             "minecraft:honeycomb" => self.dispense_honeycomb(pos, facing, stack)?,
             "minecraft:potion" => self.dispense_potion(pos, facing, stack)?,

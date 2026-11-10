@@ -1079,4 +1079,3 @@ fn an_ability_question_reaches_only_the_parts_of_the_asked_item_and_names_the_ab
         ["my_mod:chop", "minecraft:shield_block"]
     );
 }
-

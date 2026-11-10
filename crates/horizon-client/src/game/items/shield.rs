@@ -53,7 +53,7 @@ impl Game<'_> {
         let blocks = self.stack_can_perform(stack, ability, component.is_some());
         match component {
             Some(component) if blocks => Some(component),
-            None if blocks => Some(std::borrow::Cow::Owned(
+            None if blocks => Some(std::borrow::Cow::Borrowed(
                 horizon_client::items::BlocksAttacks::bare(),
             )),
             _ => None,

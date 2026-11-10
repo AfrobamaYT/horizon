@@ -110,8 +110,13 @@ fn parts_grant_and_deny_the_abilities_vanilla_asks_of_an_item_isolated() {
             },
             Abilities {
                 item: "minecraft:stick",
-                grants: SHEARING,
+                grants: &[ability::SHEARS_CARVE],
                 denies: &[],
+            },
+            Abilities {
+                item: "minecraft:arrow",
+                grants: &[ability::SHEARS_HARVEST],
+                denies: &[ability::SHEARS_CARVE],
             },
             Abilities {
                 item: "minecraft:shears",
@@ -168,6 +173,7 @@ fn parts_grant_and_deny_the_abilities_vanilla_asks_of_an_item_isolated() {
                 (carved, block_name(game, [4, 64, 4]))
             };
             let pumpkin = "minecraft:pumpkin".to_string();
+            assert_eq!(carve(game, "minecraft:arrow"), (false, pumpkin.clone()));
             assert_eq!(carve(game, "minecraft:shears"), (false, pumpkin.clone()));
             assert_eq!(carve(game, "minecraft:blaze_rod"), (false, pumpkin));
             assert_eq!(
@@ -176,7 +182,7 @@ fn parts_grant_and_deny_the_abilities_vanilla_asks_of_an_item_isolated() {
             );
 
             // A sheep, through a right click: the same.
-            let stick = ItemStack::new("minecraft:stick", 1);
+            let stick = ItemStack::new("minecraft:arrow", 1);
             let shears = ItemStack::new("minecraft:shears", 1);
             let rod = ItemStack::new("minecraft:blaze_rod", 1);
             let sheep = add_sheep(game, 8.5);
