@@ -631,7 +631,7 @@ pub use staged::{MODS_STAGE, staged_mods};
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]
 pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
-    build::track(root)?;
+    build::track(root, true)?;
     dispatch_fixtures::generate(root, out_dir)?;
     // These fixtures deliberately substitute dispatch-only stub values for API
     // types. Encoding is exercised by the real mod_api's Wire tests, not stubs.

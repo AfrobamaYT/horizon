@@ -6,7 +6,7 @@ use std::{fs, path::Path};
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
-    track(root)?;
+    track(root, !matches!(&target, Target::Vocab))?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
@@ -248,7 +248,7 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     fs::write(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
 }
 
-pub(super) fn track(root: &Path) -> Result<(), String> {
+pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
         println!("cargo:rerun-if-changed={}", path.display());
@@ -281,11 +281,19 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
         "rs",
         false,
     )?;
-    directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-client/src/game.rs").display()
-    );
+    if all_game {
+        directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
+        println!(
+            "cargo:rerun-if-changed={}",
+            root.join("crates/horizon-client/src/game.rs").display()
+        );
+    } else {
+        directory(
+            &root.join("crates/horizon-client/src/game/native_hooks"),
+            "rs",
+            false,
+        )?;
+    }
     for hook in Catalog::load(root)?.hooks {
         if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;
