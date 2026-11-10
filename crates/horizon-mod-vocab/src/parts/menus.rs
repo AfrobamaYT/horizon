@@ -1,6 +1,7 @@
 use super::*;
 
 // no wire: frozen registration storage; each boundary value has its own Wire derive.
+#[derive(Clone)]
 pub(crate) struct MenuBookDeclaration {
     pub(crate) owner: &'static str,
     pub(crate) book: crate::RecipeBookTypeKey,

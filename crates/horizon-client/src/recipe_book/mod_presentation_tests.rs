@@ -215,6 +215,7 @@ fn stock_changes_only_materialize_visible_previews() {
     cat.displays = (0..1000)
         .map(|i| mod_api::RecipeBookDisplayEntry {
             recipe: format!("demo:r{i}"),
+            placement: None,
             displays: vec![Display::Stonecutter {
                 input: item("input"),
                 result: item("result"),

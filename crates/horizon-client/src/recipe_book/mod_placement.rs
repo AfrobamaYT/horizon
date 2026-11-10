@@ -74,7 +74,7 @@ fn validate(info: &PlacementInfo, resources: &dyn DisplayResources) -> Result<()
     // This is only a preflight for values provably unable to cross Wire. The
     // derived codec below, not a second decoder or local depth budget, decides
     // acceptance identically for native and wasm declarations. A record and
-    // each recursive ingredient/tag record contributes one reader level;
+    // each recursive ingredient record contributes one reader level;
     // category/entry/info/ingredient start at four (lists/options/tuples
     // do not add reader depth).
     // Reject that proven lower bound before invoking the recursive encoder.
@@ -95,28 +95,15 @@ fn validate(info: &PlacementInfo, resources: &dyn DisplayResources) -> Result<()
         if ordered != ingredient.items || ordered.len() != ingredient.order.len() {
             return Err("ingredient holder order disagrees with its items".into());
         }
-        if let Some((kind, data)) = &ingredient.custom {
+        if let Some((kind, _)) = &ingredient.custom {
             if ingredient.children.is_some()
                 || !super::super::custom_books::valid_book_id(kind)
                 || kind.starts_with("minecraft:")
             {
                 return Err("custom ingredient kind is invalid or mixed with a child shape".into());
             }
-            let mut tags: Vec<_> = data.iter().map(|(_, tag)| (tag, depth + 1)).collect();
-            while let Some((tag, depth)) = tags.pop() {
-                if depth > usize::from(mod_api::wire::MAX_DEPTH) {
-                    return Err("Wire refused placement: ingredient data exceeds depth".into());
-                }
-                match tag {
-                    horizon_core::nbt::Tag::List(children) => {
-                        tags.extend(children.iter().map(|tag| (tag, depth + 1)))
-                    }
-                    horizon_core::nbt::Tag::Compound(children) => {
-                        tags.extend(children.iter().map(|(_, tag)| (tag, depth + 1)))
-                    }
-                    _ => {}
-                }
-            }
+            // Tag owns its independent, iterative vanilla depth budget.
+            // The shared codec below validates it; ingredient depth is not NBT depth.
         }
         if let Some((shape, children)) = &ingredient.children {
             if children.is_empty()

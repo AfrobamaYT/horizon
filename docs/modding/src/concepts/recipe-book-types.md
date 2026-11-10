@@ -314,8 +314,11 @@ same native and wasm transport.
 
 These are container slots, not the appended player inventory. Overlapping roles,
 invalid dimensions and indices outside the 256-slot menu bound refuse registration.
-Book loading checks against the actual content menu size. A declared crafting
-map must exactly agree with the menu's existing `MenuCrafting` storage and result.
+Book loading checks against the actual content menu size. If the menu has an
+instantaneous `MenuCrafting` backend, its grid and computed result must exactly
+agree with the declaration. Without that backend, a crafting map describes real
+persistent input storage instead: for example, six cooking-pot inputs in a 3 by 2
+grid. Placement never fills its cooked output or fuel, and preserves those slots.
 An incompatible display or one that does not fit refuses the declaration
 generation rather than truncating ingredients. All mapped slots need finite
 coordinates in `Screen.slots`. Registration rejects missing or nonfinite
@@ -331,6 +334,24 @@ a 3 by 3 grid is centered; a 2 by 2 recipe starts at the upper left and retains
 its holes. Shapeless ingredients occupy consecutive cells. Furnace fuel is
 included in a preview only when its slot is empty. Station icons never map to
 menu ingredients. Result display stacks retain their components and counts.
+
+## Authoritative placement information
+
+A menu-bound recipe type supplies `RecipeBookDisplayEntry.placement` as
+`Some(PlacementInfo { cells, shape })`. Each cell is either an authoritative
+`Ingredient` predicate or an empty position; `shape: Some([width, height])`
+preserves shaped holes, while `None` gives the menu's ordered inputs. The recipe
+type owns these predicates, including custom component-sensitive tests. Display
+pictures never substitute for them. Use `PlacementInfo::NOT_PLACEABLE` explicitly
+for a preview-only recipe. Omitting placement information from a bound recipe
+refuses its declaration load rather than guessing ingredients from its icons.
+
+The shared Wire boundary allows 32 structural record levels, including the
+category, display-entry and placement-info envelope. Nested ingredient shapes
+must fit that complete envelope; the native validator and wasm boundary use the
+same codec and refuse excess depth with `WireError`. Opaque NBT has its separate,
+iterative vanilla limit of 512 container levels; it does not spend one structural
+level per NBT container. Wide, shallow cooking grids do not consume extra depth.
 
 This foundation does not activate ghost rendering or click-to-place requests.
 Those require the authoritative recipe type's placement information and a

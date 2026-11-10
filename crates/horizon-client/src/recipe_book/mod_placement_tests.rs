@@ -146,42 +146,35 @@ fn rejected_native_custom_data_is_disposed_without_recursive_drop() {
     ));
 }
 #[test]
-fn native_acceptance_uses_the_shared_wire_decoder_depth_budget() {
-    let mut accepted = mod_api::Ingredient::of(vec!["minecraft:stone".into()]);
-    for _ in 0..500 {
-        let mut parent = mod_api::Ingredient::of(vec!["minecraft:stone".into()]);
-        parent.children = Some((mod_api::item::crafting::Shape::Compound, vec![accepted]));
-        accepted = parent;
+fn native_custom_data_keeps_the_independent_vanilla_nbt_depth() {
+    for (depth, expected) in [(512, true), (513, false)] {
+        let mut tag = horizon_core::nbt::Tag::Int(1);
+        for _ in 0..depth {
+            tag = horizon_core::nbt::Tag::List(vec![tag]);
+        }
+        let mut value = info();
+        value.cells[0].as_mut().unwrap().custom = Some((
+            "demo:exact".into(),
+            [("data".into(), tag)].into_iter().collect(),
+        ));
+        let mut values = batch(Some(value));
+        let mut wire = mod_api::wire::Writer::new();
+        wire.put(&values);
+        let transport =
+            mod_api::wire::Reader::decode::<Vec<RecipeBookCategory>>(wire.bytes()).is_ok();
+        assert_eq!(transport, expected, "NBT depth {depth}");
+        assert_eq!(
+            validate_batch(&mut values, &Registry).is_ok(),
+            expected,
+            "native NBT depth {depth}"
+        );
     }
-    validate_batch(
-        &mut batch(Some(PlacementInfo {
-            cells: vec![Some(accepted)],
-            shape: None,
-        })),
-        &Registry,
-    )
-    .unwrap();
-    let mut ingredient = mod_api::Ingredient::of(vec!["minecraft:stone".into()]);
-    for _ in 0..usize::from(mod_api::wire::MAX_DEPTH) + 1 {
-        let mut parent = mod_api::Ingredient::of(vec!["minecraft:stone".into()]);
-        parent.children = Some((mod_api::item::crafting::Shape::Compound, vec![ingredient]));
-        ingredient = parent;
-    }
-    let mut values = batch(Some(PlacementInfo {
-        cells: vec![Some(ingredient)],
-        shape: None,
-    }));
-    let error = validate_batch(&mut values, &Registry).unwrap_err();
-    assert!(
-        matches!(error, DisplayLoadError::InvalidPlacement(reason) if reason.contains("Wire refused"))
-    );
 }
 
 #[test]
-#[ignore = "#2812: shared Wire decoder can overflow before returning at the real depth limit"]
 fn native_depth_acceptance_matches_the_actual_category_wire_envelope() {
     let limit = usize::from(mod_api::wire::MAX_DEPTH);
-    for depth in [limit - 5, limit - 4, limit - 3] {
+    for (depth, expected) in [(limit - 5, true), (limit - 4, true), (limit - 3, false)] {
         let mut ingredient = mod_api::Ingredient::of(vec!["minecraft:stone".into()]);
         for _ in 0..depth {
             let mut parent = mod_api::Ingredient::of(vec!["minecraft:stone".into()]);
@@ -196,9 +189,10 @@ fn native_depth_acceptance_matches_the_actual_category_wire_envelope() {
         bytes.put(&values);
         let transport =
             mod_api::wire::Reader::decode::<Vec<RecipeBookCategory>>(bytes.bytes()).is_ok();
+        assert_eq!(transport, expected, "transport at depth {depth}");
         assert_eq!(
             validate_batch(&mut values, &Registry).is_ok(),
-            transport,
+            expected,
             "depth {depth}"
         );
     }
