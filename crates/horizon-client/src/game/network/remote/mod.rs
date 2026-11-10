@@ -6,6 +6,8 @@
 //! clicks). The player still moves with the local physics, as the vanilla
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
+mod recipe_properties;
+
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::render_tick::{mob_tracking_body, player_tracking_body};
 use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};

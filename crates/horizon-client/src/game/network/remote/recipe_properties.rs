@@ -4,7 +4,7 @@ impl Game<'_> {
     /// Minecraft.disconnect's `ClientPlayerNetworkEvent.LoggingOut`: on
     /// leaving a world, and on quitting the game from one. Once per
     /// connection, whichever way out runs first.
-    pub(super) fn client_logging_out(&mut self) {
+    pub(in crate::game) fn client_logging_out(&mut self) {
         let Some(remote) = self.remote.as_mut().filter(|r| !r.logged_out) else {
             return;
         };
@@ -19,7 +19,7 @@ impl Game<'_> {
         self.recipe_ui.server_properties = Default::default();
     }
 
-    fn remote_recipe_properties(
+    pub(super) fn remote_recipe_properties(
         &mut self,
         packet: horizon_protocol::packets::recipes::UpdateRecipes,
     ) {
