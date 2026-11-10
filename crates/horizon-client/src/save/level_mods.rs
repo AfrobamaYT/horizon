@@ -15,9 +15,13 @@ pub struct ModRecord {
 static LOADED: RwLock<Option<Vec<ModRecord>>> = RwLock::new(None);
 
 /// The code mods loaded now, in load order, each with its version (`""` when unknown): what
-/// every `level.dat` written from here on records. The game's start says it once.
-pub fn set_loaded(mods: Vec<ModRecord>) {
-    *LOADED.write().unwrap_or_else(|e| e.into_inner()) = Some(mods);
+/// every `level.dat` written from here on records. The game's start says it once. Returns the
+/// list it replaced: the list is the whole process's, so a test that sets one puts that back.
+pub fn set_loaded(mods: Option<Vec<ModRecord>>) -> Option<Vec<ModRecord>> {
+    std::mem::replace(
+        &mut *LOADED.write().unwrap_or_else(|e| e.into_inner()),
+        mods,
+    )
 }
 
 /// The loaded mods `set_loaded` gave; `None` before it (a tool or a test that didn't say).
@@ -46,9 +50,13 @@ pub(super) fn saved(data: &Tag) -> Option<Vec<ModRecord>> {
 /// Puts the loaded mods' list into `data`'s `fml`, in place of the one there, keeping the rest
 /// of `fml`; `data` stays as it is while the loaded mods aren't known.
 pub(super) fn write(data: &mut Tag) {
-    let Some(mods) = loaded() else {
-        return;
-    };
+    if let Some(mods) = loaded() {
+        write_list(data, &mods);
+    }
+}
+
+/// `write` with the list given.
+fn write_list(data: &mut Tag, mods: &[ModRecord]) {
     let mut fml = compound_or_empty(data.get("fml").cloned());
     let list = mods
         .iter()
@@ -98,6 +106,8 @@ mod tests {
 
     /// The loaded mods replace the list the file had and the other `fml` keys stay; a write
     /// before the loaded mods are known leaves the list alone, and a world without one has none.
+    /// The loaded list is given to `write_list`, not set: the process-wide one would reach
+    /// the level.dat other tests write meanwhile.
     #[test]
     fn the_level_data_records_the_loaded_mods() {
         let dir = std::env::temp_dir().join(format!("horizon-mod-list-{}", std::process::id()));
@@ -133,14 +143,17 @@ mod tests {
             Level::read(&dir).unwrap().saved_mods,
             Some(vec![record("old", "0.1.0")])
         );
-        set_loaded(vec![record("first", "1.2.0"), record("second", "")]);
-        level.write(&dir).unwrap();
+        let mut data = read_dat(&dir.join("level.dat"))
+            .unwrap()
+            .get("Data")
+            .unwrap()
+            .clone();
+        write_list(&mut data, &[record("first", "1.2.0"), record("second", "")]);
         assert_eq!(
-            Level::read(&dir).unwrap().saved_mods,
+            saved(&data),
             Some(vec![record("first", "1.2.0"), record("second", "")])
         );
-        let root = read_dat(&dir.join("level.dat")).unwrap();
-        let fml = root.get("Data").unwrap().get("fml").unwrap();
+        let fml = data.get("fml").unwrap();
         assert_eq!(fml.get("Other"), Some(&Tag::Int(7)));
         assert_eq!(
             fml.get("LoadingModList"),

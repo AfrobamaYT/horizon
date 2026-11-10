@@ -1390,18 +1390,27 @@ mod tests {
             name: "test".into(),
             ..Level::default()
         };
+        // The loaded list is the whole process's: the test's goes away when it ends, even
+        // when it fails, so the tests after it save no list.
+        struct Restore(Option<Vec<ModRecord>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                set_loaded(self.0.take());
+            }
+        }
         // Before the loaded mods are known: a world without the list.
+        let _restore = Restore(set_loaded(None));
         let plain = dir.join("plain");
         level().write(&plain).unwrap();
         assert_eq!(Level::read(&plain).unwrap().saved_mods, None);
         // Saved with version 1 of the mod, and with one since gone.
         let changed = dir.join("changed");
-        set_loaded(vec![
+        set_loaded(Some(vec![
             record("mismatch_test", "1.0.0"),
             record("gone", "0.5.0"),
-        ]);
+        ]));
         level().write(&changed).unwrap();
-        set_loaded(vec![record("mismatch_test", "2.0.0")]);
+        set_loaded(Some(vec![record("mismatch_test", "2.0.0")]));
         mod_api::testing::with_mods(
             vec![ModEntry::new(
                 "mismatch_test",
@@ -1420,8 +1429,9 @@ mod tests {
                         ]]
                     );
                     assert!(
-                        lines.iter().any(|line| line
-                            .contains("Horizon: mod gone was 0.5.0 when the world was saved, now missing")),
+                        lines.iter().any(|line| line.contains(
+                            "Horizon: mod gone was 0.5.0 when the world was saved, now missing"
+                        )),
                         "{lines:?}"
                     );
                     assert!(
