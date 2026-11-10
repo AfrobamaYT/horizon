@@ -751,7 +751,7 @@ mod tests {
             ),
             (
                 "expression",
-                json!({"at":"Example::calls","kind":"expression","access":"internals"}),
+                json!({"at":"Example::calls","kind":"expression","access":"internals","expr":"64.0","type":"f64","nth":0,"ctx":"context"}),
             ),
         ] {
             let dir = root.join(id);
@@ -788,14 +788,14 @@ mod tests {
             .collect();
         assert_eq!(
             classes,
-            ["prebuilt", "source", "source", "invalid", "invalid"]
+            ["prebuilt", "source", "source", "invalid", "source"]
         );
         let causes: Vec<_> = routes
             .iter()
             .filter(|(_, route)| matches!(route, super::super::Route::Game { .. }))
             .map(|(id, _)| id.as_str())
             .collect();
-        assert_eq!(causes, ["private_head", "unlisted_call"]);
+        assert_eq!(causes, ["private_head", "unlisted_call", "expression"]);
         fs::remove_dir_all(root).unwrap();
     }
 
