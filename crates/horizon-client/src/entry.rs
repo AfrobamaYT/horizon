@@ -54,21 +54,31 @@ pub use mod_points::PointId;
 pub struct CodeRuntime {
     pub initialize: fn(&[mod_api::PackageInfo]),
     pub refusal: fn(&str) -> Option<String>,
+    pub startup_refused: fn(&str) -> bool,
 }
 static CODE_RUNTIME: std::sync::OnceLock<CodeRuntime> = std::sync::OnceLock::new();
 pub(crate) fn initialize_code(inventory: &[mod_api::PackageInfo]) {
-    if let Some(runtime) = CODE_RUNTIME.get() {
-        (runtime.initialize)(inventory);
-    }
+    let runtime = CODE_RUNTIME
+        .get()
+        .expect("code initialization requires entry::start");
+    (runtime.initialize)(inventory);
+}
+pub(crate) fn code_startup_refused(id: &str) -> bool {
+    CODE_RUNTIME
+        .get()
+        .is_some_and(|runtime| (runtime.startup_refused)(id))
 }
 pub(crate) fn code_refusal(id: &str) -> Option<String> {
     CODE_RUNTIME.get().and_then(|runtime| (runtime.refusal)(id))
 }
 
 /// Start with named mods and their function slots in installed dependency order.
-pub fn start(
+pub fn start<G>(
     native: horizon_mod_package::runtime::Runtime,
-    ids: Vec<&'static str>,
+    load: impl FnOnce(
+        &horizon_mod_package::runtime::Runtime,
+        &LaunchArguments,
+    ) -> (Vec<&'static str>, G),
     code: CodeRuntime,
     slots: &[NativeSlot],
     startup: Startup,
@@ -93,6 +103,7 @@ pub fn start(
     horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
+    let (ids, _loaded_code) = load(&native, &launch);
     for id in ids {
         for slot in slots.iter().filter(|slot| slot.id() == id) {
             if let Err(error) = mod_points::register(slot) {

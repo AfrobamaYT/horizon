@@ -166,7 +166,7 @@ impl ModsState {
                     let id = &selected.package.manifest.id;
                     // A refused wasm mod's content stays out with its code.
                     !self.native.built().iter().any(|built| built.id == *id)
-                        && crate::entry::code_refusal(id).is_none()
+                        && !crate::entry::code_startup_refused(id)
                 })
                 .collect();
         self.refused = Default::default();
