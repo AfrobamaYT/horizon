@@ -122,7 +122,9 @@ jobs:
       - id: hosted
         env:
           GH_TOKEN: ${{ github.token }}
-          BOAT_CI: ${{ !inputs.github-fallback && vars.BOAT_CI || 'off' }}
+          # Empty on a fork's pull request: boat_health.py then reads what boat-recovery published.
+          BOAT_CI: ${{ vars.BOAT_CI }}
+          BOAT_FALLBACK: ${{ inputs.github-fallback && 'true' || 'false' }}
           BOAT_USERS: ${{ vars.BOAT_CI_USERS }}
           AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
           ACTOR: ${{ github.triggering_actor }}
