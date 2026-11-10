@@ -1,0 +1,89 @@
+"""Exercise workflow routing expressions and smoke commands with actual matrix entries."""
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+GAME = ROOT / ".github/workflows/game-build.yml"
+NIGHTLY = ROOT / ".github/workflows/nightly-build.yml"
+
+
+class NightlyRoutingTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node evaluates GitHub's JavaScript-style expressions")
+    def test_real_matrix_routes_both_trust_levels(self):
+        text = GAME.read_text()
+        expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)
+        block = text.split("        include:\n", 1)[1].split("    runs-on:", 1)[0]
+        rows = []
+        for line in block.splitlines():
+            found = re.match(r"\s*(- )?(\w+): ([^#]+)", line)
+            if not found:
+                continue
+            new, key, value = found.groups()
+            if new:
+                rows.append({})
+            if rows:
+                value = value.strip()
+                rows[-1][key] = {"true": True, "false": False}.get(value, value)
+        self.assertEqual({row["name"] for row in rows}, {"linux", "linux-musl", "windows", "windows-arm64", "macos", "macos-x64"})
+        variables = {"NIGHTLY_LINUX_RUNNER": '"dyna-large"', "NIGHTLY_MAC_RUNNER": '"macos-15"', "NIGHTLY_EXPORTERS_RUNNER": '"dyna-large"', "MAC_RUNNER": "release-mac"}
+        script = """const fs = require('fs');
+const {expression, matrix, inputs, vars} = JSON.parse(fs.readFileSync(0, 'utf8'));
+const fromJSON = JSON.parse;
+console.log(JSON.stringify(eval(expression)));
+"""
+        def evaluate(expression, matrix, trusted):
+            result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables}), text=True, capture_output=True, check=True)
+            return json.loads(result.stdout)
+        for trusted in [False, True]:
+            self.assertEqual(evaluate(expressions[0], {}, trusted), "release-mac" if trusted else "dyna-large")
+            for row in rows:
+                with self.subTest(trusted=trusted, entry=row["name"]):
+                    if row.get("mac"):
+                        expected = "release-mac" if trusted else "macos-15"
+                    elif row["name"] == "linux" and not trusted:
+                        expected = "dyna-large"
+                    else:
+                        expected = row["os"]
+                    self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+
+    @unittest.skipUnless(os.name == "posix", "The smoke command runs on Linux and macOS")
+    def test_smoke_runs_from_relative_or_absolute_binary_directory(self):
+        command = next(line.strip() for line in GAME.read_text().splitlines() if line.strip().startswith("client="))
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            binary_dir = root / "target tree/release"
+            binary_dir.mkdir(parents=True)
+            binary = binary_dir / "horizon-client"
+            binary.write_text("#!/bin/sh\nprintf 'smoke ran'\n")
+            binary.chmod(0o755)
+            for directory in [str(binary_dir), str(binary_dir.relative_to(root))]:
+                with self.subTest(directory=directory):
+                    result = subprocess.run(["bash", "-c", command + '\n"$client"'], cwd=root, env={**os.environ, "BIN": directory}, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, "smoke ran")
+
+    @unittest.skipUnless(os.name == "posix", "The signing gate runs in Bash on Linux")
+    def test_fork_dry_run_cannot_pass_without_real_smoke_report(self):
+        text = NIGHTLY.read_text().split("      - name: Ready to publish", 1)[1].split("      - name:", 1)[0]
+        shell = text.split("        run: |\n", 1)[1]
+        shell = "\n".join(line[10:] for line in shell.splitlines())
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "tools").symlink_to(ROOT / "tools", target_is_directory=True)
+            # No gh request is needed to prove a missing smoke report fails even in dry-run mode.
+            stub = root / "gh"
+            stub.write_text("#!/bin/sh\nprintf '[]'\n")
+            stub.chmod(0o755)
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "DRY_RUN": "true", "GITHUB_REPOSITORY": "arismoko/horizon", "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("smoke", result.stdout.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()

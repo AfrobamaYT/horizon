@@ -231,7 +231,9 @@ jobs:
           DRY_RUN: ${{ needs.pick.outputs.dry_run }}
         run: |
           if ! python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json --blockers; then
-            [[ "$DRY_RUN" == true ]] || { echo "::error::Nothing published"; exit 1; }
+            # The fork uses a dry run as release-readiness evidence: a missing/failed smoke
+            # report must fail it, not produce a misleading green workflow.
+            [[ "$DRY_RUN" == true && "$GITHUB_REPOSITORY" != arismoko/horizon ]] || { echo "::error::Nothing published"; exit 1; }
             echo "::warning::A real run would publish nothing"
           fi
       - name: Publish as the `nightly` pre-release

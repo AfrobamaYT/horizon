@@ -135,6 +135,7 @@ jobs:
             rustflags: -C target-feature=+crt-static
           - name: macos
             mac: true
+            target: aarch64-apple-darwin
             dir: horizon-macos-arm64
             asset: horizon-macos-arm64.zip
           # Intel Macs: built on the same runner for another target; its checks and smoke test run the x86_64
@@ -144,7 +145,7 @@ jobs:
             target: x86_64-apple-darwin
             dir: horizon-macos-x64
             asset: horizon-macos-x64.zip
-    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON(vars.NIGHTLY_MAC_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || (!inputs.trusted && matrix.os == 'ubuntu-latest' && !matrix.musl && vars.NIGHTLY_LINUX_RUNNER && fromJSON(vars.NIGHTLY_LINUX_RUNNER)) || matrix.os }}
+    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON(vars.NIGHTLY_MAC_RUNNER || '["self-hosted", "macOS", "horizon-nightly"]')) || (!inputs.trusted && matrix.name == 'linux' && vars.NIGHTLY_LINUX_RUNNER && fromJSON(vars.NIGHTLY_LINUX_RUNNER)) || matrix.os }}
     # Notarizing the zip can take a few minutes.
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:
@@ -211,6 +212,21 @@ jobs:
           python tools/check_pe_arch.py "${{ matrix.pe_arch }}" \
             "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" \
             "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
+      - name: Rosetta for the Intel build on Apple Silicon
+        if: runner.os == 'macOS' && matrix.target == 'x86_64-apple-darwin'
+        run: |
+          if [[ "$(uname -m)" == arm64 ]]; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+      - name: Verify macOS executable architecture
+        if: runner.os == 'macOS'
+        env:
+          EXPECTED_ARCH: ${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || 'arm64' }}
+        run: |
+          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+            actual=$(lipo -archs "$BIN/$binary")
+            [[ "$actual" == "$EXPECTED_ARCH" ]] || { echo "::error::$binary is $actual, expected $EXPECTED_ARCH"; exit 1; }
+          done
       - name: The signing keychain, unlocked
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
         env:
@@ -286,9 +302,13 @@ jobs:
           home="$RUNNER_TEMP/horizon-smoke"
           rm -rf "$home" && mkdir -p "$home"
           version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' research-lock.json | head -1)
-          client="$PWD/$BIN/horizon-client"
+          client="$(cd "$BIN" && pwd)/horizon-client"
           resources="$PWD/.local/horizon-client/$version"
-          (cd "$home" && HORIZON_HOME="$home" HORIZON_NO_AUDIO=1 "$client" --resources "$resources" --offscreen \
+          (cd "$home" && HORIZON_HOME="$home" HORIZON_NO_AUDIO=1 \
+            HORIZON_LAUNCHER_HOME="$home/launcher" XDG_DATA_HOME="$home/data" XDG_CONFIG_HOME="$home/config" \
+            HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_LAUNCHER_TRASH="$home/trash" \
+            HORIZON_LAUNCHER_CLIPBOARD="$home/clipboard" HORIZON_LAUNCHER_DESKTOP="$home/desktop" \
+            "$client" --resources "$resources" --offscreen \
             --world smoke --seed 1 --render-distance 4 --world-frames 1500 --timeout-seconds 180 \
             --smoke-report "$home/smoke.json" > "$home/client.log" 2>&1) || { tail -40 "$home/client.log"; exit 1; }
           python3 - "$home/smoke.json" <<'EOF'
@@ -301,9 +321,10 @@ jobs:
           EOF
           # Published with the release; the publish job checks it again before it publishes anything.
           cp "$home/smoke.json" "$RUNNER_TEMP/smoke-test.json"
-      # One smoke-test.json per build, the Apple Silicon one's; the Intel build must pass its own run too.
+      # One smoke-test.json: Linux when overridden, otherwise Apple Silicon. Other self-hosted
+      # legs still pass their own smoke run but never race to upload the same artifact.
       - uses: actions/upload-artifact@v7
-        if: runner.environment == 'self-hosted' && !matrix.target
+        if: runner.environment == 'self-hosted' && (matrix.name == 'linux' || (matrix.name == 'macos' && (inputs.trusted || vars.NIGHTLY_LINUX_RUNNER == '')))
         with:
           name: smoke-test.json
           path: ${{ runner.temp }}/smoke-test.json
