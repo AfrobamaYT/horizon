@@ -55,6 +55,3 @@ pub(crate) mod world_draw;
 pub(crate) mod spectator_shader;
 
 pub(crate) mod arm_pose;
-
-mod targeting;
-pub use targeting::ClientTargeting;
