@@ -1071,6 +1071,7 @@ fn configure(
 ) -> Result<Dynamic, Reason> {
     let mut registries = Dynamic::default();
     let mut content_verified = false;
+    crate::datapack_net::clear_received();
     let reply = |p: cfg::Serverbound| -> Result<(), Reason> {
         match writer.lock().unwrap().as_mut() {
             Some(w) => w
@@ -1099,6 +1100,9 @@ fn configure(
                     data: hash.to_vec(),
                 }))?;
             }
+            cfg::Clientbound::CustomPayload(p) if p.channel == crate::datapack_net::CHANNEL => {
+                crate::datapack_net::accept_chunk(&p.data).map_err(Reason::plain)?;
+            }
             cfg::Clientbound::CustomPayload(p) => {
                 // Horizon servers use the client brand to negotiate their extensions.
                 // Announce those only after the server identifies itself as Horizon.
@@ -1123,6 +1127,13 @@ fn configure(
                             &horizon_protocol::mod_list::local(),
                         ),
                     }))?;
+                    // And the mods' datapack registries it has (#811).
+                    if let Some(data) = crate::datapack_net::offer() {
+                        reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                            channel: crate::datapack_net::OFFER_CHANNEL.into(),
+                            data,
+                        }))?;
+                    }
                 }
                 receive_brand(&p, send);
             }
@@ -1179,6 +1190,7 @@ fn configure(
             }
             cfg::Clientbound::Disconnect(d) => return Err(Reason::tag(&d.reason, lang)),
             cfg::Clientbound::FinishConfiguration(_) => {
+                crate::datapack_net::finish_transfer().map_err(Reason::plain)?;
                 registries.custom_components = content_verified;
                 let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
                 let w = w.as_mut().ok_or_else(|| Reason::plain("Disconnected"))?;
