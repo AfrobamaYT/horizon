@@ -1,7 +1,8 @@
 # Design: custom recipe-book settings
 
-Proposal for [#1023](https://github.com/arismoko/horizon/issues/1023), not an
-implemented API. This is a Horizon design; vanilla 26.3 is the reference for the
+Design for [#1023](https://github.com/arismoko/horizon/issues/1023).
+Storage and registration are implemented; the player settings handles and
+negotiated synchronization below remain planned. This is a Horizon design; vanilla 26.3 is the reference for the
 four existing books. No other project's implementation is a reference.
 
 ## Registration and ownership
@@ -32,6 +33,22 @@ icons; a book owns two flags. A screen can associate categories with a registere
 book explicitly. Neither category registration nor recipe-type registration
 implicitly registers a book. Display layout, unlocking and custom recipe displays
 remain separate work; this proposal supplies settings only.
+
+### Registration API
+
+In `Hooks::register`, call `r.recipe_book_type("demo:cooking_pot")` on the
+existing `Registrar`. It returns `Result<RecipeBookTypeKey, String>`; failures
+include the declaring mod, supplied ID and rule and refuse installation even
+if ignored. Keep the returned key (`mod_api::item::recipe_book::RecipeBookTypeKey`)
+for screen bindings. `as_str()` returns its stable identity and `is_registered()`
+checks membership in this process's installed registry. No public unchecked
+constructor exists. Native and wasm share the same registrar method through
+the generated Wire boundary; the key explicitly derives `Wire`.
+
+This registration does not create a category, settings handle, UI or network
+payload. Successful installation freezes the registry; resource reload does
+not reopen it. The settings and synchronization operations below are the
+contract for the remaining implementation, not callable methods yet.
 
 ## Storage, persistence, copy and replace
 
