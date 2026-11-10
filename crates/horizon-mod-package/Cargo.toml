@@ -7,6 +7,8 @@ rust-version.workspace = true
 description = "Horizon's mod files: content mods, modpacks and the registry index (docs/modding/src/how-to/content-mods.md)"
 
 [dependencies]
+horizon-mod-vocab = { path = "../horizon-mod-vocab" }
+horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 horizon-core = { path = "../horizon-core" }
 serde = { version = "1", features = ["derive"] }
