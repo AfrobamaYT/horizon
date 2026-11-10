@@ -229,4 +229,41 @@ mod tests {
         assert_eq!(selected, vec![0, 1]);
         assert_eq!(amounts, [64, 64]);
     }
+    #[test]
+    fn capped_assignment_matches_exhaustive_two_role_oracle() {
+        for encoded in 0..256usize {
+            let limits = [
+                encoded & 3,
+                (encoded >> 2) & 3,
+                (encoded >> 4) & 3,
+                (encoded >> 6) & 3,
+            ];
+            let expected = (1..=3)
+                .filter(|amount| {
+                    (0..2).any(|first| {
+                        (0..2).any(|second| {
+                            limits[first * 2] >= *amount
+                                && limits[second * 2 + 1] >= *amount
+                                && (0..2).all(|candidate| {
+                                    usize::from(first == candidate) * amount
+                                        + usize::from(second == candidate) * amount
+                                        <= [2, 3][candidate]
+                                })
+                        })
+                    })
+                })
+                .max()
+                .unwrap_or(0);
+            let mut amounts = [2, 3];
+            let mut picker = Picker::new(&mut amounts, 2, |candidate, role| {
+                limits[candidate * 2 + role] as i32
+            });
+            assert_eq!(
+                picker.try_pick_all(3, None),
+                expected as i32,
+                "limits {limits:?}"
+            );
+            assert_eq!(amounts, [2, 3]);
+        }
+    }
 }
