@@ -32,7 +32,7 @@ pub fn enter_native_mod(call: ModCall) -> ModGuard {
     let _ = ensure_installed();
     mod_vocab::content::crash::enter_native_mod(call)
 }
-fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCall) -> ModGuard {
+fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory<'_>, call: ModCall) {
     let frame = NEXT_FRAME
         .try_with(|c| {
             let next = c.get().checked_add(1);
@@ -44,14 +44,12 @@ fn enter_native(factory: mod_vocab::dispatch_scope::ModGuardFactory, call: ModCa
         .ok()
         .flatten();
     let outer_frame = NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten();
-    factory.finish(mod_vocab::dispatch_scope::State {
-        outer_frame,
-        outer_call: IN_NATIVE_MOD
-            .try_with(|c| c.replace(Some(call)))
-            .ok()
-            .flatten(),
-        timing: crate::__private::profiler::enter(call).map(|guard| guard.into_timing()),
-    })
+    let outer_call = IN_NATIVE_MOD
+        .try_with(|c| c.replace(Some(call)))
+        .ok()
+        .flatten();
+    let timing = crate::__private::profiler::enter(call).map(|guard| guard.into_timing());
+    factory.finish(outer_frame, outer_call, timing);
 }
 /// The `[mod] id` of the native mod this thread is inside a hook of, if any.
 pub fn current_native_mod() -> Option<&'static str> {
@@ -116,10 +114,10 @@ fn leave_converted(token: u64, mut outer: Option<ConvertedScope>) {
     });
 }
 
-fn leave_native(mut state: mod_vocab::dispatch_scope::State) {
+fn leave_native(state: &mut mod_vocab::dispatch_scope::State) {
     let _ = NATIVE_FRAME.try_with(|c| c.replace(state.outer_frame.take()));
     let _ = IN_NATIVE_MOD.try_with(|c| c.set(state.outer_call));
-    if let Some(timing) = state.timing {
+    if let Some(timing) = state.timing.take() {
         crate::__private::profiler::leave(timing);
     }
 }

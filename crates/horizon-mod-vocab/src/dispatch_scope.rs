@@ -11,8 +11,8 @@ static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 /// Platform callbacks, installed once before dispatch starts.
 #[doc(hidden)]
 pub struct Backend {
-    pub enter: fn(ModGuardFactory, ModCall) -> ModGuard,
-    pub leave: fn(State),
+    pub enter: fn(ModGuardFactory<'_>, ModCall),
+    pub leave: fn(&mut State),
     pub current_native: fn() -> Option<ModCall>,
     pub current_converted: fn() -> Option<crate::content::crash::ConvertedCall>,
     pub enter_converted: fn(
@@ -44,15 +44,24 @@ pub struct State {
 /// A capability to bind exactly one guard to the installed leave callback.
 /// Its fields are private and it is neither Clone nor Copy.
 #[doc(hidden)]
-pub struct ModGuardFactory {
-    leave: fn(State),
+pub struct ModGuardFactory<'a> {
+    guard: &'a mut ModGuard,
+    leave: fn(&mut State),
 }
-impl ModGuardFactory {
+impl ModGuardFactory<'_> {
     /// Consume the capability, transferring the backend's per-call state.
-    pub fn finish(self, state: State) -> ModGuard {
-        ModGuard {
-            active: Some((self.leave, state)),
-            _thread: std::marker::PhantomData,
+    #[inline]
+    pub fn finish(
+        self,
+        outer_frame: Option<u64>,
+        outer_call: Option<ModCall>,
+        timing: Option<Timing>,
+    ) {
+        self.guard.leave = Some(self.leave);
+        self.guard.state.outer_frame = outer_frame;
+        self.guard.state.outer_call = outer_call;
+        if let Some(timing) = timing {
+            self.guard.state.timing = Some(timing);
         }
     }
 }
@@ -61,13 +70,14 @@ impl ModGuardFactory {
 /// inert; otherwise Drop restores attribution, including during unwinding.
 #[must_use]
 pub struct ModGuard {
-    active: Option<(fn(State), State)>,
+    leave: Option<fn(&mut State)>,
+    state: State,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
     fn drop(&mut self) {
-        if let Some((leave, state)) = self.active.take() {
-            leave(state);
+        if let Some(leave) = self.leave {
+            leave(&mut self.state);
         }
     }
 }
@@ -82,18 +92,25 @@ pub fn install(backend: Backend) -> Result<(), &'static str> {
 }
 
 pub(crate) fn enter(call: ModCall) -> ModGuard {
-    match BACKEND.get_or_init(|| None) {
-        Some(backend) => (backend.enter)(
+    let mut guard = ModGuard {
+        leave: None,
+        state: State {
+            outer_frame: None,
+            outer_call: None,
+            timing: None,
+        },
+        _thread: std::marker::PhantomData,
+    };
+    if let Some(backend) = BACKEND.get_or_init(|| None) {
+        (backend.enter)(
             ModGuardFactory {
+                guard: &mut guard,
                 leave: backend.leave,
             },
             call,
-        ),
-        None => ModGuard {
-            active: None,
-            _thread: std::marker::PhantomData,
-        },
+        );
     }
+    guard
 }
 
 pub(crate) fn backend() -> Option<&'static Backend> {
