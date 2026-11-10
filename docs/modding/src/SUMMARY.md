@@ -45,3 +45,4 @@
 # Contributing
 
 - [Where each doc lives](contributing.md)
+- [Design: scoped whole-stack rollback](reference/design-stack-snapshot.md)
