@@ -128,7 +128,9 @@ impl Game<'_> {
         Menu::map_crafted(Some(&maps), &mut result);
         self.register_made_maps(maps);
         // The remainders come from the grid as it was before anything moved.
-        let remainders = self.recipes().remainders(&recipe, &grid, 3);
+        let remainders = self
+            .recipes()
+            .remainders(&recipe, &grid, 3, &|s| self.crafting_remainder(s));
         self.crafter_eject(key, facing, result, &recipe);
         for rest in remainders.into_iter().flatten() {
             self.crafter_eject(key, facing, rest, &recipe);
