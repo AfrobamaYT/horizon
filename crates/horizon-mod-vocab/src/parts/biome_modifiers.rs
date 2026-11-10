@@ -62,6 +62,35 @@ pub mod tests {
     }
 
     #[test]
+    fn nonfinite_climate_is_refused_directly_and_at_registration() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for temperature in [true, false] {
+                let modifier = BiomeModifier {
+                    biomes: vec!["minecraft:plains".into()],
+                    operation: BiomeModifierOperation::ModifyBiome {
+                        temperature: temperature.then_some(value),
+                        downfall: (!temperature).then_some(value),
+                        has_precipitation: None,
+                        temperature_modifier: None,
+                        sky_color: None,
+                        fog_color: None,
+                        water_color: None,
+                        water_fog_color: None,
+                        foliage_color: None,
+                        grass_color: None,
+                    },
+                };
+                assert_eq!(modifier.check(), Err(BiomeModifierError::InvalidValue));
+                let mut registrar = super::PartRegistrar::new("ruby");
+                assert_eq!(
+                    registrar.declare_biome_modifier("climate", modifier),
+                    Err(BiomeModifierError::InvalidValue)
+                );
+            }
+        }
+    }
+
+    #[test]
     pub(crate) fn biome_modifier_declarations_validate_and_refuse_duplicates() {
         let mut registrar = super::PartRegistrar::new("ruby");
         registrar
