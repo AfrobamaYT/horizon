@@ -543,6 +543,41 @@ impl WasmMod {
                 }
             }
         }
+        // A member whose manifest listens at a library's points was built with the bridge that
+        // registers them, and the library with the seal: a module missing either is refused, not
+        // left silently unregistered.
+        for (name, manifest) in manifests {
+            for injection in &manifest.inject {
+                let Some(library) = manifest.mod_point_dependency(&injection.at) else {
+                    continue;
+                };
+                let mut exports = |member: &str, export: &str| {
+                    let instance = group.members.iter().find(|(m, _)| m == member);
+                    instance
+                        .map(|(_, instance)| *instance)
+                        .is_some_and(|instance| {
+                            instance.get_func(&mut group.store, export).is_some()
+                        })
+                };
+                let id = format!("{}:{}", manifest.id, injection.id);
+                if !exports(name, "horizon_mod_points_register") {
+                    return Err(Refusal::Runtime(format!(
+                        "{id}: {name} has no mod point registration; rebuild it with `cargo \
+                         horizon-mod build --wasm`"
+                    )));
+                }
+                let sealed = manifests
+                    .iter()
+                    .find(|(_, other)| other.id == library)
+                    .is_some_and(|(member, _)| exports(member, "horizon_mod_points_seal"));
+                if !sealed {
+                    return Err(Refusal::Runtime(format!(
+                        "{id}: library {library} has no mod point seal in this group; rebuild it \
+                         with `cargo horizon-mod build --wasm`"
+                    )));
+                }
+            }
+        }
         for (_, instance) in group.members.clone() {
             if instance
                 .get_func(&mut group.store, "horizon_mod_points_seal")

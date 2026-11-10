@@ -1242,3 +1242,74 @@ fn registration_refusal_names_the_indexed_mod_injection() {
         assert_eq!(message, expected);
     }
 }
+
+#[test]
+fn a_mod_point_listener_without_its_bridge_or_its_library_seal_is_refused_at_load() {
+    let manifest = |id: &str, dependencies: serde_json::Value, inject: serde_json::Value| {
+        serde_json::from_value::<horizon_mod_package::Manifest>(serde_json::json!({
+            "id": id, "name": id, "version": "1.0.0", "description": "", "api": "0.2",
+            "capabilities": [], "dependencies": dependencies, "inject": inject
+        }))
+        .unwrap()
+    };
+    let addon = manifest(
+        "addon",
+        serde_json::json!({"chem-lib": "*"}),
+        serde_json::json!([{"id": "first", "at": "chem_lib::first", "kind": "head", "with": "listener", "hash": "unused"}]),
+    );
+    let library = manifest("chem-lib", serde_json::json!({}), serde_json::json!([]));
+    let member = |exports: &str| {
+        wat::parse_str(format!(
+            r#"(module
+            (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (func (export "horizon_layout") (result i64) i64.const {})
+            (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+            (func (export "horizon_hook") (param i32) (result i64) i64.const 0)
+            {exports})"#,
+            *mod_api::wire::LAYOUT
+        ))
+        .unwrap()
+    };
+    let register = r#"(func (export "horizon_mod_points_register") (result i32) i32.const 0)"#;
+    let seal = r#"(func (export "horizon_mod_points_seal"))"#;
+    let load = |addon_exports: &str, library_exports: &str| {
+        let (addon_bytes, library_bytes) = (member(addon_exports), member(library_exports));
+        WasmMod::instantiate(
+            &engine().unwrap(),
+            &[("libaddon.so", &addon), ("libchem_lib.so", &library)],
+            &[
+                Member {
+                    name: "libchem_lib.so",
+                    module: &library_bytes,
+                },
+                Member {
+                    name: "libaddon.so",
+                    module: &addon_bytes,
+                },
+            ],
+        )
+        .map(|_| ())
+        .map_err(|refusal| match refusal {
+            Refusal::Runtime(message) => message,
+            other => panic!("unexpected refusal: {other:?}"),
+        })
+    };
+    assert_eq!(load(register, seal), Ok(()));
+    assert_eq!(
+        load("", seal),
+        Err(
+            "addon:first: libaddon.so has no mod point registration; rebuild it with `cargo \
+             horizon-mod build --wasm`"
+                .into()
+        )
+    );
+    assert_eq!(
+        load(register, ""),
+        Err(
+            "addon:first: library chem-lib has no mod point seal in this group; rebuild it with \
+             `cargo horizon-mod build --wasm`"
+                .into()
+        )
+    );
+}
