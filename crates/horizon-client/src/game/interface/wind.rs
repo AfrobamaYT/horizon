@@ -154,13 +154,11 @@ impl Game<'_> {
             if self.mobs.iter().any(|m| m.id == id && m.species() == Species::Breeze));
         match who {
             Who::Player => {
-                if !self.creative {
-                    self.mob_hits_player_kind(
-                        1.0,
-                        [p.previous.x, p.previous.y, p.previous.z],
-                        "minecraft:wind_charge",
-                    );
-                }
+                self.mob_hits_player_kind(
+                    1.0,
+                    [p.previous.x, p.previous.y, p.previous.z],
+                    "minecraft:wind_charge",
+                );
             }
             // An ender dragon part takes the point of damage too; a crystal is
             // not hit (`AbstractWindCharge.canHitEntity`).

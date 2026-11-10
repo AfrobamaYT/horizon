@@ -1146,7 +1146,6 @@ impl Game<'_> {
             }
             action => action,
         };
-        let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {
             self.combat.forget_noted(false);
@@ -1162,8 +1161,7 @@ impl Game<'_> {
             }
             EffectAction::Hurt(source, amount) => {
                 let mut canceled = false;
-                if !creative
-                    && let Some(id) = self.motion.health.damage.id(source)
+                if let Some(id) = self.motion.health.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
                         crate::game::entity::damage_level_of!(self, scoped),
                         &self.motion.health,
@@ -1179,8 +1177,7 @@ impl Game<'_> {
                 self.combat.forget_noted(canceled);
             }
             EffectAction::Poison => {
-                if !creative
-                    && p.health.health() > 1.0
+                if p.health.health() > 1.0
                     && let Some(id) = self.health_resources.damage.id("minecraft:magic")
                 {
                     let _ = p.hurt(
