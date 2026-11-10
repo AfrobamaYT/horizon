@@ -4,7 +4,7 @@ impl Game<'_> {
     /// The container slots (of `size`) that the mod's screen for the block at
     /// `pos` does not show: the server's menu does not have them either, so a
     /// shift-click never moves an item where the player cannot see it.
-    pub(super) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
+    pub(in crate::game) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
         if self.mod_menu_at(pos).is_none() {
             return Vec::new();
         }
@@ -26,7 +26,7 @@ impl Game<'_> {
     /// A menu opened on this client with its slots under `key`, on block
     /// `target`: a mod block's is laid out by its mod (`native_screen`).
     /// `extra` is what the server sent for this window first.
-    pub(super) fn open_native_screen(
+    pub(in crate::game) fn open_native_screen(
         &mut self,
         key: Pos,
         target: Option<Pos>,

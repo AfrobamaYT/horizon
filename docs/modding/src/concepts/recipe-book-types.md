@@ -295,7 +295,12 @@ Book loading checks against the actual content menu size. A declared crafting
 map must exactly agree with the menu's existing `MenuCrafting` storage and result.
 An incompatible display or one that does not fit refuses the declaration
 generation rather than truncating ingredients. All mapped slots need finite
-coordinates in `Screen.slots`; opening an incompatible screen is refused.
+coordinates in `Screen.slots`; opening an incompatible screen is refused. This
+is currently an open-time check, not an atomic screen-registration error:
+`native_screen` returns geometry at runtime, after the server has opened the
+menu. The adapter/rendering follow-up must move the required geometry contract
+to startup before enabling placement. The foundation does not introduce a new
+screen registration system.
 
 The shared mapper uses vanilla `PlaceRecipeHelper`: a 1 by 1 shaped recipe in
 a 3 by 3 grid is centered; a 2 by 2 recipe starts at the upper left and retains

@@ -65,28 +65,37 @@ impl RecipeBookLayout {
                 {
                     return Err("grid dimensions must match its slot list and fit the menu".into());
                 }
-                slots.iter().copied().chain([*result]).collect::<Vec<_>>()
+                slots
+                    .iter()
+                    .map(|slot| (*slot, "grid"))
+                    .chain([(*result, "result")])
+                    .collect::<Vec<_>>()
             }
             Self::Furnace {
                 input,
                 fuel,
                 result,
-            } => vec![*input, *fuel, *result],
-            Self::Stonecutter { input, result } => vec![*input, *result],
+            } => vec![(*input, "input"), (*fuel, "fuel"), (*result, "result")],
+            Self::Stonecutter { input, result } => vec![(*input, "input"), (*result, "result")],
             Self::Smithing {
                 template,
                 base,
                 addition,
                 result,
-            } => vec![*template, *base, *addition, *result],
+            } => vec![
+                (*template, "template"),
+                (*base, "base"),
+                (*addition, "addition"),
+                (*result, "result"),
+            ],
         };
         let mut seen = [false; 256];
-        for slot in slots {
+        for (slot, role) in slots {
             if slot >= slot_count {
-                return Err(format!("role slot {slot} is outside the menu"));
+                return Err(format!("{role} slot {slot} is outside the menu"));
             }
             if seen[usize::from(slot)] {
-                return Err(format!("role slot {slot} overlaps another role"));
+                return Err(format!("{role} slot {slot} overlaps another role"));
             }
             seen[usize::from(slot)] = true;
         }
