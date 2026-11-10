@@ -2,6 +2,13 @@
 """Move the installed-code loading algorithm above the engine (#2534)."""
 from pathlib import Path
 
+import sys
+from verify_refactor import verify
+
+if '--verify' in sys.argv:
+    verify(Path(__file__).resolve(), 'refactor: move installed code loading to mod host')
+    raise SystemExit(0)
+
 root = Path(__file__).resolve().parents[2]
 entry = root / 'crates/horizon-client/src/entry.rs'
 text = entry.read_text()

@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Move executable integration tests with their Cargo binary owner."""
 from pathlib import Path
+import sys
+from verify_refactor import verify
+
+if '--verify' in sys.argv:
+    verify(Path(__file__).resolve(), 'refactor: move launch integration tests with executable')
+    raise SystemExit(0)
+
 root = Path(__file__).resolve().parents[2]
 for name in ['launch_api', 'busy_launch']:
     source = root / f'crates/horizon-client/tests/{name}.rs'

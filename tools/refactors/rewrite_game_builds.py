@@ -2,6 +2,13 @@
 """Retarget Cargo executable builds without changing engine library selections."""
 import re
 from pathlib import Path
+import sys
+from verify_refactor import verify
+
+if '--verify' in sys.argv:
+    verify(Path(__file__).resolve(), 'refactor: retarget executable build commands to platform')
+    raise SystemExit(0)
+
 root = Path(__file__).resolve().parents[2]
 # Root documentation also contains developer build commands.
 for p in [root / 'AGENTS.md']:

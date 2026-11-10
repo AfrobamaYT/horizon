@@ -2,6 +2,13 @@
 """Retarget documented game runs and relocated mod examples."""
 from pathlib import Path
 import re
+import sys
+from verify_refactor import verify
+
+if '--verify' in sys.argv:
+    verify(Path(__file__).resolve(), 'docs: run the platform executable and mod host examples')
+    raise SystemExit(0)
+
 root = Path(__file__).resolve().parents[2]
 paths = [root / 'README.md', root / 'CONTRIBUTING.md']
 paths += list((root / 'docs').rglob('*.md')) + list((root / 'tools').glob('*.py'))
