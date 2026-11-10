@@ -8444,6 +8444,8 @@ impl Game<'_> {
                 == horizon_client::camera::CameraType::ThirdPersonFront,
             ..Default::default()
         });
+        // Whether a mod's `mob_layer` reads the posed parts the draws below keep.
+        let listened = self.mob_render_listened();
         for mob in &self.mobs {
             // LevelRenderer: the entity the view looks out of is not drawn
             // in first person.
@@ -8595,6 +8597,8 @@ impl Game<'_> {
                     Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
                 );
             let mut skinned = None;
+            // `native_mob_layer`'s posed parts, kept from the draw below while a mod listens.
+            let mut parts = None;
             if posable {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
@@ -8607,6 +8611,7 @@ impl Game<'_> {
                     &lookup,
                     packed,
                     self.res.mob_data(),
+                    listened.then_some(&mut parts),
                     out,
                     &mut skin,
                 );
@@ -8621,6 +8626,7 @@ impl Game<'_> {
                         packed,
                         self.res.mob_data(),
                         &armor,
+                        listened.then_some(&mut parts),
                         out,
                     );
                 } else {
@@ -8633,6 +8639,7 @@ impl Game<'_> {
                         self.res.mob_data(),
                         &armor,
                         hidden,
+                        listened.then_some(&mut parts),
                         out,
                     );
                 }
@@ -8695,7 +8702,15 @@ impl Game<'_> {
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-                self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+                self.mod_mob_layer_geometry(
+                    mob,
+                    who,
+                    parts.as_ref(),
+                    alpha as f32,
+                    camera,
+                    packed,
+                    out,
+                );
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);

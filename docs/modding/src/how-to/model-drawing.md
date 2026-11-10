@@ -109,7 +109,8 @@ draw.fluid_box(&tank.stack, [0.125, 0.0625, 0.125, 0.875, level, 0.875], options
 `HumanoidModel.setupAnim`), read-only, to attach geometry to an arm or the head without
 animating it again. Only `HumanoidMobRenderer`'s families have them (players, zombies and their
 kin, skeletons, piglins); every other mob gets `None`, a cow included, though its model has a
-head and a body. `PosedParts` is a fixed-size snapshot: `get(part)` or `iter()`.
+head and a body. `PosedParts` is a fixed-size snapshot: `get(part)` or `iter()`. It is taken
+from the vanilla body's own draw, so a part `player_submit` hid (below) has `visible` false.
 
 `player_submit` can hide single parts of the vanilla player model instead of replacing all of
 it: `hidden.hide(HumanoidPart::Head)`, as a mod drawing its own outer skin layer does.
