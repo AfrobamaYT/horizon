@@ -14,7 +14,7 @@ pub trait ClientTextClientHost {
     /// Build owned components with `Text`, or validate a flat `TextForm` with
     /// `Text::try_from(form)`. Invalid component input returns its boundary error.
     #[access(ClientSetup)]
-    fn text_width(&self, text: &Text) -> Result<i32, text::TextFormError>;
+    fn text_width(&self, text: &Text) -> Result<i32, TextFormError>;
 
     /// Side: client.
     /// `Font.split(FormattedText, width)`: wrap a component at `width` unscaled
@@ -23,5 +23,5 @@ pub trait ClientTextClientHost {
     /// below one follows vanilla's one-pixel minimum, without rejecting input.
     /// Available outside drawing on native and wasm alike.
     #[access(ClientSetup)]
-    fn text_split(&self, text: &Text, width: i32) -> Result<Vec<Text>, text::TextFormError>;
+    fn text_split(&self, text: &Text, width: i32) -> Result<Vec<Text>, TextFormError>;
 }
