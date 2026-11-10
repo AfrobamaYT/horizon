@@ -419,7 +419,8 @@ impl Biomes {
         categories.sort_by(|a, b| a.category.cmp(&b.category));
         Some(categories)
     }
-    /// A biome's own sky, fog and water colours; None for a name this table lacks.
+    /// Biome colours, with omitted water fog defaulted to 0x050533; not dimension-resolved.
+    /// Returns None for a name this table lacks.
     pub fn effects(&self, name: &str) -> Option<mod_api::world::biome::BiomeEffects> {
         let info = self.list.get(usize::from(*self.index.get(name)?))?;
         Some(mod_api::world::biome::BiomeEffects {
@@ -859,7 +860,7 @@ mod read_tests {
                     "attributes": {
                         "minecraft:visual/sky_color": "#78A7FF",
                         "minecraft:visual/fog_color": 0xC0D8FF,
-                        "minecraft:visual/water_fog_color": 0x050533
+                        "minecraft:visual/water_fog_color": 0x123456
                     }
                 }),
             ),
@@ -907,7 +908,7 @@ mod read_tests {
                 sky: Some(0x78A7FF),
                 fog: Some(0xC0D8FF),
                 water: 0x123456,
-                water_fog: 0x050533,
+                water_fog: 0x123456,
             })
         );
         // A biome that leaves sky and fog out has none, and the default water fog.

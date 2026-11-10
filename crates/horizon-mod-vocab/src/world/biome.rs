@@ -36,8 +36,9 @@ pub struct BiomeSpawners {
     /// The category's spawners, in the biome file's order.
     pub entries: Vec<SpawnEntry>,
 }
-/// A biome's own sky, fog and water colours, each 0xRRGGBB, as its file declares them: what
-/// `level_biome_effects` reads. `None` is a colour the biome leaves to the dimension's.
+/// Biome colours read by `level_biome_effects`, each 0xRRGGBB.
+/// Sky and fog preserve omitted declarations as `None`; water fog includes a global default.
+/// These are not dimension-resolved colours.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(horizon_mod_api_macros::Wire)]
@@ -48,6 +49,7 @@ pub struct BiomeEffects {
     pub fog: Option<u32>,
     /// `effects.water_color`.
     pub water: u32,
-    /// `minecraft:visual/water_fog_color`.
+    /// `minecraft:visual/water_fog_color`, defaulting to 0x050533 when omitted.
+    /// A dimension may override this global default.
     pub water_fog: u32,
 }
