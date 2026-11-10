@@ -64,6 +64,7 @@ pub mod neutral_anger;
 pub use neutral_anger::{
     adopt_anger_end, anger_left, persistent_anger, resume_anger, settle_anger_end,
 };
+mod knockback;
 pub mod nav;
 pub mod nether;
 pub mod panda;
@@ -112,7 +113,6 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-mod knockback;
 use living::totem_death_effects;
 pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
@@ -4628,7 +4628,7 @@ impl Mob {
                     (f[0] - self.position.x, f[2] - self.position.z)
                 }),
             };
-            self.knockback(level, f64::from(0.4f32), dx, dz, &source);
+            self.knockback(level, f64::from(0.4f32), dx, dz, &source, amount);
         }
         ai::after_hurt(self, &source);
         if self.health <= 0.0 {

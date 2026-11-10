@@ -5,14 +5,32 @@ impl Game<'_> {
     /// direction (`xd`, `zd`), less its knockback resistance, and up only from
     /// the ground.
     /// The native knockback hook runs before resistance is applied, with
-    /// `source`, the hit's.
-    pub(super) fn knock_back_player(
+    /// `source`, the hit's. This short entry enters `knock_back_player_full` once.
+    /// Both entries are native internals points. API access refuses `HurtSource` and
+    /// `Attack`, which have no point mirrors; wasm refuses internals at load.
+    pub(in crate::game) fn knock_back_player(
         &mut self,
         power: f64,
         xd: f64,
         zd: f64,
         source: HurtSource<'_>,
         attack: &Attack,
+        damage: f32,
+    ) {
+        self.knock_back_player_full(power, xd, zd, source, attack, damage, false);
+    }
+
+    /// Full living knockback entry. Effect pushes enter here directly.
+    /// Damage and the effect flag are carried even though vanilla players do not use them.
+    pub(in crate::game) fn knock_back_player_full(
+        &mut self,
+        power: f64,
+        xd: f64,
+        zd: f64,
+        source: HurtSource<'_>,
+        attack: &Attack,
+        _damage: f32,
+        _comes_from_effect: bool,
     ) {
         // No attacker named: the mob the player was last hurt by.
         let credited;
@@ -27,14 +45,14 @@ impl Game<'_> {
         let legacy = self.legacy_rules();
         if let Some(p) = self.player.as_mut() {
             let level = crate::game::entity::damage_level_of!(self, attack);
-            knock_back(p, level, power, (xd, zd), source, legacy);
+            apply_player_knockback(p, level, power, (xd, zd), source, legacy);
         }
     }
 }
 
-/// `LivingEntity.knockback` on `p`: [`Game::knock_back_player`]; 1.8.9's
+/// Apply the full entry's physical push, including 1.8.9's
 /// `EntityLivingBase.knockBack` under `legacy` rules.
-fn knock_back(
+pub(super) fn apply_player_knockback(
     p: &mut horizon_client::motion::PlayerMotion,
     level: &mut horizon_client::health::DamageLevel<'_>,
     power: f64,
@@ -92,4 +110,3 @@ fn knock_back(
         v.z / 2.0 - zd / l * power,
     );
 }
-

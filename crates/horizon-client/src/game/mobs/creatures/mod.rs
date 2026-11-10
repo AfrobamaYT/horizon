@@ -2944,13 +2944,13 @@ impl Game<'_> {
                             direct: 0,
                             position: None,
                         };
-                        self.knock_back_player(power, x, z, source, &attack);
+                        self.knock_back_player(power, x, z, source, &attack, 0.0);
                     }
                     Who::Mob(id) => {
                         let attack = self.attack_of_who(source.attacker);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let level = crate::game::entity::damage_level_of!(self, &attack);
-                            m.knockback(level, power, x, z, &source);
+                            m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
                 },
@@ -4783,7 +4783,7 @@ impl Game<'_> {
         // `LivingEntity.dealDefaultKnockback`: after the item's block push, so
         // a half-blocked hit pushes the defender back the way vanilla does.
         if let Some(([xd, zd], source)) = default_push {
-            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack);
+            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack, amount);
             if let Some(p) = self.player.as_mut()
                 && let Some(r) = p.hurt_log.last_mut()
             {
@@ -11702,7 +11702,14 @@ mod knockback_tests {
                 let set = p.set_modifier(attribute, "horizon:test", resistance, "add_value", true);
                 set.unwrap();
             }
-            knock_back(&mut p, &mut test_level.level(), 0.4, (0.0, 3.0), hit, false);
+            knockback::apply_player_knockback(
+                &mut p,
+                &mut test_level.level(),
+                0.4,
+                (0.0, 3.0),
+                hit,
+                false,
+            );
             (p.velocity.x, p.velocity.y, p.velocity.z)
         };
         // No mod in the way: vanilla's push, away from z = 3.

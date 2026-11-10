@@ -1,25 +1,12 @@
 use super::*;
 
 impl Mob {
-    /// LivingEntity.knockback(power, xd, zd, source) towards the negative
-    /// direction. `Creaking.knockback`: a creaking that cannot move is not
-    /// shoved. The native knockback hook runs once the knockback resistance
-    /// took its share, before the motion changes and the draws of a random
-    /// direction.
+    /// Short `LivingEntity.knockback` entry, delegating to the full entry with
+    /// `comes_from_effect = false`. Both entries are independent native internals points.
+    /// API access refuses the `Mob` receiver and the unmirrored `DamageLevel`/`Damage`
+    /// context; wasm refuses internals at load rather than silently skipping a listener.
+    /// The living hook runs once, before resistance, motion changes and random draws.
     pub fn knockback(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        power: f64,
-        xd: f64,
-        zd: f64,
-        source: &Damage,
-    ) {
-        self.knockback_by(level, power, xd, zd, source, None);
-    }
-    /// `LivingEntity.knockback(power, xd, zd, source, damage, comesFromEffect = true)`: an extra
-    /// push of a blow (sprint, the Knockback enchantment). A sulfur cube with a block turns it
-    /// into its own launch (`SulfurCube.knockback`), scaled by `power * 0.25` and `sqrt(damage)`.
-    pub fn knockback_effect(
         &mut self,
         level: &mut DamageLevel<'_>,
         power: f64,
@@ -28,23 +15,28 @@ impl Mob {
         source: &Damage,
         damage: f32,
     ) {
-        self.knockback_by(level, power, xd, zd, source, Some(damage));
+        self.knockback_full(level, power, xd, zd, source, damage, false);
     }
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)`: the mob's own, and what its gear adds.
     pub fn knockback_resistance(&self) -> f64 {
         self.gear_knockback_resistance
             .unwrap_or(self.attrs.knockback_resistance)
     }
-    fn knockback_by(
+    /// Full knockback entry, including whether this is an extra effect push.
+    /// The short entry delegates here once; direct full calls bypass the short entry.
+    /// A sulfur cube's effect push retains its special launch, before the living hook.
+    /// API access has the same receiver/context refusal as the short entry.
+    pub fn knockback_full(
         &mut self,
         level: &mut DamageLevel<'_>,
         power: f64,
         xd: f64,
         zd: f64,
         source: &Damage,
-        effect: Option<f32>,
+        damage: f32,
+        comes_from_effect: bool,
     ) {
-        if let Some(damage) = effect
+        if comes_from_effect
             && self.species() == Species::SulfurCube
             && sulfur_cube::has_body(self)
             && source.attacker.is_some()
