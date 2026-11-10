@@ -84,6 +84,8 @@ impl Game<'_> {
         .ok_or(TriggerCriterionError::PlayerUnavailable)?
     }
 
+    /// `ServerPlayerGameMode.useItemOn`'s consumed default use, for a use a mod handled:
+    /// `default_block_use`, then `any_block_use` with the empty hand, for the player in place.
     pub(super) fn player_trigger_block_use(
         &mut self,
         player: PlayerRef,
@@ -100,6 +102,8 @@ impl Game<'_> {
         })
     }
 
+    /// The consumed item use, for a use a mod handled: `item_used_on_block` against
+    /// `original` (the hook's snapshot), then `any_block_use` against `after`.
     pub(super) fn player_trigger_item_used_on_block(
         &mut self,
         player: PlayerRef,
@@ -113,6 +117,8 @@ impl Game<'_> {
         })
     }
 
+    /// Resolve the player as `player_trigger_criterion` does, refuse an unloaded chunk, then
+    /// fire in the player's own level, so predicates read where they are.
     fn with_block_use_player(
         &mut self,
         player: PlayerRef,
