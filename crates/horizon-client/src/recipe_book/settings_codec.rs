@@ -74,6 +74,10 @@ pub fn encode(message: &Message) -> Option<Vec<u8>> {
             pair(&mut out, *flags);
         }
         Message::Resnapshot => out.push(4),
+        Message::Placement(frame) => {
+            out.push(8);
+            out.extend(super::placement_codec::encode(frame)?);
+        }
     }
     (out.len() <= MAX_BYTES).then_some(out)
 }
@@ -187,6 +191,11 @@ pub fn decode(data: &[u8]) -> Option<Message> {
             } else {
                 Message::Ready
             }
+        }
+        8 => {
+            let frame = super::placement_codec::decode(r.0)?;
+            r.0 = &[];
+            Message::Placement(frame)
         }
         _ => return None,
     };
