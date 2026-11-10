@@ -17731,7 +17731,7 @@ pub(crate) fn run_with(
     mods::register_client_presentations(options.execution_role);
     mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
-    mods::register_particle_providers(options.execution_role);
+    mods::register_particles(options.execution_role);
     mods::freeze_declarations()?;
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not
