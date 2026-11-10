@@ -25,3 +25,19 @@ NeoForge's `ClientTooltipComponent` receives a `Font` in its width and drawing
 methods. These reads use that same role—the active client font—without passing
 an engine font object or requiring a `DrawContext`. They do not draw anything
 and do not expose a full rendering context.
+
+For vanilla `Component.getString()` behavior, use
+`ClientHost::text_string(&Text) -> Result<String, TextFormError>`. This client
+setup read also works outside drawing on native and wasm. It uses the same
+component conversion as measurement: translation arguments, key names and nested
+siblings resolve against the current language on every call. The result contains
+plain characters, not serialized JSON or translation keys. Styles do not add
+characters; literal legacy `§` formatting codes remain in the string, unlike the
+font's formatted rendering. Invalid components return the same boundary errors
+as the other text reads. Do not cache resolved strings across language changes.
+
+The shared decoder currently resolves action keybind IDs such as `key.jump` to
+translated action captions rather than the currently assigned key. Physical key
+names resolve normally. This existing limitation also affects measurements;
+canonical action-binding parity is tracked in
+[#2718](https://github.com/arismoko/horizon/issues/2718).

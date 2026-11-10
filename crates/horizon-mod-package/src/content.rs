@@ -70,11 +70,6 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
             "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
         ));
     }
-    if !own && top == "data" && rest.starts_with("horizon/") {
-        return Err(format!(
-            "{name}: blocks, items, mob effects, entity types and menu types are declared in data/{id}/horizon/"
-        ));
-    }
 
     Ok(())
 }
@@ -1074,17 +1069,12 @@ impl Content {
     }
 
     /// Adds blocks and items a native mod declares in code (`native_blocks`,
-    /// `native_items`), checked as declaration files are: ids in this mod's
-    /// own namespace (its id, as `data/<id>/horizon/` is) and declared once
+    /// `native_items`), checked as declaration files are: ids in any of this
+    /// mod's owned namespaces (its id and manifest `namespaces`) and declared once
     /// with what it already has, a vanilla template, a crafting remainder
     /// that is vanilla or this mod's. All or nothing: on an error nothing is
     /// added.
     pub fn declare(&mut self, blocks: &[Block], items: &[Item]) -> Result<(), String> {
-        let own = self
-            .namespaces
-            .first()
-            .map(String::as_str)
-            .unwrap_or_default();
         let mut ids: BTreeSet<&str> = self
             .blocks
             .iter()
@@ -1098,12 +1088,19 @@ impl Content {
             .map(|b| b.id.as_str())
             .chain(self.items.iter().map(|i| i.id.as_str()))
             .collect();
-        let in_own =
-            |id: &str| namespaced_id(id) && id.split_once(':').is_some_and(|(ns, _)| ns == own);
+        let in_own = |id: &str| {
+            namespaced_id(id)
+                && id
+                    .split_once(':')
+                    .is_some_and(|(ns, _)| self.namespaces.iter().any(|owned| owned == ns))
+        };
         for block in blocks {
             let id = block.id.as_str();
             if !in_own(id) {
-                return Err(format!("block {id:?} is not an id in {own}:"));
+                return Err(format!(
+                    "block {id:?} is not an id in owned namespaces {:?}",
+                    self.namespaces
+                ));
             }
             check_block(block).map_err(|e| format!("block {id}: {e}"))?;
             if !ids.insert(id) {
@@ -1118,7 +1115,10 @@ impl Content {
         for item in items {
             let id = item.id.as_str();
             if !in_own(id) {
-                return Err(format!("item {id:?} is not an id in {own}:"));
+                return Err(format!(
+                    "item {id:?} is not an id in owned namespaces {:?}",
+                    self.namespaces
+                ));
             }
             check_item(item).map_err(|e| format!("item {id}: {e}"))?;
             if !item_ids.insert(id) {
@@ -1186,9 +1186,9 @@ impl Content {
                 parts.next().unwrap_or(""),
                 parts.next().unwrap_or(""),
             );
-            let own = namespace == id;
+            let owned = manifest.owned_namespaces().any(|owned| owned == namespace);
             check_namespace(name, manifest)?;
-            let Some(decl) = (own && top == "data")
+            let Some(decl) = (owned && top == "data")
                 .then(|| rest.strip_prefix("horizon/"))
                 .flatten()
             else {
@@ -1199,7 +1199,7 @@ impl Content {
                     .strip_prefix(kind)?
                     .strip_prefix('/')?
                     .strip_suffix(".json")?;
-                Some(format!("{id}:{path}"))
+                Some(format!("{namespace}:{path}"))
             };
             if let Some(block) = parse("block") {
                 blocks.push((block, name.clone()));
@@ -2134,9 +2134,16 @@ capabilities = ["registries"]
             assert_eq!((c.blocks.len(), c.items.len()), (1, 0), "{e}");
             e
         };
-        assert!(refused(&[block("emerald:gear")], &[]).contains("not an id in ruby:"));
-        assert!(refused(&[block("minecraft:gear")], &[]).contains("not an id in ruby:"));
-        assert!(refused(&[], &[item("ruby")]).contains("not an id in ruby:"));
+        for error in [
+            refused(&[block("emerald:gear")], &[]),
+            refused(&[block("minecraft:gear")], &[]),
+            refused(&[], &[item("ruby")]),
+        ] {
+            assert!(
+                error.contains("owned namespaces") && error.contains("ruby"),
+                "{error}"
+            );
+        }
         assert!(refused(&[block("ruby:gear")], &[]).contains("declared twice"));
         assert!(refused(&[], &[item("ruby:gear")]).contains("block's item"));
         let modded = Block {
@@ -3515,10 +3522,24 @@ capabilities = ["registries"]
         let content = hmod("listed", &manifest, files).unwrap();
         assert_eq!(content.files.len(), 3);
         assert_eq!(content.namespaces, ["ruby", "kaisyn"]);
-        // Declarations stay in the id's namespace.
+        // Files and code share the manifest-owned namespace fence.
         let decl: &[(&str, &[u8])] = &[("data/kaisyn/horizon/block/a.json", BLOCK)];
-        let e = hmod("listed-decl", &manifest, decl).unwrap_err();
-        assert!(e.contains("declared in data/ruby/horizon/"), "{e}");
+        let content = hmod("listed-decl", &manifest, decl).unwrap();
+        assert_eq!(content.blocks[0].id, "kaisyn:a");
+        let mut code = Content::declared("ruby");
+        code.namespaces.push("kaisyn".into());
+        code.declare(&content.blocks, &[]).unwrap();
+        assert_eq!(code.blocks[0].id, "kaisyn:a");
+        let mut foreign = content.blocks[0].clone();
+        foreign.id = "unowned:a".into();
+        let error = code.declare(&[foreign], &[]).unwrap_err();
+        assert!(
+            error.contains("unowned:a")
+                && error.contains("owned namespaces")
+                && error.contains("ruby")
+                && error.contains("kaisyn"),
+            "{error}"
+        );
         // A namespace it does not list is still outside.
         let other: &[(&str, &[u8])] = &[("data/other/structure/a.nbt", b"nbt")];
         assert!(hmod("listed-other", &manifest, other).is_err());
