@@ -514,7 +514,7 @@ enum OwnProfile {
 pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
-    pub(super) recipe_transfer: bool,
+    pub(super) recipe_viewer: crate::game::recipe_book::ViewerChannels,
     /// This connection's configured feature flags, carried through reconfiguration.
     pub(super) features: std::sync::Arc<[String]>,
     /// The server announced it runs mods' quiet commands.
@@ -633,7 +633,7 @@ pub(super) struct Remote {
     /// The open menu's title as the server named it, with its styles.
     menu_title: Option<horizon_client::text::Text>,
     menu_title_snapshot: Option<Arc<mod_api::Text>>,
-    state_id: i32,
+    pub(in crate::game) state_id: i32,
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
     /// follows (`horizon:menu_extra`).
@@ -1159,7 +1159,7 @@ impl Game<'_> {
         self.remote = Some(Remote {
             session,
             brand: "unknown".into(),
-            recipe_transfer: false,
+            recipe_viewer: Default::default(),
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
             mod_net: false,
@@ -1399,7 +1399,7 @@ impl Game<'_> {
         self.remote = Some(Remote {
             session,
             brand: "horizon-studio".into(),
-            recipe_transfer: false,
+            recipe_viewer: Default::default(),
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
             mod_net: false,
@@ -3835,8 +3835,8 @@ impl Game<'_> {
                     Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
                 }
             }
-            C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
-                self.remote_recipe_transfer(&p.data);
+            C::CustomPayload(p) if horizon_client::lan::recipes::viewer_channel(&p.channel) => {
+                self.remote_recipe_viewer(&p.channel, &p.data);
             }
             // An anvil cost the data-slot short cannot hold, after that short.
             C::CustomPayload(p) if p.channel == horizon_protocol::anvil_cost::CHANNEL => {
