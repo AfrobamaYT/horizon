@@ -1690,8 +1690,8 @@ pub(super) fn level_sound_playable(at: [f64; 3], volume: f32, pitch: f32) -> boo
 }
 
 /// Whether a native mod's particles can be sent. Block particle types need
-/// a known state (`state_ok`); item, trail and vibration particles aren't
-/// supported by the network dispatch; a mod's own type must be namespaced.
+/// a known state (`state_ok`), item particles a validated stack; trail and vibration
+/// aren't supported by the network dispatch. A mod's own type must be namespaced.
 pub(super) fn mod_particles_ok(
     options: &ParticleOptions,
     state: Option<BlockStateId>,
