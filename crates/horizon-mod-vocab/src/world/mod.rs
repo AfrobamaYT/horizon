@@ -4,9 +4,11 @@ pub(crate) mod advancement_progress;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
+pub(crate) mod biome_modifier;
 pub(crate) mod chunk_generator;
 pub(crate) mod criteria;
 pub(crate) mod custom_spawners;
+pub(crate) mod data_maps;
 pub(crate) mod datapack_registry;
 pub(crate) mod datapack_registry_set;
 pub(crate) mod datapack_snapshot;

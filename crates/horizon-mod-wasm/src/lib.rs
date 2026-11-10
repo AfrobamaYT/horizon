@@ -7,6 +7,7 @@ pub mod link;
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
 mod points;
+mod registration_capabilities;
 mod runtime;
 #[allow(
     dead_code,
@@ -61,7 +62,7 @@ pub enum Refusal {
     Toolchain { found: String, group: String },
     /// A dependency of this mod was refused, so its group can't link.
     DependencyRefused { dependency: String },
-    /// The mod declares game internals or an `access = "internals"` injection: native mods only.
+    /// The mod declares engine internals or an engine `access = "internals"` injection.
     Internals,
     /// The package's `mod.wasm` failed its checks.
     Package(String),
@@ -129,14 +130,13 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
         .iter()
         .map(|p| dependencies::from_manifest(&p.manifest.dependencies))
         .collect();
-    // Internals access is the native-only tier: such a mod, and every mod needing it, is refused.
+    // Engine internals are native-only. A mod dependency's internals stay inside the group.
     for (i, package) in packages.iter().enumerate() {
         if !package.manifest.internals.is_empty()
-            || package
-                .manifest
-                .inject
-                .iter()
-                .any(|inject| inject.access == Access::Internals)
+            || package.manifest.inject.iter().any(|inject| {
+                inject.access == Access::Internals
+                    && package.manifest.mod_point_dependency(&inject.at).is_none()
+            })
         {
             refused.insert(i, Refusal::Internals);
         }
@@ -527,7 +527,12 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             name,
             module: &packages[i].module,
         }));
-        let result = WasmMod::instantiate(&engine, &members).and_then(|mods| {
+        let manifests: Vec<_> = indices
+            .iter()
+            .zip(&names)
+            .map(|(&i, name)| (name.as_str(), &packages[i].manifest))
+            .collect();
+        let result = WasmMod::instantiate(&engine, &manifests, &members).and_then(|mods| {
             if mods.len() != indices.len() {
                 return Err(Refusal::Runtime("missing mod boundary exports".into()));
             }
@@ -543,6 +548,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                         |r| r.take(),
                     )
                     .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
+                registration_capabilities::check(&subscriptions)?;
                 let names: Vec<String> = subscriptions
                     .iter()
                     .map(|(name, _, _)| name.clone())

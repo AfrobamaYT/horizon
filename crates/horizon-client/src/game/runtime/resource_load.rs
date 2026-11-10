@@ -616,6 +616,7 @@ pub(super) fn load_resources(
         );
     }
     api_values::resolve_block_definitions(assets.registry)?;
+    mods::extend_poi_types(assets.registry);
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(
             &assets,
