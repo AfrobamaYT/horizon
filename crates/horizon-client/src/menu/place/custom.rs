@@ -42,14 +42,23 @@ impl Menu {
         plan: &MenuPlacement,
         use_max: bool,
         allow_drop: bool,
-        _guard: impl Fn() -> bool,
+        guard: impl Fn() -> bool,
     ) -> Result<PostPlace, Refused> {
+        if !guard() {
+            return Err(Refused::Changed);
+        }
         if !matches!(self.kind(), Kind::Mod(menu) if menu.id == plan.menu) {
             return Err(Refused::Unavailable);
         }
         for &slot in &plan.clear {
-            if self.slot(slot).is_some() && !self.may_pickup(env, slot) {
-                return Err(Refused::Denied);
+            if self.slot(slot).is_some() {
+                let allowed = self.may_pickup(env, slot);
+                if !guard() {
+                    return Err(Refused::Changed);
+                }
+                if !allowed {
+                    return Err(Refused::Denied);
+                }
             }
         }
         let mut prototypes: Vec<ItemStack> = Vec::new();
@@ -100,12 +109,20 @@ impl Menu {
         let matches =
             plan.inputs
                 .iter()
-                .all(|slot| match plan.cells.iter().find(|(_, at)| at == slot) {
-                    Some((ingredient, _)) => self.slot(*slot).is_some_and(|stack| {
-                        ingredients[*ingredient].test_in(env.loop_context, stack)
-                    }),
-                    None => self.slot(*slot).is_none(),
-                });
+                .try_fold(true, |matches, slot| -> Result<bool, Refused> {
+                    if !matches {
+                        return Ok(false);
+                    }
+                    Ok(match plan.cells.iter().find(|(_, at)| at == slot) {
+                        Some((ingredient, _)) => match self.slot(*slot) {
+                            Some(stack) => ingredients[*ingredient]
+                                .test_in_guarded(env.loop_context, stack, &guard)
+                                .ok_or(Refused::Changed)?,
+                            None => false,
+                        },
+                        None => self.slot(*slot).is_none(),
+                    })
+                })?;
         let mut next = self.clone();
         let dropped = next.dropped.len();
         for &slot in &plan.clear {
@@ -113,6 +130,9 @@ impl Menu {
                 next.load_slot(slot, None);
                 next.place_back(env, &mut stack);
             }
+        }
+        if !guard() {
+            return Err(Refused::Changed);
         }
         if !allow_drop && next.dropped.len() != dropped {
             return Err(Refused::NoRoom);
@@ -124,9 +144,20 @@ impl Menu {
         let mut limits = Vec::with_capacity(prototypes.len() * ingredients.len());
         for prototype in &prototypes {
             for (ingredient, slot) in ingredients.iter().zip(&target) {
-                let accepted = ingredient.test_in(env.loop_context, prototype);
+                let accepted = ingredient
+                    .test_in_guarded(env.loop_context, prototype, &guard)
+                    .ok_or(Refused::Changed)?;
                 compatible.push(if accepted { i32::MAX } else { 0 });
-                let cap = if accepted && next.may_place(env, *slot, prototype) {
+                let allowed = if accepted {
+                    let allowed = next.may_place(env, *slot, prototype);
+                    if !guard() {
+                        return Err(Refused::Changed);
+                    }
+                    allowed
+                } else {
+                    false
+                };
+                let cap = if allowed {
                     next.slot_max(env, *slot, prototype)
                         .min(Self::max_stack(env, prototype))
                 } else {
@@ -141,7 +172,12 @@ impl Menu {
             })
             .try_pick(1, None);
         if !raw_available {
-            next.recompute(env);
+            if plan.virtual_result.is_some() {
+                next.recompute(env);
+            }
+            if !guard() {
+                return Err(Refused::Changed);
+            }
             *self = next;
             return Ok(PostPlace::Ghost);
         }
@@ -193,7 +229,12 @@ impl Menu {
                 }),
             );
         }
-        next.recompute(env);
+        if plan.virtual_result.is_some() {
+            next.recompute(env);
+        }
+        if !guard() {
+            return Err(Refused::Changed);
+        }
         *self = next;
         Ok(PostPlace::Nothing)
     }

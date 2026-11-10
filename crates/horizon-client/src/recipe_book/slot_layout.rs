@@ -9,7 +9,7 @@ use mod_api::{RecipeBookDisplay, RecipeBookLayout as SlotLayout, RecipeSlotDispl
 
 /// A layout frozen after validating against a menu's container slot count.
 #[derive(Clone, Debug)]
-pub struct CheckedSlotLayout(SlotLayout);
+pub struct CheckedSlotLayout(SlotLayout, Option<u16>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutError {
@@ -26,6 +26,14 @@ impl CheckedSlotLayout {
     /// The frozen destination declaration, for compiling authoritative placement.
     pub fn declaration(&self) -> &SlotLayout {
         &self.0
+    }
+    /// Only an instantaneous crafting backend owns a computed, non-storage result.
+    pub fn computed_result(&self) -> Option<u16> {
+        self.1
+    }
+    pub(crate) fn with_computed_result(mut self, result: Option<u16>) -> Self {
+        self.1 = result;
+        self
     }
     /// Validate mod-controlled indices once before mapping any display.
     /// The menu limit is the existing 256 container slots, not a display cap.
@@ -49,7 +57,7 @@ impl CheckedSlotLayout {
                 return Err(LayoutError::InvalidGrid);
             }
         }
-        let checked = Self(layout);
+        let checked = Self(layout, None);
         let mut seen = [false; 256];
         for slot in checked.slots() {
             if slot >= slot_count {

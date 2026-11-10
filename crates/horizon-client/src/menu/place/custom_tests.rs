@@ -194,3 +194,76 @@ fn component_distinct_stacks_never_pool_into_one_destination() {
         );
     });
 }
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn an_interrupted_context_refuses_without_applying_even_a_missing_ingredient_clear() {
+    with_env(|env| {
+        let mut menu = Menu::new(kind());
+        menu.load_slot(4, stack("minecraft:oak_planks", 3));
+        assert_eq!(
+            menu.place_custom_recipe(env, &single("minecraft:iron_ore"), false, false, || false),
+            Err(Refused::Changed)
+        );
+        assert_eq!(
+            menu.slot(4).map(|stack| (&*stack.item, stack.count)),
+            Some(("minecraft:oak_planks", 3))
+        );
+        assert!(menu.player_item(0).is_none());
+        assert!(menu.slot(9).is_none());
+    });
+}
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn a_persistent_six_cell_grid_preserves_cooked_output_and_fuel() {
+    with_env(|env| {
+        let layout = crate::recipe_book::menu_layout::compile(
+            RecipeBookLayout::Crafting {
+                width: 3,
+                height: 2,
+                slots: (0..6).collect(),
+                result: 9,
+            },
+            crate::recipe_book::menu_layout::MenuLayoutMetadata {
+                slots: 10,
+                crafting: None,
+            },
+        )
+        .unwrap();
+        let plan = MenuPlacement::new(
+            "test:custom".into(),
+            Placement::of(
+                vec![
+                    None,
+                    Some(Ingredient::of(vec!["minecraft:iron_ore".into()])),
+                    None,
+                    None,
+                    None,
+                    None,
+                ],
+                Some((3, 2)),
+            ),
+            &layout,
+        )
+        .unwrap();
+        let mut menu = Menu::new(kind());
+        menu.set_player_item(0, stack("minecraft:iron_ore", 3));
+        menu.load_slot(7, stack("minecraft:coal", 2));
+        menu.load_slot(9, stack("minecraft:baked_potato", 4));
+        assert_eq!(
+            menu.place_custom_recipe(env, &plan, false, false, || true),
+            Ok(PostPlace::Nothing)
+        );
+        assert_eq!(
+            menu.slot(1).map(|stack| (&*stack.item, stack.count)),
+            Some(("minecraft:iron_ore", 1))
+        );
+        assert_eq!(menu.player_item(0).map(|stack| stack.count), Some(2));
+        assert_eq!(menu.slot(7).map(|stack| stack.count), Some(2));
+        assert_eq!(
+            menu.slot(9).map(|stack| (&*stack.item, stack.count)),
+            Some(("minecraft:baked_potato", 4))
+        );
+    });
+}

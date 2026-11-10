@@ -43,7 +43,7 @@ impl MenuPlacement {
                 usize::from(*height),
                 slots.iter().copied().map(usize::from).collect::<Vec<_>>(),
                 usize::from(*result),
-                Some(usize::from(*result)),
+                layout.computed_result().map(usize::from),
             ),
             L::Furnace { input, result, .. } | L::Stonecutter { input, result } => {
                 (1, 1, vec![usize::from(*input)], usize::from(*result), None)
@@ -73,7 +73,7 @@ impl MenuPlacement {
             || placement.slots.len() > inputs.len()
             || placement.ingredients.len() > inputs.len()
             || placement.shaped.is_some() && w.checked_mul(h) != Some(placement.slots.len())
-            || virtual_result.is_none()
+            || !matches!(layout.declaration(), L::Crafting { .. })
                 && (placement.shaped.is_some() || placement.slots.len() != inputs.len())
         {
             return Err(PlacementRefusal::InvalidLayout);
@@ -99,7 +99,7 @@ impl MenuPlacement {
             .map(|(ingredient, cell)| (ingredient as usize, inputs[cell]))
             .collect();
         let mut clear = inputs.clone();
-        if virtual_result.is_none() {
+        if virtual_result.is_none() && !matches!(layout.declaration(), L::Crafting { .. }) {
             clear.push(result);
         }
         Ok(Self {
