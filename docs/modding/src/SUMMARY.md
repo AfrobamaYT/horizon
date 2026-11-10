@@ -33,7 +33,6 @@
 - [The mod API (rustdoc)](reference/api.md)
 <!-- The wasm-coverage preprocessor renders this chapter from the generator at its published URL. -->
 - [Wasm boundary coverage]()
-- [Legacy native hook API history (frozen)](reference/native-api-history.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
 <!-- The counterparts preprocessor renders the current declarations at the published URL. -->
