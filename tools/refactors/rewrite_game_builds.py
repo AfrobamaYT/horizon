@@ -3,7 +3,11 @@
 import re
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
-for base in ['tools', '.github', 'docs']:
+# Root documentation also contains developer build commands.
+for p in [root / 'AGENTS.md']:
+    s = p.read_text()
+    p.write_text(re.sub(r'-p horizon-client(?![\w-])', '-p horizon-game', s))
+for base in ['tools', '.github', 'docs', 'packaging', 'xtask']:
     for p in (root / base).rglob('*'):
         if not p.is_file() or 'refactors' in p.parts:
             continue
@@ -19,6 +23,7 @@ for base in ['tools', '.github', 'docs']:
             return text
         new = re.sub(r'\[[^\[\]]*\]', rewrite, s)
         # Shell build lines; retain library checks/tests.
+        new = re.sub(r'(?m)^(  -p )horizon-client(?![\w-])', r'\1horizon-game', new)
         new = '\n'.join(re.sub(r'-p horizon-client(?![\w-])', '-p horizon-game', line) if 'cargo build' in line and '--example' not in line and '--lib' not in line else line for line in new.split('\n'))
         if new != s:
             p.write_text(new)
