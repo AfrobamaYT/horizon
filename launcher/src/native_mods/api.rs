@@ -33,7 +33,7 @@ pub(super) fn game_package(stage: &Path, target: super::Target, has_api: bool) -
     } else if target == super::Target::Client && has_official(stage) {
         OFFICIAL
     } else {
-        "horizon-client"
+        "horizon-game"
     }
 }
 
@@ -524,6 +524,13 @@ pub(super) fn stage(
         dep.insert("optional".into(), true.into());
         deps.insert(OFFICIAL.into(), toml::Value::Table(dep));
     }
+    deps.insert(
+        "horizon-mod-host".into(),
+        toml::Value::Table(toml::Table::from_iter([
+            ("path".into(), "../horizon-mod-host".into()),
+            ("default-features".into(), false.into()),
+        ])),
+    );
     manifest.insert("dependencies".into(), toml::Value::Table(deps));
     manifest.insert(
         "features".into(),

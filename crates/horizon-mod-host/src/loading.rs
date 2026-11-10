@@ -1,6 +1,13 @@
 //! Installed native and wasm code loading.
 use horizon_mod_package::selection::LaunchArguments;
-pub fn load(mods: Vec<mod_api::ModEntry>, built: &'static [horizon_mod_package::runtime::BuiltMod], launch: &LaunchArguments) -> (horizon_mod_package::runtime::Runtime, Vec<&'static str>) {
+use mod_api::__private::game::Fields;
+pub fn main_with(
+    mods: Vec<mod_api::ModEntry>,
+    slots: &[horizon_client::entry::NativeSlot],
+    built: &'static [horizon_mod_package::runtime::BuiltMod],
+    startup: horizon_client::entry::Startup,
+) {
+    let launch: &LaunchArguments = &startup.launch;
     let exe = std::env::current_exe();
     let native: Result<_, Box<dyn std::error::Error + Send + Sync>> = exe
         .as_ref()
@@ -58,5 +65,14 @@ pub fn load(mods: Vec<mod_api::ModEntry>, built: &'static [horizon_mod_package::
         .collect();
     let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
     mod_api::__private::install(mods.into());
-    (native, ids)
+    horizon_client::entry::start(
+        native,
+        ids,
+        horizon_client::entry::CodeRuntime {
+            initialize: horizon_mod_wasm::initialize,
+            refusal: |id| horizon_mod_wasm::refusal(id).map(|reason| reason.to_string()),
+        },
+        slots,
+        startup,
+    );
 }

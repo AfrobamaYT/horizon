@@ -1,7 +1,6 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
-use mod_api::__private::game::*;
 
 /// Validated startup state. No native hooks or workers may run before prepare returns.
 pub struct Startup {
@@ -37,11 +36,6 @@ pub fn prepare() -> Startup {
     }
 }
 
-/// Start the game. The executable supplies the allocator and retains the mod API marker.
-pub fn main(startup: Startup) {
-    start(horizon_mod_package::runtime::Runtime::default(), Vec::new(), &[], startup);
-}
-
 /// A native function slot, checked against its place's exact type before erasure.
 pub use mod_points::__private::SlotListener as NativeSlot;
 
@@ -49,13 +43,30 @@ pub use mod_points::__private::SlotListener as NativeSlot;
 #[doc(hidden)]
 pub use mod_points::PointId;
 
+/// Code-runtime services supplied by the platform at startup.
+pub struct CodeRuntime {
+    pub initialize: fn(&[mod_api::PackageInfo]),
+    pub refusal: fn(&str) -> Option<String>,
+}
+static CODE_RUNTIME: std::sync::OnceLock<CodeRuntime> = std::sync::OnceLock::new();
+pub(crate) fn initialize_code(inventory: &[mod_api::PackageInfo]) {
+    if let Some(runtime) = CODE_RUNTIME.get() {
+        (runtime.initialize)(inventory);
+    }
+}
+pub(crate) fn code_refusal(id: &str) -> Option<String> {
+    CODE_RUNTIME.get().and_then(|runtime| (runtime.refusal)(id))
+}
+
 /// Start with named mods and their function slots in installed dependency order.
 pub fn start(
     native: horizon_mod_package::runtime::Runtime,
     ids: Vec<&'static str>,
+    code: CodeRuntime,
     slots: &[NativeSlot],
     startup: Startup,
 ) {
+    let _ = CODE_RUNTIME.set(code);
     let Startup {
         launch,
         options,
