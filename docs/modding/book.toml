@@ -6,6 +6,8 @@ src = "src"
 
 [build]
 build-dir = "../../target/modding-book"
+# A SUMMARY.md link to a page that doesn't exist fails the build instead of creating an empty page.
+create-missing = false
 
 # Resolve from mdBook's context, not the caller's working directory.
 [preprocessor.hook-notes]
