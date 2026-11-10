@@ -74,6 +74,9 @@ fn extinguish_fire_preserves_player_guest_stand_and_item_sound_routes() {
         body.entity_id = 7;
         game.player = Some(body);
         game.bind_local_player_residency();
+        // The joined-guest fixture starts before its lazy motion body exists.
+        game.for_player(crate::game::commands::Target::Guest(12), |_| {})
+            .unwrap();
         game.armor_stands.push(ArmorStand::new(22, at, 0.0));
         game.dropped.push(ItemEntity::new(
             23,
@@ -85,7 +88,10 @@ fn extinguish_fire_preserves_player_guest_stand_and_item_sound_routes() {
         for (id, source) in [(7, 7), (12, 7), (22, 6), (23, 8)] {
             let entity = game.entity(id).unwrap();
             for ticks in [72, 0, -12] {
-                assert!(entity.set_remaining_fire_ticks(game, ticks));
+                assert!(
+                    entity.set_remaining_fire_ticks(game, ticks),
+                    "entity {id}, ticks {ticks}"
+                );
                 *game.particles.random() = LegacyRandom::new(1234);
                 game.dropped[0].random = LegacyRandom::new(1234);
                 game.audio.capture = Some(Vec::new());
