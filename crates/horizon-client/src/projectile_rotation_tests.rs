@@ -38,5 +38,28 @@ fn rotation_shot_consumes_six_doubles_in_axis_order_and_inherits_motion() {
             assert!((actual - expected).abs() < 1e-14, "{actual} != {expected}");
         }
         assert_eq!(random.next_double(), 0.34690742873967684);
+        assert!(shot.needs_sync);
     }
+}
+
+#[test]
+fn rotation_shot_applies_vanilla_near_zero_normalization_without_skipping_draws() {
+    let mut shot = Projectile::new(ProjectileKind::Snowball, Vec3::ZERO, None);
+    let mut random = LegacyRandom::new(1234);
+    // At pitch 90 with a -90 vertical offset all three direction components
+    // are below Vec3.normalize's widened 1.0E-5F threshold. Spread is zero,
+    // but Projectile.getMovementToShoot still takes all six double draws.
+    shot.shoot_from_rotation(
+        &mut random,
+        90.0,
+        0.0,
+        -90.0,
+        1.5,
+        0.0,
+        Vec3::new(0.2, 0.3, -0.4),
+        false,
+    );
+    assert_eq!(shot.velocity, Vec3::new(0.2, 0.3, -0.4));
+    assert_eq!(random.next_double(), 0.34690742873967684);
+    assert!(shot.needs_sync);
 }
