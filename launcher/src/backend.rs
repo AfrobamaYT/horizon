@@ -3342,27 +3342,8 @@ pub fn check_updates() -> Result<Updates, String> {
     releases_and_updates(|_| {})
 }
 
-/// Whether a version installed as an update becomes the selected one: when the player had none,
-/// was on a Nightly, or on the newest installed release (so a player of the release channel moves
-/// to the Nightly at the first check, docs/release-flow.md). An older release picked by hand
-/// stays, and so does an imported build (`build_import`); an instance pinned to a version keeps it
-/// either way.
-pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) -> bool {
-    match selected {
-        None => true,
-        Some(s) if crate::nightly::date_of(s).is_some() => true,
-        Some(s)
-            if crate::build_import::is_imported(s)
-                || crate::developer_install::uses_developer(s) =>
-        {
-            false
-        }
-        Some(s) => installed_before
-            .iter()
-            .find(|t| is_game_tag(t))
-            .is_none_or(|newest| newest == s),
-    }
-}
+mod update_selection;
+pub use update_selection::select_after_update;
 
 /// Installs `tag` (or with "latest" the newest release, pre-releases left out), then updates the selection as
 /// `select_after_update` says when `as_update`, or always selects it otherwise.

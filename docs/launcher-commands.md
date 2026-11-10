@@ -36,13 +36,16 @@ MCP: `install`.
 
 ## `horizon-launcher developer-install`
 
-Install a local unsigned developer build. Runs the trusted checkout\'s build code through cargo run -p xtask -- package; requires companion binaries and compiled exporters. Commit tracked changes first and rebuild. Native builds use a snapshot of this local commit, even when it has never been pushed. Select this base explicitly with settings selected-version.
+Install a local unsigned developer build from a trusted checkout.
 
-    horizon-launcher developer-install --program <PROGRAM> <CHECKOUT>
+    horizon-launcher developer-install --program <PROGRAM> --trust-unsigned <CHECKOUT>
 
-- `CHECKOUT`
-- `--program`
-- `--trust-unsigned`
+- `CHECKOUT`: The trusted clean Horizon checkout to package
+- `--program`: The real horizon-client executable built from that committed checkout
+- `--trust-unsigned`: Allow executing this checkout's build code and unsigned game with your rights
+
+Example: horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned
+This executes the checkout's build code and an unsigned game with your rights. Trust both before continuing.
 
 MCP: none: the player's switch.
 
@@ -58,7 +61,7 @@ MCP: `remove`, needs `confirm: true`.
 
 ## `horizon-launcher import-build`
 
-Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed release or Nightly's game files, and select it. Nothing signed it: it runs with your rights, and updates never replace it.
+Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed base's game files, and select it. A local unsigned developer base is allowed only when explicitly selected or named with --version. Nothing signed it: it runs with your rights, and updates never replace it.
 
     horizon-launcher import-build <PATH>
 
