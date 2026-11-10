@@ -17,7 +17,8 @@ mods' listeners, without changing game source.
 There are two access tiers, and they never mix:
 
 - **`access = "api"`: native and `mod.wasm` alike.** A point is a hook whose signature comes from the
-  engine function. The listener gets the side's host and the point's record: a copy of **every**
+  engine function. The listener gets the point's record (and the side's host at a `Game` method's
+  point, [below](#which-functions-are-points)): a copy of **every**
   parameter as an API value (scalars, text, std containers, `mod_api` types, and the engine types
   with a `mod_api` mirror, such as `Text` and `BlockStateId`), plus `cancel` or `result`. A `&mut`
   parameter is copied in and its place gets the listener's value back; by-value and `&T` parameters
@@ -126,7 +127,7 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites are refused; internals `replace`, locals and extension fields are also refused.
+API call sites are refused; internals `replace` and extension fields are also refused. Locals use the native source route described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -337,6 +338,51 @@ The source tree carries no `#[point]`: the build of the prebuilt game, and the l
 put one on each method in the copy they compile. A plain `cargo build` of the game in a checkout has no
 points; a mod listening there builds, and its listeners never fire.
 
+## Mod points: patching another mod
+
+A mod's own functions are points too ([#2339](https://github.com/arismoko/horizon/issues/2339)),
+by the same rules as the game's: every eligible function of the crate, public and private, free
+functions, inherent methods and functions of inline modules (trait impl methods are not points). The
+build compiles a staged copy with a point on each, in a slot table of the mod's own
+(`<crate>::__horizon_points`); the author's source is never edited. A point is named by its path
+from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::fill`.
+
+- **Opting out.** `#[mod_api::no_point]` on a function gives it no point. An addon declaring a
+  listener there is refused: `chemlib::audit has no point (opted out with #[mod_api::no_point])`.
+- **Declaring.** An addon depends on the library and pins the function with
+  `cargo horizon-mod inject add chemlib::transfer --kind head --with double_rate`, exactly as for
+  the game's points: `at` is the function's path in its crate.
+- **`access = "api"`.** The listener gets the point's record, `<crate>::__horizon_points::<Point>Args`:
+  a copy of every parameter, `&mut` ones copied back, and `cancel` or `result`. Every parameter needs
+  a `Wire` form: scalars, text, std containers, `mod_api`'s types, and the library's own publicly
+  reachable types that carry `#[derive(mod_api::Wire)]`. Nothing adds the derive; a parameter without one refuses the
+  point's API listeners, naming it. A method of the library's own types has no API record (its
+  `self` has no handle), as on the game.
+- **No Host.** As on the game, only a `Game` method's point gets a `Host`; free functions and
+  methods of other types get none, and a mod crate's functions have no `Game` receiver. A mod
+  point's `api` listener gets its record and nothing else; an addon that acts on the game does it
+  from its own hooks, which get a `Host`.
+- **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in
+  their own types, through the raw form declared beside the function. It works from the library's
+  own target: the same binary on native, the same dependency group on wasm.
+- **The signature check.** Each mod point's hash covers its path, its signature as written and its
+  record's field types. When the library's function changes, the addon is refused at load:
+  `E_INJECT_CHANGED: addon:double_rate: chemlib 1.1.0 changed chemlib::transfer: pinned …, installed …
+  (signature)`. `cargo horizon-mod inject update` reports the change and repins with `--accept`.
+- **Across targets.** A native library with a wasm addon, or the reverse, is refused at load. A native
+  addon's listener at a wasm library's point says why it can never cross: "internals access to chemlib
+  needs the same target", or an `api` listener on a parameter without a `Wire` form, naming it. Any
+  other mixed edge gets the general refusal, "mixed native and wasm dependencies aren't supported yet"
+  ([Wire types](how-to/wire-types.md)).
+- **Cost when nothing listens.** One relaxed load of the place's slot and a branch at the head, one
+  more for the return; the listened path stays out of line. On the chemicals fixture's per-tick
+  transfer (a ~2 ns function) that is about 1.2 ns a call natively and 1.6–2 ns on wasm.
+
+The build writes the mod's points to `mod-points.json` in a wasm package and pins its SHA-512 in
+the manifest's `[wasm] points`; a package whose `mod-points.json` is missing, unpinned or changed is
+refused.
+The launcher lists a native mod's points from its source.
+
 ## Raw listeners and declared internals
 
 When an API-typed point cannot carry the state a mod needs, a native mod can declare game
@@ -522,3 +568,49 @@ These call kinds are not available to wasm mods.
   and the record carries what the point passes.
 - `[[inject]]` has no binding or hook-version fields. Implement a catalog hook through `Hooks`;
   use the slot's generated callback signature for an injection.
+
+### Mutable locals (native source rebuild only)
+
+`modify_local` requires `access = "internals"` and a rebuild from source. It uses the
+same pinned `call`, `nth` and `ctx` identity as other call-site injections, with three
+required fields that every other kind rejects:
+
+```toml
+[[inject]]
+id = "adjust_count"
+at = "horizon_client::game::count"
+kind = "modify_local"
+access = "internals"
+with = "adjust_count"
+hash = "<function hash>"
+call = "horizon_client::game::sink"
+nth = 0
+ctx = "<statement context>"
+local = "n"
+type = "i32"
+position = "before" # or "after"
+```
+
+The callback `fn adjust_count(n: &mut i32)` receives the actual mutable binding.
+Before callbacks run before evaluating the call; after callbacks run after it returns,
+while preserving its result. There is no copy or deferred write-back. Listeners use
+the existing priority/mod/injection ordering at each position. They may mutate the
+value directly, with the same type and panic handling as native internals listeners.
+No Host is passed by this raw internals route.
+
+The initial implementation accepts direct call statements in the enclosing function
+block. It refuses nested expression positions whose scope or evaluation order cannot
+be proven. The binding must be a single mutable local with a matching explicit Rust
+type, or a directly initialized suffixed integer literal (such as `3i32`) or boolean
+literal. Unsuffixed integer literals are refused because their inferred type cannot
+be proven. The declaration must include an initializer; later assignments do not
+establish initialization for this analysis.
+Missing, shadowed, immutable, type-mismatched, moved or borrowed bindings are refused
+by name. Non-scalar uses before the position, references (including `ref`/`ref mut`
+patterns in let, match and if-let over expressions mentioning the local), closures
+and opaque macros are conservatively refused when their dataflow cannot be proven.
+This may refuse bindings that Rust's borrow checker could otherwise accept.
+
+API access and wasm permanently refuse mutable locals; use native internals or request
+a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when
+no mod declares a local injection, so an unused local injection has zero runtime cost.

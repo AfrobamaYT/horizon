@@ -98,7 +98,8 @@ fn discover(folder: &Path, cache_root: &Path) -> Result<Vec<ListedInternal>, Err
     crate::storage::mark_used(&cache).map_err(super::cache_error)?;
     let stage = cache.join("stage");
     prepare_stage(&game, &stage)?;
-    let mut listed = internals::Catalog::read(&stage)?;
+    let mut listed = internals::Catalog::read(&stage)?
+        .with_mods(projects.iter().map(|project| project.bundle))?;
     listed.discovery = true;
     api::stage(&stage, &projects, &declared, &resolution, &listed)?;
     let rust = rust_toolchain::install(|_| {})?;
