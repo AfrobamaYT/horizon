@@ -979,15 +979,7 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// Join single player's integrated server through memory.
-    pub(super) fn connect_local(
-        &mut self,
-        pipe: horizon_protocol::connection::Pipe,
-        name: &str,
-    ) -> Result<()> {
-        self.join_server("local", name, Some(pipe), None, false, false)
-    }
-    fn join_server(
+    pub(super) fn connect_remote_session(
         &mut self,
         address: &str,
         name: &str,

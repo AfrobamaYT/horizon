@@ -1608,9 +1608,7 @@ impl Game<'_> {
         ));
         Ok(())
     }
-    /// Start the network side and the play-state hub: for the LAN (with the
-    /// host's own profile reserved) or for a dedicated server (no host).
-    pub(super) fn lan_host(
+    pub(super) fn start_lan_hub(
         &mut self,
         settings: LanSettings,
         net: NetConfig,
