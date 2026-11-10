@@ -16209,15 +16209,6 @@ fn load_forcefield(root: &horizon_assets::resource_source::ResourceSource) -> (u
         .unwrap_or((1, 1, vec![0; 4]))
 }
 impl<'a> Game<'a> {
-    #[cfg(test)]
-    fn initialize_mod_runtime_for_tests() {
-        static INITIALIZED: std::sync::Once = std::sync::Once::new();
-        INITIALIZED.call_once(|| {
-            mod_api::__private::initialize()
-                .expect("engine test runtime initializes before mod dispatch");
-        });
-    }
-
     /// A game with no world open, over the loaded resources: the window's,
     /// or an integrated server's on its own thread.
     fn new(
@@ -16229,9 +16220,7 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
-        #[cfg(test)]
-        Self::initialize_mod_runtime_for_tests();
-        let phase = match mod_api::__private::current_phase() {
+        let phase = match Self::mod_phase_for_construction() {
             mod_api::__private::ModPhase::Packages if cfg!(test) => {
                 mod_api::__private::ModPhase::World
             }
