@@ -3,6 +3,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
+mod menu_books;
 use horizon_client::{
     lang,
     mod_list::{self, Installed},
@@ -98,6 +99,12 @@ pub(super) struct ModsState {
     pub(super) data_switched: bool,
     /// Structured load refusals, rendered only at the existing Mods-page boundary.
     pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,
+    /// The entries of the mods' datapack registries this world session has published, at the
+    /// generation of the load or reload that built them; `None` when no mod declared one.
+    pub(super) datapack_registries: Option<mod_api::DatapackRegistrySet>,
+    /// The entries a table load decoded and checked, until its world open or reload takes them
+    /// to publish.
+    pub(super) datapack_candidate: Option<mod_api::DatapackCandidate>,
 }
 
 impl ModsState {
@@ -521,9 +528,17 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     horizon_client::title::preset_editors::register(editors);
 }
 
+/// The native mods' meshing registrations, kept once at start, before resources load: colour
+/// resolvers, then the block tint sources that read them, then section geometry renderers.
+pub(super) fn register_meshing(role: ExecutionRole) {
+    register_color_resolvers(role);
+    register_block_tint_sources(role);
+    add_section_geometry(role);
+}
+
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
 /// before the block tint sources that read them and before resources load.
-pub(super) fn register_color_resolvers(role: ExecutionRole) {
+fn register_color_resolvers(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
@@ -534,13 +549,23 @@ pub(super) fn register_color_resolvers(role: ExecutionRole) {
 
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
-pub(super) fn register_block_tint_sources(role: ExecutionRole) {
+fn register_block_tint_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut registry = mod_api::BlockTintRegistry::default();
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
+}
+/// The native mods' section geometry renderers (`native_add_section_geometry`), kept once at
+/// start, before resources load; every mesh of a section asks them to add their quads.
+fn add_section_geometry(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::SectionGeometryRegistry::default();
+    Game::native_add_section_geometry(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_section_geometry(registry.into_renderers());
 }
 /// The native mods' particle providers (`native_register_particle_providers`) and render groups
 /// (`native_register_particle_groups`), kept once at start, before resources load; every particle
@@ -905,7 +930,7 @@ pub(super) fn content_root(
             .join("\n")
     })?;
     register_entity_types(&overlay.mods);
-    register_menu_types(&overlay.mods);
+    register_menu_types(&overlay.mods)?;
     register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
@@ -1128,9 +1153,12 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
 
 /// the mods' menu types, as their entity types: set once, from the startup
 /// root.
-fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
+fn register_menu_types(
+    mods: &[horizon_client::mod_content::ContentMod],
+) -> horizon_client::Result<()> {
     use horizon_client::containers;
     let menus = horizon_client::mod_content::menu_types(mods);
+    menu_books::validate_registered(&menus)?;
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
         let crafting = m.crafting.map(|c| containers::ModCrafting {
@@ -1159,6 +1187,7 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
+    Ok(())
 }
 
 /// The embedded inventory, formatted for the crash report.
@@ -1595,6 +1624,66 @@ pub(super) fn living_mod_types()
         .into_iter()
         .map(|(id, t)| (id, std::sync::Arc::new(t)))
         .collect()
+}
+
+/// The block states native mods add to vanilla POI types (`native_extend_poi_types`),
+/// resolved against `registry` once its block definitions are published and before any
+/// world's POI tables are built; collected again when the resources reload. Each refusal
+/// is logged once.
+pub(super) fn extend_poi_types(registry: &horizon_world::registry::BlockRegistry) {
+    let (additions, refusals) = collect_poi_extensions(registry);
+    for refusal in refusals
+        .into_iter()
+        .chain(horizon_world::poi::extend(additions))
+    {
+        log::warn!("Horizon: POI type extension refused: {refusal}");
+    }
+}
+
+/// Ask the mods, then turn each predicate into the complete states of `registry` it
+/// selects, in registration order. A tag predicate is refused here: additions name blocks.
+pub(in crate::game) fn collect_poi_extensions(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> (Vec<horizon_world::poi::PoiExtension>, Vec<String>) {
+    let Some(metadata) = mod_api::__private::block_definitions() else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut extensions = mod_api::PoiTypeExtensionRegistry::new(metadata);
+    Game::native_extend_poi_types(&RegistrationContext::new(), &mut extensions);
+    let mut additions = Vec::new();
+    let mut refusals = Vec::new();
+    for (poi, predicate) in extensions.into_entries() {
+        let record = mod_api::StatePredicateRecord::from(&predicate);
+        let block = match record.target {
+            mod_api::StatePredicateTarget::Block(block) => block,
+            mod_api::StatePredicateTarget::Tag(_) => {
+                refusals.push(format!(
+                    "{poi} asked for a block tag's states; an addition names a block"
+                ));
+                continue;
+            }
+        };
+        // The predicate was built on this metadata, so its block is known.
+        let Ok(name) = mod_api::BlockMetadata::name(metadata, block) else {
+            continue;
+        };
+        for index in 0..registry.len() {
+            let state = registry
+                .state(horizon_world::registry::BlockStateId(index as u32))
+                .expect("registry index is in bounds");
+            if state.name == name
+                && record.constraints.iter().all(|constraint| {
+                    state.properties.get(constraint.name.as_str()) == Some(&constraint.value)
+                })
+            {
+                additions.push(horizon_world::poi::PoiExtension {
+                    state: state.clone(),
+                    poi: poi.to_string(),
+                });
+            }
+        }
+    }
+    (additions, refusals)
 }
 
 /// Registered callbacks indexed directly by the slots resolved in enchantment content.

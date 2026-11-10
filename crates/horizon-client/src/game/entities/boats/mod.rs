@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod lifetime_tests;
 mod placement;
+pub(super) use placement::OutlineFluidRay;
 
 use super::{Game, InteractTarget, entity::Entity, entity_culling::at, view_vector};
 use horizon_client::actions::Action;

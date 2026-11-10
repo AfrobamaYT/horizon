@@ -3309,5 +3309,9 @@ mod projectile_lifecycle_tests;
 mod spin_target_tests;
 
 #[cfg(test)]
+#[path = "tests/spawn_protection_tests.rs"]
+mod spawn_protection_tests;
+
+#[cfg(test)]
 #[path = "tests/unloaded_chunk_tests.rs"]
 mod unloaded_chunk_tests;

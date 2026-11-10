@@ -26,6 +26,24 @@ pub fn owned_declaration_id(owner: &str, name: &str) -> Result<String, String> {
 }
 
 impl crate::RegistrationContext {
+    /// Refuse this mod's registration with a diagnostic, without panicking.
+    /// The first reason wins. Reasons exceeding 4096 UTF-8 bytes are truncated
+    /// at a character boundary; shorter reasons are preserved verbatim.
+    /// All this mod's declarations from this registration are discarded, including
+    /// later declarations, without adding their validation errors to the report.
+    /// Other mods' declarations are unchanged. Native and wasm use the same
+    /// admission path. Returning from `Hooks::register` immediately is recommended.
+    pub fn refuse(&self, reason: &str) {
+        let mut reason_slot = self.self_refusal.lock().unwrap_or_else(|p| p.into_inner());
+        if reason_slot.is_none() {
+            let mut end = reason.len().min(4096);
+            while !reason.is_char_boundary(end) {
+                end -= 1;
+            }
+            *reason_slot = Some(reason[..end].to_owned());
+        }
+    }
+
     pub(crate) fn refuse_declaration(&self, reason: String) {
         self.declaration_refusals
             .lock()

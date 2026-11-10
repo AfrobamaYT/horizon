@@ -223,6 +223,21 @@ and a category selected in another book cannot be reused as a tab here.
 
 ### Hosting the panel in a mod screen
 
+Construct `Screen` with the geometry your menu needs and use struct update syntax
+for fields you do not set. This keeps the literal compiling when optional fields
+are added; it does not make the default geometry suitable for your menu.
+
+```rust
+let screen = mod_api::Screen {
+    width: 176.0,
+    height: 166.0,
+    slots: vec![Some([44.0, 35.0]), Some([116.0, 35.0])],
+    inventory_x: 8.0,
+    inventory_y: 84.0,
+    ..mod_api::Screen::default()
+};
+```
+
 Set `Screen.recipe_book` to `Some(key.clone())` in the existing `native_screen`
 declaration. Leave it `None` for a screen without a recipe book. The key must
 belong to the categories' `target_menu`; a different menu cannot display that
@@ -271,3 +286,68 @@ control reply instead of another large snapshot. The client disables the custom
 view and coalesces a retry after one second; a busy response schedules the next
 retry, and a successful authoritative snapshot cancels it. This bounds response
 amplification without leaving a lost resnapshot or pending UI intent unresolved.
+
+## Toggle layout and large books
+
+`Screen.recipe_book_toggle` optionally reserves a 20 × 18 GUI-pixel toggle at
+an `[x, y]` offset from the menu origin. Like vanilla's screen-specific button
+positions, this is space the screen author must keep clear of slots and labels.
+Both native and wasm declarations carry the same optional value over Wire.
+
+Without an anchor, the client tries an external right, left, then above-menu
+gutter, rejecting positions covered by the overlay panel. Menus wider than 176
+GUI pixels, windows narrower than 379 GUI pixels, or windows narrower than the
+menu width plus 202 GUI pixels use overlay mode instead of shifting slots. If
+the toggle does not fit in the viewport in the closed layout or in the open
+layout, the book is refused with a diagnostic identifying the mod block and menu.
+The diagnostic requests `Screen.recipe_book_toggle` when absent, or reports an
+anchored toggle outside the viewport when the declared anchor does not fit. The menu still opens unchanged; the
+engine never clamps a toggle onto mod slots or clips the menu to make room.
+
+The client caches resolved result/search metadata for the screen binding.
+Stock changes re-evaluate craftability and filtering, but only the selected
+page's twenty recipes materialize ingredient previews. Search still considers
+the entire declared book, not just the visible page.
+
+## Menu-owned destination roles
+
+During shared registration, `r.menu_recipe_book(menu, &book, recipe_type, layout)`
+binds a content menu to a registered book and a recipe type. The menu namespace
+must belong to the registering mod. Duplicate bindings and unknown books refuse
+installation even when the registration error is ignored. The declaration is
+frozen with the other registrations and explicitly derives `Wire`, for the
+same native and wasm transport.
+
+`RecipeBookLayout` declares one of four destination maps:
+
+- `Crafting { width, height, slots, result }` supports shaped and shapeless
+  displays. Slots are row-major container indices.
+- `Furnace { input, fuel, result }` supports cooking displays.
+- `Stonecutter { input, result }` supports stonecutting displays.
+- `Smithing { template, base, addition, result }` supports smithing displays.
+
+These are container slots, not the appended player inventory. Overlapping roles,
+invalid dimensions and indices outside the 256-slot menu bound refuse registration.
+Book loading checks against the actual content menu size. A declared crafting
+map must exactly agree with the menu's existing `MenuCrafting` storage and result.
+An incompatible display or one that does not fit refuses the declaration
+generation rather than truncating ingredients. All mapped slots need finite
+coordinates in `Screen.slots`; opening an incompatible screen is refused. This
+is currently an open-time check, not an atomic screen-registration error:
+`native_screen` returns geometry at runtime, after the server has opened the
+menu. The adapter/rendering follow-up must move the required geometry contract
+to startup before enabling placement. The foundation does not introduce a new
+screen registration system.
+
+The shared mapper uses vanilla `PlaceRecipeHelper`: a 1 by 1 shaped recipe in
+a 3 by 3 grid is centered; a 2 by 2 recipe starts at the upper left and retains
+its holes. Shapeless ingredients occupy consecutive cells. Furnace fuel is
+included in a preview only when its slot is empty. Station icons never map to
+menu ingredients. Result display stacks retain their components and counts.
+
+This foundation does not activate ghost rendering or click-to-place requests.
+Those require the authoritative recipe type's placement information and a
+server missing-ingredients response. Displays are pictures, not ingredient
+predicates; declaring a result ghost never grants a real stack. NeoForge 26.3
+public documentation names no registration counterpart for vanilla's internal
+`GhostSlots.setInput` and `setResult`; these declaration names are Horizon's.

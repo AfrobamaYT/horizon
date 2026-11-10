@@ -508,6 +508,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-point-shape",
+ "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
  "rustc-demangle",
@@ -519,6 +520,7 @@ dependencies = [
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
+ "wasmtime",
  "zip",
 ]
 
@@ -2163,6 +2165,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "syn 2.0.119",
+ "tempfile",
  "toml",
  "wit-parser",
 ]
@@ -2424,6 +2427,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "serde",

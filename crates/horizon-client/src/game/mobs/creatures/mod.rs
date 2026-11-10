@@ -88,35 +88,8 @@ pub(super) enum Finalized {
     Cancelled,
 }
 
-/// Damage types of a projectile: its own entity is the direct one, and
-/// the game keeps no id for it.
-const PROJECTILE_DAMAGE: [&str; 9] = [
-    "minecraft:arrow",
-    "minecraft:trident",
-    "minecraft:fireball",
-    "minecraft:unattributed_fireball",
-    "minecraft:wither_skull",
-    "minecraft:mob_projectile",
-    "minecraft:thrown",
-    "minecraft:wind_charge",
-    "minecraft:fireworks",
-];
-
-/// The `HurtSource` of a death's blow. A melee hit's direct entity is the
-/// one that caused it; a projectile's isn't known, so `direct` is 0.
-pub(in crate::game) fn death_hurt_source(damage_type: &str, causing: u32) -> HurtSource<'_> {
-    let direct = if PROJECTILE_DAMAGE.contains(&damage_type) {
-        0
-    } else {
-        causing as i32
-    };
-    HurtSource {
-        damage_type,
-        causing: causing as i32,
-        direct,
-        position: None,
-    }
-}
+mod death_source;
+pub(in crate::game) use death_source::death_hurt_source;
 
 /// A dying entity whose items drop (`LivingDropsEvent`).
 pub(super) struct DyingDrops<'a> {
@@ -1755,6 +1728,15 @@ impl Game<'_> {
     }
     /// LivingEntity.die / dropAllDeathLoot.
     pub(super) fn mob_died(&mut self, m: &Mob) {
+        // The killing blow for the drop hooks, before the player's hit is forgotten.
+        let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
+        let killer = self
+            .last_hurt_by_player
+            .get(&m.id)
+            .copied()
+            .filter(|_| m.ai.last_hurt_by_player > 0)
+            .and_then(|credit| self.resolve_player_credit(credit));
+        let killer_hand = self.death_killer_hand(m, killer);
         if self.mob_death_canceled(m) {
             return;
         }
@@ -1764,13 +1746,7 @@ impl Game<'_> {
             // The body may be gone already.
             self.set_bed_occupied(bed, false);
         }
-        // The killing blow for the drop hooks, before the player's hit is forgotten.
-        let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
-        let killer = self
-            .last_hurt_by_player
-            .remove(&m.id)
-            .filter(|_| m.ai.last_hurt_by_player > 0)
-            .and_then(|credit| self.resolve_player_credit(credit));
+        self.last_hurt_by_player.remove(&m.id);
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
@@ -1850,6 +1826,7 @@ impl Game<'_> {
             player,
             m.ai.last_hurt_by_player > 0,
             killer_entity,
+            killer_hand,
             consumed,
             pos,
             source,
@@ -2035,6 +2012,7 @@ impl Game<'_> {
         player_uuid: Option<u128>,
         player_killed: bool,
         killer: horizon_world::loot::LootEntity,
+        killer_hand: Option<ItemStack>,
         consumed: bool,
         pos: [f64; 3],
         source: Option<(&'static str, u32)>,
@@ -2189,14 +2167,16 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
+        let killer_hand = killer_hand.as_ref().try_into_api().ok().flatten();
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: hurt,
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: [m.position.x, m.position.y, m.position.z],
             block: None,
             entity: Some((m.id, &kind)),
             player: player_uuid,
-            tool: None,
+            tool: killer_hand.as_ref(),
             explosion: None,
             used: false,
         });
@@ -2513,8 +2493,8 @@ impl Game<'_> {
         dropped
     }
     /// Adds a projectile, giving it an id from the entity counter
-    /// (`Entity.id`, the same counter as the rest) when it has none.
-    pub(super) fn add_projectile(&mut self, mut p: horizon_client::projectiles::Projectile) {
+    /// (`Entity.id`, the same counter as the rest) when it has none. Its id.
+    pub(super) fn add_projectile(&mut self, mut p: horizon_client::projectiles::Projectile) -> u32 {
         if p.id == 0 {
             self.next_entity += 1;
             p.id = self.next_entity;
@@ -2545,6 +2525,7 @@ impl Game<'_> {
         }
         self.creatures.projectiles.push(p);
         self.native_projectile_launch(player, &name, id, kind);
+        id
     }
     /// `MushroomCow.shear`'s `sendParticles(EXPLOSION, x, getY(0.5), z, 1, 0, 0, 0, 0)`:
     /// one puff over a sheared mooshroom, half its `height` up, shown here and to
@@ -2592,9 +2573,7 @@ impl Game<'_> {
             let v = p.velocity;
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
-        // Projectile.tick posts on the first tick, through the shared arrow-state
-        // continuation for ordinary arrows and tridents, including loaded ones.
-        self.add_projectile(p);
+        self.spawn_mob_projectile(p);
     }
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
@@ -4556,41 +4535,6 @@ impl Game<'_> {
         }
         true
     }
-    /// Damage of a given type to the player from a point.
-    pub(super) fn mob_hits_player_kind(&mut self, amount: f32, from: [f64; 3], kind: &str) {
-        self.mob_hits_player(amount, from, kind);
-    }
-    /// Damage whose causing mob is known (`cause`, or none): not guessed
-    /// from the mob nearest to `from`.
-    pub(super) fn mob_hits_player_caused(
-        &mut self,
-        amount: f32,
-        from: [f64; 3],
-        kind: &str,
-        cause: Option<u32>,
-    ) {
-        self.hurt_player_from(amount, Some(from), kind, Some(cause), false);
-    }
-    pub(super) fn mob_hits_player(
-        &mut self,
-        amount: f32,
-        from: [f64; 3],
-        damage_type: &str,
-    ) -> bool {
-        self.hurt_player_from(amount, Some(from), damage_type, None, false)
-    }
-    /// [`mob_hits_player`](Self::mob_hits_player) whose hit was a creative
-    /// player's, which passes the victim's invulnerability
-    /// (`DamageSource.isCreativePlayer`, #916).
-    pub(in crate::game) fn mob_hits_player_from(
-        &mut self,
-        amount: f32,
-        from: [f64; 3],
-        damage_type: &str,
-        by_creative_player: bool,
-    ) -> bool {
-        self.hurt_player_from(amount, Some(from), damage_type, None, by_creative_player)
-    }
     /// `hurtServer` on the player. `from` is the source's position (none: no
     /// direction), `known`: the causing mob when it is given (`/damage`),
     /// else the melee attacker is the mob nearest to `from`.
@@ -4605,11 +4549,6 @@ impl Game<'_> {
         let post_attack_if_alive = std::mem::take(&mut self.combat.post_attack_if_alive);
         let rocket = std::mem::take(&mut self.combat.rocket_hit);
         let melee = self.combat.melee_mob.take();
-        // ServerPlayer.canHarmPlayer refused another player's projectile.
-        if self.creative || self.combat.refuse_player_hit {
-            self.combat.forget_noted(false);
-            return false;
-        }
         // A projectile entity dealt it: `#is_projectile`, or a firework
         // rocket (its `fireworks` type is not in the tag).
         let projectile = rocket
@@ -4818,8 +4757,7 @@ impl Game<'_> {
     pub(in crate::game) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
         let mut canceled = false;
         let attack = self.current_attack();
-        if !self.creative
-            && self.player.is_some()
+        if self.player.is_some()
             && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = self.hurt_player_equipment(id, amount, None, false, 0, false, &attack)
         {
@@ -6313,6 +6251,15 @@ impl Game<'_> {
             (ProjectileKind::Arrow { .. }, Hit::Block { .. }) => {}
             (ProjectileKind::Snowball, hit) => {
                 if let Hit::Entity {
+                    who: Who::Player, ..
+                } = hit
+                {
+                    self.mob_hits_player(
+                        0.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:thrown",
+                    );
+                } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
@@ -6376,10 +6323,10 @@ impl Game<'_> {
                             self.player_hit(&victim, "minecraft:thrown", Some(direct), t.damage);
                         }
                     }
-                    // Player.hurtServer takes no 0 damage.
+                    // Player.hurtServer observes invulnerability before refusing 0 damage.
                     Hit::Entity {
                         who: Who::Player, ..
-                    } if t.damage > 0.0 => {
+                    } => {
                         let from = [p.previous.x, p.previous.y, p.previous.z];
                         self.mob_hits_player(t.damage, from, "minecraft:thrown");
                     }
@@ -6390,6 +6337,15 @@ impl Game<'_> {
             }
             (ProjectileKind::Egg, hit) => {
                 if let Hit::Entity {
+                    who: Who::Player, ..
+                } = hit
+                {
+                    self.mob_hits_player(
+                        0.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:thrown",
+                    );
+                } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
@@ -6430,6 +6386,15 @@ impl Game<'_> {
             }
             (ProjectileKind::EnderPearl, hit) => {
                 if let Hit::Entity {
+                    who: Who::Player, ..
+                } = hit
+                {
+                    self.mob_hits_player(
+                        0.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:thrown",
+                    );
+                } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
@@ -6511,9 +6476,7 @@ impl Game<'_> {
                         pl.teleported_delta = [false; 3];
                     }
                     self.previous_position = to;
-                    if damage > 0.0 {
-                        self.hurt_player_by("minecraft:ender_pearl", damage);
-                    }
+                    self.hurt_player_by("minecraft:ender_pearl", damage);
                     self.audio.play(
                         "minecraft:entity.player.teleport",
                         Some([to.x, to.y, to.z]),
@@ -6528,24 +6491,22 @@ impl Game<'_> {
             (ProjectileKind::SmallFireball, hit) => match hit {
                 Hit::Entity { who, .. } => match who {
                     Who::Player => {
-                        if !self.creative {
-                            // SmallFireball.onHitEntity: remember the fire, ignite,
-                            // and restore it when the hurt is refused (a raised shield).
-                            let remaining = self.player.as_ref().map(|p| p.fire_ticks);
-                            if let Some(p) = self.player.as_mut() {
-                                p.ignite_for_ticks(100)?;
-                            }
-                            let hurt = self.mob_hits_player(
-                                5.0,
-                                [p.previous.x, p.previous.y, p.previous.z],
-                                "minecraft:fireball",
-                            );
-                            if !hurt
-                                && let Some(remaining) = remaining
-                                && let Some(pl) = self.player.as_mut()
-                            {
-                                pl.set_remaining_fire_ticks(remaining);
-                            }
+                        // SmallFireball.onHitEntity: remember the fire, ignite,
+                        // and restore it when the hurt is refused (a raised shield).
+                        let remaining = self.player.as_ref().map(|p| p.fire_ticks);
+                        if let Some(p) = self.player.as_mut() {
+                            p.ignite_for_ticks(100)?;
+                        }
+                        let hurt = self.mob_hits_player(
+                            5.0,
+                            [p.previous.x, p.previous.y, p.previous.z],
+                            "minecraft:fireball",
+                        );
+                        if !hurt
+                            && let Some(remaining) = remaining
+                            && let Some(pl) = self.player.as_mut()
+                        {
+                            pl.set_remaining_fire_ticks(remaining);
                         }
                     }
                     Who::Mob(id) => {
@@ -6745,13 +6706,11 @@ impl Game<'_> {
             (ProjectileKind::ShulkerBullet { .. }, Hit::Entity { who, .. }) => match who {
                 Who::Player => {
                     // Only a hit that hurt (`wasHurt`) brings the levitation.
-                    if !self.creative
-                        && self.mob_hits_player(
-                            4.0,
-                            [p.previous.x, p.previous.y, p.previous.z],
-                            "minecraft:mob_projectile",
-                        )
-                    {
+                    if self.mob_hits_player(
+                        4.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:mob_projectile",
+                    ) {
                         self.give_player_effect("minecraft:levitation", 200, 0);
                     }
                 }
@@ -6955,10 +6914,7 @@ impl Game<'_> {
             }
             return Ok(true);
         }
-        if self
-            .held()
-            .is_some_and(|stack| &*stack.item == "minecraft:shears")
-        {
+        if self.held_shears() {
             let mob = &self.mobs[index];
             let shearable = match mob.species() {
                 Species::Sheep => !mob.extra.sheared && !mob.is_baby(),
@@ -7014,6 +6970,7 @@ impl Game<'_> {
             .as_ref()
             .map(|h| h.item.to_string())
             .unwrap_or_default();
+        let shears = self.held_shears();
         // Bucketable.bucketMobPickup: a water bucket scoops up a fish, a
         // tadpole or an axolotl, with the data its bucket carries.
         if item == "minecraft:water_bucket"
@@ -7125,7 +7082,7 @@ impl Game<'_> {
             self.swing_arm();
             return Ok(true);
         }
-        if self.interact_shear_mob(index, &item) {
+        if self.interact_shear_mob(index, shears) {
             self.swing_arm();
             return Ok(true);
         }
@@ -7266,7 +7223,7 @@ impl Game<'_> {
                     }
                 }
             }
-            Species::Mooshroom if item == "minecraft:shears" && !m.is_baby() => {
+            Species::Mooshroom if shears && !m.is_baby() => {
                 let player = Some(self.native_acting_id());
                 self.shear_mooshroom(index, player, held.as_ref().expect("held shears"));
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
@@ -7286,7 +7243,7 @@ impl Game<'_> {
                     stew_particles = Some(true);
                 }
             }
-            Species::Sheep if item == "minecraft:shears" && !m.extra.sheared && !m.is_baby() => {
+            Species::Sheep if shears && !m.extra.sheared && !m.is_baby() => {
                 self.audio.play_bound(
                     "minecraft:entity.sheep.shear",
                     7,
@@ -7888,9 +7845,9 @@ impl Game<'_> {
     /// `SnowGolem.mobInteract` and `Bogged.mobInteract` with shears: the
     /// pumpkin or the mushrooms come off (the shearing loot table), the shear
     /// game event is posted and the tool takes one damage.
-    fn interact_shear_mob(&mut self, index: usize, item: &str) -> bool {
+    fn interact_shear_mob(&mut self, index: usize, shears: bool) -> bool {
         let m = &self.mobs[index];
-        if item != "minecraft:shears" || !m.alive() || m.extra.sheared {
+        if !shears || !m.alive() || m.extra.sheared {
             return false;
         }
         let (sound, table, height) = match m.species() {
@@ -7995,7 +7952,7 @@ impl Game<'_> {
             "minecraft:egg" | "minecraft:blue_egg" | "minecraft:brown_egg" => ProjectileKind::Egg,
             "minecraft:ender_pearl" => ProjectileKind::EnderPearl,
             "minecraft:wind_charge" => {
-                let thrown = self.throw_wind_charge()?;
+                let thrown = self.throw_wind_charge(stack)?;
                 if thrown {
                     self.apply_use_cooldown(stack);
                 }
@@ -8029,7 +7986,7 @@ impl Game<'_> {
             velocity,
             on_ground,
         );
-        self.add_projectile(proj);
+        self.spawn_projectile(proj, stack);
         // SnowballItem.use / EggItem.use / EnderpearlItem.use: awardStat(ITEM_USED).
         self.award_stat("used", item, 1);
         // ItemStack.use's applyAfterUseComponentSideEffects: the pearl's
@@ -13976,3 +13933,8 @@ mod leash_without_item_postbaseline_controls;
 mod revenge_home_tests;
 
 mod knockback;
+
+#[cfg(test)]
+mod death_loot_context_tests;
+
+mod death_loot_context;

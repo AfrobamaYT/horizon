@@ -544,10 +544,12 @@ impl ModelPolygon {
 /// `ModelPart`: a baked part, its children by name, and the pose a mod sets
 /// each frame before drawing it (`setupAnim`), from the pose it was baked
 /// with (`reset_pose`).
+///
+/// Wire uses JSON with at most 32 nested containers; named children consume
+/// object, list and tuple levels. Encoding preflights children before serialization.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[non_exhaustive]
-#[derive(horizon_mod_api_macros::Wire)]
-#[wire(via = String)]
+// no wire: handwritten JSON-backed Wire preflights recursive children before serde.
 pub struct ModelPart {
     /// Where it sits in its parent, in texels.
     pub x: f32,

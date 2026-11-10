@@ -509,6 +509,7 @@ pub struct RegistrationContext {
     pub(crate) mods: LoadedMods,
     pub(crate) data: Option<RegistrationData>,
     pub(crate) declaration_refusals: std::sync::Mutex<Vec<String>>,
+    pub(crate) self_refusal: std::sync::Mutex<Option<String>>,
     pub(crate) instance_dir: Option<crate::InstanceDirectory>,
 }
 
@@ -520,6 +521,7 @@ impl RegistrationContext {
             mods: LoadedMods::new(),
             data,
             declaration_refusals: Default::default(),
+            self_refusal: Default::default(),
             instance_dir,
         }
     }

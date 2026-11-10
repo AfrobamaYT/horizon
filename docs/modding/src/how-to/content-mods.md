@@ -549,10 +549,18 @@ order, and known owner movement is inherited (vertical movement only when airbor
 It does not consume an item, award use statistics or apply cooldowns; invalid parameters
 or unsupported types return `None` without spawning or drawing random values.
 The owner must be in the current level; a guest in another dimension is refused.
-The carried item count is one; the supplied stack is unchanged. A stack whose
-enchantments contain a nonempty `projectile_spawned` component is also refused:
-generic post-insertion enchantment effects are not implemented yet (tracked in #2670),
-so this operation never silently discards them.
+The carried item count is one; the supplied stack is unchanged. Once the projectile is
+in the level, the stack's enchantments run their `projectile_spawned` effects on it, as
+vanilla's `Projectile.applyOnProjectileSpawned` does after a throw: in the stack's order,
+each effect's requirements tested with the level random just before it applies, and its
+own draws from the projectile's random. `ignite`, `apply_impulse`, `play_sound` and an
+`all_of` of them apply; `apply_mob_effect` and `apply_exhaustion` do nothing to a
+projectile, as in vanilla. A stack with any other `projectile_spawned` effect (blocks,
+damage, explosions, particles, summons, functions, item damage) is refused until the
+engine applies it too (#2670), so this operation never silently discards one.
+Owner launch also refuses unsupported requirement contexts (including entity flags),
+and invalid clamped level-value ranges before insertion. Supported requirements
+are entity type predicates, random chance, and their boolean combinations.
 
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
@@ -575,6 +583,18 @@ id, so the network ids are the same on every side running the same mods — befo
 so a mod's entity set may name its own new attribute. Values sanitize through the definition (NaN maps to the
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
+
+A code mod can declare a datapack registry of its own with `Registrar::declare_datapack_registry(path, sync,
+fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`; [#811](https://github.com/arismoko/horizon/issues/811)).
+`path` lands in the mod's namespace (`spell` of `example` is `example:spell`), and `fields` is a flat record
+schema: `Bool`, `Int { min, max }`, `Float { min, max }`, `Text { max_len }`, `Identifier` or `Reference { registry }`,
+each required or given a default. Entry `addon:fire` is `data/addon/example/spell/fire.json`
+(`DatapackRegistryDeclaration::entry_file`), the registry's namespace being a folder as NeoForge's modded
+registries have it. The game decodes entries against the schema without running mod code, so native and wasm
+mods get the same bounds: an undeclared key, a missing required key, a wrong type or an out-of-range value fails
+the entry, and a default never stands in for invalid data. The engine adds no entry-size or field-count limit
+of its own. Only both-side packages may declare registries. This slice declares and validates; loading the
+entries from packs, the duplicate check across mods and typed reads follow in the next parts of #811.
 
 A code mod can also use `Registrar::declare_entity_attributes(path, template, attributes)` during registration.
 That declaration starts from the vanilla template's attribute row, replacing the content row's overrides.
@@ -717,6 +737,37 @@ Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one
 (`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
 accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
 
+Carver modifiers edit the biome's `carvers`: `add_carvers` appends `carvers` (an id or a list of ids) that it lacks, and
+`remove_carvers` takes them out. They read the root's `worldgen/carvers.json` for the ids that exist, so a carver a
+data pack adds is not known to them, and carver tags are not read. NeoForge's docs call these legacy carvers: noise
+caves are not carvers.
+
+NeoForge calls a modifier once in each of five phases (`BEFORE_EVERYTHING`, `ADD`, `REMOVE`, `MODIFY`,
+`AFTER_EVERYTHING`, in that order; its public biome modifier documentation). Horizon applies every addition, then every
+removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own modifier types only add and remove;
+`MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
+type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
+(`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
+`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "#minecraft:is_forest",
+  "temperature": 0.3,
+  "has_precipitation": true,
+  "effects": { "sky_color": 12632319, "grass_color": "#80a0ff" }
+}
+```
+
+What the file leaves out stays. A colour is an integer 0 to 0xFFFFFF or `#rrggbb`; the biome keeps `#rrggbb`, with the
+sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 26.3 keeps them. A value of the wrong
+type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
+modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
+here, so the API names no phase for them.
+
+**When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `horizon_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`horizon-client --dedicated`, [server.md](../../../server.md)), so it takes this path too; `horizon-server` only supervises it.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
@@ -734,11 +785,24 @@ load. Climate sets apply only to `biomes`, not `features`.
   "features": "zinc:ore_zinc", "step": "underground_ores" }
 ```
 
+A code mod declares the same modifiers without a file: `Registrar::declare_biome_modifier(path, modifier)` takes a
+`BiomeModifier` (its `biomes`, and an operation: `AddFeatures`, `RemoveFeatures`, `AddSpawns`, `RemoveSpawns`,
+`AddSpawnCosts`, `RemoveSpawnCosts`, `AddCarvers`, `RemoveCarvers` or `ModifyBiome`, whose `Option` fields are the
+values above). `BiomeModifier::json` renders it as the file above, so a declared modifier and
+a shipped one are applied by the same code, in the same order (additions first, then removals, then modifications, mods in dispatch
+order, declarations in registration order). An id outside the mod's namespace or that is not a file path, a repeated
+id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
+smallest group above its largest, a spawn cost that is not finite, a climate number that is not finite, a colour above
+0xFFFFFF and a temperature modifier other than `none` or `frozen` refuse the mods at startup, naming the mod.
+Declared modifiers are
+read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
+arismoko/horizon#2732).
+
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
 naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
-`#c:` convention tag), or of a type not read yet (`add_carvers`, a mod's own serializer), is skipped with a warning
+`#c:` convention tag), or of a type not read yet (a mod's own serializer), is skipped with a warning
 naming the mod and file; the mods still load. A malformed modifier of a type
 that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
 content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`

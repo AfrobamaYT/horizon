@@ -142,7 +142,7 @@ pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
             .join("crates/horizon-mod-render/src/render.rs")
             .display(),
     );
-    let source = super::dispatch::render(root, &Catalog::load(root)?)?.render_dispatch;
+    let source = super::dispatch::render(root, &Catalog::load_declarations(root)?)?.render_dispatch;
     use syn::spanned::Spanned;
     let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
     let lines: Vec<_> = std::iter::once(0)
@@ -191,7 +191,7 @@ fn render_records_need_no_game_sources() {
             .iter()
             .filter(|item| matches!(item, syn::Item::Struct(_)))
             .count(),
-        3
+        5
     );
     fs::remove_dir_all(root).unwrap();
 }
