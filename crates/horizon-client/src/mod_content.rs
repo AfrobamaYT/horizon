@@ -2499,6 +2499,7 @@ impl Addition {
 const BIOMES: &str = "worldgen/biomes.json";
 const FEATURE_TAGS: &str = "worldgen/feature_tags.json";
 const PLACED_FEATURES: &str = "worldgen/placed_features.json";
+const CARVERS: &str = "worldgen/carvers.json";
 
 /// Rewrites the biome bundle with the mods' biome modifiers. `biome_tags`
 /// and `placed` are the bundles as the mods left them (`None`: the base's).
@@ -2537,7 +2538,10 @@ fn place_in_biomes(
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
     let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
+    let carver_ids = biomes::carver_ids(&base.join(CARVERS))?;
     let mut saved = SavedModifiers {
+        carver_ids,
+        carver_tags: modifier_tags(base, overlay, tags, "worldgen/carver")?,
         enabled_mods,
         modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
         unmodified: BTreeMap::new(),
@@ -2558,7 +2562,6 @@ fn place_in_biomes(
     biomes::write_state(overlay, &saved, &doc, modifiers)
 }
 
-/// Registry metadata shared by both modifier loaders, after tag overlays are merged.
 fn modifier_entities(
     base: &Path,
     overlay: &Overlay<'_>,
@@ -2586,7 +2589,6 @@ fn modifier_entities(
     Ok((entity_categories, entity_tags))
 }
 
-/// Registry tags after all accepted layers, shared by both modifier loaders.
 fn modifier_tags(
     base: &Path,
     overlay: &Overlay<'_>,
@@ -2633,8 +2635,6 @@ mod structures;
 /// world's data packs takes (`biome_modifiers_over_packs`).
 const MODIFIERS: &str = "biome-modifiers.json";
 
-/// The modifiers and the registries packs leave alone, as the content root
-/// applied them.
 #[derive(Serialize, Deserialize)]
 struct SavedModifiers {
     enabled_mods: Vec<String>,
@@ -2645,11 +2645,13 @@ struct SavedModifiers {
     feature_tags: BTreeMap<String, String>,
     entity_categories: BTreeMap<String, String>,
     entity_tags: BTreeMap<String, String>,
+    #[serde(default)]
+    carver_ids: BTreeSet<String>,
+    #[serde(default)]
+    carver_tags: BTreeMap<String, String>,
 }
 
 impl SavedModifiers {
-    /// Applies `modifiers` to the biome bundle `doc`, its tags `biome_tags`
-    /// and the placed features `placed` (see `biomes::apply`).
     fn apply(
         &self,
         doc: &mut J,
@@ -2663,24 +2665,18 @@ impl SavedModifiers {
             _ => return Err(format!("{BIOMES}: not an object").into()),
         };
         let entity_ids: BTreeSet<String> = self.entity_categories.keys().cloned().collect();
+        let registries = biomes::Registries::of(
+            &biome_ids,
+            biome_tags,
+            placed,
+            &self.feature_tags,
+            (&entity_ids, &self.entity_tags),
+            (&self.carver_ids, &self.carver_tags),
+        );
         biomes::apply(
             doc,
             modifiers,
-            &biomes::Registry {
-                what: "biome",
-                ids: &biome_ids,
-                tags: biome_tags,
-            },
-            &biomes::Registry {
-                what: "placed feature",
-                ids: placed,
-                tags: &self.feature_tags,
-            },
-            &biomes::Registry {
-                what: "entity type",
-                ids: &entity_ids,
-                tags: &self.entity_tags,
-            },
+            &registries,
             &self.entity_categories,
             warnings,
         )
@@ -2702,7 +2698,7 @@ pub fn biome_modifiers_over_packs(
     let Some(bytes) = biomes::saved_bytes(root, packs, declared) else {
         return Ok(None);
     };
-    let saved: SavedModifiers =
+    let mut saved: SavedModifiers =
         serde_json::from_slice(&bytes).map_err(|e| format!("{MODIFIERS}: {e}"))?;
     let read = |name: &str| -> Result<BTreeMap<String, String>> {
         match fs::read(root.join(name)) {
@@ -2751,6 +2747,7 @@ pub fn biome_modifiers_over_packs(
         .apply("placed_features", read(PLACED_FEATURES)?)
         .into_keys()
         .collect();
+    carver_registry::refresh(&mut saved, packs)?;
     saved.apply(&mut doc, &modifiers, &biome_tags, &placed, &mut warnings)?;
     for warning in warnings {
         log::warn!("Horizon: biome modifiers over data packs: {warning}");
@@ -2767,6 +2764,9 @@ pub fn biome_modifiers_over_packs(
     }
     Ok(Some(out))
 }
+
+#[path = "mod_content_carvers.rs"]
+mod carver_registry;
 
 #[path = "mod_content_biomes.rs"]
 mod biomes;

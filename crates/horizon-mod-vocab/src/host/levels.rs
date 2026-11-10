@@ -202,9 +202,14 @@ pub trait LevelsBackend {
     /// Returns None while any lookup member is temporarily extracted, rather
     /// than returning an incomplete list.
     /// Order is lookup admission order, preserved across temporary extraction;
-    /// removal and re-admission moves an entity to the end. On initial world
-    /// load, admission follows the engine's storage-family loading order, which
-    /// can differ from vanilla's chunk entity loading order.
+    /// removal and re-admission moves an entity to the end. A chunk's entities
+    /// join in the order it stored them: section by section, each in admission
+    /// order, as vanilla stores them. An entity that moved into another section
+    /// since it joined keeps its admission place there, where vanilla moves it
+    /// to the end of that section. Zero runtime IDs fall back to stable storage
+    /// join order, not runtime admission order. Unregistered entity kinds have
+    /// no authoritative lookup handle and are omitted. These limitations mean
+    /// saved-world and whole-level ordering parity is not yet complete (#2703).
     /// Allocates a result buffer, not one allocation per entity; sorting is
     /// O(n log n), followed by one authoritative handle lookup per candidate.
     #[access(WorldOnly)]
@@ -913,6 +918,25 @@ pub trait LevelsBackendMut {
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
+    /// Side: server.
+    /// One roll of the loot table `table` (`mymod:sifting/gravel`, the world's data packs
+    /// merged), handed back instead of dropped: `LootTable.getRandomItems(LootParams)` with
+    /// `origin` as ORIGIN, `tool` as TOOL when given and `entity` as THIS_ENTITY when given,
+    /// the context `/loot … fish <table> <pos> <tool>` gives. The roll draws from the table's
+    /// random sequence, else the level random, as vanilla's does, so it moves later draws: that
+    /// is why this is a write. The stacks come split to their stack sizes, empties left out.
+    /// Mods' loot kinds see `origin` and this level; no `loot_drops` event, since nothing
+    /// drops. None for a table that isn't there, a stale or parked handle, a client, and a
+    /// stale `entity`.
+    #[access(WorldOnly)]
+    fn level_roll_loot(
+        &mut self,
+        level: LevelRef,
+        table: &str,
+        origin: [f64; 3],
         tool: Option<&ItemStack>,
         entity: Option<EntityRef>,
     ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;

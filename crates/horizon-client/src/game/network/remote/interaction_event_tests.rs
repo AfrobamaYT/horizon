@@ -1,4 +1,6 @@
 //! Behavioural proofs of the broadcast events around scoped interaction Parts.
+#[path = "use_item_hand_tests.rs"]
+mod use_item_hand_tests;
 use super::super::{
     Game, Hit, execution_role::ExecutionRole, lan::LanSettings,
     native_entity_refs::tests::with_game,
@@ -170,7 +172,10 @@ impl ItemPart for Observer {
         self.0.lock().unwrap().steps.push(Step::UseOnPart);
         Flow::Cancel
     }
-    fn use_item(&self, _: &mut dyn ServerHost, _: &mut UseItemEvent<'_>) -> Flow {
+    fn use_item(&self, _: &mut dyn ServerHost, event: &mut UseItemEvent<'_>) -> Flow {
+        if let Some(hand) = self.0.lock().unwrap().expected_hand {
+            assert_eq!(event.hand, hand);
+        }
         self.0.lock().unwrap().steps.push(Step::ItemPart);
         Flow::Cancel
     }

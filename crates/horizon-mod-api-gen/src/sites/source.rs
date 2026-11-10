@@ -152,13 +152,17 @@ mod tests {
         ));
         let file = root.join("crates/horizon-client/src/game.rs");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
-        let text = "fn run(value: &mut u32) { change(value); } fn change(value: &mut u32) {}";
+        let text = "fn run(value: &mut u32, owned: String) { change(owned, value); } fn change(owned: String, value: &mut u32) {}";
         let entries = vec![
-            internal("horizon_client::game::run", "fn", "fn run(value: &mut u32)"),
+            internal(
+                "horizon_client::game::run",
+                "fn",
+                "fn run(value: &mut u32, owned: String)",
+            ),
             internal(
                 "horizon_client::game::change",
                 "fn",
-                "fn change(value: &mut u32)",
+                "fn change(owned: String, value: &mut u32)",
             ),
         ];
         let request = Declaration {

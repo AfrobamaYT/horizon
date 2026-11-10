@@ -18,6 +18,17 @@ doesn't exist warns. Opening a world fails, naming the mod, when a part is attac
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
 
+## Instant item use
+
+`ItemPart::use_item` receives `UseItemEvent { stack, hand }`. `hand: Hand` is the
+interaction hand of this click (`Hand::Main` or `Hand::Off`), including air clicks
+with identical stacks in both hands. Read it directly when choosing which held stack
+to shrink. `living_used_item_hand` instead answers only during active item use and
+cannot identify an instantaneous click. Returning `Flow::Cancel` claims the use and
+swings that interaction hand without running the item's own use. The field has the
+same meaning on native and wasm and corresponds to NeoForge's
+`PlayerInteractEvent.RightClickItem.getHand()`.
+
 ## Item wear
 
 `ItemPart::damage_item` is `IItemExtension.damageItem`: the wear a stack of the part's item is about to take

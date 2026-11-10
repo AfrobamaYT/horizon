@@ -11,6 +11,9 @@ mod object_memory;
 #[cfg(test)]
 #[path = "persist/anger_tests.rs"]
 mod anger_tests;
+#[cfg(test)]
+#[path = "persist/lookup_order_tests.rs"]
+mod lookup_order_tests;
 
 use super::{FallingBlock, Game};
 use horizon_client::{
@@ -354,6 +357,15 @@ fn block_entity_pos(tag: &Tag) -> [i32; 3] {
     [tag.get("x"), tag.get("y"), tag.get("z")]
         .map(|v| horizon_client::save::number(v).unwrap_or(0) as i32)
 }
+/// `EntitySectionStorage.getExistingSectionsInChunk`: a chunk's sections in
+/// packed `SectionPos` order, whose low 20 bits are the section Y: section 0
+/// upward, then the negative sections. A record without a position goes last.
+fn section_order(tag: &Tag) -> u32 {
+    entity_nbt::position(tag).map_or(u32::MAX, |at| {
+        ((at.y.floor() as i32 >> 4) as u32) & 0xF_FFFF
+    })
+}
+
 fn chunk_of(p: Vec3) -> (i32, i32) {
     ((p.x.floor() as i32) >> 4, (p.z.floor() as i32) >> 4)
 }
@@ -1500,25 +1512,24 @@ impl Game<'_> {
         keys: &HashSet<(i32, i32)>,
         remove: bool,
     ) -> Vec<((i32, i32), Vec<Tag>)> {
-        let mut out: HashMap<(i32, i32), Vec<Tag>> =
-            keys.iter().map(|k| (*k, Vec::new())).collect();
+        use horizon_client::join_seq::{JoinSeq, Joined};
+        // Each root with its id and join number, ordered once all are in.
+        let mut roots: HashMap<(i32, i32), Vec<(u32, JoinSeq, Tag)>> = HashMap::new();
         // Every kind in `entity_lists!` saves itself (`Entity::save_nbt`).
-        self.save_every_entity(keys, &mut out);
+        self.save_every_entity(keys, &mut roots);
         if let Some(d) = self.dragon.as_ref()
             && keys.contains(&chunk_of(d.position))
         {
             let raw = anon_raw(&self.persist, "minecraft:ender_dragon", d.position);
             let uuid = saved_uuid(&self.persist, d.id);
-            out.entry(chunk_of(d.position))
+            // The fields kept with it (`remember_tags`: Silent, Tags, a
+            // name...) once it has flown from where it was loaded.
+            let mut tag = with_raw(d.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&d.id));
+            write_attachments(&mut tag, d.id, &self.entity_attachments);
+            roots
+                .entry(chunk_of(d.position))
                 .or_default()
-                // The fields kept with it (`remember_tags`: Silent, Tags, a
-                // name...) once it has flown from where it was loaded.
-                .push({
-                    let mut tag =
-                        with_raw(d.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&d.id));
-                    write_attachments(&mut tag, d.id, &self.entity_attachments);
-                    tag
-                });
+                .push((d.id, d.join_seq(), tag));
         }
         for c in &self.crystals {
             if keys.contains(&chunk_of(c.position)) {
@@ -1526,7 +1537,10 @@ impl Game<'_> {
                 let uuid = saved_uuid(&self.persist, c.id);
                 let mut tag = with_raw(c.to_nbt(uuid, raw.as_ref()), self.persist.raw.get(&c.id));
                 write_attachments(&mut tag, c.id, &self.entity_attachments);
-                out.entry(chunk_of(c.position)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(c.position))
+                    .or_default()
+                    .push((c.id, c.join_seq(), tag));
             }
         }
         for s in &self.ominous_spawners {
@@ -1540,7 +1554,10 @@ impl Game<'_> {
                     s.raw.as_deref(),
                 );
                 write_attachments(&mut tag, s.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((s.id, s.join_seq(), tag));
             }
         }
         for f in &self.item_frames {
@@ -1559,7 +1576,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = entity_nbt::item_frame_to_nbt(f, uuid, self.persist.raw.get(&f.id));
                 write_attachments(&mut tag, f.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((f.id, f.join_seq(), tag));
             }
         }
         for c in &self.cushions {
@@ -1572,7 +1592,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = entity_nbt::cushion_to_nbt(c, uuid, self.persist.raw.get(&c.id));
                 write_attachments(&mut tag, c.id, &self.entity_attachments);
-                out.entry(chunk_of(c.position)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(c.position))
+                    .or_default()
+                    .push((c.id, c.join_seq(), tag));
             }
         }
         for p in &self.paintings {
@@ -1586,7 +1609,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = entity_nbt::painting_to_nbt(p, uuid, self.persist.raw.get(&p.id));
                 write_attachments(&mut tag, p.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((p.id, p.join_seq(), tag));
             }
         }
         for f in &self.fangs.list {
@@ -1600,7 +1626,10 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = self.fangs_to_nbt(f, uuid);
                 write_attachments(&mut tag, f.id, &self.entity_attachments);
-                out.entry(chunk_of(at)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(at))
+                    .or_default()
+                    .push((f.id, f.join_seq(), tag));
             }
         }
         // `AreaEffectCloud.addAdditionalSaveData`: a lingering potion's cloud is
@@ -1619,7 +1648,10 @@ impl Game<'_> {
                 .unwrap_or_else(random_uuid);
             let mut tag = super::potions::potion_cloud_to_nbt(c, uuid, self.persist.raw.get(&c.id));
             write_attachments(&mut tag, c.id, &self.entity_attachments);
-            out.entry(chunk_of(at)).or_default().push(tag);
+            roots
+                .entry(chunk_of(at))
+                .or_default()
+                .push((c.id, c.join_seq(), tag));
         }
         for o in &self.others {
             if keys.contains(&chunk_of(o.position)) {
@@ -1631,7 +1663,26 @@ impl Game<'_> {
                     .unwrap_or_else(random_uuid);
                 let mut tag = self.other_to_nbt(o, uuid);
                 write_attachments(&mut tag, o.id, &self.entity_attachments);
-                out.entry(chunk_of(o.position)).or_default().push(tag);
+                roots
+                    .entry(chunk_of(o.position))
+                    .or_default()
+                    .push((o.id, o.join_seq(), tag));
+            }
+        }
+        // `PersistentEntitySectionManager.storeChunkSections`: section by
+        // section, each in the order its entities joined it. An entity not
+        // yet given an id is not a lookup member: its join stands in.
+        let mut out: HashMap<(i32, i32), Vec<Tag>> =
+            keys.iter().map(|k| (*k, Vec::new())).collect();
+        {
+            let admission = self.resident_entities.table.get_mut().admission_order();
+            for (key, mut tags) in roots {
+                tags.sort_by_cached_key(|(id, join, tag)| {
+                    (section_order(tag), admission(*id).unwrap_or(*join))
+                });
+                out.entry(key)
+                    .or_default()
+                    .extend(tags.into_iter().map(|(_, _, tag)| tag));
             }
         }
         for key in keys {

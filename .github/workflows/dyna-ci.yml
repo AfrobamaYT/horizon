@@ -292,7 +292,7 @@ jobs:
       - name: Lint the server build without sound or controllers
         if: needs.changes.outputs.rust_required != 'false'
         id: server-lint
-        run: cargo +stable clippy $JOBS --keep-going -p horizon-client --all-targets --no-default-features -- -D warnings
+        run: cargo +stable clippy $JOBS --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features -- -D warnings
       - name: The machine sample builds against this API
         if: needs.changes.outputs.sample_required == 'true'
         run: python3 tools/ci/check_machine_sample.py
