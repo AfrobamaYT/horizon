@@ -11,6 +11,7 @@ mod unavailable {
     #[diagnostic::on_unimplemented(
         message = "java_math is native only; use mod_api::strict_math on wasm"
     )]
+    // hidden: the unimplementable bound that makes wasm calls fail to compile with the message above.
     #[doc(hidden)]
     pub trait NativeOnly: private::Sealed {}
     mod private {
