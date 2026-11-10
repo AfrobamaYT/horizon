@@ -51,6 +51,12 @@ pub trait ItemEntitiesBackendMut {
     /// remove an item entity, use the removal handle. False also for an
     /// unavailable item or outside a server.
     ///
+    /// This scope is the port's own transactional requirement. NeoForge adds
+    /// no event, deferral or drop capture around a block entity's tick; newly
+    /// spawned items join immediately. With no scope open, the engine behaves
+    /// exactly as vanilla for these item operations: writes are immediate,
+    /// the overlay stays absent, and nothing is staged.
+    ///
     /// During a mod block-entity tick this write is proposed, not published:
     /// later Parts read the proposal, and it commits only with the accepted
     /// final block-entity snapshot. A stale item or rejected guest response

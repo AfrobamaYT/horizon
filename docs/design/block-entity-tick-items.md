@@ -1,6 +1,8 @@
 # Dropped-item writes during mod block-entity ticks
 
-This design implements the contract tracked in #2846. Vanilla block-entity tick item changes remain immediate. Only mod block-entity host operations gain the atomicity described here; no NeoForge counterpart is asserted.
+This design implements the port's transactional requirement tracked in #2846, not vanilla or NeoForge behavior. NeoForge adds no event, deferral or drop capture around a block entity's tick; newly spawned item entities join immediately. Its block-break and entity death/shear captures are separate mechanisms. This overlay exists only to keep existing-item host writes atomic with acceptance of the port's mod block-entity snapshot.
+
+With no scope open, the engine behaves exactly as vanilla for these item operations: changes are immediate, the overlay remains None, and nothing is staged. New item spawning remains immediate even while the mod tick scope is open.
 
 ## Acceptance
 
@@ -36,7 +38,7 @@ Real adapter tests run tick_mod_block_entity through api_block_entity_tick, fini
 | Nested transaction abort | Restore the outer proposals, not world storage; nested commit still waits for tick acceptance. |
 | Removal notification reenters | Overlay is already detached; no replay or append to the accepted batch. |
 | Disabled or stopped tick | No scope writes; unrelated block-entity dispatch stays unchanged. |
-| No active scope | Overlay remains None and ordinary reads and writes stage nothing. |
+| No active scope | Vanilla immediate behavior: overlay remains None and ordinary reads and writes stage nothing. The adapter regression checks both overlay and key are None after its outside-scope setter. |
 
 The real adapter regression `native_tick_publishes_or_rejects_item_proposals_with_writeback` covers native and real shared-memory wasm host writes, valid and malformed guest replies, actual invalid final stack conversion, typed setter refusal, registration order, nested abort, later removal, block removal, removal notification reentrancy, scheduler-disabled and sleeping ticks, unrelated dispatch, and immediate writes outside a scope. The wasm guest invokes the production setter and discard rows before its response is decoded; its failure is not a Rust fake. Guest identity fields are read-only on application, so a forged identity is ignored rather than treated as a changed authoritative identity.
 

@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 
+import lab
+
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--resources", type=Path, required=True)
@@ -57,9 +59,8 @@ for name, relative, old, new, test, case in mutants:
         assert executable, "missing test executable"
         with tempfile.TemporaryDirectory(prefix="row4-mutant-") as home:
             env.update(case)
-            env.update(HORIZON_TEST_RESOURCES=str(resources), HORIZON_HOME=home, HORIZON_NO_AUDIO="1", HORIZON_LAUNCHER_NO_SELF_UPDATE="1")
-            for key in ["HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"]:
-                env[key] = str(Path(home) / key)
+            homes = {key: str(Path(home) / key) for key in ["HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"]}
+            env = lab.game_env(env, HORIZON_TEST_RESOURCES=str(resources), HORIZON_HOME=home, **homes)
             result = subprocess.run([executable, test, "--ignored", "--nocapture", "--test-threads=1"], cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             (logs / (name + "-test.log")).write_text(result.stdout)
             assert result.returncode == 101 and "assertion" in result.stdout and "FAILED" in result.stdout, (name, "mutant survived or failed for a non-assertion reason")
