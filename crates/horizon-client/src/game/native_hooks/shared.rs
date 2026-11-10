@@ -1,3 +1,6 @@
+#[path = "shared/book_screen.rs"]
+mod book_screen;
+
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
@@ -3248,12 +3251,6 @@ impl Game<'_> {
             });
         }
     }
-    /// The mod screen showing now, if any.
-    pub(super) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
-        self.mod_screen
-            .as_ref()
-            .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
-    }
     /// A data slot of window `window`'s menu (`ContainerSetData`); false
     /// when no mod screen is showing for that window.
     pub(super) fn native_screen_data(&mut self, window: i32, id: i16, value: i16) -> bool {
@@ -3263,16 +3260,6 @@ impl Game<'_> {
         self.mod_screen
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
-    }
-    /// Whether a mod's screen is open for the current menu: it places its own
-    /// container slots and the player's inventory, so the stock layout of the
-    /// vanilla menu underneath stands back (`slot_position`).
-    pub(super) fn native_screen_shown(&self) -> bool {
-        self.shown_native_screen().is_some()
-    }
-    /// The open mod screen's height.
-    pub(super) fn native_screen_height(&self) -> Option<f32> {
-        self.shown_native_screen().map(|s| s.screen.height)
     }
     /// Where the open mod screen puts container slot `slot`.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {

@@ -1,10 +1,22 @@
-//! Styled text measurements using the client's active font, outside drawing.
+//! Client text resolution and styled measurements, outside drawing.
 #![allow(unused_variables)]
 use crate::*;
 
-/// Read-only access to the font used by client tooltip layout.
+/// Read-only component resolution and access to the client tooltip font.
 #[horizon_mod_api_macros::host_area]
 pub trait ClientTextClientHost {
+    /// Side: client.
+    /// `Component.getString()`: resolve a component to its plain characters,
+    /// including current-language translations, arguments, key names and siblings.
+    /// Styles do not contribute characters; literal legacy formatting codes remain
+    /// in the string, as in vanilla. Available outside drawing, including client
+    /// setup, on native and wasm. Invalid components return their boundary error.
+    /// Currently the shared decoder translates action IDs such as `key.jump` to
+    /// action captions, not their rebound keys; action-binding parity is tracked
+    /// in [#2718](https://github.com/arismoko/horizon/issues/2718).
+    #[access(ClientSetup)]
+    fn text_string(&self, text: &Text) -> Result<String, TextFormError>;
+
     /// Side: client.
     /// `Font.width(FormattedText)`: the width of a component in unscaled GUI
     /// pixels, using the current language, styles and resource-pack fonts.

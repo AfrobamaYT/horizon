@@ -42,8 +42,8 @@ Verified owners at this note's base; paths are repository-relative. These are cu
 | Client send to server | Same file `:142`, packet send `:160`; replace brand boolean with negotiated token/phase checks |
 | Server receive, LAN and dedicated | `crates/horizon-client/src/game/network/lan_actions/packets.rs:770` to `modding/native_net.rs:47`, queued dispatch `:72`; both must enter one ordered typed ingress |
 | Client receive | `crates/horizon-client/src/game/network/remote/mod.rs:3842` to `modding/native_net.rs:105`; replace immediate raw callback with ordered delivery |
-| Raw hook adapters | `crates/horizon-client/src/game/native_hooks/base.rs:3767` and `:3777`; delete along with `crates/horizon-mod-api/src/hooks/base.rs:677,687` |
-| Public sends | `crates/horizon-mod-api/src/host/network.rs:13,35`; delete raw methods and regenerate native/wasm API, docs and sample callers together |
+| Raw hook adapters | `crates/horizon-client/src/game/native_hooks/base.rs:3767` and `:3777`; delete along with `crates/horizon-mod-vocab/src/hooks/base.rs:677,687` |
+| Public sends | `crates/horizon-mod-vocab/src/host/network.rs:13,35`; delete raw methods and regenerate native/wasm API, docs and sample callers together |
 | Configuration advertisement | `crates/horizon-client/src/lan/conn.rs:1131`; replace channel announcement; `game/network/remote/mod.rs:2368,2390` owns capability activation/reset |
 | Server dispatch and flush | `crates/horizon-client/src/game/network/lan/mod.rs:3350,3407` runs queued delivery and flush; `game/world/integrated.rs:907` flushes integrated output. Preserve these commit boundaries |
 | Integrated and split-screen client | `crates/horizon-client/src/game/network/remote/mod.rs:976` owns connect_local; `game/runtime/split/players.rs:331` calls it. Use the same negotiated transport and queued handlers for each logical client, never direct calls |
