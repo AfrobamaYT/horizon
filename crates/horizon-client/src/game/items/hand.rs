@@ -215,8 +215,12 @@ impl Game<'_> {
         self.request_remote_mining_stop();
         self.mining = None;
     }
-    /// `LivingEntity.swing` with `getModifiedSwingDuration`.
+    /// `LivingEntity.swing` with `getModifiedSwingDuration`: the item's
+    /// `on_entity_swing` Part first, which may keep the swing from starting.
     pub(super) fn swing_hand(&mut self, hand: Hand, animation: SwingAnimation) {
+        if self.native_entity_swing_event(hand) {
+            return;
+        }
         let effects = &self.potions.effects;
         let dig_speed = effects
             .amplifier("haste")
