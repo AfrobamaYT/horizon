@@ -2,6 +2,37 @@ use super::*;
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
+    pub(in crate::game) fn item_update_round(&mut self) -> native_ticks::TickRound {
+        // EntityTickEvent.Pre for the items about to tick, and the Post after them.
+        let mut round = self.native_tick_round();
+        let merging = self.remote.is_none();
+        // One read says whether any item part listens; with none, no stack is looked at.
+        let update_hook =
+            merging && mod_api::__private::has_part_hook(mod_api::HookId::OnEntityItemUpdate);
+        if round.listening() || update_hook {
+            let ticking = self.entity_ticking_area();
+            let mut i = 0;
+            while let Some(item) = self.dropped.get(i) {
+                let (id, x, z) = (
+                    item.id,
+                    item.position.x.floor() as i32,
+                    item.position.z.floor() as i32,
+                );
+                if !(merging && self.joined_during_entity_pass(id)) && ticking(x, z) {
+                    let kind = native_ticks::TickKind::Fixed("minecraft:item");
+                    if self.native_tick_pre_batch(&mut round, id, kind)
+                        && update_hook
+                        && self.item_update_halts(i)
+                    {
+                        round.halt(id);
+                    }
+                }
+                i += 1;
+            }
+        }
+        round
+    }
+
     /// `IItemExtension.onEntityItemUpdate`: a dropped item entity holding
     /// `stack` is about to tick (`ItemEntity.tick`). Set `canceled` and its
     /// movement and merging are skipped for this tick. Server-side.

@@ -5102,33 +5102,7 @@ impl Game<'_> {
         }
     }
     fn tick_items(&mut self) {
-        // EntityTickEvent.Pre for the items about to tick, and the Post after them.
-        let mut round = self.native_tick_round();
-        let merging = self.remote.is_none();
-        // One read says whether any item part listens; with none, no stack is looked at.
-        let update_hook =
-            merging && mod_api::__private::has_part_hook(mod_api::HookId::OnEntityItemUpdate);
-        if round.listening() || update_hook {
-            let ticking = self.entity_ticking_area();
-            let mut i = 0;
-            while let Some(item) = self.dropped.get(i) {
-                let (id, x, z) = (
-                    item.id,
-                    item.position.x.floor() as i32,
-                    item.position.z.floor() as i32,
-                );
-                if !(merging && self.joined_during_entity_pass(id)) && ticking(x, z) {
-                    let kind = native_ticks::TickKind::Fixed("minecraft:item");
-                    if self.native_tick_pre_batch(&mut round, id, kind)
-                        && update_hook
-                        && self.item_update_halts(i)
-                    {
-                        round.halt(id);
-                    }
-                }
-                i += 1;
-            }
-        }
+        let mut round = self.item_update_round();
         self.tick_dropped_items(&mut round);
         self.drain_entity_inside();
         self.native_tick_post_batch(round);
