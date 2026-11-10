@@ -13,6 +13,8 @@ pub(in crate::game) enum Rule {
     Halve,
     /// This many times the points.
     Times(i32),
+    /// Replace the wear, including boundary values.
+    Set(i32),
     /// No wear at all.
     Cancel,
 }
@@ -36,6 +38,7 @@ impl ItemPart for Wear {
         match *self.rule.lock().unwrap() {
             Rule::Halve => event.amount /= 2,
             Rule::Times(factor) => event.amount *= factor,
+            Rule::Set(amount) => event.amount = amount,
             Rule::Cancel => return Flow::Cancel,
         }
         Flow::Continue
@@ -106,9 +109,11 @@ fn a_part_changes_the_wear_of_its_own_tool_on_the_player() {
         assert_eq!(used(game, "minecraft:iron_pickaxe", 10), 0);
         assert_eq!(wear.take_asked(), [10]);
 
-        // A pickaxe of another material has no part: all 10 points, nobody asked.
+        // A pickaxe of another material has no part: no stack conversion or dispatch.
+        let dispatches = game.damage_item_dispatches();
         assert_eq!(used(game, "minecraft:diamond_pickaxe", 10), 10);
         assert!(wear.take_asked().is_empty());
+        assert_eq!(game.damage_item_dispatches(), dispatches);
 
         // A creative player's tools take no wear, so the part is not asked.
         game.creative = true;
@@ -119,6 +124,52 @@ fn a_part_changes_the_wear_of_its_own_tool_on_the_player() {
     });
 }
 
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+fn part_amount_boundaries_and_threshold_crossing() {
+    with_wear_part("minecraft:iron_pickaxe", Rule::Set(0), |game, wear| {
+        for amount in [i32::MIN, -1, 0] {
+            wear.set(Rule::Set(amount));
+            assert_eq!(used(game, "minecraft:iron_pickaxe", 1), 0);
+            assert_eq!(wear.take_asked(), [1]);
+        }
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(0.0, 64.0, 0.0),
+            )
+            .unwrap(),
+        );
+        game.lan_acting = Some(1);
+        for amount in [250, i32::MAX] {
+            game.guest_equipment_breaks.clear();
+            let broken_before = game.stats.get("broken", "minecraft:iron_pickaxe");
+            wear.set(Rule::Set(amount));
+            assert_eq!(used(game, "minecraft:iron_pickaxe", 1), u32::MAX);
+            assert_eq!(wear.take_asked(), [1]);
+            assert_eq!(game.guest_equipment_breaks, [47]);
+            assert_eq!(
+                game.stats.get("broken", "minecraft:iron_pickaxe"),
+                broken_before + 1
+            );
+            game.damage_held(1);
+            assert!(wear.take_asked().is_empty());
+            assert_eq!(game.guest_equipment_breaks, [47]);
+            assert_eq!(
+                game.stats.get("broken", "minecraft:iron_pickaxe"),
+                broken_before + 1
+            );
+        }
+        wear.set(Rule::Set(249));
+        assert_eq!(used(game, "minecraft:iron_pickaxe", 1), 249);
+        assert_eq!(wear.take_asked(), [1]);
+        wear.set(Rule::Set(1));
+        game.damage_held(1);
+        assert!(game.inventory[0].is_none());
+        assert_eq!(wear.take_asked(), [1]);
+    });
+}
+
 /// The part is asked with what Unbreaking leaves, not the points the use asked for: a pickaxe of
 /// Unbreaking III saves a point three times in four, the part hears each wear that remains, and it
 /// is never asked about a point Unbreaking saved.
@@ -126,6 +177,7 @@ fn a_part_changes_the_wear_of_its_own_tool_on_the_player() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
 fn a_part_is_asked_after_unbreaking() {
     with_wear_part("minecraft:iron_pickaxe", Rule::Times(1), |game, wear| {
+        game.world.random = horizon_core::random::LegacyRandom::new(12345);
         game.creative = false;
         game.selected = 0;
         let mut pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);

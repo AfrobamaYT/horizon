@@ -1645,6 +1645,51 @@ fn soul_speed_tick(
 
 #[cfg(test)]
 mod tests {
+    use crate::game::damage_item_tests::{Rule, with_wear_part};
+    use horizon_client::mobs::{Mob, finalize};
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+    fn mob_armour_obeys_negative_cancel_and_breaking_answers() {
+        with_wear_part("minecraft:iron_helmet", Rule::Set(-1), |game, wear| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(901, kind, Vec3::ZERO, 0.0);
+            finalize::set_item_stack(&mut mob, 5, ItemStack::new("minecraft:iron_helmet", 1));
+            game.mobs.push(mob);
+            for rule in [Rule::Set(i32::MIN), Rule::Cancel] {
+                wear.set(rule);
+                game.wear_mob_piece(901, 5, 1);
+                assert_eq!(
+                    finalize::item_stack(game.mobs.last().unwrap(), 5)
+                        .unwrap()
+                        .damage,
+                    0
+                );
+                assert_eq!(wear.take_asked(), [1]);
+            }
+            wear.set(Rule::Set(164));
+            game.wear_mob_piece(901, 5, 1);
+            assert_eq!(
+                finalize::item_stack(game.mobs.last().unwrap(), 5)
+                    .unwrap()
+                    .damage,
+                164
+            );
+            wear.set(Rule::Set(i32::MAX));
+            game.wear_mob_piece(901, 5, 1);
+            assert!(finalize::item_stack(game.mobs.last().unwrap(), 5).is_none());
+            assert_eq!(wear.take_asked(), [1, 1]);
+            game.wear_mob_piece(901, 5, 1);
+            assert!(wear.take_asked().is_empty());
+        });
+    }
+
     use super::{armor_changes, block_break_speed_factor, pick_mending_slot, soul_speed_tick};
     use horizon_client::items::ItemStack;
     use horizon_core::random::{LegacyRandom, RandomSource};
