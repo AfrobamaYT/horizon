@@ -484,12 +484,20 @@ fn carver_modifiers_edit_the_biomes_carvers() {
         r#"{"minecraft:cave":{},"zinc:pit":{}}"#,
     )
     .unwrap();
+    let tag_dir = base.join("data/zinc/tags/worldgen/carver");
+    fs::create_dir_all(&tag_dir).unwrap();
+    fs::write(tag_dir.join("pits.json"), r#"{"values":["zinc:pit"]}"#).unwrap();
+    fs::write(
+        tag_dir.join("caves.json"),
+        r#"{"values":["minecraft:cave"]}"#,
+    )
+    .unwrap();
     let path = base.join("worldgen/biomes.json");
     let mut bundle: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     bundle.insert(
         "minecraft:plains".into(),
-        r#"{"temperature":0.8,"carvers":["minecraft:cave"]}"#.into(),
+        r##"{"temperature":0.8,"carvers":"#zinc:caves"}"##.into(),
     );
     fs::write(&path, serde_json::to_string(&bundle).unwrap()).unwrap();
     let m = zinc_mod(
@@ -497,11 +505,11 @@ fn carver_modifiers_edit_the_biomes_carvers() {
         &[
             (
                 "pit",
-                r#"{"type":"neoforge:add_carvers","biomes":"minecraft:desert","carvers":"zinc:pit"}"#,
+                r##"{"type":"neoforge:add_carvers","biomes":"minecraft:desert","carvers":"#zinc:pits"}"##,
             ),
             (
                 "fill",
-                r#"{"type":"neoforge:remove_carvers","biomes":"minecraft:plains","carvers":"minecraft:cave"}"#,
+                r##"{"type":"neoforge:remove_carvers","biomes":"minecraft:plains","carvers":"#zinc:caves"}"##,
             ),
             (
                 "missing",
