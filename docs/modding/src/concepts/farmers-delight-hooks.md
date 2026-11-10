@@ -26,5 +26,10 @@ keeps vanilla hunger and creative-mode behavior.
 
 ## Gaps
 
-None among these rows. Farmer's Delight's open needs are the three mismatches above, each tracked in
-its own issue.
+The outcome tests in this table do not establish exact function-entry fidelity. In particular,
+listening once to `living_knockback` is not equivalent to injecting both delegated overloads;
+#2753 tracks the entry pair and #2767 tracks its cross-target API admission. For hearing refused
+damage attempts without changing the amount, use the existing
+[invulnerability observation](hit-attempts.md), with its explicit vanilla exclusions (#2752).
+`living_incoming_damage` already allows amount changes before the cooldown comparison; no new
+amount-bearing entry event is needed for that use case.

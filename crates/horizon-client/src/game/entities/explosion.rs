@@ -245,11 +245,10 @@ fn hurt_mob(
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
-    (amount, source): (f32, horizon_client::mobs::Damage),
+    (amount, mut source): (f32, horizon_client::mobs::Damage),
 ) {
-    let shielded =
-        cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
-    if hurtable && !shielded {
+    source.attacker_species = cause;
+    if hurtable {
         m.damage(level, amount, source);
     }
 }

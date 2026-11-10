@@ -4351,7 +4351,9 @@ impl Mob {
         if !self.alive() {
             return false;
         }
-        if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
+        if !self.attacker_allows_damage(&source)
+            || !ai::accepts_damage(self, &source, amount, level.attack().player_uuid)
+        {
             return false;
         }
         // LivingEntity.hurtServer refuses fire before hooks and damage processing.

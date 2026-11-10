@@ -2,6 +2,13 @@
 use super::*;
 
 impl Mob {
+    /// WitherBoss refuses its friends after asking isInvulnerableTo, not at the caller.
+    pub(super) fn attacker_allows_damage(&self, source: &Damage) -> bool {
+        !source
+            .attacker_species
+            .is_some_and(|attacker| wither::shielded_from(self.species(), attacker))
+    }
+
     pub(super) fn invulnerable_to_attempt(
         &self,
         level: &mut DamageLevel<'_>,

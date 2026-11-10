@@ -878,6 +878,9 @@ impl PlayerMotion {
     /// `hurtServer` up to `hurtHelmet`, for a player who wears a `helmet`; the arguments are
     /// `hurt_caused_by`'s. The caller has the player and the level back to wear the helmet
     /// with ([`PausedHurt::helmet_damage`]), and ends the hit with [`Self::finish_hurt`].
+    /// `can_harm_player` is the server PvP decision, applied after the invulnerability
+    /// observation. Non-PvP damage passes true. The base observation is retained across
+    /// all continuations belonging to this hit.
     pub fn start_hurt(
         &mut self,
         level: &mut DamageLevel<'_>,
@@ -1142,8 +1145,8 @@ impl PlayerMotion {
     }
 }
 pub(crate) struct Environment<'a> {
-    invulnerability_checked: Option<bool>,
-    can_harm_player: bool,
+    pub(crate) invulnerability_checked: Option<bool>,
+    pub(crate) can_harm_player: bool,
     /// The level the hit lands in, for the damage hooks.
     pub(crate) level: DamageLevel<'a>,
     /// The player's entity id, and the causing entity's (0: none or not known).
