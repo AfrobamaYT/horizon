@@ -145,9 +145,9 @@ fn hostile_bodies_are_refused_before_anything_is_reserved() {
         })
     );
 
-    assert_eq!(decode_payload(&chain_bytes(64)), Ok(chain(64)));
+    assert_eq!(decode_payload(&chain_bytes(32)), Ok(chain(32)));
     assert_eq!(
-        decode_payload::<Chain>(&chain_bytes(65)),
+        decode_payload::<Chain>(&chain_bytes(33)),
         Err(PayloadDecodeError::TooDeep)
     );
 
@@ -190,7 +190,10 @@ fn malformed_values_are_named() {
     use PayloadDecodeError::*;
     assert_eq!(decode_payload::<i32>(&[0, 0, 0]), Err(UnexpectedEnd));
     // A string of 3 bytes with 2 behind its length.
-    assert_eq!(decode_payload::<String>(&[3, b'a', b'b']), Err(UnexpectedEnd));
+    assert_eq!(
+        decode_payload::<String>(&[3, b'a', b'b']),
+        Err(UnexpectedEnd)
+    );
     assert_eq!(decode_payload::<String>(&[2, 0xC3, 0x28]), Err(Utf8));
     assert_eq!(
         decode_payload::<bool>(&[2]),
@@ -215,7 +218,10 @@ fn malformed_values_are_named() {
             limit: 2
         })
     );
-    assert_eq!(PayloadReader::new(&[3, 1, 2, 3]).bytes(3), Ok(&[1, 2, 3][..]));
+    assert_eq!(
+        PayloadReader::new(&[3, 1, 2, 3]).bytes(3),
+        Ok(&[1, 2, 3][..])
+    );
 }
 
 #[test]
@@ -238,14 +244,73 @@ fn an_encode_past_a_bound_writes_nothing() {
             limit: 4096
         })
     );
-    assert_eq!(
-        encode_payload(&chain(64), usize::MAX),
-        Ok(chain_bytes(64))
-    );
-    assert_eq!(encode_payload(&chain(65), usize::MAX), Err(TooDeep));
+    assert_eq!(encode_payload(&chain(32), usize::MAX), Ok(chain_bytes(32)));
+    assert_eq!(encode_payload(&chain(33), usize::MAX), Err(TooDeep));
     let mut out = PayloadWriter::new(64);
     out.finite_f32(f32::INFINITY);
     // The first failure stays, and later writes add nothing.
     out.u8(1);
     assert_eq!(out.finish(), Err(NonFinite));
+}
+
+// Deliberately no Option or Vec: only Box can stop this hostile recursion.
+#[derive(Debug, PartialEq)]
+struct Recursive(Box<Recursive>);
+impl PayloadCodec for Recursive {
+    fn encode(&self, out: &mut PayloadWriter) {
+        self.0.encode(out);
+    }
+    fn decode(input: &mut PayloadReader<'_>) -> Result<Self, PayloadDecodeError> {
+        input.u8()?;
+        Box::decode(input).map(Self)
+    }
+}
+
+#[test]
+fn boxes_charge_allocation_and_bound_recursion() {
+    assert_eq!(
+        decode_payload::<Recursive>(&[0; 1024]),
+        Err(PayloadDecodeError::TooDeep)
+    );
+    let body = [0, 0, 0, 7];
+    let mut input = PayloadReader::with_budget(&body, 3);
+    assert_eq!(
+        Box::<i32>::decode(&mut input),
+        Err(PayloadDecodeError::BudgetExhausted)
+    );
+    let mut input = PayloadReader::with_budget(&body, 4);
+    assert_eq!(Box::<i32>::decode(&mut input), Ok(Box::new(7)));
+}
+
+#[test]
+fn independent_float_varint_and_utf8_fixtures() {
+    for bits in [0x80000000u32, 0x3fc00000, 0xffc12345] {
+        let bytes = bits.to_be_bytes();
+        assert_eq!(decode_payload::<f32>(&bytes).unwrap().to_bits(), bits);
+        assert_eq!(encode_payload(&f32::from_bits(bits), 4), Ok(bytes.to_vec()));
+    }
+    for bits in [0x8000000000000000u64, 0xfff8123456789abc] {
+        let bytes = bits.to_be_bytes();
+        assert_eq!(decode_payload::<f64>(&bytes).unwrap().to_bits(), bits);
+        assert_eq!(encode_payload(&f64::from_bits(bits), 8), Ok(bytes.to_vec()));
+    }
+    assert_eq!(PayloadReader::new(&[0x80, 0]).var_int(), Ok(0));
+    assert_eq!(
+        PayloadReader::new(&[0xff, 0xff, 0xff, 0xff, 0x7f]).var_int(),
+        Ok(-1)
+    );
+    assert_eq!(PayloadReader::new(&[0x80, 0]).var_long(), Ok(0));
+    assert_eq!(
+        PayloadReader::new(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f])
+            .var_long(),
+        Ok(-1)
+    );
+    assert_eq!(
+        PayloadReader::new(&[3, 0xe2, 0x82, 0xac]).str_within(3),
+        Ok("€")
+    );
+    assert!(matches!(
+        PayloadReader::new(&[3, 0xe2, 0x82, 0xac]).str_within(2),
+        Err(PayloadDecodeError::LengthOverLimit { .. })
+    ));
 }

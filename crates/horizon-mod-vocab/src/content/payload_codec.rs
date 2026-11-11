@@ -8,7 +8,7 @@
 //! in a native mod and in a wasm guest. Registration and delivery are the
 //! later stages. See `docs/modding/src/concepts/typed-payloads.md`.
 
-/// The deepest a payload value nests: each list, each present option and
+/// The deepest a payload value nests: each box, each list, each present option and
 /// each [`PayloadReader::nested`] level counts one.
 pub const PAYLOAD_MAX_DEPTH: u16 = 64;
 /// The most UTF-8 bytes of a string read with [`PayloadReader::string`].
@@ -17,8 +17,9 @@ pub const PAYLOAD_MAX_STRING_BYTES: usize = 4096;
 pub const PAYLOAD_MAX_LIST_ENTRIES: usize = 4096;
 /// The most bytes one payload value may make its decoder allocate: lists
 /// reserve against it by their decoded size, strings and byte arrays by
-/// their length. It equals the largest uncompressed packet, so a body that
-/// fits a frame always decodes as bytes.
+/// their length, and boxes by the size of their inner value. The budget equals
+/// the largest uncompressed packet; structured values can require more allocation
+/// than their encoded body and are refused when they exhaust it.
 pub const PAYLOAD_DECODE_BUDGET: usize = 8_388_608;
 
 /// Why a payload body is not a value of its type. The value is dropped and
@@ -280,7 +281,8 @@ impl<'a> PayloadReader<'a> {
     }
 
     /// A string of at most `limit` UTF-8 bytes: its VarInt byte length, then
-    /// the bytes, borrowed from the body.
+    /// the bytes, borrowed from the body. For a vanilla N-character bound,
+    /// a schema can pass 3N UTF-8 bytes.
     pub fn str_within(&mut self, limit: usize) -> Result<&'a str, PayloadDecodeError> {
         std::str::from_utf8(self.bytes(limit)?).map_err(|_| PayloadDecodeError::Utf8)
     }
@@ -603,10 +605,13 @@ impl<T: PayloadCodec> PayloadCodec for Option<T> {
 /// The boxed value's own form: what lets a type hold itself.
 impl<T: PayloadCodec> PayloadCodec for Box<T> {
     fn encode(&self, out: &mut PayloadWriter) {
-        T::encode(self, out);
+        out.nested(|out| T::encode(self, out));
     }
     fn decode(input: &mut PayloadReader<'_>) -> Result<Self, PayloadDecodeError> {
-        T::decode(input).map(Box::new)
+        input.nested(|input| {
+            input.charge(Some(std::mem::size_of::<T>()))?;
+            T::decode(input).map(Box::new)
+        })
     }
 }
 

@@ -116,3 +116,8 @@ File: none. (1) Apply the accepted vanilla limits and object-safe service requir
 - **Budgets and snapshot size?** The transport ceilings are decided, not open. Size queue, decoding and assembly budgets to preserve that capacity; measure scheduling defaults with representative packs. Never silently truncate #796 values.
 - **Network-thread handlers?** Recommendation: expose no mod network-thread handler initially; preserve main-thread Host transactions on both targets. Public counterpart differences need explicit review.
 - **Remaining route evidence?** Recommendation: trace configuration acknowledgements, framing allocation, dedicated sockets and integrated scheduler before implementation approval; add exact owners and execution tests. The current table identifies migration sites but does not prove exhaustive coverage.
+
+Strings use a 4096 UTF-8 byte default, not a character count. A schema may pass
+3N bytes to `str_within` for a vanilla N-character limit. Each box, list and
+present option consumes one of 64 nesting levels; boxes charge their inner
+allocation size before decoding.
