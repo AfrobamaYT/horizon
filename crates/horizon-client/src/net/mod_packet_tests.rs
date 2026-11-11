@@ -32,6 +32,20 @@ fn plugin(channel: &str, bytes: &[u8]) -> ServerboundPlayPacket {
     )
 }
 #[test]
+fn generic_submission_requires_a_physical_writer_and_known_packet_type() {
+    let session = Session::replay("no physical writer");
+    assert!(matches!(
+        session.prepare_mod_packet(plugin("example:unregistered", &[7])),
+        Err(SendPacketError::NotConnected)
+    ));
+    for name in ["example:pong", "minecraft:missing_packet"] {
+        let id = Identifier::parse(name).unwrap();
+        assert!(
+            matches!(session.prepare_mod_packet(ServerboundPlayPacket::new(id.clone(), Vec::new())), Err(SendPacketError::UnknownPacket { id: refused }) if refused == id)
+        );
+    }
+}
+#[test]
 fn generic_submission_preserves_plugin_bytes_and_rejects_malformed_packets() {
     let (session, mut peer) = connected();
     let bytes = vec![0x91; 32_767];

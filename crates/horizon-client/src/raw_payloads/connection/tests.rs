@@ -70,8 +70,9 @@ fn close_releases_a_waiting_configuration_without_running_queued_work() {
 fn ingress_leases_survive_phase_churn_and_refund_outside_queues() {
     let connection = connection();
     let cost = INGRESS_RECORD_OVERHEAD + byte_channel::message_overhead::<()>();
+    let snapshot_charge = connection.ingress.stats().reserved_bytes;
     let mut leases = Vec::new();
-    for _ in 0..INGRESS_BUDGET / cost {
+    for _ in 0..(INGRESS_BUDGET - snapshot_charge) / cost {
         leases.push(connection.reserve_ingress(0).unwrap());
     }
     assert!(matches!(
@@ -80,11 +81,14 @@ fn ingress_leases_survive_phase_churn_and_refund_outside_queues() {
     ));
     let old = connection.epoch().unwrap();
     connection.begin_configuration();
-    connection
-        .accept(connection.local.manifest.entries())
-        .unwrap();
-    connection.finish_configuration().unwrap();
     assert!(!old.active());
+    // An old retained epoch still owns its snapshot and input charges. Starting
+    // another configuration cannot bypass pressure by creating a fresh table.
+    assert!(
+        connection
+            .accept(connection.local.manifest.entries())
+            .is_err()
+    );
     assert!(matches!(
         connection.reserve_ingress(0),
         Err(PayloadSendError::Backpressure)
@@ -99,8 +103,17 @@ fn ingress_leases_survive_phase_churn_and_refund_outside_queues() {
     let replacement = connection.reserve_ingress(0).unwrap();
     drop(replacement);
     drop(leases);
+    assert_eq!(connection.ingress.stats().reserved_bytes, snapshot_charge);
+    drop(old);
     assert_eq!(connection.ingress.stats().reserved_bytes, 0);
-    let all = connection.reserve_ingress(INGRESS_BUDGET - cost).unwrap();
+    connection
+        .accept(connection.local.manifest.entries())
+        .unwrap();
+    connection.finish_configuration().unwrap();
+    let snapshot_charge = connection.ingress.stats().reserved_bytes;
+    let all = connection
+        .reserve_ingress(INGRESS_BUDGET - snapshot_charge - cost)
+        .unwrap();
     assert!(matches!(
         connection.reserve_ingress(0),
         Err(PayloadSendError::Backpressure)
