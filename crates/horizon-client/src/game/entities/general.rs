@@ -489,8 +489,8 @@ impl GeneralTypeCatalog {
 
     /// The type's declared save policy, the writer of a record consults: a
     /// `noSave` type's rows produce zero persisted records.
-    pub fn save_policy(&self, slot: u16) -> mod_api::GeneralSavePolicy {
-        self.entries[usize::from(slot)].save_policy
+    pub fn save_policy(&self, slot: usize) -> mod_api::GeneralSavePolicy {
+        self.entries[slot].save_policy
     }
 }
 
@@ -1263,6 +1263,10 @@ mod tests {
         assert_eq!(catalog.slot("amod:type_65535"), Some(65_535));
         assert_eq!(catalog.slot("amod:type_65536"), Some(65_536));
         assert_eq!(catalog.key(65_536), "amod:type_65536");
+        assert_eq!(
+            catalog.save_policy(65_536),
+            mod_api::GeneralSavePolicy::Save
+        );
     }
 
     /// A general row pushed to its list binds residency the way
