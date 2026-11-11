@@ -2617,9 +2617,8 @@ impl Game<'_> {
         Some(result)
     }
     /// `ItemStack.onItemUseFirst` for a click on a block: the broadcast
-    /// event's `ItemBeforeBlock` phase, then the held item's Part. Canceling
-    /// the event skips the Part even with `Pass`. The caller continues to the
-    /// block unless the answer consumes the action or is `Fail`.
+    /// event's `ItemBeforeBlock` phase, then the held item's Part. Canceling skips that Part.
+    /// Only `Pass` continues to the block.
     pub(super) fn item_use_first(
         &mut self,
         hit: &super::Hit,

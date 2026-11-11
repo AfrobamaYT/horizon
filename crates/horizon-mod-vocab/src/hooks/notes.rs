@@ -438,10 +438,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   block, once per hand where `useItemOn` starts, on the clicking client and on the server (`click.side`). `click`
   (`BlockClick`) names the level, block, hit, hand, held stack and the player's UUID and entity id. `use_block`
   and `use_item` (`TriState`) force the block's use or the item's `useOn` off, or on (the block even while
-  sneaking with something in either hand, the item even with an empty hand or while it cools down).
-  Default preserves the sneak skip and requires a held item off cooldown. Forced empty-hand use reaches
-  `ItemAfterBlock` with no stack, but no item Part; adventure restrictions still apply. Cancelling skips both and answers
-  `cancellation_result` (`InteractionResult`, default `Pass`, which goes on to the item's own use and the other
+  sneaking with something in either hand, the item even with an empty hand or while it cools down).   Default skips sneak with either hand full (both-stacks bypass remains open in #2934) and requires a held item off cooldown; forced empty use reaches `ItemAfterBlock` with no stack or Part.
+  Adventure restrictions still apply. Cancelling skips both and answers `cancellation_result` (`InteractionResult`, default `Pass`, which goes on to the item's own use and the other
   hand); with `native_break_block`, a cancel with `Fail` keeps players out of claimed land, and the player's client is
   sent the block back.
 - **`native_use_item_on_block(click, phase, cancellation_result, canceled)`**: NeoForge's

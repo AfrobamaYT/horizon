@@ -10,14 +10,10 @@ pub trait Hooks {
     /// menu). Before the block's own use (a chest, a door, a lever) and the
     /// item's (`Item.useOn`, `native_use_on`).
     ///
-    /// `use_block`: `False` skips block use; `True` allows it even when
-    /// sneaking with an item in either hand; `Default` keeps vanilla's skip
-    /// in that case. `use_item`: `False` skips the item's `useOn`; `True`
-    /// enters it even with an empty hand or while the item cools down;
-    /// `Default` requires a held stack off cooldown. An empty hand reaches
-    /// the `ItemAfterBlock` broadcast with `click.stack == None`, but has no
-    /// item Part or vanilla item behaviour. Adventure placement restrictions
-    /// still apply, and a consuming block result ends the click first. Cancelling
+    /// `use_block`: False skips; True overrides sneak; Default skips when sneaking with either hand full
+    /// (the both-stacks sneak-bypass exception remains open in #2934). `use_item`: False skips; True forces
+    /// even an empty hand or cooldown; Default requires a held stack off cooldown. Empty hands reach
+    /// ItemAfterBlock with no stack, but no item Part. Adventure restrictions still apply; block consumption ends the click. Cancelling
     /// skips both and answers `cancellation_result` in their place:
     /// `Pass` (the default) goes on to the item's own use (`Item.use`) and
     /// then the other hand, `Fail` ends the click, and `Success`,
