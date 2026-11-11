@@ -14,6 +14,7 @@
 //! Worlds saved by older Horizon builds (`region/`, `DIM-1/`, `Player` in
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
+pub mod level_mods;
 mod respawn;
 
 use crate::{
@@ -4036,6 +4037,8 @@ pub struct Level {
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
     pub enabled_features: std::sync::Arc<[String]>,
+    /// `Data.fml.LoadingModList`, the code mods the world was saved with; `None` without one.
+    pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
     /// Definitions used by this world session.
@@ -4188,14 +4191,9 @@ impl Level {
         // WorldDataConfiguration.MAP_CODEC's `enabled_features`, flat in the
         // Data compound and omitted when the flags are vanilla's default.
         if let Some(Tag::List(flags)) = data.get("enabled_features") {
-            level.enabled_features = flags
-                .iter()
-                .filter_map(|f| match f {
-                    Tag::String(s) => Some(s.to_string_lossy()),
-                    _ => None,
-                })
-                .collect();
+            level.enabled_features = flags.iter().filter_map(|f| text(Some(f))).collect();
         }
+        level.saved_mods = level_mods::saved(data);
         if let Some(packs) = data.get("DataPacks") {
             let ids = |key| match packs.get(key) {
                 Some(Tag::List(ids)) => ids.iter().filter_map(|id| text(Some(id))).collect(),
@@ -4867,6 +4865,7 @@ impl Level {
         ] {
             put(&mut data, key, value);
         }
+        level_mods::write(&mut data);
         if let Some(uuid) = uuid {
             put(&mut data, "singleplayer_uuid", uuid_tag(uuid));
         }

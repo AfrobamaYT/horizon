@@ -1371,6 +1371,145 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// NeoForge's `ModMismatchEvent`: a world saved with version 1 of a mod and
+    /// opened with version 2 fires `mod_mismatch` once with both versions, a
+    /// mod no longer loaded with no current version; the mod that marks its
+    /// own mismatch resolved gets no warning while the missing one does. The
+    /// save records the loaded list, so the reopened world fires nothing, as a
+    /// world without the list doesn't.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_world_saved_with_other_mod_versions_fires_mod_mismatch() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::save::{
+            Level,
+            level_mods::{ModRecord, set_loaded},
+        };
+        use mod_api::{Hooks, ModEntry, ModMismatch, ModMismatchEvent, ServerHost};
+        use std::sync::{Arc, Mutex};
+
+        struct Migrating(Arc<Mutex<Vec<Vec<ModMismatch>>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Migrating {
+            fn mod_mismatch(&self, _: &mut dyn ServerHost, event: &mut ModMismatchEvent<'_>) {
+                self.0.lock().unwrap().push(event.mismatches.to_vec());
+                event.resolved.push("mismatch_test".into());
+            }
+        }
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("mod-mismatch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        horizon_client::logging::init(&dir, "main");
+        let record = |id: &str, version: &str| ModRecord {
+            id: id.into(),
+            version: version.into(),
+        };
+        let mismatch = |mod_id: &str, saved: &str, current: Option<&str>| ModMismatch {
+            mod_id: mod_id.into(),
+            saved_version: saved.into(),
+            current_version: current.map(str::to_owned),
+        };
+        let request = |root: &std::path::Path| {
+            let mut request = WorldRequest::new(
+                "test",
+                Some("test"),
+                Some(1),
+                true,
+                None,
+                Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            )
+            .unwrap();
+            request.save_root = root.to_owned();
+            request
+        };
+        let warnings = || -> Vec<String> {
+            horizon_client::logging::recent_lines()
+                .into_iter()
+                .filter(|line| line.contains("Horizon: mod "))
+                .collect()
+        };
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let level = || Level {
+            name: "test".into(),
+            ..Level::default()
+        };
+        // The loaded list is the whole process's: the test's goes away when it ends, even
+        // when it fails, so the tests after it save no list.
+        struct Restore(Option<Vec<ModRecord>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                set_loaded(self.0.take());
+            }
+        }
+        // Before the loaded mods are known: a world without the list.
+        let _restore = Restore(set_loaded(None));
+        let plain = dir.join("plain");
+        level().write(&plain).unwrap();
+        assert_eq!(Level::read(&plain).unwrap().saved_mods, None);
+        // Saved with version 1 of the mod, and with one since gone.
+        let changed = dir.join("changed");
+        set_loaded(Some(vec![
+            record("mismatch_test", "1.0.0"),
+            record("gone", "0.5.0"),
+        ]));
+        level().write(&changed).unwrap();
+        set_loaded(Some(vec![record("mismatch_test", "2.0.0")]));
+        mod_api::testing::with_mods(
+            vec![ModEntry::new(
+                "mismatch_test",
+                Box::new(Migrating(heard.clone())),
+            )]
+            .into(),
+            || {
+                with_game(|game| {
+                    game.load_world(request(&changed)).unwrap();
+                    let lines = warnings();
+                    assert_eq!(
+                        *heard.lock().unwrap(),
+                        vec![vec![
+                            mismatch("mismatch_test", "1.0.0", Some("2.0.0")),
+                            mismatch("gone", "0.5.0", None),
+                        ]]
+                    );
+                    assert!(
+                        lines.iter().any(|line| line.contains(
+                            "Horizon: mod gone was 0.5.0 when the world was saved, now missing"
+                        )),
+                        "{lines:?}"
+                    );
+                    assert!(
+                        !lines.iter().any(|line| line.contains("mod mismatch_test")),
+                        "{lines:?}"
+                    );
+                    game.save_game_with(true).unwrap();
+                });
+                assert_eq!(
+                    Level::read(&changed).unwrap().saved_mods,
+                    Some(vec![record("mismatch_test", "2.0.0")])
+                );
+                // The reopened world's list is the loaded mods: nothing fires.
+                with_game(|game| {
+                    game.load_world(request(&changed)).unwrap();
+                    assert_eq!(heard.lock().unwrap().len(), 1);
+                });
+                // A world without the list fires nothing and gets the list on its save.
+                with_game(|game| {
+                    game.load_world(request(&plain)).unwrap();
+                    assert_eq!(heard.lock().unwrap().len(), 1);
+                    game.save_game_with(true).unwrap();
+                });
+                assert_eq!(
+                    Level::read(&plain).unwrap().saved_mods,
+                    Some(vec![record("mismatch_test", "2.0.0")])
+                );
+            },
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_mods_level_opens_with_no_data_packs() {
         use horizon_client::chunk::{LevelShape, LevelShapes};

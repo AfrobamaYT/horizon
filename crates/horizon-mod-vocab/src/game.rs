@@ -170,6 +170,19 @@ pub struct DataMapType {
     /// The registry it is for: `minecraft:item` or `minecraft:block`.
     pub registry: String,
 }
+/// A mod the world was saved with that differs from the loaded mods
+/// (`ModMismatchEvent`'s `MismatchedVersionInfo`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct ModMismatch {
+    /// The mod's `[mod] id`.
+    pub mod_id: String,
+    /// Its version when the world was saved; `""` when it wasn't known.
+    pub saved_version: String,
+    /// Its version now; `None` when the mod is no longer loaded.
+    pub current_version: Option<String>,
+}
 /// An experience orb as a server mod reads it (`experience_orbs`).
 /// Read by mods only.
 #[derive(Clone, Debug)]
