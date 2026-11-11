@@ -18,6 +18,17 @@ def pr(number, title="Fix a thing", labels=(), paths=("crates/horizon-client/src
             "author": author, "url": f"https://github.com/horizon-rust/horizon/pull/{number}", "merged_at": NOW - merged}
 
 
+def merged_node(number, commit):
+    return {"number": number, "mergeCommit": {"oid": commit}, "title": " Fix a thing ",
+            "url": f"https://github.com/arismoko/horizon/pull/{number}",
+            "mergedAt": (NOW - dt.timedelta(hours=9)).isoformat(), "author": {"login": "contributor"},
+            "labels": {"nodes": []}, "closingIssuesReferences": {"nodes": []}}
+
+
+def metadata_page(nodes):
+    return {"data": {"repository": {"pullRequests": {"nodes": nodes}}}}
+
+
 class ReleaseTrainTests(unittest.TestCase):
     def test_repository_merge_identity_before_metadata(self):
         for repository in ("arismoko/horizon", "horizon-rust/horizon"):
@@ -25,17 +36,17 @@ class ReleaseTrainTests(unittest.TestCase):
                     mock.patch.object(train, "run", return_value="root"), \
                     mock.patch.object(train, "merged_pull_requests", return_value=[
                         (27, "imported"), (28, "collision"), (28, "own")]), \
-                    mock.patch.object(train, "gh_json", return_value=[[], [
-                        {"number": 28, "merge_commit_sha": "own", "merged_at": "date"},
-                        {"number": 27, "merge_commit_sha": "imported", "merged_at": None}]]) as api, \
-                    mock.patch.object(train, "pull_request", return_value=pr(28)) as metadata, \
+                    mock.patch.object(train, "gh_json", return_value=[metadata_page([]),
+                        metadata_page([merged_node(28, "own")])]) as api, \
                     mock.patch.object(train, "changed_paths", return_value=["launcher/src/main.rs"]):
                 last, prs = train.gather("launcher", "head", releases=[])
                 self.assertIsNone(last)
                 self.assertEqual([p["number"] for p in prs], [28])
-                metadata.assert_called_once_with(28)
-                api.assert_called_once_with("api", f"repos/{repository}/pulls?state=closed&per_page=100",
-                                            "--paginate", "--slurp")
+                api.assert_called_once()
+                args = api.call_args.args
+                self.assertEqual(args[:4], ("api", "graphql", "--paginate", "--slurp"))
+                self.assertIn(f"owner={repository.split('/')[0]}", args)
+                self.assertIn("name=horizon", args)
                 release, _ = train.decision("launcher", prs, NOW)
                 self.assertTrue(release)
                 _, body = train.notes("launcher", "launcher@0.2.0", prs, [])
@@ -45,12 +56,10 @@ class ReleaseTrainTests(unittest.TestCase):
     def test_first_fork_release_with_only_imported_history(self):
         with mock.patch.object(train, "run", return_value="root"), \
                 mock.patch.object(train, "merged_pull_requests", return_value=[(27, "imported")]), \
-                mock.patch.object(train, "gh_json", return_value=[[]]), \
-                mock.patch.object(train, "pull_request") as metadata:
+                mock.patch.object(train, "gh_json", return_value=[metadata_page([])]):
             last, prs = train.gather("launcher", "head", releases=[])
             self.assertIsNone(last)
             self.assertEqual(prs, [])
-            metadata.assert_not_called()
             self.assertEqual(train.next_launcher_tag([], False, (0, 2)), "launcher@0.2.0")
             self.assertTrue(train.decision("launcher", prs, NOW, new_line="0.2")[0])
             self.assertFalse(train.decision("launcher", prs, NOW)[0])
@@ -58,15 +67,49 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertNotIn("#27", body)
 
     def test_release_metadata_errors_are_not_imports(self):
-        for failing in ("gh_json", "pull_request"):
-            with self.subTest(failing=failing), \
-                    mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
-                    mock.patch.object(train, "gh_json", return_value=[[{
-                        "number": 28, "merge_commit_sha": "own", "merged_at": "date"}]]) as api, \
-                    mock.patch.object(train, "pull_request") as metadata:
-                (api if failing == "gh_json" else metadata).side_effect = RuntimeError("API unavailable")
-                with self.assertRaisesRegex(RuntimeError, "API unavailable"):
-                    train.merged_between("launcher", "base", "head")
+        with mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
+                mock.patch.object(train, "gh_json", side_effect=RuntimeError("API unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "API unavailable"):
+                train.merged_between("launcher", "base", "head")
+        broken = merged_node(28, "own")
+        broken["mergedAt"] = "invalid date"
+        with mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
+                mock.patch.object(train, "gh_json", return_value=[metadata_page([broken])]):
+            with self.assertRaises(ValueError):
+                train.merged_between("launcher", "base", "head")
+
+    def test_large_history_uses_paginated_metadata_without_per_pr_requests(self):
+        nodes = [merged_node(n, f"sha-{n}") for n in range(1, 301)]
+        nodes[0]["author"] = None
+        nodes[0]["labels"]["nodes"] = [{"name": "bug"}]
+        nodes[0]["closingIssuesReferences"]["nodes"] = [{"number": 9}, {"number": 3}]
+        pages = [metadata_page(nodes[i:i + 100]) for i in range(0, 300, 100)]
+        # Support the old N+1 implementation too: it returns the same records but must
+        # fail the request-count assertion, rather than failing on a changed fixture shape.
+        def response(*args):
+            if args[1] == "graphql":
+                return pages
+            if args[0] == "api":
+                return [[{"number": n["number"], "merge_commit_sha": n["mergeCommit"]["oid"],
+                          "merged_at": n["mergedAt"]} for n in nodes]]
+            node = nodes[int(args[2]) - 1].copy()
+            node["labels"] = node["labels"]["nodes"]
+            node["closingIssuesReferences"] = node["closingIssuesReferences"]["nodes"]
+            return node
+        with mock.patch.object(train, "merged_pull_requests", return_value=[
+                (n["number"], n["mergeCommit"]["oid"]) for n in nodes]), \
+                mock.patch.object(train, "gh_json", side_effect=response) as api, \
+                mock.patch.object(train, "changed_paths", return_value=["launcher/src/main.rs"]):
+            prs = train.merged_between("launcher", "base", "head")
+        self.assertEqual(len(prs), 300)
+        self.assertEqual(prs[0]["title"], "Fix a thing")
+        self.assertEqual(prs[0]["issues"], [3, 9])
+        self.assertEqual(prs[0]["labels"], ["bug"])
+        self.assertEqual(prs[0]["author"], "")
+        self.assertEqual(prs[-1]["number"], 300)
+        self.assertEqual(prs[-1]["merged_at"], NOW - dt.timedelta(hours=9))
+        api.assert_called_once()
+        self.assertEqual(api.call_args.args[:4], ("api", "graphql", "--paginate", "--slurp"))
 
     def test_launcher_decision_shell_fails_closed_and_succeeds_normally(self):
         workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
