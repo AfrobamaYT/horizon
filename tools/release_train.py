@@ -549,6 +549,8 @@ def green_main_head(parity=False, eligible=None):
                 if entry["head_branch"] != "main" or entry["event"] != "push" or sha in seen:
                     continue
                 seen.add(sha)
+                if eligible is not None and not eligible(sha):
+                    continue
                 if not gate_jobs_passed(entry["id"], {"lint", "verify", "launcher", "pool-watch"}):
                     continue
                 fixtures = gh_json("api", "--paginate", "--slurp",
@@ -556,8 +558,7 @@ def green_main_head(parity=False, eligible=None):
                                    f"?branch=main&event=push&head_sha={sha}&per_page=100")
                 runs = [run for page in fixtures for run in page["workflow_runs"]
                         if run["head_sha"] == sha and run["head_branch"] == "main" and run["event"] == "push"]
-                if (runs and gate_jobs_passed(runs[0]["id"], {"fixture"})
-                        and (eligible is None or eligible(sha))):
+                if runs and gate_jobs_passed(runs[0]["id"], {"fixture"}):
                     return sha
         return None
     if parity:

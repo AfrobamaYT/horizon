@@ -276,11 +276,11 @@ class SdkPairTests(unittest.TestCase):
             automatic.assert_not_called()
 
     def test_final_sha_change_or_disappearing_sdk_stops_before_pushing(self):
-        for sha in ("a" * 40, "b" * 40):
+        for sha, sdk_ready in (("a" * 40, False), ("b" * 40, True)):
             with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "arismoko/horizon"}), \
                     mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
                     mock.patch.object(nightly.ns, "assemble", return_value=sha), \
-                    mock.patch.object(nightly, "sdk_ready", return_value=False), \
+                    mock.patch.object(nightly, "sdk_ready", return_value=sdk_ready), \
                     mock.patch.object(nightly.ns, "push") as push:
                 with self.assertRaises(SystemExit):
                     nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", True, False)
@@ -311,3 +311,32 @@ class SdkPairTests(unittest.TestCase):
                 mock.patch.object(nightly, "sdk_ready") as sdk:
             nightly.require_sdk("a" * 40)
             sdk.assert_not_called()
+
+    def test_fork_pick_refuses_explicit_prs_ignores_saved_prs_and_upstream_keeps_both(self):
+        main = nightly.Ref("main", "a" * 40, T)
+        saved = [{"number": 17, "head": "b" * 40}]
+        explicit = [{"number": 19, "head": "c" * 40}]
+        for repo in ("arismoko/horizon", "horizon-rust/horizon"):
+            for spec in ("", "19"):
+                with self.subTest(repo=repo, spec=spec), \
+                        mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": repo, "NIGHTLY_PRS": spec,
+                                                            "GITHUB_EVENT_NAME": "workflow_dispatch", "DRY_RUN": "true"}), \
+                        mock.patch.object(nightly, "git", return_value=""), \
+                        mock.patch.object(nightly, "green_base", return_value=main), \
+                        mock.patch.object(nightly.ns, "load_state", return_value=({"prs": saved}, "", "")) as state, \
+                        mock.patch.object(nightly.ns, "lookup"), \
+                        mock.patch.object(nightly, "requested", return_value=explicit) as requested, \
+                        mock.patch.object(nightly, "build_set") as build:
+                    if repo == "arismoko/horizon" and spec:
+                        with self.assertRaises(SystemExit):
+                            nightly.pick(False)
+                        build.assert_not_called()
+                        requested.assert_not_called()
+                        state.assert_not_called()
+                    else:
+                        nightly.pick(False)
+                        expected = [] if repo == "arismoko/horizon" else explicit if spec else saved
+                        self.assertEqual(build.call_args.args[:3], (main, expected, []))
+                        if repo == "arismoko/horizon":
+                            state.assert_not_called()
+                            requested.assert_not_called()
