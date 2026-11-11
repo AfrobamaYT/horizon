@@ -185,6 +185,21 @@ fn listening(hook_id: HookId) -> impl Iterator<Item = (bool, &'static ModEntry)>
             })
     })
 }
+mod runtime {
+    pub(super) struct ListenerScope;
+    impl ListenerScope {
+        pub(super) fn new() -> Self {
+            Self
+        }
+        pub(super) fn enter(
+            &mut self,
+            entry: &'static super::ModEntry,
+            hook: &'static str,
+        ) -> &'static dyn super::Hooks {
+            super::enter_listener(entry, hook).1
+        }
+    }
+}
 fn enter_listener(entry: &'static ModEntry, hook: &'static str) -> ((), &'static dyn Hooks) {
     let index = MODS
         .get()
