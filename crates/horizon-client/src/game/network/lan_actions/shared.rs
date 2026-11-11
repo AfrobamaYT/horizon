@@ -3304,6 +3304,10 @@ mod bundle_slot_tests;
 mod crack_feedback_tests;
 
 #[cfg(test)]
+#[path = "tests/menu_still_valid_tests.rs"]
+mod menu_still_valid_tests;
+
+#[cfg(test)]
 #[path = "tests/projectile_lifecycle_tests.rs"]
 mod projectile_lifecycle_tests;
 
