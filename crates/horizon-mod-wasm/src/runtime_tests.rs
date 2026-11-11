@@ -1,5 +1,24 @@
 use super::*;
 
+struct Capture(Mutex<Vec<String>>);
+impl log::Log for Capture {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        self.0.lock().unwrap().push(record.args().to_string());
+    }
+    fn flush(&self) {}
+}
+static CAPTURE: Capture = Capture(Mutex::new(Vec::new()));
+fn capture_logs() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        log::set_logger(&CAPTURE).unwrap();
+        log::set_max_level(log::LevelFilter::Warn);
+    });
+}
+
 #[test]
 fn released_queue_empty_fast_path_does_not_wait_for_its_mutex() {
     let releases = Arc::new(Releases::default());
@@ -99,24 +118,27 @@ fn module(body: &str) -> WasmMod {
     .remove(0)
 }
 fn call(module: &WasmMod) -> Option<u32> {
+    call_at(module, 0)
+}
+fn call_at(module: &WasmMod, id: u32) -> Option<u32> {
     module.call(
         CallClass::Hook,
         Frame::default(),
-        0,
+        id,
         None,
         |w| w.put(&42u32),
         |r| r.take(),
     )
 }
 #[test]
-fn hook_round_trip_and_malformed_reply_poison() {
+fn hook_round_trip_and_malformed_reply_refusal() {
     // Echo the four-byte input from horizon_in.
     let module = module("i64.const 2199023255556"); // 512 << 32 | 4
     assert_eq!(call(&module), Some(42));
     assert!(!module.running.poisoned.load(Ordering::Relaxed));
     let module = super::runtime_tests::module("i64.const -4294967292"); // ptr = u32::MAX
     assert_eq!(call(&module), None);
-    assert!(module.running.poisoned.load(Ordering::Relaxed));
+    assert!(!module.running.poisoned.load(Ordering::Relaxed));
     assert_eq!(call(&module), None);
 }
 /// The reply a hook names is read only where it lies inside guest memory.
@@ -167,7 +189,7 @@ fn encoding_failure_refuses_partial_arguments() {
         ),
         None
     );
-    assert!(module.is_stopped());
+    assert!(!module.is_stopped());
 }
 
 #[test]
@@ -256,19 +278,7 @@ fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
 
 #[test]
 fn guest_panic_text_is_logged_with_mod_id_and_no_reply() {
-    struct Capture(Mutex<Vec<String>>);
-    impl log::Log for Capture {
-        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-            true
-        }
-        fn log(&self, record: &log::Record<'_>) {
-            self.0.lock().unwrap().push(record.args().to_string());
-        }
-        fn flush(&self) {}
-    }
-    static CAPTURE: Capture = Capture(Mutex::new(Vec::new()));
-    log::set_logger(&CAPTURE).unwrap();
-    log::set_max_level(log::LevelFilter::Error);
+    capture_logs();
     for trailing in [false, true] {
         let module = module(&format!(
             "i32.const {} local.get 1 local.get 2 i32.const -1 i32.const 0 call $host i32.const 0 i32.ne if unreachable end i64.const 0",
@@ -1294,16 +1304,245 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
 }
 
 #[test]
-fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
-    let module = module("i32.const 4096 memory.grow drop i64.const 0");
-    let other = module.clone();
+fn growth_limits_return_failure_without_stopping_the_group() {
+    for body in [
+        "i32.const 4096 memory.grow",
+        "ref.null func i32.const 1048576 table.grow",
+    ] {
+        let module = module(&format!(
+            "{body} i32.const -1 i32.ne if unreachable end i64.const 2199023255556"
+        ));
+        let other = module.clone();
+        assert_eq!(call(&module), Some(42));
+        assert!(!other.is_stopped());
+        assert_eq!(call(&other), Some(42));
+    }
+}
+
+/// Normal guest returns cannot poison shared memory, even with unusable replies.
+#[test]
+fn refusal_replies_survive_and_report_once() {
+    capture_logs();
+    for (index, bad) in [
+        "i64.const 2203318222847", // error reply: empty string at 512
+        "i64.const 2199023255553", // too short for u32
+        "i64.const 2199023255557", // trailing byte
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut module = module(&format!(
+            r#"
+            i32.const 100 i32.const 100 i32.load i32.const 1 i32.add i32.store
+            i32.const 100 i32.load i32.const 2 i32.le_u
+            if (result i64)
+                i32.const 512 i32.const 0 i32.store
+                {bad}
+            else i64.const 2199023255556 end"#
+        ));
+        module.id = format!("refusal_case_{index}").into();
+        for _ in 0..2 {
+            assert_eq!(call(&module), None);
+            assert!(!module.is_stopped());
+        }
+        assert_eq!(
+            module
+                .running
+                .group
+                .lock()
+                .unwrap()
+                .store
+                .data()
+                .refusals
+                .len(),
+            1
+        );
+        assert_eq!(call(&module), Some(42));
+        let prefix = format!("wasm refusal: {} hook 0:", module.id);
+        assert_eq!(
+            CAPTURE
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|m| m.starts_with(&prefix))
+                .count(),
+            1
+        );
+    }
+}
+
+/// A depth refusal never enters guest code and is deduplicated by call path.
+#[test]
+fn depth_refusal_survives() {
+    capture_logs();
+    let mut module = module("i64.const 2199023255556");
+    module.id = "depth_refusal_case".into();
+    module.running.group.lock().unwrap().store.data_mut().depth = 64;
+    for _ in 0..2 {
+        assert_eq!(call(&module), None);
+        assert!(!module.is_stopped());
+    }
+    let mut group = module.running.group.lock().unwrap();
+    assert_eq!(group.store.data().refusals.len(), 1);
+    assert_eq!(
+        CAPTURE
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.starts_with("wasm depth refusal:")
+                && m.contains("depth_refusal_case")
+                && m.contains("limit 64"))
+            .count(),
+        1
+    );
+    group.store.data_mut().depth = 0;
+    drop(group);
+    assert_eq!(call(&module), Some(42));
+}
+
+/// Contention while native code holds a loan refuses without stopping the group.
+#[test]
+fn busy_refusal_survives() {
+    let module = module("i64.const 2199023255556");
+    let guard = module.running.group.lock().unwrap();
+    module.running.lending.store(1, Ordering::Relaxed);
     assert_eq!(call(&module), None);
-    assert!(other.running.poisoned.load(Ordering::Relaxed));
-    assert_eq!(call(&other), None);
-    let module =
-        super::runtime_tests::module("ref.null func i32.const 1048576 table.grow drop i64.const 0");
-    assert_eq!(call(&module), None);
-    assert!(module.running.poisoned.load(Ordering::Relaxed));
+    assert!(!module.is_stopped());
+    module.running.lending.store(0, Ordering::Relaxed);
+    drop(guard);
+    assert_eq!(call(&module), Some(42));
+}
+
+/// A cut-off guest invalidates every member sharing memory, but no other group.
+#[test]
+fn trap_stops_group_not_independent_group() {
+    let engine = engine().unwrap();
+    let trap = guest(*mod_api::wire::LAYOUT, "unreachable");
+    let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+    let members = WasmMod::instantiate(
+        &engine,
+        &[],
+        &[
+            Member {
+                name: "trap",
+                module: &trap,
+            },
+            Member {
+                name: "echo",
+                module: &echo,
+            },
+        ],
+    )
+    .unwrap();
+    let independent = module("i64.const 2199023255556");
+    assert_eq!(call(&members[1]), Some(42));
+    assert_eq!(call(&members[0]), None);
+    assert!(members.iter().all(WasmMod::is_stopped));
+    assert_eq!(call(&members[1]), None);
+    assert_eq!(call(&independent), Some(42));
+}
+
+/// One member's refusal leaves every member of its group answering: the next call of the
+/// refusing listener succeeds, and the other member never noticed.
+#[test]
+fn a_refusal_keeps_every_member_of_the_group_answering() {
+    let engine = engine().unwrap();
+    // Refuses the first call with an empty error reply at 512, then echoes; the flag lives in
+    // guest memory at 600, which the input write at 512 never touches.
+    let flaky = guest(
+        *mod_api::wire::LAYOUT,
+        r#"i32.const 600 i32.load if (result i64) i64.const 2199023255556 else
+            i32.const 600 i32.const 1 i32.store i32.const 512 i32.const 0 i32.store
+            i64.const 2203318222847 end"#,
+    );
+    let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+    let members = WasmMod::instantiate(
+        &engine,
+        &[],
+        &[
+            Member {
+                name: "flaky",
+                module: &flaky,
+            },
+            Member {
+                name: "echo",
+                module: &echo,
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(call(&members[0]), None);
+    assert!(members.iter().all(|member| !member.is_stopped()));
+    assert_eq!(call(&members[1]), Some(42));
+    assert_eq!(call(&members[0]), Some(42));
+}
+
+/// The refusal log names each (member, hook) once, not once per call.
+#[test]
+fn refusal_log_names_each_member_and_hook_once() {
+    capture_logs();
+    // Hook 0 reports its empty error reply at 512, hook 7 at 516.
+    let mut module = module(
+        r#"local.get 0 i32.eqz if (result i64) i32.const 512 i32.const 0 i32.store
+           i64.const 2203318222847 else i32.const 516 i32.const 0 i32.store
+           i64.const 2220498092031 end"#,
+    );
+    module.id = "hook_log_case".into();
+    for _ in 0..2 {
+        assert_eq!(call_at(&module, 0), None);
+        assert_eq!(call_at(&module, 7), None);
+    }
+    assert!(!module.is_stopped());
+    for hook in [0, 7] {
+        assert_eq!(
+            CAPTURE
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|m| **m == format!("wasm refusal: hook_log_case hook {hook}: "))
+                .count(),
+            1,
+            "hook {hook} logs exactly once"
+        );
+    }
+}
+
+/// A refusal during a reply's writeback applies none of it: the record a point listener would
+/// commit keeps its old value, and the same call path commits once the guest answers.
+#[test]
+fn refusal_during_writeback_leaves_the_record_unchanged() {
+    let write = |record: &mut (u32, u32), module: &WasmMod| {
+        module.call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| w.put(&42u32),
+            |input| {
+                input.take::<()>()?;
+                let bytes = input.take_bytes(input.rest().len())?;
+                mod_api::wire::Record::apply(record, bytes)
+            },
+        )
+    };
+    // A reply of (1, 2) plus one trailing byte: decoded whole, refused, nothing assigned.
+    let refused = module(
+        "i32.const 512 i32.const 1 i32.store i32.const 516 i32.const 2 i32.store \
+         i32.const 520 i32.const -1 i32.store i64.const 2199023255561",
+    );
+    let mut record = (7u32, 9u32);
+    assert_eq!(write(&mut record, &refused), None);
+    assert!(!refused.is_stopped());
+    assert_eq!(record, (7, 9));
+    let answered = module(
+        "i32.const 512 i32.const 1 i32.store i32.const 516 i32.const 2 i32.store \
+         i64.const 2199023255560",
+    );
+    assert_eq!(write(&mut record, &answered), Some(()));
+    assert_eq!(record, (1, 2));
 }
 
 #[test]
