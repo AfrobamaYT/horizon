@@ -72,7 +72,10 @@ started=$(date +%s.%N)
 output_args=()
 if [ "$side" = server ]; then output_args=(--server-output "$scratch/engine"); fi
 env "${env_vars[@]}" "$launcher" native-build "$mods" "${output_args[@]}" --version native-ci --profile optimized \
-  --trust-native-code > >(tee "$scratch/native-build.out") 2> >(tee "$scratch/native-build.err" >&2)
+  --trust-native-code > "$scratch/native-build.out" 2> "$scratch/native-build.err" || built=$?
+cat "$scratch/native-build.out"
+cat "$scratch/native-build.err" >&2
+test -z "${built:-}" || exit "$built"
 # The launcher's plan for this build, an instance's or a server folder's export alike: the prebuilt game.
 grep -F 'Prebuilt game: only the mods compile' "$scratch/native-build.err"
 if [ "$side" = client ]; then
