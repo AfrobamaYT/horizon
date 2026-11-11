@@ -74,6 +74,9 @@ pub struct Menu {
     /// A mod menu type's linked slots (`links`): the containers a native mod
     /// links them to (`native_menu_links`), in order, asked again each tick.
     pub links: Vec<(i32, i32, i32)>,
+    /// Whether a part on this mod menu type answers `menu_still_valid`,
+    /// resolved when it opened; vanilla menu types never ask one.
+    pub asks_still_valid: bool,
 }
 
 /// What a mod menu type's crafting grid makes (`ResultContainer`), and the
@@ -85,7 +88,57 @@ pub struct ModCraft {
     pub result: Option<ItemStack>,
 }
 
+/// Dispatch a mod menu type's `stillValid` answer for a player's block
+/// menu: `valid` arrives as the game's own answer and the scoped part may change it.
+#[inline(always)]
+pub fn native_menu_still_valid(
+    context: &LoopContext,
+    player: u128,
+    menu: &str,
+    pos: [i32; 3],
+    eye: [f64; 3],
+    valid: &mut bool,
+) {
+    crate::native_client_hooks::menu_still_valid(context, player, menu, pos, eye, valid);
+}
+
+/// Whether a menu of this type asks its parts `menu_still_valid`: only a mod
+/// menu type, and only when a part on it answers. Resolved once, when it opens.
+pub fn asks_still_valid(mod_type: Option<&crate::containers::ModMenuType>, menu: &str) -> bool {
+    mod_type.is_some() && crate::native_client_hooks::menu_still_valid_listens(menu)
+}
+
 impl Menu {
+    /// `AbstractContainerMenu.stillValid` of this menu for the guest: its
+    /// slots' own answer (`Slots::still_valid`), which the parts on its mod
+    /// menu type may change (`menu_still_valid`). Vanilla menu types, menus
+    /// with no block behind them (a chest vehicle, a native mod's menu) and
+    /// menus whose type no part answers are not asked, nor is one whose block
+    /// entities are gone: it closes.
+    pub fn still_valid(&self, context: &LoopContext, world: &World, guest: &Guest) -> bool {
+        let block = match self.slots {
+            Slots::Block(k) | Slots::Double(k, _) => Some(k),
+            Slots::Ender => self.pos,
+            Slots::Native => None,
+        };
+        let Some(k) = block.filter(|k| self.asks_still_valid && k.1 != VEHICLE_KEY_Y) else {
+            return self.slots.still_valid(world, guest, self.pos);
+        };
+        if !self.slots.valid(world) {
+            return false;
+        }
+        let mut valid = self.slots.in_reach(guest, self.pos);
+        native_menu_still_valid(
+            context,
+            guest.uuid,
+            &self.registry_id,
+            [k.0, k.1, k.2],
+            guest.eye(),
+            &mut valid,
+        );
+        valid
+    }
+
     /// A mod menu type's linked slots and the containers behind them.
     fn linked(&self) -> Option<(std::ops::Range<usize>, &[(i32, i32, i32)])> {
         let l = self.mod_type?.links?;
@@ -234,6 +287,11 @@ impl Slots {
     /// and the guest is within reach of each (`stillValidBlockEntity`). The
     /// ender chest's block is `at` (`PlayerEnderChestContainer.activeChest`).
     pub fn still_valid(self, world: &World, guest: &Guest, at: Option<(i32, i32, i32)>) -> bool {
+        self.valid(world) && self.in_reach(guest, at)
+    }
+    /// The reach half of `still_valid`: the guest is within its block
+    /// interaction range plus 4 of each block behind the slots.
+    fn in_reach(self, guest: &Guest, at: Option<(i32, i32, i32)>) -> bool {
         let blocks = match self {
             Slots::Ender => at.into_iter().collect(),
             Slots::Native => Vec::new(),
@@ -241,10 +299,9 @@ impl Slots {
         };
         // A vehicle's container is kept under a key, not a block: the game
         // checks its reach to the vehicle (`isChestVehicleStillValid`).
-        self.valid(world)
-            && blocks
-                .iter()
-                .all(|k| k.1 == VEHICLE_KEY_Y || guest.within_block_range([k.0, k.1, k.2], 4.0))
+        blocks
+            .iter()
+            .all(|k| k.1 == VEHICLE_KEY_Y || guest.within_block_range([k.0, k.1, k.2], 4.0))
     }
     /// Container slot `n`.
     pub fn get(self, world: &World, guest: &Guest, mut n: usize) -> Option<ItemStack> {
@@ -1372,7 +1429,7 @@ fn quick_craft(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::lan::{Joined, PlayerSender};
 
@@ -1403,7 +1460,7 @@ mod tests {
         }
     }
 
-    fn guest() -> Guest {
+    pub(crate) fn guest() -> Guest {
         let (tx, _rx) = mpsc::channel();
         Guest::new(
             Joined {
@@ -1779,6 +1836,7 @@ mod tests {
             registry_id: "test:station".into(),
             craft: None,
             links: Vec::new(),
+            asks_still_valid: false,
         });
         // Nothing made yet: nothing shown.
         assert_eq!(slots.get(&world, &g, 0), None);
@@ -1859,6 +1917,7 @@ mod tests {
             mod_type: Some(t),
             craft: None,
             links: Vec::new(),
+            asks_still_valid: false,
         });
         // Nothing linked yet: the linked slots are empty and all left out.
         let read = slots.read(&world, &g).unwrap();
