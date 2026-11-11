@@ -24,6 +24,12 @@ priority = 0
 
 Listeners receive API records. Mutable parameters are copied back. A `Game` method's API point also supplies the side's Host. A parameter without an API/Wire form refuses registration, naming its type, on both targets.
 
+A staged SDK build supplies these sites. A plain, unstaged game has no point sites and
+refuses API listeners at load by name. The launcher selects the SDK build when any
+enabled mod, native or wasm, declares an `[[inject]]` row. Each point is a replaceable
+engine function with an API record: its head loads one replacement cell, and the
+dispatcher for a listened point is installed through that cell.
+
 ## Ordering
 
 Head cancellation skips the body and return point, but every head listener still runs and may clear cancellation. Return listeners run only after the body. Replacement listeners run after other API listeners; otherwise priority descends, then dependency registration order, with inject ID breaking ties within a mod. Only one replacement may own a point; disabling it restores the original body. Calling the replaced function from its replacement re-enters the point, not the original body.

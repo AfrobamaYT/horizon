@@ -197,7 +197,7 @@ pub(crate) struct WeakWasmMod {
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
 impl WeakWasmMod {
-    /// The module-owned plan for a raw point's head call, until the module is dropped.
+    /// Whether the module's group has stopped or the module has been dropped.
     pub(crate) fn is_stopped(&self) -> bool {
         self.running
             .upgrade()

@@ -1,6 +1,6 @@
-//! The game's injection points (#589), for mods that listen at them. Every function of the game
-//! module the prebuilt game's staging pass admits is a point, and so is each listed function of the
-//! crates below it: a mod listens at its head (before the body runs) and at its return (after)
+//! The game's injection points (#589), for mods that listen at them. Every engine function the
+//! staging pass admits with an API record is a point: a mod listens at its head (before the body
+//! runs), at its return (after), or replaces its outcome
 //! through manifest `[[inject]]` functions, with no game rebuild. Each listener gets the
 //! point's record: the arguments the API carries, and `cancel` or `result` where the function's
 //! return allows. Each declaration names the target, access and listener function.
@@ -28,8 +28,7 @@ pub use registry::{RegisterError, stop};
 /// outcome).
 ///
 /// `replace!(constructor, returns, host, mod_id, priority, inject_id, listener)`: `constructor`
-/// is the place's typed listener constructor in its table (`mod_points::listeners::tick`, or a mod
-/// point's `<mod>::__horizon_points::listeners::…`). `returns` is the
+/// is the place's typed listener constructor in its table (`mod_points::listeners::tick`). `returns` is the
 /// point's `returns` in `points.json`: at a `cancel` point the listener returns `()` and the cancel
 /// is forced; at a `result` point it returns the record's `result` type, which the function
 /// returns. A point whose return has no API form (`none`) has no replace listener. `host` is `host`

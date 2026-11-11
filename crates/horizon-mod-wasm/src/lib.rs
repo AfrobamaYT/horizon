@@ -67,7 +67,7 @@ pub enum Refusal {
     Toolchain { found: String, group: String },
     /// A dependency of this mod was refused, so its group can't link.
     DependencyRefused { dependency: String },
-    /// The mod declares engine internals or an engine `access = "internals"` injection.
+    /// The mod declares engine internals, which wasm cannot access.
     Internals,
     /// The package's `mod.wasm` failed its checks.
     Package(String),

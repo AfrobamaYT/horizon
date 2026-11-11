@@ -73,8 +73,7 @@ fn stage_with_catalog(
     #[derive(serde::Serialize)]
     struct Manifest {
         points: Vec<points::GamePoint>,
-        /// The `mod_api` types with a `Wire` layout: what a mod point's `api` record may hold
-        /// beside the mod's own derived types (#2339).
+        /// The `mod_api` types with a `Wire` layout: what an engine point's API record may hold.
         wire: std::collections::BTreeSet<String>,
     }
     write(

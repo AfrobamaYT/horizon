@@ -390,7 +390,7 @@ Each stage updates this book page into a how-to and adds rustdoc. None of them t
 ## Open questions for root
 
 1. **Mixed targets.** Should a native library with wasm addons (or the reverse) be supported through the game, as proposed above? That needs a stateless "types crate" in the package model. The alternative is refusing mixed targets outright with a clear message. Recommendation: land the clear refusals first (stage 6a) and decide the types crate when a real library needs it.
-2. **`[[inject]]` for mod hooks.** Should mod hooks also be listenable through `[[inject]] at = "<mod>:<hook>"`, which would make points and mod hooks one manifest model? Recommendation: code registration only, since it is typed and needs no slot.
+2. **Mod hooks use code registration.** A library mod publishes its own hooks and functions; `[[inject]]` applies only to engine API points, never to mod functions.
 3. **Capability keys and Part kinds.** Should `CapabilityKey` be merged into `PartKind` (a part kind with a context and first-answer lookup)? Recommendation: keep NeoForge's name and API for capabilities and share only the storage.
 4. **Server-wide saved data.** Should `AttachmentHolder::Server` be added for state that belongs to a server and not a level? NeoForge's public saved data guide attaches such data to `MinecraftServer#getDataStorage`.
 5. **Replacing a service provider.** May a mod override another mod's service provider? Recommendation: no, refuse two providers, until a concrete case exists.
