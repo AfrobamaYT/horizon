@@ -64,6 +64,9 @@ pub struct Bridge {
 pub struct Extras {
     pub modules: Vec<SupportModule>,
     pub bridges: Vec<Bridge>,
+    /// The identifiers the rows' helpers and bindings use: a lower crate's mirror keeps a module's
+    /// `use` only if a copied body or one of these names it.
+    pub idents: BTreeSet<String>,
 }
 
 /// Why a target can't be copied out: a named refusal, never a game rebuild.
@@ -801,7 +804,12 @@ pub fn generate(
     let mut libs = Vec::new();
     for (source_crate, tree) in &trees {
         let bridges = source_crate == "horizon_client" && !bridge_traits.is_empty();
-        let body = match mirror(&mut source, source_crate, tree, bridges) {
+        let used = (source_crate != "horizon_client").then(|| {
+            let mut used = extras.idents.clone();
+            idents_in(&tree_tokens(tree), &mut used);
+            used
+        });
+        let body = match mirror(&mut source, source_crate, tree, bridges, used.as_ref()) {
             Ok(body) => body,
             Err(why) => {
                 return Err(targets
@@ -833,6 +841,26 @@ pub fn generate(
         ));
     }
     Ok(PatchCrate { libs, patched })
+}
+
+/// Every copy's tokens in `tree` and its children.
+fn tree_tokens(tree: &Tree) -> proc_macro2::TokenStream {
+    let copies = &tree.copies;
+    let children = tree.children.values().map(tree_tokens);
+    quote!(#(#copies)* #(#children)*)
+}
+
+/// The identifiers in `tokens`, into `out`.
+pub fn idents_in(tokens: &proc_macro2::TokenStream, out: &mut BTreeSet<String>) {
+    for tree in tokens.clone() {
+        match tree {
+            proc_macro2::TokenTree::Ident(ident) => {
+                out.insert(ident.to_string());
+            }
+            proc_macro2::TokenTree::Group(group) => idents_in(&group.stream(), out),
+            _ => {}
+        }
+    }
 }
 
 /// The patch crate that mirrors `source_crate`: `krate` itself for the game crate, and
@@ -930,6 +958,7 @@ fn mirror(
     path: &str,
     tree: &Tree,
     bridges: bool,
+    used: Option<&BTreeSet<String>>,
 ) -> Result<proc_macro2::TokenStream, String> {
     let items = source.module(path)?.items.clone();
     let original: syn::Path = syn::parse_str(&format!("::{path}")).expect("a module path");
@@ -983,12 +1012,16 @@ fn mirror(
         // A `use` naming a child mirror or a copy would collide with it.
         let mut names = Vec::new();
         collect_names(&item.tree, &mut names);
-        !names.iter().any(|name| reserved.contains(name))
+        // In a lower crate only the listed functions' modules are widened, so an import of a
+        // private item elsewhere would not resolve: keep only what the copies and helpers name.
+        let wanted = used
+            .is_none_or(|used| names.is_empty() || names.iter().any(|name| used.contains(name)));
+        wanted && !names.iter().any(|name| reserved.contains(name))
     });
     let mut children = Vec::new();
     for (name, child) in &tree.children {
         let ident = format_ident!("{name}");
-        let inner = mirror(source, &format!("{path}::{name}"), child, bridges)?;
+        let inner = mirror(source, &format!("{path}::{name}"), child, bridges, used)?;
         children.push(quote!(pub mod #ident { #inner }));
     }
     // Repeated before the children, which see them by textual scope as the game's did.
@@ -1322,6 +1355,34 @@ mod tests {
     }
 
     #[test]
+    fn a_lower_crate_mirror_keeps_only_the_imports_its_copies_and_helpers_name() {
+        let dir = std::env::temp_dir().join(format!("fnr-pruned-imports-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("lib.rs");
+        std::fs::write(
+            &file,
+            "use std::sync::Arc; use std::rc::Rc; use child::Private; use std::collections::*;",
+        )
+        .unwrap();
+        let mut source = Source {
+            root: dir.clone(),
+            loaded: BTreeSet::new(),
+            files: BTreeMap::from([("fixture".to_owned(), vec![file])]),
+            parsed: BTreeMap::new(),
+            local_macros: BTreeSet::new(),
+        };
+        let used = BTreeSet::from(["Arc".to_owned()]);
+        let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
+        let parsed: syn::File = syn::parse2(out).unwrap();
+        let imports: Vec<String> = uses(&parsed.items)
+            .iter()
+            .map(|item| item.tree.to_token_stream().to_string())
+            .collect();
+        assert_eq!(imports, ["std :: sync :: Arc", "std :: collections :: *"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn included_files_keep_both_sets_of_module_imports() {
         let dir = std::env::temp_dir().join(format!("fnr-included-imports-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1336,7 +1397,7 @@ mod tests {
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
         };
-        let out = mirror(&mut source, "fixture", &Tree::default(), false).unwrap();
+        let out = mirror(&mut source, "fixture", &Tree::default(), false, None).unwrap();
         let parsed: syn::File = syn::parse2(out).unwrap();
         let imports: Vec<String> = uses(&parsed.items)
             .iter()
@@ -1363,6 +1424,7 @@ mod tests {
                 target: "horizon_client::game::Game".into(),
                 member: Some("ticks_until_autosave".into()),
             }],
+            idents: BTreeSet::new(),
         };
         let crate_ = generate(
             &root(),
@@ -1400,6 +1462,7 @@ mod tests {
                     member: Some("no_such_field".into()),
                     ..extras.bridges[0].clone()
                 }],
+                idents: BTreeSet::new(),
             },
         )
         .unwrap_err();
