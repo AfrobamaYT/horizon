@@ -12,14 +12,13 @@ and remember that profile for the instance.
 ### CLI profile regression test
 
 The ignored `native_build_profile` integration test runs the actual launcher and
-compiler, with fresh scratch game/launcher homes and cold caches for every case.
+SDK planner, with fresh scratch game/launcher homes and cold caches for every case.
 It needs a real installed signed release directory (named for its version, with
 its `.installed` marker) and an API-only native mod folder compatible with that
 release. The release must have a matching published SDK for the host; the mod must
 not require jars, registry consent, mixins or other source-only features. Neither
-fixture is modified or committed. Network access, the native build prerequisites
-and enough disk space for two full game builds are required: Balanced and
-Developer must actually compile from source, not emulate a compiler or SDK.
+fixture is modified or committed. Network access is required to fetch and validate the SDK. Each case stops after
+the real planner emits its route, before compilation begins.
 
 ```sh
 HORIZON_NATIVE_BUILD_TEST_RELEASE=/path/to/launcher/versions/v2026.11.10 \
@@ -27,9 +26,8 @@ HORIZON_NATIVE_BUILD_TEST_MOD=/path/to/api-only-mod \
 cargo test --manifest-path launcher/Cargo.toml --test native_build_profile -- --ignored --nocapture
 ```
 
-The test checks completed builds, installed route/profile records, instance
-selection and remembered preferences. In particular, the folder-only case starts
-with saved Balanced and must finish on the prebuilt Optimized route; treating the
+The test checks route selection and remembered profile preferences. In particular, the folder-only case starts
+with saved Balanced and must select the prebuilt Optimized route; treating the
 folder as an explicit profile makes that assertion fail.
 
 ## Prebuilt SDK layout

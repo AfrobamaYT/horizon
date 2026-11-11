@@ -27,6 +27,17 @@ fn resource(name: &str) -> PathBuf {
 #[test]
 #[ignore = "requires a prepared installed release, a matching API-only native mod and a downloadable prebuilt SDK"]
 fn native_build_folder_uses_sdk_unless_profile_is_explicit() {
+    for name in [
+        "HORIZON_NATIVE_BUILD_TEST_RELEASE",
+        "HORIZON_NATIVE_BUILD_TEST_MOD",
+    ] {
+        if std::env::var_os(name).is_none() {
+            eprintln!(
+                "Skipping native build profile test: set {name} to provide optional fixtures"
+            );
+            return;
+        }
+    }
     let release = resource("HORIZON_NATIVE_BUILD_TEST_RELEASE");
     let project = resource("HORIZON_NATIVE_BUILD_TEST_MOD");
     let version = release.file_name().unwrap().to_str().unwrap();
