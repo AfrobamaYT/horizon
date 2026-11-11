@@ -8,7 +8,9 @@ fn real_member_self_refusal() {
     let fixture = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let std = std::env::var("HORIZON_WASM_STD").unwrap();
     let path = std::path::Path::new(&fixture);
-    let manifest = Package::read(path).unwrap().manifest;
+    let mut manifest = Package::read(path).unwrap().manifest;
+    // This case tests the guest's Parts registration refusal, independently of game points.
+    manifest.inject.clear();
     let info = mod_api::PackageInfo::new(
         manifest.id.clone(),
         manifest.version.clone(),

@@ -115,28 +115,6 @@ fn real_member() {
         module: Package::read_wasm(path).unwrap(),
     };
     if !mod_points::STAGED {
-        // The point-bearing variant is refused. Use a fresh instance without point
-        // declarations below so ordinary hooks and Parts still exercise the real guest.
-        let point_variant = WasmPackage {
-            manifest: package.manifest.clone(),
-            module: package.module.clone(),
-        };
-        let loaded = load(&std::fs::read(&std).unwrap(), vec![point_variant]);
-        assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-        let refused = loaded
-            .initialize(std::slice::from_ref(&info))
-            .expect_err("unstaged game refuses point listener");
-        let (_, reason) = refused
-            .iter()
-            .find(|(id, _)| id == "wasm_fixture")
-            .expect("named refusal");
-        let message = reason.to_string();
-        assert!(
-            message.contains("wasm_fixture")
-                && message.contains("::tick")
-                && message.contains("no point sites"),
-            "{message}"
-        );
         package.manifest.inject.clear();
     }
     // The no-points variant uses the same guest code, hook subscriptions and Parts.

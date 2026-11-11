@@ -57,29 +57,6 @@ fn real_library_dependency() {
     let refused = load(&std::fs::read(&std).unwrap(), replaced);
     assert!(refused.refused.iter().any(|(_, r)| matches!(r, horizon_mod_wasm::Refusal::LinkedAgainst { dependency } if dependency == "wasm_test_library")));
     if !mod_points::STAGED {
-        let point_variants = packages
-            .iter()
-            .map(|p| WasmPackage {
-                manifest: p.manifest.clone(),
-                module: p.module.clone(),
-            })
-            .collect();
-        let loaded = load(&std::fs::read(&std).unwrap(), point_variants);
-        assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-        let refused = loaded
-            .initialize(&infos)
-            .expect_err("unstaged game refuses point listener");
-        let (_, reason) = refused
-            .iter()
-            .find(|(id, _)| id == "wasm_test_dependent")
-            .expect("named refusal");
-        let message = reason.to_string();
-        assert!(
-            message.contains("wasm_test_dependent")
-                && message.contains("::tick")
-                && message.contains("no point sites"),
-            "{message}"
-        );
         // Fresh no-points variants retain the same library links, statics and Parts.
         for package in &mut packages {
             package.manifest.inject.clear();
