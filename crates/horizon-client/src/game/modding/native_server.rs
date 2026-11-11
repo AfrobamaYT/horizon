@@ -1799,20 +1799,36 @@ fn orb_meets(position: [f64; 3], min: [f64; 3], max: [f64; 3]) -> bool {
         && position[2] + 0.25 > min[2]
 }
 
+/// The box `min`..`max` with each axis's pair in order, as vanilla's `AABB` takes it;
+/// None when a bound is not finite (NaN or infinite).
+fn ordered_box(min: [f64; 3], max: [f64; 3]) -> Option<([f64; 3], [f64; 3])> {
+    if !min.iter().chain(&max).all(|v| v.is_finite()) {
+        return None;
+    }
+    Some((
+        std::array::from_fn(|i| min[i].min(max[i])),
+        std::array::from_fn(|i| min[i].max(max[i])),
+    ))
+}
+
 /// Experience for server mods.
 #[allow(dead_code)]
 impl Game<'_> {
     /// The experience orbs of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: what a mod reads before it
     /// cancels an orb in `native_entity_join_level`, to give its points with
-    /// `PlayerRef::give_experience_points`. Empty for a level not in place and on a
-    /// client of a server.
+    /// `PlayerRef::give_experience_points`. Empty for a level not in place, on a
+    /// client of a server and for a bound that is not finite (NaN or infinite); a
+    /// minimum above its maximum is the same box with the two swapped (`AABB`).
     pub(super) fn experience_orbs(
         &self,
         dimension: &str,
         min: [f64; 3],
         max: [f64; 3],
     ) -> Vec<mod_api::ExperienceOrb> {
+        let Some((min, max)) = ordered_box(min, max) else {
+            return Vec::new();
+        };
         if (self.serving.is_none() && self.options.dedicated.is_none())
             || dimension != self.dim.id()
         {
@@ -2451,6 +2467,53 @@ impl Drop for Acting {
 mod tests {
     use super::*;
     use horizon_client::items::ItemStack;
+
+    /// Box bounds come from mod code: one that is not finite reads no orb and never
+    /// panics, and an inverted box reads what the ordered one does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn experience_orbs_refuse_bounds_that_are_not_finite_and_swap_an_inverted_box() {
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        game.options.dedicated = Some(Vec::new());
+        let at = horizon_core::geometry::Vec3::new(1.0, 70.0, 1.0);
+        game.orbs.push(horizon_client::entities::ExperienceOrb {
+            attachment_lifetime: Default::default(),
+            rotation: [0.0, 0.0],
+            join: Default::default(),
+            id: 40,
+            position: at,
+            previous: at,
+            velocity: horizon_core::geometry::Vec3::ZERO,
+            value: 3,
+            age: 0,
+            on_ground: true,
+            count: 1,
+            ticks: 0,
+            health: 5,
+            no_gravity: true,
+            following: None,
+        });
+        let dimension = game.dim.id().to_owned();
+        let ids = |game: &Game<'_>, min, max| -> Vec<u32> {
+            game.experience_orbs(&dimension, min, max)
+                .into_iter()
+                .map(|orb| orb.id)
+                .collect()
+        };
+        assert_eq!(ids(&game, [0.0, 69.0, 0.0], [2.0, 71.0, 2.0]), [40]);
+        for (min, max) in [
+            ([f64::NAN, 69.0, 0.0], [2.0, 71.0, 2.0]),
+            ([0.0, 69.0, 0.0], [2.0, f64::NAN, 2.0]),
+            ([f64::NEG_INFINITY, 69.0, 0.0], [2.0, 71.0, 2.0]),
+            ([0.0, 69.0, 0.0], [2.0, 71.0, f64::INFINITY]),
+            ([f64::NEG_INFINITY; 3], [f64::INFINITY; 3]),
+        ] {
+            assert_eq!(ids(&game, min, max), Vec::<u32>::new(), "{min:?} {max:?}");
+        }
+        assert_eq!(ids(&game, [2.0, 69.0, 0.0], [0.0, 71.0, 2.0]), [40]);
+        assert_eq!(ids(&game, [2.0, 71.0, 2.0], [0.0, 69.0, 0.0]), [40]);
+    }
 
     /// A mod's `announce` reaches the dedicated server's event stream and nothing else's.
     /// The integrated server thread keeps the launch configuration (`options.dedicated`) too,

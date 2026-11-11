@@ -51,8 +51,9 @@ pub trait EntitiesServerHost {
     /// The experience orbs of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: what a mod reads before it
     /// cancels an orb in `native_entity_join_level`, to give its points with
-    /// `PlayerRef::give_experience_points`. Empty for a level not in place and on a
-    /// client of a server.
+    /// `PlayerRef::give_experience_points`. Empty for a level not in place, on a
+    /// client of a server and for a bound that is not finite (NaN or infinite); a
+    /// minimum above its maximum is the same box with the two swapped (`AABB`).
     #[access(WorldOnly)]
     fn experience_orbs(&self, dimension: &str, min: [f64; 3], max: [f64; 3]) -> Vec<ExperienceOrb>;
     /// Side: server.
