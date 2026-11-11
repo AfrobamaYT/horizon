@@ -881,7 +881,8 @@ impl Game<'_> {
         for mob in self.mob_objects() {
             if let Some(vehicle) = mob.extra.mount
                 && (self.persist.off_level.contains_key(&mob.id)
-                    || self.persist.off_level.contains_key(&vehicle))
+                    || self.persist.off_level.contains_key(&vehicle)
+                    || self.persist.removed_vehicles.contains_key(&vehicle))
             {
                 links.entry(mob.id).or_default().push(vehicle);
                 links.entry(vehicle).or_default().push(mob.id);
@@ -892,7 +893,9 @@ impl Game<'_> {
                 .iter()
                 .flat_map(|host| host.hub.guests.iter().filter_map(|guest| guest.vehicle)),
         ) {
-            if self.persist.off_level.contains_key(&vehicle) {
+            if self.persist.off_level.contains_key(&vehicle)
+                || self.persist.removed_vehicles.contains_key(&vehicle)
+            {
                 retained.insert(vehicle);
             }
         }
@@ -903,7 +906,10 @@ impl Game<'_> {
             .collect();
         while let Some(id) = pending.pop() {
             for &neighbor in links.get(&id).into_iter().flatten() {
-                if self.persist.off_level.contains_key(&neighbor) && retained.insert(neighbor) {
+                if (self.persist.off_level.contains_key(&neighbor)
+                    || self.persist.removed_vehicles.contains_key(&neighbor))
+                    && retained.insert(neighbor)
+                {
                     pending.push(neighbor);
                 }
             }
@@ -917,6 +923,17 @@ impl Game<'_> {
             .collect();
         for id in gone {
             self.persist.off_level.remove(&id);
+            self.forget_entity(id);
+        }
+        let gone: Vec<_> = self
+            .persist
+            .removed_vehicles
+            .keys()
+            .copied()
+            .filter(|id| !retained.contains(id))
+            .collect();
+        for id in gone {
+            self.persist.removed_vehicles.remove(&id);
             self.forget_entity(id);
         }
     }

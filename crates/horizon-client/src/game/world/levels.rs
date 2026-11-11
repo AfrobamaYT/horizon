@@ -150,7 +150,8 @@ impl Game<'_> {
         target: Target,
     ) -> bool {
         if dimension == self.dim.key() {
-            return !self.persist.removals.contains(&target);
+            return !self.persist.removals.contains(&target)
+                && !self.persist.destroying_vehicles.contains(&target);
         }
         let dim = match dimension {
             DimensionKey::OVERWORLD => Dim::Overworld,
@@ -158,10 +159,10 @@ impl Game<'_> {
             DimensionKey::END => Dim::End,
             key => Dim::Extra(key),
         };
-        self.levels
-            .parked
-            .get(&dim)
-            .is_none_or(|parked| !parked.persist.removals.contains(&target))
+        self.levels.parked.get(&dim).is_none_or(|parked| {
+            !parked.persist.removals.contains(&target)
+                && !parked.persist.destroying_vehicles.contains(&target)
+        })
     }
 
     /// Visit exactly the actual physical lifetime slot. Resolution releases the
@@ -793,7 +794,7 @@ impl Game<'_> {
             let present = mob.is_some()
                 || p.boats.iter().any(|b| b.id == id)
                 || p.carts.iter().any(|c| c.id == id);
-            let removed = p.persist.removals.iter().any(|target| matches!(
+            let removed = p.persist.removals.iter().chain(p.persist.destroying_vehicles.iter()).any(|target| matches!(
                 target, commands::Target::Mob(n) | commands::Target::Boat(n) | commands::Target::Cart(n) if *n == id
             ));
             return (present && !removed).then_some(id);
