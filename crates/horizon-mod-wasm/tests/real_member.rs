@@ -1,6 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/lending.rs"]
+mod lending;
 #[path = "fixture/src/matrix.rs"]
 mod matrix;
 #[path = "support/checks.rs"]
@@ -130,6 +132,7 @@ fn real_member() {
                 .any(|kind| kind.id == "wasm_fixture:counter")
         );
         mod_api::__private::mark_game_thread();
+        lending::check(&mut Quiet);
         // Exercise the same three subscriptions as the native residency regression.
         // The guest only observes; terminal falling-block retirement belongs to
         // the engine and does not depend on the listener's target.

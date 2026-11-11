@@ -6,6 +6,7 @@ static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
 pub mod datapack;
+pub mod lending;
 pub mod matrix;
 pub mod projectile_owner;
 pub mod replace;
@@ -21,6 +22,22 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn recipe_sources(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RecipeSourcesEvent<'_>,
+    ) {
+        lending::Lender.recipe_sources(host, event);
+    }
+
+    fn menu_links(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::MenuLinksEvent<'_>,
+    ) {
+        lending::Lender.menu_links(host, event);
+    }
+
     fn register_json_animation_types(
         &self,
         _: &mod_api::RegistrationContext,

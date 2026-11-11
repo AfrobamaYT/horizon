@@ -1,4 +1,6 @@
 //! The wasm fixture's shutdown listener, registered natively: the same answers as `real_member`.
+#[path = "fixture/src/lending.rs"]
+mod lending;
 #[path = "fixture/src/matrix.rs"]
 mod matrix;
 #[path = "support/checks.rs"]
@@ -115,4 +117,24 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
     for (angle, wrapped) in turn::CASES {
         assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
     }
+}
+
+#[test]
+fn collect_positions_copy_in_and_out_natively_as_in_the_real_guest() {
+    struct Quiet;
+    impl mod_api::Host for Quiet {}
+    mod_api::impl_host_areas!(Quiet);
+    impl mod_api::ServerHost for Quiet {}
+    mod_api::impl_server_host_areas!(Quiet);
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "native_lender",
+            Box::new(lending::Lender),
+        )]
+        .into(),
+        || {
+            mod_api::__private::mark_game_thread();
+            lending::check(&mut Quiet);
+        },
+    );
 }
