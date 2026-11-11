@@ -1,7 +1,9 @@
 //! Function replacement: how a patched copy of a game function is installed in place of the
 //! original, with the game prebuilt. The staging pass ([`stage`]) writes one check at the head of
 //! every replaceable function of a staged source copy: a load of the function's slot in its
-//! crate's `__REPLACE` array and, when a copy is installed there, a direct call of it. Beside the
+//! crate's `__REPLACE` array and, when a copy is installed there, a direct call of it. A function
+//! that is an injection point shares that one check: its `#[point]` writes it, and while a mod
+//! listens there the point's dispatcher is what the slot holds, with the copy behind it. Beside the
 //! function it writes the slot's typed reader (`__fnr_read_slot_<index>`) and installer
 //! (`__fnr_<name>`), which a mixin build's patch crate calls with its copy
 //! ([`crate::patch`]). A function's check is part of its body, so every inlined copy of the
@@ -352,6 +354,7 @@ pub fn pointer_type(sig: &syn::Signature) -> proc_macro2::TokenStream {
 /// A replaceable function, as found in a parsed file.
 struct Found<'a> {
     module: String,
+    attrs: &'a [syn::Attribute],
     sig: &'a syn::Signature,
     body: &'a syn::Block,
     /// The `impl` it is a method of.
@@ -363,6 +366,22 @@ struct Found<'a> {
 }
 
 impl Found<'_> {
+    /// The `#[point(…)]` the point staging pass put on it, when it is an injection point.
+    fn point(&self) -> Option<&syn::MetaList> {
+        self.attrs.iter().find_map(|attr| match &attr.meta {
+            syn::Meta::List(list)
+                if list
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "point") =>
+            {
+                Some(list)
+            }
+            _ => None,
+        })
+    }
+
     /// Its path, as a mixin's `target` names it.
     fn target(&self) -> String {
         match (self.owner, self.trait_name) {
@@ -413,6 +432,7 @@ fn functions<'a>(
             {
                 out.push(Found {
                     module: module.to_owned(),
+                    attrs: &function.attrs,
                     sig: &function.sig,
                     body: &function.block,
                     owner: None,
@@ -438,6 +458,7 @@ fn functions<'a>(
                     {
                         out.push(Found {
                             module: module.to_owned(),
+                            attrs: &method.attrs,
                             sig: &method.sig,
                             body: &method.block,
                             owner: Some(block),
@@ -574,8 +595,28 @@ pub struct Staged {
     pub crates: usize,
 }
 
+/// The library name of the package at `package`: its `[lib]` name, or its own with underscores.
+fn library_name(package: &Path) -> Result<String, String> {
+    let manifest = package.join("Cargo.toml");
+    let text = fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let cargo: toml::Table =
+        toml::from_str(&text).map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let name = |table: &str| {
+        cargo
+            .get(table)
+            .and_then(|table| table.get("name"))
+            .and_then(toml::Value::as_str)
+    };
+    name("lib")
+        .or(name("package"))
+        .map(|name| name.replace('-', "_"))
+        .ok_or_else(|| format!("{}: no package name", manifest.display()))
+}
+
 /// One crate's files in the staged copy.
 struct Crate {
+    /// Its library's name, as the game crate names it.
+    name: String,
     /// Its library root, where its slot array goes.
     lib: PathBuf,
     files: Vec<GameFile>,
@@ -592,6 +633,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     let mut used = vec![false; list.len()];
     let client = root.join("crates/horizon-client/src");
     let mut crates = vec![Crate {
+        name: "horizon_client".into(),
         lib: client.join("lib.rs"),
         files: source::game_files(&client, true)?,
         listed_only: false,
@@ -606,8 +648,9 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
                 "{LIST}: {name}: every function of the game crate's game module is replaceable already"
             ));
         }
-        let (_, lib) = source::crate_root(root, name)?;
+        let (package, lib) = source::crate_root(root, name)?;
         crates.push(Crate {
+            name: library_name(&package)?,
             lib,
             files: source::crate_files(root, name)?,
             listed_only: true,
@@ -616,6 +659,8 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     let mut staged = Staged::default();
     for krate in &crates {
         let mut count = 0;
+        let mut cells = 0;
+        let mut armers = Vec::new();
         let mut trait_methods = 0;
         let mut counts = BTreeMap::new();
         // Each file's text as the pass leaves it, the crate root's included.
@@ -650,7 +695,8 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
                 .iter()
                 .filter(|function| function.trait_name.is_some())
                 .count();
-            let Some(text) = rewrite(&file.path, text, &found, &mut count)? else {
+            count += found.len();
+            let Some(text) = rewrite(&file.path, text, &found, &mut cells, &mut armers)? else {
                 continue;
             };
             staged.files += 1;
@@ -680,7 +726,21 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         let mut root_text =
             root_text.replacen("#![forbid(unsafe_code)]", "#![deny(unsafe_code)]", 1);
         root_text.push_str(&format!(
-            "\n/// The replacement of each replaceable function of this crate, or null: see `horizon_mod_api_gen::replace`.\n#[doc(hidden)]\npub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; {count}] = [const {{ ::std::sync::atomic::AtomicPtr::new(::std::ptr::null_mut()) }}; {count}];\n"
+            "\n/// The replacement of each replaceable function of this crate, or null: see `horizon_mod_api_gen::replace`.\n#[doc(hidden)]\npub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; {cells}] = [const {{ ::std::sync::atomic::AtomicPtr::new(::std::ptr::null_mut()) }}; {cells}];\n"
+        ));
+        // The game crate arms the crates below it too: it is where the points are sealed.
+        let below: Vec<String> = crates
+            .iter()
+            .filter(|other| !krate.listed_only && other.listed_only)
+            .map(|other| format!("::{}::__fnr_arm", other.name))
+            .collect();
+        let calls: String = armers
+            .iter()
+            .chain(&below)
+            .map(|path| format!(" {path}();"))
+            .collect();
+        root_text.push_str(&format!(
+            "/// Installs the dispatcher of each injection point of this crate that a mod listens at as its function's entry: called once, after the points are sealed.\n#[doc(hidden)]\npub fn __fnr_arm() {{{calls} }}\n"
         ));
         texts.insert(&krate.lib, root_text);
         for (path, text) in texts {
@@ -697,14 +757,18 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     Ok(staged)
 }
 
-/// `text` with the head check, reader and installer of each of `found`, numbering their slots
-/// from `count`, and with each `replaced!(f)` of a function it stages answered from `f`'s slot.
+/// `text` with the head check, reader and installer of each of `found`, numbering their cells
+/// from `cells`, with each `replaced!(f)` of a function it stages answered from `f`'s entry, and
+/// with `arm_points!()` calling the crate's `__fnr_arm`. A function that is an injection point
+/// gets its cell number in its `#[point]` instead of a head check, and its armer's path joins
+/// `armers`.
 /// None when the file has nothing to stage.
 fn rewrite(
     path: &Path,
     text: &str,
     found: &[Found<'_>],
-    count: &mut usize,
+    cells: &mut usize,
+    armers: &mut Vec<String>,
 ) -> Result<Option<String>, String> {
     if found.is_empty() {
         return Ok(None);
@@ -718,8 +782,11 @@ fn rewrite(
     let mut names = BTreeSet::new();
     let mut free = BTreeMap::new();
     for function in found {
-        let slot = *count;
-        *count += 1;
+        // A point's function has two cells: its entry, which its head loads, and behind it the
+        // copy its dispatcher runs in place of the body.
+        let point = function.point();
+        let slot = *cells;
+        *cells += if point.is_some() { 2 } else { 1 };
         let name = source::unraw(&function.sig.ident);
         let installer = installer(function.trait_name, &function.sig.ident);
         let reader = quote::format_ident!("__fnr_read_slot_{slot}");
@@ -741,7 +808,14 @@ fn rewrite(
         // is taken by a plain name first, and bound as written after the check.
         let mut arguments = Vec::new();
         let mut rebind = String::new();
-        for (index, input) in function.sig.inputs.iter().enumerate() {
+        // A point's own expansion names the parameters and writes the head check.
+        let plain_inputs = function
+            .sig
+            .inputs
+            .iter()
+            .enumerate()
+            .filter(|_| point.is_none());
+        for (index, input) in plain_inputs {
             match input {
                 FnArg::Receiver(_) => arguments.push("self".to_owned()),
                 FnArg::Typed(typed) => match &*typed.pat {
@@ -766,39 +840,49 @@ fn rewrite(
         } else {
             format!("{reader}()")
         };
-        let open = at(function.body.brace_token.span.open().end());
-        edits.push((
-            open,
-            open,
-            format!(
-                " if let ::std::option::Option::Some(__fnr) = {call} {{ return __fnr({}); }}{rebind}",
-                arguments.join(", ")
-            ),
-        ));
+        match point {
+            Some(list) => {
+                let open = at(list.delimiter.span().open().end());
+                edits.push((open, open, format!("slot = {slot}, ")));
+            }
+            None => {
+                let open = at(function.body.brace_token.span.open().end());
+                edits.push((
+                    open,
+                    open,
+                    format!(
+                        " if let ::std::option::Option::Some(__fnr) = {call} {{ return __fnr({}); }}{rebind}",
+                        arguments.join(", ")
+                    ),
+                ));
+            }
+        }
         let ty = match function.owner.and_then(|block| block.trait_.as_ref()) {
             Some((_, path, _)) if function.trait_name.is_some() => {
                 pointer_type(&qualified(function.sig, path))
             }
             _ => pointer_type(function.sig),
         };
-        let items = quote! {
-            #[doc(hidden)]
-            #[inline(always)]
-            #[allow(unsafe_code, dead_code, clippy::all)]
-            pub fn #reader() -> ::std::option::Option<#ty> {
-                let installed = crate::__REPLACE[#slot].load(::std::sync::atomic::Ordering::Relaxed);
-                if installed.is_null() {
-                    ::std::option::Option::None
-                } else {
-                    // SAFETY: only this function's installer stores here, a pointer of this type.
-                    ::std::option::Option::Some(unsafe { ::std::mem::transmute::<*mut (), #ty>(installed) })
+        let read = |reader: &syn::Ident, cell: usize| {
+            quote! {
+                #[doc(hidden)]
+                #[inline(always)]
+                #[allow(unsafe_code, dead_code, clippy::all)]
+                pub fn #reader() -> ::std::option::Option<#ty> {
+                    let installed = crate::__REPLACE[#cell].load(::std::sync::atomic::Ordering::Relaxed);
+                    if installed.is_null() {
+                        ::std::option::Option::None
+                    } else {
+                        // SAFETY: only this function's installer and its point's dispatcher, both
+                        // of this type, are stored here.
+                        ::std::option::Option::Some(unsafe { ::std::mem::transmute::<*mut (), #ty>(installed) })
+                    }
                 }
             }
-            #[doc(hidden)]
-            #[inline]
-            #[allow(dead_code, non_snake_case, clippy::all)]
-            pub fn #installer(replacement: #ty) -> bool {
-                crate::__REPLACE[#slot]
+        };
+        let install = |cell: usize| {
+            quote! {
+                crate::__REPLACE[#cell]
                     .compare_exchange(
                         ::std::ptr::null_mut(),
                         replacement as *mut (),
@@ -808,6 +892,59 @@ fn rewrite(
                     .is_ok()
             }
         };
+        let entry = read(&reader, slot);
+        let items = if point.is_some() {
+            // The copy goes behind the entry, where the point's dispatcher finds it, and into
+            // the entry itself unless the dispatcher is there already.
+            let body = slot + 1;
+            let body_reader = quote::format_ident!("__fnr_read_body_{slot}");
+            let (behind, body_read, direct) =
+                (install(body), read(&body_reader, body), install(slot));
+            quote! {
+                #entry
+                #body_read
+                #[doc(hidden)]
+                #[inline]
+                #[allow(dead_code, non_snake_case, clippy::all)]
+                pub fn #installer(replacement: #ty) -> bool {
+                    let installed = #behind;
+                    if installed {
+                        let _ = #direct;
+                    }
+                    installed
+                }
+            }
+        } else {
+            let direct = install(slot);
+            quote! {
+                #entry
+                #[doc(hidden)]
+                #[inline]
+                #[allow(dead_code, non_snake_case, clippy::all)]
+                pub fn #installer(replacement: #ty) -> bool {
+                    #direct
+                }
+            }
+        };
+        if point.is_some() {
+            let armer = quote::format_ident!("__pointa_{name}");
+            let arm = quote::format_ident!("__fnr_arm_{slot}");
+            let call = match function.owner {
+                Some(block) => {
+                    let (generics, _, clause) = block.generics.split_for_impl();
+                    let ty = &block.self_ty;
+                    quote!(#[doc(hidden)] #[allow(clippy::all)] pub fn #arm #generics () #clause { <#ty>::#armer() })
+                }
+                None => quote!(#[doc(hidden)] #[allow(clippy::all)] pub fn #arm() { #armer() }),
+            };
+            let end = at(function.end);
+            edits.push((end, end, format!(" {call}")));
+            let module = function
+                .module
+                .split_once("::")
+                .map_or(String::new(), |(_, rest)| format!("{rest}::"));
+            armers.push(format!("crate::{module}{arm}"));
+        }
         let items = match function.owner {
             Some(block) => {
                 let (generics, _, clause) = block.generics.split_for_impl();
@@ -825,7 +962,10 @@ fn rewrite(
     for item in parsed.items {
         if let Item::Macro(item) = item
             && item.mac.path.is_ident("macro_rules")
-            && item.ident.as_ref().is_some_and(|name| name == "replaced")
+            && item
+                .ident
+                .as_ref()
+                .is_some_and(|name| name == "replaced" || name == "arm_points")
         {
             let span = syn::spanned::Spanned::span(&item);
             let (start, end) = (at(span.start()), at(span.end()));
@@ -852,6 +992,13 @@ fn rewrite(
             ));
         };
         edits.push((start, close + 1, format!("{reader}().is_some()")));
+    }
+    if let Some(start) = text.find("arm_points!()") {
+        edits.push((
+            start,
+            start + "arm_points!()".len(),
+            "crate::__fnr_arm()".into(),
+        ));
     }
     // At one offset, a replacement of a range before an insertion there, each in pushed order.
     edits.sort_by_key(|(start, end, _)| (*start, *end == *start));

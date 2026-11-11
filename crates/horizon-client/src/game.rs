@@ -60,6 +60,13 @@ fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOv
     }
 }
 include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
+/// Installs the dispatcher of each injection point a mod listens at as its function's entry,
+/// once the points are sealed. The prebuilt game's staging pass writes the call; a build without
+/// points has none to arm.
+macro_rules! arm_points {
+    () => {};
+}
+
 /// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
@@ -17482,6 +17489,7 @@ pub(crate) fn run_with(
         crate::entry::initialize_code(&inventory);
     }
     mod_points::__private::seal();
+    arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before

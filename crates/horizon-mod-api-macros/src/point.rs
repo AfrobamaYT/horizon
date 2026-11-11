@@ -1,4 +1,4 @@
-//! `#[point]`: an injection point's slot check, record copy-in and copy-out,.
+//! `#[point]`: an injection point's head check, record copy-in and copy-out.
 use point_shape::{Arg, Pass, Receiver, Returns, Side};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -144,19 +144,14 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
             inputs.push(i);
         }
     }
-    let api = shape.api();
-    if !api {
+    if !shape.api() {
         return syn::Error::new_spanned(
             &function.sig.ident,
             format!("point {} has no API record", function.sig.ident),
         )
         .to_compile_error();
     }
-    let args: Vec<(&Arg, usize)> = if api {
-        shape.args.iter().zip(inputs.iter().copied()).collect()
-    } else {
-        Vec::new()
-    };
+    let args: Vec<(&Arg, usize)> = shape.args.iter().zip(inputs.iter().copied()).collect();
     // What the body gets: a `&T` the listeners may have replaced, a `&mut` reborrowed so the
     // return listeners can still copy it.
     let call: Vec<TokenStream> = inputs
@@ -193,7 +188,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     } else {
         quote!(::<#(#generics),*>)
     };
-    let (_receiver, callee) = match (shape.receiver, shape.free) {
+    let (receiver, callee) = match (shape.receiver, shape.free) {
         (Receiver::None, true) => (quote!(), quote!(#inner)),
         (Receiver::None, false) => (quote!(), quote!(Self::#inner)),
         (Receiver::Shared, _) => (quote!(self,), quote!(self.#inner)),
@@ -210,10 +205,10 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     };
     let record = shape.record();
     let api_value = match &shape.returns {
-        Returns::Value(value) if api => Some(value),
+        Returns::Value(value) => Some(value),
         _ => None,
     };
-    let cancels = matches!(shape.returns, Returns::Unit | Returns::UnitResult) && api;
+    let cancels = matches!(shape.returns, Returns::Unit | Returns::UnitResult);
     let results = api_value.is_some();
     let listened = |variant: &syn::Ident| quote!(#table::__private::POINTS[#table::PointId::#variant as usize].load(::std::sync::atomic::Ordering::Acquire));
 
@@ -243,7 +238,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         let (names, values): (Vec<_>, Vec<_>) = mirrored.iter().cloned().unzip();
         (made, names, values)
     };
-    let head_api = api.then(|| {
+    let head_api = {
         let mirrored: Vec<_> = args
             .iter()
             .filter_map(|(arg, input)| mirror_in(arg, *input, false))
@@ -271,7 +266,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
             #outcome
         };
         guarded(&names, &values, body, &name)
-    });
+    };
     let stop = {
         let cancel = match (&shape.returns, cancels) {
             (Returns::Unit, true) => quote!(if __cancel {
@@ -296,7 +291,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
 
     // The return: the API listeners get the value returned and copies of the arguments (written
     // back only for `&mut` ones).
-    let has_api_return = api && shape.has_return();
+    let has_api_return = shape.has_return();
     let back = has_api_return.then(|| {
         // A by-value argument is spent by the body: it is copied (or converted) before.
         let before: Vec<_> = args
@@ -410,10 +405,33 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api (#(#owned,)*) });
         #stop
     };
-    let body_call = quote!(#callee #turbofish(#(#call),*));
     let result_local =
         results.then(|| quote!(let mut __result_slot = ::std::option::Option::None;));
-    outer.block = syn::parse_quote!({
+    // The body, or the copy a mixin build installed in its place: the listeners run around either.
+    let reader = |kind: &str, slot: usize| {
+        let reader = format_ident!("__fnr_read_{kind}_{slot}");
+        if shape.free {
+            quote!(#reader())
+        } else {
+            quote!(Self::#reader())
+        }
+    };
+    let own_body = quote!(#callee #turbofish(#(#call),*));
+    let body_call = match shape.slot {
+        Some(slot) => {
+            let installed = reader("body", slot);
+            quote! {
+                match #installed {
+                    ::std::option::Option::Some(__fnr) => __fnr(#receiver #(#call),*),
+                    ::std::option::Option::None => #own_body,
+                }
+            }
+        }
+        None => own_body,
+    };
+    // The listeners' path: the function's own block where the point checks its table slot, the
+    // dispatcher's where the function has a replacement cell.
+    let listened_block: syn::Block = syn::parse_quote!({
         #cancel_local
         #result_local
         #(#shared_locals)*
@@ -431,14 +449,69 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         __result
     });
     // The outer function keeps the function's own `#[inline]`: a small accessor in a lower crate
-    // (`Chunk::get`) stays inlinable into its callers, slot check and all.
+    // (`Chunk::get`) stays inlinable into its callers, head check and all.
+    let dispatch = shape.slot.map(|slot| {
+        let stem = function.sig.ident.to_string();
+        let stem = stem.trim_start_matches("r#");
+        let dispatcher = format_ident!("__pointd_{stem}");
+        let armer = format_ident!("__pointa_{stem}");
+        let mut listened_function = outer.clone();
+        listened_function.sig.ident = dispatcher.clone();
+        listened_function.vis = syn::Visibility::Inherited;
+        listened_function.attrs = vec![
+            syn::parse_quote!(#[doc(hidden)]),
+            syn::parse_quote!(#[allow(clippy::all)]),
+        ];
+        listened_function.block = listened_block.clone();
+        let entry = reader("slot", slot);
+        let plain = inputs.iter().map(|&input| local(input));
+        let own = match shape.receiver {
+            Receiver::None => quote!(),
+            _ => quote!(self,),
+        };
+        let pass = inputs.iter().map(|&input| local(input));
+        outer.block = syn::parse_quote!({
+            // The function's one head check: a mixin build's copy, or this point's dispatcher
+            // while a mod listens here.
+            if let ::std::option::Option::Some(__fnr) = #entry {
+                return __fnr(#own #(#plain),*);
+            }
+            #callee #turbofish(#(#pass),*)
+        });
+        let path = if shape.free {
+            quote!(#dispatcher)
+        } else {
+            quote!(Self::#dispatcher)
+        };
+        let places = std::iter::once(shape.variant())
+            .chain(shape.has_return().then(|| shape.return_variant()))
+            .map(|variant| listened(&variant));
+        quote! {
+            #listened_function
+            /// Installs this point's dispatcher as the function's entry while a mod listens at
+            /// its head or return. Called once, after the points are sealed.
+            #[doc(hidden)]
+            #[allow(dead_code, clippy::all)]
+            pub fn #armer() {
+                if #(#places)||* {
+                    crate::__REPLACE[#slot].store(
+                        #path as *mut (),
+                        ::std::sync::atomic::Ordering::Release,
+                    );
+                }
+            }
+        }
+    });
+    if dispatch.is_none() {
+        outer.block = listened_block;
+    }
     function.sig.ident = inner;
     function.vis = syn::Visibility::Inherited;
     function
         .attrs
         .retain(|attr| !attr.path().is_ident("doc") && !attr.path().is_ident("inline"));
     function.attrs.push(syn::parse_quote!(#[inline(always)]));
-    quote!(#outer #function)
+    quote!(#outer #function #dispatch)
 }
 
 /// `body`, run only when every mirror converted; a value the API can't carry skips the listeners

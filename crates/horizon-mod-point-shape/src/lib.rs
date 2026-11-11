@@ -121,6 +121,11 @@ pub struct Shape {
     /// The slot table module its expansion reaches (`table = "…"`): the game's `mod_points`, or a
     /// mod crate's own generated table (`crate::__horizon_points`).
     pub table: syn::Path,
+    /// The function's entry cell in its crate's replacement array (`slot = N`), written by the
+    /// staging pass where the function is replaceable: its head is then that cell's one load,
+    /// which a listened point's dispatcher is installed through. Without one the point checks its
+    /// own slot in `table`.
+    pub slot: Option<usize>,
 }
 
 /// Whether the staging pass gives a function with these `attrs` and `sig` a point: one predicate for
@@ -185,19 +190,22 @@ fn borrows(ty: &Type) -> bool {
     find.0
 }
 
-/// The point of the function `sig`, from `#[point(side = "…", name = "…", free, api(…),
+/// The point of the function `sig`, from `#[point(side = "…", name = "…", slot = N, free, api(…),
 /// mirror(…))]`'s arguments. `api(EntityRef = "::mod_api::EntityRef", …)` names the `mod_api` types
 /// with a `Wire` layout the signature writes; `mirror(Text = "::mod_api::Text", …)` the engine
 /// types the game carries as their `mod_api` mirrors. The generator resolves both once.
 pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape> {
     let (mut name, mut side, mut free) = (sig.ident.to_string(), None, false);
     let mut table: syn::Path = syn::parse_quote!(mod_points);
+    let mut slot = None;
     let mut mirrors = Vec::new();
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("free") {
             free = true;
         } else if meta.path.is_ident("name") {
             name = meta.value()?.parse::<syn::LitStr>()?.value();
+        } else if meta.path.is_ident("slot") {
+            slot = Some(meta.value()?.parse::<syn::LitInt>()?.base10_parse()?);
         } else if meta.path.is_ident("table") {
             table = meta.value()?.parse::<syn::LitStr>()?.parse()?;
         } else if meta.path.is_ident("mirror") || meta.path.is_ident("api") {
@@ -226,7 +234,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
             });
         } else {
             return Err(meta.error(
-                "a point takes side = \"…\", name = \"…\", table = \"…\", free, api(…) and mirror(…)",
+                "a point takes side = \"…\", name = \"…\", table = \"…\", slot = N, free, api(…) and mirror(…)",
             ));
         }
         Ok(())
@@ -326,6 +334,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         borrowed_return,
         free,
         table,
+        slot,
     })
 }
 
