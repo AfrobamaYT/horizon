@@ -1,9 +1,10 @@
 //! Connection-local negotiation state; an empty installation shares immutable storage only.
 use super::{
     Local, Side,
-    connection::{Connection, Epoch},
+    connection::{Connection, Epoch, IngressLease},
 };
 use horizon_protocol::payload_negotiation::Entry;
+use mod_api::{PayloadSendError, PlayerRef};
 use std::sync::{Arc, OnceLock};
 
 pub struct Transport {
@@ -34,6 +35,23 @@ impl Transport {
                 })
             })
             .clone()
+    }
+    /// Reserve physical-connection ingress storage, independent of protocol epoch.
+    pub fn reserve_ingress(&self, owned_bytes: usize) -> Result<IngressLease, PayloadSendError> {
+        self.connection
+            .as_ref()
+            .ok_or(PayloadSendError::Disconnected)?
+            .reserve_ingress(owned_bytes)
+    }
+    pub fn bind_player(&self, player: PlayerRef) {
+        if let Some(connection) = &self.connection {
+            connection.bind_player(player);
+        }
+    }
+    pub fn player(&self) -> Option<PlayerRef> {
+        self.connection
+            .as_ref()
+            .and_then(|connection| connection.player())
     }
     pub fn epoch(&self) -> Option<Arc<Epoch>> {
         self.connection
