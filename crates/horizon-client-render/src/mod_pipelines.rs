@@ -242,6 +242,9 @@ pub fn compose(text: &str) -> Result<String, String> {
             return Err("horizon_pipeline_view is vertex-only".into());
         }
     }
+    if !module.overrides.is_empty() {
+        return Err("override declarations are not supported".into());
+    }
     signature(&module)?;
     if !module.entry_points.is_empty() {
         return Err("it declares an entry point; the game supplies both stages".into());
@@ -311,6 +314,11 @@ mod tests {
     #[test]
     fn fragment_cannot_read_vertex_uniform() {
         assert!(compose("fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return horizon_pipeline_view * input.color; }").unwrap_err().contains("horizon_pipeline_view"));
+    }
+
+    #[test]
+    fn overrides_without_defaults_are_refused() {
+        assert!(compose("override strength: f32; fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return input.color * strength; }").unwrap_err().contains("override"));
     }
 
     const GLOW: &str = "\
