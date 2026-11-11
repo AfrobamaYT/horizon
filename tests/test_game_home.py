@@ -114,6 +114,9 @@ class SpawnerTests(unittest.TestCase):
 
 class SpawnerDetectorTests(unittest.TestCase):
     def test_snapshot_checks_both_rules_and_refreshes_between_suites(self):
+        class FixtureSpawnerTests(SpawnerTests):
+            pass
+
         with tempfile.TemporaryDirectory(dir=lab.ROOT) as temp:
             tools = Path(temp)
             script = tools / "nested" / "spawn.py"
@@ -133,7 +136,7 @@ class SpawnerDetectorTests(unittest.TestCase):
                 for source, expected in cases:
                     script.write_text(source, encoding="utf-8")
                     result = unittest.TestResult()
-                    unittest.defaultTestLoader.loadTestsFromTestCase(SpawnerTests).run(result)
+                    unittest.defaultTestLoader.loadTestsFromTestCase(FixtureSpawnerTests).run(result)
                     self.assertEqual(result.errors, [])
                     self.assertEqual(result.testsRun, 2)
                     self.assertEqual({test._testMethodName for test, _ in result.failures}, expected)
