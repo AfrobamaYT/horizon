@@ -207,7 +207,7 @@ pub enum PartsRef {
     /// This game thread's table.
     Game(Rc<Parts>),
     /// The table the server published for its world generation, as this thread holds it.
-    Worldgen(Rc<Arc<Parts>>),
+    Worldgen(Arc<Parts>),
 }
 
 impl std::ops::Deref for PartsRef {
@@ -229,7 +229,7 @@ static WORLDGEN_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     /// This thread's handle on the published table, with the generation it belongs to.
-    static WORLDGEN_TABLE: RefCell<Option<(u64, Option<Rc<Arc<Parts>>>)>> =
+    static WORLDGEN_TABLE: RefCell<Option<(u64, Option<Arc<Parts>>)>> =
         const { RefCell::new(None) };
     /// Whether this thread runs a feature, whose lookups keep the table it started with.
     static IN_FEATURE: Cell<bool> = const { Cell::new(false) };
@@ -266,7 +266,7 @@ pub fn worldgen_parts() -> PartsRef {
     })
 }
 
-fn refresh_worldgen_table(table: &mut Option<(u64, Option<Rc<Arc<Parts>>>)>) {
+fn refresh_worldgen_table(table: &mut Option<(u64, Option<Arc<Parts>>)>) {
     let generation = WORLDGEN_GENERATION.load(Ordering::Acquire);
     if table.as_ref().is_some_and(|(seen, _)| *seen == generation) {
         return;
@@ -274,7 +274,7 @@ fn refresh_worldgen_table(table: &mut Option<(u64, Option<Rc<Arc<Parts>>>)>) {
     let published = WORLDGEN_PARTS
         .read()
         .unwrap_or_else(PoisonError::into_inner);
-    *table = Some((published.0, published.1.clone().map(Rc::new)));
+    *table = Some((published.0, published.1.clone()));
 }
 
 /// Run one feature: its worldgen lookups read the table published when it started, so a feature
