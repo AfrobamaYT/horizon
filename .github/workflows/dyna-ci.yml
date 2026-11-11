@@ -469,7 +469,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
-    runs-on: dyna-large
+    # Owner-approved stopgap: #2944 removes this when the legs run under 15 minutes.
+    runs-on: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 'dyna-xlarge' || 'dyna-large' }}
     # Temporary: #2944 brings client data legs under 15 minutes and restores the 60-minute cap.
     timeout-minutes: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 90 || 60 }}
     permissions:
