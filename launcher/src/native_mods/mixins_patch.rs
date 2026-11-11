@@ -14,7 +14,6 @@ use crate::rust_toolchain::{self, Toolchain};
 
 const PATCH: &str = include_str!("../../../tools/mixins/narrow-reference-rule.patch");
 const PATCH_NAME: &str = "tools/mixins/narrow-reference-rule.patch";
-const SOURCE: &str = "https://codeload.github.com/horizon-rust/horizon-mixins/tar.gz";
 
 /// The patched tool at [`MIXINS_REV`], built once per pin and patch.
 pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf, String> {
@@ -32,7 +31,11 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
     }
     progress(Step::Tool);
     let partial = dir.join(".source");
-    let top = super::unpack_archive(&format!("{SOURCE}/{MIXINS_REV}"), &partial, 256 << 20)?;
+    let top = super::unpack_archive(
+        &format!("{}/{MIXINS_REV}", horizon_addresses::HORIZON_MIXINS_SOURCE),
+        &partial,
+        256 << 20,
+    )?;
     apply(&top, PATCH).map_err(|why| {
         format!("E_MIXINS_PATCH: {PATCH_NAME} does not apply to horizon-mixins {MIXINS_REV}: {why}")
     })?;
