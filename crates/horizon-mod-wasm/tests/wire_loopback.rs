@@ -1995,3 +1995,65 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
         Some(false)
     );
 }
+
+#[test]
+fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
+    thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+    use horizon_core::nbt::Tag;
+    use mod_api::BlockEntityPart;
+    struct Notice;
+    impl mod_api::BlockPart for Notice {
+        fn block_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+            &[]
+        }
+    }
+    impl BlockEntityPart for Notice {
+        fn block_entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+            &[Some(mod_api::HookId::BlockEntityDataReceived)]
+        }
+        fn block_entity_data_received(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::BlockEntityDataReceivedEvent<'_>,
+        ) {
+            assert_eq!(event.tag.get(&"count".into()), Some(&Tag::Int(3)));
+            assert_eq!(event.entity, notice_handle());
+            CALLS.set(CALLS.get() + 1);
+        }
+    }
+    fn notice_handle() -> mod_api::BlockEntityRef {
+        mod_api::__private::game::block_entity_ref(
+            mod_api::LevelRef::new(
+                mod_api::WorldEpoch::new(1),
+                mod_api::DimensionKey::OVERWORLD,
+            ),
+            [1, 64, 1],
+            1,
+        )
+    }
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let index = guest::add_handler(vec![guest::view::<dyn BlockEntityPart>(Arc::new(Notice))]);
+    let proxy = WasmHandler {
+        index,
+        module: WasmMod {
+            group: 0,
+            subscribed: &[],
+            listeners: &[],
+            corrupt: false,
+        },
+    };
+    let tag = [("count".into(), Tag::Int(3))].into();
+    proxy.block_entity_data_received(
+        &Client,
+        &mut mod_api::BlockEntityDataReceivedEvent {
+            entity: notice_handle(),
+            tag: &tag,
+        },
+    );
+    assert_eq!(CALLS.get(), 1);
+}

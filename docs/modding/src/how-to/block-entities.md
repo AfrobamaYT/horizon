@@ -98,3 +98,13 @@ not a stale identity. Existing item and data-vector methods retain their special
 `Ok(true)` means opened, `Ok(false)` means a non-provider, cancelled open or
 unconnected/wrong-level player, and `Err(BlockEntityError::Stale)` means the entity
 no longer resolves. It never opens a replacement through an old handle.
+
+### Receiving synchronized data
+
+Implement `block_entity_data_received` on the block entity's part to react on the
+client after its synchronized tag has merged. It receives a `BlockEntityRef` and
+the arriving compound; reads through the handle already see the new data. This
+listen notice fires once for a chunk's initial tag and each later data packet.
+It cannot change the arriving tag. Vanilla entities, missing tags, missing client
+entities and mismatched types do not call it. Server tag production still uses
+`block_entity_update_tag`.
