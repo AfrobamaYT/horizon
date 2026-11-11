@@ -231,8 +231,10 @@ class Legs(unittest.TestCase):
         name = leg_names()[1][0]
         cases = [
             (f"test {name} ... ok\ntest {name} ... ok\n", "duplicate-result"),
+            (f"test {name} ... ok\n\x1b[0mPRIVATE_PAYLOAD test {name} ... FAILED\n", "duplicate-result"),
             (f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok test {name} ... ok\n", "duplicate-result"),
             (f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "ambiguous-result"),
+            (f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "ambiguous-result"),
             (f"test {name} ... ok\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "ambiguous-result"),
             (f"test {name} ... ok\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... FAILED\n", "duplicate-result"),
         ]
@@ -263,18 +265,27 @@ class Legs(unittest.TestCase):
                 self.assertIn("category=missing-result", log.getvalue())
                 self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
 
+    def test_complete_prefixed_records_are_recovered_without_payload(self):
+        name = leg_names()[1][0]
+        for prefix in ("PRIVATE_PAYLOAD ", "\x1b[0mPRIVATE_PAYLOAD ",
+                       f"\x1b[0m{'P' * 503}", f"\x1b[0m{'P' * 504}"):
+            def fake(command, **_):
+                text = (f"{name}: test\n" if "--list" in command else
+                        target(1, f"{prefix}test {name} ... ok\n", summary(passed=1)))
+                return subprocess.CompletedProcess(command, 0, text)
+            with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertEqual(ignored_tests.run("example", [], 1, 2), {name: True})
+            self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+            self.assertNotIn("\x1b", log.getvalue())
+            self.assertNotIn("framing=", log.getvalue())
+
     def test_missing_identity_framing_is_safe_and_still_fails(self):
         name = leg_names()[1][0]
         # Expected counts are independent fixture facts, not classifier output.
         cases = [
-            (f"\x1b[0mPRIVATE_PAYLOAD test {name} ... ok\n", "ansi-prefix", 1, 1, 0, 0),
             (f"PRIVATE_PAYLOAD test {name} ...\nok\n", "split-status", 1, 0, 0, 1),
             ("test different ... ok PRIVATE_PAYLOAD\n", "absent-intact-identity", 0, 0, 0, 0),
-            (f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "unclassified-candidate", 1, 0, 0, 0),
-            # Complete ANSI sequence exactly inside the 512-character prefix.
-            (f"\x1b[0m{'P' * 503}test {name} ... ok\n", "ansi-prefix", 1, 1, 0, 0),
-            # One character farther away: ESC falls outside that window.
-            (f"\x1b[0m{'P' * 504}test {name} ... ok\n", "unclassified-candidate", 1, 0, 0, 0),
+            (f"PRIVATE_PAYLOAD test {name} ... UNKNOWN\n", "unclassified-candidate", 1, 0, 0, 0),
         ]
         for record, framing, candidates, ansi, interleaved, split in cases:
             with self.subTest(framing=framing):

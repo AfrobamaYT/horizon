@@ -336,15 +336,15 @@ def missing_result_framing(output, name):
 def listed_result_records(line, expected, max_name_length):
     """Literal, bounded parsing of listed identities in interleaved libtest output.
 
-    A lone payload/ANSI-prefixed mention is not new execution evidence: recovery
-    needs an earlier `test ` marker on the same line. Ambiguous suffixes are
-    reported to the caller, never guessed or printed.
+    Prefix output is ignored, but every matching listed result is counted:
+    a second prefixed record must not escape duplicate detection. Ambiguous
+    suffixes are reported to the caller, never guessed or printed.
     """
-    first = cursor = line.find("test ")
+    cursor = line.find("test ")
     while cursor >= 0:
         start = cursor + len("test ")
         end = line.find(" ", start, start + max_name_length + 1)
-        if end >= 0 and (cursor == 0 or cursor > first):
+        if end >= 0:
             name = line[start:end]
             if name in expected:
                 for panic in ("", " - should panic"):
