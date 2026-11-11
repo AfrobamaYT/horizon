@@ -118,7 +118,7 @@ impl Game<'_> {
         if g.spectator()
             || g.dead
             || menu.drag.is_some()
-            || !menu.slots.still_valid(&self.world, g, menu.pos)
+            || !menu.still_valid(&host.hub.loop_context, &self.world, g)
         {
             return false;
         }
