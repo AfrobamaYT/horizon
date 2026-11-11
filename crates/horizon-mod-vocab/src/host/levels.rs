@@ -247,11 +247,14 @@ pub trait LevelsBackend {
     /// O(n log n), followed by one authoritative handle lookup per candidate.
     #[access(WorldOnly)]
     fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>>;
-    /// Side: server.
+    /// Side: both.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
-    /// Returns None on a client, for a stale handle, or for a parked level:
-    /// its entity handles cannot resolve until the level is in place. The walk
+    /// Returns None for a stale handle or a parked level: its entity handles
+    /// cannot resolve until the level is in place. On a client (`ClientLevel`),
+    /// the entities the server tracks to it and the window's own player, with
+    /// the same walk; other players are left out, as their handles do not
+    /// resolve there. None there before login and for a level it does not show. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
     /// yet resolve; frames, paintings and other special entities
@@ -661,7 +664,7 @@ pub trait LevelsBackend {
     /// filter (`canHitEntity`, `isPickable`) is the caller's: take the first hit it accepts.
     /// Candidates are those `entities_in` finds, so spectators are not hit and the same kinds
     /// are left out. None for a negative or non-finite margin, a non-finite point, and where
-    /// `entities_in` is None (a client, a stale handle, a parked level).
+    /// `entities_in` is None (a stale handle, a parked level).
     #[access(WorldOnly)]
     fn level_ray_trace_entities(
         &self,
