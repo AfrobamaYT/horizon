@@ -2164,8 +2164,8 @@ struct PreparedParts {
     block_states: Arc<api_values::block_state::Index>,
     tags: HashMap<String, HashSet<mod_api::BlockKey>>,
     parts: Option<mod_api::Parts>,
+    cauldrons: Arc<cauldron_interactions::Table>,
 }
-
 struct PreparedWorldReload {
     structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns,
     tables: Option<WorldTables>,
@@ -12334,7 +12334,7 @@ impl Game<'_> {
         let id = self.world.block(pos[0], pos[1], pos[2]);
         let state = registry
             .state(id)
-            .filter(|s| s.name.ends_with("cauldron"))
+            .filter(|s| cauldron_interactions::snapshot().contains_block(&s.name))
             .cloned()?;
         let above = self.world.block(pos[0], pos[1] + 1, pos[2]);
         let under_water = registry
