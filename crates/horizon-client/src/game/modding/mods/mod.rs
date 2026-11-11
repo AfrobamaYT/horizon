@@ -480,6 +480,9 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
 /// types (`native_register_item_models`), so item definitions' nodes of them draw what the mod
 /// answers; and animation targets and interpolations (`native_register_json_animation_types`), so
 /// animation files may name them.
+/// Block-state
+/// definition types (`native_register_block_state_models`), so blockstate files naming one get
+/// the models the mod picks.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -499,6 +502,9 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut types = Vec::new();
     Game::native_register_json_animation_types(&RegistrationContext::new(), &mut types);
     horizon_client_render::mod_animations::register(types);
+    let mut definitions = Vec::new();
+    Game::native_register_block_state_models(&RegistrationContext::new(), &mut definitions);
+    horizon_client_render::mod_block_state_models::register(definitions);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
@@ -2425,8 +2431,15 @@ mod tests {
                         horizon_client::fluid_models::resolved()[0].still,
                         "reload_fluid:block/oil_1"
                     );
+                    // An item's fluid layer follows the same reload.
+                    let item_still = || {
+                        horizon_client::fluid_models::item_appearance("reload_fluid:oil")
+                            .map(|appearance| appearance.still)
+                    };
+                    assert_eq!(item_still().as_deref(), Some("reload_fluid:block/oil_1"));
                     horizon_client::fluid_models::register(vec![]);
                     horizon_client::fluid_models::set_world_looks([]);
+                    assert_eq!(item_still(), None);
                 });
             },
         );

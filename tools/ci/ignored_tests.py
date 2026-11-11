@@ -302,6 +302,37 @@ def failure_diagnostics(output):
           f"{skipped_contexts} contexts skipped (retention bound)")
 
 
+def missing_result_framing(output, name):
+    """Describe bounded framing hints, never line contents or recovered results.
+
+    Text searches can also find prefix identities or incidental mentions; counts
+    describe candidate framing only and cannot establish that a test ran.
+    """
+    counts = {"ansi-prefix": 0, "interleaved-record": 0, "split-status": 0}
+    cursor = matches = 0
+    seen = set()
+    while matches < 8 and (position := output.find(name, cursor)) >= 0:
+        matches += 1
+        cursor = position + len(name)
+        start = output.rfind("\n", 0, position) + 1
+        if start in seen:
+            continue
+        seen.add(start)
+        end = output.find("\n", position)
+        if end < 0:
+            end = len(output)
+        prefix = output[max(start, position - 512):position]
+        suffix = output[cursor:min(end, cursor + 512)]
+        counts["ansi-prefix"] += bool(re.search(r"\x1b\[[0-?]*[ -/]*[@-~]", prefix))
+        counts["interleaved-record"] += prefix.count("test ") > 1 or "test " in suffix
+        following = output[end + 1:end + 513].split("\n", 1)[0].strip()
+        counts["split-status"] += suffix.rstrip().endswith("...") and following in {"ok", "FAILED"}
+    framing = ",".join(key for key, count in counts.items() if count)
+    framing = framing or ("unclassified-candidate" if seen else "absent-intact-identity")
+    metadata = "; ".join(f"{key}={count}" for key, count in counts.items())
+    return f"framing={framing}; candidate_lines={len(seen)}; {metadata}; sampled_matches={matches}; sample_limit=8"
+
+
 def run(package, skip, number=None, count=None):
     """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build."""
     # Resource-backed fixtures need a fresh home, not the runner user's game files.
@@ -402,7 +433,11 @@ def run(package, skip, number=None, count=None):
         remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
         shown = 0
         for name in missing:
-            emitted, _ = bounded_record(f"  {safe_identity(name)}\n", remaining)
+            if remaining[0] <= 0:
+                break
+            framing = missing_result_framing(process.stdout, name)
+            emitted, _ = bounded_record(
+                f"  {safe_identity(name)}; category=missing-result; {framing}\n", remaining)
             shown += emitted
         print(f"{len(missing) - shown} missing identities not shown (shared total byte budget)")
         return None

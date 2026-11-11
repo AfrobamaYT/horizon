@@ -39,10 +39,7 @@ impl Plan {
         Ok(())
     }
 
-    /// The command that runs `args`. The SDK's flags go into an `@` file in `argfiles`, one per
-    /// line as rustc reads it: with an extern per SDK crate they pass Windows' 32,767-character
-    /// command-line limit, and the wrappers in front of rustc pass an `@` file through untouched.
-    fn arguments(
+    pub(super) fn arguments(
         &self,
         mut args: Vec<OsString>,
         manifest: Option<PathBuf>,

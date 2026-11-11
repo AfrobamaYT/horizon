@@ -45,6 +45,39 @@ generation, including an empty one. Closing a screen or changing dimension retai
 disconnecting discards it. Reads allocate nothing and do not rescan recipes or registries.
 There is no second hook and no per-slot load callback.
 
+##### Keeping a block menu open
+
+The server closes a player's block menu when `AbstractContainerMenu.stillValid` says no: by default when the
+block entity is gone or the player's eyes are farther than their block interaction range plus 4 from it. A
+large machine whose menu belongs to a core block deep inside it answers `menu_still_valid` on its menu type
+instead, as a Java menu overrides `stillValid`:
+
+```rust,ignore
+struct ShellReach;
+#[mod_api::horizon_part]
+impl mod_api::MenuPart for ShellReach {
+    fn menu_still_valid(
+        &self,
+        _: &dyn mod_api::LoopContext,
+        event: &mut mod_api::MenuStillValidEvent<'_>,
+    ) {
+        // `event.valid` arrives as the game's answer; keep the menu open while
+        // the player stands within 12 blocks of the core.
+        let d: f64 = (0..3)
+            .map(|k| (event.eye[k] - (f64::from(event.pos[k]) + 0.5)).powi(2))
+            .sum();
+        event.valid = d < 12.0 * 12.0;
+    }
+}
+// In Hooks::register:
+// registrar.menu_part("mymod:torus", ShellReach);
+```
+
+It is asked each tick the menu is open and before each click on it, on the server only, and only for a mod
+menu type: vanilla menu types keep their own check. A part that leaves `valid` alone keeps the game's answer,
+and a menu whose block entity is gone closes without asking. [Hook notes](../../reference/hook-notes.md#keeping-a-block-menu-open)
+has the details.
+
 
 Client hooks can read the local player's menu with `host.local_player()?.container_menu(host)`,
 including the inventory when no container is open. `MenuRef::slot_count`, `slot` and `carried`
