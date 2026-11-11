@@ -43,7 +43,9 @@ impl Scene {
             OsString::from_wide(&[110, 0xd800])
         };
         let path = root.path().canonicalize().unwrap().join(&name);
-        fs::create_dir(&path).unwrap();
+        #[cfg(unix)]
+        let path = path.join("long-launcher-home-".repeat(8));
+        fs::create_dir_all(&path).unwrap();
         let data = path.join("data");
         let registry = Registry::with_release(&data, Release::Close).unwrap();
         let snapshots: Vec<_> = [("image", !native), ("world", false), ("sdk", true)]
@@ -100,7 +102,16 @@ impl Scene {
         let (record, file) = record::Reference::publish(&snapshots[1], &entry, &selection).unwrap();
         Self {
             _root: root,
-            marker: Marker::new(path.join("endpoint")).unwrap(),
+            marker: {
+                #[cfg(unix)]
+                {
+                    Marker::runtime().unwrap()
+                }
+                #[cfg(windows)]
+                {
+                    Marker::new(path.join("endpoint")).unwrap()
+                }
+            },
             request: Request {
                 entry,
                 program,

@@ -19,7 +19,7 @@ impl Game<'_> {
         &mut self,
         stack: &ItemStack,
         on_block: bool,
-        mut claimed: bool,
+        claimed: bool,
     ) -> Option<bool> {
         if claimed {
             self.swing_arm();
@@ -37,11 +37,7 @@ impl Game<'_> {
             }
             return Some(answer.consumes_action());
         }
-        self.use_item_in_hand(stack, &mut claimed);
-        if claimed {
-            self.swing_arm();
-        }
-        claimed.then_some(true)
+        self.use_item_in_hand(stack)
     }
 
     /// Item.use after the same hand's target passed, or for a server UseItem packet.

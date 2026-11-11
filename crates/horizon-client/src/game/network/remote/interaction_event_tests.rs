@@ -3,6 +3,8 @@
 mod item_fallthrough_tests;
 #[path = "use_item_hand_tests.rs"]
 mod use_item_hand_tests;
+#[path = "use_item_result_tests.rs"]
+mod use_item_result_tests;
 use super::super::{
     Game, Hit, execution_role::ExecutionRole, lan::LanSettings,
     native_entity_refs::tests::with_game,
@@ -50,6 +52,8 @@ struct Controls {
     air_answer: Option<Answer>,
     consume_item: bool,
     expected_hand: Option<Hand>,
+    part_answer: Option<Answer>,
+    part_pass: bool,
     /// Every hand `use_item_on_block` fired for, in order, instead of asserting one.
     hands: Option<Vec<Hand>>,
     use_block: TriState,
@@ -174,12 +178,17 @@ impl ItemPart for Observer {
         self.0.lock().unwrap().steps.push(Step::UseOnPart);
         Flow::Cancel
     }
-    fn use_item(&self, _: &mut dyn ServerHost, event: &mut UseItemEvent<'_>) -> Flow {
+    fn use_item(&self, _: HostSide<'_>, event: &mut UseItemEvent<'_>) -> Option<Answer> {
         if let Some(hand) = self.0.lock().unwrap().expected_hand {
             assert_eq!(event.hand, hand);
         }
-        self.0.lock().unwrap().steps.push(Step::ItemPart);
-        Flow::Cancel
+        let mut state = self.0.lock().unwrap();
+        state.steps.push(Step::ItemPart);
+        if state.part_pass {
+            None
+        } else {
+            Some(state.part_answer.unwrap_or(Answer::SuccessServer))
+        }
     }
 }
 
