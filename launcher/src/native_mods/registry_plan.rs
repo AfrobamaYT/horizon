@@ -418,6 +418,24 @@ mod tests {
 
     #[test]
     fn fetch_retains_actual_feature_closure_and_excludes_unreachable_pins() {
+        const ACTOR: &str = "HORIZON_REGISTRY_FETCH_TEST_ACTOR";
+        if std::env::var_os(ACTOR).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "native_mods::registry_plan::tests::fetch_retains_actual_feature_closure_and_excludes_unreachable_pins", "--nocapture"])
+                .env(ACTOR, "1")
+                .env("HORIZON_LAUNCHER_HOME", home.path())
+                .status().unwrap();
+            assert!(status.success());
+            return;
+        }
+        assert!(
+            !super::super::log_path().exists(),
+            "the isolated actor must start with a fresh home"
+        );
+        // Production build entries call logged()/clear_log(); native-lock also
+        // creates root() before resolution. This direct unit call bypasses them.
+        super::super::clear_log().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         for name in ["feature-parent", "feature-only"] {
