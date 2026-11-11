@@ -30,6 +30,10 @@ fn run(mode: Option<bool>, test: impl FnOnce(&mut Game<'_>)) {
         .into_iter()
         .collect::<Vec<_>>()
         .into();
+    run_mods(mods, test);
+}
+
+fn run_mods(mods: Mods, test: impl FnOnce(&mut Game<'_>)) {
     crate::game::api_values::install_parts(&mods).unwrap();
     mod_api::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_game(|game| {
@@ -156,4 +160,133 @@ fn non_bundle_keeps_text_only_geometry() {
         // Two 10px lines: top 8, content height 20, outer border extends through y + h + 4.
         assert_eq!(bottom(&batch), 32.0);
     });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bundle_empty_text_gathers_image_at_zero() {
+    run(None, |game| {
+        let elements = game
+            .gather_tooltip_components(&bundle(), vec![], vec![], (320.0, 240.0))
+            .unwrap();
+        assert!(matches!(
+            &elements[..],
+            [Element::Image(TooltipImage {
+                source: mod_api::TooltipImageSource::Bundle(_),
+                size: [96.0, 45.0],
+            })]
+        ));
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bundle_empty_contents_keeps_image() {
+    run(None, |game| {
+        let stack = ItemStack::new("minecraft:bundle", 1);
+        let lines = vec![(horizon_client::text::Text::literal("Name"), u32::MAX)];
+        let elements = game
+            .gather_tooltip_components(&stack, lines, vec![], (320.0, 240.0))
+            .unwrap();
+        // Vanilla maps the present bundle-contents component even when empty.
+        // Empty description: two 9px lines + 13px bar + 8px gap = 39px.
+        assert!(matches!(
+            &elements[..],
+            [
+                Element::Text(..),
+                Element::Image(TooltipImage {
+                    source: mod_api::TooltipImageSource::Bundle(_),
+                    size: [96.0, 39.0],
+                })
+            ]
+        ));
+        let batch = draw(game, &stack);
+        grid(game, &batch, 20.0, false);
+        // Content top 8 + two text lines 20 + image 39 + outer extent 4.
+        assert_eq!(bottom(&batch), 71.0);
+    });
+}
+
+struct Boundary {
+    insert: bool,
+    observed: std::sync::Arc<std::sync::Mutex<Vec<TooltipElement>>>,
+}
+#[mod_api::__subscriptions]
+impl Hooks for Boundary {
+    fn render_tooltip_gather_components(
+        &self,
+        _: &dyn ClientHost,
+        event: &mut RenderTooltipGatherComponentsEvent<'_>,
+    ) -> mod_api::Flow {
+        if self.insert {
+            event.elements.insert(
+                0,
+                TooltipElement::Text(mod_api::Text::literal("Inserted"), u32::MAX),
+            );
+        } else {
+            let image = event.elements.remove(1);
+            event.elements.push(image);
+        }
+        mod_api::Flow::Continue
+    }
+
+    fn render_tooltip_pre(
+        &self,
+        _: &dyn ClientHost,
+        event: &mut mod_api::RenderTooltipPreEvent<'_>,
+    ) -> mod_api::Flow {
+        *self.observed.lock().unwrap() = event.elements.to_vec();
+        mod_api::Flow::Continue
+    }
+}
+
+fn boundary(insert: bool) {
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mods: Mods = vec![ModEntry::new(
+        "bundle-boundary",
+        Box::new(Boundary {
+            insert,
+            observed: observed.clone(),
+        }),
+    )]
+    .into();
+    run_mods(mods, |game| {
+        let stack = bundle();
+        let lines = game.stack_tooltip_lines(&stack, false, false);
+        assert_eq!(lines.len(), 1);
+        let name = TooltipElement::Text(lines[0].0.try_into_api().unwrap(), lines[0].1);
+        let rest = TooltipElement::Text(mod_api::Text::literal("Rest"), u32::MAX);
+        let image = TooltipElement::Image(TooltipImage {
+            source: mod_api::TooltipImageSource::Bundle(stack.try_into_api().unwrap()),
+            size: [96.0, 45.0],
+        });
+        let expected = if insert {
+            vec![
+                TooltipElement::Text(mod_api::Text::literal("Inserted"), u32::MAX),
+                name,
+                image,
+                rest,
+            ]
+        } else {
+            vec![name, rest, image]
+        };
+        let batch = draw(game, &stack);
+        assert!(*observed.lock().unwrap() == expected);
+        // Top 8 + first line 10 + first-element gap 2 + second line 10 = 30.
+        // Inserting before the name transfers the gap to the inserted line.
+        grid(game, &batch, 30.0, true);
+        grid(game, &batch, 20.0, false);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bundle_listener_inserts_before_name() {
+    boundary(true);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bundle_pre_observes_gather_reordered_list() {
+    boundary(false);
 }
