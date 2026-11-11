@@ -2355,11 +2355,14 @@ mod tests {
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
+        // Keep the connection owner alive until the peer receives the queued
+        // finish ACK, as a real Session does when configure returns to play.
+        let client_writer = writer.clone();
         let thread = std::thread::spawn(move || {
             let (send, _events) = event_channel();
             configure(
                 &mut reader,
-                &writer,
+                &client_writer,
                 &Arc::new(AtomicBool::new(true)),
                 &Language::new(),
                 &send,
@@ -2403,6 +2406,7 @@ mod tests {
             cfg::Serverbound::FinishConfiguration(Empty)
         );
         assert!(thread.join().unwrap().is_ok());
+        drop(writer);
         std::fs::remove_dir_all(
             std::env::temp_dir().join(format!("horizon-content-identity-{}", std::process::id())),
         )
