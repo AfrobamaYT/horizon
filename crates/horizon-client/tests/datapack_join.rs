@@ -224,7 +224,8 @@ fn drive<T>(
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         host.tick();
-        for event in session.poll() {
+        for receipt in session.poll() {
+            let (event, _credit) = receipt.into_parts();
             if let Some(found) = done(host, event) {
                 return found;
             }
