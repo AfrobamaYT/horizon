@@ -2,6 +2,8 @@
 
 An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points work on native and wasm, including points provided by another mod.
 
+## Declaration
+
 ```toml
 [[inject]]
 id = "count"
@@ -22,6 +24,16 @@ priority = 0
 
 Listeners receive API records. Mutable parameters are copied back. A `Game` method's API point also supplies the side's Host. A parameter without an API/Wire form refuses registration, naming its type, on both targets.
 
-Head cancellation skips the body and return point, but every head listener still runs and may clear cancellation. Return listeners run only after the body. Priority descends, then dependency registration order, with inject ID breaking ties within a mod. Only one replacement may own a point; disabling it restores the original body. Calling the replaced function from its replacement re-enters the point, not the original body.
+## Ordering
+
+Head cancellation skips the body and return point, but every head listener still runs and may clear cancellation. Return listeners run only after the body. Replacement listeners run after other API listeners; otherwise priority descends, then dependency registration order, with inject ID breaking ties within a mod. Only one replacement may own a point; disabling it restores the original body. Calling the replaced function from its replacement re-enters the point, not the original body.
 
 Native code that needs game internals uses [`[[native.mixin]]`](mixins.md); `access = "internals"` on `[[inject]]` is refused by name.
+
+## Mod points: patching another mod
+
+Eligible mod functions expose API points. Pin another mod point with its signature hash; a changed signature is refused.
+
+## Ask for the hook
+
+If no suitable API point is available, request a named hook.
