@@ -16,13 +16,15 @@ root=$(git rev-parse --show-toplevel)
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
 mixins=$(sed -n 's/^pub const MIXINS_REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
 
-rm -rf "$scratch"
+# FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
+if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run"; else rm -rf "$scratch"; fi
 mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
 scratch=$(realpath "$scratch")
 data=$scratch/launcher
 
 # The pinned source a patched function is copied out of, from this checkout.
 source=$data/native/source/$revision
+rm -rf "$source" "$data/native/prebuilt"
 mkdir -p "$source"
 git -C "$root" archive "$revision" | tar -x -C "$source"
 find "$source" -type l -delete

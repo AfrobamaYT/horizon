@@ -81,8 +81,10 @@ pub(super) fn build(
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
-    let started = std::time::Instant::now();
+    // Built once per pin, before the clock: the timing is the mixin build's own.
+    let tool = super::tool(rust, super::MIXINS_REV, &|_| {})?;
     let source = super::source(sdk.commit())?;
+    let started = std::time::Instant::now();
     let targets: Vec<String> = bundles
         .iter()
         .flat_map(|bundle| bundle.manifest.mixin.iter().map(|row| row.target.clone()))
@@ -177,7 +179,7 @@ pub(super) fn build(
             &toml::to_string(&manifest).map_err(|e| e.to_string())?,
         )?;
     }
-    let tool = super::tool(rust, super::MIXINS_REV, &|_| {})?;
+    let copied = started.elapsed();
     let patched = out.join("patch-applied");
     super::run(
         super::apply(rust, &tool, &workspace, &mods, &patched),
@@ -222,11 +224,13 @@ pub(super) fn build(
     }
     super::run(cmd, "Compiling the patched functions", |_| {})?;
     super::append_log(&trf(
-        "Function replacement: {count} functions patched by {rows} mixins, without rebuilding the game (tool {tool} ms, total {total} ms)",
+        "Function replacement: {count} functions patched by {rows} mixins, without rebuilding the game (copy {copy} ms, horizon-mixins {tool} ms, compile {compile} ms, total {total} ms)",
         &[
             ("count", &generated.patched.len().to_string()),
             ("rows", &targets.len().to_string()),
-            ("tool", &applied.as_millis().to_string()),
+            ("copy", &copied.as_millis().to_string()),
+            ("tool", &(applied - copied).as_millis().to_string()),
+            ("compile", &(started.elapsed() - applied).as_millis().to_string()),
             ("total", &started.elapsed().as_millis().to_string()),
         ],
     ))?;
