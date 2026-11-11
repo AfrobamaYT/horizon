@@ -1233,7 +1233,12 @@ impl Game<'_> {
     /// `MapItem.useOn`: a map used on a banner toggles that banner's marker
     /// on the map; when the map's data says no (`toggleBanner` fails) the use
     /// ends without a swing, and nothing else is done with the map either way.
-    pub(super) fn use_map_on_banner(&mut self, hit: &super::Hit, stack: &ItemStack, before: &ItemStack) -> bool {
+    pub(super) fn use_map_on_banner(
+        &mut self,
+        hit: &super::Hit,
+        stack: &ItemStack,
+        before: &ItemStack,
+    ) -> bool {
         let Some(id) = map_id(stack) else {
             return false;
         };
@@ -1260,7 +1265,12 @@ impl Game<'_> {
     }
     /// `CompassItem.useOn`: a compass used on a lodestone locks onto it (a
     /// single one in survival changes in place, else one is split off).
-    pub(super) fn use_lodestone_compass(&mut self, hit: &super::Hit, stack: &ItemStack, before: &ItemStack) -> bool {
+    pub(super) fn use_lodestone_compass(
+        &mut self,
+        hit: &super::Hit,
+        stack: &ItemStack,
+        before: &ItemStack,
+    ) -> bool {
         if &*stack.item != "minecraft:compass" {
             return false;
         }

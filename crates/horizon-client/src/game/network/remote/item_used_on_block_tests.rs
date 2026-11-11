@@ -4,7 +4,7 @@ use horizon_client::advancements as a;
 use serde_json::json;
 
 /// One `item_used_on_block` advancement per stick count the tool must have.
-fn install_criteria(game: &mut Game<'_>, counts: &[u32], item: &str) {
+pub(super) fn install_criteria(game: &mut Game<'_>, counts: &[u32], item: &str) {
     let mut tree = a::Tree::default();
     for count in counts {
         let trigger = "minecraft:item_used_on_block".to_owned();
@@ -23,8 +23,12 @@ fn install_criteria(game: &mut Game<'_>, counts: &[u32], item: &str) {
             criteria: vec![a::Criterion {
                 name: "seen".into(),
                 trigger,
-                conditions:
-                    json!({"location": {"type": "minecraft:match_tool", "predicate": tool}}).into(),
+                conditions: (if *count == 0 {
+                    json!({})
+                } else {
+                    json!({"location": {"type": "minecraft:match_tool", "predicate": tool}})
+                })
+                .into(),
             }],
             requirements: vec![vec!["seen".into()]],
             rewards: Default::default(),
@@ -98,11 +102,11 @@ fn compass_criterion_sees_two_compasses_before_the_block_takes_one() {
             *observer.0.lock().unwrap() = Controls {
                 block_answer: Some(Answer::Pass),
                 take_in_block: true,
-                
+
                 ..Controls::default()
             };
             assert!(use_block(game, false));
-            
+
             assert_eq!(game.held().map(|stack| stack.count), Some(1));
             assert!(game.adv.progress.has("test:sticks2", "seen"));
             assert!(!game.adv.progress.has("test:sticks1", "seen"));

@@ -8843,7 +8843,9 @@ impl Game<'_> {
                 && use_item.or(true)
                 && (self.may_build()
                     || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)))
-                && held.as_ref().is_none_or(|stack| self.items().get(&stack.item).is_some())
+                && held
+                    .as_ref()
+                    .is_none_or(|stack| self.items().get(&stack.item).is_some())
                 && (item_forced
                     || held.as_ref().is_some_and(|stack| {
                         self.items().get(&stack.item).is_some_and(|info| {

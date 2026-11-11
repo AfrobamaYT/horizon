@@ -7522,7 +7522,7 @@ impl Game<'_> {
                 self.hand,
                 stack.as_ref(),
                 mod_api::UsePhase::ItemAfterBlock,
-)
+            )
         {
             if answer.consumes_action() {
                 self.trigger_block("minecraft:item_used_on_block", hit.pos, before);
