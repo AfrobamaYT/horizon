@@ -362,7 +362,7 @@ mod tests {
             draft.shapes = Some(mod_api::BlockShapes {
                 properties: vec![],
                 values: BTreeMap::new(),
-                default: Some(vec![[0.0, 0.0, 0.0, 16.0, 8.0, 16.0]]),
+                default: Some(vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]),
             });
             draft
         };
@@ -396,7 +396,7 @@ mod tests {
         );
         assert_eq!(
             converted.shapes.unwrap().default,
-            Some(vec![[0.0, 0.0, 0.0, 16.0, 8.0, 16.0]])
+            Some(vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]])
         );
     }
 }

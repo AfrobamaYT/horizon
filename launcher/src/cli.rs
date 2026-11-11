@@ -744,7 +744,7 @@ enum Cmd {
         /// Allow missing original Java asset/data jars to be downloaded from Modrinth
         #[arg(long)]
         allow_jar_downloads: bool,
-        #[arg(long)]
+        #[arg(long, help = "Installed version to play (default: instance version)")]
         version: Option<String>,
         /// The instance to play (its name or id; default: the selected one). A Java instance
         /// starts its Minecraft: Java Edition, downloaded with its Java the first time
