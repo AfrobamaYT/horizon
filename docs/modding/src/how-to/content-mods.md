@@ -945,3 +945,19 @@ the entity and rotate with its yaw.
 Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.
 
 Ambient additions accept any finite `tick_chance`, without clamping to the unit interval. Music delays need not be ordered.
+
+### Custom block-state definition types
+
+Register a type id with `Hooks::register_block_state_models` before client resources
+load. Set `neoforge:definition_type` to that id in the blockstate JSON, and answer
+`Hooks::instantiate_block_state_definition` on every load and reload. Read the whole
+file from `event.config` and enumerate `event.states` in registry order. Append a
+`BlockStateModelPick::Model` for each state you choose, with its index, model id,
+quarter turns and UV-lock setting; append `Refuse` with a reason to reject a file.
+See the generated hook notes for a powered-block example.
+
+A state not picked inherits the lower pack layer's selection when present;
+otherwise it draws no model. Pack layers bind independently. An unknown type,
+explicit refusal, invalid model, out-of-range state, duplicate state or answer
+with no picks rejects the whole layer with a diagnostic, leaving lower layers
+available. Vanilla `variants` and `multipart` remain available for ordinary files.

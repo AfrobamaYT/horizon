@@ -2,7 +2,8 @@
 
 /// One answer a block-state definition type gives for a blockstate file naming it
 /// (`register_block_state_models`): the model one of the block's states draws, or a refusal of
-/// the whole file. A state no `Model` names draws no model.
+/// the whole file. A state no `Model` names inherits the lower pack layer's selection
+/// when present; otherwise it draws no model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: mods construct picks and the game matches every kind
 #[derive(horizon_mod_api_macros::Wire)]
