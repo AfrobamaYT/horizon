@@ -1039,7 +1039,6 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
-    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -3619,23 +3618,20 @@ mod tests {
         );
         let path = d.join("horizon-mod.toml");
         let original = fs::read_to_string(&path).unwrap();
-        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
+        let declaration = "\n[[inject]]\nid='listener'\nat='horizon_client::game::Game::tick'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
         fs::write(&path, format!("{original}{declaration}")).unwrap();
-        let source = key(A);
-        assert_ne!(
-            first, source,
-            "source adapters require another game artifact"
-        );
-        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
+        let declared = key(A);
+        assert_ne!(first, declared, "a declaration is part of the build");
+        assert_eq!(declared, key(A), "an unchanged manifest reuses the build");
         fs::write(
             &path,
             format!(
                 "{original}{}",
-                declaration.replace("id='source'", "id='changed'")
+                declaration.replace("id='listener'", "id='changed'")
             ),
         )
         .unwrap();
-        assert_ne!(source, key(A), "private point identity is part of the key");
+        assert_ne!(declared, key(A), "an inject's id is part of the key");
         fs::write(path, original).unwrap();
         assert_ne!(first, key(B));
         assert_ne!(
