@@ -3,6 +3,34 @@ use super::*;
 use crate::game::commands::Target;
 use horizon_client::motion::PlayerMotion;
 
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+fn constructed_and_saved_mob_uuids_survive_repeated_reconstruction() {
+    with_game(|game, _| {
+        for saved_uuid in [None, Some([160, 0, 0, 987])] {
+            let mut tag = Tag::compound([("id", Tag::String("minecraft:pig".into()))]);
+            if let Some(uuid) = saved_uuid
+                && let Tag::Compound(fields) = &mut tag
+            {
+                fields.insert("UUID".into(), Tag::IntArray(uuid.to_vec()));
+            }
+            let mut id = game.load_mob(tag, None).unwrap();
+            let uuid = game.persist.uuid_of(id).expect("constructor assigns UUID");
+            if let Some(saved_uuid) = saved_uuid {
+                assert_eq!(uuid, saved_uuid, "saved UUID overrides constructor UUID");
+            }
+            for _ in 0..3 {
+                let tag = game.command_target_nbt(Target::Mob(id)).unwrap();
+                assert_eq!(entity_nbt::uuid(&tag), Some(uuid));
+                game.forget_entity(id);
+                game.mobs.retain(|mob| mob.id != id);
+                id = game.load_mob(tag, None).unwrap();
+                assert_eq!(game.persist.uuid_of(id), Some(uuid));
+            }
+        }
+    });
+}
+
 const PIG: &str = "NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b";
 
 fn pig(tag: &str, n: i32, riders: &str) -> String {
