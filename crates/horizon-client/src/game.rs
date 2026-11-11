@@ -1316,8 +1316,8 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        let mut canceled = false;
-        if self.native_authoritative {
+        let mut canceled = self.world.carrier_fences.holds_move(push, destroy);
+        if !canceled && self.native_authoritative {
             let step = direction.normal();
             self.native_piston_pre(mod_api::__private::PistonPreCall {
                 dimension: self.dimension,
@@ -6841,7 +6841,7 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
-        self.player_break_block(pos).map(|_| ())
+        self.carrier_break_block(pos)
     }
     /// `ServerPlayerGameMode.destroyBlock`: whether the block was removed.
     /// A break inside another (a mod breaking more blocks from its
@@ -11850,7 +11850,7 @@ impl Game<'_> {
         self.apply_settings();
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
-        self.load_world_state();
+        self.load_world_state()?;
         self.native_world_opened(dim);
         self.open_saved_portal_levels()
     }

@@ -309,7 +309,7 @@ impl Default for Pass {
 /// The levels not in place, by dimension.
 #[derive(Default)]
 pub(super) struct Levels {
-    parked: HashMap<Dim, Parked>,
+    pub(super) parked: HashMap<Dim, Parked>,
     /// The levels whose open the mods heard (`native_level_load`), each to
     /// be told closed once.
     heard_open: Vec<Dim>,
@@ -325,6 +325,13 @@ impl Levels {
         if !self.requested_saves.contains(&dim) {
             self.requested_saves.push(dim);
         }
+    }
+
+    /// Whether a save of `dim` is still waiting for a tick that admits
+    /// saves (the #2488 gate holds it back).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(in crate::game) fn save_pending(&self, dim: Dim) -> bool {
+        self.requested_saves.contains(&dim)
     }
 
     /// Clear every parked level and dimensions recorded as heard open.
@@ -663,6 +670,9 @@ impl Game<'_> {
     fn swap_level(&mut self, p: &mut Parked) {
         use std::mem::swap;
         swap(&mut self.world, &mut p.world);
+        // The carrier first-use gate belongs to the world, not the
+        // level: a level swap keeps it.
+        self.world.carrier_data_existed_at_open = p.world.carrier_data_existed_at_open;
         swap(&mut self.streaming, &mut p.streaming);
         let mut locator = self.end.locator();
         swap(&mut locator, &mut p.locator);

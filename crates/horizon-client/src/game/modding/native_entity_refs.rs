@@ -616,8 +616,11 @@ impl Game<'_> {
         }
         Ok(world.loaded(pos[0], pos[2]) && world.shape.contains_y(pos[1]))
     }
-    fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.is_logical_server()
+    pub(crate) fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        // A carrier transfer fence holds this cell: every mod write
+        // through the level gate refuses while the operation runs.
+        !self.world.carrier_fences.locks_cell(&pos)
+            && self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && self.world.loaded(pos[0], pos[2])
             && self.world.shape.contains_y(pos[1])
