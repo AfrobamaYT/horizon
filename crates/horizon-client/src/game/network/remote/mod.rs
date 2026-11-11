@@ -9533,8 +9533,7 @@ impl Game<'_> {
         let Some(held) = self.with_hand(hand, |g| g.held().cloned()) else {
             return false;
         };
-        // A mod's claimed item is never used on the server; its own use
-        // starts from the main hand only (`mod_use_start`).
+        // Client-owned input items use mod_use_start instead of server item use.
         if self.native_input.claimant(&held.item).is_some() {
             return false;
         }
@@ -9554,12 +9553,8 @@ impl Game<'_> {
         if self.cooldowns.is_on_cooldown(&group) {
             return false;
         }
-        if let Some(answer) = self.right_click_item(hand, &held) {
-            let success = answer == mod_api::InteractionResult::Success;
-            if success {
-                self.with_hand(hand, Game::swing_arm);
-            }
-            return success;
+        if let Some(handled) = self.client_item_interaction(hand, &held) {
+            return handled;
         }
         // a mod's item used over time starts here too, as the server starts it.
         if self.with_hand(hand, |g| g.start_mod_use(&held)) {
@@ -11866,7 +11861,7 @@ pub(super) fn item_has_use(info: &horizon_client::items::ItemInfo) -> bool {
     id.ends_with("_spear")
         || info.is("minecraft:fishing_rod") // a content mod's rod too
         || info.consumable.is_some()
-        || info.equip_slot.is_some()
+        || (info.equip_slot.is_some() && info.swappable)
         || info.blocks_attacks.is_some()
         || horizon_client::items::bucket_contents(&info.id).is_some()
         || id.ends_with("_boat")
@@ -16910,6 +16905,9 @@ mod tests {
                 let rod = items.get(rod).unwrap();
                 assert!(!super::use_ends_click(rod, gliding), "{}", rod.id);
             }
+            // A carved pumpkin has an equip_slot (head) but is not swappable, so it has no Item.use.
+            let pumpkin = items.get("minecraft:carved_pumpkin").unwrap();
+            assert!(!super::use_ends_click(pumpkin, gliding));
         }
     }
 
