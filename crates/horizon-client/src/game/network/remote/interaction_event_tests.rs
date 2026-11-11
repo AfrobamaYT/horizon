@@ -1088,7 +1088,6 @@ fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
             game.world.set(0, 64, 0, lever).unwrap();
             game.forced_hit = Some(hit());
             let server = LogicalSide::Server;
-            let first = Step::Phase(UsePhase::ItemBeforeBlock, server);
 
             // Every non-PASS Part answer stops before the block, including TRY.
             for (answer, used, swings) in [
@@ -1107,6 +1106,7 @@ fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
                 assert_eq!(use_block(game, false), used);
                 assert_eq!(game.swings_started - before, swings);
                 assert_eq!(game.world.block(0, 64, 0), lever);
+                let first = Step::Phase(UsePhase::ItemBeforeBlock, server);
                 assert_eq!(observer.0.lock().unwrap().steps, [first, Step::FirstPart]);
             }
 
