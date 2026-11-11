@@ -2361,11 +2361,11 @@ pub enum MobEvent {
         target: Who,
     },
     PiglinAlertTarget(undead::PiglinAlert),
-    /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
-    /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
+    /// `HoglinAi.broadcastAttackTarget`: receiver and source player connection.
     HoglinAttackTarget {
         mob: u32,
         target: Who,
+        player: Option<u32>,
     },
     /// `StartHuntingHoglin` for a nearby adult piglin: it takes the hoglin as
     /// its anger target (when it has none) and starts its `HUNTED_RECENTLY` wait.

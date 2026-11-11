@@ -22,6 +22,16 @@ fn route_player_events(
             };
             events.insert(k, *event);
         }
+        // A hoglin broadcast carries the source's player, not the receiving
+        // hoglin's independently selected player.
+        if let MobEvent::HoglinAttackTarget {
+            target: Who::Player,
+            player,
+            ..
+        } = &mut events[k]
+        {
+            *player = conn;
+        }
         // ShulkerBullet stores a target for later projectile ticks. Preserve
         // the selected guest's entity ID instead of the host-player sentinel.
         if let Some(conn) = conn
@@ -833,5 +843,37 @@ mod off_level_tests {
             game.tick_creature_entities().unwrap();
             assert_eq!(game.mob_object(73).unwrap().age, 20);
         });
+    }
+}
+
+#[cfg(test)]
+mod hoglin_routing_tests {
+    use super::*;
+
+    #[test]
+    fn broadcast_keeps_source_player_connection() {
+        for (seen_guest, tag, expected) in [
+            (Some(12), None, Some(12)),
+            (None, None, None),
+            (Some(12), Some(Some(13)), Some(13)),
+            (Some(12), Some(None), None),
+        ] {
+            let event = MobEvent::HoglinAttackTarget {
+                mob: 9001,
+                target: Who::Player,
+                player: None,
+            };
+            let mut events = vec![match tag {
+                Some(conn) => MobEvent::ForPlayer {
+                    conn,
+                    event: Box::new(event),
+                },
+                None => event,
+            }];
+            route_player_events(&mut events, 0, seen_guest, &[], &mut Vec::new(), 9000);
+            assert!(matches!(events[0], MobEvent::HoglinAttackTarget {
+                player, ..
+            } if player == expected));
+        }
     }
 }
