@@ -8,6 +8,8 @@ use std::{rc::Rc, sync::Arc};
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/load_conditions.rs"]
+mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
 #[path = "wire_loopback/use_item_hand.rs"]
@@ -191,6 +193,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 .unwrap();
             let item = event.tags.items(tag).unwrap()[0];
             event.holds = event.tags.is_in_tag(item, tag).unwrap();
+        }
+        fn register_load_conditions(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterLoadConditionsEvent<'_>,
+        ) {
+            load_conditions::register(event.conditions);
         }
         fn register(
             &self,

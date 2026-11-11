@@ -72,6 +72,9 @@ pub(super) struct CodeSwitches {
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    pub(super) load_condition_candidate: Option<horizon_world::conditions::LoadConditions>,
+    pub(super) load_conditions:
+        Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
     pub(super) profession_declarations:
         Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
     /// Saved switches gate the first data inventory while registration keeps

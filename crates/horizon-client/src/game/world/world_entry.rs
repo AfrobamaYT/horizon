@@ -242,7 +242,7 @@ impl Game<'_> {
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
         let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-        let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+        let conditions = self.registered_load_conditions(&inventory)?;
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
             files: &files,
@@ -323,6 +323,7 @@ impl Game<'_> {
             })
             .collect();
         let datapack_candidate = self.datapack_candidate(stack, &conditions)?;
+        conditions.check_errors()?;
         self.mods.datapack_candidate = datapack_candidate;
         Ok((
             Some(WorldTables {
@@ -373,7 +374,7 @@ impl Game<'_> {
                                 // Malformed: the decoder reports it, naming the file.
                                 return Some(bytes);
                             };
-                            if !conditions.allows(&json) {
+                            if !conditions.allows_file(&json, &path) {
                                 return None;
                             }
                             if let Some(object) = json.as_object_mut() {
@@ -660,6 +661,7 @@ impl Game<'_> {
         } else {
             None
         };
+        overlay.conditions.check_errors()?;
         Ok(PreparedWorldReload {
             structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns::load(root),
             tables,

@@ -17,3 +17,5 @@ pub(crate) mod registry_keys;
 pub(crate) mod resource;
 
 pub(crate) mod professions;
+
+pub(crate) mod load_conditions;

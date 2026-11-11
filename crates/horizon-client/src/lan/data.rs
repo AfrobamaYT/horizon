@@ -458,7 +458,7 @@ impl SyncData {
                         .transpose()
                         .map_err(|e| format!("damage type {id}: {e}"))?;
                     let conditions = serde_json::json!({ "neoforge:conditions": conditions.unwrap_or(Value::Null) });
-                    if !overlay.conditions.allows(&conditions) {
+                    if !overlay.conditions.allows_id(&conditions, path, &id) {
                         continue;
                     }
                     let definition =
@@ -488,7 +488,9 @@ impl SyncData {
                     entries.push(((ns.to_owned(), p.to_owned()), v, true));
                 }
             }
-            entries.retain(|(_, value, _)| overlay.conditions.allows(value));
+            entries.retain(|((ns, id), value, _)| {
+                overlay.conditions.allows_parts(value, path, ns, id)
+            });
             // A biome the mods' modifiers changed is not the client's own file any more:
             // its data is sent, as a pack's biome is.
             let modified = match *key == BIOME_REGISTRY {
@@ -753,7 +755,7 @@ impl SyncData {
         let mut own = BTreeMap::new();
         walk(&root.join("tags").join(kind), &mut own);
         for (name, value) in own {
-            if !overlay.conditions.allows(&value) {
+            if !overlay.conditions.allows_tag(&value, kind, &name) {
                 continue;
             }
             Self::add_tag_values(files.entry(qualified(&name)).or_default(), &value);
@@ -761,7 +763,7 @@ impl SyncData {
         for (id, packs) in overlay.tag_kind(kind) {
             for bytes in packs {
                 if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
-                    if !overlay.conditions.allows(&value) {
+                    if !overlay.conditions.allows_tag(&value, kind, &id) {
                         continue;
                     }
                     Self::add_tag_values(files.entry(id.clone()).or_default(), &value);
@@ -871,7 +873,7 @@ impl SyncData {
             }
             let mut files = BTreeMap::new();
             walk(&dir, &mut files);
-            files.retain(|_, value| conditions.allows(value));
+            files.retain(|id, value| conditions.allows_path(value, &dir, id));
             if files.is_empty() {
                 continue;
             }
