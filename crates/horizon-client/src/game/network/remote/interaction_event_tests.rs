@@ -52,6 +52,7 @@ struct Controls {
     block_answer: Option<Answer>,
     item_on_answer: Option<Answer>,
     air_answer: Option<Answer>,
+    air_main_only: bool,
     consume_item: bool,
     /// The block phase takes one item from the hand before its answer.
     take_in_block: bool,
@@ -175,7 +176,9 @@ impl Hooks for Observer {
         state
             .steps
             .push(Step::Air(event.click.side, event.click.hand));
-        if let Some(answer) = state.air_answer {
+        if let Some(answer) = state.air_answer
+            && (!state.air_main_only || event.click.hand == Hand::Main)
+        {
             *event.cancellation_result = answer;
             Flow::Cancel
         } else {
@@ -915,6 +918,22 @@ fn air_event_skips_the_item_and_consuming_results_end_the_click() {
                         observer.0.lock().unwrap().steps,
                         expected,
                         "{side:?} {answer:?}"
+                    );
+                }
+                if client {
+                    *observer.0.lock().unwrap() = Controls {
+                        air_answer: Some(Answer::Pass),
+                        air_main_only: true,
+                        ..Controls::default()
+                    };
+                    game.remote_use(mod_api::InteractionAttempt::Press);
+                    assert!(
+                        game.using.is_some(),
+                        "passing main hand must allow the shield to rise"
+                    );
+                    assert_eq!(
+                        observer.0.lock().unwrap().steps,
+                        [Step::Air(side, Hand::Main), Step::Air(side, Hand::Off)]
                     );
                 }
                 if !client {
