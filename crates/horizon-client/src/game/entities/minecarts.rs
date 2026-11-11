@@ -1589,8 +1589,9 @@ impl Game<'_> {
             }
             CartKind::Tnt => {
                 // MinecartTNT.causeFallDamage ran inside the move.
-                if let Some(speed_sqr) = c.fall_blast.take() {
-                    self.explode_cart(c, speed_sqr);
+                if let Some(speed_sqr) = c.fall_blast.take()
+                    && self.explode_cart(c, speed_sqr)
+                {
                     return false;
                 }
                 // MinecartTNT.tick: the fuse and the collision check are separate.
@@ -1603,8 +1604,9 @@ impl Game<'_> {
                     // explode(horizontalDistanceSqr()): a rising cart's
                     // vertical speed adds nothing.
                     let speed = c.velocity.x * c.velocity.x + c.velocity.z * c.velocity.z;
-                    self.explode_cart(c, speed);
-                    return false;
+                    if self.explode_cart(c, speed) {
+                        return false;
+                    }
                 }
                 // MinecartTNT.tick reads the delta left after AbstractMinecart.tick
                 // (pushes and fluids included). The move zeroed the blocked axes
@@ -1612,8 +1614,9 @@ impl Game<'_> {
                 // them back: a head-on stop leaves nothing, a diagonal one keeps
                 // the free axis (#11380).
                 let speed = c.velocity.horizontal_distance_squared();
-                if tnt_ignites_by_collision(c.horizontal_collision, speed) {
-                    self.explode_cart(c, speed);
+                if tnt_ignites_by_collision(c.horizontal_collision, speed)
+                    && self.explode_cart(c, speed)
+                {
                     return false;
                 }
             }
@@ -1646,11 +1649,16 @@ impl Game<'_> {
         match c.kind {
             CartKind::Rideable if powered => {
                 // Minecart.activateMinecart: ejectPassengers.
-                if self.riding == Some(c.id) {
+                if self.riding == Some(c.id)
+                    && self.native_may_leave(c.id)
+                    && self.riding == Some(c.id)
+                {
                     self.riding = None;
                 }
                 for (_, rider, player) in self.seated_passengers(c.id) {
-                    if !player {
+                    if !player && self.mob_object(rider).is_some_and(|mob| {
+                        !mob.removed && mob.extra.mount == Some(c.id)
+                    }) {
                         self.dismount_mob_from_cart(rider, c);
                     }
                 }
@@ -1702,50 +1710,6 @@ impl Game<'_> {
         {
             self.carts.update(i, |c| c.fuse = 80);
         }
-    }
-    fn explode_cart(&mut self, c: &mut Minecart, speed_sqr: f64) {
-        if !self
-            .ui
-            .rules
-            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
-        {
-            return;
-        }
-        let speed = speed_sqr.sqrt().min(5.0);
-        let r = c.random.next_double();
-        let power = (4.0 + r * 1.5 * speed) as f32;
-        let at = [c.position.x, c.position.y, c.position.z];
-        // The cart is the explosion's source: it is gone before the blast
-        // looks for entities, so it can't hit itself.
-        let silent = self.entity_silent(c.id);
-        if let Some(i) = self.carts.iter().position(|x| x.id == c.id) {
-            self.eject_cart_mobs(i);
-        }
-        self.finish_destroyed_vehicle_riders(c.id, c.position.y);
-        self.release_vehicle_container(c.id);
-        self.carts.retain(|x| x.id != c.id);
-        // ExplosionInteraction.TNT: the tnt_explosion_drop_decay rule.
-        let interaction =
-            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY);
-        // MinecartTNT.isPrimed (fuse > -1): a cart that ran into a wall or
-        // fell unprimed blows rails up like any blast.
-        self.combat.rail_proof_blast = c.fuse >= 0;
-        self.combat.explosion_in_water = self.bounds_in_water(c.bounds());
-        self.combat.explosion_direct = Some(c.id);
-        let _ = self.with_hive_emptying_blast(|g| {
-            g.server_explode_from(
-                at,
-                power,
-                interaction,
-                false,
-                super::explosion::ExplosionSource::default()
-                    .with_silence(silent)
-                    .with_entity(c.id, "minecraft:tnt_minecart"),
-            )
-        });
-        self.combat.explosion_direct = None;
-        self.combat.explosion_in_water = false;
-        self.combat.rail_proof_blast = false;
     }
     /// `AbstractMinecart.push` from each player walking into a cart
     /// (`LivingEntity.pushEntities`): the window's player and every server
@@ -2034,7 +1998,9 @@ impl Game<'_> {
     pub(super) fn eject_cart_mobs(&mut self, i: usize) {
         let (id, y) = (self.carts[i].id, self.carts[i].position.y);
         for (_, rider, player) in self.seated_passengers(id) {
-            if player {
+            if player
+                || self.mob_object(rider).is_none_or(|mob| mob.removed || mob.extra.mount != Some(id))
+            {
                 continue;
             }
             self.dismount_cart_mob_at(rider, y);
@@ -2106,9 +2072,7 @@ impl Game<'_> {
                     game.store_cart_back(i, c);
                     due
                 } else {
-                    game.eject_cart_mobs(i);
-                    game.release_vehicle_container(id);
-                    game.carts.remove(i);
+                    // explode_cart owns destruction and its passenger callbacks.
                     false
                 }
             });
@@ -2234,23 +2198,24 @@ impl Game<'_> {
         let result = self.with_entity_held_out(id, |game| {
             let mut c = game.carts[i].clone();
             let alive = game.tick_cart(&mut c, intent, i, &mut CartIndex::default());
-            if let Some(p) = game.player.as_mut() {
+            if alive && game.riding == Some(c.id)
+                && let Some(p) = game.player.as_mut()
+            {
                 game.previous_position = p.position;
                 p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
                 p.velocity = Vec3::ZERO;
                 p.fall_distance = 0.0;
             }
             let Some(i) = game.carts.iter().position(|x| x.id == c.id) else {
-                game.riding = None;
+                if alive && game.riding == Some(id)
+                    && !game.persist.removed_vehicles.contains_key(&id)
+                {
+                    game.riding = None;
+                }
                 return None;
             };
             if alive {
                 game.store_cart_back(i, c);
-            } else {
-                game.eject_cart_mobs(i);
-                game.release_vehicle_container(c.id);
-                game.carts.remove(i);
-                game.riding = None;
             }
             Some((i, alive))
         });
@@ -2656,16 +2621,10 @@ impl Game<'_> {
             return;
         }
         if burning && self.carts[i].kind == CartKind::Tnt {
-            let id = self.carts[i].id;
-            self.eject_cart_mobs(i);
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            let mut c = self.carts[i].clone();
+            if self.explode_cart(&mut c, arrow_velocity.length_squared()) {
                 return;
-            };
-            self.finish_destroyed_vehicle_riders(id, self.carts[i].position.y);
-            self.release_vehicle_container(id);
-            let mut c = self.carts.remove(i);
-            self.explode_cart(&mut c, arrow_velocity.length_squared());
-            return;
+            }
         }
         self.hurt_cart(i, damage, creative, false);
     }

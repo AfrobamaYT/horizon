@@ -1098,8 +1098,9 @@ impl Game<'_> {
         );
         candidates.extend(self.natural_knot_ids().into_iter().map(Target::Knot));
         // `isRemoved` from a mod's call on, though the sweep has not taken it out.
-        if !self.persist.removals.is_empty() {
-            candidates.retain(|t| !self.persist.removals.contains(t));
+        if !self.persist.removals.is_empty() || !self.persist.destroying_vehicles.is_empty() {
+            candidates.retain(|t| !self.persist.removals.contains(t)
+                && !self.persist.destroying_vehicles.contains(t));
         }
         candidates
     }
@@ -2632,25 +2633,9 @@ impl Game<'_> {
                 self.item_frames.retain(|f| f.id != id);
             }
             Target::Painting(id) => self.paintings.retain(|p| p.id != id),
-            Target::Boat(id) => {
-                // AbstractBoat.remove: a killed boat drops its lead.
-                self.dismount_killed_boat(id);
-                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
-                    self.release_vehicle_container(id);
-                    let b = self.boats.remove(i);
-                    // AbstractChestBoat.remove, after the live menu writes
-                    // back its slots.
-                    self.drop_vehicle_contents(b.position.components(), &b.items);
-                    self.boat_removed(&b);
-                }
-            }
-            Target::Cart(id) => {
-                self.dismount_killed_cart(id);
-                self.release_vehicle_container(id);
-                if let Some(i) = self.carts.iter().position(|c| c.id == id) {
-                    let c = self.carts.remove(i);
-                    // AbstractMinecartContainer.remove.
-                    self.drop_vehicle_contents(c.position.components(), &c.items);
+            Target::Boat(_) | Target::Cart(_) => {
+                if !self.kill_vehicle_object(t) {
+                    return;
                 }
             }
             Target::Other(id) => {

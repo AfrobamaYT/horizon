@@ -222,6 +222,7 @@ macro_rules! define_resident_access {
             // incorrectly evict reversible conversion rows or report Taken.
             source.map(|mut source| {
                 source.value.1 &= !$this.persist.removals.contains(&source.value.0);
+                source.value.1 &= !$this.persist.destroying_vehicles.contains(&source.value.0);
                 source
             })
         }

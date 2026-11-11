@@ -251,6 +251,11 @@ impl Game<'_> {
         let mark = self.persist.joined_seq;
         let mut best: Option<(Slot, u32, JoinSeq)> = None;
         let mut offer = |slot: Slot, id: u32, seq: JoinSeq| {
+            if self.persist.removals.iter().chain(self.persist.destroying_vehicles.iter()).any(|target| {
+                matches!(*target, super::commands::Target::Boat(n) | super::commands::Target::Cart(n) if n == id)
+            }) {
+                return;
+            }
             if seq > mark && best.is_none_or(|(_, _, previous)| seq < previous) {
                 best = Some((slot, id, seq));
             }

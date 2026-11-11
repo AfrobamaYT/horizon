@@ -1826,6 +1826,9 @@ impl Game<'_> {
         creative: bool,
     ) -> Option<bool> {
         let id = self.boats[i].id;
+        if self.persist.destroying_vehicles.contains(&super::commands::Target::Boat(id)) {
+            return Some(true);
+        }
         let mut cancel = false;
         self.native_vehicle_damage("boat", &mut damage, &mut cancel);
         if cancel {
@@ -1851,6 +1854,23 @@ impl Game<'_> {
         });
         if destroyed {
             self.native_vehicle_destroy("boat", at);
+            if !self.boats.iter().any(|b| {
+                b.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Boat(id))
+            }) {
+                return Some(true);
+            }
+            if self.with_destroying_vehicle(super::commands::Target::Boat(id), |game| {
+                game.dismount_destroyed_vehicle_players(id);
+                if let Some(i) = game.boats.iter().position(|boat| boat.id == id) {
+                    game.eject_boat_mobs(i, true);
+                }
+            }).is_none() {
+                return Some(true);
+            }
             let Some(i) = self.boats.iter().position(|b| {
                 b.id == id
                     && !self
@@ -1860,17 +1880,6 @@ impl Game<'_> {
             }) else {
                 return Some(true);
             };
-            self.eject_boat_mobs(i, true);
-            let Some(i) = self.boats.iter().position(|b| {
-                b.id == id
-                    && !self
-                        .persist
-                        .removals
-                        .contains(&crate::game::commands::Target::Boat(id))
-            }) else {
-                return Some(true);
-            };
-            self.finish_destroyed_vehicle_riders(id, self.boats[i].position.y);
             self.release_vehicle_container(id);
             let b = self.boats.remove(i);
             // `AbstractChestBoat.remove` spills the chest through
@@ -1913,6 +1922,7 @@ impl Game<'_> {
                     self.drop_vehicle_contents(at, &empty);
                 }
             }
+            self.retain_removed_vehicle(id, super::persist::RemovedVehicle::Boat(b));
         }
         Some(destroyed)
     }
