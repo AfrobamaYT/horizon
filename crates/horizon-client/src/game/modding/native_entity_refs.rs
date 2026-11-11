@@ -526,7 +526,9 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
-        self.server_destroy_block_progress(breaker, pos, progress);
+        self.after_commit(super::transactions::After::BreakProgress(
+            breaker, pos, progress,
+        ));
         true
     }
     /// `Level.sendBlockUpdated`: queue the block at `pos` to be sent to the clients again.

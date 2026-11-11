@@ -137,6 +137,8 @@ pub(super) enum After {
     Updated(Pos),
     /// `Level.sendBlockUpdated` alone, without marking the save dirty.
     NotifyClients(Pos),
+    /// `ServerLevel.destroyBlockProgress`: breaker id, position, stage. Sent once, at the root commit.
+    BreakProgress(i32, [i32; 3], i32),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// Deferred interaction effects, replayed in the same root-commit order.
@@ -460,6 +462,9 @@ impl Game<'_> {
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
+            After::BreakProgress(breaker, pos, progress) => {
+                self.server_destroy_block_progress(breaker, pos, progress);
+            }
             After::Effect(effect) => match effect {
                 DeferredEffect::CustomStat {
                     player,
