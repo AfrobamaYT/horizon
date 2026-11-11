@@ -203,3 +203,76 @@ fn death_weapon_harming_potion_does_not_read_thrower_sword() {
         game.mob_died(&dead);
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_weapon_different_killing_source_discards_projectile() {
+    if isolated() {
+        return;
+    }
+    fixture(None, |game| {
+        game.mobs.push(victim(game));
+        assert!(hit(
+            game,
+            &arrow(Some(ItemStack::new("minecraft:bow", 1))),
+            1.0
+        ));
+        assert!(game.combat.death_weapons.contains_key(&70));
+        let mut dead = game.mobs[0].clone();
+        dead.last_damage = Some((Damage::of(DamageKind::Fall), i64::from(dead.age) + 1));
+        dead.health = 0.0;
+        game.mob_died(&dead);
+        assert!(!game.combat.death_weapons.contains_key(&70));
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_weapon_without_subscriber_does_not_capture() {
+    if isolated() {
+        return;
+    }
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        mod_api::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+            game.mobs.push(victim(game));
+            assert!(hit(
+                game,
+                &arrow(Some(ItemStack::new("minecraft:bow", 1))),
+                1.0
+            ));
+            assert!(game.combat.death_weapons.is_empty());
+        });
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_weapon_removal_and_vehicle_transfer_clear_capture() {
+    if isolated() {
+        return;
+    }
+    fixture(None, |game| {
+        for transfer in [false, true] {
+            game.mobs.clear();
+            game.mobs.push(victim(game));
+            assert!(hit(
+                game,
+                &arrow(Some(ItemStack::new("minecraft:bow", 1))),
+                1.0
+            ));
+            assert!(game.combat.death_weapons.contains_key(&70));
+            if transfer {
+                let state = game.take_transferred_entity_state(70);
+                game.detach_entity(70);
+                assert!(!game.combat.death_weapons.contains_key(&70));
+                game.adopt_transferred_entity_state(70, state);
+            } else {
+                game.forget_entity(70);
+            }
+            assert!(!game.combat.death_weapons.contains_key(&70));
+        }
+        let mut dead = victim(game);
+        dead.health = 0.0;
+        game.mob_died(&dead);
+    });
+}
