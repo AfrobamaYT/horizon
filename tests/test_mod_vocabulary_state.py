@@ -2,16 +2,35 @@
 import sys
 from pathlib import Path
 import unittest
+import tempfile
 from unittest import mock
 
 with mock.patch.object(sys, 'path', [*sys.path, str(Path(__file__).resolve().parents[1] / 'tools')]):
-    from check_mod_vocabulary_state import declarations, violations, unsafe_violations, expansion_violations
+    from check_mod_vocabulary_state import declarations, violations, unsafe_violations, expansion_violations, symlink_violations
 
 
 class VocabularyStateGate(unittest.TestCase):
     def test_macro_metavariable_cannot_hide_a_new_static(self):
         mutant = 'macro_rules! slot { ($n:ident) => { static $n: AtomicBool = AtomicBool::new(false); }; } slot!(EXTRA);'
         self.assertTrue(expansion_violations({'macro.rs': mutant}))
+
+    def test_nested_inline_path_refuses_the_in_set_decoy(self):
+        for module in ('outer', 'r#outer'):
+            source = f'mod {module} {{ #[path = "socket.rs"] mod hidden; }}'
+            errors = expansion_violations({'lib.rs': source, 'socket.rs': ''})
+            self.assertTrue(any('inline module directory' in error for error in errors))
+
+    def test_directory_and_file_symlinks_are_refused_before_scanning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'src'
+            outside = Path(temporary) / 'outside'
+            root.mkdir()
+            outside.mkdir()
+            (outside / 'socket.rs').write_text('static HIDDEN: AtomicBool = make();')
+            (root / 'outer').symlink_to(outside, target_is_directory=True)
+            (root / 'socket.rs').symlink_to(outside / 'socket.rs')
+            self.assertEqual(len(symlink_violations(root)), 2)
+            self.assertTrue(all('descendant modules can escape' in error for error in symlink_violations(root)))
 
     def test_path_module_cannot_escape_the_scanned_source_set(self):
         for source in ('#[path = "../hidden.rs"] mod hidden;', '#[path = "/outside/hidden.rs"] mod hidden;', 'mod hidden;'):

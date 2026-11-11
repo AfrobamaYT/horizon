@@ -80,6 +80,12 @@ def unsafe_violations(files: dict[str, str]) -> list[str]:
     return errors
 
 
+def symlink_violations(source_root: Path) -> list[str]:
+    """Do not let Rust descend a directory that the source scan never visits."""
+    return [f'{path.relative_to(source_root)}: symlinks are refused because descendant modules can escape the scanned source tree'
+            for path in source_root.rglob('*') if path.is_symlink()]
+
+
 def expansion_violations(files: dict[str, str], source_root: Path = SOURCE) -> list[str]:
     """Refuse state-producing macro definitions and unchecked include boundaries.
 
@@ -109,7 +115,12 @@ def expansion_violations(files: dict[str, str], source_root: Path = SOURCE) -> l
                 choices = [directory / (module['name'] + '.rs'), directory / module['name'] / 'mod.rs']
                 if not any((source_root / child).resolve() in scanned for child in choices):
                     errors.append(f'{path}: module {module["name"]} targets source outside the scanned vocabulary set')
+        inline_modules = [(module.start(), item_end(code, module.start())[0])
+                          for module in re.finditer(r'(?<![\w#])\bmod\b[^;{]*\{', code)]
         for attr in re.finditer(r'#\[\s*path\s*=', code):
+            if any(start < attr.start() < end for start, end in inline_modules):
+                errors.append(f'{path}: nested inline-module path attributes are refused because Rust resolves them from the inline module directory')
+                continue
             literal = re.match(r'#\[\s*path\s*=\s*"([^"\n]+)"\s*\]', source[attr.start():])
             target = (source_root / Path(path).parent / literal[1]).resolve() if literal else None
             if target not in scanned:
@@ -184,8 +195,11 @@ listed below. Unconditional unit-test items and explicitly test-only module file
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
 exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
 include boundaries are refused. Path modules must target the scanned vocabulary source set;
-generated module declarations are checked against its canonical file paths as well. Conditional
-path routing and module-declaring generated macros are refused instead of being skipped.
+generated module declarations are checked against its canonical file paths as well. Source symlinks
+are refused, including directory links that recursive scans do not enter. Path attributes nested
+inside inline modules are refused because Rust resolves them from an inline-module directory, not
+the file's directory. Conditional path routing and module-declaring generated macros are refused
+instead of being skipped.
 Every listed generated OUT_DIR input is token-checked before write by
 `horizon-mod-api-gen`: no unlisted static declarations (including macro metavariables), unsafe,
 unsafe lint suppression, or further includes. The generated immutable ABI hash is checked against
@@ -215,6 +229,11 @@ def main() -> int:
     for name, entry in allowed.items():
         if not entry.get('reason') or not entry.get('category'):
             parser.error(f"{name} needs an ownership category and reason")
+    links = symlink_violations(args.source)
+    if links:
+        for error in links:
+            print(error)
+        return 1
     files = {p.relative_to(args.source).as_posix(): p.read_text() for p in args.source.rglob('*.rs')}
     errors = violations(files, allowed) + unsafe_violations(files) + expansion_violations(files, args.source)
     expected_doc = inventory_document(allowed)

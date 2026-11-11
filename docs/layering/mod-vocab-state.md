@@ -21,8 +21,11 @@ listed below. Unconditional unit-test items and explicitly test-only module file
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
 exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
 include boundaries are refused. Path modules must target the scanned vocabulary source set;
-generated module declarations are checked against its canonical file paths as well. Conditional
-path routing and module-declaring generated macros are refused instead of being skipped.
+generated module declarations are checked against its canonical file paths as well. Source symlinks
+are refused, including directory links that recursive scans do not enter. Path attributes nested
+inside inline modules are refused because Rust resolves them from an inline-module directory, not
+the file's directory. Conditional path routing and module-declaring generated macros are refused
+instead of being skipped.
 Every listed generated OUT_DIR input is token-checked before write by
 `horizon-mod-api-gen`: no unlisted static declarations (including macro metavariables), unsafe,
 unsafe lint suppression, or further includes. The generated immutable ABI hash is checked against
