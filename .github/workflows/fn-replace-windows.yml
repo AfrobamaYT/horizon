@@ -21,7 +21,8 @@ jobs:
           persist-credentials: false
       - name: The launcher's pinned Rust
         id: rust
-        run: echo "version=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";$/\1/p' launcher/src/rust_toolchain.rs)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";$/\1/p' launcher/src/rust_toolchain.rs)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}-x86_64-pc-windows-gnu
