@@ -41,11 +41,9 @@ impl Game<'_> {
         spawn: [f64; 3],
     ) -> Option<LanHost> {
         loop {
-            let Some(back) = horizon_client::spans::time("lan_events", || {
+            let back = horizon_client::spans::time("lan_events", || {
                 self.lan_process_events(host, events, entities, spawn)
-            }) else {
-                return None;
-            };
+            })?;
             host = back;
             if !host.hub.packets_paused() {
                 return Some(host);
