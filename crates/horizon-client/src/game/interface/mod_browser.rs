@@ -208,8 +208,10 @@ mod tests {
             running: Some(receive),
             index: None,
         };
-        let mut ui = ModBrowser::default();
-        ui.status = Status::Loading;
+        let mut ui = ModBrowser {
+            status: Status::Loading,
+            ..ModBrowser::default()
+        };
         let mut mods = ModList::default();
         assert_eq!(jobs.poll(&mut ui, &mut mods, false), (false, false));
         send.send(Finished::Index(Err("offline".into()))).unwrap();
