@@ -732,6 +732,92 @@ impl Game<'_> {
         true
     }
 
+    /// Carry a general entity tree into another level
+    /// (`Entity.teleportCrossDimension` for `Target::General`): the whole
+    /// tree is validated before anything of it moves — the destination may
+    /// not already hold a general row of one of its UUIDs — then each row
+    /// leaves the source list and joins the destination's, its identity
+    /// (id, UUID, attachments) unchanged but its join identity new, so no
+    /// handle of the source level reaches it again. A failure after the
+    /// rows left — the destination level cannot open — puts every row back
+    /// in the source, at its place and with the join identity it had; a
+    /// failure before leaves the tree untouched. The root lands at `at`;
+    /// a rider keeps its own position until the tree's own tick moves it.
+    pub(in crate::game) fn teleport_general_tree_across(
+        &mut self,
+        root_id: u32,
+        destination: crate::game::Dim,
+        at: [f64; 3],
+    ) -> Result<bool, String> {
+        let source = self.dim;
+        if source == destination {
+            return Ok(false);
+        }
+        // The whole tree, root first, each row exactly once: a mount link
+        // this walk cannot reach from the root is not the tree's.
+        let rows = &self.resident_entities.general.rows;
+        let Some(root) = rows
+            .iter()
+            .position(|row| row.id == root_id && row.mount.is_none())
+        else {
+            return Ok(false);
+        };
+        let mut tree = vec![root];
+        let mut cursor = 0;
+        while cursor < tree.len() {
+            let vehicle = rows[tree[cursor]].id;
+            for (index, row) in rows.iter().enumerate() {
+                if row.mount == Some(vehicle) && !tree.contains(&index) {
+                    tree.push(index);
+                }
+            }
+            cursor += 1;
+        }
+        // Validate the destination before anything moves: no general row of
+        // the tree's UUIDs may already live there.
+        let uuids: HashSet<[i32; 4]> = tree.iter().map(|&index| rows[index].uuid).collect();
+        if self
+            .levels
+            .parked_general_holds_any_uuid(destination, &uuids)
+        {
+            return Err(format!(
+                "destination {} already holds a general entity of the tree's uuids",
+                destination.id()
+            ));
+        }
+        // Extract: highest index first, each row with the place it left.
+        let mut extracted: Vec<(usize, GeneralRow)> = Vec::new();
+        for &index in tree.iter().rev() {
+            extracted.push((index, self.resident_entities.general.rows.remove(index)));
+        }
+        extracted.reverse();
+        // The removals are leaves of the source level
+        // (`PersistentEntitySectionManager.stopTracking`): flush them there.
+        self.native_leaves_flush();
+        // The only failing step: if the destination cannot open, every row
+        // returns to the source, at its place and with its join identity.
+        if let Err(error) = self.enter_level(destination) {
+            for (index, row) in extracted {
+                self.resident_entities.general.rows.insert(index, row);
+            }
+            return Err(format!("{error}"));
+        }
+        // The tree joins the destination: identities unchanged, join
+        // identity new (a fresh admission — no source handle reaches it).
+        for (_, mut row) in extracted {
+            row.join = JoinSeq::UNJOINED;
+            if row.id == root_id {
+                row.position = Vec3::new(at[0], at[1], at[2]);
+                row.previous = row.position;
+            }
+            self.resident_entities.general.rows.push(row);
+        }
+        if let Err(error) = self.enter_level(source) {
+            log::error!("could not reopen {}: {error}", source.id());
+        }
+        Ok(true)
+    }
+
     /// Load one saved general entity tree whose root kind the frozen
     /// registry holds: tag → record → every check, then the whole tree
     /// publishes through the same join boundary a fresh spawn takes. A

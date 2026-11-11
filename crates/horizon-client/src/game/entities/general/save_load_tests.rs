@@ -420,3 +420,131 @@ fn quarantine_chunk_limit_skips_past_256() {
         assert_eq!(game.others.len(), limits::QUARANTINE_CHUNK_LIMIT + 1);
     });
 }
+
+/// The transfer load path (`load_listed_transferred`) accepts a general
+/// tree: what arrives with a transfer token is installed as the same
+/// logical entity — its runtime state (attachments map) carried over to
+/// the new id — instead of the old "refusing unsupported transferred
+/// entity kind".
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn transferred_general_tree_loads_as_the_same_logical_entity() {
+    with_types(|game| {
+        game.load_listed(
+            "mymod:robot",
+            None,
+            None,
+            record_tag("mymod:robot", [1, 2, 3, 4], b"", Vec::new()),
+        )
+        .unwrap();
+        let row = game.resident_entities.general.rows.remove(0);
+        let state = game.take_transferred_entity_state(row.id);
+        game.detach_entity(row.id);
+        // The transferred arrival: a fresh id, the same UUID, its runtime
+        // state (the attachments map, even empty) adopted, not refused.
+        game.spawn_loaded_entity(
+            (0, 0),
+            record_tag("mymod:robot", [1, 2, 3, 4], b"", Vec::new()),
+            Some(state),
+        );
+        let rows = &game.resident_entities.general.rows;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
+        assert_ne!(rows[0].id, row.id);
+        assert!(game.entity_attachments.contains_key(&rows[0].id));
+    });
+}
+
+/// A tree travels between dimensions with its riders: the source ends with
+/// zero rows and stale ids, the destination holds the same tree — same
+/// UUIDs, same mount links — with fresh join identities, the root placed.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn general_tree_travels_to_another_dimension_with_its_riders() {
+    use crate::game::entity_residency::SlotAccess;
+    use mod_api::DimensionKey;
+    use std::num::NonZeroU32;
+    with_types(|game| {
+        game.reset_entity_residency();
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        let (old_root, old_rider, old_join) = (rows[0].id, rows[1].id, rows[0].join);
+        assert!(
+            game.teleport_general_tree_across(
+                old_root,
+                crate::game::Dim::Nether,
+                [8.5, 100.0, 8.5]
+            )
+            .unwrap()
+        );
+        // The source keeps nothing; its stale ids no longer resolve.
+        assert!(game.resident_entities.general.rows.is_empty());
+        let id = |value: u32| NonZeroU32::new(value).unwrap();
+        for gone in [old_root, old_rider] {
+            assert!(matches!(
+                game.with_resident_slot(&DimensionKey::OVERWORLD, id(gone), |_| panic!(
+                    "a stale id resolved"
+                )),
+                SlotAccess::Missing
+            ));
+        }
+        // The destination holds the same tree, freshly admitted.
+        game.enter_level(crate::game::Dim::Nether).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
+        assert_eq!(rows[1].uuid, [9, 9, 9, 9]);
+        assert_eq!(rows[1].mount, Some(rows[0].id));
+        assert_eq!(rows[0].position, Vec3::new(8.5, 100.0, 8.5));
+        assert!(rows[0].join.is_joined() && rows[0].join != old_join);
+        assert!(matches!(
+            game.with_resident_slot(&DimensionKey::NETHER, id(rows[0].id), |_| true),
+            SlotAccess::Done(true)
+        ));
+    });
+}
+
+/// A refused transfer returns the whole tree: a destination row of one of
+/// the tree's UUIDs refuses before anything moves, and the source keeps
+/// every row at its place with its join identity.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn refused_dimension_transfer_returns_the_whole_tree() {
+    with_types(|game| {
+        // Seed the destination with a row of the travelling UUID.
+        game.enter_level(crate::game::Dim::Nether).unwrap();
+        game.load_listed(
+            "mymod:robot",
+            None,
+            None,
+            record_tag("mymod:robot", [1, 2, 3, 4], b"", Vec::new()),
+        )
+        .unwrap();
+        game.enter_level(crate::game::Dim::Overworld).unwrap();
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let before: Vec<_> = game
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .map(|row| (row.id, row.uuid, row.join, row.position))
+            .collect();
+        let root_id = game.resident_entities.general.rows[0].id;
+        assert!(
+            game.teleport_general_tree_across(root_id, crate::game::Dim::Nether, [8.5, 100.0, 8.5])
+                .is_err()
+        );
+        let after: Vec<_> = game
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .map(|row| (row.id, row.uuid, row.join, row.position))
+            .collect();
+        assert_eq!(before, after, "the tree returns exactly as it stood");
+    });
+}
