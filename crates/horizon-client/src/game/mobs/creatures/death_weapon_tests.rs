@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 // Native mod registries are process-global. Each parallel test owns a fresh process
 // and temporary working directory, while retaining the normal test runner parallelism.
-fn isolated() -> bool {
+pub(super) fn isolated() -> bool {
     const FLAG: &str = "HORIZON_DEATH_WEAPON_CHILD";
     if std::env::var_os(FLAG).is_some() {
         return false;
@@ -38,10 +38,10 @@ fn isolated() -> bool {
     true
 }
 
-struct WeaponProbe {
-    expected: Option<mod_api::ItemStack>,
-    swap: Option<mod_api::ItemStack>,
-    seen: Arc<Mutex<usize>>,
+pub(super) struct WeaponProbe {
+    pub(super) expected: Option<mod_api::ItemStack>,
+    pub(super) swap: Option<mod_api::ItemStack>,
+    pub(super) seen: Arc<Mutex<usize>>,
 }
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for WeaponProbe {
@@ -177,8 +177,11 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
                     .unwrap()
                     .extra
                     .set_main_hand_stack(Some(ItemStack::new("minecraft:stick", 1)));
-                // Use the production projectile path before the projectile leaves the world.
-                game.shot_damage(&mut shot, Some("minecraft:zombie"), Who::Mob(70));
+                // Commit through the same accepted-damage path as real projectile impacts.
+                victim.health = 20.0;
+                game.mobs.push(victim);
+                assert!(game.damage_projectile_with_weapon(&shot, 70, 100.0, damage, None));
+                victim = game.mobs.iter().find(|mob| mob.id == 70).unwrap().clone();
                 drop(shot);
             }
             game.mob_died(&victim);

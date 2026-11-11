@@ -151,27 +151,15 @@ impl LootDrops<'_> {
     /// Vanilla's `DamageSource.getWeaponItem` for this death. Arrows return the
     /// bow or crossbow recorded when fired; tridents return their own original
     /// stack, preserving components even after the shooter changes hands.
-    /// Melee reads the attacker's weapon when called: a player's recorded
+    /// Otherwise reads the direct entity's weapon when called: a player's recorded
     /// auto-spin stack during Riptide, otherwise the live main hand.
     /// Returns None for non-death drops or an absent or unavailable weapon.
     pub fn weapon_item(&self, host: &dyn Host) -> Option<ItemStack> {
         let source = self.damage_source?;
-        if matches!(source.damage_type, "minecraft:arrow" | "minecraft:trident") {
-            return self.weapon.cloned();
+        if let Some(weapon) = self.weapon {
+            return Some(weapon.clone());
         }
-        if matches!(
-            source.damage_type,
-            "minecraft:fireball"
-                | "minecraft:unattributed_fireball"
-                | "minecraft:wither_skull"
-                | "minecraft:mob_projectile"
-                | "minecraft:thrown"
-                | "minecraft:wind_charge"
-                | "minecraft:fireworks"
-        ) {
-            return None;
-        }
-        let entity = host.entity(u32::try_from(source.causing).ok().filter(|id| *id != 0)?)?;
+        let entity = host.entity(u32::try_from(source.direct).ok().filter(|id| *id != 0)?)?;
         let living = host.living(entity)?;
         backend_of(host)?.living_weapon_item(living)
     }

@@ -92,6 +92,7 @@ pub(super) enum Finalized {
 mod death_source;
 mod death_weapon;
 pub(in crate::game) use death_source::death_hurt_source;
+pub(in crate::game) use death_weapon::AcceptedWeapon;
 
 /// A dying entity whose items drop (`LivingDropsEvent`).
 pub(super) struct DyingDrops<'a> {
@@ -5680,15 +5681,7 @@ impl Game<'_> {
                         [p.previous.x, p.previous.y, p.previous.z],
                         "minecraft:trident",
                     ),
-                    Who::Mob(id) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
-                        m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self, scoped),
-                            amount,
-                            source,
-                            aim,
-                            [p.velocity.x, p.velocity.z],
-                        )
-                    }),
+                    Who::Mob(id) => self.damage_projectile_with_weapon(p, id, amount, source, aim),
                 };
                 let outcome = if hurt {
                     self.shot_post_attack(p, who, "minecraft:trident", "minecraft:trident");
@@ -5757,15 +5750,7 @@ impl Game<'_> {
                         hurt
                     }
                     Who::Mob(id) => {
-                        let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
-                            m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, scoped),
-                                amount,
-                                source,
-                                aim,
-                                [p.velocity.x, p.velocity.z],
-                            )
-                        });
+                        let hurt = self.damage_projectile_with_weapon(p, id, amount, source, aim);
                         dodged = !hurt
                             && self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
                                 m.species() == Species::Enderman

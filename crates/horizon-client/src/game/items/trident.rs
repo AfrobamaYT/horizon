@@ -1056,13 +1056,9 @@ impl Game<'_> {
                             .map_or(self.own_entity_id() as u32, |s| s.0);
                         let damage =
                             self.evaluate_weapon_damage(&t.stack, Some((attacker, id)), ctx, 8.0);
-                        self.capture_projectile_weapon(
-                            Who::Mob(id),
-                            "minecraft:trident",
-                            Some(&t.stack),
-                        );
                         t.dealt_damage = true;
                         let mut hurt_at = None;
+                        let mut accepted_source = None;
                         let aim = self.attacker_aim(Some(Who::Player));
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let from = Some([t.position.x, t.position.y, t.position.z]);
@@ -1079,8 +1075,12 @@ impl Game<'_> {
                                 [t.velocity.x, t.velocity.z],
                             );
                             if hurt {
+                                accepted_source = m.last_damage;
                                 hurt_at = Some([m.position.x, m.position.y, m.position.z]);
                             }
+                        }
+                        if let Some(source) = accepted_source {
+                            self.capture_projectile_weapon(id, source, Some(&t.stack));
                         }
                         self.thrower_dealt_absorbed(t.guest);
                         // ThrownTrident.onHitEntity on a boat or minecart:

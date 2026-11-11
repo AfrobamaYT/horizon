@@ -1,20 +1,75 @@
 //! Recorded projectile weapons and the death-loot producer.
 use super::*;
 
+/// A weapon belonging to the victim's committed last damage source.
+pub(in crate::game) struct AcceptedWeapon {
+    source: (Damage, i64),
+    stack: Option<ItemStack>,
+}
+impl AcceptedWeapon {
+    fn belongs_to(&self, damage: Option<(Damage, i64)>) -> bool {
+        damage.is_some_and(|(source, at)| {
+            at == self.source.1
+                && source.kind == self.source.0.kind
+                && source.attacker == self.source.0.attacker
+                && source.from == self.source.0.from
+                && source.attacker_species == self.source.0.attacker_species
+        })
+    }
+}
+
 impl Game<'_> {
     pub(in crate::game) fn capture_projectile_weapon(
         &mut self,
-        who: Who,
-        kind: &'static str,
+        id: u32,
+        source: (Damage, i64),
         stack: Option<&ItemStack>,
     ) {
         if mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            let id = match who {
-                Who::Mob(id) => id,
-                Who::Player => self.own_entity_id() as u32,
-            };
-            self.combat.death_weapons.insert(id, (kind, stack.cloned()));
+            self.combat.death_weapons.insert(
+                id,
+                AcceptedWeapon {
+                    source,
+                    stack: stack.cloned(),
+                },
+            );
         }
+    }
+
+    /// Commit the weapon only after hurtServer committed this projectile's source.
+    pub(in crate::game) fn damage_projectile_with_weapon(
+        &mut self,
+        projectile: &Projectile,
+        id: u32,
+        amount: f32,
+        source: Damage,
+        aim: Option<horizon_client::mobs::Aim>,
+    ) -> bool {
+        let (hurt, accepted) =
+            self.mobs
+                .iter_mut()
+                .find(|mob| mob.id == id)
+                .map_or((false, None), |mob| {
+                    let hurt = mob.damage_projectile(
+                        crate::game::entity::damage_level_of!(self, scoped),
+                        amount,
+                        source,
+                        aim,
+                        [projectile.velocity.x, projectile.velocity.z],
+                    );
+                    (hurt, hurt.then_some(mob.last_damage).flatten())
+                });
+        if let Some(accepted) = accepted {
+            let stack = projectile.arrow.as_ref().and_then(|arrow| {
+                if matches!(projectile.kind, ProjectileKind::Trident) {
+                    Some(&arrow.pickup_item)
+                } else {
+                    arrow.fired_from_weapon.as_ref()
+                }
+            });
+            self.capture_projectile_weapon(id, accepted, stack);
+        }
+        hurt
     }
     /// What an arrow or a thrown trident hits an entity of type `victim`
     /// for (`AbstractArrow.onHitEntity`, `ThrownTrident.onHitEntity`): a
@@ -33,20 +88,11 @@ impl Game<'_> {
         };
         let weapon = shot.arrow.as_ref().and_then(|a| {
             if trident {
-                Some(a.pickup_item.clone())
+                Some(&a.pickup_item)
             } else {
-                a.fired_from_weapon.clone()
+                a.fired_from_weapon.as_ref()
             }
         });
-        self.capture_projectile_weapon(
-            who,
-            if trident {
-                "minecraft:trident"
-            } else {
-                "minecraft:arrow"
-            },
-            weapon.as_ref(),
-        );
         let Some(weapon) = weapon else {
             return if trident {
                 base
@@ -104,7 +150,7 @@ impl Game<'_> {
                 victim
             };
         let enchanted =
-            self.evaluate_weapon_damage(&weapon, attacker.map(|id| (id, victim)), ctx, base);
+            self.evaluate_weapon_damage(weapon, attacker.map(|id| (id, victim)), ctx, base);
         if trident {
             enchanted
         } else {
@@ -127,15 +173,8 @@ impl Game<'_> {
             .combat
             .death_weapons
             .remove(&m.id)
-            .and_then(|(kind, stack)| {
-                source
-                    .filter(|(damage_type, _)| {
-                        *damage_type == kind
-                            // Horizon's trident mob hurt currently records DamageKind::Arrow.
-                            || (kind == "minecraft:trident" && *damage_type == "minecraft:arrow")
-                    })
-                    .and(stack)
-            });
+            .filter(|weapon| weapon.belongs_to(m.last_damage))
+            .and_then(|weapon| weapon.stack);
         let weapon = weapon.and_then(|stack| stack.try_into_api().ok());
         let Some(loot) = self.server_loot.get() else {
             return;
@@ -215,7 +254,13 @@ impl Game<'_> {
         };
         // LootContextParams.ORIGIN of a death: the mob's position.
         let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
-        let hurt = source.map(|(damage_type, causing)| death_hurt_source(damage_type, causing));
+        let hurt = source.map(|(damage_type, causing)| {
+            let mut source = death_hurt_source(damage_type, causing);
+            if m.last_direct.is_some() {
+                source.direct = 0;
+            }
+            source
+        });
         let enchanted_loot = hurt
             .as_ref()
             .filter(|_| mod_api::__private::listened(mod_api::HookId::EnchantedEntityLoot))
@@ -358,3 +403,7 @@ impl Game<'_> {
 #[cfg(test)]
 #[path = "death_weapon_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "death_weapon_review_tests.rs"]
+mod review_tests;
