@@ -852,10 +852,11 @@ enum Cmd {
         /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
-        /// This instance's build mode: optimized, balanced or developer. Remembers an explicit
-        /// choice for this instance. Otherwise uses the Mods page's automatic picker, including
-        /// for a mod folder: matching prebuilt SDKs use Optimized unless a rebuild is required.
-        #[arg(long, value_enum)]
+        #[arg(
+            long,
+            value_enum,
+            help = tr("This instance's build mode: optimized, balanced or developer. An explicit choice is remembered; otherwise the automatic picker uses a matching prebuilt SDK when possible.")
+        )]
         profile: Option<native_mods::Profile>,
     },
     /// Show a release's patch notes (default: the newest)
