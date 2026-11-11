@@ -71,7 +71,7 @@ def compile_diagnostics(output):
         elif re.match(r"^\s*--> [\w./-]+:\d+:\d+$", line):
             headings.append(line)
     for line in headings[:20]:
-        print("  compiler: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
+        print("  compiler: " + line[:300] + (" [shortened]" if len(line) > 300 else ""))
         if line.strip().startswith("--> "):
             panic_source(line.strip()[4:], kind="compiler")
     if len(headings) > 20:
@@ -108,7 +108,7 @@ def panic_source(location, kind="panic"):
     line = lines[int(found[2]) - 1]
     # Prefix and escape controls so checked-in text cannot inject workflow commands.
     line = line.encode("unicode_escape").decode("ascii")
-    print(f"  {kind} source: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
+    print(f"  {kind} source: " + line[:300] + (" [shortened]" if len(line) > 300 else ""))
 
 
 def has_vulkan():

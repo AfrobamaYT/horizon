@@ -2,12 +2,36 @@
 import contextlib
 import io
 import unittest
+import subprocess
+import tempfile
+from pathlib import Path
+from argparse import Namespace
 from unittest.mock import patch
 
 from tools import pr_ready
 
 
 class RevisionOrchestration(unittest.TestCase):
+    def test_plan_runs_real_repository_hygiene_even_for_python_only_delta(self):
+        steps = pr_ready.plan(Namespace(host="local", quick=True), "HEAD", {"tools/ci/ignored_tests.py"}, {}, set(), {})
+        hygiene = next(step for step in steps if step.name == "Repository hygiene")
+        self.assertIsNone(hygiene.skip)
+        self.assertEqual(hygiene.where, "here")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", directory], check=True)
+            # Reuse the real guard/parser while the guard inspects only this private repo.
+            (root / "tools").symlink_to(pr_ready.ROOT / "tools", target_is_directory=True)
+            bad = root / "bad.txt"
+            bad.write_text("[" + "truncated" + "]\n")
+            subprocess.run(["git", "add", "bad.txt"], cwd=root, check=True)
+            failed = subprocess.run(hygiene.command, cwd=root, shell=True, capture_output=True, text=True)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("repository hygiene", failed.stderr)
+            bad.write_text("complete authored content\n")
+            passed = subprocess.run(hygiene.command, cwd=root, shell=True, capture_output=True, text=True)
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+
     def test_starting_identity_survives_concurrent_commit_and_dirty_commit(self):
         for status in ("", " M tracked.rs\n"):
             for ending in (("b" * 40, "", ""), ("a" * 40, status, "changed contents")):
