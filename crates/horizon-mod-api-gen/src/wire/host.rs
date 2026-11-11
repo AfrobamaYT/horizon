@@ -259,6 +259,11 @@ fn event_input(
 }
 fn fallback(types: &super::ty::Types<'_>, m: &Method) -> &'static str {
     match &m.ret {
+        // String-error operations can report a refused VM call directly. In particular,
+        // callbacks must not turn a trap after staged effects into a successful commit.
+        Ty::Result(_, error) if matches!(**error, Ty::Str(super::ty::Str::Owned)) => {
+            "Err(String::from(\"wasm call refused or trapped\"))"
+        }
         Ty::Result(ok, _) if **ok == Ty::Unit => "Ok(())",
         Ty::Result(..) => "Err(call_refused())",
         Ty::Named(d) if types.defs[*d].rust.ends_with("::Flow") => "mod_api::Flow::Continue",
