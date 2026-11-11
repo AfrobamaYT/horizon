@@ -86,7 +86,8 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
     if engine.is_empty() {
         return Ok(());
     }
-    if !mod_points::STAGED {
+    // The table's own answer, before the guest is asked anything: `register` would refuse each.
+    if !mod_points::__private::TABLE.has_sites() {
         return Err(format!(
             "{}: {}: this build has no point sites; start the game through the launcher's mod build",
             manifest.id, engine[0].at

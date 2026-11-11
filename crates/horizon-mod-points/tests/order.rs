@@ -8,6 +8,8 @@ use mod_points::{
 
 #[test]
 fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
+    // This test calls the places' dispatch itself; a plain build has no sites for them.
+    mod_points::__private::TABLE.fire_from_fixture();
     struct Row {
         place: PointId,
         priorities: [i32; 4],

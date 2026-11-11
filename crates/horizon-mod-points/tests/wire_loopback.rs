@@ -110,6 +110,8 @@ static LOOPBACK_TOP_RETURN: Loopback = Loopback(3);
 
 #[test]
 fn head_and_return_share_the_hook_arena_and_native_listener_list() {
+    // This test calls the places' dispatch itself; a plain build has no sites for them.
+    mod_points::__private::TABLE.fire_from_fixture();
     mod_points::guest::register(&mod_points::listeners::tick("guest", 0, "head", head)).unwrap();
     mod_points::guest::register(&mod_points::listeners::tick_return(
         "guest", 0, "return", tail,

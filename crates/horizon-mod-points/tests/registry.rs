@@ -35,6 +35,8 @@ impl mod_api::Hooks for SelfStop {
 
 #[test]
 fn one_list_registered_sealed_and_stopped() {
+    // This test calls the places' dispatch itself; a plain build has no sites for them.
+    mod_points::__private::TABLE.fire_from_fixture();
     mod_api::__private::install(
         ["tick_mod", "stopped_early", "self_stopping"]
             .into_iter()

@@ -17,15 +17,47 @@ pub fn cold<R>(path: impl FnOnce() -> R) -> R {
 pub struct Table {
     points: &'static [AtomicBool],
     sealed: OnceLock<Sealed>,
+    /// Each place's target function, when this build compiled no sites for the places: a
+    /// listener there would never run, so [`register`] refuses it by this name.
+    unsited: Option<&'static [&'static str]>,
+    /// A test fires the places itself ([`Table::fire_from_fixture`]).
+    fixture: AtomicBool,
 }
 
 impl Table {
-    /// A table over its API point slots.
+    /// A table over its API point slots, whose sites are compiled into this build.
     pub const fn new(points: &'static [AtomicBool]) -> Self {
         Self {
             points,
             sealed: OnceLock::new(),
+            unsited: None,
+            fixture: AtomicBool::new(false),
         }
+    }
+
+    /// A table whose places have no site in this build: `targets` names each place's function,
+    /// and [`register`] refuses every listener.
+    pub const fn without_sites(
+        points: &'static [AtomicBool],
+        targets: &'static [&'static str],
+    ) -> Self {
+        Self {
+            points,
+            sealed: OnceLock::new(),
+            unsited: Some(targets),
+            fixture: AtomicBool::new(false),
+        }
+    }
+
+    /// Whether a listener registered here can run: the build has the sites, or a test fires them.
+    pub fn has_sites(&self) -> bool {
+        self.unsited.is_none() || self.fixture.load(Ordering::Relaxed)
+    }
+
+    /// For dispatch tests only, which call a place's dispatch themselves in a build without
+    /// sites: lets listeners register. The game never calls it.
+    pub fn fire_from_fixture(&self) {
+        self.fixture.store(true, Ordering::Relaxed);
     }
 
     /// Runs the API functions and forwarding endpoints at point `place`, each under its owner's
@@ -346,8 +378,15 @@ impl SlotListener {
 }
 
 /// Registers a function or checked endpoint in its place's table, in the same order for native
-/// and wasm owners.
+/// and wasm owners. The one boundary every listener passes: a table whose places have no site in
+/// this build refuses here, naming the mod and the target, so no listener registers and never runs.
 pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
+    if let (false, Some(targets)) = (slot.place.table.has_sites(), slot.place.table.unsited) {
+        return Err(RegisterError::Unstaged {
+            id: slot.id,
+            target: targets[slot.place.index],
+        });
+    }
     let mut open = lock();
     if open.sealed {
         return Err(RegisterError::Sealed);

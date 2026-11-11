@@ -7,7 +7,8 @@ fn native_listener_is_refused_by_mod_and_target() {
         return;
     }
     let slot = mod_points::listeners::tick("named_mod", 0, "head", tick);
-    let error = mod_points::register(&slot).unwrap_err();
+    // The one boundary every registration passes, not a wrapper of it.
+    let error = mod_api::__private::points::register(&slot).unwrap_err();
     assert!(matches!(error, RegisterError::Unstaged { .. }));
     let message = error.to_string();
     assert!(
