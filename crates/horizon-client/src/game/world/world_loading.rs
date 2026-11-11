@@ -1396,6 +1396,21 @@ mod tests {
                 event.resolved.push("mismatch_test".to_owned().into());
             }
         }
+        struct Erasing;
+        #[mod_api::__subscriptions]
+        impl Hooks for Erasing {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
+                assert_eq!(event.resolved[0].resolver, "mismatch_test");
+                event.resolved.clear();
+            }
+        }
+        struct Observing;
+        #[mod_api::__subscriptions]
+        impl Hooks for Observing {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
+                assert_eq!(event.resolved[0].resolver, "mismatch_test");
+            }
+        }
         let dir = std::env::current_dir()
             .unwrap()
             .join("target")
@@ -1458,10 +1473,11 @@ mod tests {
         level().write(&changed).unwrap();
         set_loaded(Some(vec![record("mismatch_test", "2.0.0")]));
         mod_api::testing::with_mods(
-            vec![ModEntry::new(
-                "mismatch_test",
-                Box::new(Migrating(heard.clone())),
-            )]
+            vec![
+                ModEntry::new("mismatch_test", Box::new(Migrating(heard.clone()))),
+                ModEntry::new("erasing", Box::new(Erasing)),
+                ModEntry::new("observing", Box::new(Observing)),
+            ]
             .into(),
             || {
                 with_game(|game| {
