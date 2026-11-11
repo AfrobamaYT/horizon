@@ -4818,6 +4818,21 @@ impl Game<'_> {
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
         }
+        // `Entity.applyEffectsFromBlocks`' checkInsideBlocks for every
+        // projectile that ticked, at the batch: the borrow block above held the
+        // world read-only, and a part's contact needs the lent level, so the
+        // sweeps run here, each still inside this batch and its own tick.
+        for i in 0..projectiles.len() {
+            if !keep_flags[i] {
+                continue;
+            }
+            let mut swept = None;
+            projectiles.update(i, |p| {
+                swept = Some((p.previous, p.position));
+            });
+            let _ = swept;
+            projectiles.update(i, |p| self.sweep_projectile_inside(p));
+        }
         self.creatures.projectiles.restore(
             projectiles,
             horizon_client::join_seq::RestoreOrder::SpawnsFirst,
