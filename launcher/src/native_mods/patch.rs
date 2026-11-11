@@ -81,8 +81,8 @@ pub(super) fn build(
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
-    // Built once per pin, before the clock: the timing is the mixin build's own.
-    let tool = super::tool(rust, super::MIXINS_REV, &|_| {})?;
+    // Built once per pin and patch, before the clock: the timing is the mixin build's own.
+    let tool = super::mixins_patch::tool(rust, &|_| {})?;
     let source = super::source(sdk.commit())?;
     let started = std::time::Instant::now();
     let targets: Vec<String> = bundles
