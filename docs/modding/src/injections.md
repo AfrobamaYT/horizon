@@ -1,6 +1,6 @@
 # Injections
 
-An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points work on native and wasm, including points provided by another mod.
+An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points work on native and wasm, on engine functions.
 
 ## Declaration
 
@@ -14,7 +14,7 @@ access = "api"
 priority = 0
 ```
 
-`id`, `at`, `kind` and `with` identify the declaration, function, point kind and listener. `access` defaults to `api`; `priority` defaults to zero. A signature `hash` pins the target and is required for another mod's point.
+`id`, `at`, `kind` and `with` identify the declaration, function, point kind and listener. `access` defaults to `api`; `priority` defaults to zero. An optional signature `hash` pins the target.
 
 | Kind | Contract |
 | --- | --- |
@@ -30,9 +30,7 @@ Head cancellation skips the body and return point, but every head listener still
 
 Native code that needs game internals uses [`[[native.mixin]]`](mixins.md); `access = "internals"` on `[[inject]]` is refused by name.
 
-## Mod points: patching another mod
-
-Eligible mod functions expose API points. Pin another mod point with its signature hash; a changed signature is refused.
+A library mod publishes its own hooks and functions for other mods to use.
 
 ## Ask for the hook
 
