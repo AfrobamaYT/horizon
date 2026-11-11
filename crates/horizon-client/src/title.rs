@@ -22,6 +22,7 @@ use std::{
 mod buffet;
 mod confirm_experiments;
 mod create_world;
+mod edit_world;
 mod experiments;
 mod flat;
 mod missing_biome_regions;
@@ -289,6 +290,8 @@ pub enum Mode {
         world: WorldEntry,
         name: String,
         focused: bool,
+        /// The installed mods' biome regions differ from the world's (`edit_world`).
+        adopt_regions: bool,
     },
     Backup {
         world: WorldEntry,
@@ -316,6 +319,11 @@ pub enum Mode {
     /// `openWorldCheckDiskSpace`'s ConfirmScreen: little space is left on the device.
     LowDiskSpace {
         world: WorldEntry,
+    },
+    /// Edit World's opt-in to the installed mods' biome regions (`edit_world`).
+    AdoptBiomeRegions {
+        world: WorldEntry,
+        name: String,
     },
     /// Saved biome regions of missing mods, as `(mod, region)` (`missing_biome_regions`).
     MissingBiomeRegions {
@@ -773,6 +781,7 @@ impl Mode {
             Self::Optimize { .. } => "world_optimize",
             Self::LowDiskSpace { .. } => "low_disk_space",
             Self::MissingBiomeRegions { .. } => "missing_biome_regions",
+            Self::AdoptBiomeRegions { .. } => "adopt_biome_regions",
             Self::Delete { .. } => "world_delete",
             Self::Recover { .. } => "world_recover",
             Self::Recovered { .. } => "world_recovered",
@@ -2043,6 +2052,7 @@ Running out of disk space while in game can lead to your world being damaged.",
             Mode::MissingBiomeRegions { missing, .. } => {
                 missing_biome_regions::screen_info(missing)
             }
+            Mode::AdoptBiomeRegions { .. } => edit_world::adopt_screen_info(),
             // AccessibilityOnboardingScreen narrates its title.
             Mode::Onboarding(_) => ScreenInfo::new(
                 "accessibility_onboarding",
@@ -2502,33 +2512,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
             }
             Mode::Edit { name, focused, .. } => {
-                crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
-                centered(
-                    atlas,
-                    batch,
-                    &lang::get_or("selectWorld.edit.title", "Edit World"),
-                    15.0,
-                    u32::MAX,
-                );
-                let top = edit_top(h);
-                batch.text(
-                    atlas,
-                    &lang::get_or("selectWorld.enterName", "World Name"),
-                    (w / 2.0).floor() - 100.0,
-                    top + 25.0,
-                    rgba(160, 160, 160, 255),
-                    true,
-                );
-                self.caret.borrow_mut().draw(
-                    batch,
-                    atlas,
-                    (EDIT_NAME, name, 32),
-                    [(w / 2.0).floor() - 100.0, top + 39.0, 200.0, 20.0],
-                    *focused,
-                    self.started,
-                );
-                crate::widgets::name_last_edit_box(|| narration_text("selectWorld.enterName", &[]));
+                self.draw_edit(atlas, batch, (w, h), name, *focused)
             }
+            Mode::AdoptBiomeRegions { .. } => self.draw_adopt_regions(atlas, batch, (w, h)),
             Mode::Delete { world } => {
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
                 let message = translate(
@@ -3416,6 +3402,15 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 let world = world.clone();
                 self.open_with_vanilla_regions(world)
             }
+            (Mode::Edit { world, name, .. }, Some(98)) => {
+                let (world, name) = (world.clone(), name.clone());
+                self.set_mode(Mode::AdoptBiomeRegions { world, name });
+                Action::None
+            }
+            (Mode::AdoptBiomeRegions { world, name }, Some(id @ (99 | 100))) => {
+                let (world, name) = (world.clone(), name.clone());
+                self.answer_adopt_regions(world, name, id == 99)
+            }
             (
                 Mode::OptimizeConfirm {
                     world, erase_cache, ..
@@ -3467,11 +3462,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     return Action::None;
                 };
                 match id {
-                    13 => self.set_mode(Mode::Edit {
-                        name: world.name.clone(),
-                        world,
-                        focused: true,
-                    }),
+                    13 => self.edit_world(world.name.clone(), world),
                     14 => self.set_mode(Mode::Delete { world }),
                     _ => {
                         let level = Level::read(&self.saves.join(&world.folder));
@@ -3856,24 +3847,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             // WorldSelectionList.notifyListUpdated: the filtered list is
             // narrated at once.
             crate::widgets::narrate_now();
-        }
-    }
-    pub fn confirm_edit(&mut self) {
-        let Mode::Edit {
-            world,
-            name,
-            focused: true,
-        } = &self.mode
-        else {
-            return;
-        };
-        if name.trim().is_empty() {
-            return;
-        }
-        let folder = world.folder.clone();
-        match world_management::rename(&self.saves, &folder, name) {
-            Ok(()) => self.return_to_list(Some(&folder)),
-            Err(error) => self.failed(error),
         }
     }
     /// `CreateWorldScreen.keyPressed`, `DirectJoinServerScreen.keyPressed` and
@@ -4565,12 +4538,8 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             // OptimizeWorldScreen: `shouldCloseOnEsc` is false; the Backup wait takes no input.
             Mode::Backup { .. } | Mode::Optimize { .. } => {}
             // BackupConfirmScreen.keyPressed: Escape runs `onCancel`, the Edit World screen again.
-            Mode::OptimizeConfirm { world, name, .. } => {
-                self.set_mode(Mode::Edit {
-                    world: world.clone(),
-                    name: name.clone(),
-                    focused: true,
-                });
+            Mode::OptimizeConfirm { world, name, .. } | Mode::AdoptBiomeRegions { world, name } => {
+                self.edit_world(name.clone(), world.clone())
             }
             Mode::Edit { world, .. }
             | Mode::Delete { world }

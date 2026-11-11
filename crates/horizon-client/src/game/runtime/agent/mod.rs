@@ -676,8 +676,12 @@ impl Game<'_> {
                 world,
                 name,
                 focused,
+                adopt_regions,
             } => {
-                json!({ "mode": "edit-world", "folder": world.folder, "fields": { "name": name }, "focus": if *focused { "name" } else { "none" } })
+                json!({ "mode": "edit-world", "folder": world.folder, "fields": { "name": name }, "focus": if *focused { "name" } else { "none" }, "adopt_biome_regions": adopt_regions })
+            }
+            Mode::AdoptBiomeRegions { world, .. } => {
+                json!({ "mode": "adopt-biome-regions", "folder": world.folder, "name": world.name })
             }
             Mode::Backup { world, .. } => {
                 json!({ "mode": "creating-backup", "folder": world.folder })

@@ -4,7 +4,7 @@ use horizon_core::nbt::Tag;
 
 /// A record naming one region of `gone`, a mod no test installs; `substituted` when the
 /// owner already chose vanilla.
-fn record(f: &Fixture, folder: &str, substituted: bool) -> PathBuf {
+pub(in crate::title) fn record(f: &Fixture, folder: &str, substituted: bool) -> PathBuf {
     let string = |text: &str| Tag::String(text.into());
     let pair = || Tag::List(vec![Tag::Float(0), Tag::Float(0)]);
     let mut region = vec![

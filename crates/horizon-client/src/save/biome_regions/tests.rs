@@ -337,3 +337,36 @@ fn adopting_takes_installed_regions_and_keeps_saved_weights() {
     );
     assert_eq!(adopted.differences(&everyone, &now), Differences::default());
 }
+
+#[test]
+fn the_opt_in_is_offered_only_while_adopting_would_change_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    // No record and no regions installed: nothing to adopt.
+    assert!(!adoptable_with(dir.path(), &[]));
+    // A world made before any region mod: the installed regions are new to it.
+    assert!(adoptable_with(dir.path(), &overworld()));
+    BiomeRegions::from_declarations(&overworld())
+        .write(dir.path())
+        .unwrap();
+    assert!(!adoptable_with(dir.path(), &overworld()));
+    // Changed points, an added region or a removed one are offered; a changed declared
+    // weight alone is not, since adopting keeps the saved weight.
+    let mut moved = overworld();
+    moved[0].region.points[0].offset = 0.5;
+    assert!(adoptable_with(dir.path(), &moved));
+    let mut added = overworld();
+    added.push(declaration("zeta", "zeta:dunes", "minecraft:nether", 2));
+    assert!(adoptable_with(dir.path(), &added));
+    assert!(adoptable_with(dir.path(), &overworld()[..1]));
+    let mut heavier = overworld();
+    heavier[1].region.weight = 9;
+    assert!(!adoptable_with(dir.path(), &heavier));
+    // Adopting makes the record match, and the opt-in is no longer offered.
+    choose_with(dir.path(), &mods(&["alpha", "zeta"]), &added, false, true).unwrap();
+    assert!(!adoptable_with(dir.path(), &added));
+    // A record that does not read is never offered, and stays as it was.
+    let file = path(dir.path());
+    fs::write(&file, b"not a record").unwrap();
+    assert!(!adoptable_with(dir.path(), &added));
+    assert_eq!(fs::read(&file).unwrap(), b"not a record");
+}

@@ -66,7 +66,7 @@ One durable world-level file, `data/horizon/biome_regions.dat`, separate from `d
 - **Client.** The question is asked in the existing pre-load prompt, where the backup questions are.
 - **Dedicated server.** `server.toml` gets `[biome_regions] missing = "refuse" | "vanilla"`, default `"refuse"`. Without the setting the server refuses to start, naming the mod and region.
 - **The mod returns.** The substitution is reversible. When the mod returns, the world says so once and keeps the substitution until the owner opts back in, since the chunks generated in between are vanilla there.
-- **Opt-in.** "Use the installed regions for new chunks" is a recorded per-world choice, off by default: on a server `adopt_installed = false` under `[biome_regions]`. Adopting keeps the saved weight of every region that is still declared, takes the declared weight for a new one, and drops the regions of mods that are not installed. *Not built:* an opt-in in the client; today only a dedicated server can adopt, with that setting. The new layout is written durably before any chunk is generated with it. Chunks that already exist keep their biomes and blocks.
+- **Opt-in.** "Use the installed regions for new chunks" is a recorded per-world choice, off by default: on a server `adopt_installed = false` under `[biome_regions]`. Adopting keeps the saved weight of every region that is still declared, takes the declared weight for a new one, and drops the regions of mods that are not installed. In single player, the world's Edit World screen shows **Use Installed Biome Regions** only while adopting would change the world's record. It asks first, saying that new chunks beside existing ones may differ in surface, decoration and structures, and then writes the choice into the world. The new layout is written durably before any chunk is generated with it. Chunks that already exist keep their biomes and blocks, and a partly generated chunk keeps the biomes it saved.
 
 ## Acceptance matrix
 
@@ -89,4 +89,4 @@ One durable world-level file, `data/horizon/biome_regions.dat`, separate from `d
 1. Saved biome ids kept when the game lacks them (#3132).
 2. `BiomeRegion`, `declare_biome_region` and validation, with unit tests and a wire round trip. No generator change. **Built.**
 3. Region selection in the biome source (`ResolvedBiomeSource`), behind "no record means today's path", with the oracle, distribution, order and structure fixtures. **Built.**
-4. The saved record (`crates/horizon-client/src/save/biome_regions.rs`), world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix. **Built**, except the client opt-in button.
+4. The saved record (`crates/horizon-client/src/save/biome_regions.rs`), world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix. **Built**, with the client opt-in on Edit World.
