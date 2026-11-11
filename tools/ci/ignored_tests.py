@@ -265,11 +265,16 @@ def failure_diagnostics(output):
             panic_reason_pending = True
     remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
     shown = shortened = missing = withheld = 0
+    identities_withheld = locations_withheld = payloads_withheld = reasons_shown = 0
     for name in failures:
         identity = safe_identity(name)
         details = contexts.get(name, ["  panic context missing from captured output"])
         missing += any("missing from captured output" in item for item in details)
         withheld += identity != name or any("withheld" in item for item in details)
+        identities_withheld += identity != name
+        locations_withheld += any("panic location withheld" in item for item in details)
+        payloads_withheld += any("payload withheld" in item for item in details)
+        reasons_shown += any(item.startswith("  panic reason:") for item in details)
         record = f"  failed test: {identity}\n" + "\n".join(details) + "\n"
         emitted, cut = bounded_record(record, remaining)
         shown += emitted
@@ -277,6 +282,8 @@ def failure_diagnostics(output):
     print(f"failure diagnostics: {shown} shown; {len(failures) - shown} failing tests not shown "
           f"(total byte budget {FAILURE_TOTAL_BYTES}); {shortened} records shortened "
           f"(per-test byte budget {FAILURE_BYTES}); {missing} missing context; {withheld} withheld context/identity; "
+          f"{reasons_shown} classified panic reasons; {identities_withheld} identities withheld; "
+          f"{locations_withheld} locations withheld; {payloads_withheld} payloads withheld (expected privacy filtering); "
           f"{skipped_lines} lines skipped (line/count bounds; failure count unknown there); "
           f"{skipped_contexts} contexts skipped (retention bound)")
 

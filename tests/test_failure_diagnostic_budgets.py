@@ -2,6 +2,7 @@
 import contextlib
 import io
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.ci import ignored_tests as ci
@@ -12,6 +13,33 @@ class Budgets(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as log:
             ci.failure_diagnostics(output)
         return log.getvalue()
+
+    def test_public_client_excerpt_preserves_reason_despite_all_withheld_counter(self):
+        # Public job 130479644435, lines 326–330 (timestamps removed).
+        # Raw panic locations/payloads are unavailable; input below is synthetic,
+        # not a reconstruction of private output.
+        fixture = Path(__file__).with_name('fixtures') / 'client_failure_public_excerpt.txt'
+        excerpt = fixture.read_text()
+        name = excerpt.splitlines()[0].removeprefix('  failed test: ')
+        log = self.render(f"test {name} ... FAILED\n"
+                          f"thread '{name}' panicked at private.rs:1:1:\n"
+                          "assertion `left == right` failed: PRIVATE\n"
+                          ' left: "PRIVATE"\n right: "PRIVATE"\n')
+        self.assertTrue(log.startswith(excerpt))
+        self.assertIn('1 withheld context/identity', log)
+        self.assertIn('1 classified panic reasons; 0 identities withheld; 1 locations withheld; '
+                      '1 payloads withheld (expected privacy filtering)', log)
+        self.assertNotIn('PRIVATE', log)
+
+    def test_payload_filtering_does_not_imply_location_or_identity_loss(self):
+        with patch.object(ci, 'tracked_rust_paths', return_value={'crates/example.rs'}):
+            log = self.render("test safe ... FAILED\n"
+                              "thread 'safe' panicked at crates/example.rs:2:3:\n"
+                              "called `Option::unwrap()` on a `None` value\n")
+        self.assertIn('panicked at crates/example.rs:2:3', log)
+        self.assertIn('Option::unwrap on None', log)
+        self.assertIn('1 classified panic reasons; 0 identities withheld; 0 locations withheld; '
+                      '1 payloads withheld', log)
 
     def test_120_failures_all_have_identity_and_first_safe_context(self):
         output = ''.join(f"test suite::case_{i} ... FAILED\n"
