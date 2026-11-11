@@ -6,8 +6,8 @@
 use super::api_values::TryIntoApi;
 use super::{Dim, Game, entity_culling::EntityCullDecision};
 use horizon_assets::item_model::{
-    Components, ComponentsView, DisplayContext, GlobalPos, ItemEnv, LevelState, OwnerState,
-    StackView,
+    Components, ComponentsView, DisplayContext, FluidAppearance, GlobalPos, ItemEnv, LevelState,
+    OwnerState, StackView,
 };
 use horizon_client::{
     block_entity_render::{diffuse_lights, vertex_light},
@@ -170,6 +170,12 @@ impl ItemEnv for Env<'_, '_> {
                 seed: ctx.seed,
                 models,
             });
+    }
+    fn stack_fluid(&self, stack: &StackView) -> Option<String> {
+        horizon_client::fluid_models::held_fluid(&stack.item).map(str::to_owned)
+    }
+    fn fluid_appearance(&self, fluid: &str) -> Option<FluidAppearance> {
+        horizon_client::fluid_models::item_appearance(fluid)
     }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)

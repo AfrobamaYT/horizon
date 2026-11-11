@@ -349,6 +349,8 @@ fn failed_reaper_spawn_retains_ownership_without_waiting_or_panicking() {
         "unreaped owner was silently dropped"
     );
 }
+/// Used by the Unix-only holder tests below.
+#[cfg(unix)]
 fn assert_record_owned(data: &Path, expected: bool) {
     let record = fs::read_dir(data.join("run-records"))
         .unwrap()
@@ -371,6 +373,8 @@ fn assert_record_owned(data: &Path, expected: bool) {
         );
     }
 }
+/// Used by the Unix-only holder tests below.
+#[cfg(unix)]
 fn released_record(data: &Path) {
     let end = deadline();
     loop {
@@ -674,7 +678,7 @@ fn direct_game_owns_install_resources_and_home_until_process_exit() {
         fs::create_dir(path).unwrap();
     }
     fs::write(install.join(".installed"), b"").unwrap();
-    let registry = Registry::with_release(&data, Release::Close).unwrap();
+    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     let directories: Vec<_> = [&install, &resources, &home]
         .into_iter()
         .map(|p| open_directory(p).unwrap())

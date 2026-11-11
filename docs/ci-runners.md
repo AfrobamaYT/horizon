@@ -56,6 +56,8 @@ gh variable delete SELF_HOSTED_CI --repo horizon-rust/horizon             # the 
 Set `light` when the desktop is paused (the maintainer uses it), `off` when playhorizon is down or moves: the bots
 would wait for it. Back to the default when they return.
 
+The Python step uses `unittest --durations` (Python 3.12+); the self-hosted `all` route must provide Python 3.12 or newer.
+
 ## Forks
 
 A fork's pull request is code nobody here wrote. It may run on the checks runners only:

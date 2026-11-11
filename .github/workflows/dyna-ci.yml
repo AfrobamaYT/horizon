@@ -461,7 +461,7 @@ jobs:
       - name: Test offline research tooling
         if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
-          python3 -m unittest discover -s tests -v
+          python3 -m unittest discover -s tests -v --durations=25
           python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
       # The mod-host map's tables (#2534), built on main's pushes instead of committed, so no PR has to regenerate
       # them: docs/layering/mod-host-map.md points here. Main pushes only, never pull requests; about 17 s of Python
@@ -623,7 +623,7 @@ jobs:
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
+            bash tools/ci/install_launcher_deps.sh libxkbcommon-x11-dev libwayland-dev \
               libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then

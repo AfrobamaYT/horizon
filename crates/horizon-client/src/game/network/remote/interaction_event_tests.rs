@@ -26,8 +26,9 @@ use horizon_protocol::{connection::Pipe, packets::configuration::ClientInformati
 use mod_api::InteractionResult as Answer;
 use mod_api::{
     self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
-    LogicalSide, Registrar, RightClickBlockEvent, RightClickItemEvent, ServerHost, TriState,
-    UseItemEvent, UseItemOnBlockEvent, UseItemOnEvent, UseOnEvent, UsePhase,
+    LivingEntityUseItemFinishEvent, LogicalSide, Registrar, RightClickBlockEvent,
+    RightClickItemEvent, ServerHost, TriState, UseItemEvent, UseItemOnBlockEvent, UseItemOnEvent,
+    UseOnEvent, UsePhase,
 };
 use std::sync::{
     Arc, Mutex,
@@ -65,6 +66,11 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    /// Each `living_entity_use_item_finish`: side, hand and the item and count of the result it
+    /// arrived with.
+    finishes: Vec<(LogicalSide, Hand, Option<(String, u32)>)>,
+    /// What a finish listener does to the result when set: `None` clears it, `Some(n)` sets its count.
+    finish_replacement: Option<Option<u32>>,
     /// Cancel `right_click_block` with this answer.
     click_answer: Option<Answer>,
     /// How many `right_click_block` events fired.
@@ -117,6 +123,30 @@ impl Hooks for Observer {
         *event.use_block = state.use_block;
         *event.use_item = state.use_item;
         Flow::Continue
+    }
+    fn living_entity_use_item_finish(
+        &self,
+        host: HostSide<'_>,
+        event: &mut LivingEntityUseItemFinishEvent<'_>,
+    ) {
+        let mut state = self.0.lock().unwrap();
+        state.finishes.push((
+            side(&host),
+            event.hand,
+            event.result.as_ref().map(|r| {
+                let item = mod_api::__private::item_key_id(r.item()).unwrap_or("?");
+                (item.to_owned(), r.count())
+            }),
+        ));
+        match state.finish_replacement {
+            Some(None) => *event.result = None,
+            Some(Some(count)) => {
+                if let Some(result) = event.result.as_mut() {
+                    result.set_count(count).unwrap();
+                }
+            }
+            None => {}
+        }
     }
     fn use_item_on_block(&self, host: HostSide<'_>, event: &mut UseItemOnBlockEvent<'_>) -> Flow {
         assert_eq!(side(&host), event.click.side);
@@ -1298,6 +1328,180 @@ fn setup_interaction_guest(
     game.lan.as_mut().unwrap().hub.guests.push(guest);
     rx
 }
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_server_client_fires_use_item_finish_when_the_server_completes_the_use() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "finish_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            let offhand = super::super::shield::OFFHAND_SLOT;
+            // (slot, creative, used stack, replacement, what the listener sees, what the slot
+            // holds after), the expectations from vanilla's client finishUsingItem.
+            let cases: [(
+                usize,
+                bool,
+                (&str, u32),
+                Option<Option<u32>>,
+                Option<(&str, u32)>,
+                Option<(&str, u32)>,
+            ); 9] = [
+                // A consumable loses one.
+                (
+                    0,
+                    false,
+                    ("minecraft:apple", 3),
+                    None,
+                    Some(("minecraft:apple", 2)),
+                    Some(("minecraft:apple", 2)),
+                ),
+                // Nothing is used up in creative mode.
+                (
+                    0,
+                    true,
+                    ("minecraft:apple", 3),
+                    None,
+                    Some(("minecraft:apple", 3)),
+                    Some(("minecraft:apple", 3)),
+                ),
+                // The last stew leaves its use remainder, the bowl, in the hand.
+                (
+                    0,
+                    false,
+                    ("minecraft:mushroom_stew", 1),
+                    None,
+                    Some(("minecraft:bowl", 1)),
+                    Some(("minecraft:bowl", 1)),
+                ),
+                // A spyglass is not a consumable: it comes back as it was.
+                (
+                    0,
+                    false,
+                    ("minecraft:spyglass", 1),
+                    None,
+                    Some(("minecraft:spyglass", 1)),
+                    Some(("minecraft:spyglass", 1)),
+                ),
+                // The last apple leaves nothing.
+                (0, false, ("minecraft:apple", 1), None, None, None),
+                // A replacement goes into the hand: survival, cleared, creative.
+                (
+                    0,
+                    false,
+                    ("minecraft:apple", 3),
+                    Some(Some(7)),
+                    Some(("minecraft:apple", 2)),
+                    Some(("minecraft:apple", 7)),
+                ),
+                (
+                    0,
+                    false,
+                    ("minecraft:apple", 3),
+                    Some(None),
+                    Some(("minecraft:apple", 2)),
+                    None,
+                ),
+                (
+                    0,
+                    true,
+                    ("minecraft:apple", 3),
+                    Some(Some(7)),
+                    Some(("minecraft:apple", 3)),
+                    Some(("minecraft:apple", 7)),
+                ),
+                // The off hand, with a replacement.
+                (
+                    offhand,
+                    false,
+                    ("minecraft:apple", 2),
+                    Some(Some(5)),
+                    Some(("minecraft:apple", 1)),
+                    Some(("minecraft:apple", 5)),
+                ),
+            ];
+            let owned = |s: Option<(&str, u32)>| s.map(|(item, count)| (item.to_owned(), count));
+            for (slot, creative, (item, count), replacement, seen, after) in cases {
+                game.creative = creative;
+                game.inventory[game.selected] = None;
+                game.offhand = None;
+                let slot = if slot == offhand {
+                    offhand
+                } else {
+                    game.selected
+                };
+                *game.stack_in_mut(slot) = Some(ItemStack::new(item, count));
+                game.using = Some((slot, 5));
+                *observer.0.lock().unwrap() = Controls {
+                    finish_replacement: replacement,
+                    ..Controls::default()
+                };
+                game.remote_complete_using();
+                let hand = if slot == offhand {
+                    Hand::Off
+                } else {
+                    Hand::Main
+                };
+                assert_eq!(
+                    observer.0.lock().unwrap().finishes,
+                    [(LogicalSide::Client, hand, owned(seen))],
+                    "{item} x{count} creative={creative} {replacement:?}"
+                );
+                let held = game.stack_in(slot).map(|s| (s.item.to_string(), s.count));
+                assert_eq!(
+                    held,
+                    owned(after),
+                    "{item} x{count} creative={creative} {replacement:?}"
+                );
+            }
+            // The stack's use cooldown starts with the finish.
+            game.creative = false;
+            let mut cooling = ItemStack::new("minecraft:apple", 2);
+            cooling.data_mut().set_other(
+                "minecraft:use_cooldown",
+                Some(Tag::Compound(
+                    [
+                        ("seconds".into(), Tag::Float(1.0_f32.to_bits())),
+                        ("cooldown_group".into(), Tag::String("test:finish".into())),
+                    ]
+                    .into(),
+                )),
+            );
+            game.cooldowns.remove("test:finish");
+            game.inventory[game.selected] = Some(cooling);
+            game.using = Some((game.selected, 5));
+            *observer.0.lock().unwrap() = Controls::default();
+            game.remote_complete_using();
+            assert!(game.cooldowns.is_on_cooldown("test:finish"));
+            // The server's inventory update replaces a mod's replacement.
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 3));
+            game.using = Some((game.selected, 5));
+            *observer.0.lock().unwrap() = Controls {
+                finish_replacement: Some(Some(7)),
+                ..Controls::default()
+            };
+            game.remote_complete_using();
+            assert_eq!(game.held().map(|s| s.count), Some(7));
+            let server = game.to_network(&Some(ItemStack::new("minecraft:apple", 2)));
+            game.handle_packet(
+                horizon_protocol::packets::play::Clientbound::SetPlayerInventory(
+                    horizon_protocol::packets::play::SetPlayerInventory {
+                        slot: game.selected as i32,
+                        item: server,
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(game.held().map(|s| s.count), Some(2));
+        });
+    });
+}
+
 #[path = "interaction_key_tests.rs"]
 mod interaction_key_tests;
 
