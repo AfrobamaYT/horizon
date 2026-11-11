@@ -997,6 +997,32 @@ mod tests {
 mod plugin_seat_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn controlling_client_copies_sneak_press_and_release_into_rider() {
+        use horizon_client::sprint::Keys;
+        crate::game::mounts::sneak_dismount_tests::with_horse(|game, horse, _, _| {
+            game.riding = Some(horse);
+            for shift in [true, false] {
+                let i = game.mobs.iter().position(|m| m.id == horse).unwrap();
+                // Exercise client prediction itself, not the server input assignment.
+                game.drive_mount(
+                    i,
+                    Keys {
+                        shift,
+                        ..Keys::default()
+                    },
+                    0.0,
+                );
+                let input = game.mobs[i]
+                    .rider
+                    .expect("prediction stores next tick's input");
+                assert_eq!(input.sneak, shift);
+                assert!(!input.client, "the controlling client simulates this mount");
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn local_rider_uses_attachments_and_follows_a_moving_seat_chain() {
         use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::{mobs::Mob, motion::PlayerMotion, sprint::Keys};

@@ -33,7 +33,7 @@ impl Hooks for KeepRider {
 }
 
 /// Runs `test` on a server game with a horse (its id) and the `KeepRider` mod.
-fn with_horse(test: impl FnOnce(&mut Game<'_>, u32, &AtomicBool, &AtomicU32)) {
+pub(in crate::game) fn with_horse(test: impl FnOnce(&mut Game<'_>, u32, &AtomicBool, &AtomicU32)) {
     let keep = Arc::new(AtomicBool::new(true));
     let leaves = Arc::new(AtomicU32::new(0));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -61,6 +61,52 @@ fn with_horse(test: impl FnOnce(&mut Game<'_>, u32, &AtomicBool, &AtomicU32)) {
 
 fn rider(game: &Game<'_>, horse: u32) -> Option<equine::Rider> {
     game.mob_object(horse).unwrap().rider
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn underwater_dismount_obeys_the_listener_without_sneak() {
+    with_horse(|game, horse, keep, leaves| {
+        game.riding = Some(horse);
+        assert!(game.run_command("fill 0 100 0 15 104 15 water"));
+        assert!(game.rider_eyes_in_water(), "exercise the underwater branch");
+        let keys = Keys {
+            forward: true,
+            ..Keys::default()
+        };
+        assert!(game.tick_mount_riding(keys));
+        assert_eq!(leaves.load(Ordering::SeqCst), 1);
+        assert_eq!(game.riding, Some(horse));
+        let input = rider(game, horse).unwrap();
+        assert_eq!(input.forward, 1.0);
+        assert!(!input.sneak);
+        keep.store(false, Ordering::SeqCst);
+        assert!(game.tick_mount_riding(keys));
+        assert_eq!(leaves.load(Ordering::SeqCst), 2);
+        assert_eq!(game.riding, None);
+        assert!(rider(game, horse).is_none());
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_dead_mount_never_receives_input_even_when_dismount_is_cancelled() {
+    with_horse(|game, horse, keep, leaves| {
+        game.riding = Some(horse);
+        let i = game.mount_index().unwrap();
+        game.mobs[i].health = 0.0;
+        for cancelled in [true, false] {
+            keep.store(cancelled, Ordering::SeqCst);
+            assert!(game.tick_mount_riding(Keys {
+                forward: true,
+                jump: true,
+                ..Keys::default()
+            }));
+            assert!(rider(game, horse).is_none(), "dead mounts receive no input");
+            assert_eq!(game.riding, cancelled.then_some(horse));
+        }
+        assert_eq!(leaves.load(Ordering::SeqCst), 2);
+    });
 }
 
 #[test]
