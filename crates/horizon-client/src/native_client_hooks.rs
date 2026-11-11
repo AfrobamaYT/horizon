@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&LoopContext, &str, usize, &ItemStack, &mut bool, &mut u32),
+    pub menu_still_valid: fn(&LoopContext, u128, &str, [i32; 3], [f64; 3], &mut bool),
+    pub menu_still_valid_listens: fn(&str) -> bool,
     pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
     pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
@@ -47,6 +49,28 @@ pub(crate) fn menu_slot_rules(
     if let Some(hooks) = HOOKS.get() {
         (hooks.menu_slot_rules)(context, menu, slot, stack, may_place, max_stack);
     }
+}
+
+/// Ask the installed adapter for a mod menu type's `stillValid` answer; with
+/// none installed, `valid` keeps the game's answer.
+pub(crate) fn menu_still_valid(
+    context: &LoopContext,
+    player: u128,
+    menu: &str,
+    pos: [i32; 3],
+    eye: [f64; 3],
+    valid: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.menu_still_valid)(context, player, menu, pos, eye, valid);
+    }
+}
+
+/// Whether a part on the menu type `menu` answers `menu_still_valid`.
+pub(crate) fn menu_still_valid_listens(menu: &str) -> bool {
+    HOOKS
+        .get()
+        .is_some_and(|hooks| (hooks.menu_still_valid_listens)(menu))
 }
 
 pub(crate) fn item_stacked_on_other(

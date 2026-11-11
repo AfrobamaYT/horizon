@@ -14,8 +14,8 @@ fn main() {
     };
     // SAFETY: the generated listener aliases above check the exact point signatures.
     unsafe {
-        mod_points::register(&SlotListener::new("probe", PointId::ClientLibMobsKnockbackMobKnockback.place(), short as *const ())).unwrap();
-        mod_points::register(&SlotListener::new("probe", PointId::ClientLibMobsKnockbackMobKnockbackFull.place(), full as *const ())).unwrap();
+        mod_api::__private::points::register(&SlotListener::new("probe", PointId::ClientLibMobsKnockbackMobKnockback.place(), short as *const ())).unwrap();
+        mod_api::__private::points::register(&SlotListener::new("probe", PointId::ClientLibMobsKnockbackMobKnockbackFull.place(), full as *const ())).unwrap();
     }
     let player_short: player_entries::__KnockBackPlayerListener = |_, args| {
         *args.power *= 2.0;
@@ -27,8 +27,8 @@ fn main() {
     };
     // SAFETY: the generated listener aliases check the player receiver and arguments.
     unsafe {
-        mod_points::register(&SlotListener::new("probe", PointId::KnockBackPlayer.place(), player_short as *const ())).unwrap();
-        mod_points::register(&SlotListener::new("probe", PointId::KnockBackPlayerFull.place(), player_full as *const ())).unwrap();
+        mod_api::__private::points::register(&SlotListener::new("probe", PointId::KnockBackPlayer.place(), player_short as *const ())).unwrap();
+        mod_api::__private::points::register(&SlotListener::new("probe", PointId::KnockBackPlayerFull.place(), player_full as *const ())).unwrap();
     }
     seal();
     let hit = Damage { attacker: None, from: None };

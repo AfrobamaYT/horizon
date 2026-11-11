@@ -479,10 +479,10 @@ fn initialize_selected<'a>(
         };
         if let Err(why) = result {
             module.disable();
-            log::error!("wasm mod {} refused: {why}", manifest.id);
             refused.push((manifest.id.clone(), why));
         }
     }
+    report_refusals(&refused, &mut std::io::stdout().lock());
     refused
 }
 fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -> bool {
@@ -876,11 +876,7 @@ mod mixed_install_tests {
         assert!(why.contains("layouts.json is malformed"), "{why}");
     }
     fn refusal(hash: &str) -> String {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("wasm-mixed-{}-{nonce}", std::process::id()));
+        let root = tempfile::tempdir().unwrap().keep();
         let addon = root.join("addon");
         let library = root.join("lib");
         std::fs::create_dir_all(&addon).unwrap();

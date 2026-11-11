@@ -110,11 +110,14 @@ fn real_member() {
         vec![manifest.id.clone()],
         manifest.dependencies.keys().cloned().collect(),
     );
-    let package = WasmPackage {
+    let mut package = WasmPackage {
         manifest,
         module: Package::read_wasm(path).unwrap(),
     };
-    // load checks the layout and calls Hooks::subscribed through the real host boundary.
+    if !mod_points::STAGED {
+        package.manifest.inject.clear();
+    }
+    // The no-points variant uses the same guest code, hook subscriptions and Parts.
     let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
@@ -255,6 +258,9 @@ fn real_member() {
             )]
         );
     });
+    if !mod_points::STAGED {
+        return;
+    }
     mod_points::__private::seal();
     matrix_checks::check();
     let mut args = mod_points::TickArgs::__new();
