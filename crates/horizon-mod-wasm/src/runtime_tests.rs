@@ -1435,6 +1435,7 @@ fn trap_stops_group_not_independent_group() {
                 module: &echo,
             },
         ],
+        None,
     )
     .unwrap();
     let independent = module("i64.const 2199023255556");
@@ -1472,6 +1473,7 @@ fn a_refusal_keeps_every_member_of_the_group_answering() {
                 module: &echo,
             },
         ],
+        None,
     )
     .unwrap();
     assert_eq!(call(&members[0]), None);
