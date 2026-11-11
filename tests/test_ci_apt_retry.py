@@ -15,6 +15,12 @@ class AptRetryTests(unittest.TestCase):
             stubs = {
                 "sudo": '#!/bin/bash\nexec "$@"\n',
                 "sleep": '#!/bin/bash\necho "sleep $*" >> "$LOG"\n',
+                "timeout": '''#!/bin/bash
+[[ "$1 $2" == '--kill-after=10s 120s' ]] || exit 2
+shift 2
+[[ "$FAILED_COMMAND" != timeout ]] || exit 124
+exec "$@"
+''',
                 "apt-get": '''#!/bin/bash
 echo "apt $*" >> "$LOG"
 if [[ " $* " == *" update "* ]]; then
@@ -44,6 +50,12 @@ fi
                 ["bash", ROOT / "tools/ci/install_launcher_deps.sh", "libx11-xcb-dev", "libudev-dev"],
                 env=env, text=True, capture_output=True)
             return result, (root / "log").read_text().splitlines()
+
+    def test_timed_out_attempts_stop_at_the_bound(self):
+        result, calls = self.run_install("timeout", 99)
+        self.assertEqual(result.returncode, 124, result.stderr)
+        self.assertEqual(calls, ["sleep 5", "sleep 10", "sleep 15"])
+        self.assertIn("failed after 4 tries", result.stderr)
 
     def test_transient_index_and_download_failures_recover(self):
         for command in ("update", "install"):
