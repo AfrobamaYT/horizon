@@ -9,7 +9,9 @@ pub use parts::{
     EntityProviders, ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts,
     ProvidedBy, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
-pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
+pub(crate) use parts::{
+    InstalledProviders, answered, ask_providers, has_part_hook, parts, worldgen_parts,
+};
 mod __private {
     #[cfg(any(test, feature = "testing"))]
     pub use crate::parts::install_process_datapack_registry_declarations;
@@ -22,8 +24,8 @@ mod __private {
         entity_attribute_modifications, entity_parts, game_rule_bool_slot, game_rule_categories,
         game_rules, has_entity_parts, has_part_hook, has_scoped_hook, install_parts,
         install_resolved_parts, item_listens, key_mappings, mark_game_thread, menu_listens, parts,
-        prepare_parts, resolve_parts, setting, settings, spawn_placement_declarations,
-        tooltip_appenders,
+        prepare_parts, publish_worldgen_parts, resolve_parts, setting, settings,
+        spawn_placement_declarations, tooltip_appenders, worldgen_feature, worldgen_part_mods,
     };
     #[cfg(any(test, feature = "testing"))]
     pub use crate::{
