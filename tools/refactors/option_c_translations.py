@@ -5,9 +5,13 @@ from pathlib import Path
 import subprocess
 source = '\n'.join(p.read_text() for p in Path('launcher/src').rglob('*.rs'))
 for path in Path('launcher/lang').glob('*.json'):
-    base = json.loads(subprocess.check_output(['git', 'show', f'90db1b460b:{path}'], text=True))
-    data = json.loads(path.read_text())
-    for key, value in base.items():
-        if key not in data and key in source:
-            data[key] = value
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n')
+    original = subprocess.check_output(['git', 'show', f'90db1b460b:{path}'], text=True)
+    current = json.loads(subprocess.check_output(['git', 'show', f'HEAD:{path}'], text=True))
+    base = json.loads(original)
+    keep = {key for key in base if key in current or key in source}
+    lines = []
+    for line in original.splitlines()[1:-1]:
+        key = json.loads('{' + line.rstrip(',') + '}')
+        if next(iter(key)) in keep:
+            lines.append(line.rstrip(','))
+    path.write_text('{\n' + ',\n'.join(lines) + '\n}\n')
