@@ -50,8 +50,13 @@ A missing required declaration refuses admission. Matching protocol/id declarati
 must agree on version and direction even when optional; mismatches refuse with the
 id, reason and both declarations. Only one-sided optional absence permits admission,
 and send then returns `UnsupportedPeer`
-without a packet. When neither peer declares payloads, no mod manifest is exchanged.
-There is no per-tick scan of loaded mods.
+without a packet. Horizon-branded peers must also answer the global raw transport
+revision mark on `horizon:payloads`, even with empty or all-optional declarations.
+Query is `[0, 1]`; Offer starts `[1, 1]` followed by the record count. A missing
+response or wrong revision refuses admission with a named raw-protocol cause.
+This is not a build authentication mechanism. Non-Horizon vanilla peers retain
+optional admission. Empty peers exchange only protocol metadata and an empty Offer;
+there is no per-tick scan of loaded mods.
 
 Clients send through `ClientHost::send_payload_to_server`; servers use
 `PlayerRef::send_payload`. `IPayloadContext` offers `player`, `reply`, `disconnect`,

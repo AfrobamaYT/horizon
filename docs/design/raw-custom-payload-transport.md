@@ -34,8 +34,16 @@ Only one-sided optional extras are absent from the agreed set. A missing require
 declaration refuses admission. Optional means absence is permitted, not that an
 incompatible matching declaration is ignored. A vanilla
 peer is admitted when all local requirements are optional; sending an absent
-optional payload returns UnsupportedPeer without a packet. Empty registries emit
-no manifest and do no per-tick mod work.
+optional payload returns UnsupportedPeer without a packet. There is no per-tick mod
+work for empty registries. Configuration still exchanges a constant-size protocol
+mark (and an empty Offer) for Horizon-branded peers, even with empty or all-optional
+registries. On `horizon:payloads`, Query is bytes `[0, 1]`; Offer begins `[1, 1]`
+then the manifest record count. The second byte is raw transport revision 1,
+independent of application versions. A wrong revision or an absent marked response
+from a Horizon-branded peer refuses admission with a named raw-protocol cause.
+Servers send the Query before known packs so a compatible empty peer's Offer cannot
+be overtaken by that barrier. Non-Horizon vanilla peers remain eligible for optional
+admission; a brand is capability negotiation, not authentication of a build.
 
 A connection owns its negotiated table, protocol and incarnation epoch. Application
 messages never supply a player identity. A server handler resolves the authenticated
