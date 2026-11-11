@@ -1030,3 +1030,5 @@ fn setup_interaction_guest(
     game.lan.as_mut().unwrap().hub.guests.push(guest);
     rx
 }
+#[path = "interaction_key_tests.rs"]
+mod interaction_key_tests;
