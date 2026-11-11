@@ -2,7 +2,7 @@ use super::*;
 /// A biome region declared in code: the declaring mod, the region's id (`mymod:highlands`) and
 /// the region. The game writes the declared regions into a new world's saved layout.
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
+// exhaustive: record fixtures and the engine construct declarations
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct BiomeRegionDeclaration {
     /// The declaring mod's id: the first key of the regions' order.
@@ -11,6 +11,13 @@ pub struct BiomeRegionDeclaration {
     pub id: String,
     /// The dimension, weight and points.
     pub region: crate::BiomeRegion,
+}
+
+impl BiomeRegionDeclaration {
+    /// Build a declaration record; the registrar validates and qualifies actual registrations.
+    pub fn new(mod_id: String, id: String, region: crate::BiomeRegion) -> Self {
+        Self { mod_id, id, region }
+    }
 }
 
 /// The biome regions mods declared, sorted by declaring mod id, then region id: the same mods
