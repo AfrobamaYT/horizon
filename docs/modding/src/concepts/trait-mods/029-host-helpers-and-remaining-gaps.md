@@ -19,6 +19,10 @@ Both reads are available on either side.
 entities and the window's own non-spectator player are returned as readable handles.
 Other players are omitted (arismoko/horizon#3033);
 a level the client does not show, or a read before login, returns `None`.
+A bound that is NaN or infinite returns `None` on either side, before any entity is walked;
+a minimum above its maximum is the same box with the two swapped, as vanilla's `AABB`.
+`host.experience_orbs(dimension, min, max)` takes its box the same way, with an empty list
+for a bound that is not finite.
 Every entity list is walked once per call, O(entities) regardless of the box;
 each overlapping mob resolves through a mob-list scan, O(K*N) for K overlaps and N mobs.
 
