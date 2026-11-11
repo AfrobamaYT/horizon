@@ -16,7 +16,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_mod_mismatch(
         &mut self,
         mismatches: &[mod_api::ModMismatch],
-        resolved: &mut Vec<String>,
+        resolved: &mut Vec<mod_api::ModMismatchResolution>,
     ) {
         self.fire_mod_mismatch(mismatches, resolved);
     }
@@ -41,19 +41,37 @@ impl Game<'_> {
                 version.to_owned()
             }
         };
-        for mismatch in mismatches
-            .iter()
-            .filter(|mismatch| !resolved.contains(&mismatch.mod_id))
-        {
-            log::warn!(
-                "Horizon: mod {} was {} when the world was saved, now {}",
-                mismatch.mod_id,
-                shown(&mismatch.saved_version),
-                mismatch
-                    .current_version
-                    .as_deref()
-                    .map_or_else(|| "missing".to_owned(), shown)
-            );
+        let mut ordered: Vec<_> = mismatches.iter().collect();
+        ordered.sort_by(|a, b| a.mod_id.cmp(&b.mod_id));
+        for mismatch in ordered {
+            let current = mismatch
+                .current_version
+                .as_deref()
+                .map_or_else(|| "missing".to_owned(), shown);
+            if let Some(resolution) = resolved.iter().find(|r| r.mod_id == mismatch.mod_id) {
+                log::debug!(
+                    "Horizon: mod {} was {}, now {}; resolved by {} ({})",
+                    mismatch.mod_id,
+                    shown(&mismatch.saved_version),
+                    current,
+                    resolution.resolver,
+                    if resolution.resolver == mismatch.mod_id {
+                        "self"
+                    } else {
+                        "other mod"
+                    }
+                );
+            } else {
+                log::warn!(
+                    "Horizon: mod {} was {} when the world was saved, now {}",
+                    mismatch.mod_id,
+                    shown(&mismatch.saved_version),
+                    current
+                );
+            }
+        }
+        if !mismatches.is_empty() {
+            log::warn!("Horizon: changed mods may cause the world to work incorrectly");
         }
     }
 }

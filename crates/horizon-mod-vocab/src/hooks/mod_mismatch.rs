@@ -32,6 +32,7 @@ no longer loaded). Nothing blocks the open, and no screen is shown."##]
         side = "server",
         contract = "collect",
         out = "resolved",
+        collect_validator = "crate::game::mismatch_resolution::attribute",
         neoforge = "ModMismatchEvent"
     )]
     fn mod_mismatch();
