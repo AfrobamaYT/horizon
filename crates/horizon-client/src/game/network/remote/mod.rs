@@ -8821,7 +8821,7 @@ impl Game<'_> {
             }
             // The held item's onItemUseFirst on this client: the broadcast
             // event skips the item's before-block Part when canceled. Only
-            // consuming answers or FAIL end the block interaction; PASS goes
+            // non-PASS answers end the block interaction; PASS goes
             // on to the block (a Part's answer comes from the server).
             if canceled.is_none()
                 && !spectator
@@ -8843,6 +8843,7 @@ impl Game<'_> {
                 && use_item.or(true)
                 && (self.may_build()
                     || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)))
+                && held.as_ref().is_none_or(|stack| self.items().get(&stack.item).is_some())
                 && (item_forced
                     || held.as_ref().is_some_and(|stack| {
                         self.items().get(&stack.item).is_some_and(|info| {

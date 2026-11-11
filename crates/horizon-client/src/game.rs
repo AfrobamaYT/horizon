@@ -7525,9 +7525,7 @@ impl Game<'_> {
 )
         {
             if answer.consumes_action() {
-                if let Some(stack) = &stack {
-                    self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
-                }
+                self.trigger_block("minecraft:item_used_on_block", hit.pos, before);
                 if matches!(answer, Answer::Success | Answer::SuccessServer) {
                     self.swing_arm();
                 }

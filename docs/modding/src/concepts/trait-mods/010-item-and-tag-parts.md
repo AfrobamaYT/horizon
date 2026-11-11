@@ -27,7 +27,8 @@ does) can't see tag parts, and warns once.
 identical switches for native and wasm mods:
 
 - `use_block = TriState::True` allows block use even while sneaking with an item
-  in either hand. `Default` preserves vanilla's sneak skip; `False` skips block use.
+  in either hand. `Default` skips while sneaking with either hand full; `False` skips block use.
+  The both-stacks `doesSneakBypassUse` exception remains open in #2934.
 - `use_item = TriState::True` enters the item's `useOn` phase even with an empty
   hand or an item on cooldown. `Default` requires a held stack off cooldown;
   `False` skips this phase. Adventure placement restrictions still apply.
@@ -73,9 +74,7 @@ Return `Flow::Cancel` to skip the selected phase's Part and vanilla behaviour,
 using `*event.cancellation_result` (initially `TryWithEmptyHand`) as its result.
 
 Canceling `ItemBeforeBlock` skips the item's `on_item_use_first` Part. `Pass`
-continues to the block phase; any non-`Pass` result ends the block interaction. Consuming results (`Success`,
-`SuccessServer`, `Consume`) ends this hand's block interaction. Cancellation
-alone does not suppress the later phases. A block-phase `TryWithEmptyHand`
+continues to the block phase; any non-`Pass` result ends the block interaction. Cancellation alone does not suppress the later phases when its answer is `Pass`. A block-phase `TryWithEmptyHand`
 can still run the block's empty-hand behaviour on the main hand.
 
 ## Item wear
