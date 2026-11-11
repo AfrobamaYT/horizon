@@ -16,39 +16,62 @@ use horizon_client::{
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 
-/// What `block_entities.tick` is visiting: the dispatch's own kinds.
+/// What `block_entities.tick` is visiting: the kinds its dispatch ticks, read once per entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TickedKind {
+    /// `HopperBlockEntity` (its transfer state is `Game::hoppers[pos]`).
     Hopper,
+    /// `CrafterBlockEntity`.
     Crafter,
+    /// `JukeboxBlockEntity`, while it holds a record.
     Jukebox,
+    /// `BeaconBlockEntity`.
     Beacon,
+    /// `CreakingHeartBlockEntity`.
     CreakingHeart,
+    /// `SpawnerBlockEntity`.
     Spawner,
+    /// `TrialSpawnerBlockEntity`.
     TrialSpawner,
+    /// `VaultBlockEntity`.
     Vault,
+    /// `BeehiveBlockEntity` (beehives and bee nests).
     Beehive,
+    /// `AbstractFurnaceBlockEntity` (furnaces, blast furnaces, smokers).
     Furnace,
+    /// `BrewingStandBlockEntity`.
     BrewingStand,
+    /// `DaylightDetectorBlockEntity`.
     DaylightDetector,
+    /// `TheEndGatewayBlockEntity`.
     EndGateway,
+    /// `CampfireBlockEntity`.
     Campfire,
+    /// A mod's ticking block entity.
     Mod,
+    /// `PotentSulfurBlockEntity`.
     PotentSulfur,
 }
 
 /// The block entity `block_entities.tick` is visiting, as a slot gets it: the loop's own state,
 /// lent under the loop's `&mut self` for one call. Pinned to this build like a mixin's target.
-#[allow(dead_code, reason = "read by `[[native.loop]]` helpers, compiled in a mod build")]
+#[allow(
+    dead_code,
+    reason = "read by `[[native.loop]]` helpers, compiled in a mod build"
+)]
 pub(crate) struct BlockEntityTick<'g, 'a> {
     /// The game the loop runs on: the level being ticked, `hoppers`, everything the loop has.
     pub(crate) game: &'g mut Game<'a>,
     /// The block entity's position.
     pub(crate) pos: Pos,
+    /// What it is, from the block entity the dispatch is about to tick.
     pub(crate) kind: TickedKind,
 }
 
-#[allow(dead_code, reason = "read by `[[native.loop]]` helpers, compiled in a mod build")]
+#[allow(
+    dead_code,
+    reason = "read by `[[native.loop]]` helpers, compiled in a mod build"
+)]
 impl BlockEntityTick<'_, '_> {
     /// The visited block entity.
     pub(crate) fn block_entity(&mut self) -> Option<&mut BlockEntity> {
@@ -56,14 +79,19 @@ impl BlockEntityTick<'_, '_> {
     }
 }
 
-/// A `[[native.loop]]` slot of `block_entities.tick`: `before` runs after vanilla's visit filters,
-/// just before the block entity ticks; `after` just after a tick that happened.
+/// A `[[native.loop]]` slot of `block_entities.tick` (book: Published loops). The loop visits the
+/// block entities in vanilla's order, only those in block-ticking chunks, inside the border, live and
+/// not asleep, and asks each slot about each. Pinned to this build like a mixin's target: its
+/// signatures and the cursor may change in any build.
 pub(crate) trait BlockEntityTickSlot {
+    /// Just before the visited block entity ticks. [`LoopFlow::Skip`] leaves it out this tick;
+    /// [`LoopFlow::Stop`] ends the pass (what follows the loop, such as shulker box lids, still runs).
     #[inline(always)]
     fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
         let _ = tick;
         LoopFlow::Continue
     }
+    /// Just after the visited block entity ticked; not called for one a slot skipped.
     #[inline(always)]
     fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
         let _ = tick;

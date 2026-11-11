@@ -33,8 +33,10 @@ fn default_priority() -> i32 {
 /// Why a package's loop rows are refused before anything is built; `id` is `package:row`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoopError {
-    /// A wasm mod declared a loop row.
+    /// `E_LOOP_WASM`: a wasm mod declared a loop row; a loop slot is game code, native only.
     Wasm { id: String },
+    /// `E_LOOP_INVALID`: an empty `loop`, a `helper` that is not a Rust file under `src/`, or a
+    /// `with` that is not an identifier.
     Invalid {
         id: String,
         field: &'static str,
