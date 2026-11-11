@@ -563,7 +563,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         let growth_pos = above(pos);
                         let growth = self.sculk_random_growth(growth_pos);
                         self.set_block_and_update(growth_pos, growth);
-                        let sounds = self.b.data(growth).sounds.clone();
+                        let own = self.b.data(growth).sounds.clone();
+                        let sounds = self.level.place_sound_type(growth_pos, growth, false, own);
                         self.emit(LevelEvent::Sound {
                             pos,
                             sound: sounds.place.clone(),
