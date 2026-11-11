@@ -829,6 +829,7 @@ mod tests {
         let dir = super::super::tests::dir("prebuilt-exact-build");
         let check = |commit: &str, rustc: &str, target: &str, side: &str| {
             let identity = serde_json::json!({
+                "format_version": 5,
                 "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
             });
             fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
