@@ -93,6 +93,23 @@ mod tests {
         }
     }
 
+    fn region() -> crate::BiomeRegion {
+        crate::BiomeRegion::new(
+            "minecraft:overworld".into(),
+            5,
+            vec![crate::BiomePoint {
+                biome: "minecraft:plains".into(),
+                temperature: (0.0, 0.0),
+                humidity: (0.0, 0.0),
+                continentalness: (0.0, 0.0),
+                erosion: (0.0, 0.0),
+                depth: (0.0, 0.0),
+                weirdness: (0.0, 0.0),
+                offset: 0.0,
+            }],
+        )
+    }
+
     struct Refuses;
     impl Hooks for Refuses {
         fn subscribed(&self) -> &'static [Option<crate::HookId>] {
@@ -100,6 +117,7 @@ mod tests {
         }
         fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
             r.declare_fluid("before");
+            r.declare_biome_region("rejected", region()).unwrap();
             let kind = r.block_entity_type("callback").blocks(&[]).build();
             r.block_entity_part(&kind, Callback).unwrap();
             cx.refuse("bootstrap failed: café\nmissing bridge");
@@ -114,6 +132,7 @@ mod tests {
         }
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             r.declare_fluid("soup");
+            r.declare_biome_region("kept", region()).unwrap();
         }
     }
 
@@ -128,6 +147,14 @@ mod tests {
         assert_eq!(
             registrar.refused,
             ["mod broken refused registration: bootstrap failed: café\nmissing bridge"]
+        );
+        assert_eq!(
+            registrar
+                .biome_regions
+                .iter()
+                .map(|d| (d.mod_id.as_str(), d.id.as_str(), d.region.weight))
+                .collect::<Vec<_>>(),
+            [("healthy", "healthy:kept", 5), ("later", "later:kept", 5)]
         );
         assert!(registrar.block_entity_types.is_empty());
         assert!(registrar.parts.block_entity_kinds.is_empty());
