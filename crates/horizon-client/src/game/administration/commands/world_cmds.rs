@@ -615,11 +615,12 @@ impl Game<'_> {
         let Some(pos) = self.target_position(t) else {
             return Ok(0);
         };
-        let current = self.target_rotation(t);
         let mut look_at_target = None;
         let rot = if let Some(Arg::Coords(c)) = ctx.get("rotation") {
-            // Relative parts are offsets from the entity's own rotation.
-            c.rotation(current)
+            // RotateCommand.rotate: relative parts are offsets from the command
+            // source's rotation (WorldCoordinates.getRotation); the entity's own
+            // rotation cancels out in Entity.forceSetRotation.
+            c.rotation(self.source_rotation())
         } else {
             let mut faced_entity = None;
             let to = if ctx.has("entity") {
@@ -2886,11 +2887,9 @@ mod vehicle_damage_command_tests {
 
 impl Game<'_> {
     /// `PoiTypes`: the point of interest type of a block state.
-    pub(super) fn poi_type(
-        &self,
-        state: horizon_world::registry::BlockStateId,
-    ) -> Option<&'static str> {
-        let s = self.pack.assets.registry.state(state)?;
-        horizon_world::poi::poi_type(s).map(|(kind, _)| kind)
+    pub(super) fn poi_type(&self, state: horizon_world::registry::BlockStateId) -> Option<&str> {
+        let table = &self.stations().professions;
+        let state = self.pack.assets.registry.state(state)?;
+        table.pois.name(table.pois.classify(state)?)
     }
 }

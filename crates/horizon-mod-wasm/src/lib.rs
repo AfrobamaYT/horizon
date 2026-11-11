@@ -620,7 +620,7 @@ mod tests {
         let package = root.join("bad_mixin");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("horizon-mod.toml"), format!(
-            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
+            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
         )).unwrap();
         let loaded = load_installed(&root, &[package]);
         assert!(
@@ -904,4 +904,15 @@ mod mixed_install_tests {
             "lib is a native mod; wasm mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
         );
     }
+}
+
+/// Resolve generated boundary operations for hand-written guest integration fixtures.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
+    boundary::import_id(owner, method)
+}
+/// Resolve generated hook operations for hand-written guest integration fixtures.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
+    boundary::export_id(owner, method)
 }

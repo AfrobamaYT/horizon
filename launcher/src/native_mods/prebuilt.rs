@@ -26,7 +26,6 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 /// Why a build compiles the game from source instead of using the prebuilt game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceReason {
-    /// A mod has a checked private source point, legacy helper, or module changing game code.
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
@@ -516,6 +515,8 @@ fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
     ])
     .arg("-L")
     .arg(format!("dependency={}", game.join("deps").display()))
+    .arg("-L")
+    .arg(format!("dependency={}", game.join("host").display()))
     .arg("-L")
     .arg(format!("native={}", game.join("native").display()))
     .arg("-L")
@@ -1088,10 +1089,10 @@ mod tests {
         let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
         assert_eq!(
             name,
-            "horizon-prebuilt-v3-x86_64-unknown-linux-gnu-server.tar.gz"
+            "horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server.tar.gz"
         );
         let listing =
-            format!("AB12  horizon-prebuilt-v3-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
+            format!("AB12  horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }

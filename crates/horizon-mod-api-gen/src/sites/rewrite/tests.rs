@@ -1,4 +1,5 @@
 use super::*;
+mod listed_bench;
 mod owned;
 use crate::crossing::tests::internal;
 
@@ -8,7 +9,7 @@ fn rewrite(
     entries: &[Internal],
     declarations: &[Declaration],
 ) -> Result<(String, Vec<Site>), Error> {
-    super::rewrite(source, module, entries, declarations, false)
+    super::rewrite(source, module, entries, declarations)
 }
 
 fn entries() -> Vec<Internal> {
@@ -455,7 +456,7 @@ fn changing_an_import_to_a_same_signature_callee_changes_the_fingerprint() {
 }
 
 #[test]
-fn private_borrowed_calls_have_call_scoped_records_for_both_ordinals() {
+fn borrowed_calls_have_call_scoped_records_for_both_ordinals() {
     let source = "fn run(wood: &str) { editor_sprite(\"hanging_signs\", wood); editor_sprite(\"signs\", wood); }";
     let entries = vec![
         internal("horizon_client::game::run", "fn", "fn run(wood: &str)"),
@@ -468,31 +469,19 @@ fn private_borrowed_calls_have_call_scoped_records_for_both_ordinals() {
     for ordinal in [0, 1] {
         let mut request = declaration("horizon_client::game::editor_sprite", Some(ordinal));
         request.target = "horizon_client::game::run".into();
-        let (rewritten, sites) = super::rewrite(
-            source,
-            "horizon_client::game",
-            &entries,
-            &[request.clone()],
-            true,
-        )
-        .unwrap();
+        let (rewritten, sites) =
+            super::rewrite(source, "horizon_client::game", &entries, &[request]).unwrap();
         syn::parse_file(&rewritten).unwrap();
         assert_eq!(sites[0].ordinal, ordinal);
         assert_eq!(sites[0].output, ":: std :: string :: String");
         assert!(rewritten.contains("Args < 'a >"), "{rewritten}");
         assert!(rewritten.contains("for < 'g , 'a >"));
         assert!(rewritten.contains("folder : & 'a str"));
-        assert!(
-            super::rewrite(source, "horizon_client::game", &entries, &[request], false)
-                .unwrap_err()
-                .to_string()
-                .contains("borrowing or non-Copy")
-        );
     }
 }
 
 #[test]
-fn private_engine_borrow_and_copy_array_are_call_scoped() {
+fn engine_borrow_and_copy_array_are_call_scoped() {
     let source = "fn sense_secondary(w: &MobWorld) { farmland(w, [1, 2, 3]); }";
     let module = "horizon_client_lib::mobs::villager_brain::secondary";
     let entries = vec![
@@ -518,8 +507,7 @@ fn private_engine_borrow_and_copy_array_are_call_scoped() {
     entries[2].refs.insert("MobWorld".into(), world_path);
     let mut request = declaration(&entries[2].path, Some(0));
     request.target = entries[1].path.clone();
-    let (rewritten, sites) =
-        super::rewrite(source, module, &entries, &[request.clone()], true).unwrap();
+    let (rewritten, sites) = super::rewrite(source, module, &entries, &[request.clone()]).unwrap();
     syn::parse_file(&rewritten).unwrap();
     assert!(
         rewritten.contains("& 'a crate :: mobs :: MobWorld < 'g >"),
@@ -527,15 +515,9 @@ fn private_engine_borrow_and_copy_array_are_call_scoped() {
     );
     assert!(rewritten.contains("p : [i32 ; 3]"));
     assert_eq!(sites[0].output, "bool");
-    assert!(
-        super::rewrite(source, module, &entries, &[request.clone()], false)
-            .unwrap_err()
-            .to_string()
-            .contains("borrowing or non-Copy")
-    );
     entries[2].signature = "fn farmland(w: &mut MobWorld, p: [i32; 3]) -> bool".into();
     assert!(
-        super::rewrite(source, module, &entries, &[request], true)
+        super::rewrite(source, module, &entries, &[request])
             .unwrap_err()
             .to_string()
             .contains("borrowing or non-Copy")

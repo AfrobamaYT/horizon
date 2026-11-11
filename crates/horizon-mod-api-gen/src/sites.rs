@@ -229,7 +229,7 @@ fn slot_extension_matches_disk_parser() {
     let disk_error = slots(&directory).unwrap_err().to_string();
     let memory_error = extended.extend(&b, conflict).unwrap_err().to_string();
     assert_eq!(disk_error, memory_error);
-    assert!(memory_error.contains("a.txt:4") && memory_error.contains("b.txt:1"));
+    assert!(memory_error.contains("a.txt:3") && memory_error.contains("b.txt:1"));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -277,6 +277,8 @@ pub fn facade_name(target: &str, callee: &str, ordinal: usize) -> String {
 mod stage;
 pub(crate) use stage::{ids, stage, tracked};
 
+#[cfg(test)]
+mod production_tests;
 #[cfg(test)]
 mod tests;
 
