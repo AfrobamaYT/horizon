@@ -52,6 +52,9 @@ impl mod_api::Hooks for WeaponProbe {
     ) {
         assert!(event.context.tool.is_none());
         assert_eq!(event.context.weapon_item(host), self.expected);
+        if let Some(expected) = &self.expected {
+            wasm_weapon_dispatch(host, event, expected);
+        }
         if let Some(axe) = &self.swap {
             let source = event.context.damage_source.unwrap();
             let living = host
@@ -63,6 +66,7 @@ impl mod_api::Hooks for WeaponProbe {
                     .unwrap()
             );
             assert_eq!(event.context.weapon_item(host), Some(axe.clone()));
+            wasm_weapon_dispatch(host, event, axe);
         }
         *self.seen.lock().unwrap() += 1;
     }
@@ -262,4 +266,104 @@ fn death_weapon_e_fall_has_no_weapon() {
         });
         assert_eq!(*seen.lock().unwrap(), 1);
     });
+}
+
+// The producer calls WeaponProbe with its real context. Dispatch that same context to
+// a real guest, checking either the recorded stack on the wire or the live backend.
+fn wasm_weapon_dispatch(
+    host: &mut dyn mod_api::ServerHost,
+    event: &mut mod_api::LootDropsEvent<'_>,
+    expected: &mod_api::ItemStack,
+) {
+    use mod_api::wire::{Id, Writer};
+    let mut request = Writer::new();
+    let mut answer = Writer::new();
+    let recorded = event.context.weapon.is_some();
+    if !recorded {
+        let source = event.context.damage_source.unwrap();
+        let entity = host.entity(source.direct as u32).unwrap();
+        let living = host.living(entity).unwrap();
+        request.put(&living);
+        answer.put(&Some(expected.clone()));
+    } else {
+        answer.put(expected);
+    }
+    let escape = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(|b| format!("\\{b:02x}"))
+            .collect::<String>()
+    };
+    let backend = horizon_mod_wasm::fixture::import_id("Backend", "living_weapon_item").unwrap();
+    let check = if recorded {
+        // Borrowed stacks are embedded in the hook frame. Find the complete encoded
+        // stack, including count, damage and components, not merely its item ID.
+        "i32.const 512 local.set $start global.get $length i32.const 512 i32.add local.set $end"
+            .to_owned()
+    } else {
+        format!(
+            r#"
+          i32.const {backend} i32.const 4096 i32.const {request_len}
+          i32.const 16384 i32.const 8192 call $host local.set $length
+          local.get $length i32.const {answer_len} i32.ne if unreachable end
+          i32.const 16384 local.set $start
+          i32.const 16384 local.get $length i32.add local.set $end
+        "#,
+            request_len = request.bytes().len(),
+            answer_len = answer.bytes().len()
+        )
+    };
+    let bytes = wat::parse_str(format!(
+        r#"(module
+      (@custom "dylink.0" "\01\04\00\00\00\00")
+      (import "env" "memory" (memory 1))
+      (import "env" "__indirect_function_table" (table 1 funcref))
+      (import "horizon" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
+      (import "horizon" "host_reply" (func (param i32)))
+      (func (export "horizon_layout") (result i64) i64.const {layout})
+      (global $length (mut i32) (i32.const 0))
+      (data (i32.const 4096) "{request}")
+      (data (i32.const 32768) "{answer}")
+      (func (export "horizon_in") (param i32) (result i32)
+        local.get 0 global.set $length i32.const 512)
+      (func (export "horizon_hook") (param i32) (result i64)
+        (local $start i32) (local $end i32) (local $i i32) (local $length i32)
+        {check}
+        (block $found (loop $search
+          local.get $start i32.const {answer_len} i32.add local.get $end i32.gt_u if unreachable end
+          i32.const 0 local.set $i
+          (block $different (loop $compare
+            local.get $i i32.const {answer_len} i32.eq br_if $found
+            local.get $start local.get $i i32.add i32.load8_u
+            i32.const 32768 local.get $i i32.add i32.load8_u i32.ne br_if $different
+            local.get $i i32.const 1 i32.add local.set $i br $compare))
+          local.get $start i32.const 1 i32.add local.set $start br $search))
+        ;; Successful assertion returns an empty drops vector (u32 length zero).
+        i32.const 49152 i32.const 0 i32.store
+        i64.const 211106232532996)
+    )"#,
+        layout = *mod_api::wire::LAYOUT,
+        request = escape(request.bytes()),
+        answer = escape(answer.bytes()),
+        answer_len = answer.bytes().len()
+    ))
+    .unwrap();
+    let module = horizon_mod_wasm::fixture::module(&bytes).unwrap();
+    let handler = horizon_mod_wasm::WasmHandler::new(&module, Id(1));
+    let mut sentinel = expected.clone();
+    sentinel
+        .set_count(if expected.count() == 1 { 2 } else { 1 })
+        .unwrap();
+    let mut drops = vec![sentinel];
+    handler.loot_drops(
+        host,
+        &mut mod_api::LootDropsEvent {
+            context: event.context,
+            drops: &mut drops,
+        },
+    );
+    assert!(
+        drops.is_empty(),
+        "guest must assert the producer weapon and return successfully"
+    );
 }
