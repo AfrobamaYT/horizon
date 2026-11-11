@@ -162,7 +162,8 @@ pub fn bake_resolved(
 }
 
 /// `mask` gives the first layer its shape (NeoForge's mask quads): its own sprite is
-/// drawn, and the mask sprite's opaque pixels decide where.
+/// drawn on the front and back, the mask sprite's opaque pixels decide where, and the
+/// side faces show the mask sprite itself.
 fn bake_layers(
     model: &ResolvedCuboidModel,
     sprites: &dyn SpriteLookup,
@@ -192,10 +193,16 @@ fn bake_layers(
             if layer == 0
                 && let Some(mask) = mask
             {
+                // A mask in neither atlas is the missing sprite (`MaterialBaker.get`), which is
+                // opaque: the layer fills the whole square, its sides `missingno`.
                 let shape = sprites
                     .mask(mask)
                     .unwrap_or_else(|| SpriteMask::opaque(16, 16));
-                quads.extend(extrude_masked(&shape, &m, layer as i32)?);
+                let mask_material = material(&Material {
+                    sprite: mask.to_owned(),
+                    force_translucent: false,
+                });
+                quads.extend(extrude_masked(&shape, &m, &mask_material, layer as i32)?);
                 continue;
             }
             let layer_mask = if m.sprite == MISSING_SPRITE {
@@ -306,8 +313,16 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
 /// `UnbakedElementsHelper.bakeItemMaskQuads`: one thin face per edge of `shape`'s
 /// opaque pixels (which `ItemModelGenerator.bakeSideFaces` emits first), then the
 /// front and back faces over merged runs of those pixels, not over the whole sprite.
-fn extrude_masked(shape: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<ModelQuad>> {
-    let mut quads = side_faces(shape, material, layer)?;
+/// The sides are baked from the mask's own material with tint index -1 (the 5-argument
+/// overload's `MaterialInfo.of(mask, ..., -1, ...)`, offsets 17-50); only the front and
+/// back draw `material` with the layer's tint index.
+fn extrude_masked(
+    shape: &SpriteMask,
+    material: &Material,
+    mask_material: &Material,
+    layer: i32,
+) -> Result<Vec<ModelQuad>> {
+    let mut quads = side_faces(shape, mask_material, -1)?;
     quads.extend(mask_rect_faces(shape, material, layer)?);
     Ok(quads)
 }
@@ -631,16 +646,59 @@ mod tests {
             [1.0, 0.5, 7.5 / 16.0],
             [[8, 8], [8, 16], [16, 16], [16, 8]],
         );
-        // The mask is the shape; the sprite is still what is drawn.
-        assert!(
-            masked
-                .quads
-                .iter()
-                .all(|q| q.material.sprite == "mod:item/fluid")
-        );
+        // The mask is the shape; the sprite is what the front and back draw, with the
+        // layer's tint index 0. The 4 sides show the mask sprite itself, untinted (-1).
+        for face in &faces {
+            assert_eq!(face.material.sprite, "mod:item/fluid");
+            assert_eq!(face.tint_index, 0);
+        }
+        let sides: Vec<&ModelQuad> = masked
+            .quads
+            .iter()
+            .filter(|q| !matches!(q.facing, Direction::South | Direction::North))
+            .collect();
+        assert_eq!(sides.len(), 4);
+        for side in &sides {
+            assert_eq!(side.material.sprite, "mod:item/mask");
+            assert_eq!(side.tint_index, -1);
+        }
         // A sprite layer takes `item/generated`'s displays, as NeoForge reads its
         // top transforms.
         assert_eq!(masked.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
+    }
+
+    /// A mask no atlas holds is `missingno` (`MaterialBaker.get`), opaque over 16x16: the
+    /// drawn sprite fills the whole front and back, and the 64 one-pixel sides show
+    /// `missingno`, untinted.
+    #[test]
+    fn a_missing_mask_is_the_opaque_missing_sprite() {
+        let library = library();
+        let masked = bake_sprite_layer(
+            &library,
+            &Sprites,
+            "mod:item/fluid",
+            Some("mod:item/absent"),
+        )
+        .unwrap();
+        assert_eq!(masked.quads.len(), 64 + 2);
+        let (faces, sides): (Vec<&ModelQuad>, Vec<&ModelQuad>) = masked
+            .quads
+            .iter()
+            .partition(|q| matches!(q.facing, Direction::South | Direction::North));
+        assert_eq!(faces.len(), 2);
+        assert_face(
+            faces[0],
+            Direction::South,
+            [0.0, 0.0, 8.5 / 16.0],
+            [1.0, 1.0, 8.5 / 16.0],
+            [[0, 0], [0, 16], [16, 16], [16, 0]],
+        );
+        assert!(faces.iter().all(|q| q.material.sprite == "mod:item/fluid"));
+        assert!(
+            sides
+                .iter()
+                .all(|q| q.material.sprite == MISSING_SPRITE && q.tint_index == -1)
+        );
     }
 
     #[test]

@@ -149,7 +149,8 @@ impl ItemEnv for Gas {
 }
 
 /// A fluid container draws its fluid layer, in the fluid's sprite and tint, only
-/// while the stack holds a fluid.
+/// while the stack holds a fluid. The tint reaches the layer's front and back; its sides
+/// show the mask sprite untinted, as `bakeItemMaskQuads` bakes them.
 #[test]
 fn a_fluid_containers_fluid_layer_takes_the_fluids_sprite_and_tint() {
     const FLUID_TINT: u32 = 0xFF22_8844;
@@ -200,6 +201,7 @@ fn a_fluid_containers_fluid_layer_takes_the_fluids_sprite_and_tint() {
     let sprites = HashMap::from([
         ("tintdraw:item/flask".to_owned(), rect()),
         ("tintdraw:block/gas_still".to_owned(), rect()),
+        ("tintdraw:item/flask_mask".to_owned(), rect()),
     ]);
     let colours = |held: Option<&'static str>| {
         let state = renderer.resolve(&stack, DisplayContext::Gui, None, None, 0, &Gas(held));
@@ -208,8 +210,10 @@ fn a_fluid_containers_fluid_layer_takes_the_fluids_sprite_and_tint() {
         quads.iter().map(|q| q.color).collect::<Vec<_>>()
     };
     let drawn = colours(Some("tintdraw:gas"));
-    assert_eq!(drawn.iter().filter(|c| **c == 0xFFFF_FFFF).count(), 66);
-    assert_eq!(drawn.iter().filter(|c| **c == FLUID_TINT).count(), 66);
+    // The base's 66 quads and the fluid layer's 64 sides are white; its front and back
+    // take the fluid's tint.
+    assert_eq!(drawn.iter().filter(|c| **c == 0xFFFF_FFFF).count(), 66 + 64);
+    assert_eq!(drawn.iter().filter(|c| **c == FLUID_TINT).count(), 2);
     assert_eq!(colours(None), [0xFFFF_FFFF; 66]);
     fs::remove_dir_all(root).unwrap();
 }
