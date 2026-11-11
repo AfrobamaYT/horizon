@@ -62,7 +62,8 @@ class GitChangedPathsTests(unittest.TestCase):
         self.commit()
         head = self.git("rev-parse", "HEAD").strip()
         def header():
-            return pr_ready.block(args(), "HEAD", head, [], {}, [], "skip-release", 0).splitlines()[0]
+            return pr_ready.block(args(), "HEAD", head, [], {}, [], "skip-release", 0,
+                                  pr_ready.revision_state()).splitlines()[0]
         self.assertIn(f"commit `{head}`", header())
         self.assertIn("host `", header())
         self.assertNotIn(" dirty", header())
@@ -125,7 +126,8 @@ class PrReadyTests(unittest.TestCase):
             step.status = "pass"
             step.detail = pr_ready.tests_passed(step.output)
             def render():
-                return pr_ready.block(args(), "origin/main", "abcdef123", [], {}, [step], "skip-release", 0)
+                return pr_ready.block(args(), "origin/main", "abcdef123", [], {}, [step], "skip-release", 0,
+                                      ("a" * 40, "", ""))
             self.assertIn("data-backed tests not run: no prepared data here", render())
             prepared = pr_ready.ROOT / ".local/horizon-client/26.3"
             prepared.mkdir(parents=True)

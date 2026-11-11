@@ -583,15 +583,24 @@ def finish(step, verbose):
 MARK = {"pass": "✅", "fail": "❌", "skip": "➖", "list": "➖", "warn": "⚠️"}
 
 
-def block(args, base, merge_base, changed, counts, steps, label, elapsed):
+def revision_state():
+    """Snapshot before selection and after checks; ignored build output is excluded."""
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z").split("\0")[:-1]
+    return (git("rev-parse", "HEAD").strip(),
+            git("status", "--porcelain=v1", "--untracked-files=all"),
+            git("diff", "HEAD", "--binary") + (git("hash-object", "--", *untracked) if untracked else ""))
+
+
+def block(args, base, merge_base, changed, counts, steps, label, elapsed, revision, changed_during_run=False):
     where = socket.gethostname().split(".")[0] if args.host == "local" else args.host
-    head = git("rev-parse", "HEAD").strip()
-    dirty = bool(git("status", "--porcelain=v1", "--untracked-files=all"))
+    head, status, _ = revision
+    dirty = bool(status)
     flags = "".join(f" --{flag}" for flag in ("quick",) if getattr(args, flag)) + \
         ("" if args.host == "local" else f" --host {args.host}") + ("" if base == "origin/main" else f" --base {base}")
     added, removed = (sum(count[i] for count in counts.values()) for i in (0, 1))
     warnings = scope_warnings(changed)
     lines = [f"**pr_ready** (`tools/pr_ready.py{flags}`, commit `{head}`{' dirty' if dirty else ''}, "
+             f"{'changed during run; checks do not certify the ending worktree, ' if changed_during_run else ''}"
              f"host `{where}`, against {base} at {merge_base[:9]}, "
              f"{duration(elapsed)})", "", "| Check | Result |", "| --- | --- |",
              f"| Scope | {'⚠️' if warnings else '✅'} {len(changed)} files, +{added} −{removed}"
@@ -626,6 +635,7 @@ def main():
     if args.host != "local" and not RBUILD.exists():
         parser.error(f"--host {args.host} needs {RBUILD}; without the fleet, run it here (no --host)")
     started = time.monotonic()
+    revision = revision_state()
     changed = parity.changed_files(args.base)
     if changed is None:
         parser.error(f"no merge base with {args.base} (git fetch?)")
@@ -647,7 +657,7 @@ def main():
 
     label = suggested_label(changed, release_train.exporters())
     print(block(args, args.base, merge_base, sorted(changed), counts, steps, label,
-                time.monotonic() - started))
+                time.monotonic() - started, revision, revision_state() != revision))
     return 1 if any(step.status == "fail" for step in steps) else 0
 
 
