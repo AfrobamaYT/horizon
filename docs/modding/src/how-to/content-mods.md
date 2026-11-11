@@ -903,9 +903,11 @@ declares a **biome region** instead: `Registrar::declare_biome_region(path, regi
 `dimension`, `minecraft:overworld` or `minecraft:nether`; a `weight` from 1 to 1000 against vanilla's 10; and its
 `points`, the same `BiomePoint`s as a mod dimension's). An area belongs to one region, and the region's own points
 choose the biome there. A malformed or repeated id, an id outside the mod's namespace, another dimension, a weight
-outside 1 to 1000, no points or an invalid point refuse the mods at startup, naming the mod. Declared regions are read
-by the API today; world generation does not use them yet (the stages are in
-[the design](../concepts/mod-biome-regions.md), arismoko/horizon#2554).
+outside 1 to 1000, no points or an invalid point refuse the mods at startup, naming the mod. A new world records the
+declared regions in `data/horizon/biome_regions.dat`, and from then on that record decides: a changed or added region
+reaches an existing world only when its owner opts in, and a world whose region's mod is missing asks before it opens
+(a dedicated server reads `[biome_regions] missing = "refuse" | "vanilla"` in `server.toml`). The full contract is in
+[the design](../concepts/mod-biome-regions.md).
 
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A

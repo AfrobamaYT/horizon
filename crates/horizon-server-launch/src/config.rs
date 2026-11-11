@@ -107,6 +107,12 @@ enabled = true               # false pauses it and keeps the webhook
 # Fights follow 26.3's rules. For 1.8.9's (no attack cooldown or sweep, 1.8 weapon damage; docs/pvp.md):
 # [combat]
 # legacy = true
+
+# A world's biome regions from mods are fixed when it is made (docs/modding/src/concepts/mod-biome-regions.md).
+# When a mod with one is gone, the server refuses to start until you choose. To change it:
+# [biome_regions]
+# missing = "vanilla"        # generate vanilla's biomes where the missing mods' regions were; "refuse": don't start
+# adopt_installed = true     # new chunks use the installed mods' regions (the world keeps its saved weights)
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
@@ -175,6 +181,10 @@ pub struct Config {
     /// The game reads this section itself (docs/pvp.md); written only when it isn't the default.
     #[serde(default, skip_serializing_if = "Combat::is_default")]
     pub combat: Combat,
+    /// The game reads this section itself (game/interface/dedicated/biome_regions.rs); written only when it
+    /// isn't the default.
+    #[serde(default, skip_serializing_if = "BiomeRegions::is_default")]
+    pub biome_regions: BiomeRegions,
 }
 
 /// `[combat]`: `legacy = true` resolves the players' melee hits by 1.8.9's rules (no attack cooldown or sweep,
@@ -188,6 +198,30 @@ impl Combat {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
+}
+
+/// `[biome_regions]`: what an existing world does about its saved biome regions. `missing = "vanilla"` opens a
+/// world whose region mods are gone with vanilla's biomes there (`"refuse"`, the default, does not start);
+/// `adopt_installed = true` takes the installed mods' regions for new chunks.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BiomeRegions {
+    pub missing: MissingRegions,
+    pub adopt_installed: bool,
+}
+impl BiomeRegions {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// `[biome_regions] missing`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MissingRegions {
+    #[default]
+    Refuse,
+    Vanilla,
 }
 
 /// The game reads this section itself too (docs/chat-filter.md).
@@ -731,7 +765,13 @@ pub fn render(config: &Config) -> String {
         set(&mut doc, section, field, &table[section][field]);
     }
     let mut text = doc.to_string();
-    for section in ["anticheat", "chat_filter", "prune_chunks", "combat"] {
+    for section in [
+        "anticheat",
+        "chat_filter",
+        "prune_chunks",
+        "combat",
+        "biome_regions",
+    ] {
         if let Some(settings) = table.get(section) {
             let mut only = toml::Table::new();
             only.insert(section.into(), settings.clone());
@@ -980,6 +1020,26 @@ mod tests {
         assert!(!off.lines().any(|l| l.trim() == "[combat]"), "{off}");
         assert!(Config::parse("[combat]\nlegacy = 1\n").is_err());
         assert!(Config::parse("[combat]\nlegcy = true\n").is_err());
+    }
+
+    #[test]
+    fn biome_regions_refuse_missing_mods_unless_their_section_says() {
+        assert_eq!(
+            Config::default().biome_regions.missing,
+            MissingRegions::Refuse
+        );
+        assert!(!Config::default().biome_regions.adopt_installed);
+        let set = Config::parse(&format!(
+            "{TEMPLATE}\n[biome_regions]\nmissing = \"vanilla\"\nadopt_installed = true\n"
+        ))
+        .unwrap();
+        assert_eq!(set.biome_regions.missing, MissingRegions::Vanilla);
+        assert!(set.biome_regions.adopt_installed);
+        // Kept when the file is written again, and left out while default.
+        assert_eq!(Config::parse(&render(&set)).unwrap(), set);
+        let off = render(&Config::default());
+        assert!(!off.lines().any(|l| l.trim() == "[biome_regions]"), "{off}");
+        assert!(Config::parse("[biome_regions]\nmissing = \"skip\"\n").is_err());
     }
 
     #[test]

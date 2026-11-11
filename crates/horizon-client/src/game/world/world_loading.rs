@@ -263,6 +263,15 @@ impl WorldRequest {
         if created {
             level.allow_commands.get_or_insert(creative);
         }
+        // The biome regions are fixed before any chunk generates: a new world records the
+        // installed mods' regions; an existing one opens only with a record that reads and a
+        // recorded choice for each missing mod's region.
+        if created {
+            horizon_client::save::biome_regions::create(&save_root)?;
+        } else {
+            horizon_client::save::biome_regions::open(&save_root)
+                .map_err(|why| format!("Failed to load world \"{folder}\": {why}"))?;
+        }
         if let Some(d) = &options.dimension {
             level.dimension = d.clone();
             level.position = None;
@@ -1161,7 +1170,9 @@ pub(super) fn make_streaming(
         let saved_stem = horizon_client::save::world_gen_settings(world_root)
             .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
             .map(|stem| horizon_client::scoreboard::tag_to_json(&stem));
-        let mut inner = VanillaTerrain::for_world_with_settings(terrain_resources, &overrides, seed, preset, dim.id(), structures, saved_stem.as_ref(), None).map_err(|e| {
+        let regions = horizon_client::save::biome_regions::layout(world_root, dim.id())
+            .map_err(|e| format!("Failed to read the world's biome regions: {e}"))?;
+        let mut inner = VanillaTerrain::for_world_with_settings(terrain_resources, &overrides, seed, preset, dim.id(), structures, saved_stem.as_ref(), regions).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {

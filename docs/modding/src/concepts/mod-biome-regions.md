@@ -1,6 +1,6 @@
 # Design: a mod's biomes inside the Overworld and Nether
 
-Scope 2 of [#2554](https://github.com/arismoko/horizon/issues/2554): how a mod's biomes generate among vanilla's in the Overworld and the Nether. The design below was ruled on in [#2554](https://github.com/arismoko/horizon/issues/2554#issuecomment-6803604498) and is being built in stages (see the end). Until the stages land, the parts marked *not built* describe the agreed contract, not shipped behaviour. Scope 1, a mod's own dimension with its own climate points (`BiomeSourceKind::Points`), is separate and does not need this note.
+Scope 2 of [#2554](https://github.com/arismoko/horizon/issues/2554): how a mod's biomes generate among vanilla's in the Overworld and the Nether. The design below was ruled on in [#2554](https://github.com/arismoko/horizon/issues/2554#issuecomment-6803604498) and built in the stages listed at the end. One part is not built yet and is marked so. Scope 1, a mod's own dimension with its own climate points (`BiomeSourceKind::Points`), is separate and does not need this note.
 
 ## Starting points
 
@@ -31,7 +31,7 @@ The same answer says NeoForge has no API for this: its biome modifiers change bi
 
 **Order.** Regions are sorted by owner mod id, then region id, the same rule the attribute catalog uses. The same mods give the same order on every side, so the list can be saved and compared.
 
-## Choosing a region (not built)
+## Choosing a region
 
 - **Seed stream.** `root.from_hash_of("horizon:biome_region")`, where `root` is the generator's existing `random.fork_positional()`. `from_hash_of` is a pure function of root and name and advances nothing, so no vanilla stream moves.
 - **Jittered cells.** Horizontal space is split into square cells of 128 quarts (512 blocks). Each cell gets one uniform draw from the stream at that cell, which gives a jitter point and a region chosen by cumulative weight. A quart belongs to the nearest jitter point among the 3×3 cells around it. Shares then follow the weights in expectation, and borders are irregular. A thresholded `NormalNoise` would not give the declared shares, because its values are not uniformly distributed.
@@ -42,7 +42,7 @@ The same answer says NeoForge has no API for this: its biome modifiers change bi
 
 **What changes at a border.** Surface material and carvers change at a region border; terrain shape does not, since density reads only climate. A structure whose biome check straddles a border follows vanilla's own check at its sample position.
 
-## The saved record (not built)
+## The saved record
 
 One durable world-level file, `data/horizon/biome_regions.dat`, separate from `data/minecraft/world_gen_settings.dat`:
 
@@ -60,13 +60,13 @@ One durable world-level file, `data/horizon/biome_regions.dat`, separate from `d
 - **Malformed record.** The open is refused with the reason, and the file is left untouched on disk: no rewrite, no rename, no default record in its place.
 - **Changed mods.** An installed mod whose declared regions differ from the record (points, biomes, or a region added or removed) never changes an existing world silently. The record wins, the difference is reported once by name, and the new layout is taken only through the opt-in below.
 
-## Missing mods and opting in (not built)
+## Missing mods and opting in
 
 - **A saved region's mod is absent.** The world names each missing mod and region and requires a choice: do not open, or open and resolve that region through vanilla's index from then on. The region keeps its slot and weight, so the other regions' borders do not move. The choice is recorded on the region with the missing mod's id.
 - **Client.** The question is asked in the existing pre-load prompt, where the backup questions are.
 - **Dedicated server.** `server.toml` gets `[biome_regions] missing = "refuse" | "vanilla"`, default `"refuse"`. Without the setting the server refuses to start, naming the mod and region.
 - **The mod returns.** The substitution is reversible. When the mod returns, the world says so once and keeps the substitution until the owner opts back in, since the chunks generated in between are vanilla there.
-- **Opt-in.** "Use the installed regions for new chunks" is a recorded per-world choice, off by default, and on a server `adopt_installed = false`. The new layout is written durably before any chunk is generated with it. Chunks that already exist keep their biomes and blocks.
+- **Opt-in.** "Use the installed regions for new chunks" is a recorded per-world choice, off by default: on a server `adopt_installed = false` under `[biome_regions]`. Adopting keeps the saved weight of every region that is still declared, takes the declared weight for a new one, and drops the regions of mods that are not installed. *Not built:* an opt-in in the client; today only a dedicated server can adopt, with that setting. The new layout is written durably before any chunk is generated with it. Chunks that already exist keep their biomes and blocks.
 
 ## Acceptance matrix
 
@@ -88,5 +88,5 @@ One durable world-level file, `data/horizon/biome_regions.dat`, separate from `d
 
 1. Saved biome ids kept when the game lacks them (#3132).
 2. `BiomeRegion`, `declare_biome_region` and validation, with unit tests and a wire round trip. No generator change. **Built.**
-3. Region selection in the biome source (`ResolvedBiomeSource`), behind "no record means today's path", with the oracle, distribution, order and structure fixtures.
-4. The saved record, world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix.
+3. Region selection in the biome source (`ResolvedBiomeSource`), behind "no record means today's path", with the oracle, distribution, order and structure fixtures. **Built.**
+4. The saved record (`crates/horizon-client/src/save/biome_regions.rs`), world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix. **Built**, except the client opt-in button.
