@@ -235,18 +235,42 @@ def changed_paths(commit):
     return run("git", "diff", "--name-only", f"{commit}^1", commit).split()
 
 
-def pull_request(number):
-    data = gh_json("pr", "view", str(number), "--repo", REPO, "--json",
-                   "number,title,url,labels,closingIssuesReferences,author,mergedAt")
-    return {
-        "number": data["number"],
-        "title": data["title"].strip(),
-        "url": data["url"],
-        "labels": sorted(label["name"] for label in data["labels"]),
-        "issues": sorted(issue["number"] for issue in data.get("closingIssuesReferences") or []),
-        "author": (data.get("author") or {}).get("login", ""),
-        "merged_at": dt.datetime.fromisoformat(data["mergedAt"].replace("Z", "+00:00")) if data.get("mergedAt") else None,
+def merged_pull_request_metadata():
+    """Repository-owned merge identities and note fields, without one network call per PR."""
+    owner, name = REPO.split("/")
+    query = """
+    query($owner: String!, $name: String!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(first: 100, states: MERGED, after: $endCursor) {
+          nodes {
+            number title url mergedAt mergeCommit { oid } author { login }
+            labels(first: 100) { nodes { name } }
+            closingIssuesReferences(first: 100) { nodes { number } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
     }
+    """
+    pages = gh_json("api", "graphql", "--paginate", "--slurp",
+                    "-F", f"owner={owner}", "-F", f"name={name}", "-f", f"query={query}")
+    owned = {}
+    for page in pages:
+        for data in page["data"]["repository"]["pullRequests"]["nodes"]:
+            # A historical merge commit can have been removed by a force-push. It cannot
+            # match a reachable candidate; GraphQL explicitly permits a null commit.
+            if data["mergeCommit"] is None:
+                continue
+            owned[(data["number"], data["mergeCommit"]["oid"])] = {
+                "number": data["number"],
+                "title": data["title"].strip(),
+                "url": data["url"],
+                "labels": sorted(label["name"] for label in data["labels"]["nodes"]),
+                "issues": sorted(issue["number"] for issue in data["closingIssuesReferences"]["nodes"]),
+                "author": (data["author"] or {}).get("login", ""),
+                "merged_at": dt.datetime.fromisoformat(data["mergedAt"].replace("Z", "+00:00")),
+            }
+    return owned
 
 
 def published_releases():
@@ -478,17 +502,14 @@ def merged_between(kind, base, head):
     candidates = merged_pull_requests(base, head)
     if not candidates:
         return []
-    # Merge subjects survive imports and PR numbers are repository-local. Enumerate this
-    # repository's closed PRs without a history cap, then require the actual merge SHA.
-    # A missing PR here is imported history, not a failed metadata request to suppress.
-    pages = gh_json("api", f"repos/{REPO}/pulls?state=closed&per_page=100", "--paginate", "--slurp")
-    owned = {(entry["number"], entry["merge_commit_sha"]) for page in pages for entry in page
-             if entry["merged_at"]}
+    # Merge subjects survive imports and PR numbers are repository-local. Fetch this
+    # repository's merge identities AND note fields in one fully paginated query.
+    owned = merged_pull_request_metadata()
     prs = []
     for number, commit in candidates:
         if (number, commit) not in owned:
             continue
-        pr = pull_request(number)
+        pr = owned[(number, commit)].copy()
         pr["paths"] = [path for path in changed_paths(commit) if player_facing(path, kind, exporter_paths)]
         prs.append(pr)
     return prs
