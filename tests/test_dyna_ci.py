@@ -104,26 +104,48 @@ class DynaRoutingTests(unittest.TestCase):
     @unittest.skipUnless(POSIX_BASH and os.name != "nt", "needs the runner's bash")
     def test_baked_packages_skip_the_download_and_a_partial_image_falls_back(self):
         script = ROOT / "tools/ci/dyna_ci_deps.sh"
-        for missing in (False, True):
-            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+        for missing, extraction_error in ((False, False), (True, False), (True, True)):
+            with self.subTest(missing=missing, extraction_error=extraction_error), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 stubs = root / "stubs"
                 stubs.mkdir()
                 (stubs / "dpkg-query").write_text(
                     '#!/bin/bash\nif [ "$MISSING" = 1 ] && [ "${!#}" = libudev-dev ]; then exit 1; fi\nprintf installed\n')
-                (stubs / "apt-get").write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$APT_CALLS"\n')
-                (stubs / "dpkg-deb").write_text("#!/bin/bash\n")
+                (stubs / "apt-get").write_text(
+                    '#!/bin/bash\nprintf "%s\\n" "$*" >> "$APT_CALLS"\n'
+                    'for arg in "$@"; do\n'
+                    '  case "$arg" in Dir::Cache::archives=*) archives=${arg#*=} ;; esac\n'
+                    'done\n'
+                    'if [[ " $* " == *" install "* ]]; then touch "$archives/headers.deb"; fi\n')
+                (stubs / "dpkg-deb").write_text(
+                    '#!/bin/bash\nset -eu\n'
+                    'test -f "$2"\n'
+                    '[ "$EXTRACTION_ERROR" = 0 ] || exit 42\n'
+                    'mkdir -p "$3/usr/include"\n'
+                    'printf "fixture header\\n" > "$3/usr/include/fixture.h"\n'
+                    'echo extracted >> "$EXTRACTION_RECEIPT"\n')
                 for stub in stubs.iterdir():
                     stub.chmod(0o755)
                 (root / "build").mkdir()
                 env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", HOME=str(root / "home"),
                            DYNA_CI_BUILD=str(root / "build"), CARGO_HOME=str(root / "cargo"),
                            GITHUB_ENV=str(root / "env"), GITHUB_PATH=str(root / "path"),
-                           MISSING=str(int(missing)), APT_CALLS=str(root / "apt-calls"), DYNA_CI_APT_TRIES="1")
+                           MISSING=str(int(missing)), APT_CALLS=str(root / "apt-calls"), DYNA_CI_APT_TRIES="1",
+                           EXTRACTION_ERROR=str(int(extraction_error)), EXTRACTION_RECEIPT=str(root / "extracted"))
                 result = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
                 calls = (root / "apt-calls").read_text() if (root / "apt-calls").exists() else ""
                 if missing:
                     self.assertTrue(calls, "a missing package must run the download fallback")
+                    if extraction_error:
+                        self.assertEqual(result.returncode, 42, result.stderr)
+                        self.assertFalse((root / "env").exists())
+                        self.assertFalse((root / "build/apt-prefix/.dyna-hash").exists())
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual((root / "extracted").read_text(), "extracted\n")
+                        exports = dict(line.split("=", 1) for line in (root / "env").read_text().splitlines())
+                        prefix = Path(exports["PKG_CONFIG_SYSROOT_DIR"])
+                        self.assertEqual((prefix / "usr/include/fixture.h").read_text(), "fixture header\n")
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(calls, "")
@@ -170,7 +192,7 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 100)
         self.assertEqual(count, 3)
         self.assertEqual(result.stderr.count("E: File has unexpected size"), 3)
-        self.assertIn("apt-get failed after 3 tries (exit 100)", result.stderr)
+        self.assertIn("timeout failed after 3 tries (exit 100)", result.stderr)
 
     def test_lint_enforces_api_boundary_under_central_selection(self):
         from test_ci_runners import jobs

@@ -6,8 +6,16 @@ use horizon_core::{geometry::Vec3, random::RandomSource};
 use mod_api::Identifier;
 
 #[test]
-#[ignore = "needs prepared resources and HORIZON_TEST_SEEDS=1"]
+#[ignore = "needs prepared resources"]
 fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
+    // Opt in only in a fresh child; never mutate the parallel parent's environment.
+    if crate::game::native_entity_refs::tests::run_fresh_cases(
+        "game::native_projectile_launch_tests::owner_launch_sets_owner_before_insertion_and_uses_projectile_random",
+        "HORIZON_TEST_SEEDS",
+        &["1"],
+    ) {
+        return;
+    }
     with_game(|game| {
         let kind = game
             .res
