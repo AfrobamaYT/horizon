@@ -24,7 +24,7 @@ pub struct Count {
 impl BlockEntityTickSlot for Count {
     fn before(&mut self, view: &mut impl BlockEntityTickView) -> LoopFlow {
         self.visited += 1;
-        if self.visited % 100 == 1 {
+        if self.visited % 1000 == 1 {
             note(&format!(
                 "count before #{}: {:?} at {:?} in {:?}, time {}, cooldown {:?}",
                 self.visited,
@@ -39,7 +39,7 @@ impl BlockEntityTickSlot for Count {
     }
     fn after(&mut self, view: &mut impl BlockEntityTickView) {
         self.ticked += 1;
-        if self.ticked % 100 == 1 {
+        if self.ticked % 1000 == 1 {
             note(&format!("count after #{}: {:?}", self.ticked, view.kind()));
         }
     }
@@ -57,7 +57,7 @@ impl BlockEntityTickSlot for Throttle {
             Some(cooldown) if cooldown > 1 => {
                 view.set_hopper_cooldown(cooldown - 1);
                 self.skipped += 1;
-                if self.skipped % 100 == 1 {
+                if self.skipped % 1000 == 1 {
                     note(&format!(
                         "throttle skips #{}: cooldown {cooldown}",
                         self.skipped

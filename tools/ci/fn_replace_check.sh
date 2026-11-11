@@ -92,12 +92,31 @@ if [ -n "$resources" ]; then
   run=$scratch/run
   mkdir -p "$run"
   echo eula=true > "$run/eula.txt"
-  (sleep 30; echo "tick rate 40"; sleep 3; echo "tick rate 13"; sleep 3; echo "tick query"; sleep 3; echo "stop"; sleep 20) |
+  # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them.
+  hoppers=
+  if [[ " ${FNR_MODS:-alpha beta} " == *" loop"* ]]; then
+    hoppers='forceload add 0 0
+fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft:stone",count:64}]}'
+  fi
+  (sleep 30; echo "$hoppers"; sleep 5; echo "tick rate 40"; sleep 3; echo "tick rate 13"; sleep 3; echo "tick query"; sleep 3; echo "stop"; sleep 20) |
     (cd "$run" && env "${env_vars[@]}" timeout 180 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" \
       --dedicated --nogui) > "$scratch/server.log" 2>&1 || true
   grep -F 'fnr:' "$scratch/server.log"
   if [[ " ${FNR_MODS:-alpha beta} " == *" alpha "* ]]; then
     grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" loop "* ]]; then
+    # Both slots ran in priority order, the throttle wrote cooldowns, and the entry's HEAD composed.
+    grep -F 'fnr: loop count before #1: Hopper' "$scratch/server.log"
+    grep -F 'fnr: loop count after #1: Hopper' "$scratch/server.log"
+    grep -F 'fnr: loop throttle skips #1:' "$scratch/server.log"
+    grep -F 'fnr: loop HEAD tick_block_entities' "$scratch/server.log"
+    grep -F 'Published loops: 1 filled by 2 mod slots' "$log"
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" loop_panic "* ]]; then
+    # The slot's panic is the server's crash, and its report names the mod and the loop.
+    grep -rlF 'fnr_loop_panic' "$scratch/home" | grep -q .
+    grep -rF 'loop block_entities.tick' "$scratch/home" "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
