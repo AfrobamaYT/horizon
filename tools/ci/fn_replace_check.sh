@@ -2,7 +2,7 @@
 # Function replacement end to end (fn-replace): two native mods' `[[native.mixin]]` rows built by the
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
-#   [FNR_MODS="alpha beta"] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
+#   [FNR_MODS="alpha beta"] [FNR_MOD_ROOT=DIR] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
 # SDK is a folder from `tools/prebuilt_game.py build --server` at this checkout's HEAD. With
 # RESOURCES (a prepared `horizon-client/26.3` folder), the server starts, takes `/tick` commands
 # and stops; every mixin helper prints a line starting `fnr:`.
@@ -56,7 +56,7 @@ printf '{"base": "ci", "horizon": "%s", "target": "%s"}\n' "$revision" "$side" >
 mods=$scratch/mods/fnr
 mkdir -p "$mods"
 for mod in ${FNR_MODS:-alpha beta}; do
-  cp -r "$root/tools/ci/fn-replace-check/$mod" "$mods/fnr_$mod"
+  cp -r "${FNR_MOD_ROOT:-$root/tools/ci/fn-replace-check}/$mod" "$mods/fnr_$mod"
   sed -i "s/^horizon = \"HEAD\"$/horizon = \"$revision\"/; s/^mixins = \"MIXINS\"$/mixins = \"$mixins\"/" "$mods/fnr_$mod/horizon-mod.toml"
   sed -i "s/rev = \"HEAD\"/rev = \"$revision\"/" "$mods/fnr_$mod/Cargo.toml"
 done

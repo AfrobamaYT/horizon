@@ -1686,7 +1686,7 @@ mod tests {
         let crate_ = generate(
             &root(),
             "horizon_patch",
-            &[published.entry.clone()],
+            std::slice::from_ref(&published.entry),
             &extras,
         )
         .unwrap();

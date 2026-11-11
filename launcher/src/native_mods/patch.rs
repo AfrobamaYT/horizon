@@ -288,7 +288,7 @@ fn loop_slots(
             if !matches!(mixin.kind, Kind::Head | Kind::Return) {
                 let fillers: Vec<&str> = slots.slots.iter().map(|s| s.mod_id.as_str()).collect();
                 refusals.push(format!(
-                    "E_LOOP_ENTRY_REPLACED: {}:{}: a {} mixin on {} would replace or bypass the published loop `{}`, which {} fill; only HEAD and RETURN mixins compose with it",
+                    "E_LOOP_ENTRY_REPLACED: {}:{}: the {} mixin on {} would replace or bypass the published loop `{}`, filled by {}; only HEAD and RETURN mixins compose with it",
                     bundle.manifest.id,
                     mixin.id,
                     mixin.kind.name(),
