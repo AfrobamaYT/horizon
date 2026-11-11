@@ -470,10 +470,10 @@ impl Store {
         let tombstones = self.journal.tombstones.clone();
         let mut changed = false;
         for (uuid, generation) in tombstones {
-            if !self.data.join(format!(
-                "horizon_carrier_{uuid:032x}-{generation}.nbt"
-            ))
-            .exists()
+            if !self
+                .data
+                .join(format!("horizon_carrier_{uuid:032x}-{generation}.nbt"))
+                .exists()
             {
                 self.journal.tombstones.retain(|t| *t != (uuid, generation));
                 changed = true;

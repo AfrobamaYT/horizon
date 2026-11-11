@@ -1317,7 +1317,8 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        let mut canceled = carrier_transfers::piston_fenced(&self.world.carrier_fences, push, destroy);
+        let mut canceled =
+            carrier_transfers::piston_fenced(&self.world.carrier_fences, push, destroy);
         if !canceled && self.native_authoritative {
             let step = direction.normal();
             self.native_piston_pre(mod_api::__private::PistonPreCall {
