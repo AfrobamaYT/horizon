@@ -446,6 +446,11 @@ def run_script(steps, host, verbose):
     """Runs the steps in one shell on host (here for "local"), each between markers, reading results as they come."""
     if not steps:
         return
+    # Parity may generate datafix worlds, downloads and locks. Refuse before
+    # starting any stage subprocess, not after the harness has begun writing.
+    if any(step.name == "Parity" for step in steps):
+        from tools.datafix_paths import writable_root
+        writable_root()
     if host == "local" and os.name == "nt":
         run_windows(steps, verbose)
         return
