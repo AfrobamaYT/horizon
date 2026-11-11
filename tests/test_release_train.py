@@ -133,7 +133,8 @@ class ReleaseTrainTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True,
                                         text=True, env={**os.environ, "GITHUB_OUTPUT": str(output),
                                         "GITHUB_STEP_SUMMARY": str(root / "summary"), "GITHUB_SHA": "head",
-                                        "HEAD_SHA": "head", "FORCE": ""})
+                                        "BASE": "", "EVENT": "workflow_dispatch", "DRY_RUN": "true",
+                                        "SOURCE_SHA": "head", "FORCE": ""})
                 if status:
                     self.assertEqual(result.returncode, status, result.stderr)
                     self.assertEqual(output.read_text(), "")
@@ -307,6 +308,40 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(train.green_main_head(), "c")
         with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
             self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
+
+    def test_launcher_manual_base_is_pinned_and_must_belong_to_main(self):
+        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
+        selection = workflow.split("          set -euo pipefail\n", 1)[1].split(
+            "          python3 tools/release_train.py decide", 1)[0]
+        script = "set -euo pipefail\n" + textwrap.dedent(selection) + '\nprintf "%s" "$HEAD_SHA"'
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "main")
+            main = git("rev-parse", "HEAD")
+            git("remote", "add", "origin", folder)
+            git("checkout", "-b", "topic")
+            git("commit", "--allow-empty", "-m", "not main")
+            topic = git("rev-parse", "HEAD")
+            def select(base="", event="workflow_dispatch", dry_run="false"):
+                return subprocess.run(["bash", "-c", script], cwd=folder, text=True,
+                                      capture_output=True, env={**os.environ, "BASE": base,
+                                      "EVENT": event, "DRY_RUN": dry_run, "SOURCE_SHA": topic})
+            for dry_run in ("false", "true"):
+                result = select(main, dry_run=dry_run)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, main)
+            for invalid in ("does-not-exist", topic, "--help"):
+                result = select(invalid)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::base", result.stdout)
+            self.assertEqual(select().stdout, "", "default real manual run uses the gate picker")
+            self.assertEqual(select(event="push").stdout, topic)
+            self.assertEqual(select(dry_run="true").stdout, topic)
 
     @mock.patch.object(train, "REPO", "arismoko/horizon")
     def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
