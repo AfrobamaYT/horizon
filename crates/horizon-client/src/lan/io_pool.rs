@@ -689,7 +689,16 @@ impl Conn {
         }
         if !self.draining
             && let Some(body) = self.session.tick(now)
-            && self.frame(now, vec![body], false)
+            && self.frame(
+                now,
+                vec![Queued {
+                    body,
+                    prepared: false,
+                    pending: self.outbox.pending.clone(),
+                    cost: 0,
+                }],
+                false,
+            )
         {
             self.serve(now);
         }

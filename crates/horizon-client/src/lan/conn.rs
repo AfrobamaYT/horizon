@@ -12,7 +12,6 @@ use super::{
     forwarding,
     io_pool::{self, Session as _},
 };
-use horizon_mod_api::{PayloadFrameStage, PayloadId, PayloadSendError};
 use horizon_protocol::{
     PROTOCOL_VERSION,
     connection::{ConnWriter, Connection, Counters},
@@ -24,6 +23,7 @@ use horizon_protocol::{
     },
     text::translatable,
 };
+use mod_api::{PayloadFrameStage, PayloadId, PayloadSendError};
 use std::{
     cell::Cell,
     net::TcpStream,
@@ -338,7 +338,7 @@ impl PlayerSender {
     }
     fn reserve(&self, cost: usize) -> bool {
         self.pending
-            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Relaxed, |n| {
                 n.checked_add(cost).filter(|n| *n <= io_pool::MAX_PENDING)
             })
             .is_ok()
@@ -1880,8 +1880,10 @@ pub(super) fn frame_body(
         return Ok(());
     };
     let body = &body[..];
-    match writer.threshold {
-        Some(t) if body.len() >= t.max(SHARED_FRAME_MIN) => {
+    match writer.framing() {
+        horizon_protocol::connection::Framing::Network(Some(t))
+            if body.len() >= t.max(SHARED_FRAME_MIN) =>
+        {
             writer.frame_into(&SharedFrames::get().contents(body, t)?, out);
         }
         _ => writer.frame_into(&writer.contents(body)?, out),

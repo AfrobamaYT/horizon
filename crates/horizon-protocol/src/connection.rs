@@ -594,6 +594,16 @@ impl ConnWriter {
             .and_then(|a| a.legacy_secure_chat_enforcement())
     }
 
+    /// Observe live secure-chat metadata after moving the writer to another thread.
+    pub fn legacy_secure_chat_observer(&self) -> impl Fn() -> Option<bool> + Send + Sync + 'static {
+        let adapter = self.adapter.clone();
+        move || {
+            adapter
+                .as_ref()
+                .and_then(|a| a.legacy_secure_chat_enforcement())
+        }
+    }
+
     /// Write bytes as they are, with no framing: the legacy server list ping
     /// (`LegacyServerPinger`) is not a framed protocol.
     pub fn write_raw(&mut self, data: &[u8]) -> Result<()> {
