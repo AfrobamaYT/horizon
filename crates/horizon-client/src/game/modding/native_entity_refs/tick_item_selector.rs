@@ -12,6 +12,22 @@ impl Game<'_> {
             .borrow_mut()
             .level_entities(level.dimension());
         ids.into_iter()
+            .filter(|id| {
+                !self
+                    .persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+            })
+            .filter(|id| {
+                !self
+                    .persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+            })
             .map(|id| {
                 let entity = EntityRef::new(level.epoch(), id);
                 self.native_entity_target(entity).map(|_| entity)
@@ -35,6 +51,26 @@ impl Game<'_> {
             .level_entities(level.dimension());
         Some(
             ids.into_iter()
+                .filter(|id| {
+                    !self.persist.removals.iter().chain(self.persist.destroying_vehicles.iter())
+    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+                })
+                .filter(|id| {
+                    !self
+                    .persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+                })
+                .filter(|id| {
+                    !self
+                    .persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+                })
                 .filter_map(|id| {
                     let entity = EntityRef::new(level.epoch(), id);
                     self.native_entity_target(entity).map(|_| entity)

@@ -597,7 +597,9 @@ impl Game<'_> {
             _ => "Mod parts refused".to_owned(),
         })?;
         let block_states = api_values::prepare_block_states(registry)?;
+        let cauldrons = self.prepare_cauldron_interactions(items)?;
         Ok(PreparedParts {
+            cauldrons,
             block_states,
             tags,
             parts,
@@ -671,6 +673,7 @@ impl Game<'_> {
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
     /// on nothing else, so path finding and spawning read it with no dispatch.
     pub(super) fn install_parts(&self, prepared: PreparedParts) {
+        cauldron_interactions::install(prepared.cauldrons);
         api_values::install_block_states(prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);

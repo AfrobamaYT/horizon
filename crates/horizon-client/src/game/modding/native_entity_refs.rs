@@ -890,8 +890,8 @@ pub(super) mod tests {
             std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
                 .canonicalize()
                 .unwrap();
-        let target = std::env::current_dir().unwrap().join("target");
-        std::fs::create_dir_all(&target).unwrap();
+        let scratch_owner = tempfile::tempdir().unwrap();
+        let target = scratch_owner.path();
         for case in cases {
             let scratch = target.join(format!(
                 "be-types-fixture-{}-{}",

@@ -16,7 +16,6 @@ use glam::{DVec3, Mat4, Vec3, Vec4};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
-
 // RenderPipelines.CRUMBLING: dst * src + src * dst, alpha replaced.
 const CRUMBLING_BLEND: wgpu::BlendState = wgpu::BlendState {
     color: wgpu::BlendComponent {
@@ -380,6 +379,7 @@ mod custom_sky;
 mod displace;
 pub mod lightning;
 mod lod;
+pub mod mod_pipelines;
 mod native_material;
 mod native_pack;
 mod native_post;
