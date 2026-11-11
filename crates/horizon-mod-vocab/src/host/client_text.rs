@@ -11,9 +11,8 @@ pub trait ClientTextClientHost {
     /// Styles do not contribute characters; literal legacy formatting codes remain
     /// in the string, as in vanilla. Available outside drawing, including client
     /// setup, on native and wasm. Invalid components return their boundary error.
-    /// Currently the shared decoder translates action IDs such as `key.jump` to
-    /// action captions, not their rebound keys; action-binding parity is tracked
-    /// in [#2718](https://github.com/arismoko/horizon/issues/2718).
+    /// Action keybind IDs such as `key.jump` resolve through the client's current
+    /// key binding to their assigned physical key, matching vanilla KeybindContents.
     #[access(ClientSetup)]
     fn text_string(&self, text: &Text) -> Result<String, TextFormError>;
 
@@ -23,8 +22,8 @@ pub trait ClientTextClientHost {
     /// drawing on native and wasm, including client setup. Invalid components
     /// return the same boundary errors as `text_string`. Sink indices are local
     /// UTF-16 offsets, not offsets into the input component tree.
-    /// Action keybinds currently resolve to captions rather than rebound keys,
-    /// as for `text_string`. No NeoForge hook counterpart is documented.
+    /// Action keybinds resolve to their assigned keys as in `text_string`.
+    /// No NeoForge hook counterpart is documented.
     #[access(ClientSetup)]
     fn text_visual_order(&self, text: &Text) -> Result<Vec<VisualTextCharacter>, TextFormError>;
 

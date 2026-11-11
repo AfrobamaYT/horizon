@@ -500,7 +500,8 @@ struct CreativeTabFile {
     items: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, horizon_mod_api_macros::Wire)]
+#[wire(crate = ::mod_vocab::wire)]
 #[serde(deny_unknown_fields)]
 struct FluidFile {
     sprite: Option<String>,
@@ -511,7 +512,8 @@ struct FluidFile {
 /// What makes a fluid exist in the world: a block holding it, as `minecraft:water`'s does, and
 /// how it flows. Each value defaults to water's, in `data/<id>/horizon/fluid/` as in code
 /// (`Registrar::declare_world_fluid`).
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[wire(crate = ::mod_vocab::wire)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldFluid {
     /// Game ticks between two flow steps (`Fluid.getTickDelay`), 1 or more.
@@ -556,7 +558,8 @@ impl WorldFluid {
 /// How a fluid the mod names looks on the client (`data/<id>/horizon/fluid/`), as
 /// NeoForge's `IClientFluidTypeExtensions`: `getStillTexture` and `getTintColor`.
 /// The fluid needs no block, so it can be a fluid only a tank holds.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[wire(crate = ::mod_vocab::wire)]
 pub struct FluidLook {
     /// `<mod id>:<path>`.
     pub id: String,
@@ -3619,3 +3622,7 @@ mod context_shape_tests {
         assert!(check_block(&block).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "fluid_wire_tests.rs"]
+mod fluid_wire_tests;
