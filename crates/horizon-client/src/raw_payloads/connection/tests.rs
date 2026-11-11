@@ -69,7 +69,7 @@ fn close_releases_a_waiting_configuration_without_running_queued_work() {
 #[test]
 fn ingress_leases_survive_phase_churn_and_refund_outside_queues() {
     let connection = connection();
-    let cost = 1024 + byte_channel::message_overhead::<()>();
+    let cost = INGRESS_RECORD_OVERHEAD + byte_channel::message_overhead::<()>();
     let mut leases = Vec::new();
     for _ in 0..INGRESS_BUDGET / cost {
         leases.push(connection.reserve_ingress(0).unwrap());

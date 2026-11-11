@@ -220,5 +220,8 @@ impl IPayloadContext for MainContext<'_, '_> {
     }
 }
 #[cfg(test)]
+#[path = "payload_transport/config_tests.rs"]
+mod config_tests;
+#[cfg(test)]
 #[path = "payload_transport/tests.rs"]
 mod tests;

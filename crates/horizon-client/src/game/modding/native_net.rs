@@ -76,91 +76,47 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
-    };
+    use super::super::native_entity_refs::tests::{run_fresh_cases, with_client_game};
     use super::{SendPacketError, ServerboundPlayPacket};
-    use horizon_protocol::quiet;
     use horizon_protocol::{buf::Writer, connection::Pipe};
     use mod_api::Identifier;
 
-    /// A mod's packet goes out only from a joined player, and a custom
-    /// payload only within vanilla's size limit.
+    /// A joined flag cannot manufacture a physical transport. Packet codec,
+    /// reservation, and framing cases live in net::mod_packet_tests.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn mod_packets_need_a_joined_player_and_a_payload_within_the_limit() {
-        let root = std::path::PathBuf::from(
-            std::env::var_os("HORIZON_TEST_RESOURCES")
-                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
-        );
-        let settings = Settings::default();
-        let loaded = load_resources(
-            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
-            Vec::new(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            ExecutionRole::Client,
-            &Progress::new(),
-            &mut |_, _| unreachable!("no menu handoff"),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = ExecutionRole::Client;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.to_path_buf(),
-            )),
-            None,
-        )
-        .unwrap();
-        let payload = |len| {
-            let mut body = Writer::new();
-            body.string("voicechat:request_secret");
-            body.bytes(&vec![0; len]);
-            ServerboundPlayPacket::new(
-                Identifier::parse("minecraft:custom_payload").unwrap(),
-                body.data,
-            )
-        };
-
-        assert!(game.send_packet(payload(4)).is_err());
-        let (client, _server) = Pipe::pair();
-        game.connect_local(client, "PacketTest").unwrap();
-        assert!(game.send_packet(payload(4)).is_err());
-        game.remote.as_mut().unwrap().joined = true;
-        assert!(game.send_packet(payload(4)).is_ok());
-        assert!(game.send_packet(payload(quiet::MAX_PAYLOAD)).is_ok());
-        assert!(game.send_packet(payload(quiet::MAX_PAYLOAD + 1)).is_err());
-        let mut pong = Writer::new();
-        pong.i32(7);
-        assert_eq!(
-            game.send_packet(ServerboundPlayPacket::new(
-                Identifier::parse("minecraft:pong").unwrap(),
-                pong.data.clone(),
-            )),
-            Ok(())
-        );
-        pong.bytes(&[0]);
-        assert_eq!(
-            game.send_packet(ServerboundPlayPacket::new(
-                Identifier::parse("minecraft:pong").unwrap(),
-                pong.data,
-            )),
-            Err(SendPacketError::InvalidBody)
-        );
-        let unknown = Identifier::parse("test:unknown_packet").unwrap();
-        assert_eq!(
-            game.send_packet(ServerboundPlayPacket::new(unknown.clone(), Vec::new())),
-            Err(SendPacketError::UnknownPacket { id: unknown })
-        );
+    #[ignore = "needs private prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_packets_require_joined_player_and_physical_transport() {
+        if run_fresh_cases(
+            "game::native_net::tests::mod_packets_require_joined_player_and_physical_transport",
+            "HORIZON_PACKET_GUARD_CHILD",
+            &["guards"],
+        ) {
+            return;
+        }
+        with_client_game(|game| {
+            let packet = || {
+                let mut body = Writer::new();
+                body.string("voicechat:request_secret");
+                body.bytes(&[1, 2, 3, 4]);
+                ServerboundPlayPacket::new(
+                    Identifier::parse("minecraft:custom_payload").unwrap(),
+                    body.data,
+                )
+            };
+            assert_eq!(
+                game.send_packet(packet()),
+                Err(SendPacketError::NotConnected)
+            );
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "PacketTest").unwrap();
+            assert_eq!(game.send_packet(packet()), Err(SendPacketError::NotInPlay));
+            // Deliberately inconsistent actor state: no handshake has installed
+            // a writer. Acceptance must still require the physical provider.
+            game.remote.as_mut().unwrap().joined = true;
+            assert_eq!(
+                game.send_packet(packet()),
+                Err(SendPacketError::NotConnected)
+            );
+        });
     }
 }

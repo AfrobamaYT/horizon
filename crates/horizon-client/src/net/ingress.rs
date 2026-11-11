@@ -101,6 +101,13 @@ impl<T> Consumer<T> {
     pub fn try_recv_owned(&self) -> Result<OwnedReceipt<T>, TryRecvError> {
         self.receiver.try_recv_owned()
     }
+    #[cfg(test)]
+    pub fn recv_timeout_owned(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<OwnedReceipt<T>, std::sync::mpsc::RecvTimeoutError> {
+        self.receiver.recv_timeout_owned(timeout)
+    }
     /// Only values already published at the beginning of this turn. New replies
     /// append behind these values and cannot feed back into the same actor turn.
     pub fn take_turn(&self) -> Vec<OwnedReceipt<T>> {

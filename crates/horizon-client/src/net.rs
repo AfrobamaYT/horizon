@@ -2357,11 +2357,11 @@ mod tests {
             play::Serverbound::KeepAlive(cfg::KeepAlive { id: 9 })
         );
         let timeout = Duration::from_secs(5);
+        let (event, _teleport_credit) = events.recv_timeout_owned(timeout).unwrap().into_parts();
+        assert!(matches!(event, Event::Packet(p) if *p == teleport));
+        let (event, _ping_credit) = events.recv_timeout_owned(timeout).unwrap().into_parts();
         assert!(
-            matches!(events.recv_timeout(timeout).unwrap(), Event::Packet(p) if *p == teleport)
-        );
-        assert!(
-            matches!(events.recv_timeout(timeout).unwrap(), Event::Packet(p) if *p == play::Clientbound::Ping(cfg::Ping { id: 7 }))
+            matches!(event, Event::Packet(p) if *p == play::Clientbound::Ping(cfg::Ping { id: 7 }))
         );
         writer.lock().unwrap().take().unwrap().shutdown();
         assert!(thread.join().unwrap().is_err());
@@ -2372,7 +2372,7 @@ mod tests {
     fn local_send_rejects_unknown_oversize_payload_before_writing() {
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (_, writer) = Connection::local(client).split();
-        let (_, events) = channel();
+        let (_, events) = event_channel();
         let session = Session {
             events,
             payload_events: event_channel().0,
@@ -2537,9 +2537,14 @@ mod tests {
         });
         server.send(&transfer.encode()).unwrap();
         assert!(thread.join().unwrap().is_ok());
+        let turn: Vec<_> = events
+            .take_turn()
+            .into_iter()
+            .map(ingress::OwnedReceipt::into_parts)
+            .collect();
         assert!(matches!(
-            events.try_iter().last(),
-            Some(Event::Transfer { host, port: 25566 }) if host == "example.net"
+            turn.last(),
+            Some((Event::Transfer { host, port: 25566 }, _credit)) if host == "example.net"
         ));
         // The stored cookie stays for the next connection (TransferState).
         assert_eq!(
@@ -2559,14 +2564,15 @@ mod tests {
             data: writer.data,
         };
         receive_brand(&payload, &send);
-        assert!(matches!(events.try_recv(), Ok(Event::Brand(brand)) if brand == "vanilla"));
+        let (event, _credit) = events.try_recv_owned().unwrap().into_parts();
+        assert!(matches!(event, Event::Brand(brand) if brand == "vanilla"));
         payload.channel = "example:other".into();
         receive_brand(&payload, &send);
-        assert!(events.try_recv().is_err());
+        assert!(events.try_recv_owned().is_err());
         payload.channel = "minecraft:brand".into();
         payload.data = vec![0xff];
         receive_brand(&payload, &send);
-        assert!(events.try_recv().is_err());
+        assert!(events.try_recv_owned().is_err());
     }
     /// No account never joins; the signed-in rule is compared with the real
     /// client login listener by test_lan_auth_parity.py.
@@ -2641,13 +2647,14 @@ mod tests {
                 Arc::new(lang),
                 Arc::clone(&data),
             );
-            let reason = loop {
-                if let Event::Disconnected { reason, .. } = session
+            let (reason, _credit) = loop {
+                let (event, credit) = session
                     .events
-                    .recv_timeout(Duration::from_secs(60))
+                    .recv_timeout_owned(Duration::from_secs(60))
                     .unwrap()
-                {
-                    break reason;
+                    .into_parts();
+                if let Event::Disconnected { reason, .. } = event {
+                    break (reason, credit);
                 }
             };
             // Without an account nothing joins, LAN or not.

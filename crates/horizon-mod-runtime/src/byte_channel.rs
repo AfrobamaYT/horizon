@@ -276,11 +276,20 @@ impl<T> Receiver<T> {
         }
     }
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
+        self.recv_timeout_owned(timeout)
+            .map(|receipt| receipt.into_parts().0)
+    }
+    /// Timed receive that transfers, rather than refunds, the input's credit.
+    /// A zero timeout still receives an already published value.
+    pub fn recv_timeout_owned(
+        &self,
+        timeout: Duration,
+    ) -> Result<OwnedReceipt<T>, RecvTimeoutError> {
         let start = Instant::now();
         let mut state = self.0.lock();
         loop {
-            if let Some(value) = Self::pop(&mut state) {
-                return Ok(value);
+            if let Some(receipt) = self.pop_owned(&mut state) {
+                return Ok(receipt);
             }
             if state.senders == 0 {
                 return Err(RecvTimeoutError::Disconnected);
@@ -531,6 +540,29 @@ mod tests {
         ));
         assert_eq!(drops.load(Ordering::SeqCst), 2);
         assert_eq!(tx.stats().queued_items, 0);
+    }
+
+    #[test]
+    fn timed_owned_receive_keeps_credit_through_timeout_and_endpoint_close() {
+        let capacity = message_overhead::<u32>() + 4;
+        let (tx, rx) = channel::<u32>(capacity).unwrap();
+        assert!(matches!(
+            rx.recv_timeout_owned(Duration::ZERO),
+            Err(RecvTimeoutError::Timeout)
+        ));
+        tx.try_send(42, 4).unwrap();
+        let (value, credit) = rx.recv_timeout_owned(Duration::ZERO).unwrap().into_parts();
+        assert_eq!(value, 42);
+        assert_eq!(tx.stats().reserved_bytes, capacity);
+        assert!(matches!(tx.reserve(4), Err(ReserveError::Full)));
+        assert!(matches!(
+            rx.recv_timeout_owned(Duration::ZERO),
+            Err(RecvTimeoutError::Timeout)
+        ));
+        drop(rx);
+        assert_eq!(tx.stats().reserved_bytes, capacity);
+        drop(credit);
+        assert_eq!(tx.stats().reserved_bytes, 0);
     }
 
     #[test]
