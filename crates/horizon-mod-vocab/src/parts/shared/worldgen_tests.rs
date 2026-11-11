@@ -1,5 +1,5 @@
 //! The table a server publishes for its world generation, as the worldgen Part methods read it on
-//! threads with no game. One test: the published table is process-wide.
+//! threads with no game. One test publishes: the published table is process-wide.
 use super::*;
 use crate::*;
 use std::sync::Mutex;
@@ -133,4 +133,19 @@ fn a_thread_with_no_game_asks_the_published_key_and_tag_parts_and_a_feature_keep
     })
     .join()
     .unwrap();
+}
+
+#[test]
+fn with_no_part_subscribed_a_worldgen_dispatch_looks_nothing_up() {
+    install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    TEST_PART_LOOKUPS.set(0);
+    let mut soil = None;
+    crate::world::ground::native_on_tree_grow(
+        &OwningWorldgen::new(&|_| None, &|_, _| None),
+        BlockState::from(BlockStateRecord::new(BlockKey(0), 0)),
+        [0, 63, 0],
+        &mut Draws,
+        &mut soil,
+    );
+    assert_eq!((soil, TEST_PART_LOOKUPS.get()), (None, 0));
 }
