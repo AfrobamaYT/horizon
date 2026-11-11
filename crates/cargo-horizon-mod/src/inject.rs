@@ -602,7 +602,11 @@ mod tests {
             dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("internals.json"), r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap();
-        fs::write(cache.join("points.json"), r#"{"sites":[]}"#).unwrap();
+        fs::write(
+            cache.join("points.json"),
+            r#"{"points":[{"target":"game::tick"}],"sites":[]}"#,
+        )
+        .unwrap();
         fs::write(dir.join(MANIFEST), TEXT).unwrap();
         dir
     }
