@@ -250,23 +250,39 @@ class DynaRoutingTests(unittest.TestCase):
                     self.assertIn(f"Shard result: {result}", summary.read_text())
                     summary.unlink()
 
+    def assert_positive_stage_export(self, verify):
+        command = "python3 tools/ci/test_stage_catalog.py -v"
+        name = "- name: Validate prebuilt source stage and listed slots\n"
+        step = verify.split(name, 1)[1].split("\n      - ", 1)[0]
+        # Inspect active scalar values in this named step, not command text in
+        # comments or another step. Require the exact executable invocation.
+        fields = dict(line.strip().split(":", 1) for line in step.splitlines()
+                      if line.startswith("        ") and ":" in line and not line.lstrip().startswith("#"))
+        self.assertEqual(fields.get("run", "").strip(), command)
+        self.assertEqual(fields.get("if", "").strip(), "needs.changes.outputs.rust_required != 'false'")
+        self.assertEqual(fields.get("continue-on-error", "false").strip(), "false")
+        self.assertEqual(verify.count(command), 1)
+        self.assertLess(verify.index(name), verify.index("- name: Test Rust documentation examples"))
+        self.assertNotIn("python3 tools/ci/stage_slots.py", verify)
+        self.assertLess(verify.index("- name: Install Rust toolchain and the runner image's packages"), verify.index(name))
+        self.assertLess(verify.index("uses: actions/setup-python@v5"), verify.index(name))
+
     def test_positive_stage_export_runs_once_before_docs_outside_offline_discovery(self):
         from test_ci_runners import jobs
         verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
-        command = "python3 tools/ci/test_stage_catalog.py -v"
-        self.assertEqual(verify.count(command), 1)
-        self.assertLess(verify.index(command), verify.index("- name: Test Rust documentation examples"))
-        self.assertNotIn("python3 tools/ci/stage_slots.py", verify)
-        step = verify.split("- name: Validate prebuilt source stage and listed slots\n", 1)[1].split("\n      - ", 1)[0]
-        condition = step.split("if:", 1)[1].splitlines()[0].strip()
-        for rust, tooling, expected in (("false", "false", False), ("false", "true", True),
-                                        ("true", "false", True), ("true", "true", True)):
-            with self.subTest(rust=rust, tooling=tooling):
-                expression = condition.replace("needs.changes.outputs.rust_required", repr(rust))
-                expression = expression.replace("needs.changes.outputs.tooling_required", repr(tooling))
-                self.assertEqual(eval(expression.replace("||", "or"), {"__builtins__": {}}), expected)
-        self.assertLess(verify.index("- name: Install Rust toolchain and the runner image's packages"), verify.index(command))
-        self.assertLess(verify.index("uses: actions/setup-python@v5"), verify.index(command))
+        self.assert_positive_stage_export(verify)
+
+    def test_positive_stage_guard_rejects_commented_command_noop_and_ignored_failure(self):
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        command = "        run: python3 tools/ci/test_stage_catalog.py -v"
+        for replacement in (
+            "        # run: python3 tools/ci/test_stage_catalog.py -v\n        run: true",
+            "        run: '# python3 tools/ci/test_stage_catalog.py -v'",
+            command + "\n        continue-on-error: true",
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises(AssertionError):
+                self.assert_positive_stage_export(verify.replace(command, replacement, 1))
 
     def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
         # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).
