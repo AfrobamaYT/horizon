@@ -6954,19 +6954,7 @@ impl Game<'_> {
         {
             self.mod_harvest_check(pos, state, &mut correct_tool);
         }
-        let source = self
-            .lan_acting_uuid
-            .map(horizon_world::level::LevelEventPlayer);
-        let removed = self.with_level(|b, level, ticks| {
-            b.player_destroy_block(
-                level,
-                ticks,
-                BlockPos::new(pos[0], pos[1], pos[2]),
-                creative,
-                correct_tool,
-                source,
-            )
-        });
+        let removed = self.remove_block_as_player(pos, state, creative, correct_tool);
         if !creative {
             let held = self.held().cloned();
             let mut harvest = !facts.requires_tool
