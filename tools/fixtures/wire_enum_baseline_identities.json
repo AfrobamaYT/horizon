@@ -1,6 +1,5 @@
 [
   "crate::entity::behaviors::Activity",
-  "crate::client::keyframe_animation::AnimationTarget",
   "crate::item::types::ArrowPickup",
   "crate::entity::types::AttributeOperation",
   "crate::entity::types::AttributeRegistrationError",
@@ -68,7 +67,6 @@
   "crate::item::types::InteractionAttempt",
   "crate::item::types::InteractionKey",
   "crate::item::types::InteractionResult",
-  "crate::client::keyframe_animation::Interpolation",
   "crate::item::types::ItemDisplayContext",
   "crate::content::resource::ItemRarity",
   "crate::client::types::KeyAction",
