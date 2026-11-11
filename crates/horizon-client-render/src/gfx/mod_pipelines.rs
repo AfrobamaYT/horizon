@@ -233,7 +233,11 @@ impl ModPipelines {
             self.pipelines = set
                 .built()
                 .iter()
-                .map(|built| built.as_ref().and_then(|built| self.pipeline(device, built)))
+                .map(|built| {
+                    built
+                        .as_ref()
+                        .and_then(|built| self.pipeline(device, built))
+                })
                 .collect();
         }
         let mut next = 0;

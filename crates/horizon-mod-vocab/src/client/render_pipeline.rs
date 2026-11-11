@@ -23,7 +23,12 @@ pub struct RenderPipeline {
 }
 impl RenderPipeline {
     /// Describe a pipeline that draws [`PipelineVertexFormat::PositionTexColor`] geometry.
-    pub fn new(id: Identifier, fragment: Identifier, blend: PipelineBlend, depth: WorldDepth) -> Self {
+    pub fn new(
+        id: Identifier,
+        fragment: Identifier,
+        blend: PipelineBlend,
+        depth: WorldDepth,
+    ) -> Self {
         Self {
             id,
             fragment,
@@ -153,7 +158,6 @@ fn validate_in(
             Some("its id is outside the mod's namespaces")
         } else if pipelines.iter().any(|kept| kept.id == pipeline.id) {
             Some("an earlier registration has that id")
-
         } else {
             None
         };
@@ -213,9 +217,7 @@ mod tests {
 
     #[test]
     fn a_mod_can_register_more_than_vanillas_pipeline_count() {
-        let mut pipelines: Vec<_> = (0..131)
-            .map(|i| pipeline(&format!("mine:p{i}")))
-            .collect();
+        let mut pipelines: Vec<_> = (0..131).map(|i| pipeline(&format!("mine:p{i}"))).collect();
         validate_in("mine", &[], &mut pipelines, &|_| true);
         assert_eq!(pipelines.len(), 131);
         assert_eq!(pipelines.last().unwrap().id.to_string(), "mine:p130");
