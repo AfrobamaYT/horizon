@@ -24,6 +24,14 @@ pub struct PublishedLoop {
     pub side: String,
 }
 
+impl PublishedLoop {
+    /// The generic loop function, as a `[[native.mixin]]` row's `target` writes it.
+    pub fn generic_target(&self) -> String {
+        let (owner, _) = self.entry.rsplit_once("::").expect("an entry is a path");
+        format!("{owner}::{}", self.generic)
+    }
+}
+
 /// The game's published loops, from the source at `root`, by name.
 pub fn collect(root: &Path) -> Result<Vec<PublishedLoop>, String> {
     let src = root.join("crates/horizon-client/src");

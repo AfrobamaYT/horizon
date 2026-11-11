@@ -225,9 +225,6 @@ fn loop_slots(game: &Path, bundles: &[&Bundle]) -> Result<Vec<api_gen::patch::Lo
         .iter()
         .flat_map(|bundle| bundle.native().r#loop.iter().map(move |row| (*bundle, row)))
         .collect();
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
     let path = game.join(api_gen::loops::FILE);
     // A game built before published loops has no list, and so no loop a row can name.
     let published: Vec<api_gen::loops::PublishedLoop> = match fs::read_to_string(&path) {
@@ -235,7 +232,20 @@ fn loop_slots(game: &Path, bundles: &[&Bundle]) -> Result<Vec<api_gen::patch::Lo
         Err(_) => Vec::new(),
     };
     let mut refusals = Vec::new();
-    let mut filled: Vec<api_gen::patch::LoopSlots> = Vec::new();
+    // A loop with a mixin on its function is copied with it, slots or none.
+    let mut filled: Vec<api_gen::patch::LoopSlots> = published
+        .iter()
+        .filter(|l| {
+            let generic = l.generic_target();
+            bundles
+                .iter()
+                .any(|b| b.native().mixin.iter().any(|m| m.target == generic))
+        })
+        .map(|l| api_gen::patch::LoopSlots {
+            published: l.clone(),
+            slots: Vec::new(),
+        })
+        .collect();
     let mut ordered = rows;
     ordered.sort_by(|(a, ra), (b, rb)| {
         (ra.priority, &a.manifest.id, &ra.id).cmp(&(rb.priority, &b.manifest.id, &rb.id))
@@ -274,10 +284,18 @@ fn loop_slots(game: &Path, bundles: &[&Bundle]) -> Result<Vec<api_gen::patch::Lo
     }
     for bundle in bundles {
         for mixin in &bundle.native().mixin {
-            let Some(slots) = filled.iter().find(|l| l.published.entry == mixin.target) else {
+            let Some(slots) = filled.iter().find(|l| {
+                !l.slots.is_empty()
+                    && (l.published.entry == mixin.target
+                        || (l.published.generic_target() == mixin.target
+                            && mixin.kind == Kind::Overwrite))
+            }) else {
                 continue;
             };
-            if !matches!(mixin.kind, Kind::Head | Kind::Return) {
+            if mixin.kind == Kind::Overwrite
+                || !matches!(mixin.kind, Kind::Head | Kind::Return)
+                    && slots.published.entry == mixin.target
+            {
                 let fillers: Vec<&str> = slots.slots.iter().map(|s| s.mod_id.as_str()).collect();
                 refusals.push(format!(
                     "E_LOOP_ENTRY_REPLACED: {}:{}: the {} mixin on {} would replace or bypass the published loop `{}`, filled by {}; only HEAD and RETURN mixins compose with it",
@@ -340,13 +358,14 @@ pub(super) fn prepare<'a>(
     };
     let source = super::source(sdk.commit())?;
     let started = std::time::Instant::now();
-    // A filled loop's entry is copied like a mixin's target, with the loop's body.
+    // A filled loop's entry, or one whose loop function has rows, is copied like a mixin's target,
+    // with the loop's body.
     let targets: Vec<String> = rows
         .iter()
         .cloned()
         .chain(loops.iter().map(|l| l.published.entry.clone()))
         .collect();
-    let loop_count = loops.len();
+    let loop_count = loops.iter().filter(|l| !l.slots.is_empty()).count();
     let slot_count = loops.iter().map(|l| l.slots.len()).sum::<usize>();
     // The generator refuses targets the staged game cannot replace.
     let mut extras = extras(&bundles)?;
@@ -474,7 +493,7 @@ pub(super) fn prepare<'a>(
         installs: generated
             .patched
             .iter()
-            .map(|p| format!("({:?}, {})", p.target, p.install))
+            .filter_map(|p| Some(format!("({:?}, {})", p.target, p.install.as_ref()?)))
             .collect(),
         bundles,
         count: generated.patched.len(),

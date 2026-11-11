@@ -18,7 +18,7 @@ priority = 1000
 - `loop` names a loop the pinned game publishes.
 - `helper` is a Rust file under `src/`, compiled beside the loop as a mixin helper is: it names the game's types and private fields as the game's source does, and it may call the mod's own crate.
 - `with` names a type the helper defines. It implements the loop's slot trait and `Default`.
-- `priority` is optional. Lower runs first; ties go by mod id.
+- `priority` is optional and defaults to 1000. Lower runs first; ties go by mod id.
 
 ## The first loop: `block_entities.tick`
 
@@ -47,13 +47,13 @@ impl BlockEntityTickSlot for Throttle {
 }
 ```
 
-`before` runs for each block entity vanilla would tick, after vanilla's own filters and before its tick. `after` runs once it has ticked. The cursor lends `game`, the entity's `pos` and its `kind` for one call.
+`before` runs for each block entity vanilla would tick, after vanilla's own filters (in a block-ticking chunk, inside the world border, live, not asleep) and before its tick. `after` runs once it has ticked. The cursor lends `game`, the entity's `pos` and its `kind` for one call.
 
 | Answer from `before` | Effect |
 | --- | --- |
 | `Continue` | The entity ticks. |
 | `Skip` | This entity does not tick this tick. |
-| `Stop` | No further entity ticks this tick. The work after the loop still runs. |
+| `Stop` | No further entity ticks this tick. The work after the loop still runs: song volumes, creaking hearts, client effects, shulker box lids. |
 
 The game keeps the order, what is visited and where the slot sits. A slot cannot reorder, add or remove entries.
 
@@ -61,18 +61,25 @@ The game keeps the order, what is visited and where the slot sits. A slot cannot
 
 - Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue` wins and later mods are not asked for that entity. `after` runs for every mod.
 - The slot value is created with `Default` once per `Game` and kept across ticks. Key per-dimension state on the game's dimension.
-- A run started from inside a slot (the slot calls something that ticks block entities) is the game's own loop, logged once.
-- A panic in a slot unwinds out of the tick like any game panic: the server writes its crash report, naming the mod and the loop, and saves the world.
-- A `HEAD` or `RETURN` mixin on the loop's entry function composes around the loop. A row that would replace or bypass the entry is refused.
+- A run started from inside a slot (the slot calls something that ticks block entities) is the game's own loop, without slots.
+- A panic in a slot unwinds out of the tick like any game panic: the server writes its crash report and saves the world. The report names the mod and the loop: `in native mod <id>, hook loop block_entities.tick, part <id>::<Type>`. That `Game` does not run the slots again.
+- The run without slots, nested or after a panic, is logged once per loop per `Game`.
+
+## What composes with a loop
+
+- A `HEAD` or `RETURN` mixin on the loop's entry function runs around the loop.
+- An `[[inject]]` `api` listener on the entry function runs around it too.
+- A mixin on a function the loop calls applies as anywhere else.
+- Call-site rows inside the loop body target `…::tick_block_entities_with`. That function is copied for the installed slots, and these rows do not apply to the run without slots.
 
 ## Refusals
 
 | Code | When |
 | --- | --- |
 | `E_LOOP_WASM` | A wasm mod declares `[[native.loop]]`. |
-| `E_LOOP_INVALID` | `helper` is not a Rust file under `src/`, or `with` is not an identifier; the field is named. |
+| `E_LOOP_INVALID` | `loop` is empty, `helper` is not a Rust file under `src/`, or `with` is not an identifier; the field is named. |
 | `E_LOOP_UNKNOWN` | The pinned game publishes no loop of that name; the known loops are listed. |
-| `E_LOOP_HELPER` | The helper cannot be read or parsed. |
-| `E_LOOP_ENTRY_REPLACED` | Another row (an `OVERWRITE`, or a call-site kind on the entry's call into the loop) would replace or bypass the loop; both rows and mods are named. |
+| `E_LOOP_HELPER` | The helper is not Rust items, or `with` does not parse. An unreadable helper file is a plain file error. |
+| `E_LOOP_ENTRY_REPLACED` | A mixin of any kind other than `HEAD` or `RETURN` on a filled loop's entry function, or an `OVERWRITE` of `…::tick_block_entities_with`. The error names the refused row (`mod:id`), its kind and target, the loop, and the mods filling it. |
 
 A helper that does not compile against the pinned game is reported with the compiler's error under the mod's id.
