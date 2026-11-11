@@ -7,9 +7,9 @@ pub trait Hooks {
     /// none); set it to the fluid's key, taken once at registration with
     /// `r.fluid_key`. Asked on the client each time a stack of an item outside
     /// `minecraft:` is drawn through a fluid container model; vanilla's items
-    /// keep their own answer and never ask. A key the item renderer draws no
-    /// fluid for draws the stack as holding none (the model's declared fluid,
-    /// untinted), and the game logs it once per item.
+    /// keep their own answer and never ask. A fluid with no look in an item
+    /// draws the missing texture; a key no fluid is registered under draws the
+    /// stack as holding none, and the game logs it once per item.
     /// Answer from the stack alone, and fast.
     #[notes = r##"### What a mod's container item holds
 
@@ -27,8 +27,9 @@ a part attached to a vanilla item by key or tag is never asked, and vanilla's bu
 
 It is asked once per draw of a stack whose model is a fluid container, so at most once per stack per frame, and
 only for an item whose parts subscribe: that check is a lookup by the item's key, and the stack snapshot is built
-only after it. A key no fluid is registered under, or a fluid the item renderer has no look for (a tank-only
-fluid with no `horizon/fluid` data), draws the stack as holding none and is logged once for that item. The hook is
+only after it. A registered fluid the item renderer has no look for (a tank-only fluid with no `horizon/fluid`
+data) draws the missing texture through the mask, so the mistake shows. A key no fluid is registered under draws
+the stack as holding none and is logged once for that item. The hook is
 client-only; the server keeps the fluid in the stack's own data, through `ITEM_FLUIDS` and the item's
 components, as before."##]
     #[hook(

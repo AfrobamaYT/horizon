@@ -246,24 +246,20 @@ impl ItemEnv for Env<'_, '_> {
     }
 }
 /// The fluid a mod's `contained_fluid` answer `key` draws in a stack of `item`: none (the stack
-/// draws as holding none) for a key no fluid is registered under or a fluid with no look in an item, logged
-/// the first time an item answers so.
+/// draws as holding none) for a key no fluid is registered under, logged the first time an item
+/// answers so. A registered fluid with no look in an item is drawn, as the missing sprite.
 fn drawn_contained_fluid(item: &str, key: mod_api::FluidKey) -> Option<&'static str> {
     let fluid = mod_api::__private::fluid_id(key);
-    if let Some(fluid) = fluid.filter(|fluid| horizon_client::fluid_models::draws_in_item(fluid)) {
-        return Some(fluid);
-    }
-    if first_undrawn_answer(item) {
+    if fluid.is_none() && first_unregistered_answer(item) {
         log::warn!(
-            "contained_fluid for {item} answered {}, which an item cannot draw: drawn as holding none",
-            fluid.unwrap_or("an unregistered fluid key")
+            "contained_fluid for {item} answered a fluid key no fluid is registered under: drawn as holding none"
         );
     }
-    None
+    fluid
 }
-/// Whether `item` answers a fluid it cannot draw for the first time: only that path reads the
+/// Whether `item` answers an unregistered fluid key for the first time: only that path reads the
 /// list, so a stack that draws pays nothing for it.
-fn first_undrawn_answer(item: &str) -> bool {
+fn first_unregistered_answer(item: &str) -> bool {
     static REPORTED: std::sync::Mutex<Vec<Box<str>>> = std::sync::Mutex::new(Vec::new());
     let mut reported = REPORTED.lock().unwrap_or_else(|poison| poison.into_inner());
     if reported.iter().any(|seen| &**seen == item) {

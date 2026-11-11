@@ -54,6 +54,12 @@ use crate::{
     Mods, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text, TicketController, WorldEpoch,
 };
 
+/// A fluid key no fluid is registered under, which registration never returns: for testing that
+/// a host draws or refuses such a key without panicking.
+pub fn unregistered_fluid_key() -> crate::FluidKey {
+    crate::FluidKey(u32::MAX)
+}
+
 /// The world epoch of every fake's handles.
 const FAKE_EPOCH: u64 = 1;
 

@@ -34,9 +34,11 @@ Why not the alternatives:
    the Part table built at load. With no subscriber nothing is converted and nothing allocates.
 3. A subscribed item gets the stack's owned snapshot (as the item model property hooks do) and its parts' answer.
 4. The key becomes the fluid's id through the load-resolved registry (`fluid_id`, a `&'static str`). A key no fluid
-   is registered under, or a fluid with no look in an item (a tank-only fluid with no `horizon/fluid` data, which
-   would draw `missingno`), draws the stack as holding none and is logged once per item: the model's declared
-   fluid untinted, or no fluid layer when that is `minecraft:empty`.
+   is registered under draws the stack as holding none and is logged once per item: the model's declared fluid
+   untinted, or no fluid layer when that is `minecraft:empty`. A registered fluid with no look in an item (a
+   tank-only fluid with no `horizon/fluid` data) is drawn like any held fluid, so the resolver draws the missing
+   texture through the mask, as `DynamicFluidContainerModel` does for a contained fluid it has no model for: the
+   mod author sees the mistake instead of an unexplained empty tank (fork-lead's ruling on #3342).
 
 `stack_fluid` now returns `Option<&str>`: both answers are `&'static str` ids, so the resolver no longer allocates a
 `String` for every held bucket.
@@ -54,4 +56,4 @@ unsubscribed mod items one table lookup.
 
 Native and wasm answers cross the same generated dispatch. A wasm answer's key is checked when the Wire boundary
 decodes it, a native key can only come from registration, and the game checks the id again before drawing: an
-answer that names no drawable fluid draws as holding none and never panics in the game.
+answer whose key names no registered fluid draws as holding none and never panics in the game.

@@ -25,6 +25,8 @@ enum Answer {
     Water,
     /// A tank-only fluid of the mod's own with no look: an item cannot draw it.
     Sludge,
+    /// A key no fluid is registered under.
+    Unregistered,
 }
 
 static WATER: OnceLock<FluidKey> = OnceLock::new();
@@ -58,6 +60,7 @@ impl ItemPart for Canister {
             Answer::Nothing => None,
             Answer::Water => WATER.get().copied(),
             Answer::Sludge => SLUDGE.get().copied(),
+            Answer::Unregistered => Some(mod_api::testing::unregistered_fluid_key()),
         };
     }
 }
@@ -186,8 +189,23 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             let empty = drawn(game, "tank:canister");
             assert_eq!(empty.len(), 1, "{empty:?}");
 
-            // A fluid an item cannot draw draws the empty container, logged once.
+            // A registered fluid with no look in an item draws the missing sprite through the
+            // mask, untinted, so the mistake shows; nothing is logged for it.
             answer(Answer::Sludge);
+            let sludge = drawn(game, "tank:canister");
+            assert_eq!(sludge.len(), 2, "{sludge:?}");
+            assert_eq!(
+                sludge[1].content,
+                LayerContent::Sprite {
+                    sprite: "minecraft:missingno".into(),
+                    mask: Some("neoforge:item/mask/bucket_fluid".into()),
+                }
+            );
+            assert_eq!(sludge[1].tints, vec![-1]);
+            assert!(WARNINGS.0.lock().unwrap().is_empty());
+
+            // A key no fluid is registered under draws the empty container, logged once.
+            answer(Answer::Unregistered);
             for _ in 0..3 {
                 assert_eq!(drawn(game, "tank:canister").len(), 1);
             }
@@ -196,8 +214,8 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             assert!(warnings[0].contains("tank:canister"), "{warnings:?}");
 
             // Holding none under a model that declares water draws that water untinted (white),
-            // and so does an answer the item cannot draw.
-            for holds in [Answer::Nothing, Answer::Sludge] {
+            // and so does an unregistered key.
+            for holds in [Answer::Nothing, Answer::Unregistered] {
                 answer(holds);
                 let fallback = drawn_with(game, "tank:canister", WATER_FALLBACK);
                 assert_eq!(fallback.len(), 2, "{holds:?}: {fallback:?}");
@@ -212,7 +230,7 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             assert_eq!(drawn(game, "minecraft:water_bucket")[1].content, water_still);
             let asked = part.asked.lock().unwrap().clone();
             assert!(asked.iter().all(|item| item == "tank:canister"), "{asked:?}");
-            assert_eq!(asked.len(), 7);
+            assert_eq!(asked.len(), 8);
         });
     });
 }
