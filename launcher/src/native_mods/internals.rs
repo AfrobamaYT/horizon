@@ -141,6 +141,9 @@ impl Catalog {
         manifest: &horizon_mod_package::Manifest,
     ) -> horizon_mod_package::Manifest {
         let mut pinned = manifest.clone();
+        for inject in pinned.inject.iter_mut().filter(|inject| inject.hash.is_none()) {
+            inject.hash = self.target(&inject.at).map(|item| item.hash.clone());
+        }
         for declared in pinned
             .internals
             .iter_mut()

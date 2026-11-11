@@ -232,7 +232,7 @@ hash = "pin"
         );
         let mut opaque = points[0].clone();
         opaque.returns = "none".into();
-        opaque.return_ty = Some("&str".into());
+        opaque.return_ty = Some("Frame<'_>".into());
 
         assert_eq!(
             api(&replace, &[opaque], "mod_3::").unwrap_err(),

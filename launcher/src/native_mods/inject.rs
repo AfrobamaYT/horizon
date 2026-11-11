@@ -5,8 +5,6 @@ use std::{fs, path::Path};
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(super) struct ListedPoint {
     pub(super) name: String,
-    #[serde(default)]
-    pub(super) record_name: Option<String>,
     pub(super) target: String,
     pub(super) at_return: bool,
     /// Why its API listeners are refused, naming the parameter with no API type.
@@ -38,13 +36,7 @@ impl ListedPoint {
         }
     }
 
-    pub(super) fn place(&self, at_return: bool) -> String {
-        if at_return {
-            format!("{}_return", self.name)
-        } else {
-            self.name.clone()
-        }
-    }
+
 }
 
 /// The `points.json` the game's build script writes, beside the prebuilt game or in the
