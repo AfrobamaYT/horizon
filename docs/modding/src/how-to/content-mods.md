@@ -6,8 +6,8 @@ Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-own
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
 A block's `item` defaults to false in code. Each mod receives its own declaration
-batch. New identifiers from codeâ€”including block entity types and other registrar
-declarationsâ€”may use any namespace owned by that mod's manifest. Bare names use
+batch. New identifiers from code—including block entity types and other registrar
+declarations—may use any namespace owned by that mod's manifest. Bare names use
 the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
 refuses registration with a diagnostic naming both the mod and namespace. This
 is identical for native and wasm mods. Attaching a Part to an existing vanilla or
@@ -95,7 +95,7 @@ uses exactly `api = "0.2"` and `capabilities = ["registries"]`, with `side = "cl
 Code mods add `[native]` for exact build pins and optional raw injections ([Injections](../injections.md)); their id and version still come only
 from this manifest, not Cargo metadata ([Native mods](native-mods.md#a-bundle)). Both content and code mods support `[dependencies]`: use `base = "^1.2"` for a required dependency or
 `extra = { version = "^2", optional = true }` for an optional one. Missing required dependencies, incompatible installed versions and cycles refuse startup. Content layers load after their dependencies; an absent optional dependency is ignored. Both kinds may include a fixed-name `icon.png` at the top level, with no
-manifest key: a valid square PNG, at most 512 Ã— 512 pixels and 256 KiB encoded ([Mod files](../reference/manifest.md)).
+manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](../reference/manifest.md)).
 Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
 installed through a modpack. Code is never silently skipped.
 
@@ -217,7 +217,7 @@ vanilla's. Unset or `true`, the crack is drawn. It stands where a mod once had a
 `LevelRenderer.renderBlockDestroyAnimation`, which has no NeoForge event.
 
 A block copies its template's states. It can also declare state properties of
-its own, which its template does not have â€” how a pipe says which sides it
+its own, which its template does not have — how a pipe says which sides it
 connects to, or a machine whether it is running. Its states then become its
 template's states times the combinations of the ones it declares, laid out as
 vanilla lays out a block's states (`StateDefinition`): every property, the
@@ -487,7 +487,7 @@ doesn't have are left out):
 They come after vanilla's tabs, ten to a page; the
 buttons above the inventory turn the pages. The title is a lang key or English
 text: `"title": "itemGroup.ruby"` uses that key from the mod's lang files, and a
-lang file's `itemGroup.<mod id>.<file name>` (`creative_tab/gems.json` â†’
+lang file's `itemGroup.<mod id>.<file name>` (`creative_tab/gems.json` →
 `itemGroup.ruby.gems`) translates any title. A mod's items join the search tab
 under their names.
 
@@ -602,8 +602,8 @@ client mods cannot shift packet IDs. `mod_api::Sentiment` is `Positive`, `Negati
 The id lands in the
 mod's namespace, the bounds and default follow `RangedAttribute`'s own checks, `syncable` decides whether the
 value syncs to clients, and `sentiment` (POSITIVE by default) colors the attribute's tooltip lines. The declared
-attributes append after the vanilla ones in the attribute catalog â€” sorted by declaring mod id, then attribute
-id, so the network ids are the same on every side running the same mods â€” before entity attribute rows resolve,
+attributes append after the vanilla ones in the attribute catalog — sorted by declaring mod id, then attribute
+id, so the network ids are the same on every side running the same mods — before entity attribute rows resolve,
 so a mod's entity set may name its own new attribute. Values sanitize through the definition (NaN maps to the
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
@@ -623,7 +623,7 @@ entries from packs, the duplicate check across mods and typed reads follow in th
 A code mod can also use `Registrar::declare_entity_attributes(path, template, attributes)` during registration.
 That declaration starts from the vanilla template's attribute row, replacing the content row's overrides.
 Declared bases remain available to base-value reads, but computed values and spawn fields clamp them to each
-attribute's vanilla range (for example, `minecraft:max_health` is clamped to 1â€“1024).
+attribute's vanilla range (for example, `minecraft:max_health` is clamped to 1–1024).
 
 To give an existing type, vanilla or a mod's, an attribute it lacks, a code mod calls
 `Registrar::modify_entity_attributes(entity, attributes)` (NeoForge's `EntityAttributeModificationEvent`) during
