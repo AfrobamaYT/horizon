@@ -134,7 +134,7 @@ built-in types match first; unknown types fail during tooltip construction.
 Wrapping occurs once before Pre with the item's tooltip font. It starts with
 the widest text element (components contribute zero), applies screen fitting,
 then a positive maximum-width cap. The maintainers have supplied the screen-fit
-rule below; only the exact overflow comparison remains an open screen-fit gate.
+complete rule below; no screen-fit arithmetic remains open.
 Pre's font controls final measurement and drawing.
 These are accepted contract facts from the #3129 review, not a claim to have
 independently verified NeoForge internals. No NeoForge source or patches were
@@ -257,23 +257,59 @@ is 3 pixels; the sprites additionally extend 9 pixels per side.
 
 ### Wrapping fixtures
 
-The supplied contract's order is: **wrap width starts from the widest text
-element, components count 0, then the screen-fit rule, then the positive
-max-width cap**. The maintainers' confirmed screen-fit rule is:
+The maintainers' confirmed rule uses GUI-scaled integer pixels throughout:
 
-1. Start with the widest text element; custom components count as width 0.
-2. If a box at mouse X+12 would overflow the screen, move its assumed position
-   to mouse X−16−that width. If that position is still under 4, set wrap width
-   to `max(mouseX−20, screenWidth−16−mouseX)`, the space on the wider side.
-3. A listener's positive max width caps that wrap width further; the default
-   is unlimited.
+1. Measure the widest text line after listeners edit the list. Images, bundles
+   and custom components count as width 0; an empty list measures 0.
+2. Trial left edge is mouse X+12. The right side overflows **only** when
+   `trialLeft + measuredWidth + 4 > screenWidth`; equality fits. If it fits,
+   stop screen fitting with no wrap (the listener cap below still applies).
+3. Otherwise trial left edge is `mouseX−16−measuredWidth`. It fails **only**
+   when it is `< 4`; exactly 4 fits. If it fits, do not wrap and retain the
+   measured width.
+4. If neither side fits, turn wrapping on. When
+   `mouseX > floor(screenWidth/2)`, strictly, use `mouseX−20`; otherwise,
+   including exactly half, use `screenWidth−16−mouseX`. This is a half-screen
+   branch, **not** whichever side is larger. Do not clamp: the result may be
+   zero or negative; the splitter policy below applies without panic.
+5. A listener's max width applies afterwards only when it is `> 0`. If the
+   current width (measured or step 4's) is strictly greater than that max,
+   replace it with the max and turn wrapping on, even if screen fitting needed
+   no wrap. Never widen a smaller width. A non-positive max is ignored.
 
-Only the exact comparison for “would overflow” remains pending: whether its
-comparison includes the 4-pixel margin. The rule above is the supplied maintainer
-contract, not wrapping found in vanilla's renderer. Its assumed left position
-(mouse X−16−width) is distinct from the verified vanilla final positioner
-(mouse X−12−final content width before its minimum-X clamp). Do not conflate
-the wrap-stage probe with final placement or wrap again after positioning.
+The cap never changes trial placements, margins or the half-screen branch;
+there is no screen-fit re-check after wrapping. This rule decides wrapping;
+it never moves the box. Vanilla's positioner places the final measured content
+box afterwards. The trial left position (mouse X−16−measured width) differs
+from the verified vanilla final positioner (mouse X−12−final content width
+before its minimum-X clamp). Do not conflate them or wrap a second time.
+
+For zero or negative wrap widths, match vanilla's splitter without any stricter
+validation, rejection or panic. The nominal screen-fit width remains unchanged;
+its splitting behavior is reference-defined. Through `rea_vanilla`, `Font.split`
+forwards to `StringSplitter.splitLines(FormattedText, int, Style)` (overload 2),
+which delegates to overload 3. That overload creates a `LineBreakFinder` and
+emits each split segment and the remainder. The finder's constructor sets its
+internal `maxWidth` to `Math.max(maxWidth, 1.0f)`. Its `accept` checks overflow
+only after `hadNonZeroWidthChar` is true, so the first nonzero-width code point
+is accepted even when wider than that internal minimum. Thus an unspaced run of
+6-pixel characters at nominal width 0 or −6 makes progress one character per
+line, not empty or dropped lines. Preserve code-point progress (including
+multi-unit Unicode characters), explicit newline behavior and zero-width glyphs;
+do not replace the reference with UTF-16-unit slicing. This internal splitter
+minimum is vanilla behavior, not a new clamp on the contract's wrap width or on
+component dimensions.
+
+Reproduce the non-positive-width evidence with:
+
+```sh
+python3 tools/rea_vanilla.py classes StringSplitter
+python3 tools/rea_vanilla.py method net.minecraft.client.gui.Font split
+python3 tools/rea_vanilla.py --overload-index 2 method net.minecraft.client.StringSplitter splitLines
+python3 tools/rea_vanilla.py --overload-index 3 method net.minecraft.client.StringSplitter splitLines
+python3 tools/rea_vanilla.py method net.minecraft.client.StringSplitter.LineBreakFinder '<init>'
+python3 tools/rea_vanilla.py method net.minecraft.client.StringSplitter.LineBreakFinder accept
+```
 
 Use a fixed monospace font of 6 pixels per character, text height 10, and a
 deterministic hard break inside an unspaced word when it exceeds the width.
@@ -287,24 +323,28 @@ drawing origins: four rows have relative Y offsets 0,12,22,32 and content height
 
 | Fixture | Hand-written expected lines | Size and derivation |
 | --- | --- | --- |
-| No max width (`-1`), screen 320×240, mouse (100,80), text `ABCD`, custom component 60×16 | [`ABCD`] | Text width 4×6=24; component contributes 0 to wrap width. Right probe ends at 100+12+24=136, so no wrap. Final content is 60×26 with text then component. |
-| Positive max width 24, same screen/mouse, text `ABCDEFGH` | [`ABCD`, `EFGH`] | Initial width 8×6=48; right probe ends at 160, well inside 320. Cap to 24 permits 4 characters per row. Final content 24×20; relative Y offsets 0 and 12. |
-| (i) Fits on right: screen width 320, mouse X=40, text `ABCDEFGH`, no max width | [`ABCDEFGH`] | Width 8×6=48; 40+12+48=100, at least 216 pixels inside either overflow threshold (316 or 320). No move or wrap; content 48×8. |
-| (ii) Moves left without wrapping: screen width 320, mouse X=300, text `ABCDEFGH`, no max width | [`ABCDEFGH`] | Right probe ends at 300+12+48=360, at least 40 beyond either threshold. Assumed wrap-stage X=300−16−48=236, which exceeds 4 by 232; width stays 48. Content 48×8. With the vanilla final positioner its actual X is 300+12−24−48=240. |
-| (iii) Shrinks: screen width 100, mouse X=50, text `ABCDEFGHIJKLMNOPQRST`, no max width | [`ABCDE`, `FGHIJ`, `KLMNO`, `PQRST`] | Initial width 20×6=120; right probe ends at 182, at least 82 beyond either threshold (96 or 100). Left probe X=50−16−120=−86, 90 below 4. Wrap width=max(50−20,100−16−50)=max(30,34)=34. Five characters fit (30≤34<36); actual text width 30, content 30×40. |
-| (iv) Listener cap below shrink: case (iii), max width 18 | [`ABC`, `DEF`, `GHI`, `JKL`, `MNO`, `PQR`, `ST`] | Same edge probes as (iii), then min(34,18)=18. Three characters fit; ceil(20/3)=7 lines, final row 2×6=12. Content 18×70. |
-| Boundary: screen width 100, mouse X=40, text `ABCDEFGH`, no max width; right probe ends at 40+12+48=100 | **Pending the overflow comparison** | No expected line boundaries, size or placement until the exact comparison is confirmed. |
+| No max width (`-1`), screen 320×240, mouse (100,80), text `ABCD`, custom component 60×16 | [`ABCD`] | Text width 4×6=24; component contributes 0 to wrap width. Right check is 100+12+24+4=140≤320, so no wrap. Final content is 60×26 with text then component. |
+| Positive max width 24, same screen/mouse, text `ABCDEFGH` | [`ABCD`, `EFGH`] | Initial width 8×6=48; right check is 100+12+48+4=164≤320. Cap to 24 permits 4 characters per row. Final content 24×20; relative Y offsets 0 and 12. |
+| (A) Right equality fits: screen 320, mouse X=40, text `ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR` (44 characters) | [`ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR`] | Measured width 44×6=264; 52+264+4=320 is not >320. No wrap; content 264×8. |
+| (B) One character more overflows; below half: screen 320, mouse X=40, text `ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRS` (45) | [`ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR`, `S`] | Width 270; 52+270+4=326>320. Left=40−16−270=−246<4. Since 40≤160, wrap width=320−16−40=264; 44 characters then 1. Content 264×20. |
+| (C) Left exactly 4 fits: screen 120, mouse X=68, text `ABCDEFGH` | [`ABCDEFGH`] | Width 48; 80+48+4=132>120; left=68−16−48=4 fits. No wrap; content 48×8. |
+| (D) Left fails, above half: screen 120, mouse X=68, text `ABCDEFGHI` | [`ABCDEFGH`, `I`] | Width 54; 80+54+4=138>120; left=68−16−54=−2<4. Since 68>60, wrap width=68−20=48; 8 characters then 1. Content 48×20. |
+| (E) Exactly half: screen 100, mouse X=50, text `ABCDEFGHIJKLMNOPQRST` | [`ABCDE`, `FGHIJ`, `KLMNO`, `PQRST`] | Width 120; 62+120+4=186>100; left=50−16−120=−86<4. 50 is not >50, so wrap width=100−16−50=34. Five characters fit (30≤34<36); content 30×40. |
+| (F) Above half: screen 100, mouse X=70, text `ABCDEFGHIJKLMNOPQRST` | [`ABCDEFGH`, `IJKLMNOP`, `QRST`] | Width 120; 82+120+4=206>100; left=70−16−120=−66<4. 70>50, so wrap width=70−20=50. Eight characters fit (48≤50<54); content 48×30. |
+| (G) Non-positive wrap width: screen 20, mouse X=10, text `AB` | [`A`, `B`] | Width 12; 22+12+4=38>20; left=10−16−12=−18<4. 10 is not >10, so wrap width=20−16−10=−6. The reference splitter accepts one 6-pixel character per line despite that nominal width; content 6×20. |
+| (H) Listener cap despite fitting: screen 320, mouse X=40, text `ABCDEFGH`, max 30 | [`ABCDE`, `FGH`] | Width 48; 52+48+4=104≤320 fits. Then 48>30 sets width 30 and enables wrapping; 5 characters then 3. Content 30×20. |
+| (I) Max never widens: case (E), max 100 | [`ABCDE`, `FGHIJ`, `KLMNO`, `PQRST`] | Screen-fit width 34 is not >100; retain 34 and the same lines. Content 30×40. |
+| (J) Non-positive max ignored: case (A), max 0 | [`ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR`] | Max 0 is ignored; equality still fits, no wrap. Content 264×8. |
 
 Test images between wrapped text, an image-only tooltip, zero-size decisions,
 invalid floats, overflow, panic/trap recovery and no-listener equivalence on both
-targets. The pending boundary row is the sole remaining screen-fit gate, not permission
-to guess its expected value. All other screen-fit fixtures sit at least 40 pixels
-from an overflow threshold; none depends on a comparison within 4 pixels of it.
+targets. Rows (A)–(D) now fix both strict comparisons, including equality;
+there is no pending overflow-boundary row.
 
 ## Stages
 
-1. Land #2974 and obtain maintainer confirmation of the overflow comparison first,
-   then implement #2927 on that ordered-source shape.
+1. Land #2974 first, then implement #2927 on that ordered-source shape using
+   the complete supplied screen-fit contract.
 2. Add the once-only client registrar before first resource load, Wire envelope,
    font reference and prepared component interface on native and wasm together.
 3. Remove both old item parts and update every caller, catalog entry, generated
@@ -315,16 +355,15 @@ from an overflow threshold; none depends on a comparison within 4 pixels of it.
 
 ## Build issue
 
-The #2927 implementation starts only after #2974 lands and the overflow comparison
-is confirmed, and carries stages 2–4 as one complete native/wasm contract: registrar, Wire data envelope, font reference,
+The #2927 implementation starts only after #2974 lands, and carries stages 2–4
+as one complete native/wasm contract: registrar, Wire data envelope, font reference,
 prepared component, removal of both old parts with every caller and the catalog,
 shared item/text-only preparation, exact vanilla no-listener fast path and a book
 example. Keep new logic in sibling modules rather than growing oversized owners.
 
 Start with failing tests: every acceptance-matrix row must have its own test with
 the literal hand-written sizes, origins, ordering or refusal stated here. Add all
-wrap fixtures with literal expected line boundaries (fill in the pending
-boundary row after confirmation), the positioner-flip fixture,
+wrap fixtures with literal expected line boundaries, the positioner-flip fixture,
 and a no-listener equivalence test on **both native and wasm**. No expected result
 may be generated by calling the implementation under test. Tests must distinguish
 the item's wrapping font from Pre's measurement/drawing font, silent replacement
@@ -333,11 +372,6 @@ position. Trap/invalid-output recovery must be followed by a built-in tooltip.
 
 ## Open questions
 
-- What is the exact overflow comparison: does “would overflow” compare the
-  right edge at mouse X+12+width with screenWidth itself, or include the 4-pixel
-  margin? Recommendation: maintainers confirm the exact comparison before the
-  build and fill in the pending boundary fixture. All other screen-fit arithmetic
-  is settled by the supplied rule; do not reopen the former candidate readings.
 - Which public font reference and item-font selection service should be exposed?
   Recommendation: a typed client registry reference shared by measurement and
   DrawContext, resolved once; avoid an opaque native Font pointer or a new hook at
