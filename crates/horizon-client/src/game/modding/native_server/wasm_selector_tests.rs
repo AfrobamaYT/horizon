@@ -158,11 +158,10 @@ fn wasm_server_tick_messages_reach_dedicated_game() {
                 crate::game::execution_role::ExecutionRole::DedicatedServer;
             game.options.dedicated = Some(Vec::new());
             let (tx, rx) = std::sync::mpsc::channel();
-            game.lan.as_mut().unwrap().hub.guests[0].sender =
-                horizon_client::lan::PlayerSender::new(
-                    tx,
-                    Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                );
+            let host = game.lan.as_mut().unwrap();
+            host.hub.guests.update(0, |guest| {
+                guest.sender = horizon_client::lan::PlayerSender::new(tx, Arc::default())
+            });
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
             let context =
                 mod_api::LifecycleContext::from(mod_api::__private::built::LifecycleContext {
