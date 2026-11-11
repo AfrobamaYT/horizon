@@ -243,3 +243,47 @@ class PruneBuildsTests(unittest.TestCase):
         self.assertIn("prune-builds --days 7", step)
         self.assertIn("GITHUB_STEP_SUMMARY", step)
 
+
+
+class SdkPairTests(unittest.TestCase):
+    def test_only_complete_published_exact_pair_is_eligible(self):
+        assets = [{"name": name} for name in (
+            "SHA256SUMS", "horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz",
+            "horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server.tar.gz",
+            "horizon-prebuilt-v4-x86_64-pc-windows-gnu.tar.gz",
+            "horizon-prebuilt-v4-aarch64-apple-darwin.tar.gz")]
+        release = {"draft": False, "tag_name": "prebuilt-" + "a" * 40, "assets": assets}
+        for changes, expected in [({}, True), ({"draft": True}, False),
+                                  ({"tag_name": "prebuilt-" + "b" * 40}, False)]:
+            with mock.patch.object(nightly.train, "gh_json", return_value=[[], [{**release, **changes}]]):
+                self.assertEqual(nightly.sdk_ready("a" * 40), expected)
+        for index in range(len(assets)):
+            with mock.patch.object(nightly.train, "gh_json", return_value=[[{
+                    **release, "assets": assets[:index] + assets[index + 1:]}]]):
+                self.assertFalse(nightly.sdk_ready("a" * 40))
+        with mock.patch.object(nightly.train, "gh_json", return_value=[[]]):
+            self.assertFalse(nightly.sdk_ready("a" * 40))
+        with mock.patch.object(nightly.train, "gh_json", side_effect=SystemExit("API failed")):
+            with self.assertRaises(SystemExit):
+                nightly.sdk_ready("a" * 40)
+
+    def test_explicit_missing_sdk_stops_without_selecting_another_base(self):
+        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": "a" * 40}), \
+                mock.patch.object(nightly, "is_ancestor", return_value=True), \
+                mock.patch.object(nightly, "git", return_value="a" * 40), \
+                mock.patch.object(nightly, "sdk_ready", return_value=False), \
+                mock.patch.object(nightly.train, "green_main_head") as automatic:
+            with self.assertRaises(SystemExit):
+                nightly.green_base("arismoko/horizon", "")
+            automatic.assert_not_called()
+
+    def test_final_sha_change_or_disappearing_sdk_stops_before_pushing(self):
+        for sha in ("a" * 40, "b" * 40):
+            with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "arismoko/horizon"}), \
+                    mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
+                    mock.patch.object(nightly.ns, "assemble", return_value=sha), \
+                    mock.patch.object(nightly, "sdk_ready", return_value=False), \
+                    mock.patch.object(nightly.ns, "push") as push:
+                with self.assertRaises(SystemExit):
+                    nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", True, False)
+                push.assert_not_called()

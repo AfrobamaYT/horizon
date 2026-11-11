@@ -373,6 +373,7 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(train.green_main_head(parity=True), "good")
             fixture_sha["new"] = "new"
             self.assertEqual(train.green_main_head(), "new", "non-gate failure must not reject a build")
+            self.assertEqual(train.green_main_head(eligible=lambda sha: sha == "good"), "good")
             for status, conclusion in [("queued", None), ("in_progress", "success"),
                                        ("completed", "skipped"), ("completed", "cancelled"),
                                        ("completed", "failure"), ("completed", None),
