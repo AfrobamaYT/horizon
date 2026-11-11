@@ -15,6 +15,23 @@ pub(super) struct Options<'a> {
     pub adapter: &'a Path,
 }
 
+fn compiler_plan(
+    rust: &Toolchain,
+    game: &Path,
+    bindings: BTreeMap<PathBuf, registry_rustc::Bindings>,
+) -> registry_rustc::Plan {
+    registry_rustc::Plan {
+        rustc: rust.rustc(),
+        target: rust.host.target.into(),
+        cache_wrapper: std::env::var_os("RUSTC_WRAPPER").map(PathBuf::from),
+        workspace_wrapper: std::env::var_os("RUSTC_WORKSPACE_WRAPPER").map(PathBuf::from),
+        // Transitive proc-macro metadata lives in host, just as on the direct SDK route.
+        search: vec![game.join("deps"), game.join("host")],
+        native: game.join("native"),
+        crates: bindings,
+    }
+}
+
 pub(super) fn compile(
     rust: &Toolchain,
     game: &Path,
@@ -328,15 +345,7 @@ pub(super) fn compile(
         .arg("--target-dir")
         .arg(&target_dir)
         .arg("--message-format=json-render-diagnostics");
-    let wrapper = registry_rustc::Plan {
-        rustc: rust.rustc(),
-        target: rust.host.target.into(),
-        cache_wrapper: std::env::var_os("RUSTC_WRAPPER").map(PathBuf::from),
-        workspace_wrapper: std::env::var_os("RUSTC_WORKSPACE_WRAPPER").map(PathBuf::from),
-        search: vec![deps],
-        native: game.join("native"),
-        crates: bindings,
-    };
+    let wrapper = compiler_plan(rust, game, bindings);
     wrapper.configure(&mut command, &out.join("rustc-plan.json"), options.adapter)?;
     let messages = out.join("cargo-messages.jsonl");
     let result = super::run_checked(
@@ -388,6 +397,135 @@ pub(super) fn compile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_adapter_compiles_facade_with_transitive_host_macro_metadata() {
+        use std::{ffi::OsString, process::Command};
+        let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/registry-facade-tests");
+        fs::create_dir_all(&target).unwrap();
+        let scratch = tempfile::tempdir_in(target).unwrap();
+        let game = scratch.path().join("sdk");
+        for folder in ["deps", "host", "native"] {
+            fs::create_dir_all(game.join(folder)).unwrap();
+        }
+        let sysroot = Command::new("rustc")
+            .arg("--print")
+            .arg("sysroot")
+            .output()
+            .unwrap();
+        assert!(sysroot.status.success());
+        let rust = Toolchain {
+            dir: PathBuf::from(String::from_utf8(sysroot.stdout).unwrap().trim()),
+            host: crate::rust_toolchain::host().expect("supported test host"),
+        };
+        let macros = game.join("host").join(format!(
+            "{}sdk_macros{}",
+            std::env::consts::DLL_PREFIX,
+            std::env::consts::DLL_SUFFIX
+        ));
+        let macro_source = scratch.path().join("macros.rs");
+        fs::write(&macro_source, "extern crate proc_macro; #[proc_macro_derive(Marker)] pub fn marker(_: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }").unwrap();
+        let built = Command::new(rust.rustc())
+            .args([
+                "--crate-name",
+                "sdk_macros",
+                "--crate-type",
+                "proc-macro",
+                "--edition",
+                "2024",
+            ])
+            .arg(&macro_source)
+            .arg("-o")
+            .arg(&macros)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let engine = game.join("deps/libhorizon_client.rmeta");
+        let engine_source = scratch.path().join("engine.rs");
+        fs::write(
+            &engine_source,
+            "pub use sdk_macros::Marker; #[derive(Marker)] pub struct Game;",
+        )
+        .unwrap();
+        let built = Command::new(rust.rustc())
+            .args([
+                "--crate-name",
+                "horizon_client",
+                "--crate-type",
+                "rlib",
+                "--edition",
+                "2024",
+                "--emit",
+                "metadata",
+                "-C",
+                "prefer-dynamic",
+                "--target",
+                rust.host.target,
+            ])
+            .arg(&engine_source)
+            .arg("--extern")
+            .arg(format!("sdk_macros={}", macros.display()))
+            .arg("-o")
+            .arg(&engine)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let facade = scratch.path().join("facade");
+        fs::create_dir_all(&facade).unwrap();
+        let source = facade.join("lib.rs");
+        fs::write(&source, "pub use horizon_client::Game;").unwrap();
+        let mut plan = compiler_plan(
+            &rust,
+            &game,
+            BTreeMap::from([(
+                facade.clone(),
+                registry_rustc::Bindings {
+                    externs: BTreeMap::from([("horizon_client".into(), engine)]),
+                    link_args: vec![],
+                },
+            )]),
+        );
+        plan.cache_wrapper = None;
+        plan.workspace_wrapper = None;
+        let args: Vec<OsString> = vec![
+            rust.rustc().into_os_string(),
+            source.into_os_string(),
+            "--crate-name".into(),
+            "facade".into(),
+            "--crate-type".into(),
+            "rlib".into(),
+            "--edition".into(),
+            "2024".into(),
+            "--target".into(),
+            rust.host.target.into(),
+            "--emit".into(),
+            "metadata".into(),
+            "-o".into(),
+            scratch.path().join("facade.rmeta").into_os_string(),
+        ];
+        let (program, arguments) = plan.arguments(args.clone(), Some(facade.clone())).unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        // The old registry route supplied deps alone, unlike the direct SDK route.
+        plan.search = vec![game.join("deps")];
+        let (program, arguments) = plan.arguments(args, Some(facade)).unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("E0463"));
+    }
+
     #[test]
     #[ignore = "requires an explicitly prepared private SDK, mod and launcher executable"]
     fn real_sdk_registry_compile() {
