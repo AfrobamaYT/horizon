@@ -66,18 +66,25 @@ fn write_list(data: &mut Tag, mods: &[ModRecord]) {
 
 impl Level {
     /// The saved mods that differ from `loaded`, NeoForge's `ModMismatchEvent`: one saved with
-    /// another version (both known: `""` compares equal) or no longer loaded. A mod loaded now
+    /// another version (including an unknown saved version) or no longer loaded. A mod loaded now
     /// that the world wasn't saved with is no mismatch, nor is a world without the list.
     pub fn mod_mismatches(&self, loaded: &[ModRecord]) -> Vec<mod_api::ModMismatch> {
         self.saved_mods
             .iter()
             .flatten()
             .filter_map(|saved| {
+                if saved.id == "minecraft" {
+                    return None;
+                }
                 let current = loaded.iter().find(|m| m.id == saved.id);
                 let differs = current.is_none_or(|current| {
-                    !saved.version.is_empty()
-                        && !current.version.is_empty()
-                        && saved.version != current.version
+                    match (
+                        horizon_mod_package::dependencies::parse_version(&saved.version),
+                        horizon_mod_package::dependencies::parse_version(&current.version),
+                    ) {
+                        (Ok(saved), Ok(current)) => saved != current,
+                        _ => saved.version != current.version,
+                    }
                 });
                 differs.then(|| mod_api::ModMismatch {
                     mod_id: saved.id.clone(),
@@ -207,11 +214,15 @@ mod tests {
             record("unknown_now", ""),
             record("known_now", "3.0.0"),
             record("added", "1.0.0"),
+            record("minecraft", "99"),
+            record("downgrade", "3.0.0"),
         ];
         assert!(Level::default().mod_mismatches(&loaded).is_empty());
         let level = Level {
             saved_mods: Some(vec![
-                record("same", "1.0.0"),
+                record("same", "1"),
+                record("minecraft", "0"),
+                record("downgrade", "4.0.0"),
                 record("changed", "1.0.0"),
                 record("unknown_now", "1.0.0"),
                 record("known_now", ""),
@@ -222,7 +233,10 @@ mod tests {
         assert_eq!(
             level.mod_mismatches(&loaded),
             vec![
+                mismatch("downgrade", "4.0.0", Some("3.0.0")),
                 mismatch("changed", "1.0.0", Some("2.0.0")),
+                mismatch("unknown_now", "1.0.0", Some("")),
+                mismatch("known_now", "", Some("3.0.0")),
                 mismatch("gone", "0.5.0", None),
             ]
         );
