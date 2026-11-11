@@ -16,9 +16,7 @@ impl Game<'_> {
     /// The mods hear the differences once, and each one nobody resolved is
     /// a warning.
     pub(in crate::game) fn check_mod_mismatch(&mut self) {
-        let Some(loaded) = level_mods::loaded() else {
-            return;
-        };
+        let loaded = level_mods::loaded().unwrap_or_default();
         let mismatches = self.level.mod_mismatches(&loaded);
         if self.level.saved_mods.is_none() {
             return;
@@ -94,7 +92,6 @@ mod tests {
             }
         }
         let heard = Arc::new(Mutex::new(0));
-        let old = level_mods::set_loaded(Some(vec![]));
         mod_api::testing::with_mods(
             vec![ModEntry::new("listener", Box::new(Listener(heard.clone())))].into(),
             || {
@@ -112,7 +109,6 @@ mod tests {
                 }
             },
         );
-        level_mods::set_loaded(old);
         assert_eq!(*heard.lock().unwrap(), 2);
     }
 }
