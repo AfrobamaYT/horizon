@@ -1,11 +1,13 @@
 """The mod API's public structs are built by mods or only received (#2862)."""
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tools.mod_api_struct_kinds import census, defaults_and_constructors, structs
 
 # Public structs a mod can build with a brace literal that have neither
 # `Default` nor a constructor and are not `#[non_exhaustive]`. The number only
-# goes down: each batch that classifies some lowers it to the new count.
+# is a ceiling: classification batches need not edit this shared line.
 NEITHER_LIMIT = 141
 
 
@@ -68,6 +70,60 @@ class StructKindFixtures(unittest.TestCase):
             'impl D { pub fn new() -> Result<D, E> { todo!() } }', 'file')
         self.assertEqual(d, {('file', ('a', 'A'))})
         self.assertEqual(c, {('file', ('a', 'A')), ('file', ('C',)), ('file', ('D',))})
+
+    def test_file_backed_module_prefixes_exclude_only_mirrors(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            src = root / 'crates/horizon-mod-vocab/src'
+            fixtures = {
+                '__private.rs': 'mod built { pub struct Hidden { pub x: u8 } }',
+                '__private/built/mod.rs': 'pub struct AlsoHidden { pub x: u8 }',
+                '__private/built/leaf.rs': 'pub struct HiddenLeaf { pub x: u8 }',
+                'ordinary/built.rs': 'pub struct Visible { pub x: u8 }',
+                'ordinary/mod.rs': 'pub struct Defaulted { pub x: u8 } '
+                                   'impl Default for Defaulted {}',
+                'ordinary/leaf.rs': 'mod nested { pub struct Constructed { pub x: u8 } '
+                                    'impl Constructed { pub fn new() -> Self { todo!() } } }',
+            }
+            for file, source in fixtures.items():
+                path = src / file
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
+            counts, neither = census(root)
+            self.assertEqual(counts['public'], 3)
+            self.assertEqual(counts['default'], 1)
+            self.assertEqual(counts['constructor'], 1)
+            self.assertEqual(counts['neither'], 1)
+            self.assertEqual(neither, [
+                'crates/horizon-mod-vocab/src/ordinary/built.rs:1: Visible'])
+
+    def test_file_prefix_is_part_of_impl_keys(self):
+        for file, module in [
+            ('crates/horizon-mod-vocab/src/foo.rs', ('foo',)),
+            ('crates/horizon-mod-vocab/src/foo/mod.rs', ('foo',)),
+            ('crates/horizon-mod-vocab/src/__private.rs', ('__private',)),
+            ('crates/horizon-mod-vocab/src/lib.rs', ()),
+        ]:
+            with self.subTest(file=file):
+                defaults, constructors = defaults_and_constructors(
+                    'mod inner { impl Default for A {} '
+                    'impl B { pub fn new() -> Self { todo!() } } }', file)
+                self.assertEqual(defaults, {(file, module + ('inner', 'A'))})
+                self.assertEqual(constructors, {(file, module + ('inner', 'B'))})
+
+    def test_same_line_declarations_keep_distinct_module_keys(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / 'crates/horizon-mod-vocab/src/foo.rs'
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                'mod a { pub struct A { pub x: u8 } impl Default for A {} } '
+                'mod b { pub struct A { pub x: u8 } }')
+            counts, neither = census(root)
+            self.assertEqual(counts['public'], 2)
+            self.assertEqual(counts['default'], 1)
+            self.assertEqual(counts['neither'], 1)
+            self.assertEqual(neither, ['crates/horizon-mod-vocab/src/foo.rs:1: A'])
 
 
 class StructKindRepository(unittest.TestCase):

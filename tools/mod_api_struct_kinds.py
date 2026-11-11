@@ -39,13 +39,27 @@ def _tokens(source):
     return out
 
 
-def _modules(ts):
+def _file_module(file):
+    """Conventional Rust module path relative to the crate's src directory."""
+    if not file:
+        return ()
+    parts = Path(file).with_suffix('').parts
+    if 'src' in parts:
+        parts = parts[parts.index('src') + 1:]
+    elif file:
+        parts = ()  # fixture labels are not Rust source paths
+    if parts and parts[-1] in ('lib', 'main', 'mod'):
+        parts = parts[:-1]
+    return tuple(parts)
+
+
+def _modules(ts, file=""):
     """Inline lexical module at each token (other brace groups do not add scope)."""
     scopes = {}
     for i in range(len(ts) - 2):
         if ts[i] == 'mod' and ts[i + 2] == '{':
             scopes[i + 2] = ts[i + 1]
-    stack, module, result = [], (), []
+    stack, module, result = [], _file_module(file), []
     for i, token in enumerate(ts):
         result.append(module)
         if token == '{':
@@ -109,11 +123,11 @@ def _fields_public(body):
     return public
 
 
-def structs(source):
-    """(name, line, non_exhaustive, derives_default, literal) per public struct."""
+def structs(source, file=""):
+    """(name, token offset, non_exhaustive, derives_default, literal) per struct."""
     pairs = _tokens(source)
     ts = [v for v, _ in pairs]
-    modules = _modules(ts)
+    modules = _modules(ts, file)
     out = []
     for i in range(len(ts) - 2):
         if ts[i] != 'pub' or ts[i + 1] != 'struct' or ('__private', 'built') == modules[i][:2] or any(
@@ -141,8 +155,7 @@ def structs(source):
         if j < len(ts) and ts[j] == '{':
             end = _skip_group(ts, j, '{', '}')
             literal = _fields_public(ts[j + 1:end - 1])
-        line = source.count('\n', 0, pairs[i][1]) + 1
-        out.append((name, line, non_exhaustive, derives_default, literal))
+        out.append((name, pairs[i][1], non_exhaustive, derives_default, literal))
     return out
 
 
@@ -150,7 +163,7 @@ def defaults_and_constructors(source, file=""):
     """Names with a hand-written `Default` impl, and names with a constructor
     (a `pub fn` without a `self` receiver that returns `Self` or the type)."""
     ts = [v for v, _ in _tokens(source)]
-    modules = _modules(ts)
+    modules = _modules(ts, file)
     defaults, constructors = set(), set()
     for i, t in enumerate(ts):
         if t != 'impl':
@@ -223,10 +236,9 @@ def census(root=ROOT):
     neither = []
     for path, source in files.items():
         pairs = _tokens(source)
-        modules = _modules([v for v, _ in pairs])
-        module_by_line = {source.count("\n", 0, offset) + 1: modules[i]
-                          for i, (v, offset) in enumerate(pairs) if v == "pub"}
-        for name, line, non_exhaustive, derives_default, literal in structs(source):
+        modules = _modules([v for v, _ in pairs], path)
+        module_by_offset = {offset: modules[i] for i, (_, offset) in enumerate(pairs)}
+        for name, offset, non_exhaustive, derives_default, literal in structs(source, path):
             counts['public'] += 1
             if non_exhaustive:
                 counts['non_exhaustive'] += 1
@@ -234,13 +246,14 @@ def census(root=ROOT):
             if not literal:
                 continue
             counts['literal'] += 1
-            key = (path, module_by_line[line] + (name,))
+            key = (path, module_by_offset[offset] + (name,))
             if derives_default or key in defaults:
                 counts['default'] += 1
             elif key in constructors:
                 counts['constructor'] += 1
             else:
                 counts['neither'] += 1
+                line = source.count('\n', 0, offset) + 1
                 neither.append(f'{path}:{line}: {name}')
     return counts, neither
 
