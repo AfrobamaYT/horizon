@@ -236,3 +236,136 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
         });
     });
 }
+
+/// A mod holder with nine container slots and `keys` entries of saved data beside them.
+fn container_holder(game: &mut super::Game<'_>, keys: usize) -> mod_api::BlockEntityRef {
+    let entity = mod_holder(game);
+    let stone = game.world.block(1, 64, 1);
+    game.world.block_entities.set_mod_containers(
+        [(
+            stone.0,
+            Arc::new(ModContainer {
+                slots: 9,
+                inputs: (0..9).collect(),
+                outputs: (0..9).collect(),
+                ..Default::default()
+            }),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let BlockEntity::Mod(holder) = game.world.block_entities.get_mut(&(1, 64, 1)).unwrap() else {
+        panic!()
+    };
+    holder.items = vec![None; 9];
+    for key in 0..keys {
+        holder.nbt.insert(format!("k{key}").as_str().into(), Tag::Long(key as i64));
+    }
+    entity
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+fn container_moves_roll_back_slots_and_saved_data_in_any_order() {
+    const NAME: &str = "game::native_block_entity_item_tests::container_moves_roll_back_slots_and_saved_data_in_any_order";
+    with_mod_parts(NAME, |root| {
+        super::native_entity_refs::tests::with_game_at(root, |game| {
+            let entity = container_holder(game, 3);
+            let level = entity.level(game).unwrap();
+            let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
+            let dirt = ItemResource::of(
+                &ItemStack::new("minecraft:dirt", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            let saved = |game: &super::Game<'_>| {
+                let BlockEntity::Mod(holder) = game.world.block_entities.get(&(1, 64, 1)).unwrap()
+                else {
+                    panic!()
+                };
+                (holder.items.clone(), holder.nbt.clone(), holder.data.clone())
+            };
+            commit(game, |host, tx| assert_eq!(items.insert(host, tx, 0, &dirt, 10), 10));
+            let before = saved(game);
+            // Slot writes, then a whole-entity write, then slots again, through nested
+            // transactions that commit into one that aborts.
+            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
+                assert_eq!(items.extract(host, tx, 0, &dirt, 4), 4);
+                assert_eq!(items.insert(host, tx, 3, &dirt, 7), 7);
+                host.transaction(|host, child| {
+                    assert_eq!(items.insert(host, child, 0, &dirt, 50), 50);
+                    assert_eq!(entity.set_data_slots(host, vec![7]), Ok(true));
+                    assert_eq!(items.extract(host, child, 3, &dirt, 2), 2);
+                    Ok::<_, ()>(())
+                })?;
+                host.transaction(|host, child| {
+                    assert_eq!(items.insert(host, child, 8, &dirt, 1), 1);
+                    Err::<(), ()>(())
+                })
+                .unwrap_err();
+                assert_eq!(items.amount(host, 8), 0, "the child's abort undid its slot");
+                assert_eq!(items.amount(host, 0), 56);
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(saved(game), before, "slots, saved data and data slots back as they were");
+            // The same writes committed stay.
+            commit(game, |host, tx| {
+                assert_eq!(items.extract(host, tx, 0, &dirt, 4), 4);
+                assert_eq!(entity.set_data_slots(host, vec![9]), Ok(true));
+                assert_eq!(items.insert(host, tx, 5, &dirt, 3), 3);
+            });
+            let (slots, nbt, data) = saved(game);
+            assert_eq!(slots[0].as_ref().map(|s| s.count), Some(6));
+            assert_eq!(slots[5].as_ref().map(|s| s.count), Some(3));
+            assert_eq!(data, [9]);
+            assert_eq!(nbt.len(), 3, "the saved data beside the slots is untouched");
+            assert!(game.transactions.is_empty());
+        });
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+fn a_container_move_costs_the_same_whatever_saved_data_sits_beside_the_slots() {
+    const NAME: &str = "game::native_block_entity_item_tests::a_container_move_costs_the_same_whatever_saved_data_sits_beside_the_slots";
+    with_mod_parts(NAME, |root| {
+        super::native_entity_refs::tests::with_game_at(root, |game| {
+            let dirt = ItemResource::of(
+                &ItemStack::new("minecraft:dirt", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            // Moves as `move_once` makes them: each in its own transaction, nested in a root.
+            let time = |game: &mut super::Game<'_>, keys: usize| {
+                let entity = container_holder(game, keys);
+                let level = entity.level(game).unwrap();
+                let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
+                let start = std::time::Instant::now();
+                commit(game, |host, _| {
+                    for _ in 0..500 {
+                        host.transaction(|host, tx| {
+                            assert_eq!(items.insert(host, tx, 0, &dirt, 1), 1);
+                            Ok::<_, ()>(())
+                        })
+                        .unwrap();
+                        host.transaction(|host, tx| {
+                            assert_eq!(items.extract(host, tx, 0, &dirt, 1), 1);
+                            Ok::<_, ()>(())
+                        })
+                        .unwrap();
+                    }
+                });
+                start.elapsed()
+            };
+            time(game, 1);
+            let small = time(game, 1);
+            let large = time(game, 100_000);
+            eprintln!("1,000 container moves: {small:?} beside 1 key, {large:?} beside 100,000");
+            assert!(
+                large < small * 4 + std::time::Duration::from_millis(20),
+                "a move copied the saved data: {small:?} beside 1 key, {large:?} beside 100,000"
+            );
+        });
+    });
+}

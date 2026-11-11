@@ -44,6 +44,10 @@ pub(super) struct Level {
     dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
+    /// Each item slot (block entity, slot) a slot-only write changed, as it was before this
+    /// transaction first wrote it, for a block entity not kept whole in `block_entities`: a
+    /// move through a container keeps the slot it touches, not the entity's whole saved data.
+    slots: HashMap<(Pos, usize), Option<ItemStack>>,
     /// Each block's state before this transaction first wrote it.
     blocks: HashMap<Pos, BlockStateId>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
@@ -270,6 +274,13 @@ impl Game<'_> {
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
+                // A slot the outer transaction keeps the whole entity of is already kept, and
+                // older there.
+                for ((pos, slot), kept) in level.slots {
+                    if !outer.block_entities.contains_key(&pos) {
+                        outer.slots.entry((pos, slot)).or_insert(kept);
+                    }
+                }
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
                 }
@@ -318,6 +329,24 @@ impl Game<'_> {
             .block_entities
             .entry(pos)
             .or_insert_with(|| Kept::capture(&self.world, &self.hoppers, pos));
+    }
+    /// Keeps item slot `slot` of the block entity at `pos` as it is, if a transaction is open
+    /// and keeps neither it nor the whole entity yet. Only for a write that changes that slot
+    /// and nothing else of the entity (no cooldown, cooking or saved data beside it), so the
+    /// journal holds one stack however large the entity's saved data is.
+    pub(super) fn journal_block_entity_slot(&mut self, pos: Pos, slot: usize) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        if level.block_entities.contains_key(&pos) {
+            return;
+        }
+        level.slots.entry((pos, slot)).or_insert_with(|| {
+            self.world
+                .block_entities
+                .get(&pos)
+                .and_then(|entity| entity.slots().get(slot).cloned().flatten())
+        });
     }
     /// Keeps `holder`'s attachment map as it is, if a transaction is open and hasn't yet: a
     /// block entity's with the rest of it, any other's alone.
@@ -611,6 +640,18 @@ impl Game<'_> {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
             };
+        }
+        // After the whole entities: a slot kept here was kept before any whole capture of its
+        // entity at this depth, so its stack is the older one.
+        for ((pos, slot), kept) in level.slots {
+            if let Some(target) = self
+                .world
+                .block_entities
+                .get_mut(&pos)
+                .and_then(|entity| entity.slots_mut().get_mut(slot))
+            {
+                *target = kept;
+            }
         }
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
