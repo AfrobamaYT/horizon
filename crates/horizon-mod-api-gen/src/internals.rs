@@ -1919,8 +1919,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         fixture.put("crates/horizon-items/src/aliases.rs", "use super::ItemStack as StackItem; pub type Stack = StackItem; pub type Pos = (i32, i32, i32);");
         let entries = widen_with(&fixture.0, &[]).unwrap().entries;
         let request = crate::sites::Declaration {
-            expression: None,
-            local: None,
             target: "horizon_client::game::run".into(),
             selector: "horizon_client::game::take".into(),
             ordinal: Some(0),
