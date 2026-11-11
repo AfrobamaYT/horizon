@@ -71,9 +71,12 @@ impl Default for State {
     }
 }
 
+/// Explicit engine settings; the remaining defaults are covered by Wasmtime compatibility.
+pub(crate) const ENGINE_CONFIG: (&str, bool) = ("epoch_interruption", true);
+
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = wasmtime::Config::new();
-    config.epoch_interruption(true);
+    config.epoch_interruption(ENGINE_CONFIG.1);
     let engine = Engine::new(&config)?;
     let weak = engine.weak();
     std::thread::Builder::new()
@@ -440,12 +443,13 @@ impl WasmMod {
         engine: &Engine,
         manifests: &[(&str, &horizon_mod_package::Manifest)],
         members: &[Member<'_>],
+        cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
         let mut armed = false;
-        let mut group = Group::link_with(store, members, |store, module, name| {
+        let mut group = Group::link_cached_with(store, members, cache, |store, module, name| {
             // Compilation is not guest execution and must not consume its load deadline.
             if !armed {
                 store.set_epoch_deadline(30_000);
@@ -640,7 +644,8 @@ impl WasmMod {
         let mut resumed = Resumed::take(key);
         let mut locked = None;
         if resumed.is_none() {
-            let start = Instant::now();
+            // Start the busy timeout on contention, not on the uncontended hot path.
+            let mut start = None;
             loop {
                 match self.running.group.try_lock() {
                     Ok(group) => {
@@ -654,7 +659,8 @@ impl WasmMod {
                     Err(_)
                         if class != CallClass::Worker
                             && (self.running.lending.load(Ordering::Relaxed) != 0
-                                || start.elapsed() >= Duration::from_secs(5)) =>
+                                || start.get_or_insert_with(Instant::now).elapsed()
+                                    >= Duration::from_secs(5)) =>
                     {
                         log::warn!("wasm mod {}: {}", self.id, Refusal::Busy);
                         return None;

@@ -28,6 +28,8 @@ pub trait DisplayResolver {
 /// vanilla display ids. The caller paginates these buttons in groups of twenty.
 pub struct PresentedRecipe {
     pub recipe: String,
+    /// Original indices inside the authoritative recipe entry, after sorting/filtering.
+    pub sources: Vec<u32>,
     pub button: ButtonView,
     pub overlay: Vec<OverlayRecipe>,
 }

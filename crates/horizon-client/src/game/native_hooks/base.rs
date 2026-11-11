@@ -1289,8 +1289,8 @@ impl Game<'_> {
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
-    /// `parts` is a humanoid model's parts as vanilla posed them this frame,
-    /// None for a model that isn't humanoid.
+    /// `parts` is a humanoid model's parts as its draw posed them this frame (a part
+    /// `native_player_submit` hid is not visible), None for a model that isn't humanoid.
     /// Not asked for what a mod drew itself (`native_mob_submit`,
     /// `native_player_submit`) nor for a mob that isn't drawn at all.
     pub(in crate::game) fn native_mob_layer(
@@ -3469,13 +3469,13 @@ impl Game<'_> {
     ) {
         self.fire_dispense_item(dimension, pos, facing, stack, answer);
     }
-    /// A player uses `stack` (right click) with `self.hand`: in the air, or
+    /// A player uses `call.stack` with this click's `call.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
     /// hand swings and the item's own use doesn't run. Server-side, for every
     /// player of the world; an item on cooldown is never used.
-    pub(in crate::game) fn native_use_item(&mut self, stack: &ItemStack, claimed: &mut bool) {
-        self.fire_use_item(stack, claimed);
+    pub(in crate::game) fn native_use_item(&mut self, call: mod_api::__private::UseItemCall<'_>) {
+        self.fire_use_item(call);
     }
     /// `Item.getUseDuration` of `stack`, in ticks: `duration` arrives with
     /// vanilla's (a consumable's time, 72000 for a shield, a spear, a bow,

@@ -1,5 +1,6 @@
 """Run the production item and packet dispatch with counted boundary doubles."""
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ItemAttackBoundary(unittest.TestCase):
     def test_scoped_conversion_and_packet_veto(self):
+        compiler = shutil.which("rustc")
+        if compiler is None:
+            self.skipTest("requires Rust to execute the production boundary fixture")
         source = (ROOT / 'crates/horizon-client/src/game/native_hooks/item_attack.rs').read_text()
         methods = source[source.index('    pub(in crate::game) fn native_left_click_entity_event'):]
         methods = methods.replace('pub(in crate::game)', 'pub')
@@ -58,5 +62,5 @@ fn game(item:&str,canceled:bool)->Game { Game { hand:Hand::Main, offhand:None,pl
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / 'test.rs').write_text(fixture)
-            subprocess.run(['rustc', '--edition=2024', '--test', str(path / 'test.rs'), '-o', str(path / 'test')], check=True)
+            subprocess.run([compiler, '--edition=2024', '--test', str(path / 'test.rs'), '-o', str(path / 'test')], check=True)
             subprocess.run([str(path / 'test')], check=True)

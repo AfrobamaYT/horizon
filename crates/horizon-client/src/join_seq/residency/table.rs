@@ -234,6 +234,13 @@ impl EntityTable {
         rows.into_iter().map(|(_, id)| id).collect()
     }
 
+    /// Each admitted id's lookup admission: what an `EntitySection` keeps its
+    /// entities in, so a chunk saved in this order loads back in it.
+    pub fn admission_order(&mut self) -> impl Fn(u32) -> Option<JoinSeq> + '_ {
+        self.drain();
+        |id| Some(self.rows.get(&NonZeroU32::new(id)?)?.admission)
+    }
+
     /// Clone the current producer authority when binding storage.
     pub fn producer(&self) -> Journal {
         self.journal.clone()

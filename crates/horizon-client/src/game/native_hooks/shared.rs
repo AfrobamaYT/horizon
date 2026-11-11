@@ -16,19 +16,9 @@ impl Drop for ContentsChangedGuard<'_, '_> {
     }
 }
 
-/// `view` as the screen `id` (an overlay or a title screen, which shows over
-/// the whole window with no menu).
-fn screen_view_with_id<'a>(view: &ScreenView<'a>, id: &'static str) -> ScreenView<'a> {
-    ScreenView::from(mod_api::__private::built::ScreenView {
-        id,
-        menu: view.menu,
-        title: view.title,
-        rect: view.rect,
-        slots: view.slots,
-        mouse: view.mouse,
-        partial_tick: view.partial_tick,
-    })
-}
+#[path = "shared/screen_view.rs"]
+mod screen_view;
+use screen_view::screen_view_with_id;
 
 /// What `decide_screen` says the hooks answered to a change of screen.
 enum ScreenDecision {
@@ -106,7 +96,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
-        self.apply_screen(screen, owner);
+        self.apply_screen_with_mod_book(screen, owner);
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
@@ -2796,6 +2786,7 @@ impl Game<'_> {
             return;
         };
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: None,
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: pos.map(|c| f64::from(c) + 0.5),
@@ -2835,6 +2826,7 @@ impl Game<'_> {
             return;
         };
         let context = LootDrops::from(mod_api::__private::built::LootDrops {
+            damage_source: None,
             table,
             dimension: self.dim.id(),
             origin,

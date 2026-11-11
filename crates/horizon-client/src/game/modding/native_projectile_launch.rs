@@ -27,21 +27,11 @@ impl Game<'_> {
         {
             return None;
         }
-        // The engine has no generic EnchantmentHelper.onProjectileSpawned
-        // interpreter yet (#2670). Refuse before constructing or drawing rather
-        // than silently skipping an item's post-insertion effects.
-        for (enchantment, _) in stack.all_enchantments().iter() {
-            if world_stations!(self)
-                .enchantments
-                .get(enchantment)
-                .is_some_and(|definition| {
-                    definition.effects["minecraft:projectile_spawned"]
-                        .as_array()
-                        .is_some_and(|effects| !effects.is_empty())
-                })
-            {
-                return None;
-            }
+        // A stack whose `projectile_spawned` effects the engine cannot all
+        // apply yet (#2670) is refused before anything is made or drawn,
+        // rather than spawned without some of them.
+        if !self.projectile_spawned_effects_applied(stack) {
+            return None;
         }
         let mut carried = stack.clone();
         carried.count = 1;
@@ -90,12 +80,14 @@ impl Game<'_> {
         let id = shot.id;
         // The explicit owner may be an inactive guest: launch listeners must
         // see that player's identity, not the player currently swapped into Game.
+        // Projectile.spawnProjectile: the spawn effects read the supplied
+        // stack, whatever its count, and never change it.
         match target {
             t @ (Target::Player | Target::Guest(_)) => {
-                self.for_player(t, |game| game.add_projectile(shot))?
+                self.for_player(t, |game| game.spawn_projectile(shot, stack))?
             }
-            _ => self.add_projectile(shot),
-        }
+            _ => self.spawn_projectile(shot, stack),
+        };
         self.projectile(self.entity(id)?)
     }
 }

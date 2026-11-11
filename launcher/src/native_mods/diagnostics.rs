@@ -463,7 +463,7 @@ mod tests {
         let site: horizon_platform::mod_build::api_gen::sites::Site = serde_json::from_value(json!({
             "expression": {"ty": "f32", "origin": "far_reach:reach, other:reach"},
             "name": "Sreach", "target": "horizon_client::game::reach", "selector": "4.5",
-            "ordinal": 0, "hash": "h", "call": "4.5", "ctx": "c", "listener": "L", "record": "R",
+            "once": false, "ordinal": 0, "hash": "h", "call": "4.5", "ctx": "c", "listener": "L", "record": "R",
             "receiver": "()", "args": [], "output": "f32"
         }))
         .unwrap();
@@ -599,6 +599,7 @@ type = "Charge"
                         mods: &mods,
                         declared: &[],
                     }),
+                    None,
                 )
                 .map_err(|ran| ran.error)
             })

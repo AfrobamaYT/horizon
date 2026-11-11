@@ -10,6 +10,11 @@ mod boundary {
 }
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
+#[path = "wire_loopback/use_item_hand.rs"]
+mod use_item_hand;
+thread_local! {
+    static EXPECTED_LOOT_HAND: std::cell::RefCell<Option<mod_api::ItemStack>> = const { std::cell::RefCell::new(None) };
+}
 #[derive(Clone)]
 struct WasmMod {
     group: u8,
@@ -194,6 +199,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
+            use_item_hand::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
@@ -271,11 +277,27 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         }
         fn loot_drops(
             &self,
-            _: &mut dyn mod_api::ServerHost,
+            host: &mut dyn mod_api::ServerHost,
             event: &mut mod_api::LootDropsEvent<'_>,
         ) {
             assert_eq!(event.context.entity, Some((12, "test:mob")));
             assert_eq!(event.context.table.len(), 300);
+            let source = event.context.damage_source.unwrap();
+            assert_eq!(
+                (source.damage_type, source.causing, source.direct),
+                ("minecraft:arrow", 41, 73)
+            );
+            assert_eq!(source.position, Some([1.0, 2.0, 3.0]));
+            assert!(event.context.tool.is_none());
+            EXPECTED_LOOT_HAND.with(|expected| {
+                assert_eq!(
+                    host.entity(source.causing as u32)
+                        .and_then(|e| host.living(e))
+                        .and_then(|living| living.hand_item(host, mod_api::Hand::Main)),
+                    expected.borrow().clone(),
+                    "the complete live hand crosses the generated Host boundary"
+                )
+            });
             event.drops.clear();
         }
         fn item_stacked_on_other(
@@ -867,9 +889,59 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
+    use mod_api::__private::game::BackendRefOf;
+    struct World;
+    impl mod_api::Host for World {
+        fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
+            Some(mod_api::BackendRef::of(self))
+        }
+    }
+    mod_api::impl_host_areas!(World, except(entities, living));
+    impl mod_api::prelude::EntitiesHost for World {
+        fn entity(&self, id: u32) -> Option<mod_api::EntityRef> {
+            Some(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), id))
+        }
+    }
+    impl mod_api::prelude::LivingHost for World {
+        fn living(&self, entity: mod_api::EntityRef) -> Option<mod_api::LivingRef> {
+            Some(mod_api::LivingRef::new(entity))
+        }
+    }
+    impl mod_api::Backend for World {}
+    mod_api::impl_backend_areas!(World, except(living));
+    impl mod_api::prelude::LivingClientBackend for World {}
+    impl mod_api::prelude::LivingBackend for World {
+        fn living_hand_item(
+            &self,
+            _: mod_api::LivingRef,
+            _: mod_api::Hand,
+        ) -> Option<mod_api::ItemStack> {
+            EXPECTED_LOOT_HAND.with(|expected| expected.borrow().clone())
+        }
+    }
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+
     install_counter();
     let table = "t".repeat(300);
+    let mut hand = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 7).unwrap();
+    hand.set_damage(19);
+    hand.set_components(
+        [(
+            "minecraft:custom_data".into(),
+            mod_api::Tag::Compound([("marker".into(), mod_api::Tag::Int(73))].into()),
+        )]
+        .into(),
+    )
+    .unwrap();
+    EXPECTED_LOOT_HAND.with(|expected| *expected.borrow_mut() = Some(hand.clone()));
     let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
+        damage_source: Some(mod_api::HurtSource {
+            damage_type: "minecraft:arrow",
+            causing: 41,
+            direct: 73,
+            position: Some([1.0, 2.0, 3.0]),
+        }),
         table: &table,
         dimension: "minecraft:overworld",
         origin: [0.; 3],
@@ -889,7 +961,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
         corrupt: false,
     }
     .loot_drops(
-        &mut guest::Guest,
+        &mut World,
         &mut mod_api::LootDropsEvent {
             context: &context,
             drops: &mut drops,

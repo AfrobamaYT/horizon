@@ -6,11 +6,20 @@ use mod_api::{RecipeBookDisplay as Display, RecipeSlotDisplay as Slot};
 pub(super) struct Resolver<'a, 'w> {
     game: &'a Game<'w>,
     stocks: &'a Stacked,
+    placement_stocks: &'a [(ItemStack, i32)],
 }
 
 impl<'a, 'w> Resolver<'a, 'w> {
-    pub(super) fn new(game: &'a Game<'w>, stocks: &'a Stacked) -> Self {
-        Self { game, stocks }
+    pub(super) fn new(
+        game: &'a Game<'w>,
+        stocks: &'a Stacked,
+        placement_stocks: &'a [(ItemStack, i32)],
+    ) -> Self {
+        Self {
+            game,
+            stocks,
+            placement_stocks,
+        }
     }
 
     pub(super) fn resolve(&self, slot: &Slot) -> Vec<ItemStack> {
@@ -147,7 +156,42 @@ impl horizon_client::recipe_book::mod_presentation::DisplayResolver for Resolver
     fn resolve(&self, slot: &Slot) -> Vec<ItemStack> {
         Resolver::resolve(self, slot)
     }
-    fn craftable(&self, _: &str, _: &Display, ingredients: &[Ingredient]) -> bool {
+    fn craftable(&self, recipe: &str, _: &Display, ingredients: &[Ingredient]) -> bool {
+        if self
+            .game
+            .native_screen_menu()
+            .is_some_and(|menu| mod_api::RecipeBookLayout::declaring_mod(menu).is_some())
+        {
+            let Some(plan) = self
+                .game
+                .native_net
+                .placement
+                .view
+                .as_ref()
+                .and_then(|view| view.index.placement(recipe).ok())
+            else {
+                return false;
+            };
+            let ingredients = &plan.requirements().ingredients;
+            let mut counts: Vec<_> = self
+                .placement_stocks
+                .iter()
+                .map(|(_, amount)| *amount)
+                .collect();
+            return horizon_client::menu::place::can_craft_matching(
+                &mut counts,
+                ingredients.len(),
+                |candidate, ingredient| {
+                    if ingredients[ingredient]
+                        .test_in(&self.game.loop_context, &self.placement_stocks[candidate].0)
+                    {
+                        i32::MAX
+                    } else {
+                        0
+                    }
+                },
+            );
+        }
         Resolver::craftable(self, ingredients)
     }
     fn search_text(&self, results: &[ItemStack]) -> String {
