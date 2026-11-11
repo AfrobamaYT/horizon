@@ -235,6 +235,7 @@ mod terrain_model;
 pub(crate) mod test_gpu;
 mod weather;
 mod world_text;
+use cull::occlusion_culling_requested;
 use entity_batch::EntityBatch;
 pub use entity_batch::{
     ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
@@ -282,15 +283,6 @@ fn outline_vertices_into(edges: &[[f64; 6]], camera: glam::DVec3, out: &mut Vec<
             .iter()
             .map(|e| std::array::from_fn(|i| (e[i] - camera[i % 3]) as f32)),
     );
-}
-
-/// Whether the renderer should initialize its occlusion culling pass (`cull`).
-///
-/// Software adapters spend more time running the culling pass than drawing
-/// the sections it removes. Keep the pass available for explicit A/B checks,
-/// while leaving hardware adapters on the existing default.
-fn occlusion_culling_requested(info: &wgpu::AdapterInfo, env: Option<&str>) -> bool {
-    env != Some("0") && (env.is_some() || info.device_type != wgpu::DeviceType::Cpu)
 }
 
 /// `DrawableGizmoPrimitives.getGroup`: a line whose ARGB alpha is 255 joins the

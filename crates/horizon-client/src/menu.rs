@@ -26,6 +26,7 @@ pub use models::{
 use std::sync::Arc;
 
 mod bundle;
+pub use bundle::fits_inside_container_items;
 mod equippable;
 pub mod place;
 mod remainder;
@@ -411,12 +412,6 @@ pub fn beacon_required_levels(effect: Option<&str>) -> i32 {
         .iter()
         .position(|tier| tier.contains(&effect))
         .map_or(i32::MAX, |i| i as i32 + 1)
-}
-
-/// `Item.canFitInsideContainerItems` (`ShulkerBoxSlot.mayPlace`): shulker
-/// boxes cannot nest.
-pub fn fits_inside_container_items(stack: &ItemStack) -> bool {
-    !stack.item.ends_with("shulker_box")
 }
 
 /// The containers a menu spans.

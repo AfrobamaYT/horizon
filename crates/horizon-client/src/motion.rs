@@ -156,6 +156,7 @@ pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
 }
 
 pub(crate) mod environment;
+use environment::fly_into_wall_damage;
 mod fluids;
 mod ladder;
 pub use fluids::{
@@ -3105,12 +3106,6 @@ pub(crate) fn fall_flying_movement(v: Vec3, pitch: f32, yaw: f32, gravity: f64) 
         m.y * f64::from(0.98_f32),
         m.z * f64::from(0.99_f32),
     )
-}
-
-/// `LivingEntity.handleFallFlyingCollisions`: a glide a block stopped takes
-/// `(before - after) * 10 - 3`, and nothing when that is not positive.
-fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
-    ((before - after) * 10.0 - 3.0) as f32
 }
 
 /// The block factors an entity reads for a kind that keeps no motion world of its own (mobs,
