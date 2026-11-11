@@ -17,6 +17,37 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             })?;
         }
     }
+    let reject = |attrs: &[syn::Attribute]| -> syn::Result<()> {
+        for attr in attrs {
+            if attr.path().is_ident("payload") {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "payload attributes belong on the type",
+                ));
+            }
+        }
+        Ok(())
+    };
+    match &input.data {
+        Data::Struct(data) => {
+            for field in &data.fields {
+                reject(&field.attrs)?;
+            }
+        }
+        Data::Enum(data) => {
+            for variant in &data.variants {
+                reject(&variant.attrs)?;
+                for field in &variant.fields {
+                    reject(&field.attrs)?;
+                }
+            }
+        }
+        Data::Union(data) => {
+            for field in &data.fields.named {
+                reject(&field.attrs)?;
+            }
+        }
+    }
     let c = contract.unwrap_or_else(|| parse_quote!(::mod_api));
     for param in input.generics.type_params_mut() {
         param.bounds.push(parse_quote!(#c::PayloadCodec));
@@ -27,7 +58,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             let (pattern, encodes, build) = fields(&data.fields, quote!(Self), &c);
             (
                 quote!(let Self #pattern = self; #encodes),
-                quote!(Ok(#build)),
+                quote!(::core::result::Result::Ok(#build)),
             )
         }
         Data::Enum(data) => {
@@ -45,14 +76,14 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                 let case = &variant.ident;
                 let (pattern, writes, build) = fields(&variant.fields, quote!(Self::#case), &c);
                 encodes.push(quote!(Self::#case #pattern => { out.var_int(#tag); #writes }));
-                decodes.push(quote!(#tag => Ok(#build),));
+                decodes.push(quote!(#tag => ::core::result::Result::Ok(#build),));
             }
             (
                 quote!(match self { #(#encodes)* }),
                 quote! {
                     match input.var_int()? {
                         #(#decodes)*
-                        value => Err(#c::PayloadDecodeError::InvalidDiscriminant { value }),
+                        value => ::core::result::Result::Err(#c::PayloadDecodeError::InvalidDiscriminant { value }),
                     }
                 },
             )
@@ -134,6 +165,9 @@ mod tests {
     fn shapes_without_a_payload_form_are_refused() {
         for source in [
             "enum Empty {}",
+            "struct Bad { #[payload(with = other)] a: u8 }",
+            "enum Bad { #[payload(with = other)] A }",
+            "enum Bad { A(#[payload(with = other)] u8) }",
             "union Raw { a: i32, b: u32 }",
             "#[payload(with = other)] struct Unknown;",
             "#[payload(crate = ::a, crate = ::b)] struct Twice;",
