@@ -7207,9 +7207,8 @@ impl Game<'_> {
         // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates, BlockState.useItemOn
         // first. ITEM_USED_ON_BLOCK sees the stack from before it, whichever phase consumes.
         let held = self.held().cloned();
-        let before = held
-            .clone()
-            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+        let empty = ItemStack::new("minecraft:air", 0);
+        let before = held.as_ref().unwrap_or(&empty);
         if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
@@ -7718,8 +7717,8 @@ impl Game<'_> {
                 || self.place_minecart(hit, &stack)
                 || self.place_painting(hit, &stack)
                 || self.place_item_frame(hit, &stack)
-                || self.use_lodestone_compass(hit, &stack)
-                || self.use_map_on_banner(hit, &stack)
+                || self.use_lodestone_compass(hit, &stack, before)
+                || self.use_map_on_banner(hit, &stack, before)
                 || self.place_armor_stand(hit, &stack)
                 || self.place_cushion(hit, &stack)
                 || self.place_end_crystal(hit, &stack))
