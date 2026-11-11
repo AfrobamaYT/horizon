@@ -20,14 +20,6 @@ impl Game<'_> {
                     .chain(self.persist.destroying_vehicles.iter())
                     .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
             })
-            .filter(|id| {
-                !self
-                    .persist
-                    .removals
-                    .iter()
-                    .chain(self.persist.destroying_vehicles.iter())
-                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
-            })
             .map(|id| {
                 let entity = EntityRef::new(level.epoch(), id);
                 self.native_entity_target(entity).map(|_| entity)
@@ -52,24 +44,12 @@ impl Game<'_> {
         Some(
             ids.into_iter()
                 .filter(|id| {
-                    !self.persist.removals.iter().chain(self.persist.destroying_vehicles.iter())
-    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
-                })
-                .filter(|id| {
                     !self
-                    .persist
-                    .removals
-                    .iter()
-                    .chain(self.persist.destroying_vehicles.iter())
-                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
-                })
-                .filter(|id| {
-                    !self
-                    .persist
-                    .removals
-                    .iter()
-                    .chain(self.persist.destroying_vehicles.iter())
-                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+                        .persist
+                        .removals
+                        .iter()
+                        .chain(self.persist.destroying_vehicles.iter())
+                        .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
                 })
                 .filter_map(|id| {
                     let entity = EntityRef::new(level.epoch(), id);
