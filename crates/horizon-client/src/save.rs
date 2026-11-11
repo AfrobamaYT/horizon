@@ -6219,7 +6219,7 @@ mod tests {
                 })
                 .flatten()
                 .filter_map(|t| match t {
-                    Tag::String(s) => Some(s.to_string_lossy().into_owned()),
+                    Tag::String(s) => Some(s.to_string_lossy()),
                     _ => None,
                 })
                 .collect()
