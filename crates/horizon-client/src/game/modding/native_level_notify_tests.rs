@@ -1,6 +1,7 @@
 //! #968: a level's break progress and block updates wait for the outermost commit.
 use super::native_entity_refs::tests::with_game;
 use horizon_client::chunk::Chunk;
+use mod_api::HostTransaction;
 use std::sync::Arc;
 
 #[test]
