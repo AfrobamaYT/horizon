@@ -33,6 +33,18 @@ class Visibility(unittest.TestCase):
         self.assertNotIn("PRIVATE_RESOURCE_CONTENT", log.getvalue())
         self.assertIn("error[E0308]: custom diagnostic payload withheld", log.getvalue())
 
+    def test_codeless_build_failures_keep_category_not_payload(self):
+        for message, expected in (
+            ('error: linking with `cc` failed: exit status: 1 PRIVATE_LINK_ARGS',
+             'linker failure; command/output withheld; exit status=1'),
+            ('error: failed to run custom build command for `PRIVATE_PACKAGE` PRIVATE_OUTPUT',
+             'custom build command failure; command/output withheld'),
+        ):
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                ignored_tests.compile_diagnostics(message)
+            self.assertIn(expected, log.getvalue())
+            self.assertNotIn('PRIVATE', log.getvalue())
+
     def test_standard_panic_details_are_preserved(self):
         for reason in ("index out of bounds: the len is 3 but the index is 4",
                        "attempt to divide by zero", "attempt to add with overflow"):

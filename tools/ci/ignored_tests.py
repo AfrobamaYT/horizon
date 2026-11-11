@@ -61,6 +61,12 @@ def compile_diagnostics(output):
                 "mismatched types", "type annotations needed", "unexpected closing delimiter",
                 "unclosed delimiter", "expected item, found keyword", "aborting due to previous error",
             } else "custom diagnostic payload withheld"
+            if reason.startswith("linking with "):
+                safe = "linker failure; command/output withheld"
+                if status := re.search(r"(?:^|: )exit status: (\d{1,5})(?:\D|$)", reason):
+                    safe += f"; exit status={status[1]}"
+            elif reason.startswith("failed to run custom build command for "):
+                safe = "custom build command failure; command/output withheld"
             headings.append(f"error{code}: {safe}")
         elif re.match(r"^\s*--> [\w./-]+:\d+:\d+$", line):
             headings.append(line)
