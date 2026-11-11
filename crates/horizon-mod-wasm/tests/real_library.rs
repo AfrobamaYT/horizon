@@ -68,6 +68,7 @@ fn real_library_dependency() {
         )
         .unwrap();
         mod_api::__private::mark_game_thread();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         let mut entity = mod_api::ModBlockEntity::new(
             "wasm_test_dependent:dependent".into(),
             Default::default(),
@@ -85,6 +86,7 @@ fn real_library_dependency() {
         );
     });
     mod_points::__private::seal();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut args = mod_points::TickArgs::__new();
     mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(

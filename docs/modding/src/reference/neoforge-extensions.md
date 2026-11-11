@@ -284,7 +284,8 @@ not its type properties, so "partial" below means the vanilla answer is readable
 
 Menu types are content data (`MenuType` in `crates/horizon-mod-package/src/content.rs`, files under
 `data/<id>/horizon/menu/`), and the game's own menu engine opens them (`menu::Kind::Mod`). A `MenuPart` can answer
-slot rules, not construct a menu.
+slot rules and whether a player's block menu stays open (`menu_still_valid`, vanilla's `stillValid`), not
+construct a menu.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
