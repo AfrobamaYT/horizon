@@ -14,6 +14,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// no fluid layer while it holds none.
 const MODEL: &str = r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
     "textures":{"base":"minecraft:item/bucket","fluid":"neoforge:item/mask/bucket_fluid"}}"#;
+/// [`MODEL`] declaring water as what it draws while it holds none.
+const WATER_FALLBACK: &str = r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water",
+    "textures":{"base":"minecraft:item/bucket","fluid":"neoforge:item/mask/bucket_fluid"}}"#;
 
 /// What the canister's part answers.
 #[derive(Clone, Copy, Debug)]
@@ -113,10 +116,14 @@ fn resource_root(scratch: &std::path::Path) -> std::path::PathBuf {
 
 /// The layers `item` draws under [`MODEL`], asking the game.
 fn drawn(game: &crate::game::Game<'_>, item: &str) -> Vec<Layer> {
+    drawn_with(game, item, MODEL)
+}
+/// The layers `item` draws under the fluid container `model`, asking the game.
+fn drawn_with(game: &crate::game::Game<'_>, item: &str, model: &str) -> Vec<Layer> {
     let mut models = ItemModels::default();
     models.definitions.insert(
         item.into(),
-        ClientItem::from_json(&format!(r#"{{"model":{MODEL}}}"#)).unwrap(),
+        ClientItem::from_json(&format!(r#"{{"model":{model}}}"#)).unwrap(),
     );
     Arc::make_mut(&mut models.prototypes).insert(
         item.into(),
@@ -188,6 +195,16 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             assert_eq!(warnings.len(), 1, "{warnings:?}");
             assert!(warnings[0].contains("tank:canister"), "{warnings:?}");
 
+            // Holding none under a model that declares water draws that water untinted (white),
+            // and so does an answer the item cannot draw.
+            for holds in [Answer::Nothing, Answer::Sludge] {
+                answer(holds);
+                let fallback = drawn_with(game, "tank:canister", WATER_FALLBACK);
+                assert_eq!(fallback.len(), 2, "{holds:?}: {fallback:?}");
+                assert_eq!(fallback[1].content, water_still, "{holds:?}");
+                assert_eq!(fallback[1].tints, vec![-1], "{holds:?}");
+            }
+
             // Vanilla's items never ask a part, even one attached to them: the water bucket
             // keeps vanilla's answer and the empty bucket stays empty.
             answer(Answer::Water);
@@ -195,7 +212,7 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             assert_eq!(drawn(game, "minecraft:water_bucket")[1].content, water_still);
             let asked = part.asked.lock().unwrap().clone();
             assert!(asked.iter().all(|item| item == "tank:canister"), "{asked:?}");
-            assert_eq!(asked.len(), 5);
+            assert_eq!(asked.len(), 7);
         });
     });
 }

@@ -70,11 +70,12 @@ impl Hooks for MyMod {
 ```
 
 - The answer is a fluid, never a sprite or a colour: the model draws the fluid's own still sprite and item tint, as
-  for a water bucket. A mod fluid draws in an item once it has a look (`data/<mod>/horizon/fluid/<name>.json`, or a
-  model from `register_fluid_models`).
-- Leaving `event.fluid` at `None` draws the container empty.
-- A key the item renderer cannot draw (a fluid with no look) draws the container empty, and the game logs it once
-  for that item.
+  for a water bucket. A mod fluid draws in an item only once it has a look (`data/<mod>/horizon/fluid/<name>.json`);
+  a model from `register_fluid_models` changes how a fluid with a look draws, but does not make one drawable alone.
+- Leaving `event.fluid` at `None` draws the stack as holding none: the model's declared `fluid`, untinted, or no
+  fluid layer when that is `minecraft:empty`.
+- A key the item renderer cannot draw (a fluid with no look) draws the same as `None`, and the game logs it once for
+  that item.
 - It is asked on the client each time such a stack is drawn, so answer from the stack alone and keep it cheap. Only
   items outside `minecraft:` are asked: a part on a vanilla item is not.
 - It is the client's picture only. What the stack holds for gameplay (filling, emptying, pipes) stays in the stack's

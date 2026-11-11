@@ -8,7 +8,8 @@ impl Game<'_> {
     /// `r.fluid_key`. Asked on the client each time a stack of an item outside
     /// `minecraft:` is drawn through a fluid container model; vanilla's items
     /// keep their own answer and never ask. A key the item renderer draws no
-    /// fluid for draws the container empty, and the game logs it once per item.
+    /// fluid for draws the stack as holding none (the model's declared fluid,
+    /// untinted), and the game logs it once per item.
     /// Answer from the stack alone, and fast.
     pub(in crate::game) fn native_contained_fluid(
         &self,

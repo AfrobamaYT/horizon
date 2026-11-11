@@ -245,8 +245,8 @@ impl ItemEnv for Env<'_, '_> {
         (nanos % 1_000_000) as f32 / 1_000_000.0
     }
 }
-/// The fluid a mod's `contained_fluid` answer `key` draws in a stack of `item`: none, an empty
-/// container, for a key no fluid is registered under or a fluid with no look in an item, logged
+/// The fluid a mod's `contained_fluid` answer `key` draws in a stack of `item`: none (the stack
+/// draws as holding none) for a key no fluid is registered under or a fluid with no look in an item, logged
 /// the first time an item answers so.
 fn drawn_contained_fluid(item: &str, key: mod_api::FluidKey) -> Option<&'static str> {
     let fluid = mod_api::__private::fluid_id(key);
@@ -255,7 +255,7 @@ fn drawn_contained_fluid(item: &str, key: mod_api::FluidKey) -> Option<&'static 
     }
     if first_undrawn_answer(item) {
         log::warn!(
-            "contained_fluid for {item} answered {}, which an item cannot draw: drawn empty",
+            "contained_fluid for {item} answered {}, which an item cannot draw: drawn as holding none",
             fluid.unwrap_or("an unregistered fluid key")
         );
     }
