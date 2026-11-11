@@ -13876,15 +13876,15 @@ impl Game<'_> {
         }
         (out, runs)
     }
-    /// The renderer for the window, with the current block sprites, GUI
-    /// atlas and world border texture.
-    /// A new renderer's atlas holds only the pack's sprites: what was drawn into it at run time
-    /// (skins, maps, the themed UI's glyphs and corners) has to be drawn again.
+    /// Forget runtime atlas slots after replacing the renderer or its atlas.
+    /// Skins, maps, glyphs and corners must be uploaded again; queued uploads
+    /// and kept geometry refer to the old atlas and are discarded.
     pub(super) fn forget_atlas_slots(&mut self) {
         self.skin_slots.forget();
         self.maps.slots.forget();
         self.trim_slots.forget();
         self.map_patches.clear();
+        self.text_patches.get_mut().clear();
         self.kept_block_entities.get_mut().clear();
         horizon_client::ui_theme::reset_atlas();
     }

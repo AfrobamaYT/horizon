@@ -587,10 +587,7 @@ impl BlockEntityDraw {
         // a part standing still keeps its light in its colour.
         let (color, normal) = if self.spinning() {
             let n = (normal * 127.0).round();
-            (
-                shaded(tint, 1.0),
-                [n.x as i8, n.y as i8, n.z as i8, 127],
-            )
+            (shaded(tint, 1.0), [n.x as i8, n.y as i8, n.z as i8, 127])
         } else {
             (shaded(tint, diffuse(normal, self.lights)), [0; 4])
         };
@@ -883,13 +880,7 @@ impl Game<'_> {
                 }
             } else {
                 let drawn = draw.vertices.split_off(start);
-                place_turning(
-                    &drawn,
-                    &spins,
-                    draw.animation,
-                    origin,
-                    &mut draw.vertices,
-                );
+                place_turning(&drawn, &spins, draw.animation, origin, &mut draw.vertices);
             }
         }
         *out = draw.vertices;
@@ -1067,13 +1058,19 @@ impl Game<'_> {
         glowing: bool,
         outline: Option<u32>,
     ) -> f32 {
-        let opaque = |c: u32| horizon_client::hud::rgba((c >> 16) as u8, (c >> 8) as u8, c as u8, 255);
+        let opaque =
+            |c: u32| horizon_client::hud::rgba((c >> 16) as u8, (c >> 8) as u8, c as u8, 255);
         let atlas = &self.gui.atlas;
         let mut batch = horizon_client::hud::HudBatch::scratch([1, 1]);
         let (width, front) = match outline {
-            Some(ring) => {
-                batch.text_styled_outline_world(atlas, text, at[0], at[1], opaque(color), opaque(ring))
-            }
+            Some(ring) => batch.text_styled_outline_world(
+                atlas,
+                text,
+                at[0],
+                at[1],
+                opaque(color),
+                opaque(ring),
+            ),
             None => (
                 batch.text_styled_world(atlas, text, at[0], at[1], opaque(color), false),
                 0,
@@ -1116,7 +1113,7 @@ impl Game<'_> {
                 });
             }
         }
-        width
+        width.ceil()
     }
     /// The width of `text` in font pixels, as `draw_text` draws it, styles
     /// included (`Font.width`), to lay a line out before drawing it.
@@ -2479,7 +2476,10 @@ mod tests {
             assert_eq!(drawn.text_width(&plain), Ok(12.0));
             // Font.width: bold adds a pixel a glyph.
             assert_eq!(drawn.text_width(&bold), Ok(7.0));
-            assert_eq!(drawn.text(&plain, [0.0, 0.0], 0xFF0000, false, None), Ok(12.0));
+            assert_eq!(
+                drawn.text(&plain, [0.0, 0.0], 0xFF0000, false, None),
+                Ok(12.0)
+            );
             assert_eq!(surface.vertices.len(), 8, "a quad per glyph");
             // Vanilla's bitmap providers: A is 8x8 with ascent 7; Á is 9x12 with ascent 10.
             // GlyphBitmap places the top at 7 - ascent; BakedSheetGlyph adds the pen's position.
@@ -2519,16 +2519,112 @@ mod tests {
                 surface: &mut surface,
             };
             drawn
-                .text(&mod_api::Text::literal("A"), [0.0, 0.0], 0xFFFFFF, true, Some(0))
+                .text(
+                    &mod_api::Text::literal("A"),
+                    [0.0, 0.0],
+                    0xFFFFFF,
+                    true,
+                    Some(0),
+                )
                 .unwrap();
             assert_eq!(surface.vertices.len(), 9 * 4);
             let (rings, front) = surface.vertices.split_at(8 * 4);
-            assert!(rings.iter().all(|v| v.color == 0xFF00_0000 && v.pos[2] == 0.0));
+            assert!(
+                rings
+                    .iter()
+                    .all(|v| v.color == 0xFF00_0000 && v.pos[2] == 0.0)
+            );
             assert!(
                 front
                     .iter()
                     .all(|v| v.color == u32::MAX && v.pos[2] == TEXT_OVER_OUTLINE)
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fractional_text_advance_rounds_up_for_drawing_and_measurement() {
+        use super::super::host::draw::GameBlockEntityDrawContext;
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        use mod_api::BlockEntityDrawContext;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+                "assets/minecraft/font/default.json".into(),
+                Resource::bytes(
+                    br#"{"providers":[{"type":"space","advances":{"X":2.25}}]}"#.to_vec(),
+                ),
+            )]));
+            game.gui.atlas.font = horizon_client::font::Font::metrics(&source);
+            let mut surface = draw();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            let text = mod_api::Text::literal("XX");
+            assert_eq!(drawn.text_width(&text), Ok(5.0));
+            assert_eq!(drawn.text(&text, [0.0; 2], 0xFFFFFF, false, None), Ok(5.0));
+            assert_eq!(
+                drawn.text(&text, [0.0; 2], 0xFFFFFF, true, Some(0)),
+                Ok(5.0)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn animation_clock_survives_pause_freeze_resume_and_time_updates() {
+        use horizon_protocol::packets::play;
+        use std::time::Duration;
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            game.clock = horizon_client::clock::FixedStep::client();
+            game.texture_ticks = 0;
+            game.clock.advance(Duration::from_millis(75), 50.0);
+            game.tick_frame_visuals(true);
+            assert_eq!(game.animation_time(), 1.5);
+            game.clock.end_frame(true);
+            game.clock.advance(Duration::from_millis(50), 50.0);
+            assert_eq!(game.animation_time(), 1.5);
+            game.clock.end_frame(false);
+            game.clock.set_frozen(true);
+            game.clock.end_frame(false);
+            assert_eq!(game.animation_time(), 2.0);
+            game.clock.advance(Duration::from_millis(25), 50.0);
+            let running = game.clock.world_runs();
+            game.tick_frame_visuals(running);
+            assert_eq!(game.texture_ticks, 1);
+            assert_eq!(game.animation_time(), 2.0);
+            assert_eq!(game.clock.camera_fraction(), 0.0);
+            game.handle_packet(play::Clientbound::SetTime(play::SetTime {
+                game_time: 0,
+                clocks: vec![],
+            }))
+            .unwrap();
+            assert_eq!(game.animation_time(), 2.0);
+            game.clock.set_frozen(false);
+            game.clock.end_frame(false);
+            game.clock.advance(Duration::from_millis(75), 50.0);
+            let running = game.clock.world_runs();
+            game.tick_frame_visuals(running);
+            assert_eq!(game.animation_time(), 2.5);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn atlas_reset_discards_queued_text_uploads() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.text_patches
+                .borrow_mut()
+                .push(horizon_client::font::Patch {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255; 4],
+                });
+            game.forget_atlas_slots();
+            assert!(game.text_patches.borrow().is_empty());
         });
     }
 
