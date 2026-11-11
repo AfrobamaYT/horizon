@@ -15,6 +15,7 @@ const _: () = assert!(
     "The native inventory must be generated from mod manifests"
 );
 fn main() {
+    horizon_mod_host::exit_if_compile_child();
     let startup = horizon_client::entry::prepare();
     std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
     std::hint::black_box(&GAME_IDENTITY);
