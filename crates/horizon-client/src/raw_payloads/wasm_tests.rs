@@ -115,12 +115,14 @@ fn compiled_guest_observes_physical_provider_pressure() {
                 );
             })
         });
-        let expected_packet = encode(
-            negotiation::Phase::Play,
-            Side::Server,
-            &PayloadId("wasm_fixture:measure".into()),
-            PayloadBytes(expected),
-        );
+        // Independent vanilla packet reference: never call the encoder under test.
+        // Both this packet id and this fixed channel length fit one-byte VarInts.
+        let mut expected_packet = vec![
+            horizon_protocol::ids::play::clientbound::CUSTOM_PAYLOAD as u8,
+            b"wasm_fixture:measure".len() as u8,
+        ];
+        expected_packet.extend_from_slice(b"wasm_fixture:measure");
+        expected_packet.extend_from_slice(&expected);
         assert_eq!(out(), [expected_packet]);
         assert!(!transport.closed());
         eprintln!(

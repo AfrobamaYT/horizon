@@ -154,6 +154,7 @@ impl Hooks for Probe {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; starts a real integrated server"]
 fn integrated_memory_delivers_registered_raw_payload_and_reply() {
+    super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(
         NAME,
         "HORIZON_RAW_TRANSPORT_CHILD",
@@ -223,6 +224,15 @@ fn integrated_memory_delivers_registered_raw_payload_and_reply() {
                 game.integrated.is_some(),
                 "production integrated server handle"
             );
+            let wire_hits = Arc::new(AtomicUsize::new(0));
+            game.remote.as_ref().unwrap().session.start_recording(
+                WireReceipt {
+                    channel: CHANNEL,
+                    expected: expected.clone(),
+                    hits: wire_hits.clone(),
+                },
+                |_| {},
+            );
             let host: &mut dyn mod_api::ClientHost = game;
             assert_eq!(
                 host.send_payload_to_server(
@@ -240,9 +250,98 @@ fn integrated_memory_delivers_registered_raw_payload_and_reply() {
                 );
                 std::thread::yield_now();
             }
+            assert_eq!(
+                wire_hits.load(Ordering::SeqCst),
+                1,
+                "one independently inspected memory-transport reply"
+            );
             assert_eq!(server.load(Ordering::SeqCst), 1);
             assert_eq!(client.load(Ordering::SeqCst), 1);
             game.leave_server(None).unwrap();
         });
     });
+}
+
+// These selectors are explicitly ignored, not silently optional once selected.
+pub(super) fn require_resources() {
+    let root =
+        std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").expect(
+            "missing HORIZON_TEST_RESOURCES: set it to a private prepared 26.3 resource root",
+        ));
+    assert!(
+        root.is_dir(),
+        "missing HORIZON_TEST_RESOURCES directory: {}",
+        root.display()
+    );
+    for file in [
+        "registries.json",
+        "block-behaviours.json",
+        "assets/minecraft/blockstates/stone.json",
+    ] {
+        let path = root.join(file);
+        assert!(
+            path.is_file(),
+            "missing required prepared resource: {}",
+            path.display()
+        );
+    }
+}
+
+// Inspect vanilla bytes independently of both the raw encoder and CustomPayload decoder.
+// These fixed fixture channels have single-byte vanilla string lengths.
+pub(super) fn assert_bare_body(body: &[u8], channel: &str, expected: &[u8]) {
+    assert_eq!(
+        body.len(),
+        1 + channel.len() + expected.len(),
+        "wire body must contain only the declared channel and application bytes"
+    );
+    assert_eq!(body[0], channel.len() as u8, "vanilla channel length");
+    let prefix = 1 + channel.len();
+    assert_eq!(
+        &body[1..prefix],
+        channel.as_bytes(),
+        "declared wire channel"
+    );
+    assert!(
+        body[prefix..] == *expected,
+        "no envelope inside the declared channel"
+    );
+}
+
+pub(super) struct WireReceipt {
+    pub(super) channel: &'static str,
+    pub(super) expected: Arc<Vec<u8>>,
+    pub(super) hits: Arc<AtomicUsize>,
+}
+impl horizon_client::net::PacketRecorder for WireReceipt {
+    fn is_active(&self) -> bool {
+        true
+    }
+    fn received(
+        &self,
+        packet: &horizon_protocol::packets::play::Clientbound,
+        id: i32,
+        body: &[u8],
+    ) {
+        if matches!(packet, horizon_protocol::packets::play::Clientbound::CustomPayload(p) if p.channel == self.channel)
+        {
+            assert_eq!(id, horizon_protocol::ids::play::clientbound::CUSTOM_PAYLOAD);
+            assert_bare_body(body, self.channel, &self.expected);
+            self.hits.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    fn record_packet(&self, _: i32, _: &[u8]) {}
+    fn status(&self) -> horizon_client::net::RecorderStatus {
+        horizon_client::net::RecorderStatus {
+            active: true,
+            path: Default::default(),
+            elapsed: Duration::ZERO,
+            packet_count: self.hits.load(Ordering::SeqCst) as u64,
+            bytes_written: 0,
+            error: None,
+        }
+    }
+    fn stop(self: Box<Self>) -> std::io::Result<std::path::PathBuf> {
+        Ok(Default::default())
+    }
 }

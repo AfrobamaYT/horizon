@@ -73,6 +73,7 @@ impl Hooks for Native {
 #[test]
 #[ignore = "requires prepared resources and compiled HORIZON_WASM_FIXTURE/HORIZON_WASM_STD"]
 fn compiled_guest_runs_in_actual_game_roots() {
+    super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(
         TEST,
         "HORIZON_WASM_GAME_CASE",
@@ -93,7 +94,8 @@ fn compiled_guest_runs_in_actual_game_roots() {
         case.as_str(),
         "handler_trap" | "work_trap" | "network_handler_trap"
     );
-    let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
+    let path = std::env::var("HORIZON_WASM_FIXTURE")
+        .expect("missing HORIZON_WASM_FIXTURE: build the matching compiled guest package");
     let path = std::path::Path::new(&path);
     let manifest = Package::read(path).unwrap().manifest;
     let info = mod_api::PackageInfo::new(
@@ -105,7 +107,11 @@ fn compiled_guest_runs_in_actual_game_roots() {
         vec![],
     );
     let loaded = horizon_mod_wasm::load(
-        &std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap(),
+        &std::fs::read(
+            std::env::var("HORIZON_WASM_STD")
+                .expect("missing HORIZON_WASM_STD: build the matching shared standard library"),
+        )
+        .unwrap(),
         vec![horizon_mod_wasm::WasmPackage {
             manifest,
             module: Package::read_wasm(path).unwrap(),
@@ -166,6 +172,17 @@ fn compiled_guest_runs_in_actual_game_roots() {
             } else {
                 (0..1 << 20).map(|i| ((i * 31 + 7) % 251) as u8).collect()
             };
+            let wire_hits = Arc::new(AtomicUsize::new(0));
+            if !trap {
+                game.remote.as_ref().unwrap().session.start_recording(
+                    super::tests::WireReceipt {
+                        channel: "raw_probe:receipt",
+                        expected: Arc::new(bytes.clone()),
+                        hits: wire_hits.clone(),
+                    },
+                    |_| {},
+                );
+            }
             let host: &mut dyn mod_api::ClientHost = game;
             assert_eq!(
                 host.send_payload_to_server(&PayloadId(channel.into()), PayloadBytes(bytes)),
@@ -185,6 +202,11 @@ fn compiled_guest_runs_in_actual_game_roots() {
                 );
                 std::thread::yield_now();
             }
+            assert_eq!(
+                wire_hits.load(Ordering::SeqCst),
+                usize::from(!trap),
+                "independently inspected compiled-guest wire receipt"
+            );
             let prepared = staging.snapshot();
             assert_eq!(
                 prepared.work,

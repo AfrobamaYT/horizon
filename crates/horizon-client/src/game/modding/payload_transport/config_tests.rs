@@ -160,6 +160,7 @@ impl Hooks for Probe {
 #[test]
 #[ignore = "needs HORIZON_TEST_RESOURCES; starts a real integrated server and TCP peer"]
 fn tcp_configuration_reply_precedes_finish() {
+    super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(
         NAME,
         "HORIZON_CONFIG_TRANSPORT_CHILD",
@@ -391,6 +392,7 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
         let (id, body) = c.recv().unwrap();
         match cfg::Clientbound::decode(id, &body).unwrap() {
             cfg::Clientbound::CustomPayload(p) if p.channel == CHANNEL => {
+                super::tests::assert_bare_body(&body, CHANNEL, expected);
                 assert_eq!(p.data, expected);
                 replies += 1;
                 assert_eq!(replies, 1);

@@ -77,6 +77,7 @@ impl Hooks for Registration {
 #[test]
 #[ignore = "needs HORIZON_TEST_RESOURCES; starts an integrated server and two physical TCP clients"]
 fn published_tcp_attributes_players_and_orders_actions() {
+    super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(
         NAME,
         "HORIZON_SENDER_TRANSPORT_CHILD",
@@ -162,6 +163,7 @@ fn published_tcp_attributes_players_and_orders_actions() {
                         let (id, body) = c.recv().unwrap();
                         match play::Clientbound::decode(id, &body).unwrap() {
                             play::Clientbound::CustomPayload(p) if p.channel == CHANNEL => {
+                                super::tests::assert_bare_body(&body, CHANNEL, &[peer as u8, slot]);
                                 assert_eq!(p.data, vec![peer as u8, slot]);
                                 break;
                             }
