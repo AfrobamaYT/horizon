@@ -2840,7 +2840,8 @@ registration path.
   (default `TryWithEmptyHand`); a main-hand block-phase TRY can still run the empty method.
   `UsePhase::ItemBeforeBlock` fires first, before the item's `on_item_use_first` Part and before
   the block is asked anything (ahead of the sneak gate, unless `right_click_block` denied the item);
-  a cancel there answers for the block and the item. On the client only this broadcast event fires:
+  canceling skips that item's Part, but `Pass` continues to the block. Only `Fail` or a consuming
+  result ends the block interaction. On the client only this broadcast event fires:
   a Part's claim comes from the server, which corrects the predicted click as it does for the block
   Part.
 - `ItemPart::on_item_use_first(host, event)` is `IItemExtension.onItemUseFirst`, server side, for the

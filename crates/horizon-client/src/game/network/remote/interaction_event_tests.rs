@@ -834,6 +834,90 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
 
 #[test]
 #[ignore = "requires prepared game resources"]
+fn before_block_cancellation_pass_continues_but_fail_and_consuming_results_stop() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "before_block_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        for client in [false, true] {
+            with_interaction_game(client, |game| {
+                let side = if client {
+                    LogicalSide::Client
+                } else {
+                    LogicalSide::Server
+                };
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let lever = game
+                    .with_props(
+                        registry.default_state("minecraft:lever").unwrap(),
+                        &[("face", "floor")],
+                    )
+                    .unwrap();
+                game.world.set(0, 63, 0, stone).unwrap();
+                game.forced_hit = Some(hit());
+                // Reference rules: PASS reaches the block; FAIL and each
+                // consuming result stop before it. Expected values are literal,
+                // independent of InteractionResult::consumes_action.
+                for (answer, reaches_block, swings) in [
+                    (Answer::Pass, true, 1),
+                    (Answer::Fail, false, 0),
+                    (Answer::Success, false, 1),
+                    (Answer::SuccessServer, false, u32::from(!client)),
+                    (Answer::Consume, false, 0),
+                ] {
+                    game.world.set(0, 64, 0, lever).unwrap();
+                    *observer.0.lock().unwrap() = Controls {
+                        record_first: true,
+                        first_answer: Some(answer),
+                        // Cancellation must skip this Part even for PASS.
+                        first_part_answer: Some(Answer::Fail),
+                        ..Controls::default()
+                    };
+                    let before = game.swings_started;
+                    assert!(use_block(game, client), "{side:?}: {answer:?}");
+                    assert_eq!(game.swings_started - before, swings);
+                    assert_eq!(game.world.block(0, 64, 0) != lever, reaches_block);
+                    let mut expected = vec![Step::Phase(UsePhase::ItemBeforeBlock, side)];
+                    if reaches_block {
+                        expected.push(Step::Phase(UsePhase::Block, side));
+                        if !client {
+                            expected.push(Step::BlockPart);
+                        }
+                    }
+                    assert_eq!(observer.0.lock().unwrap().steps, expected);
+                }
+                // A block that passes also reaches the after-block item phase.
+                game.world.set(0, 64, 0, stone).unwrap();
+                *observer.0.lock().unwrap() = Controls {
+                    record_first: true,
+                    first_answer: Some(Answer::Pass),
+                    first_part_answer: Some(Answer::Fail),
+                    item_on_answer: Some(Answer::Consume),
+                    ..Controls::default()
+                };
+                assert!(use_block(game, client));
+                assert_eq!(game.world.block(0, 64, 0), stone);
+                let mut expected = vec![
+                    Step::Phase(UsePhase::ItemBeforeBlock, side),
+                    Step::Phase(UsePhase::Block, side),
+                ];
+                if !client {
+                    expected.push(Step::BlockPart);
+                }
+                expected.push(Step::Phase(UsePhase::ItemAfterBlock, side));
+                assert_eq!(observer.0.lock().unwrap().steps, expected);
+            });
+        }
+    });
+}
+
+#[test]
+#[ignore = "requires prepared game resources"]
 fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
     let observer = Observer::default();
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
