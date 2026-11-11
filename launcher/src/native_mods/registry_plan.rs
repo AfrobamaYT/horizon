@@ -6,6 +6,7 @@ pub(super) struct Plan {
     pub game: RegistryLock,
     pub mods: RegistryLock,
     pub allowed: RegistryLock,
+    fetch_roots: RegistryLock,
     owned: Vec<(String, String, RegistryLock)>,
     roots: std::collections::BTreeSet<String>,
 }
@@ -44,12 +45,23 @@ impl Plan {
             mods.extend(&pins)?;
             owned.push((bundle.manifest.id.clone(), project.package.clone(), pins));
         }
+        let mut fetch_roots = RegistryLock::default();
+        for (identity, record) in &mods.packages {
+            if wanted.iter().any(|request| {
+                request.name == identity.name && request.requirement.matches(&identity.version)
+            }) {
+                fetch_roots
+                    .packages
+                    .insert(identity.clone(), record.clone());
+            }
+        }
         let mut allowed = game.clone();
         allowed.extend(&mods)?;
         Ok(Self {
             game,
             mods,
             allowed,
+            fetch_roots,
             owned,
             roots,
         })
@@ -69,7 +81,9 @@ impl Plan {
                     .map(|(package, _)| (*package).to_owned()),
             );
             skip_local.insert(super::internals::package(id));
-            resolved.check_mod(id, root, &skip_local, pins)?;
+            let mut owned_pins = self.game.clone();
+            owned_pins.extend(pins)?;
+            resolved.check_mod(id, root, &skip_local, &owned_pins)?;
         }
         Ok(())
     }
@@ -110,7 +124,17 @@ impl Plan {
         rust: &crate::rust_toolchain::Toolchain,
         directory: &Path,
     ) -> Result<(), String> {
-        self.mods.fetch_workspace(&self.mods, directory)?;
+        self.fetch_with_patches(rust, directory, &toml::Table::new())
+    }
+
+    pub fn fetch_with_patches(
+        &self,
+        rust: &crate::rust_toolchain::Toolchain,
+        directory: &Path,
+        patches: &toml::Table,
+    ) -> Result<(), String> {
+        self.mods.fetch_workspace(&self.fetch_roots, directory)?;
+        apply_patches(directory, patches)?;
         let mut index = super::cargo(rust, directory, "update");
         index.arg("--workspace");
         super::run(index, "Checking the pinned registry index", |_| {})
@@ -127,6 +151,41 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fetch_roots_exclude_unrelated_game_union_records() {
+        let dir = tempfile::tempdir().unwrap();
+        super::super::tests::write_bundle(dir.path(), "example", "");
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname='example'\nversion='1.0.0'\n[dependencies]\nhorizon-mod-api='0.1'\nused='1'\n").unwrap();
+        let mut lock = "version=4\n".to_owned();
+        for name in ["used", "unrelated-allocator"] {
+            lock.push_str(&format!("[[package]]\nname='{name}'\nversion='1.0.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\n", "a".repeat(64)));
+        }
+        std::fs::write(dir.path().join("Cargo.lock"), &lock).unwrap();
+        let bundle = super::super::bundle_in(dir.path()).unwrap().unwrap();
+        let projects = [Project::read(&bundle).unwrap()];
+        let wanted = [Wanted {
+            mod_id: "example".into(),
+            name: "used".into(),
+            version: "1".into(),
+            requirement: semver::VersionReq::parse("1").unwrap(),
+        }];
+        let plan = Plan::read(&lock, &projects, &wanted).unwrap();
+        let fetch = dir.path().join("fetch");
+        plan.mods
+            .fetch_workspace(&plan.fetch_roots, &fetch)
+            .unwrap();
+        let manifest: toml::Table = std::fs::read_to_string(fetch.join("Cargo.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        let deps = manifest["dependencies"].as_table().unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(
+            deps.values().next().unwrap()["package"].as_str(),
+            Some("used")
+        );
+    }
+
     #[test]
     fn missing_malformed_and_bad_checksum_locks_refuse_before_fetch() {
         let dir = tempfile::tempdir().unwrap();
@@ -150,4 +209,15 @@ mod tests {
         }
         assert!(!dir.path().join("target").exists());
     }
+}
+
+/// Only the SDK identity supplies patches; mod manifests cannot inject overrides.
+pub(super) fn apply_patches(directory: &Path, patches: &toml::Table) -> Result<(), String> {
+    let path = directory.join("Cargo.toml");
+    let mut manifest: toml::Table = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())?
+        .parse()
+        .map_err(|e| format!("Cargo.toml: {e}"))?;
+    manifest.insert("patch".into(), patches.clone().into());
+    std::fs::write(path, manifest.to_string()).map_err(|e| e.to_string())
 }

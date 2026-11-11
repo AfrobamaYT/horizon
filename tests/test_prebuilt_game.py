@@ -14,6 +14,26 @@ from pathlib import Path
 from tools import prebuilt_game
 
 
+class RegistryPatchTests(unittest.TestCase):
+    def test_sdk_carries_only_patched_crate_and_resolution_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged, sdk = root / "stage", root / "sdk"
+            patched = staged / "third_party" / "allocator-sys"
+            patched.mkdir(parents=True)
+            sdk.mkdir()
+            (staged / "Cargo.toml").write_text("[workspace]\nmembers=[]\n[patch.crates-io]\nallocator-sys={path='third_party/allocator-sys'}\n")
+            (patched / "Cargo.toml").write_text("[package]\nname='allocator-sys'\nversion='0.1.49'\n")
+            (patched / "src").mkdir()
+            (patched / "src/lib.rs").write_text("pub fn patched() {}")
+            (staged / "game.rs").write_text("must not ship")
+            patches = prebuilt_game.carry_patches(staged, sdk)
+            self.assertEqual(patches["crates-io"]["allocator-sys"]["path"], "patches/allocator-sys")
+            self.assertEqual((sdk / "patches/allocator-sys/src/lib.rs").read_text(), "pub fn patched() {}")
+            self.assertFalse((sdk / "game.rs").exists())
+            self.assertNotIn("workspace", (sdk / "Cargo.toml").read_text())
+
+
 class AllocatorSelectionTests(unittest.TestCase):
     def test_staging_api_version_comes_from_the_package_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
