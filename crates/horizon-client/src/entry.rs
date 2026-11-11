@@ -120,6 +120,15 @@ pub fn start<G>(
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
     let (ids, _loaded_code) = load(&native, &launch);
+    // Only the prebuilt game carries the points' sites: without them a listener would register
+    // and never run.
+    if let (false, Some(slot)) = (mod_points::STAGED, slots.first()) {
+        eprintln!(
+            "Horizon: {}: this build has no point sites; start the game through the launcher's mod build",
+            slot.id()
+        );
+        std::process::exit(game::exit_code::ERROR);
+    }
     for id in ids {
         for slot in slots.iter().filter(|slot| slot.id() == id) {
             if let Err(error) = mod_points::register(slot) {

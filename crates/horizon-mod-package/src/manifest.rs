@@ -1033,7 +1033,7 @@ mod tests {
     #[test]
     fn injections_at_dependency_functions_are_refused_by_name() {
         let text = format!(
-            "{EXAMPLE}[dependencies]\nchemlib='1'\n[[inject]]\nid='listen'\nat='chemlib::transfer'\nkind='head'\nwith='listen'\n"
+            "{EXAMPLE}[native]\ngame='26.3'\nmixins='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nhorizon='0123456789012345678901234567890123456789'\n[dependencies]\nchemlib='1'\n[[inject]]\nid='listen'\nat='chemlib::transfer'\nkind='head'\nwith='listen'\n"
         );
         let error = Manifest::parse(&text).unwrap_err();
         assert!(
