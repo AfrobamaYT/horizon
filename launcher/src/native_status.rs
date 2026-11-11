@@ -119,14 +119,7 @@ pub fn horizon_label(version: &str) -> String {
 /// Enabled wasm packages that need the patchable engine, never native compilation.
 pub fn wasm_points(home: &Path) -> Vec<horizon_mod_package::index::native::Bundle> {
     use std::io::Read;
-    let mut paths: Vec<_> = fs::read_dir(home.join(horizon_mod_package::mod_list::DIR))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .collect();
-    paths.sort();
-    paths
+    wasm_hmods(home)
         .into_iter()
         .filter_map(|path| {
             let file = fs::File::open(&path).ok()?;
@@ -316,14 +309,7 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
     for path in hmods(home)
         .into_iter()
-        .chain(
-            fs::read_dir(home.join(horizon_mod_package::mod_list::DIR))
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e == "hmod")),
-        )
+        .chain(wasm_hmods(home))
         .flat_map(|p| [p.clone(), p.with_extension("origin.json")])
         .chain([home.join("mod-browser.json")])
     {
@@ -332,6 +318,18 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
         out += &format!("\n{} {:?} {time:?}", path.display(), meta.map(|m| m.len()));
     }
     out
+}
+
+fn wasm_hmods(home: &Path) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = fs::read_dir(home.join(horizon_mod_package::mod_list::DIR))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "hmod"))
+        .collect();
+    paths.sort();
+    paths
 }
 
 fn hmods(home: &Path) -> Vec<std::path::PathBuf> {
@@ -433,7 +431,7 @@ mod tests {
             } else {
                 ""
             };
-            let manifest = format!("id='wasm_test'\nname='Wasm test'\nversion='1.0.0'\napi='0.2'\ncapabilities=[]\n{rows}[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n", horizon_mod_package::manifest::sha512_of(&module));
+            let manifest = format!("id='wasm_test'\nname='Wasm test'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n{rows}[wasm]\nsha512='{}'\ntoolchain='1.99.1'\nbuilt_with='selection fixture'\n", horizon_mod_package::manifest::sha512_of(&module));
             let bytes =
                 horizon_mod_package::Package::write_files(&manifest, &[("mod.wasm", &module)])
                     .unwrap();

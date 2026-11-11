@@ -1572,6 +1572,8 @@ fn pipeline(
         .iter()
         .map(|b| (b.manifest.id.clone(), source_digest(b)))
         .collect();
+    // The cache identifies every requested input, including a mod left out after a failure:
+    // replacing its files must retry it rather than reuse a build that excluded the old copy.
     let requested: Vec<Bundle> = found
         .into_iter()
         .map(|b| Bundle {
@@ -1588,9 +1590,6 @@ fn pipeline(
         .iter()
         .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
         .collect();
-    // The cache identifies every requested input, including a mod left out after a failure:
-    // replacing its files must retry it rather than reuse a build that excluded the old copy.
-
     let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
         .iter()
         .zip(&declared)
