@@ -55,10 +55,6 @@ pub struct GeneralTypeEnvelope {
     pub payload_bytes: Vec<u8>,
 }
 
-#[allow(
-    dead_code,
-    reason = "stage 3's load path and the row's construction are the first non-test users"
-)]
 /// Why a general entity record was refused before any of it could reach a
 /// row. Each fault names the record's uuid in its diagnostic string.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,10 +83,6 @@ pub enum GeneralRecordError {
     InvalidEnvelope { field: &'static str },
 }
 
-#[allow(
-    dead_code,
-    reason = "stage 3's load path and the row's construction are the first non-test users"
-)]
 impl GeneralRecordError {
     /// The refusal's diagnostic, for the load summary.
     pub fn message(&self) -> String {
@@ -123,10 +115,6 @@ impl GeneralRecordError {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "stage 3's load path and the row's construction are the first non-test users"
-)]
 /// The outcome of checking a record against every bound: ready to become a
 /// row, or structurally sound but of a type this load cannot resolve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,10 +141,6 @@ pub enum GeneralRecordCheck {
 /// written, allocated beyond the walk's own bookkeeping, or panicked on; a
 /// refused tree leaves no partial state, and the next valid record checks
 /// cleanly.
-#[allow(
-    dead_code,
-    reason = "stage 3's load path and the row's construction are the first non-test users"
-)]
 pub fn check_general_record(
     record: &GeneralEntityRecord,
     is_known_type: impl Fn(&str) -> bool,
@@ -165,10 +149,6 @@ pub fn check_general_record(
     check_record(record, &mut Vec::new(), &mut seen, 1, &is_known_type)
 }
 
-#[allow(
-    dead_code,
-    reason = "stage 3's load path and the row's construction are the first non-test users"
-)]
 fn check_record(
     record: &GeneralEntityRecord,
     ancestors: &mut Vec<[i32; 4]>,
@@ -266,7 +246,6 @@ impl GeneralEntityRecord {
     /// names, the type envelope (`id`, `PayloadVersion`, `Payload`), and the
     /// passenger tree inside `Passengers`, exactly what save writes and load
     /// reads. Runtime slots, network ids and pointers never appear.
-    #[allow(dead_code, reason = "stage 3's save path is the first non-test caller")]
     pub fn to_tag(&self) -> Tag {
         let mut map = horizon_core::nbt::Compound::new();
         map.insert(
@@ -308,7 +287,6 @@ impl GeneralEntityRecord {
 /// wrappers excluded: each riding record is a compound of the same shape as
 /// its root, so its depth is checked where it is read, and the passenger
 /// chain has its own bound ([`limits::MAX_PASSENGER_DEPTH`]).
-#[allow(dead_code, reason = "stage 3's load path is the first non-test caller")]
 fn data_nesting(tag: &Tag, passengers_key: &horizon_core::nbt::JavaString) -> u32 {
     match tag {
         Tag::Compound(map) => {
@@ -334,10 +312,6 @@ fn data_nesting(tag: &Tag, passengers_key: &horizon_core::nbt::JavaString) -> u3
 /// The encoded NBT size of a tag, as its writer emits it (name payloads
 /// included, strings counted as their UTF-8 bytes): the measure the
 /// quarantine record bound applies.
-#[allow(
-    dead_code,
-    reason = "stage 3's quarantine gate is the first non-test caller"
-)]
 pub(super) fn nbt_size(tag: &Tag) -> u64 {
     let payload = match tag {
         Tag::End => 1,
@@ -460,14 +434,10 @@ fn record_from_compound(tag: &Tag) -> Result<GeneralEntityRecord, GeneralRecordE
     })
 }
 
-/// A saved general entity tag as a record: every compound of the tree reads
-/// under the format's checks, so a refusal names the first fault and leaves
-/// nothing read behind (the caller discards the whole tree).
-#[allow(dead_code, reason = "stage 3's load path is the first non-test caller")]
-pub(super) fn record_from_tag(tag: &Tag) -> Result<GeneralEntityRecord, GeneralRecordError> {
-    record_from_compound(tag)
-}
-
+/// A saved general entity compound as a record: it and every compound of
+/// its riding tree read under the format's checks, so a refusal names the
+/// first fault and leaves nothing read behind (the caller discards the
+/// whole tree).
 /// The frozen type registry: every declared general entity type, resolved
 /// once into dense slots. The registry is data — built from the installed
 /// declarations and never hand-kept — and freezes with them: duplicates
@@ -831,7 +801,7 @@ impl Game<'_> {
         tag: Tag,
         transferred: Option<TransferredEntityState>,
     ) -> Result<(), Tag> {
-        let record = match record_from_tag(&tag) {
+        let record = match record_from_compound(&tag) {
             Ok(record) => record,
             Err(error) => {
                 log::warn!(
@@ -1324,7 +1294,7 @@ mod tests {
         rider.envelope.payload_bytes = vec![1];
         root.passengers.push(rider);
         let tag = root.to_tag();
-        assert_eq!(record_from_tag(&tag), Ok(root));
+        assert_eq!(record_from_compound(&tag), Ok(root));
     }
 
     /// The writer names the fields the format fixes: the common fields under
@@ -1379,12 +1349,12 @@ mod tests {
         // The root compound is the first level: an `Extra` field nested to
         // the bound makes the record's data one level past it.
         assert_eq!(
-            record_from_tag(&deeply(limits::MAX_NESTING)),
+            record_from_compound(&deeply(limits::MAX_NESTING)),
             Err(GeneralRecordError::NestingTooDeep {
                 depth: limits::MAX_NESTING + 1
             })
         );
-        assert!(record_from_tag(&deeply(limits::MAX_NESTING - 1)).is_ok());
+        assert!(record_from_compound(&deeply(limits::MAX_NESTING - 1)).is_ok());
         // The deepest legal passenger chain (16 riders) is not data nesting.
         let mut root = record([1, 2, 3, 4], "mymod:robot");
         let mut node = &mut root;
@@ -1393,7 +1363,13 @@ mod tests {
                 .push(record([index as i32 + 5, 0, 0, 0], "mymod:drone"));
             node = node.passengers.last_mut().unwrap();
         }
-        assert_eq!(record_from_tag(&root.to_tag()).unwrap().passengers.len(), 1);
+        assert_eq!(
+            record_from_compound(&root.to_tag())
+                .unwrap()
+                .passengers
+                .len(),
+            1
+        );
     }
 
     /// A field of the wrong shape refuses the whole record as a malformed
@@ -1464,7 +1440,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                record_from_tag(&malformed(field, value)),
+                record_from_compound(&malformed(field, value)),
                 Err(expected),
                 "{field}"
             );
