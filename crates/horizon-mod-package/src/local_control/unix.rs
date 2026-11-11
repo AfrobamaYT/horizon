@@ -241,6 +241,7 @@ fn runtime_addresses_validate_candidates_and_exchange() {
     let second = Marker::runtime_at(Some(&safe)).unwrap();
     assert_ne!(first.directory, second.directory);
     assert_eq!(first.directory.parent(), Some(safe.as_path()));
+    let second_endpoint = Endpoint::bind(&second).unwrap();
     let mut endpoint = Endpoint::bind(&first).unwrap();
     let deadline = Instant::now() + std::time::Duration::from_secs(3);
     let client = connect(&first, deadline).unwrap();
@@ -255,6 +256,10 @@ fn runtime_addresses_validate_candidates_and_exchange() {
     std::fs::create_dir(&long).unwrap();
     std::fs::set_permissions(&long, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(socket2::SockAddr::unix(long.join("control")).is_err());
+    let old_marker = Marker::new(long.join("holder-control-123-456")).unwrap();
+    assert!(Endpoint::bind(&old_marker).is_err());
+    assert!(!old_marker.directory.exists());
+    drop(second_endpoint);
     std::fs::set_permissions(&safe, std::fs::Permissions::from_mode(0o777)).unwrap();
     for candidate in [
         Some(safe.as_path()),
