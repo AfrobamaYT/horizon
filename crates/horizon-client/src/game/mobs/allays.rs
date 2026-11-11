@@ -402,4 +402,3 @@ impl Game<'_> {
         false
     }
 }
-
