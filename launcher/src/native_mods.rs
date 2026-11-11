@@ -17,8 +17,8 @@ use horizon_mod_package::dependencies;
 
 mod api;
 mod inject;
-mod slots;
 mod planning;
+mod slots;
 pub use planning::routes;
 mod crates;
 mod diagnostics;
