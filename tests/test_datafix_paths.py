@@ -76,6 +76,34 @@ class DatafixPaths(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'HORIZON_DATAFIX_ROOT.*not writable'):
                 datafix_paths.writable_root()
 
+    def test_protected_ancestor_root_refused(self):
+        os.environ['HORIZON_DATAFIX_ROOT'] = str(self.base)
+        (self.base / 'servers').symlink_to(self.shared / 'servers')
+        with self.assertRaisesRegex(ValueError, 'HORIZON_DATAFIX_ROOT'):
+            datafix_paths.writable_root()
+        self.assertEqual(list(self.shared.iterdir()), [])
+
+    def test_subprocess_receives_canonical_root(self):
+        os.environ['HORIZON_DATAFIX_ROOT'] = 'private-datafix'
+        step = pr_ready.Step('Parity', 'true')
+        step.datafix_selected = True
+        with mock.patch.object(datafix_paths.os, 'getcwd', return_value=str(self.checkout)), mock.patch.object(pr_ready.subprocess, 'Popen', side_effect=RuntimeError('intercepted')) as runner:
+            with self.assertRaisesRegex(RuntimeError, 'intercepted'):
+                pr_ready.run_script([step], 'local', False)
+        self.assertEqual(runner.call_args.kwargs['env']['HORIZON_DATAFIX_ROOT'], str(self.checkout / 'private-datafix'))
+        self.assertEqual(os.environ['HORIZON_DATAFIX_ROOT'], 'private-datafix')
+
+    def test_unknown_dependencies_still_preflight_opt_in(self):
+        args = argparse.Namespace(host='local', quick=False, datafix=True)
+        with mock.patch.object(pr_ready, 'affected_here', return_value=None):
+            step = next(s for s in pr_ready.plan(args, 'origin/main', set(), {}, set(), {}) if s.name == 'Parity')
+        self.assertTrue(step.datafix_selected)
+        os.environ['HORIZON_DATAFIX_ROOT'] = str(self.shared)
+        with mock.patch.object(pr_ready.subprocess, 'Popen') as runner:
+            with self.assertRaisesRegex(ValueError, 'HORIZON_DATAFIX_ROOT'):
+                pr_ready.run_script([step], 'local', False)
+            runner.assert_not_called()
+
     def test_relative_override(self):
         os.environ['HORIZON_DATAFIX_ROOT'] = 'private-datafix'
         self.assertEqual(datafix_paths.writable_root(), Path('private-datafix').resolve())

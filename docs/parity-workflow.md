@@ -7,12 +7,14 @@ How parity work is run, checked and merged. What is ported and where it is check
 Datafix generation owns a private writable root, defaulting to checkout `.local/datafix`.
 `HORIZON_DATAFIX_ROOT` overrides it (relative values resolve from the invoking working directory).
 Minecraft input symlinks never select this output root. The tool refuses shared vanilla
-roots, escaping default symlinks, escaping descendant symlinks, file roots and unwritable
+roots and their ancestors, escaping default symlinks, escaping descendant symlinks, file roots and unwritable
 ancestors before downloads, world generation or `generate.lock` creation. Choose a new private
 directory on refusal; never change permissions on shared fixtures to bypass the guard.
 
 Author `pr_ready` excludes datafix by default and prints one opt-in reminder. To explicitly
-allow it among the affected harnesses, use a private directory:
+allow it among the affected harnesses, use a private directory. Local opt-in preflights the
+root conservatively even when affected dependencies are unknown, and passes its validated
+absolute path into subprocesses so a working-directory change cannot reinterpret it:
 
 ```sh
 HORIZON_DATAFIX_ROOT="$PWD/.local/datafix-private" python3 tools/pr_ready.py --datafix

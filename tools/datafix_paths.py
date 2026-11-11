@@ -13,7 +13,7 @@ def writable_root():
     root = Path(configured).expanduser().resolve() if configured else (ROOT / '.local' / 'datafix').resolve()
     forbidden = READ_ONLY.resolve()
     problem = None
-    if root.is_relative_to(forbidden) or (not configured and not root.is_relative_to(ROOT.resolve())):
+    if root.is_relative_to(forbidden) or forbidden.is_relative_to(root) or (not configured and not root.is_relative_to(ROOT.resolve())):
         problem = 'shared fixture inputs are read-only or the default escapes the checkout'
     elif root.exists() and not root.is_dir():
         problem = 'root is not a directory'
