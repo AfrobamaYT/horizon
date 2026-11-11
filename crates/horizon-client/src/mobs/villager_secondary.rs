@@ -10,7 +10,7 @@ pub(super) fn sense_secondary(m: &mut Mob, w: &MobWorld) {
     // Tags are resolved with the world's item generation. Borrow its membership
     // set once; the scan performs only constant-time block membership checks.
     let additions = index
-        .and_then(|index| TAGS.get(usize::from(index)))
+        .and_then(|index| TAGS.get(index))
         .and_then(|tag| w.block_tags.get(*tag));
     if !farmer
         && additions.is_none_or(|set| set.is_empty())

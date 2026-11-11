@@ -84,14 +84,14 @@ impl PoiSnapshot {
         };
         let identity = PoiIdentity::Custom(index);
         for state in states {
-            if let Some(old) = self.classify(&state) {
-                if old != identity {
-                    return Err(format!(
-                        "{} already belongs to {}",
-                        state.name,
-                        self.name(old).unwrap_or("unknown POI")
-                    ));
-                }
+            if let Some(old) = self.classify(&state)
+                && old != identity
+            {
+                return Err(format!(
+                    "{} already belongs to {}",
+                    state.name,
+                    self.name(old).unwrap_or("unknown POI")
+                ));
             }
             self.states.insert(state, identity);
         }

@@ -2,17 +2,21 @@
 use crate::Identifier;
 
 /// A profession's persistent resource identity.
+// exhaustive: a key newtype mods construct directly.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub struct ProfessionKey(pub Identifier);
 /// A point-of-interest resource identity.
+// exhaustive: a key newtype mods construct directly.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub struct PoiKey(pub Identifier);
 /// A trade-set resource identity, independent of the profession's name.
+// exhaustive: a key newtype mods construct directly.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub struct TradeSetKey(pub Identifier);
 
 /// Declarative profession metadata, collected once for the owning mod load.
 /// References resolve together before any candidate table becomes active.
+// exhaustive: a mod declares its profession as a struct literal.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub struct ProfessionDefinition {
     /// Persistent qualified identity; the minecraft namespace is reserved.
@@ -35,6 +39,7 @@ pub struct ProfessionDefinition {
 
 /// A candidate registry refusal. A refusal publishes no candidate entries.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
 pub enum ProfessionRegistrationError {
     /// A workstation selector is invalid or conflicts with another POI.
     InvalidWorkstation {
@@ -104,12 +109,14 @@ pub trait VillagerProfessions {
 
 // no wire: engine-owned registrar backend, borrowed only during registration.
 /// Engine storage for declarations and their dispatch owners.
+// exhaustive: its fields are private; only the engine constructs it.
 #[derive(Default)]
 pub struct ProfessionDeclarations {
     entries: Vec<(String, ProfessionDefinition)>,
 }
 impl ProfessionDeclarations {
     /// Consume the collected declarations, retaining the engine-recorded owner.
+    // hidden: only the game consumes the collected declarations.
     #[doc(hidden)]
     pub fn into_entries(self) -> Vec<(String, ProfessionDefinition)> {
         self.entries
@@ -124,6 +131,7 @@ impl VillagerProfessions for ProfessionDeclarations {
 }
 
 /// A custom workstation selector; unspecified block properties match every value.
+// exhaustive: a mod declares its workstation as a struct literal.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub struct ProfessionWorkstation {
     /// Custom POI identity, outside the minecraft namespace.

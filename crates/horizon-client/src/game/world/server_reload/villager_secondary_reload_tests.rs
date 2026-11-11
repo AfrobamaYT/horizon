@@ -97,7 +97,7 @@ fn fixture(run: impl FnOnce(&mut crate::game::Game<'_>, &Arc<AtomicBool>, &mut M
                 mobs::villager::set_profession(
                     &mut mob,
                     horizon_client::mobs::villager::profession_table(),
-                    usize::from(5 as u8),
+                    5,
                 );
                 // Keep the full brain from resetting an untraded farmer with no primary POI.
                 mob.extra.villager_level = 2;

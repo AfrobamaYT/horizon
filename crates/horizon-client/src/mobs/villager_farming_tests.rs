@@ -61,7 +61,7 @@ fn farmer(types: &super::super::MobTypes) -> Mob {
     super::super::villager::set_profession(
         &mut m,
         horizon_client::mobs::villager::profession_table(),
-        usize::from(5 as u8),
+        5,
     );
     m
 }

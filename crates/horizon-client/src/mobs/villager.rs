@@ -388,6 +388,21 @@ pub fn xp(m: &Mob) -> i32 {
 /// `Villager.setVillagerData(withProfession)`: a new profession forgets the
 /// offers (`offers = null`), so the next `getOffers` rolls the new
 /// profession's trades.
+/// An index outside the owning load is refused.
+pub fn set_profession(m: &mut Mob, table: &ResolvedProfessions, index: usize) -> bool {
+    let Some(state) = table.state(index) else {
+        return false;
+    };
+    if m.extra.profession != state {
+        m.extra.profession = state;
+        if let Some(trade) = m.extra.trade.as_mut() {
+            trade.offers.clear();
+            trade.unset = true;
+        }
+    }
+    true
+}
+
 /// `VillagerProfession.workSound`.
 pub fn work_sound(index: u8) -> Option<&'static str> {
     Some(match profession(index).id.as_str() {
@@ -1452,15 +1467,15 @@ mod tests {
     #[test]
     fn a_new_profession_rolls_new_offers() {
         let mut m = villager();
-        set_profession(&mut m, profession_table(), usize::from(1 as u8));
+        set_profession(&mut m, profession_table(), 1);
         // Offers made for the first profession.
         m.extra.trade.get_or_insert_default().unset = false;
         // The same profession keeps them.
-        set_profession(&mut m, profession_table(), usize::from(1 as u8));
+        set_profession(&mut m, profession_table(), 1);
         assert!(!m.extra.trade.as_ref().unwrap().unset);
         // A new one forgets them (offers = null), so the next getOffers
         // (ensure_offers) rolls the new profession's trades.
-        set_profession(&mut m, profession_table(), usize::from(2 as u8));
+        set_profession(&mut m, profession_table(), 2);
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
@@ -1480,7 +1495,7 @@ mod tests {
     fn a_villager_that_loses_its_job_site_offers_its_new_profession_trades() {
         let mut m = villager();
         // The composter's job: the villager is a farmer.
-        set_profession(&mut m, profession_table(), usize::from(5 as u8));
+        set_profession(&mut m, profession_table(), 5);
         assert_eq!(m.extra.profession.index().unwrap_or(0), 5);
         // Its trades were made, so the offers are there.
         let trade = m.extra.trade.get_or_insert_default();
@@ -1501,13 +1516,13 @@ mod tests {
         }];
         // The work bench is destroyed: the job site is gone, so the villager
         // is unemployed and its offers are dropped (`offers = null`).
-        set_profession(&mut m, profession_table(), usize::from(NONE as u8));
+        set_profession(&mut m, profession_table(), usize::from(NONE));
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
         // It takes the smithing table's job. The new profession's trades are
         // rolled by the next `getOffers` (ensure_offers).
-        set_profession(&mut m, profession_table(), usize::from(13 as u8));
+        set_profession(&mut m, profession_table(), 13);
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
@@ -1627,19 +1642,4 @@ mod tests {
         assert_eq!(food_points("minecraft:beetroot"), 1);
         assert_eq!(food_points("minecraft:apple"), 0);
     }
-}
-
-/// Change profession through the current load; a missing identity is refused.
-pub fn set_profession(m: &mut Mob, table: &ResolvedProfessions, index: usize) -> bool {
-    let Some(state) = table.state(index) else {
-        return false;
-    };
-    if m.extra.profession != state {
-        m.extra.profession = state;
-        if let Some(trade) = m.extra.trade.as_mut() {
-            trade.offers.clear();
-            trade.unset = true;
-        }
-    }
-    true
 }

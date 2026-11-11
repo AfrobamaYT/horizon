@@ -187,10 +187,10 @@ impl ResolvedProfessions {
                     errors.push(E::UnknownBlock { key: key.clone() });
                 }
             }
-            if let Some(key) = &definition.work_sound {
-                if !exists("sound", key) {
-                    errors.push(E::UnknownSound { key: key.clone() });
-                }
+            if let Some(key) = &definition.work_sound
+                && !exists("sound", key)
+            {
+                errors.push(E::UnknownSound { key: key.clone() });
             }
         }
         for (key, mut owners) in owners {
@@ -382,14 +382,14 @@ impl ResolvedProfessions {
         }
     }
     pub fn accepts(&self, index: usize, poi: horizon_world::poi::PoiIdentity, held: bool) -> bool {
-        if let horizon_world::poi::PoiIdentity::Vanilla(p) = poi {
-            if index < 15 {
-                return if held {
-                    self.held(index as u8, p)
-                } else {
-                    self.acquirable(index as u8, p)
-                };
-            }
+        if let horizon_world::poi::PoiIdentity::Vanilla(p) = poi
+            && index < 15
+        {
+            return if held {
+                self.held(index as u8, p)
+            } else {
+                self.acquirable(index as u8, p)
+            };
         }
         if index == 0 && !held {
             return poi.is_job();

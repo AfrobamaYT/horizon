@@ -37,10 +37,10 @@ impl super::ResolvedProfessions {
         }
         match &mob.extra.profession {
             ProfessionState::Unresolved(name) => {
-                if let Some(index) = self.resolve(name) {
-                    if let Some(state) = self.state(index) {
-                        mob.extra.profession = state;
-                    }
+                if let Some(index) = self.resolve(name)
+                    && let Some(state) = self.state(index)
+                {
+                    mob.extra.profession = state;
                 }
             }
             ProfessionState::Registered(name) if self.resolve(name).is_none() => {

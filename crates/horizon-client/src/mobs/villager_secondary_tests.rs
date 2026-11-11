@@ -40,7 +40,7 @@ fn fixture(
             super::super::super::villager::set_profession(
                 &mut m,
                 horizon_client::mobs::villager::profession_table(),
-                usize::from(profession as u8),
+                usize::from(profession),
             );
             let tags = if entries.is_empty() {
                 HashMap::new()
