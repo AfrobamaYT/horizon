@@ -112,6 +112,9 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     grep -F 'fnr: loop throttle skips #1:' "$scratch/server.log"
     grep -F 'fnr: loop HEAD tick_block_entities' "$scratch/server.log"
     grep -F 'Published loops: 1 filled by 2 mod slots' "$log"
+    # The slot ran the loop again from inside it: the nested run was the game's own, logged once.
+    grep -F 'fnr: loop count ran the loop again inside it: true' "$scratch/server.log"
+    test "$(grep -cF 'Published loop block_entities.tick: it was entered again while it ran' "$scratch/server.log")" = 1
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" loop_panic "* ]]; then
     # The slot's panic is the server's crash, and its report names the mod and the loop.
