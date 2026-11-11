@@ -15483,7 +15483,7 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            world_primitives: world_geometry.batch(),
+            world_primitives: world_geometry.batch_with(&self.pack.render.mod_pipelines),
             shadow_only: &shadow_only,
             celestial: if self.settings.horizon.sky || title {
                 &celestial

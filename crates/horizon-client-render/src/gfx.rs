@@ -380,6 +380,7 @@ mod custom_sky;
 mod displace;
 pub mod lightning;
 mod lod;
+pub mod mod_pipelines;
 mod native_material;
 mod native_pack;
 mod native_post;
