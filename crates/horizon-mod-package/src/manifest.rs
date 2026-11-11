@@ -4,6 +4,7 @@
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 pub mod inject;
 mod jar;
+pub mod mixin;
 mod wasm;
 pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
@@ -83,9 +84,12 @@ pub struct Manifest {
     /// Game internals used by this mod, fingerprinted against its pinned build.
     #[serde(default)]
     pub internals: Vec<Internal>,
-    /// Unified listeners; routing and staging are separate from manifest parsing.
-    #[serde(default)]
+    /// Listeners at compiled slots; they never compile game code.
+    #[serde(default, deserialize_with = "inject::rows")]
     pub inject: Vec<inject::Inject>,
+    /// Source-level edits of game functions, native only: the one form that compiles game code.
+    #[serde(default)]
+    pub mixin: Vec<mixin::Mixin>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -111,6 +115,12 @@ pub struct Native {
     pub mixins: String,
     #[serde(default)]
     pub module: Vec<Module>,
+    /// Accessor and invoker bridges, forwarded as horizon-mixins' `[[bridge]]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bridge: Vec<mixin::Forwarded>,
+    /// State fields added to game types, forwarded as horizon-mixins' `[[state]]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state: Vec<mixin::Forwarded>,
 }
 
 /// One declared game internal, as listed in the pinned game's `internals.json`.
@@ -238,16 +248,6 @@ impl Manifest {
 
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        if m.wasm.is_some()
-            && let Some(field) = m.inject.iter().find(|i| i.kind == inject::Kind::Field)
-        {
-            return Err(inject::InjectError::NoSlot {
-                id: format!("{}:{}", m.id, field.id),
-                reason: inject::NoSlotReason::FieldRequiresSource,
-                declaration: format!("slots/{}.txt: type {}", m.id, field.at),
-            }
-            .to_string());
-        }
         Internal::check_all(&m.internals)?;
         if m.wasm.is_some()
             && m.internals.is_empty()
@@ -287,9 +287,24 @@ impl Manifest {
         }
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        mixin::Mixin::check_all(&m.mixin, &m.id, m.native.is_some())
+            .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
+            // horizon-mixins keeps one id space per mod, which injects share.
             let mut ids: std::collections::HashSet<_> =
                 m.inject.iter().map(|entry| &entry.id).collect();
+            for id in m
+                .mixin
+                .iter()
+                .map(|entry| &entry.id)
+                .chain(native.bridge.iter().chain(&native.state).map(|row| &row.id))
+            {
+                if id.is_empty() || !ids.insert(id) {
+                    return Err(format!(
+                        "{MANIFEST}: empty or duplicate mixin, bridge or state id"
+                    ));
+                }
+            }
             for module in &native.module {
                 if module.id.is_empty() || !ids.insert(&module.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate module id"));
