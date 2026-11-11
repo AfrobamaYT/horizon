@@ -781,7 +781,11 @@ impl WasmMod {
             && !self.running.poisoned.swap(true, Ordering::Relaxed);
         if let Err(CallError::Refused(error)) = &result {
             let reason = format!("{} hook {id}: {error:#}", self.id);
-            if store.data_mut().refusals.insert(format!("{} hook {id}", self.id)) {
+            if store
+                .data_mut()
+                .refusals
+                .insert(format!("{} hook {id}", self.id))
+            {
                 log::warn!("wasm refusal: {reason}");
             }
         }
