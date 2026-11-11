@@ -680,6 +680,7 @@ impl Pass {
                     } else {
                         Visibility::Inherited
                     };
+                    // `$vis struct` is unsupported: inserting `pub` here would produce `$vis pub struct`.
                     source.public(&visibility, keyword.span(), "macro type");
                 }
             }
@@ -714,6 +715,7 @@ impl Pass {
                 if test_only(&item.attrs) {
                     return;
                 }
+                // `unsafe trait` is unsupported: keyword insertion would produce `unsafe pub trait`, not `pub unsafe trait`.
                 self.0.public(&item.vis, item.trait_token.span(), "trait");
             }
             fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
