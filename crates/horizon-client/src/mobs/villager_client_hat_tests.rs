@@ -11,8 +11,23 @@ fn engineer_hat_full_and_none_control_type_head() {
         let model = crate::mobs::load_model(&root, &format!("minecraft:{species}#main")).unwrap();
         let no_hat =
             crate::mobs::load_model(&root, &format!("minecraft:{species}_no_hat#main")).unwrap();
-        for (hat, hidden) in [("full", true), ("none", false)] {
+        for (hat, type_hat, hidden) in [
+            ("full", "none", true),
+            ("none", "none", false),
+            ("partial", "full", true),
+            ("partial", "none", false),
+        ] {
             let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+                (
+                    format!("assets/minecraft/textures/{folder}/type/plains.png"),
+                    Resource::bytes(vec![]),
+                ),
+                (
+                    format!("assets/minecraft/textures/{folder}/type/plains.png.mcmeta"),
+                    Resource::bytes(
+                        format!(r#"{{"villager":{{"hat":"{type_hat}"}}}}"#).into_bytes(),
+                    ),
+                ),
                 (
                     format!("assets/test/textures/{folder}/profession/engineer.png"),
                     Resource::bytes(vec![]),

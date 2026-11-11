@@ -13,7 +13,7 @@ The texture's `.png.mcmeta` supplies its hat policy:
 {"villager":{"hat":"full"}}
 ```
 
-`none` keeps the type layer's head visible, `full` hides it, and `partly`
+`none` keeps the type layer's head visible, `full` hides it, and `partial`
 hides it only when the type texture has a full hat. Missing metadata means
 `none`. Pack reload refreshes the cached metadata. Unresolved saved professions
 retain their names and render the neutral base without a profession layer.

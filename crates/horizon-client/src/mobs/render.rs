@@ -185,35 +185,9 @@ fn baby_or<'a>(
         adult.into()
     }
 }
-/// A name built from parts (`entity/villager/profession/farmer`), kept for the
-/// process so that drawing a mob allocates no names each frame: they come from
-/// a few tables (types, professions, levels, materials, variants). Past 4096
-/// names on a thread (an unknown item's material from a server) a new one comes
-/// back owned.
-fn interned(args: std::fmt::Arguments) -> Cow<'static, str> {
-    use std::fmt::Write;
-    thread_local! {
-        static NAMES: std::cell::RefCell<(String, crate::fast_hash::FxHashSet<&'static str>)> =
-            std::cell::RefCell::default();
-    }
-    NAMES.with(|names| {
-        let (buffer, set) = &mut *names.borrow_mut();
-        buffer.clear();
-        let _ = buffer.write_fmt(args);
-        if let Some(name) = set.get(buffer.as_str()) {
-            return Cow::Borrowed(*name);
-        }
-        if set.len() >= 4096 {
-            return Cow::Owned(buffer.clone());
-        }
-        let name: &'static str = Box::leak(buffer.as_str().into());
-        set.insert(name);
-        Cow::Borrowed(name)
-    })
-}
 #[path = "villager_client.rs"]
-mod villager_client;
-use villager_client::{profession_name, profession_texture};
+pub mod villager_client;
+use villager_client::interned;
 
 fn climate(m: &Mob) -> &'static str {
     match m.extra.variant {
@@ -943,16 +917,15 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 white,
                 false,
             );
-            let prof = profession_name(&m.extra.profession);
-            if !m.is_baby() && prof != "none" {
-                push(
-                    &mut v,
-                    model.clone(),
-                    profession_texture(folder, prof),
-                    white,
-                    false,
-                );
-                if prof != "nitwit" {
+            let nitwit = m.extra.profession.index() == Some(11);
+            if !m.is_baby()
+                && let Some(texture) = villager_client::texture(
+                    &m.extra.profession,
+                    folder == "entity/zombie_villager",
+                )
+            {
+                push(&mut v, model.clone(), texture, white, false);
+                if !nitwit {
                     // `LEVEL_LOCATIONS` clamps the level to 1..=5.
                     let level = ["stone", "iron", "gold", "emerald", "diamond"]
                         [(m.extra.villager_level.max(1) as usize - 1).min(4)];
@@ -2266,16 +2239,17 @@ fn render_visible(
             }
         }
         if matches!(m.species(), Species::Villager | Species::ZombieVillager)
-            && let Some((folder, variant)) = layer
+            && let Some((folder, _variant)) = layer
                 .texture
                 .split_once("/type/")
                 .or_else(|| layer.texture.split_once("/baby/"))
         {
-            let profession = profession_name(&m.extra.profession);
-            data.villager_hats
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .apply(folder, variant, profession, &mut layer_poses);
+            villager_client::apply(
+                &m.extra.profession,
+                folder == "entity/zombie_villager",
+                m.extra.variant,
+                &mut layer_poses,
+            );
         }
         let light = if layer.full_bright {
             FULL_BRIGHT
@@ -2787,11 +2761,14 @@ mod tests {
     #[test]
     fn profession_texture_preserves_nested_namespaces() {
         assert_eq!(
-            profession_texture("entity/villager", "minecraft:farmer"),
+            villager_client::profession_texture("entity/villager", "minecraft:farmer"),
             "entity/villager/profession/farmer"
         );
         assert_eq!(
-            profession_texture("entity/zombie_villager", "example:nested/engineer"),
+            villager_client::profession_texture(
+                "entity/zombie_villager",
+                "example:nested/engineer"
+            ),
             "example:entity/zombie_villager/profession/nested/engineer"
         );
     }

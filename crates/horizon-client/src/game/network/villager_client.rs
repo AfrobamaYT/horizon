@@ -141,8 +141,17 @@ impl super::Game<'_> {
         });
         // The client consumes only identity slots. World-dependent POI/trade references
         // are validated by the authoritative server's complete world preparation.
-        ResolvedProfessions::prepare(declarations.clone(), |_, _| true)
-            .map(Arc::new)
-            .map_err(|errors| format!("client villager professions refused: {errors:?}").into())
+        let table = ResolvedProfessions::prepare(declarations.clone(), |_, _| true)
+            .map_err(|errors| format!("client villager professions refused: {errors:?}"))?;
+        horizon_client::mobs::render::villager_client::install(
+            &table,
+            &self
+                .res
+                .mob_data()
+                .villager_hats
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        Ok(Arc::new(table))
     }
 }
