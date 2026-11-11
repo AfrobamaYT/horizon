@@ -124,5 +124,5 @@ the hand and HUD, and `hand_drawn` runs after the hand, on the render thread.
 | Removed path or registration | Current route |
 | --- | --- |
 | `mod_api::render` raw GPU types | `mod_render::render` (native escape hatch) |
-| `RenderHooks` / `Hooks::render` | `[[inject]]` internals listeners on the three listed frame functions |
+| `RenderHooks` / `Hooks::render` | native function-replacement mixins for frame functions |
 | API draw contexts | Unchanged; use these for API-typed drawing |
