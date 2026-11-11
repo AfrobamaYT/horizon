@@ -39,7 +39,7 @@ impl VillagerHats {
                 .as_ref()
                 .and_then(|v| v["villager"]["hat"].as_str())
             {
-                Some("partial") => Hat::Partial,
+                Some("partly") => Hat::Partial,
                 Some("full") => Hat::Full,
                 _ => Hat::None,
             };
@@ -89,7 +89,7 @@ mod tests {
             ),
             (
                 "assets/example/textures/entity/villager/type/nested/plains.png.mcmeta".into(),
-                Resource::bytes(br#"{"villager":{"hat":"partial"}}"#.to_vec()),
+                Resource::bytes(br#"{"villager":{"hat":"partly"}}"#.to_vec()),
             ),
         ]));
         let hats = VillagerHats::load(&source);
@@ -198,3 +198,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "villager_client_hat_tests.rs"]
+mod profession_tests;

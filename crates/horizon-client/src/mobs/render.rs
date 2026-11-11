@@ -211,15 +211,9 @@ fn interned(args: std::fmt::Arguments) -> Cow<'static, str> {
         Cow::Borrowed(name)
     })
 }
-/// Resolve the namespace of a profession to the shared atlas's sprite name.
-fn profession_texture(folder: &str, id: &str) -> Cow<'static, str> {
-    let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-    if namespace == "minecraft" {
-        interned(format_args!("{folder}/profession/{path}"))
-    } else {
-        interned(format_args!("{namespace}:{folder}/profession/{path}"))
-    }
-}
+#[path = "villager_client.rs"]
+mod villager_client;
+use villager_client::{profession_name, profession_texture};
 
 fn climate(m: &Mob) -> &'static str {
     match m.extra.variant {
@@ -949,7 +943,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 white,
                 false,
             );
-            let prof = super::villager::profession_id(m.extra.profession.index().unwrap_or(0));
+            let prof = profession_name(&m.extra.profession);
             if !m.is_baby() && prof != "none" {
                 push(
                     &mut v,
@@ -2277,8 +2271,7 @@ fn render_visible(
                 .split_once("/type/")
                 .or_else(|| layer.texture.split_once("/baby/"))
         {
-            let profession =
-                super::villager::profession_id(m.extra.profession.index().unwrap_or(0));
+            let profession = profession_name(&m.extra.profession);
             data.villager_hats
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
