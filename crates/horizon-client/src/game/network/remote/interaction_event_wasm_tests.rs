@@ -64,9 +64,10 @@ fn cases(hand: Hand) -> Vec<Case> {
                             phases,
                             used: block || after,
                             swings: [0, 0],
-                            // A consuming block answer awards with the old stack
-                            // (air when empty); an empty item phase has no stack.
-                            item_award: block || (after && held),
+                            // ITEM_USED_ON_BLOCK sees the stack copied before the
+                            // block phase, whichever phase consumes: air when the
+                            // hand is empty, including a forced empty item phase.
+                            item_award: block || after,
                             default_award: false,
                             lever: false,
                         });
@@ -98,15 +99,16 @@ fn cases(hand: Hand) -> Vec<Case> {
             lever: false,
         });
     }
-    // PASS and TRY before the block continue. FAIL ends the hand; the three
-    // consuming answers end it too. Before-block answers award no criterion.
-    for (answer, continues, swings) in [
-        (1, true, [0, 0]),
-        (2, false, [0, 0]),
-        (3, false, [1, 1]),
-        (4, false, [1, 0]),
-        (5, false, [0, 0]),
-        (6, true, [0, 0]),
+    // Only PASS before the block continues. Every other answer ends the hand:
+    // FAIL and the three consuming answers use the click, TRY does not. A
+    // before-block answer awards no criterion.
+    for (answer, continues, used, swings) in [
+        (1, true, true, [0, 0]),
+        (2, false, true, [0, 0]),
+        (3, false, true, [1, 1]),
+        (4, false, true, [1, 0]),
+        (5, false, true, [0, 0]),
+        (6, false, false, [0, 0]),
     ] {
         cases.push(Case {
             controls: [1, 0, answer, 1, 5, 0],
@@ -118,7 +120,7 @@ fn cases(hand: Hand) -> Vec<Case> {
             } else {
                 vec![0, 1]
             },
-            used: true,
+            used,
             swings,
             item_award: continues,
             default_award: false,
@@ -276,7 +278,10 @@ fn matrix(mods: mod_api::Mods) {
                         );
                         control.data = case.controls.iter().map(|&b| i32::from(b)).collect();
                         game.native_block_entity_tick([0, 64, 0], &mut control);
-                        assert!(control.data.is_empty(), "control callback must run");
+                        assert!(
+                            control.data.is_empty(),
+                            "the control callback must run and accept {case:?}"
+                        );
                         let swings = game.swings_started;
                         let used = if client {
                             game.remote_use_item_on(hand)
