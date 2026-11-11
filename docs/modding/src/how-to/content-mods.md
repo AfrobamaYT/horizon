@@ -13,8 +13,10 @@ refuses registration with a diagnostic naming both the mod and namespace. This
 is identical for native and wasm mods. Attaching a Part to an existing vanilla or
 foreign block or item is a reference, not a new declaration, and remains allowed.
 
-Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
+Code declarations carry component patches as `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
+Repeated component IDs, including a set and removal of the same ID, are refused; `lore` and `minecraft:lore`
+count as the same ID, and an ID may not start with the removal prefix `!`.
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
 

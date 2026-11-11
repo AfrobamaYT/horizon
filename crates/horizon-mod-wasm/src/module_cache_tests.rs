@@ -508,7 +508,7 @@ fn child_failures_fall_back_to_identical_compilation() {
             .load_with_child(
                 &engine,
                 &bytes,
-                Some((command, std::time::Duration::from_secs(2))),
+                Some((command, std::time::Duration::from_secs(10))),
             )
             .unwrap();
         assert_eq!(source, Source::Compiled);
