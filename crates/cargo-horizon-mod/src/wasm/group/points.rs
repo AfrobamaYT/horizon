@@ -68,11 +68,7 @@ pub(super) fn prepare(
                 },
             )
             .map_err(|e| e.to_string())?;
-            let access = if routed.access == Access::Api {
-                "listeners"
-            } else {
-                "raw"
-            };
+            let access = "listeners";
             let listener = if routed.access == Access::Api && injection.kind == Kind::Replace {
                 format!(
                     "mod_api::replacement_listener!({}, none, crate::{})",

@@ -307,3 +307,84 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<SlotKind, InjectError>
         declaration: inject.at.clone(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn inject() -> Inject {
+        toml::from_str("id='listen'\nat='game::tick'\nkind='head'\nwith='listen'").unwrap()
+    }
+    #[test]
+    fn only_api_function_kinds_parse() {
+        for kind in Kind::ALL {
+            let text = format!(
+                "id='listen'\nat='game::tick'\nkind='{}'\nwith='listen'",
+                kind.name()
+            );
+            assert_eq!(toml::from_str::<Inject>(&text).unwrap().access, Access::Api);
+        }
+        let text = "id='listen'\nat='game::tick'\nkind='head'\nwith='listen'";
+        assert!(
+            toml::from_str::<Inject>(&format!("{text}\naccess='internals'"))
+                .unwrap_err()
+                .to_string()
+                .contains("[[native.mixin]]")
+        );
+        for extra in ["call='f'", "nth=0", "ctx='x'"] {
+            assert!(toml::from_str::<Inject>(&format!("{text}\n{extra}")).is_err());
+        }
+        for kind in [
+            "before_call",
+            "after_call",
+            "modify_value",
+            "wrap_call",
+            "wrap_if",
+        ] {
+            assert!(serde_json::from_value::<Kind>(serde_json::json!(kind)).is_err());
+        }
+    }
+    #[test]
+    fn routing_checks_catalog_presence_and_signature() {
+        let mut i = inject();
+        let places = [Place {
+            at: i.at.clone(),
+            hash: "new".into(),
+            slots: vec![SlotKind::Head],
+        }];
+        assert_eq!(
+            route(
+                Entry {
+                    inject: &i,
+                    target: Target::Wasm,
+                    mod_id: "mod"
+                },
+                &places
+            )
+            .unwrap(),
+            SlotKind::Head
+        );
+        i.hash = Some("old".into());
+        assert!(matches!(
+            route(
+                Entry {
+                    inject: &i,
+                    target: Target::Native,
+                    mod_id: "mod"
+                },
+                &places
+            ),
+            Err(InjectError::Changed { .. })
+        ));
+        assert!(matches!(
+            route(
+                Entry {
+                    inject: &i,
+                    target: Target::Native,
+                    mod_id: "mod"
+                },
+                &[]
+            ),
+            Err(InjectError::Missing { .. })
+        ));
+    }
+}
