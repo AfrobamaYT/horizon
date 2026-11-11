@@ -27,7 +27,9 @@ pub struct Patched {
 /// The patch crate's library source and the copies in it.
 #[derive(Debug)]
 pub struct PatchCrate {
-    pub lib: String,
+    /// One library per game crate with copies, `(crate name, source)`: a copy's `crate::` paths
+    /// resolve against the mirror of its own crate.
+    pub libs: Vec<(String, String)>,
     pub patched: Vec<Patched>,
 }
 
@@ -98,6 +100,9 @@ struct Module {
 
 /// The game crate's modules by path, parsed lazily from the pinned source.
 struct Source {
+    root: PathBuf,
+    /// The crates whose modules are in `files`.
+    loaded: BTreeSet<String>,
     files: BTreeMap<String, PathBuf>,
     parsed: BTreeMap<String, Module>,
     /// `macro_rules!` names the crate defines without `#[macro_export]`: a body using one can't
@@ -118,25 +123,43 @@ impl Source {
         for path in walk(&src) {
             let text =
                 std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            for (at, _) in text.match_indices("macro_rules!") {
-                let name: String = text[at + "macro_rules!".len()..]
-                    .trim_start()
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                if text[..at].trim_end().ends_with("#[macro_export]") {
-                    exported.insert(name);
-                } else {
-                    local_macros.insert(name);
-                }
-            }
+            macro_names(&text, &mut local_macros, &mut exported);
         }
         local_macros.retain(|name| !exported.contains(name));
         Ok(Self {
+            root: root.to_owned(),
+            loaded: BTreeSet::from(["horizon_client".to_owned()]),
             files,
             parsed: BTreeMap::new(),
             local_macros,
         })
+    }
+
+    /// Adds a lower crate's modules, once: `false` when the source has no such crate.
+    fn load(&mut self, krate: &str) -> bool {
+        if self.loaded.contains(krate) {
+            return true;
+        }
+        let Ok((_, lib)) = crate::points::crate_root(&self.root, krate) else {
+            return false;
+        };
+        let dir = lib.parent().expect("a source file has a folder").to_owned();
+        let Ok(files) = crate::points::module_files(krate.to_owned(), lib.clone(), dir, false)
+        else {
+            return false;
+        };
+        self.files.insert(krate.to_owned(), lib);
+        let mut exported = BTreeSet::new();
+        let mut local = BTreeSet::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file.path).unwrap_or_default();
+            macro_names(&text, &mut local, &mut exported);
+            self.files.insert(file.module, file.path);
+        }
+        self.local_macros
+            .extend(local.into_iter().filter(|name| !exported.contains(name)));
+        self.loaded.insert(krate.to_owned());
+        true
     }
 
     /// Module `path`'s items: its file's, or an inline module's inside its parent's.
@@ -198,9 +221,26 @@ impl Source {
         out
     }
 
-    /// Whether `path` names a module of the game crate.
+    /// Whether `path` names a module of a loaded crate.
     fn is_module(&mut self, path: &str) -> bool {
-        path == "horizon_client" || self.files.contains_key(path) || self.module(path).is_ok()
+        self.files.contains_key(path) || self.module(path).is_ok()
+    }
+}
+
+/// The names `text` defines with `macro_rules!`, into `local` or (with `#[macro_export]`)
+/// `exported`.
+fn macro_names(text: &str, local: &mut BTreeSet<String>, exported: &mut BTreeSet<String>) {
+    for (at, _) in text.match_indices("macro_rules!") {
+        let name: String = text[at + "macro_rules!".len()..]
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if text[..at].trim_end().ends_with("#[macro_export]") {
+            exported.insert(name);
+        } else {
+            local.insert(name);
+        }
     }
 }
 
@@ -299,12 +339,11 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
     let (front, name) = target
         .rsplit_once("::")
         .ok_or(("E_MIXIN_TARGET_MISSING", "not a function path".to_owned()))?;
-    if front.split("::").next() != Some("horizon_client") {
+    let krate = front.split("::").next().unwrap_or_default();
+    if !source.load(krate) {
         return Err((
-            "E_MIXIN_NOT_REPLACEABLE",
-            "only functions of the game crate (`horizon_client`) are replaced; a lower crate's \
-             function has no copy route yet"
-                .into(),
+            "E_MIXIN_TARGET_MISSING",
+            format!("no crate `{krate}` in the game's source"),
         ));
     }
     // The longest prefix that is a module; what follows it is the `impl`'s type, if anything.
@@ -521,8 +560,6 @@ struct Tree {
     copies: Vec<proc_macro2::TokenStream>,
     /// Names the copies define, which the mirror must not also re-export.
     own: BTreeSet<String>,
-    /// At the root: whether there are bridges for every mirror module to import.
-    bridges: bool,
 }
 
 /// The patch crate for `targets` (as `[[mixin]]` rows write them), from the pinned game source
@@ -549,7 +586,7 @@ pub fn generate(
         }
     };
     let mut refusals = Vec::new();
-    let mut tree = Tree::default();
+    let mut trees: BTreeMap<String, Tree> = BTreeMap::new();
     let mut patched = Vec::new();
     let unique: BTreeSet<&String> = targets.iter().collect();
     for target in unique {
@@ -565,7 +602,9 @@ pub fn generate(
             continue;
         }
         let name = found.function.sig.ident.clone();
-        let mut node = &mut tree;
+        let source_crate = found.module.split("::").next().expect("a crate").to_owned();
+        let patch_name = patch_crate(krate, &source_crate);
+        let mut node = trees.entry(source_crate).or_default();
         for segment in found.module.split("::").skip(1) {
             node = node.children.entry(segment.to_owned()).or_default();
         }
@@ -590,7 +629,7 @@ pub fn generate(
                             #original::#constructor(#name)
                         }
                     },
-                    format!("{krate}::{}::{name}", module_path.join("::")),
+                    format!("{patch_name}::{}::{name}", module_path.join("::")),
                 )
             }
             Some(owner) => {
@@ -655,7 +694,7 @@ pub fn generate(
                         }
                     },
                     format!(
-                        "{krate}::{}::<{id_type} as {id_trait}>::{name}",
+                        "{patch_name}::{}::<{id_type} as {id_trait}>::{name}",
                         module_path.join("::")
                     ),
                 )
@@ -665,13 +704,13 @@ pub fn generate(
         patched.push(Patched {
             target: target.clone(),
             id,
-            install: format!("{krate}::{}::{install}()", module_path.join("::")),
+            install: format!("{patch_name}::{}::{install}()", module_path.join("::")),
         });
     }
     for module in &extras.modules {
         match support_module(&source, module) {
             Ok((path, tokens)) => {
-                let mut node = &mut tree;
+                let mut node = trees.entry("horizon_client".to_owned()).or_default();
                 for segment in path.split("::").skip(1) {
                     node = node.children.entry(segment.to_owned()).or_default();
                 }
@@ -685,7 +724,7 @@ pub fn generate(
     for bridge in &extras.bridges {
         match bridge_trait(&mut source, bridge) {
             Ok((path, trait_name, tokens)) => {
-                let mut node = &mut tree;
+                let mut node = trees.entry("horizon_client".to_owned()).or_default();
                 for segment in path.split("::").skip(1) {
                     node = node.children.entry(segment.to_owned()).or_default();
                 }
@@ -702,32 +741,50 @@ pub fn generate(
     if !refusals.is_empty() {
         return Err(refusals);
     }
-    tree.bridges = !bridge_traits.is_empty();
-    let body = match mirror(&mut source, "horizon_client", &tree, tree.bridges) {
-        Ok(body) => body,
-        Err(why) => {
-            return Err(targets
-                .iter()
-                .map(|t| refuse(t, "E_MIXIN_SOURCE", why.clone()))
-                .collect());
-        }
-    };
-    let lib = quote! {
-        //! Generated by the launcher: game functions copied out of the pinned source for the
-        //! installed mods' `[[mixin]]` rows, patched by horizon-mixins. Not for editing.
-        #![allow(unused_imports, unused_macros, unused_mut, unused_variables, dead_code, unused_braces, unused_parens)]
-        #![allow(clippy::all)]
-        #body
-        /// The bridges' traits, which every mirror module imports.
-        #[doc(hidden)]
-        pub mod __fnr_bridges {
-            #(#bridge_traits)*
-        }
-    };
-    Ok(PatchCrate {
-        lib: prettyplease_or_tokens(lib),
-        patched,
-    })
+    let mut libs = Vec::new();
+    for (source_crate, tree) in &trees {
+        let bridges = source_crate == "horizon_client" && !bridge_traits.is_empty();
+        let body = match mirror(&mut source, source_crate, tree, bridges) {
+            Ok(body) => body,
+            Err(why) => {
+                return Err(targets
+                    .iter()
+                    .map(|t| refuse(t, "E_MIXIN_SOURCE", why.clone()))
+                    .collect());
+            }
+        };
+        let bridge_module = bridges.then(|| {
+            quote! {
+                /// The bridges' traits, which every mirror module imports.
+                #[doc(hidden)]
+                pub mod __fnr_bridges {
+                    #(#bridge_traits)*
+                }
+            }
+        });
+        let lib = quote! {
+            //! Generated by the launcher: game functions copied out of the pinned source for the
+            //! installed mods' `[[native.mixin]]` rows, patched by horizon-mixins. Not for editing.
+            #![allow(unused_imports, unused_macros, unused_mut, unused_variables, dead_code, unused_braces, unused_parens)]
+            #![allow(clippy::all)]
+            #body
+            #bridge_module
+        };
+        libs.push((
+            patch_crate(krate, source_crate),
+            prettyplease_or_tokens(lib),
+        ));
+    }
+    Ok(PatchCrate { libs, patched })
+}
+
+/// The patch crate that mirrors `source_crate`: `krate` itself for the game crate, and
+/// `krate_<crate>` for a lower one (`horizon_patch_client_lib` for `horizon_client_lib`).
+pub fn patch_crate(krate: &str, source_crate: &str) -> String {
+    match source_crate {
+        "horizon_client" => krate.to_owned(),
+        other => format!("{krate}_{}", other.trim_start_matches("horizon_")),
+    }
 }
 
 /// A path's tokens without spaces, as horizon-mixins writes an id.
@@ -791,7 +848,7 @@ fn mirror(
             _ => None,
         })
         .collect();
-    let root = path == "horizon_client";
+    let root = !path.contains("::");
     let explicit = defined(&items)
         .into_iter()
         .filter(|(ident, _)| !reserved.contains(&ident.to_string()))
@@ -1026,13 +1083,13 @@ mod tests {
             crate_.patched[0].id,
             "horizon_patch::game::autosave::<Game<'_> as __Fnr_Game_next_autosave_interval>::next_autosave_interval"
         );
-        assert!(crate_.lib.contains("pub mod autosave"));
+        assert!(crate_.libs[0].1.contains("pub mod autosave"));
         assert!(
-            crate_
-                .lib
+            crate_.libs[0]
+                .1
                 .contains("impl __Fnr_Game_next_autosave_interval for Game<'_>")
         );
-        assert!(crate_.lib.contains("self.clock.sprinting()"));
+        assert!(crate_.libs[0].1.contains("self.clock.sprinting()"));
     }
 
     #[test]
@@ -1042,13 +1099,39 @@ mod tests {
             "horizon_patch",
             &[
                 "horizon_client::game::autosave::Game<'_>::no_such_function".into(),
-                "horizon_client_lib::clock::FixedStep::advance".into(),
+                "horizon_client::game::autosave::Game<'_>::on_tick_rate_changed".into(),
+                "horizon_no_such_crate::f".into(),
             ],
             &Extras::default(),
         )
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
-        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
+        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_TARGET_MISSING"]);
+    }
+
+    #[test]
+    fn a_lower_crate_function_gets_a_patch_crate_of_its_own() {
+        let crate_ = generate(
+            &root(),
+            "horizon_patch",
+            &[
+                "horizon_client::game::autosave::Game<'_>::next_autosave_interval".into(),
+                "horizon_client_lib::clock::FixedStep::advance".into(),
+            ],
+            &Extras::default(),
+        )
+        .unwrap();
+        let names: Vec<_> = crate_.libs.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["horizon_patch", "horizon_patch_client_lib"]);
+        let lower = &crate_.libs[1].1;
+        assert!(lower.contains("pub mod clock"), "{lower}");
+        assert!(
+            lower.contains("pub use ::horizon_client_lib::clock::*;"),
+            "{lower}"
+        );
+        assert!(crate_.patched.iter().any(|p| {
+            p.id.starts_with("horizon_patch_client_lib::clock::<FixedStep as")
+        }));
     }
 
     #[test]
@@ -1076,16 +1159,16 @@ mod tests {
             &extras,
         )
         .unwrap();
-        let lib = crate_.lib.replace(char::is_whitespace, "");
+        let lib = crate_.libs[0].1.replace(char::is_whitespace, "");
         assert!(
             lib.contains("pub(crate)modfnr_support{pubfntwice"),
             "{}",
-            crate_.lib
+            crate_.libs[0].1
         );
         assert!(
             lib.contains("fn__horizon_mixins_m_ticks(&mutself)->&mut"),
             "{}",
-            crate_.lib
+            crate_.libs[0].1
         );
         assert!(lib.contains("{&mutself.ticks_until_autosave}"));
         assert!(lib.contains(
@@ -1132,8 +1215,10 @@ mod spike {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         match super::generate(&root, "horizon_patch", &targets, &super::Extras::default()) {
             Ok(crate_) => {
-                std::fs::create_dir_all(out.join("horizon_patch/src")).unwrap();
-                std::fs::write(out.join("horizon_patch/src/lib.rs"), &crate_.lib).unwrap();
+                for (name, lib) in &crate_.libs {
+                    std::fs::create_dir_all(out.join(name).join("src")).unwrap();
+                    std::fs::write(out.join(name).join("src/lib.rs"), lib).unwrap();
+                }
                 for patched in crate_.patched {
                     println!("{} => {} | {}", patched.target, patched.id, patched.install);
                 }

@@ -724,9 +724,9 @@ pub(super) fn compile(
             library(&deps, "horizon_mod_host")?.display()
         ));
     }
-    if let Some(patch) = &patch {
+    for (name, rlib) in patch.iter().flat_map(|patch| &patch.rlibs) {
         cmd.arg("--extern")
-            .arg(format!("{}={}", super::patch::CRATE, patch.rlib.display()));
+            .arg(format!("{name}={}", rlib.display()));
     }
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();
