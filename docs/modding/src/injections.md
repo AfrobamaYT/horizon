@@ -660,6 +660,15 @@ A reviewed call row compiles the same typed record into the prebuilt game. Attac
 listener to that listed site does not rebuild the game, and uses the same listener source
 and lifetime rules as source routing. A stale listed declaration is refused by name;
 it never falls back to a source build.
+
+With no listener, these sites cost what every already-listed site costs: one relaxed
+atomic load and a branch, without constructing Args or allocating. This is not literally
+zero overhead relative to an uninstrumented call. An optimized author benchmark on an
+Intel Core i9-13900H measured 1.44 ns per plain call versus 1.93 ns per unsubscribed listed
+call, a difference of +0.49 ns per call (six alternating samples of 50 million calls,
+with the subscription flag opaque to the optimizer). Run the generator's ignored
+`unsubscribed_listed_call_cost` test to reproduce the measurement on another machine.
+
 Owned shapes containing further borrows remain refused; direct immutable-reference fields
 can accompany owned fields.
 

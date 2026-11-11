@@ -101,6 +101,11 @@ pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
 
 /// Rewrite one source file. Missing targets are left for the coordinator to check across files;
 /// every matched target must resolve its call, and overlapping declarations are refused.
+///
+/// An unsubscribed call keeps the existing listed-site cost: one relaxed atomic load and
+/// a branch, with no argument record or allocation. An optimized i9-13900H author run
+/// measured 1.44 ns plain versus 1.93 ns listed (+0.49 ns; six alternating 50-million-call
+/// samples with an opaque subscription flag). This is not a zero-overhead plain call.
 pub fn rewrite(
     source: &str,
     module: &str,
