@@ -46,8 +46,10 @@ broadcast event. Dispatch selects the one registered owner.
 ## Admission, sending, and context
 
 Configuration exchanges declarations and freezes the compatible peer intersection.
-Required missing or mismatched declarations refuse admission with the id and
-reason. Optional absence permits admission, but send returns `UnsupportedPeer`
+A missing required declaration refuses admission. Matching protocol/id declarations
+must agree on version and direction even when optional; mismatches refuse with the
+id, reason and both declarations. Only one-sided optional absence permits admission,
+and send then returns `UnsupportedPeer`
 without a packet. When neither peer declares payloads, no mod manifest is exchanged.
 There is no per-tick scan of loaded mods.
 

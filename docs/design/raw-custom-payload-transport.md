@@ -27,9 +27,12 @@ value. The raw body crosses Wire as a length followed by contiguous bytes.
 
 ## Connection admission and identity
 
-Negotiate a bounded configuration manifest and compatible intersection. Required
-one-sided declarations, versions or directions that disagree refuse admission,
-naming the id and reason. Optional extras are absent from the agreed set. A vanilla
+Negotiate a bounded configuration manifest and compatible intersection. Matching
+protocol/id declarations must agree on version and direction, even when both are
+optional; a mismatch refuses admission with the id, reason and both declarations.
+Only one-sided optional extras are absent from the agreed set. A missing required
+declaration refuses admission. Optional means absence is permitted, not that an
+incompatible matching declaration is ignored. A vanilla
 peer is admitted when all local requirements are optional; sending an absent
 optional payload returns UnsupportedPeer without a packet. Empty registries emit
 no manifest and do no per-tick mod work.

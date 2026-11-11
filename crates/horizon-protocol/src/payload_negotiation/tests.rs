@@ -1,14 +1,11 @@
 use super::*;
 fn manifest(optional: bool, version: &str, flow: Flow) -> Manifest {
+    manifest_for(RegistrationPhase::Common, optional, version, flow)
+}
+fn manifest_for(phase: RegistrationPhase, optional: bool, version: &str, flow: Flow) -> Manifest {
     let mut b = Manifest::builder();
-    b.register(
-        RegistrationPhase::Common,
-        "test:data",
-        flow,
-        version,
-        optional,
-    )
-    .unwrap();
+    b.register(phase, "test:data", flow, version, optional)
+        .unwrap();
     b.finish().unwrap()
 }
 #[test]
@@ -21,7 +18,7 @@ fn idle_and_explicit_barrier() {
     let mut n = Negotiation::new(manifest(false, "v", Flow::ToClient));
     assert!(matches!(
         n.finish_without_offer(),
-        Err(Error::Required {
+        Err(Error::Incompatible {
             reason: Mismatch::Missing,
             ..
         })
@@ -44,18 +41,35 @@ fn crossed_queries_and_frozen_offer() {
 fn one_sided_and_mismatch_matrix() {
     for optional in [true, false] {
         for peer_optional in [true, false] {
-            for (version, flow, reason) in [
-                ("other", Flow::ToClient, Mismatch::Version),
-                ("v", Flow::ToServer, Mismatch::Direction),
+            for (registration, phase) in [
+                (RegistrationPhase::Configuration, Phase::Configuration),
+                (RegistrationPhase::Play, Phase::Play),
             ] {
-                let l = manifest(optional, "v", Flow::ToClient);
-                let p = manifest(peer_optional, version, flow);
-                let result = intersect(&l, &p);
-                if optional && peer_optional {
-                    assert_eq!(result.unwrap(), vec![]);
-                } else {
-                    assert!(
-                        matches!(result, Err(Error::Required { reason: r, .. }) if r == reason)
+                for (version, flow, reason) in [
+                    ("other", Flow::ToClient, Mismatch::Version),
+                    ("v", Flow::ToServer, Mismatch::Direction),
+                ] {
+                    let l = manifest_for(registration, optional, "v", Flow::ToClient);
+                    let p = manifest_for(registration, peer_optional, version, flow);
+                    assert_eq!(
+                        intersect(&l, &p),
+                        Err(Error::Incompatible {
+                            phase,
+                            id: "test:data".into(),
+                            reason,
+                            local: Some(("v".into(), Flow::ToClient)),
+                            peer: Some((version.into(), flow)),
+                        })
+                    );
+                    assert_eq!(
+                        intersect(&p, &l),
+                        Err(Error::Incompatible {
+                            phase,
+                            id: "test:data".into(),
+                            reason,
+                            local: Some((version.into(), flow)),
+                            peer: Some(("v".into(), Flow::ToClient)),
+                        })
                     );
                 }
             }

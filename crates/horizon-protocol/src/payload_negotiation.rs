@@ -39,10 +39,12 @@ pub enum Error {
     TrailingBytes,
     UnexpectedOffer,
     Frozen,
-    Required {
+    Incompatible {
         phase: Phase,
         id: String,
         reason: Mismatch,
+        local: Option<(String, Flow)>,
+        peer: Option<(String, Flow)>,
     },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,8 +56,17 @@ pub enum Mismatch {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Required { phase, id, reason } => {
-                write!(f, "required payload {id} ({phase:?}): {reason:?}")
+            Self::Incompatible {
+                phase,
+                id,
+                reason,
+                local,
+                peer,
+            } => {
+                write!(
+                    f,
+                    "incompatible payload {id} ({phase:?}): {reason:?}; local {local:?}, peer {peer:?}"
+                )
             }
             Self::Duplicate { phase, id } => write!(f, "duplicate payload {id} ({phase:?})"),
             Self::InvalidId(id) => write!(f, "invalid payload id {id}"),
@@ -346,11 +357,14 @@ fn intersect(local: &Manifest, peer: &Manifest) -> Result<Vec<Entry>, Error> {
             _ => None,
         };
         if let Some(reason) = mismatch {
-            if !a.optional || b.is_some_and(|b| !b.optional) {
-                return Err(Error::Required {
+            // Optional permits absence, not contradictory declarations at both ends.
+            if b.is_some() || !a.optional {
+                return Err(Error::Incompatible {
                     phase: a.phase,
                     id: a.id.clone(),
                     reason,
+                    local: Some((a.version.clone(), a.flow)),
+                    peer: b.map(|b| (b.version.clone(), b.flow)),
                 });
             }
         } else {
@@ -359,10 +373,12 @@ fn intersect(local: &Manifest, peer: &Manifest) -> Result<Vec<Entry>, Error> {
     }
     for (key, b) in &p {
         if !l.contains_key(key) && !b.optional {
-            return Err(Error::Required {
+            return Err(Error::Incompatible {
                 phase: b.phase,
                 id: b.id.clone(),
                 reason: Mismatch::Missing,
+                local: None,
+                peer: Some((b.version.clone(), b.flow)),
             });
         }
     }
