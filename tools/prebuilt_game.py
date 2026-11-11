@@ -243,6 +243,7 @@ def build(out: Path, server: bool) -> None:
     link_args = executable_link_args(output)
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
+        "format_version": 5,
         "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
         "rustc": run(["rustc", "-vV"]).strip(),
         "target": host,

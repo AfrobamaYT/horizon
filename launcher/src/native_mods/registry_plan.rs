@@ -148,9 +148,75 @@ impl Plan {
     }
 }
 
+/// Only the SDK identity supplies patches; mod manifests cannot inject overrides.
+pub(super) fn apply_patches(directory: &Path, patches: &toml::Table) -> Result<(), String> {
+    let path = directory.join("Cargo.toml");
+    let mut manifest: toml::Table = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())?
+        .parse()
+        .map_err(|e| format!("Cargo.toml: {e}"))?;
+    manifest.insert("patch".into(), patches.clone().into());
+    std::fs::write(path, manifest.to_string()).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cargo_resolves_registry_parent_through_sdk_local_patch_without_compiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for path in [
+            "vendor/allocator/src",
+            "sdk/allocator-sys/src",
+            "src",
+            ".cargo",
+        ] {
+            std::fs::create_dir_all(root.join(path)).unwrap();
+        }
+        for (path, text) in [
+            ("Cargo.toml", "[package]\nname='fixture'\nversion='1.0.0'\n[workspace]\n[dependencies]\nallocator='1'\n"),
+            ("src/lib.rs", ""),
+            ("vendor/allocator/Cargo.toml", "[package]\nname='allocator'\nversion='1.0.0'\n[dependencies]\nallocator-sys='0.1'\n"),
+            ("vendor/allocator/src/lib.rs", ""),
+            ("sdk/allocator-sys/Cargo.toml", "[package]\nname='allocator-sys'\nversion='0.1.49'\n"),
+            ("sdk/allocator-sys/src/lib.rs", ""),
+            (".cargo/config.toml", "[source.crates-io]\nreplace-with='fixture'\n[source.fixture]\ndirectory='vendor'\n"),
+        ] { std::fs::write(root.join(path), text).unwrap(); }
+        std::fs::write(
+            root.join("vendor/allocator/.cargo-checksum.json"),
+            format!(r#"{{"package":"{}","files":{{}}}}"#, "a".repeat(64)),
+        )
+        .unwrap();
+        let patches: toml::Table = format!(
+            "[crates-io]\nallocator-sys={{path={:?}}}\n",
+            root.join("sdk/allocator-sys").to_string_lossy()
+        )
+        .parse()
+        .unwrap();
+        apply_patches(root, &patches).unwrap();
+        let output = std::process::Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+        let game = format!("version=4\n[[package]]\nname='allocator'\nversion='1.0.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\ndependencies=['allocator-sys']\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n", "a".repeat(64));
+        RegistryLock::parse(&game)
+            .unwrap()
+            .check_resolution(
+                &RegistryLock::parse(&text).unwrap(),
+                &RegistryLock::default(),
+            )
+            .unwrap();
+        assert!(!root.join("target").exists());
+    }
+
     #[test]
     fn fetch_roots_exclude_unrelated_game_union_records() {
         let dir = tempfile::tempdir().unwrap();
@@ -209,15 +275,4 @@ mod tests {
         }
         assert!(!dir.path().join("target").exists());
     }
-}
-
-/// Only the SDK identity supplies patches; mod manifests cannot inject overrides.
-pub(super) fn apply_patches(directory: &Path, patches: &toml::Table) -> Result<(), String> {
-    let path = directory.join("Cargo.toml");
-    let mut manifest: toml::Table = std::fs::read_to_string(&path)
-        .map_err(|e| e.to_string())?
-        .parse()
-        .map_err(|e| format!("Cargo.toml: {e}"))?;
-    manifest.insert("patch".into(), patches.clone().into());
-    std::fs::write(path, manifest.to_string()).map_err(|e| e.to_string())
 }
