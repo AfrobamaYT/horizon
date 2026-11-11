@@ -2,17 +2,8 @@ use super::*;
 use horizon_client::save::level_mods;
 
 impl Game<'_> {
-    /// A world opened whose saved mod list differs from the mods loaded now
-    /// (NeoForge's `ModMismatchEvent`): `mismatches` names each mod the world
-    /// was saved with whose version changed, or that is no longer loaded
-    /// (`current_version` none). A mod loaded now that the world wasn't saved
-    /// with is no mismatch, and a version unknown on either side (`""`)
-    /// compares equal. Push a mod id into `resolved` to mark its mismatch
-    /// handled, as `markResolved` does: each mismatch nobody resolves is
-    /// logged as a warning once the hook returns. Fired once per world open,
-    /// after `level.dat` is read and before any chunk loads, only when there
-    /// is at least one mismatch; nothing stops the world from opening.
-    /// Server-side (the single player's integrated server included).
+    /// Dispatch the saved list at the earliest Game Host boundary on either side.
+    /// Each resolution keeps its first resolving listener across dispatch.
     pub(in crate::game) fn native_mod_mismatch(
         &mut self,
         mismatches: &[mod_api::ModMismatch],

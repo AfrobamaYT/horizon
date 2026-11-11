@@ -11864,7 +11864,6 @@ impl Game<'_> {
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
         self.load_world_state();
-        // The world's mod list, then the level it opens in, before any of its chunks.
         self.native_world_opened(dim);
         self.open_saved_portal_levels()
     }
