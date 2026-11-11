@@ -55,14 +55,21 @@ impl BlockEntityTickSlot for Throttle {
 | `Skip` | This entity does not tick this tick. |
 | `Stop` | No further entity ticks this tick. The work after the loop still runs: song volumes, creaking hearts, client effects, shulker box lids. |
 
-The game keeps the order, what is visited and where the slot sits. A slot cannot reorder, add or remove entries.
+The game keeps the order and where the slot sits. The cursor's `game` is the whole game, so a slot can add, remove or replace block entities, with these effects:
+
+- After every slot answered `Continue`, the loop checks the visited entity again. If it was removed, or replaced by one of another `kind`, it does not tick and no `after` runs for it.
+- The pass visits the list it took when it started. An entity a slot adds is not visited in this pass and ticks from the next, as one placed by a tick does.
+- An entity a slot removes later in the list is passed over when the loop reaches it, as one removed by an earlier tick is.
+
+The game's own loop (no mod) has no `before`, so it does not make that second check.
 
 ## Several mods, state, panics
 
 - Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue` wins and later mods are not asked for that entity. `after` runs for every mod that defines it; a slot that defines only `before` costs nothing after the tick.
-- The slot value is created with `Default` once per `Game` and kept across ticks. Key per-dimension state on the game's dimension.
-- A run started from inside a slot (the slot calls something that ticks block entities) is the game's own loop, without slots.
-- A panic in a slot unwinds out of the tick like any game panic: the server writes its crash report and saves the world. The report names the mod and the loop: `in native mod <id>, hook loop block_entities.tick, part <id>::<Type>`. That `Game` does not run the slots again.
+- The slot value is created with `Default` on the loop's first run, once per `Game`, and kept across ticks. Key per-dimension state on the game's dimension.
+- A run started from inside a slot (the slot calls something that ticks block entities) is the game's own loop, without slots. It is a whole pass: every entity ticks again, and the work after the loop runs again. The enclosing pass's working state (its item and mob caches, the spawners it has ticked) is set aside during the nested pass and restored after it, so the enclosing pass carries on as before.
+- A panic in a slot's `before`, `after` or `Default` unwinds out of the tick like any game panic: the server writes its crash report and saves the world. The report names the mod and the loop: `in native mod <id>, hook loop block_entities.tick, part <id>::<Type>`. That `Game` does not run the slots again, and the slots already made are dropped, each one attributed to its own mod.
+- Each mod's slot is dropped on its own. If one mod's `Drop` panics, the other mods' slots are still dropped and the process does not abort. That panic is reported as its mod's when it happens. If it happens while cleaning up after another slot's panic, the first panic is the one that unwinds. When a `Game` is dropped normally, the first `Drop` panic unwinds after every slot has been dropped.
 - The run without slots, nested or after a panic, is logged once per loop per `Game`.
 
 ## What composes with a loop
