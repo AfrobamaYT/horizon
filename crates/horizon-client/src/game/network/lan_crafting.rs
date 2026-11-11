@@ -5,6 +5,7 @@
 //! and their corrections, and the grid back into the inventory when the menu
 //! closes (`AbstractContainerMenu.clearContainer`).
 use super::Game;
+use horizon_client::lan::recipes;
 use horizon_client::{
     containers::{BlockEntity, ModMenuType},
     furnace::FurnaceCooking,
@@ -18,7 +19,6 @@ use horizon_client::{
         place::{PostPlace, TransferCheck, TransferError},
     },
 };
-use horizon_client::lan::recipes;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 
 /// `AbstractContainerMenu.dropOrPlaceInInventory`: actual network disconnects
@@ -1811,7 +1811,10 @@ mod recipe_check_tests {
     use super::*;
     use horizon_client::{
         containers::{ModBlockEntity, ModBlockEntityFields, ModCrafting},
-        lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig, menu::Menu as HubMenu},
+        lan::{
+            Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig,
+            menu::Menu as HubMenu,
+        },
     };
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
@@ -1823,7 +1826,10 @@ mod recipe_check_tests {
     /// inventory, grid and cursor, its menus' slots, and the station's chunk
     /// unmarked as changed (`container_changed` marks it; this takes the mark).
     fn state(game: &mut Game<'_>) -> String {
-        let changed = game.world.modified.remove(&(STATION.0 >> 4, STATION.2 >> 4));
+        let changed = game
+            .world
+            .modified
+            .remove(&(STATION.0 >> 4, STATION.2 >> 4));
         let host = game.lan.as_ref().unwrap();
         let g = &host.hub.guests[0];
         format!(
@@ -1833,7 +1839,9 @@ mod recipe_check_tests {
             g.craft_grid,
             g.carried,
             g.menu.as_ref().map(|m| (&m.sent, m.state, &m.craft)),
-            host.play.get(&2).is_some_and(|p| p.crafting.machine.is_some()),
+            host.play
+                .get(&2)
+                .is_some_and(|p| p.crafting.machine.is_some()),
             changed,
         )
     }
@@ -1989,7 +1997,10 @@ mod recipe_check_tests {
                 reply(&sent(&rx))
             };
             // Two planks make a stick; the grid's cobblestone has room to go.
-            assert_eq!(check(game, WINDOW, 1, "minecraft:stick"), (WINDOW, 1, 0, vec![]));
+            assert_eq!(
+                check(game, WINDOW, 1, "minecraft:stick"),
+                (WINDOW, 1, 0, vec![])
+            );
             // A crafting table's last two planks lack.
             assert_eq!(
                 check(game, WINDOW, 2, "minecraft:crafting_table"),
@@ -1997,8 +2008,14 @@ mod recipe_check_tests {
             );
             // An unknown recipe, and a window the guest doesn't have open:
             // not into this menu.
-            assert_eq!(check(game, WINDOW, 3, "minecraft:no_such_recipe"), (WINDOW, 3, 3, vec![]));
-            assert_eq!(check(game, WINDOW + 1, 4, "minecraft:stick"), (WINDOW + 1, 4, 3, vec![]));
+            assert_eq!(
+                check(game, WINDOW, 3, "minecraft:no_such_recipe"),
+                (WINDOW, 3, 3, vec![])
+            );
+            assert_eq!(
+                check(game, WINDOW + 1, 4, "minecraft:stick"),
+                (WINDOW + 1, 4, 3, vec![])
+            );
             // The transfer the first check answered for does move them.
             game.guest_recipe_transfer(2, &{
                 let mut w = horizon_protocol::buf::Writer::new();

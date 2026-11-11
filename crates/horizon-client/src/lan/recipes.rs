@@ -516,7 +516,6 @@ pub fn byte_result(byte: u8) -> Option<mod_api::RecipeTransferResult> {
         3 => R::NotIntoMenu,
         _ => return None,
     })
-
 }
 
 #[cfg(test)]

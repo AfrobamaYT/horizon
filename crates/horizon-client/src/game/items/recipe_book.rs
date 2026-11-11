@@ -123,7 +123,22 @@ struct TransferChecks {
     seen: Option<(i32, i32, Vec<Option<ItemStack>>)>,
     answers: Vec<CheckAnswer>,
     /// The one request out: its display id and when it went.
-    asked: Option<(i32, Instant)>,
+    asked: Option<(i32, i32, Instant)>,
+}
+
+impl TransferChecks {
+    fn ask(&mut self, display_id: i32, now: Instant) -> Option<i32> {
+        static NEXT_TAG: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+        let tag = NEXT_TAG
+            .try_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |tag| tag.checked_add(1),
+            )
+            .ok()?;
+        self.asked = Some((tag, display_id, now));
+        Some(tag)
+    }
 }
 
 /// One answer of `TransferChecks`.
@@ -1289,7 +1304,11 @@ impl Game<'_> {
             self.show_transfer_result(RecipeTransferResult::NotIntoMenu);
             return;
         }
-        if self.remote.as_ref().is_some_and(|r| !r.recipe_viewer.transfer) {
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|r| !r.recipe_viewer.transfer)
+        {
             // Older Horizon and vanilla servers still accept book clicks.
             if self.recipe_place(display_id, false).is_err() {
                 self.panel.transfer_warning = Some((
@@ -1346,7 +1365,11 @@ impl Game<'_> {
         if data.is_empty() {
             if let Some(remote) = &mut self.remote {
                 let channels = &mut remote.recipe_viewer;
-                *(if channel == TRANSFER_CHANNEL { &mut channels.transfer } else { &mut channels.check }) = true;
+                *(if channel == TRANSFER_CHANNEL {
+                    &mut channels.transfer
+                } else {
+                    &mut channels.check
+                }) = true;
             }
         } else if channel == TRANSFER_CHANNEL {
             self.remote_recipe_transfer(data);
@@ -1358,7 +1381,6 @@ impl Game<'_> {
     fn remote_recipe_transfer(&mut self, data: &[u8]) {
         if let Ok(Some((container, result))) =
             horizon_client::lan::recipes::decode_transfer_reply(data)
-
             && container == self.remote_menu_id()
             && self.mod_recipe_screen()
             && self.panel.recipes.is_some()
@@ -1427,7 +1449,7 @@ impl Game<'_> {
             Some(a) => a.refreshes < CHECK_REFRESHES && now.duration_since(a.at) >= CHECK_REFRESH,
         };
         let answer = answer.map(|a| a.check.clone());
-        let waiting = (checks.asked).is_some_and(|(_, at)| now.duration_since(at) < CHECK_WAIT);
+        let waiting = (checks.asked).is_some_and(|(_, _, at)| now.duration_since(at) < CHECK_WAIT);
         if ask && !waiting {
             self.ensure_book();
             let id = (self.recipe_ui.book.as_ref())
@@ -1436,7 +1458,10 @@ impl Game<'_> {
             if let Some(id) = id {
                 let mut request = horizon_protocol::buf::Writer::new();
                 request.varint(self.remote_menu_id());
-                request.varint(display_id);
+                let Some(tag) = self.recipe_ui.checks.ask(display_id, now) else {
+                    return answer;
+                };
+                request.varint(tag);
                 request.string(&id);
                 self.send(horizon_protocol::packets::play::Serverbound::CustomPayload(
                     horizon_protocol::packets::configuration::CustomPayload {
@@ -1444,7 +1469,6 @@ impl Game<'_> {
                         data: request.data,
                     },
                 ));
-                self.recipe_ui.checks.asked = Some((display_id, now));
             }
         }
         answer
@@ -1475,13 +1499,17 @@ impl Game<'_> {
         }
         let checks = &mut self.recipe_ui.checks;
         if reader.remaining() != 0
-            || checks.asked.map(|(id, _)| id) != Some(tag)
+            || checks.asked.map(|(id, _, _)| id) != Some(tag)
             || checks.seen.as_ref().map(|s| s.0) != Some(container)
         {
             return;
         }
-        checks.asked = None;
-        let refreshes = match checks.answers.iter().position(|a| a.display_id == tag) {
+        let (_, display_id, _) = checks.asked.take().unwrap();
+        let refreshes = match checks
+            .answers
+            .iter()
+            .position(|a| a.display_id == display_id)
+        {
             Some(i) => checks.answers.remove(i).refreshes + 1,
             None => 0,
         };
@@ -1489,7 +1517,7 @@ impl Game<'_> {
             checks.answers.remove(0);
         }
         checks.answers.push(CheckAnswer {
-            display_id: tag,
+            display_id,
             at: Instant::now(),
             refreshes,
             check: RecipeTransferCheck {
@@ -2124,5 +2152,24 @@ fn sub_rect(r: Rect, [x, y, w, h]: [f32; 4]) -> Rect {
         v1: r.v0 + (y + h) * dv,
         w: w as u32,
         h: h as u32,
+    }
+}
+
+#[cfg(test)]
+mod request_generation_tests {
+    use super::*;
+    #[test]
+    fn delayed_answers_cannot_match_inventory_changes_or_retries() {
+        let mut checks = TransferChecks::default();
+        let first = checks.ask(42, Instant::now()).unwrap();
+        checks = TransferChecks::default(); // Inventory change clears the cache.
+        let second = checks.ask(42, Instant::now()).unwrap();
+        assert_ne!(first, second);
+        let retry = checks.ask(42, Instant::now()).unwrap();
+        assert_ne!(second, retry);
+        assert_eq!(
+            checks.asked.map(|(tag, id, _)| (tag, id)),
+            Some((retry, 42))
+        );
     }
 }
