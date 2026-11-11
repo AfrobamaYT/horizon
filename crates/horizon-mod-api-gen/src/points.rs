@@ -420,7 +420,10 @@ impl Scanned {
         let none = std::collections::BTreeSet::new();
         let replaceable = crate::replace::targets(&self.module, &self.parsed, &none, &none);
         let keep = |found: &Found<'_>| {
-            if !replaceable.contains(&found.target()) {
+            // A staged copy also holds what the replacement pass wrote beside each function.
+            if found.sig.ident.to_string().starts_with("__fnr_")
+                || !replaceable.contains(&found.target())
+            {
                 return false;
             }
             if self.package.is_none() {
