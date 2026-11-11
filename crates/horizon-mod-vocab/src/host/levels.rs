@@ -75,6 +75,39 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
     /// Side: both.
+    /// The entry ids (`addon:fire`) of a datapack registry a mod declared
+    /// (`declare_datapack_registry`), sorted, as this world session last loaded them. On a client
+    /// they are the ones its server sent at the join and after each reload, and only for a
+    /// registry declared `Required` or `Optional`. None for a stale or parked level and a
+    /// registry no mod declared (or, on a client, one the server did not send). Reads nothing
+    /// from disk.
+    #[access(WorldOnly)]
+    fn level_datapack_entries(&self, level: LevelRef, registry: &str) -> Option<Vec<String>>;
+    /// Side: both.
+    /// A handle to `entry` of `registry` at the generation now loaded (on a client, the one its
+    /// server last sent). A handle kept across a reload fails its next read with
+    /// `StaleGeneration`, one from an earlier world session with `WrongSession`. A stale or parked
+    /// level and a registry no mod declared are `UnknownRegistry`; an entry no pack defines is
+    /// `MissingEntry`.
+    #[access(WorldOnly)]
+    fn level_datapack_handle(
+        &self,
+        level: LevelRef,
+        registry: &str,
+        entry: &str,
+    ) -> Result<DatapackHandle, DatapackReadError>;
+    /// Side: both.
+    /// The decoded fields of the entry a handle names, in the registry's schema order, as plain
+    /// values: a copy, which carries no authority after the read. The handle is checked first
+    /// (session, then generation), then the entry; the errors are those of
+    /// [`level_datapack_handle`](Self::level_datapack_handle).
+    #[access(WorldOnly)]
+    fn level_datapack_read(
+        &self,
+        level: LevelRef,
+        handle: &DatapackHandle,
+    ) -> Result<Vec<(String, DatapackValue)>, DatapackReadError>;
+    /// Side: both.
     /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
     /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool; for a block it has no
     /// rule for, the tool's default mining speed), before the player's enchantments, attributes, water, ground and

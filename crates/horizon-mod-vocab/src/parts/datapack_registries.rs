@@ -6,7 +6,25 @@ use crate::world::datapack_registry::{
 
 /// The datapack registries mods declared.
 pub fn datapack_registry_declarations() -> &'static [DatapackRegistryDeclaration] {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(declarations) = PROCESS_DECLARATIONS.get() {
+        return declarations;
+    }
     installed().map_or(&[], |installed| &installed.datapack_registries)
+}
+
+/// Declarations a test process shares with every thread. A test's own installation is per
+/// thread, but the connection a server answers a client on runs on threads the test did not
+/// start.
+#[cfg(any(test, feature = "testing"))]
+static PROCESS_DECLARATIONS: OnceLock<Vec<DatapackRegistryDeclaration>> = OnceLock::new();
+
+/// Declare `declarations` for every thread of this test process; the first call wins.
+#[cfg(any(test, feature = "testing"))]
+pub fn install_process_datapack_registry_declarations(
+    declarations: Vec<DatapackRegistryDeclaration>,
+) {
+    let _ = PROCESS_DECLARATIONS.set(declarations);
 }
 
 /// Registration of mod-owned datapack registries
@@ -65,7 +83,6 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
             {
                 return Err(DatapackRegistrationError::Duplicate);
             }
-            check_schema(&fields)?;
             for field in &mut fields {
                 if matches!(
                     field.kind,
@@ -78,6 +95,7 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
                         .to_string();
                 }
             }
+            check_schema(&fields)?;
             self.datapack_registries.push(DatapackRegistryDeclaration {
                 mod_id: self.mod_id.to_owned(),
                 key,

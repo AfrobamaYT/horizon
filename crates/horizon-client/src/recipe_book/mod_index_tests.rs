@@ -205,6 +205,7 @@ fn all_five_display_kinds_validate_and_unknown_nested_items_are_typed_errors() {
     a.displays.push(mod_api::RecipeBookDisplayEntry {
         recipe: "demo:soup".into(),
         displays,
+        placement: None,
     });
     assert!(ModBookIndex::build(vec![a.clone()], &Resources).is_ok());
     a.displays[0]
@@ -235,6 +236,7 @@ fn malformed_layouts_and_wrong_recipe_ownership_are_refused() {
     a.displays.push(mod_api::RecipeBookDisplayEntry {
         recipe: "demo:wrong_type".into(),
         displays: vec![shaped(vec![item()])],
+        placement: None,
     });
     assert!(matches!(
         ModBookIndex::build(vec![a], &Resources),

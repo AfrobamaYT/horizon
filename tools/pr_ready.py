@@ -370,9 +370,9 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
     steps = [
         Step("Cargo.lock", where="git"),
         Step("Public tree", "python3 tools/check_public_tree.py", where="here"),
-        # Upstream layer/address policies are not yet fully adapted to the fork's
-        # split mod crates and separate launcher/registry workspaces. Run their
-        # diagnostics manually until the fork baseline is reviewed.
+        # docs/layers.md: a crate depends only on its own layer or a lower one, and the exceptions only shrink.
+        Step("Layers", f"python3 tools/check_layers.py --base {shlex.quote(base)}", where="here"),
+        Step("Addresses", f"python3 tools/check_addresses.py --base {shlex.quote(base)}", where="here"),
         Step("File size", f"python3 tools/check_file_size.py --base {shlex.quote(base)}", where="here"),
         # Always, as in CI: some read the crates, the roadmap or the workflows.
         Step("Python tests", "python3 -m unittest discover -s tests", where="here", summary=unittest_passed),
@@ -597,6 +597,17 @@ def block(args, base, merge_base, changed, counts, steps, label, elapsed):
         took = f" ({duration(step.seconds)})" if step.seconds else ""
         detail = f" {step.detail}" if step.detail else ""
         lines.append(f"| {step.name} | {MARK[step.status]}{detail}{took} |")
+    content = next((step for step in steps if step.name == "content root tests"), None)
+    resource_override = os.environ.get("HORIZON_TEST_RESOURCES")
+    resource_roots = [Path(resource_override)] if resource_override is not None else [
+        ROOT / ".local/horizon-client/26.3", ROOT.parent.parent / ".local/horizon-client/26.3"]
+    if args.host == "local" and not any((root / "gameplay-facts.json").is_file() for root in resource_roots):
+        data_tests = "data-backed tests not run: no prepared data here"
+    elif content and content.status in {"pass", "fail"}:
+        data_tests = f"data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): {content.detail or content.status}"
+    else:
+        data_tests = "data-backed tests not run: content root untouched"
+    lines.append(f"| Data-backed cargo tests | {data_tests} |")
     lines.append(f"| Label | {label} |")
     return "\n".join(lines)
 

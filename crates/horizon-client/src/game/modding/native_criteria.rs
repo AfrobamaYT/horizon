@@ -84,6 +84,64 @@ impl Game<'_> {
         .ok_or(TriggerCriterionError::PlayerUnavailable)?
     }
 
+    /// `ServerPlayerGameMode.useItemOn`'s consumed default use, for a use a mod handled:
+    /// `default_block_use`, then `any_block_use` with the empty hand, for the player in place.
+    pub(super) fn player_trigger_block_use(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+    ) -> Result<(), TriggerCriterionError> {
+        self.with_block_use_player(player, pos, |g| {
+            g.trigger_default_block_use(pos);
+            // The default use has no tool: `any_block_use` sees the empty stack the engine's
+            // own use path passes for an empty hand.
+            g.trigger_any_block_use(
+                pos,
+                &horizon_client::items::ItemStack::new("minecraft:air", 0),
+            );
+        })
+    }
+
+    /// The consumed item use, for a use a mod handled: `item_used_on_block` against
+    /// `original` (the hook's snapshot), then `any_block_use` against `after`.
+    pub(super) fn player_trigger_item_used_on_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        original: &horizon_client::items::ItemStack,
+        after: &horizon_client::items::ItemStack,
+    ) -> Result<(), TriggerCriterionError> {
+        self.with_block_use_player(player, pos, |g| {
+            g.trigger_block("minecraft:item_used_on_block", pos, original);
+            g.trigger_any_block_use(pos, after);
+        })
+    }
+
+    /// Resolve the player as `player_trigger_criterion` does, refuse an unloaded chunk, then
+    /// fire in the player's own level, so predicates read where they are.
+    fn with_block_use_player(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        fire: impl FnOnce(&mut Self),
+    ) -> Result<(), TriggerCriterionError> {
+        if self.remote.is_some() {
+            return Err(TriggerCriterionError::NotServer);
+        }
+        let target = self
+            .player_handle_read(player)
+            .and_then(|_| self.native_entity_target(player.entity()))
+            .ok_or(TriggerCriterionError::PlayerUnavailable)?;
+        self.for_player(target, |g| {
+            if !g.world.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4)) {
+                return Err(TriggerCriterionError::UnloadedChunk);
+            }
+            fire(g);
+            Ok(())
+        })
+        .ok_or(TriggerCriterionError::PlayerUnavailable)?
+    }
+
     /// `trigger` for a mod's trigger, for the player in place.
     fn trigger_mod_criteria(
         &mut self,

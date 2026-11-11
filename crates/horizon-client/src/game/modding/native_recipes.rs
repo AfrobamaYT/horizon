@@ -558,7 +558,7 @@ impl Game<'_> {
     /// last, the window's tables take the server's recipes of those types in
     /// place of its own, and the mods hear of it (`RecipesReceivedEvent`).
     pub(super) fn remote_recipe_content(&mut self, data: &[u8]) {
-        let part: horizon_client::lan::recipes::ContentPart = match serde_json::from_slice(data) {
+        let part = match horizon_client::lan::recipes::ContentPart::decode(data) {
             Ok(part) => part,
             Err(e) => {
                 log::warn!("Horizon: bad recipe content from the server: {e}");

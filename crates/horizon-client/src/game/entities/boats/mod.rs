@@ -1511,12 +1511,11 @@ impl Game<'_> {
     }
     /// Where the boat at `i` lets a player facing `yaw` off.
     pub(super) fn boat_player_dismount_target(&self, i: usize, yaw: f32) -> Vec3 {
-        self.boat_dismount_target(i, 0.6, yaw)
+        self.boat_dismount_target(&self.boats[i], 0.6, yaw)
     }
     /// `getDismountLocationForPassenger` for a passenger `width` wide
     /// facing `yaw`.
-    pub(super) fn boat_dismount_target(&self, i: usize, width: f64, yaw: f32) -> Vec3 {
-        let b = &self.boats[i];
+    pub(super) fn boat_dismount_target(&self, b: &Boat, width: f64, yaw: f32) -> Vec3 {
         let r = yaw.to_radians();
         let distance = (WIDTH * std::f64::consts::SQRT_2 + width + 1.0e-5) / 2.0;
         let (s, c) = (-(r.sin()) as f64, r.cos() as f64);

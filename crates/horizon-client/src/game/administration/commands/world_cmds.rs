@@ -113,6 +113,9 @@ impl Game<'_> {
         let index = &world_stations!(self).recipe_index;
         let removed = self.level.recipe_book.remove_recipes(index, recipes);
         let count = removed.len() as i32;
+        if count != 0 {
+            self.invalidate_mod_book_placement_knowledge();
+        }
         // A network player's client drops them from its book.
         if self.lan_acting.is_some() && !removed.is_empty() {
             self.guest_packets.push(C::RecipeBookRemove(
@@ -1891,7 +1894,7 @@ impl Game<'_> {
             ));
         }
         let (width, yaw) = (f64::from(mob.width()), mob.yaw);
-        if let Some(b) = self.boats.iter().position(|b| b.id == v) {
+        if let Some(b) = self.boat_object(v) {
             return Some(self.boat_dismount_target(b, width, yaw));
         }
         self.horse_dismount_point(v, rider)

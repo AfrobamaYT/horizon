@@ -140,6 +140,24 @@ class PrebuiltContentsTests(unittest.TestCase):
         eligible = prebuilt_game.facade_crates(deps, runtime)
         self.assertEqual(eligible, ["horizon_client", "horizon_core", "horizon_mod_host", "horizon_mod_wasm"])
 
+    def test_native_link_inventory_uses_package_identity_not_a_same_named_host_variant(self):
+        def package(package_id, version, library=None):
+            return {"id": package_id, "name": "native-sys" if library else "horizon-mod-host",
+                    "version": version, "links": library,
+                    "targets": [{"name": "native_sys" if library else "horizon_client", "kind": ["lib"]}]}
+        metadata = {
+            "packages": [package("game", "1.0.0"), package("target", "1.0.0", "native"),
+                         package("host", "2.0.0", "native")],
+            "resolve": {"nodes": [
+                {"id": "game", "deps": [{"pkg": "target", "dep_kinds": [{"kind": None}]},
+                                          {"pkg": "host", "dep_kinds": [{"kind": "build"}]}]},
+                {"id": "target", "deps": []}, {"id": "host", "deps": []},
+            ]},
+        }
+        self.assertEqual(prebuilt_game.native_links(metadata, "horizon-mod-host"), [
+            {"name": "native-sys", "version": "1.0.0", "library": "native"},
+        ])
+
     def test_sdk_assertion_refuses_a_duplicate_eligible_facade_on_every_os(self):
         root = self.folder("deps/libhorizon_core-one.rmeta", "deps/libmod_api-one.rmeta",
                            "deps/libhorizon_mod_package-one.rmeta")

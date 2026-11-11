@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import zlib
 from pathlib import Path
 
@@ -98,8 +99,17 @@ def run(package, skip, number=None, count=None):
             # Worldgen must meet its real-time deadlines without disabling test assertions.
             env["CARGO_PROFILE_TEST_OPT_LEVEL"] = "3"
         # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
+        # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
+        client_half = package == "horizon-client" and count == 2 and number in (1, 2)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
+        if client_half:
+            command.append("--jobs=8")
         expected = set()
+        timing = os.environ.get("HORIZON_DATA_LEG_TIMING") == "1"
+        phase = f"{package}#{number}of{count}" if number is not None else package
+        if timing:
+            print(f"data-leg phase={phase} compile-list-start utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}", flush=True)
+        compile_started = time.monotonic()
         if number is not None:
             # List what exists, then skip every test another leg owns.
             listing = subprocess.run(
@@ -116,10 +126,18 @@ def run(package, skip, number=None, count=None):
             skip = [*skip, *others]
             print(f"{package}: leg {number} of {count} runs {len(names) - len(others)} of {len(names)} listed tests")
         skips = [arg for test in skip for arg in ("--skip", test)]
+        if timing:
+            # Listing already compiled the target(s). Do not forward its output.
+            # This marks the existing test command, not an instruction inside a binary.
+            print(f"data-leg phase={phase} test-command-start utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} listed={int(number is not None)} compile_list_seconds={time.monotonic() - compile_started:.3f}", flush=True)
+        execution_started = time.monotonic()
+        threads = 8 if client_half else 4
         process = subprocess.run(
-            [*command, "--", "--include-ignored", "--exact", "--test-threads=4", *skips],
+            [*command, "--", "--include-ignored", "--exact", f"--test-threads={threads}", *skips],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,
         )
+        if timing:
+            print(f"data-leg phase={phase} test-command-end utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} execution_seconds={time.monotonic() - execution_started:.3f}", flush=True)
     results = {}
     summaries = []
     print(f"{package}: cargo exit {process.returncode}")
@@ -164,8 +182,9 @@ def run(package, skip, number=None, count=None):
             print(f"  {name}")
         return None
     if not summaries:
-        # A build failure: the compiler's output quotes only this repository's code.
-        print(process.stdout[-20000:])
+        # Unknown output is not necessarily a compiler diagnostic: never forward
+        # a malformed test process's captured payload to public CI logs.
+        print(f"{package}: no completed test-target summary; raw output withheld")
         return None
     return results
 

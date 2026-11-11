@@ -311,8 +311,9 @@ the entire declared book, not just the visible page.
 
 ## Menu-owned destination roles
 
-During shared registration, `r.menu_recipe_book(menu, &book, recipe_type, layout)`
-binds a content menu to a registered book and a recipe type. The menu namespace
+During shared registration,
+`r.menu_recipe_book(menu, &book, recipe_type, layout, screen)` binds a content
+menu to a registered book, a recipe type and its existing typed `Screen` value. The menu namespace
 must belong to the registering mod. Duplicate bindings and unknown books refuse
 installation even when the registration error is ignored. The declaration is
 frozen with the other registrations and explicitly derives `Wire`, for the
@@ -328,16 +329,20 @@ same native and wasm transport.
 
 These are container slots, not the appended player inventory. Overlapping roles,
 invalid dimensions and indices outside the 256-slot menu bound refuse registration.
-Book loading checks against the actual content menu size. A declared crafting
-map must exactly agree with the menu's existing `MenuCrafting` storage and result.
+Book loading checks against the actual content menu size. If the menu has an
+instantaneous `MenuCrafting` backend, its grid and computed result must exactly
+agree with the declaration. Without that backend, a crafting map describes real
+persistent input storage instead: for example, six cooking-pot inputs in a 3 by 2
+grid. Placement never fills its cooked output or fuel, and preserves those slots.
 An incompatible display or one that does not fit refuses the declaration
 generation rather than truncating ingredients. All mapped slots need finite
-coordinates in `Screen.slots`; opening an incompatible screen is refused. This
-is currently an open-time check, not an atomic screen-registration error:
-`native_screen` returns geometry at runtime, after the server has opened the
-menu. The adapter/rendering follow-up must move the required geometry contract
-to startup before enabling placement. The foundation does not introduce a new
-screen registration system.
+coordinates in `Screen.slots`. Registration rejects missing or nonfinite
+coordinates, nonpositive/nonfinite panel sizes and a screen bound to another
+book. Startup also rejects geometry for slots beyond the actual content menu.
+The screen is frozen in this same declaration, not a second registry. For these
+book-enabled menus, both the client layout and server hidden-slot policy use
+that registered screen; `native_screen` is not consulted. Other mod menus still
+obtain their screens dynamically.
 
 The shared mapper uses vanilla `PlaceRecipeHelper`: a 1 by 1 shaped recipe in
 a 3 by 3 grid is centered; a 2 by 2 recipe starts at the upper left and retains
@@ -345,9 +350,42 @@ its holes. Shapeless ingredients occupy consecutive cells. Furnace fuel is
 included in a preview only when its slot is empty. Station icons never map to
 menu ingredients. Result display stacks retain their components and counts.
 
-This foundation does not activate ghost rendering or click-to-place requests.
-Those require the authoritative recipe type's placement information and a
-server missing-ingredients response. Displays are pictures, not ingredient
-predicates; declaring a result ghost never grants a real stack. NeoForge 26.3
-public documentation names no registration counterpart for vanilla's internal
-`GhostSlots.setInput` and `setResult`; these declaration names are Horizon's.
+## Authoritative placement information
+
+A menu-bound recipe type supplies `RecipeBookDisplayEntry.placement` as
+`Some(PlacementInfo { cells, shape })`. Each cell is either an authoritative
+`Ingredient` predicate or an empty position; `shape: Some([width, height])`
+preserves shaped holes, while `None` gives the menu's ordered inputs. The recipe
+type owns these predicates, including custom component-sensitive tests. Display
+pictures never substitute for them. Use `PlacementInfo::NOT_PLACEABLE` explicitly
+for a preview-only recipe. Omitting placement information from a bound recipe
+refuses its declaration load rather than guessing ingredients from its icons.
+
+The shared Wire boundary allows 32 structural record levels, including the
+category, display-entry and placement-info envelope. Nested ingredient shapes
+must fit that complete envelope; the native validator and wasm boundary use the
+same codec and refuse excess depth with `WireError`. Opaque NBT has its separate,
+iterative vanilla limit of 512 container levels; it does not spend one structural
+level per NBT container. Wide, shallow cooking grids do not consume extra depth.
+
+Bound menus use the server's negotiated catalogue, not a reconstruction from
+local client recipe JSON. Each request names the exact published recipe and
+original display alternative, scoped to the connection epoch, open window,
+screen nonce, server menu instance and declaration generation. Left click places
+one increment; Shift requests the maximum. Right click opens the alternatives
+preview, whose left-click selection preserves the original source index even
+after filtering and craftability sorting. Unbound books remain preview-only.
+
+The server tests the recipe type's authoritative predicates against exact
+component-aware stack classes and rechecks its live context after callbacks.
+It commits placement atomically, or refuses without publishing a partial plan.
+Persistent machines retain their real fuel and cooked output; placement does not
+craft their output. Only a current server missing-ingredients response installs
+ghost hints. Every new click, window change, disconnect or declaration reload
+revokes pending hints. Ghosts use the shared vanilla painter and the registered
+screen's native slot geometry, never built-in slot coordinates.
+
+Displays are pictures, not ingredient predicates; declaring a result ghost never
+grants a real stack. NeoForge 26.3 public documentation names no registration
+counterpart for vanilla's internal `GhostSlots.setInput` and `setResult`; these
+declaration names are Horizon's.
