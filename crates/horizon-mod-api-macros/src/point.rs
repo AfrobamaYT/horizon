@@ -614,6 +614,20 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         redirect.then(|| quote!(let mut __fnr_to: *const () = ::std::ptr::null();));
     let redirect_load = redirect
         .then(|| quote!(__fnr_to = #table::__private::redirect(#table::PointId::#head_variant);));
+    // With a replacement body installed, the listeners' path runs only if listeners are there.
+    let listeners_body = quote! {
+        (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api #head_raw (#(#owned,)*) });
+        #stop
+    };
+    let listeners_path = if redirect {
+        quote! {
+            if __fnr_to.is_null() || #table::__private::listened(#table::PointId::#head_variant) {
+                #listeners_body
+            }
+        }
+    } else {
+        listeners_body
+    };
     let recv_arg = match shape.receiver {
         Receiver::None => quote!(),
         Receiver::Shared => quote!(self,),
@@ -662,9 +676,8 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         // The listened path stays out of line, so a point nothing listens at keeps the function
         // small enough to inline: one load and a branch.
         if #head_listened {
-            (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api #head_raw (#(#owned,)*) });
-            #stop
             #redirect_load
+            #listeners_path
         }
         #(#shared_refs)*
         #returned_local

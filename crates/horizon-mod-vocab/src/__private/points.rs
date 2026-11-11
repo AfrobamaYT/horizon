@@ -59,6 +59,15 @@ impl Table {
             .map_or(std::ptr::null(), |slot| slot.load(Ordering::Acquire))
     }
 
+    /// Whether any listener is sealed at `place`: a point whose head slot is set only for its
+    /// replacement body skips its listeners' path.
+    #[inline]
+    pub fn listened(&self, place: usize) -> bool {
+        self.sealed
+            .get()
+            .is_some_and(|sealed| !sealed.slots[place].entries.is_empty())
+    }
+
     /// Installs `redirect`'s body in place of its point's, once per point, before the game runs.
     pub fn install(&self, redirect: &Redirect) -> Result<(), String> {
         let place = redirect.place.index;

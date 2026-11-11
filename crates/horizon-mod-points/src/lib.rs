@@ -137,6 +137,13 @@ pub mod __private {
         TABLE.redirect(place as usize)
     }
 
+    /// Whether any listener is sealed at `place` (its head slot may be set for a replacement
+    /// body alone).
+    #[inline]
+    pub fn listened(place: PointId) -> bool {
+        TABLE.listened(place as usize)
+    }
+
     /// Whether an active `replace` listener owns `place`'s outcome. A point's head checks it
     /// around its internals listeners, which run after the API ones and may not undo it.
     #[inline]
