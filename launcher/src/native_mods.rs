@@ -3991,23 +3991,52 @@ mod tests {
                 .expect("operation=spawn path_class=test_binary")
                 .wait_with_output()
                 .expect("operation=wait path_class=test_binary");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let step = stderr
+                .lines()
+                .filter_map(|line| line.strip_prefix("NATIVE_SERVER_EXPORT_STEP="))
+                .filter(|step| {
+                    [
+                        "prepare_base",
+                        "prepare_package",
+                        "install",
+                        "discoverability",
+                        "export",
+                        "remove_cache",
+                        "verify_export",
+                        "remove_project",
+                        "verify_package",
+                        "load_runtime",
+                        "verify_runtime",
+                        "cleanup",
+                    ]
+                    .contains(step)
+                })
+                .last()
+                .unwrap_or("not_started");
             let diagnostic = [
                 ("install", "NATIVE_SERVER_EXPORT_INSTALL_OS="),
                 ("remove", "NATIVE_SERVER_EXPORT_REMOVE_OS="),
             ]
             .into_iter()
             .find_map(|(operation, prefix)| {
-                output.stderr.split(|byte| *byte == b'\n').find_map(|line| {
-                    std::str::from_utf8(line)
-                        .ok()?
-                        .trim_end_matches('\r')
-                        .strip_prefix(prefix)?
+                stderr.lines().find_map(|line| {
+                    line.strip_prefix(prefix)?
                         .parse::<i32>()
                         .ok()
                         .map(|code| (operation, code))
                 })
             })
             .unwrap_or(("isolated_test", 0));
+            let assertion = stderr.lines().any(|line| {
+                line.starts_with("assertion failed:") || line.starts_with("assertion `")
+            });
+            let error_class = match diagnostic.0 {
+                "install" => "install_error",
+                "remove" => "remove_error",
+                _ if assertion => "assertion",
+                _ => "other",
+            };
             let completion = b"NATIVE_SERVER_EXPORT_COMPLETE";
             let completed = output
                 .stdout
@@ -4015,21 +4044,24 @@ mod tests {
                 .filter(|window| *window == completion)
                 .count()
                 == 1;
+            let status = output.status;
             assert!(
-                output.status.success() && completed,
-                "operation={} path_class=server_cache os_error={}",
+                status.success() && completed,
+                "step={step} exit_status={status} completed={completed} error_class={error_class} operation={} path_class=server_cache os_error={}",
                 diagnostic.0,
                 diagnostic.1
             );
+            drop(stderr);
             drop(output);
             home.close().unwrap_or_else(|error| {
                 panic!(
-                    "operation=remove path_class=private_home os_error={:?}",
+                    "step=remove_private_home exit_status={status} error_class=remove_error operation=remove path_class=private_home os_error={:?}",
                     error.raw_os_error()
                 )
             });
             return;
         }
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=prepare_base");
         let base = "native-test-server-base";
         let version = "native-test-server-cache";
         let source = backend::version_dir(base);
@@ -4042,6 +4074,7 @@ mod tests {
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
         let native_dir = horizon_mod_package::mod_list::NATIVE_DIR;
         fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=prepare_package");
         let project = dir("server-runtime-project");
         write_bundle(&project, "exported", "pub fn hook() {}");
         for (path, bytes) in [
@@ -4056,6 +4089,7 @@ mod tests {
         let bundle = bundle_in(&project).unwrap().unwrap();
         let binary = dir("server-install").join("built");
         fs::write(&binary, b"modded").unwrap();
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=install");
         install(
             base,
             version,
@@ -4075,18 +4109,22 @@ mod tests {
                 .unwrap_or(0);
             panic!("NATIVE_SERVER_EXPORT_INSTALL_OS={code}")
         });
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=discoverability");
         assert!(!backend::installed().contains(&version.to_string()));
         let cached = Target::Server.directory(version);
         let output = dir("server-independent").join("export");
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=export");
         export(&cached, &output).unwrap();
         // install/export retain no files, iterators or compiler/tool children;
         // their synchronous calls have returned before this cache deletion.
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=remove_cache");
         fs::remove_dir_all(cached).unwrap_or_else(|error| {
             panic!(
                 "NATIVE_SERVER_EXPORT_REMOVE_OS={}",
                 error.raw_os_error().unwrap_or(0)
             )
         });
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=verify_export");
         assert_eq!(
             fs::read(output.join(Target::Server.binary())).unwrap(),
             b"modded"
@@ -4096,7 +4134,14 @@ mod tests {
             b"facts"
         );
         assert!(output.join("native-mods.json").is_file());
-        fs::remove_dir_all(project).unwrap();
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=remove_project");
+        fs::remove_dir_all(project).unwrap_or_else(|error| {
+            panic!(
+                "NATIVE_SERVER_EXPORT_REMOVE_OS={}",
+                error.raw_os_error().unwrap_or(0)
+            )
+        });
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=verify_package");
         let package = output.join(native_dir).join("exported");
         assert_eq!(
             fs::read(package.join("assets/exported/probe.txt")).unwrap(),
@@ -4108,6 +4153,7 @@ mod tests {
         );
         assert!(!package.join("jars").exists());
         assert!(!output.join(native_dir).join("stale").exists());
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=load_runtime");
         let runtime = horizon_mod_package::runtime::Runtime::load(
             &output.join(Target::Server.binary()),
             &[horizon_mod_package::runtime::BuiltMod {
@@ -4117,7 +4163,9 @@ mod tests {
             }],
         )
         .unwrap();
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=verify_runtime");
         assert_eq!(runtime.packages()[0].path, package);
+        eprintln!("NATIVE_SERVER_EXPORT_STEP=cleanup");
         drop(runtime);
         let _ = fs::remove_dir_all(source);
         println!("NATIVE_SERVER_EXPORT_COMPLETE");
