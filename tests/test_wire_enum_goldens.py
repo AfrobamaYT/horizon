@@ -20,6 +20,24 @@ class WireEnumDiscoveryTests(unittest.TestCase):
         '''
         self.assertEqual(MODULE.discover(source), {"Plain"})
 
+    def test_unsupported_local_fieldless_impl_headers_fail_closed(self):
+        for header in [
+            "impl<const N: usize> ::mod_api::wire::Wire for Flag<N>",
+            "impl ::mod_api::wire::Wire for crate::Flag",
+            "impl ::mod_api::wire::Wire for Flag where (): Sized",
+            "impl Wire for Flag",
+        ]:
+            with self.subTest(header=header):
+                with self.assertRaisesRegex(ValueError, "unsupported.*Flag"):
+                    MODULE.discover(f"enum Flag {{ A }} {header} {{}}")
+
+    def test_external_manual_codecs_do_not_enter_local_derive_inventory(self):
+        self.assertEqual(MODULE.discover('''
+            enum Local { A }
+            impl ::mod_api::wire::Wire for Local {}
+            impl crate::wire::Wire for external::Other {}
+        '''), {"Local"})
+
     def test_duplicate_leaf_identity_refuses_instead_of_dropping(self):
         with self.assertRaisesRegex(ValueError, "ambiguous"):
             MODULE.discover('''

@@ -23,8 +23,10 @@ def discover(source):
     source = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/',
                     lambda match: "" if match[0].startswith(("//", "/*")) else match[0], source)
     tokens = re.findall(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|::|[^\s]', source)
-    impls = set(re.findall(r"impl\s+(?:::)?[\w:]*wire::Wire\s+for\s+(\w+)\s*\{", source))
-    enums = set()
+    headers = re.sub(r'"(?:\\.|[^"\\])*"', '""', source)
+    supported = r"impl\s+(?:::)?[\w:]*wire::Wire\s+for\s+(\w+)\s*\{"
+    impls = set(re.findall(supported, headers))
+    local_units = {}
     for i, token in enumerate(tokens[:-2]):
         if token != "enum":
             continue
@@ -60,10 +62,19 @@ def discover(source):
                 discriminant = False
             elif item in ("(", "{") and not discriminant:
                 unit = False
-        if unit and name in impls:
-            if name in enums:
-                raise ValueError(f"ambiguous enum leaf identity: {name}")
-            enums.add(name)
+        if unit:
+            local_units[name] = local_units.get(name, 0) + 1
+    # This deliberately supports the derive's simple owned impl shape only.
+    # Refuse unusual headers targeting local unit enums instead of silently
+    # dropping them from coverage (including const-generic impl parameters).
+    for match in re.finditer(r"\bimpl\b[^{};]*\bWire\b[^{};]*\bfor\s+([\w:]+)[^{};]*\{", headers):
+        name = match[1].split("::")[-1]
+        if name in local_units and re.fullmatch(supported, match[0]) is None:
+            raise ValueError(f"unsupported Wire impl header for local fieldless enum: {name}")
+    enums = set(local_units) & impls
+    for name in enums:
+        if local_units[name] != 1:
+            raise ValueError(f"ambiguous enum leaf identity: {name}")
     return enums
 
 

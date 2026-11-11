@@ -10,8 +10,18 @@ through their actual compiled `Wire::layout` implementations. Generated/private
 The generated ordinary Rust test calls each actual type, with no unsafe code.
 The generator independently discovers unit-variant enums and Wire impls from
 compiler expansion and requires exact identity coverage against the manifest.
-Ambiguous names fail rather than silently selecting a type. The checked
-configuration is native/default features, not inactive target or feature branches.
+Ambiguous names and unsupported generic/qualified/where-clause impl headers for
+local unit enums fail rather than silently dropping a type. The 151 pins cover
+locally defined fieldless Wire derives, including generated/private enums. They
+do not cover external types with manual codecs (such as horizon-core's Direction
+or horizon-mod-runtime's attachment types), which this derive change cannot affect.
+The checked configuration is native/default features, not inactive target or
+feature branches.
+
+Two generated fixture paths were corrected using rustc E0603 re-export
+suggestions: EditKey and ProvidedBy. This is compiler-guided fixture data, not
+automatic alias resolution in the generator. Each manifest entry retains its
+canonical symbol identity; those two also retain the correction provenance.
 
 Regenerate or check without running the game:
 
