@@ -31,7 +31,7 @@ pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
     signature_exclusion(attrs, sig).is_none()
 }
 
-fn signature_exclusion(attrs: &[syn::Attribute], sig: &syn::Signature) -> Option<&'static str> {
+pub(crate) fn signature_exclusion(attrs: &[syn::Attribute], sig: &syn::Signature) -> Option<&'static str> {
     struct Opaque(bool);
     impl<'ast> syn::visit::Visit<'ast> for Opaque {
         fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {

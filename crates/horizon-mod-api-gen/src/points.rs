@@ -171,6 +171,8 @@ pub(crate) struct Found<'a> {
     /// The types its signature names that cross as `mod_api` types, as written, with the API
     /// type's path and whether it converts (an engine type's [`MIRRORS`] entry).
     mirrors: Vec<(String, String, bool)>,
+    /// The replacement rule that leaves it without a cell, and so without a point site.
+    unreplaceable: Option<&'static str>,
 }
 
 impl Found<'_> {
@@ -244,9 +246,18 @@ impl Found<'_> {
         parts.join(", ")
     }
 
+    /// Its shape. A function without a replacement cell has no site a listener could run at:
+    /// its API listeners are refused, naming the rule.
     fn shape(&self) -> Result<point_shape::Shape, String> {
-        point_shape::shape(self.attribute().parse().expect("the attribute"), self.sig)
-            .map_err(|e| format!("{}: {e}", self.target()))
+        let mut shape =
+            point_shape::shape(self.attribute().parse().expect("the attribute"), self.sig)
+                .map_err(|e| format!("{}: {e}", self.target()))?;
+        if let Some(rule) = self.unreplaceable {
+            shape.api_refusal = Some(format!(
+                "the function has no point site: it takes no replacement ({rule})"
+            ));
+        }
+        Ok(shape)
     }
 }
 
@@ -309,6 +320,7 @@ pub(crate) fn file_functions<'a>(
                     sig: &function.sig,
                     owner: None,
                     mirrors: Vec::new(),
+                    unreplaceable: None,
                 };
                 if keep(&found) {
                     out.push(found);
@@ -332,6 +344,7 @@ pub(crate) fn file_functions<'a>(
                             sig: &method.sig,
                             owner: Some((&block.self_ty, &block.generics)),
                             mirrors: Vec::new(),
+                            unreplaceable: None,
                         };
                         if keep(&found) {
                             out.push(found);
@@ -415,15 +428,9 @@ impl Scanned {
     /// This file's points: all of a game-module file's, or the listed ones of a lower crate's.
     fn points<'a>(&'a self, list: &[(String, String)], wire: &WireTypes) -> Vec<Found<'a>> {
         let mut out = Vec::new();
-        // A point is installed through its function's replacement cell: only a replaceable
-        // function has one.
-        let none = std::collections::BTreeSet::new();
-        let replaceable = crate::replace::targets(&self.module, &self.parsed, &none, &none);
         let keep = |found: &Found<'_>| {
             // A staged copy also holds what the replacement pass wrote beside each function.
-            if found.sig.ident.to_string().starts_with("__fnr_")
-                || !replaceable.contains(&found.target())
-            {
+            if found.sig.ident.to_string().starts_with("__fnr_") {
                 return false;
             }
             if self.package.is_none() {
@@ -434,9 +441,25 @@ impl Scanned {
         };
         file_points(&self.module, &self.parsed.items, &keep, &mut out);
         let uses = imports(&self.parsed.items, "horizon_client");
+        // A point is installed through its function's replacement cell: only a replaceable
+        // function has one.
+        let none = std::collections::BTreeSet::new();
+        let replaceable = crate::replace::targets(&self.module, &self.parsed, &none, &none);
         for found in &mut out {
             // Only the game's own crate has the conversions a mirror goes through.
             found.mirrors = mirrors(found.sig, &uses, wire, self.package.is_none());
+            if !replaceable.contains(&found.target()) {
+                found.unreplaceable = Some(
+                    crate::replace::signature_exclusion(found.attrs, found.sig).unwrap_or(
+                        match found.owner {
+                            Some((_, generics)) if !crate::replace::lifetimes_only(generics) => {
+                                "impl type/const generics"
+                            }
+                            _ => "no replacement cell",
+                        },
+                    ),
+                );
+            }
         }
         out
     }
@@ -1518,6 +1541,12 @@ name = 'horizon-mod-api-gen'
                     true
                 ),
                 (
+                    "game_remote_decode",
+                    "horizon_client::game::remote::decode",
+                    "none",
+                    false
+                ),
+                (
                     "game_remote_other_send",
                     "horizon_client::game::remote::Other::send",
                     "none",
@@ -1548,8 +1577,16 @@ name = 'horizon-mod-api-gen'
                 && !api.contains("fn game_remote_other_send ("),
             "{api}"
         );
+        // A generic function takes no replacement, so it has no site: refused, naming the rule.
+        let decode = points.iter().find(|p| p.name == "game_remote_decode");
+        assert_eq!(
+            decode.unwrap().api_refusal.as_deref(),
+            Some(
+                "the function has no point site: it takes no replacement (function type/const generics)"
+            )
+        );
         let staged = stage_with(&root, &WireTypes::new()).unwrap();
-        assert_eq!((staged.points, staged.head_only, staged.refused), (7, 1, 2));
+        assert_eq!((staged.points, staged.head_only, staged.refused), (7, 1, 3));
         let game = std::fs::read_to_string(root.join("crates/horizon-client/src/game.rs")).unwrap();
         assert!(
             game.contains("#[horizon_mod_api_macros::point(side = \"both\")] fn tick(")
