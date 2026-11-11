@@ -208,7 +208,7 @@ mod tests {
             *mod_api::wire::LAYOUT
         ))
         .unwrap();
-        let module = WasmMod::instantiate(
+        let mut modules = WasmMod::instantiate(
             &crate::runtime::engine().unwrap(),
             &[("libsite.so", &manifest)],
             &[crate::link::Member {
@@ -219,7 +219,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            listen_checked(&manifest, &module).unwrap_err(),
+            listen_checked(&manifest, &modules.remove(0)).unwrap_err(),
             "site_test: game::tick: this build has no point sites; start the game through the launcher's mod build"
         );
     }
