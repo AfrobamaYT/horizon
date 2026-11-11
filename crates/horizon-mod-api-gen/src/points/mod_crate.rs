@@ -198,9 +198,6 @@ fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Li
                 format!("name = {name:?}"),
                 format!("table = \"crate::{TABLE}\""),
             ];
-            if point_shape::raw_able(found.sig, found.owner.map(|(_, generics)| generics)) {
-                attribute.push("raw".into());
-            }
             if found.owner.is_none() {
                 attribute.push("free".into());
             }
@@ -224,11 +221,6 @@ fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Li
             let target = found.target();
             let signature = signature(&target, found.sig, &shape);
             let mut point = GamePoint::new(shape, &found, target);
-            // Raw forms are named from the crate root, where the table module is.
-            let local =
-                |path: String| format!("crate{}", path.strip_prefix(krate).unwrap_or(&path));
-            point.listener = point.listener.take().map(local);
-            point.return_listener = point.return_listener.take().map(local);
             point.hash = Some(crate::internals::signature_hash(&signature));
             point.signature = Some(signature);
             out.push(Listed {
@@ -280,14 +272,11 @@ fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog
             .map(|point| point_shape::catalog::Point {
                 hash: point.hash.unwrap_or_default(),
                 signature: point.signature.unwrap_or_default(),
-                raw: point.raw,
                 at_return: point.at_return,
                 api_refusal: point.api_refusal,
                 returns: point.returns.to_owned(),
                 host: point.host.to_owned(),
                 return_ty: point.return_ty,
-                listener: point.listener,
-                return_listener: point.return_listener,
                 name: point.name,
                 target: point.target,
             })
@@ -324,6 +313,10 @@ pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
             .collect();
         let mut edits: Vec<(usize, String)> = Vec::new();
         for listed in &here {
+            // A function with no API record has no listeners: it is not marked.
+            if listed.point.api_refusal.is_some() {
+                continue;
+            }
             let found = &listed.found;
             let start = match found.vis {
                 syn::Visibility::Inherited => found.sig.fn_token.span.start(),
@@ -333,20 +326,6 @@ pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
                 super::offset(source, &lines, start),
                 format!("#[::mod_api::__point({})] ", listed.attribute),
             ));
-            let shape =
-                point_shape::shape(listed.attribute.parse().expect("the attribute"), found.sig)
-                    .map_err(|e| format!("{}: {e}", found.target()))?;
-            if shape.raw {
-                let items = shape.raw_items(
-                    found.sig,
-                    found.owner.map(|(ty, _)| ty),
-                    found.owner.map(|(_, generics)| generics),
-                );
-                edits.push((
-                    super::offset(source, &lines, found.end),
-                    format!("\n{items}\n"),
-                ));
-            }
         }
         edits.sort_by_key(|(at, _)| *at);
         let mut out = String::with_capacity(source.len());
@@ -401,63 +380,29 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
-    let raw: Vec<_> = points.iter().filter(|point| point.raw).flat_map(|point| {
-        let head = point.listener.clone().map(|listener| (point.name.clone(), listener));
-        let back = point
-            .return_listener
-            .clone()
-            .map(|listener| (format!("{}_return", point.name), listener));
-        head.into_iter().chain(back).map(|(place, listener)| {
-            let variant = quote::format_ident!("{}", point_shape::camel(&place));
-            let method = quote::format_ident!("{place}");
-            let listener: syn::Path = syn::parse_str(&listener).expect("a listener path");
-            let doc = format!("Registers an internals listener at `{place}`: a function of its exact raw listener type.");
-            quote! {
-                #[doc = #doc]
-                pub const fn #method(id: &'static str, listener: #listener) -> super::__private::SlotListener {
-                    // SAFETY: `listener` has this place's raw listener type, checked by the signature.
-                    unsafe { super::__private::SlotListener::new(id, PointId::#variant.place(), listener as *const ()) }
-                }
-            }
-        })
-    }).collect();
     // The wrapper executes in the library member, whose private mod_api owns its registry.
     // Only typed function pointers and scalar metadata cross the dynamic-link boundary.
     let mut registration = Vec::new();
-    for (module, source) in [
-        (
-            "listeners",
-            points.iter().map(|p| p.api[0].clone()).collect::<Vec<_>>(),
-        ),
-        ("raw", raw.iter().map(ToString::to_string).collect()),
-    ] {
-        for source in source {
-            let file: syn::File = syn::parse_str(&source).expect("generated constructors");
-            for item in file.items {
-                let syn::Item::Fn(function) = item else {
-                    continue;
-                };
-                let name = &function.sig.ident;
-                let bridge = quote::format_ident!("register_{module}_{name}");
-                let mut listener = function
-                    .sig
-                    .inputs
-                    .last()
-                    .expect("listener parameter")
-                    .clone();
-                if module == "listeners"
-                    && let syn::FnArg::Typed(argument) = &mut listener
-                {
-                    let ty = &argument.ty;
-                    *argument.ty = syn::parse_quote!(listeners::#ty);
-                }
-                let module = quote::format_ident!("{module}");
-                let constructor = if module == "raw" {
-                    quote!(#module::#name(id, listener).ordered(priority, injection))
-                } else {
-                    quote!(#module::#name(id, priority, injection, listener))
-                };
-                registration.push(quote! {
+    for source in points.iter().map(|p| &p.api[0]) {
+        let file: syn::File = syn::parse_str(source).expect("generated constructors");
+        for item in file.items {
+            let syn::Item::Fn(function) = item else {
+                continue;
+            };
+            let name = &function.sig.ident;
+            let bridge = quote::format_ident!("register_listeners_{name}");
+            let mut listener = function
+                .sig
+                .inputs
+                .last()
+                .expect("listener parameter")
+                .clone();
+            if let syn::FnArg::Typed(argument) = &mut listener {
+                let ty = &argument.ty;
+                *argument.ty = syn::parse_quote!(listeners::#ty);
+            }
+            let constructor = quote!(listeners::#name(id, priority, injection, listener));
+            registration.push(quote! {
                     /// Registers in this library member's registry; false means registration was refused.
                     #[inline(never)]
                     pub fn #bridge(id: &'static str, priority: i32, injection: &'static str, replace: bool, #listener) -> bool {
@@ -466,7 +411,6 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
                         ::mod_api::__private::points::register(&slot).is_ok()
                     }
                 });
-            }
         }
     }
     let doc =
@@ -495,28 +439,22 @@ pub(crate) fn table(points: &[GamePoint]) -> String {
         pub mod __private {
             use super::PointId;
             use ::std::sync::atomic::AtomicBool;
-            pub use ::mod_api::__private::points::{ApiKind, PointHost, RawKind, SlotListener};
+            pub use ::mod_api::__private::points::{ApiKind, PointHost, SlotListener};
             /// Each place's slot: set once, at the seal, where an addon listens.
             pub static POINTS: [AtomicBool; super::POINT_COUNT] = [const { AtomicBool::new(false) }; super::POINT_COUNT];
-            static SITES: [AtomicBool; 0] = [];
             /// The mod's table.
-            pub static TABLE: ::mod_api::__private::points::Table = ::mod_api::__private::points::Table::new(&POINTS, &SITES);
+            pub static TABLE: ::mod_api::__private::points::Table = ::mod_api::__private::points::Table::new(&POINTS);
             /// Whether an active `replace` listener owns `place`'s outcome.
             #[inline]
             pub fn replaced(place: PointId) -> bool { TABLE.replaced(place as usize) }
             /// Runs the API listeners at `place`.
             #[inline]
             pub fn fire_api(place: PointId, call: &mut dyn FnMut(ApiKind)) { TABLE.fire_api(place as usize, call) }
-            /// Runs the internals listeners at `place`.
-            #[inline]
-            pub fn fire_raw(place: PointId, call: &mut dyn FnMut(RawKind)) { TABLE.fire_raw(place as usize, call) }
         }
         /// Typed API listener aliases and constructors.
         pub mod listeners { use super::*; #(#listeners)* }
         /// The points' typed dispatch.
         pub mod dispatch { use super::*; #(#dispatch)* }
-        /// Typed internals listener constructors.
-        pub mod raw { use super::*; #(#raw)* }
     }
     .to_string()
 }

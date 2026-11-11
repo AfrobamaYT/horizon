@@ -639,12 +639,12 @@ pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
 }
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
-pub mod internals_table;
 pub mod internals_view;
 pub mod notes;
 pub mod patch;
 pub mod points;
-pub mod sites;
+pub mod replace;
+pub(crate) mod source;
 pub mod staging;
 pub use build::{generate, generate_points, generate_render, write_if_changed};
 pub use notes::generate as generate_hook_notes;

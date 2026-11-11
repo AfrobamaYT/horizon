@@ -6,7 +6,7 @@
 //! public, and repeats the module's own `use` items, so `self`, `super::` and `crate::` mean what
 //! they meant. A method moves into a one-method trait implemented for its own type, so `self`,
 //! `Self` and the helpers' bindings stay as written. horizon-mixins then patches the copies, and
-//! the game installs each through its point's replacement slot (`__fnr_<name>`).
+//! the game installs each through its function's replacement slot (`__fnr_<name>`).
 use quote::{ToTokens, format_ident, quote};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub struct Patched {
     pub target: String,
     /// The copy's id for horizon-mixins, in the patch crate.
     pub id: String,
-    /// The expression that builds the copy's `Redirect`, from the patch crate's root.
+    /// The expression that builds the copy's installation result, from the patch crate's root.
     pub install: String,
 }
 
@@ -118,7 +118,7 @@ impl Source {
         let src = root.join("crates/horizon-client/src");
         let mut files = BTreeMap::new();
         files.insert("horizon_client".to_owned(), vec![src.join("lib.rs")]);
-        for file in crate::points::game_files(&src, false)? {
+        for file in crate::source::game_files(&src, false)? {
             files
                 .entry(file.module)
                 .or_insert_with(Vec::new)
@@ -146,11 +146,11 @@ impl Source {
         if self.loaded.contains(krate) {
             return true;
         }
-        let Ok((_, lib)) = crate::points::crate_root(&self.root, krate) else {
+        let Ok((_, lib)) = crate::source::crate_root(&self.root, krate) else {
             return false;
         };
         let dir = lib.parent().expect("a source file has a folder").to_owned();
-        let Ok(files) = crate::points::module_files(krate.to_owned(), lib.clone(), dir, false)
+        let Ok(files) = crate::source::module_files(krate.to_owned(), lib.clone(), dir, false)
         else {
             return false;
         };
@@ -447,7 +447,7 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
     }
 }
 
-/// Whether `function` can be copied and installed through its point's replacement slot.
+/// Whether `function` can be copied and installed through its function's replacement slot.
 fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
     // A crate-local macro defined in a module on the function's path moves with the copy (the
     // mirror repeats it); one defined elsewhere would not resolve.
@@ -460,16 +460,49 @@ fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
         source.local_macros.difference(&on_path).cloned().collect();
     let local_macros = &local_macros;
     let sig = &found.function.sig;
-    if !point_shape::eligible(&found.function.attrs, sig) {
-        return Err(
-            "it is not a point: a hook function (`native_*`), `const`, `async`, `unsafe`, \
+    if !crate::replace::eligible(&found.function.attrs, sig) {
+        return Err("it is not replaceable: `const`, `async`, `unsafe`, \
              `self` by value, `impl Trait` or `!` in its signature, `#[inline(always)]`, or \
              compiled only under a `cfg`"
-                .into(),
-        );
+            .into());
     }
-    if !point_shape::raw_able(sig, found.owner.as_ref().map(|block| &block.generics)) {
+    if !(crate::replace::lifetimes_only(&sig.generics)
+        && found
+            .owner
+            .as_ref()
+            .is_none_or(|b| crate::replace::lifetimes_only(&b.generics)))
+    {
         return Err("it is generic over types or takes `impl Trait`: one copy can't stand for every instance".into());
+    }
+    if let Some(block) = &found.owner
+        && block.trait_.is_some()
+    {
+        struct Associated(bool);
+        impl<'ast> Visit<'ast> for Associated {
+            fn visit_path(&mut self, path: &'ast syn::Path) {
+                self.0 |= path.segments.len() > 1 && path.segments[0].ident == "Self";
+                syn::visit::visit_path(self, path);
+            }
+        }
+        let mut associated = Associated(false);
+        let (_, path, _) = block.trait_.as_ref().expect("a trait implementation");
+        associated.visit_signature(&crate::replace::qualified(sig, path));
+        if associated.0 {
+            return Err("its signature names a trait-associated constant through Self".into());
+        }
+        let items = source.module(&found.module)?.items.clone();
+        let mut types = BTreeSet::new();
+        crate::replace::declared_types(&items, &mut types);
+        if crate::replace::replaceable_trait(
+            block,
+            &crate::replace::declared_traits(&source.root)?,
+            &types,
+            &crate::replace::foreign_imports(&items),
+        )
+        .is_none()
+        {
+            return Err("its trait implementation has no replacement installer".into());
+        }
     }
     if let Some(block) = &found.owner
         && block.attrs.iter().any(|attr| attr.path().is_ident("cfg"))
@@ -622,6 +655,17 @@ pub fn generate(
     let mut patched = Vec::new();
     let unique: BTreeSet<&String> = targets.iter().collect();
     for target in unique {
+        match crate::replace::refusal(root, target) {
+            Ok(None) => {}
+            Ok(Some(why)) => {
+                refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
+                continue;
+            }
+            Err(why) => {
+                refusals.push(refuse(target, "E_MIXIN_SOURCE", why));
+                continue;
+            }
+        }
         let found = match find(&mut source, target) {
             Ok(found) => found,
             Err((code, why)) => {
@@ -657,7 +701,7 @@ pub fn generate(
                         pub #sig #block
 
                         #[doc(hidden)]
-                        pub fn #install() -> ::horizon_client::entry::Redirect {
+                        pub fn #install() -> bool {
                             #original::#constructor(#name)
                         }
                     },
@@ -748,7 +792,7 @@ pub fn generate(
                         }
 
                         #[doc(hidden)]
-                        pub fn #install() -> ::horizon_client::entry::Redirect {
+                        pub fn #install() -> bool {
                             <#elided>::#constructor(<#elided as #trait_ref>::#method)
                         }
                     },
@@ -1266,14 +1310,13 @@ mod tests {
             "horizon_patch",
             &[
                 "horizon_client::game::autosave::Game<'_>::no_such_function".into(),
-                "horizon_client::game::autosave::Game<'_>::on_tick_rate_changed".into(),
                 "horizon_no_such_crate::f".into(),
             ],
             &Extras::default(),
         )
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
-        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_TARGET_MISSING"]);
+        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
     }
 
     #[test]
@@ -1321,10 +1364,20 @@ mod tests {
                     && f.sig.receiver().is_some_and(|r| r.reference.is_some())
                     && f.sig.generics.params.is_empty()
                 {
-                    return format!(
+                    let target = format!(
                         "{module}::<{} as {}>::{}",
                         ty.path.segments[0].ident, path.segments[0].ident, f.sig.ident
                     );
+                    if generate(
+                        &root(),
+                        "horizon_patch",
+                        std::slice::from_ref(&target),
+                        &Extras::default(),
+                    )
+                    .is_ok()
+                    {
+                        return target;
+                    }
                 }
             }
         }
@@ -1354,34 +1407,6 @@ mod tests {
         assert!(crate_.patched.iter().any(|p| {
             p.id.starts_with("horizon_patch_client_lib::clock::<FixedStep as")
         }));
-    }
-
-    #[test]
-    fn a_lower_crate_mirror_keeps_only_the_imports_its_copies_and_helpers_name() {
-        let dir = std::env::temp_dir().join(format!("fnr-pruned-imports-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("lib.rs");
-        std::fs::write(
-            &file,
-            "use std::sync::Arc; use std::rc::Rc; use child::Private; use std::collections::*;",
-        )
-        .unwrap();
-        let mut source = Source {
-            root: dir.clone(),
-            loaded: BTreeSet::new(),
-            files: BTreeMap::from([("fixture".to_owned(), vec![file])]),
-            parsed: BTreeMap::new(),
-            local_macros: BTreeSet::new(),
-        };
-        let used = BTreeSet::from(["Arc".to_owned()]);
-        let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
-        let parsed: syn::File = syn::parse2(out).unwrap();
-        let imports: Vec<String> = uses(&parsed.items)
-            .iter()
-            .map(|item| item.tree.to_token_stream().to_string())
-            .collect();
-        assert_eq!(imports, ["std :: sync :: Arc", "std :: collections :: *"]);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1437,6 +1462,34 @@ mod tests {
             .to_string()
             .contains("game_helper")
         );
+    }
+
+    #[test]
+    fn a_lower_crate_mirror_keeps_only_the_imports_its_copies_and_helpers_name() {
+        let dir = std::env::temp_dir().join(format!("fnr-pruned-imports-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("lib.rs");
+        std::fs::write(
+            &file,
+            "use std::sync::Arc; use std::rc::Rc; use child::Private; use std::collections::*;",
+        )
+        .unwrap();
+        let mut source = Source {
+            root: dir.clone(),
+            loaded: BTreeSet::new(),
+            files: BTreeMap::from([("fixture".to_owned(), vec![file])]),
+            parsed: BTreeMap::new(),
+            local_macros: BTreeSet::new(),
+        };
+        let used = BTreeSet::from(["Arc".to_owned()]);
+        let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
+        let parsed: syn::File = syn::parse2(out).unwrap();
+        let imports: Vec<String> = uses(&parsed.items)
+            .iter()
+            .map(|item| item.tree.to_token_stream().to_string())
+            .collect();
+        assert_eq!(imports, ["std :: sync :: Arc", "std :: collections :: *"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1638,7 +1691,7 @@ mod census {
             walk(&items, module, &mut functions, &mut traits);
             total += traits;
             for _ in 0..traits {
-                note("refused: trait method (not a point)".into());
+                note("refused: trait method (not enumerated)".into());
             }
             for found in functions {
                 let attrs = &found.function.attrs;
@@ -1651,9 +1704,7 @@ mod census {
                 }
                 total += 1;
                 let sig = &found.function.sig;
-                let why = if sig.ident.to_string().starts_with("native_") {
-                    "refused: hook function (`native_*`)".to_owned()
-                } else if attrs
+                let why = if attrs
                     .iter()
                     .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
                     || found
@@ -1662,10 +1713,15 @@ mod census {
                         .is_some_and(|b| b.attrs.iter().any(|a| a.path().is_ident("cfg")))
                 {
                     "refused: compiled only under a cfg".to_owned()
-                } else if !point_shape::eligible(attrs, sig) {
+                } else if !crate::replace::eligible(attrs, sig) {
                     "refused: const/async/unsafe/self by value/impl Trait or ! /inline(always)"
                         .to_owned()
-                } else if !point_shape::raw_able(sig, found.owner.as_ref().map(|b| &b.generics)) {
+                } else if !(crate::replace::lifetimes_only(&sig.generics)
+                    && found
+                        .owner
+                        .as_ref()
+                        .is_none_or(|b| crate::replace::lifetimes_only(&b.generics)))
+                {
                     "refused: generic over types".to_owned()
                 } else {
                     if replaceable(&found, &mut source).is_ok() {
