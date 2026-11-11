@@ -94,6 +94,33 @@ class GitChangedPathsTests(unittest.TestCase):
 
 
 class PrReadyTests(unittest.TestCase):
+    def test_data_backed_summary_with_and_without_prepared_data(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(pr_ready, "ROOT", Path(directory) / "checkout/repo"), \
+                mock.patch.dict(os.environ):
+            os.environ.pop("HORIZON_TEST_RESOURCES", None)
+            step = pr_ready.Step("content root tests", summary=pr_ready.tests_passed)
+            step.output = "test result: ok. 3 passed; 0 failed; 0 ignored"
+            step.status = "pass"
+            step.detail = pr_ready.tests_passed(step.output)
+            def render():
+                return pr_ready.block(args(), "origin/main", "abcdef123", [], {}, [step], "skip-release", 0)
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            prepared = pr_ready.ROOT / ".local/horizon-client/26.3"
+            prepared.mkdir(parents=True)
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            (prepared / "gameplay-facts.json").write_text("{}")
+            self.assertIn("data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): 3 passed", render())
+            override = Path(directory) / "override"
+            override.mkdir()
+            os.environ["HORIZON_TEST_RESOURCES"] = str(override)
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            (override / "gameplay-facts.json").write_text("{}")
+            (prepared / "gameplay-facts.json").unlink()
+            self.assertIn("data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): 3 passed", render())
+            step.status, step.detail = "skip", "content root untouched"
+            self.assertIn("data-backed tests not run: content root untouched", render())
+
     def test_windows_runner_gives_a_leading_variable_to_the_environment(self):
         step = pr_ready.Step(
             "dispatch tests tests",

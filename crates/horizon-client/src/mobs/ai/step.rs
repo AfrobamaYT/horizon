@@ -3,7 +3,7 @@
 use super::{Mob, MobWorld, Species};
 
 /// `playStepSound`: the species' footstep, or the block's step sound at 15%.
-pub fn step_sound(
+pub fn inherited_step_sound(
     m: &Mob,
     w: &MobWorld,
     pos: [i32; 3],
@@ -139,7 +139,7 @@ mod tests {
                     let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
                     m.extra.set_body(body.map(Into::into));
                     let state = w.world.block(0, 63, 0);
-                    step_sound(&m, w, [0, 63, 0], state)
+                    inherited_step_sound(&m, w, [0, 63, 0], state)
                 };
                 assert_eq!(stepped(Some("minecraft:stone")), None, "loaded");
                 let empty = stepped(None);

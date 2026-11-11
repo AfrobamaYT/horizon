@@ -3,6 +3,9 @@ mod point;
 mod wire;
 
 /// Derive the shared native/wasm owned-value encoding.
+///
+/// `#[wire(crate = ::mod_vocab::wire)]` selects the contract module for
+/// lower-layer crates. The default is `::mod_api::wire`.
 #[proc_macro_derive(Wire, attributes(wire))]
 pub fn derive_wire(input: TokenStream) -> TokenStream {
     wire::expand(syn::parse_macro_input!(input as syn::DeriveInput))

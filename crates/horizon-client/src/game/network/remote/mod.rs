@@ -3810,7 +3810,7 @@ impl Game<'_> {
             C::Ping(p) => self.send(S::Pong(p)),
             // A native mod's server half to its client half.
             C::CustomPayload(p) if self.is_book_or_mod_channel(&p.channel) => {
-                self.remote_book_or_mod_payload(&p.channel, &p.data);
+                self.remote_book_or_mod_payload(&p.channel, &p.data)?;
             }
             // The synced attachments of a holder the server shows the window.
             C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {
@@ -8896,15 +8896,18 @@ impl Game<'_> {
             // AbstractCauldronBlock.useItemOn, either hand: CauldronInteractions
             // answers on the client as on the server and only the server acts,
             // so a bucket the cauldron takes is not used again (UseItem).
-            let result = if result.consumes_action() || spectator || !vanilla_block {
-                result
-            } else {
-                match self.cauldron_outcome(hit.pos, held.as_ref()) {
-                    horizon_client::cauldron::Outcome::Success => InteractionResult::Success,
-                    horizon_client::cauldron::Outcome::Consume => InteractionResult::Consume,
-                    horizon_client::cauldron::Outcome::Pass => result,
-                }
-            };
+            // The main-hand path already asked above; only the off-hand fallback asks here.
+            let result =
+                if result.consumes_action() || spectator || !vanilla_block || hand == Hand::Main {
+                    result
+                } else {
+                    match self.with_hand(hand, |game| game.cauldron_outcome(hit.pos, held.as_ref()))
+                    {
+                        horizon_client::cauldron::Outcome::Success => InteractionResult::Success,
+                        horizon_client::cauldron::Outcome::Consume => InteractionResult::Consume,
+                        horizon_client::cauldron::Outcome::Pass => result,
+                    }
+                };
             // useItemOn on this client, unless a sneak with something in hand
             // skips it: RedStoneOreBlock's dust, and the wick smoke of a lit
             // candle an empty hand snuffs (CandleBlock.useItemOn) or a lit
@@ -9378,76 +9381,6 @@ impl Game<'_> {
         })
     }
 
-    /// `AbstractCauldronBlock.useItemOn` (`CauldronInteractions`) on this
-    /// client's level: the cauldron's new state and the sound it made, or
-    /// None when the item passes and `Item.use` still has its turn. The
-    /// interaction player is a copy: the hand and the inventory change only
-    /// when the server confirms them.
-    fn remote_cauldron_reacts(
-        &self,
-        hit: &super::Hit,
-        held: Option<&ItemStack>,
-    ) -> Option<(InteractionResult, DryUse)> {
-        use horizon_client::cauldron::{self, Outcome};
-        struct DryHand<'a> {
-            creative: bool,
-            hand: Option<ItemStack>,
-            inventory: &'a [Option<ItemStack>],
-        }
-        impl cauldron::Player for DryHand<'_> {
-            fn creative(&self) -> bool {
-                self.creative
-            }
-            fn hand(&mut self) -> &mut Option<ItemStack> {
-                &mut self.hand
-            }
-            fn add(&mut self, _: &mut ItemStack) -> bool {
-                true
-            }
-            fn contains(&self, stack: &ItemStack) -> bool {
-                self.inventory
-                    .iter()
-                    .flatten()
-                    .any(|have| have.same_item_same_components(stack))
-            }
-            fn drop_stack(&mut self, _: ItemStack) {}
-        }
-        let registry = self.pack.assets.registry;
-        let state = registry
-            .state(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-            .filter(|s| s.name.ends_with("cauldron"))?
-            .clone();
-        let held = held?;
-        let above = self.world.block(hit.pos[0], hit.pos[1] + 1, hit.pos[2]);
-        let under_water = registry
-            .state(above)
-            .is_some_and(|s| s.name == "minecraft:water");
-        let removes_dye = cauldron::removes_dye(self.items(), &held.item);
-        let mut hand = DryHand {
-            creative: self.creative,
-            hand: Some(held.clone()),
-            inventory: &self.inventory,
-        };
-        let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
-        let reaction = match result.outcome {
-            Outcome::Pass => return None,
-            Outcome::Success => InteractionResult::Success,
-            Outcome::Consume => InteractionResult::Consume,
-        };
-        let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let mut changes = Vec::new();
-        if let Some(block) = result.block
-            && let Ok(new) = registry.resolve(&block)
-        {
-            changes.push((pos, new));
-        }
-        let sounds = match result.sound {
-            Some(sound) => vec![(pos, std::sync::Arc::from(sound), 1.0, 1.0)],
-            None => Vec::new(),
-        };
-        Some((reaction, (changes, sounds)))
-    }
-
     /// MultiPlayerGameMode.useItemOn inside startPrediction, for a block item:
     /// the blocks `BlockItem.place` set at `pos` are placed on this client's
     /// level at once, so the next click of a fast bridge aims at them rather
@@ -9621,7 +9554,7 @@ impl Game<'_> {
         if self.cooldowns.is_on_cooldown(&group) {
             return false;
         }
-        if let Some(answer) = self.right_click_item(hand, &held, self.pick().is_some()) {
+        if let Some(answer) = self.right_click_item(hand, &held) {
             let success = answer == mod_api::InteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);
@@ -11845,7 +11778,7 @@ type DrySound = (
 /// The blocks a use on the dry level set.
 type DryChanges = Vec<(horizon_core::position::BlockPos, BlockStateId)>;
 /// What a use on the dry level changed, and the sounds it played.
-type DryUse = (DryChanges, Vec<DrySound>);
+pub(super) type DryUse = (DryChanges, Vec<DrySound>);
 /// Where `BlockItem.place` on the dry level placed, and the blocks it set.
 type DryPlace = (horizon_core::position::BlockPos, DryChanges);
 

@@ -363,6 +363,7 @@ impl Game<'_> {
                 Event::DebugEntriesChanged => self.debug_entries.invalidate(),
                 Event::Changed => {
                     self.settings.save(&Self::options_path());
+                    self.settings.keys.sync_action_bindings();
                     self.apply_settings();
                     self.switch_mods();
                     self.sync_native_switches();

@@ -98,6 +98,10 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                 assert!(game.run_command("reload"));
                 assert_eq!(power(game), DatapackValue::Int(9));
                 assert_eq!(
+                    horizon_client::datapack_net::served(),
+                    game.mods.datapack_registries
+                );
+                assert_eq!(
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
                     2
                 );
@@ -129,10 +133,7 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
                     6
                 );
-                game.mods
-                    .datapack_registries
-                    .as_mut()
-                    .unwrap()
+                std::sync::Arc::make_mut(game.mods.datapack_registries.as_mut().unwrap())
                     .exhaust_generation_for_testing();
                 let old_set = game.mods.datapack_registries.clone();
                 let old_files = game
@@ -146,6 +147,10 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     "generation exhaustion must refuse the whole publication"
                 );
                 assert_eq!(game.mods.datapack_registries, old_set);
+                assert_eq!(
+                    horizon_client::datapack_net::served().unwrap().generation(),
+                    6
+                );
                 assert_eq!(
                     game.world_tables
                         .as_ref()
@@ -196,3 +201,8 @@ fn remote_reload_never_decodes_local_registry_files() {
         },
     );
 }
+#[path = "datapack_host_read_tests.rs"]
+mod datapack_host_read_tests;
+
+#[path = "datapack_game_delivery_tests.rs"]
+mod datapack_game_delivery_tests;
