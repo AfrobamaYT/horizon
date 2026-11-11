@@ -1100,7 +1100,7 @@ pub(super) mod tests {
         );
     }
 
-    fn with_game_role(
+    pub(in crate::game) fn with_game_role(
         root: std::path::PathBuf,
         role: super::super::execution_role::ExecutionRole,
         test: impl FnOnce(&mut super::Game<'_>),

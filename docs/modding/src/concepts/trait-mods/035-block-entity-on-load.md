@@ -10,3 +10,8 @@ Attachment notices are drained before block entity ticking on each logical
 side. Payload writes to an existing identity do not fire again. Unloading
 and loading a chunk creates new identities, which receive new notices.
 Vanilla block entities do not receive this hook.
+
+Each drain handles only the notices pending when it began. A listener that
+replaces a block queues the replacement for a later drain. If the pre-tick
+drain replaces the entity about to tick, that tick waits; the replacement
+receives its own notice first. Worlds without subscribers collect no notices.

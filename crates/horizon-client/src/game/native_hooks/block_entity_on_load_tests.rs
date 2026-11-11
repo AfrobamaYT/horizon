@@ -193,13 +193,16 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn block_entity_on_load_without_listener_preserves_data_and_consumes_notice() {
+    fn block_entity_on_load_without_listener_preserves_data_and_never_queues() {
         mod_api::testing::with_mods(vec![].into(), || {
             with_game(|game| {
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-                game.world.block_entities.insert((1, 64, 1), holder(7));
+                game.world
+                    .block_entities
+                    .load_chunk(vec![((1, 64, 1), holder(7)), ((2, 64, 1), holder(9))]);
+                assert_eq!(game.world.block_entities.pending_on_load_len(), 0);
                 game.fire_pending_block_entity_loads();
                 assert_eq!(game.world.block_entities.next_on_load(), None);
                 let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(1, 64, 1))

@@ -76,6 +76,7 @@ pub struct BlockEntities {
     map: HashMap<Pos, BlockEntity>,
     generations: FxHashMap<Pos, u64>,
     on_load: std::collections::VecDeque<(Pos, u64)>,
+    on_load_enabled: bool,
     attachments: HashMap<Pos, Attachments>,
     attachment_observer: Option<Arc<dyn AttachmentObserver<BlockEntityIdentity>>>,
     /// `Level.blockEntityTickers`: positions and the slot each was given.
@@ -254,14 +255,26 @@ pub fn chunk_map_order(positions: impl IntoIterator<Item = Pos>) -> Vec<Pos> {
 }
 
 impl BlockEntities {
+    /// Gameplay supplies its subscription decision; storage knows no hook identifiers.
+    pub fn set_on_load_enabled(&mut self, enabled: bool) {
+        self.on_load_enabled = enabled;
+        if !enabled {
+            self.on_load.clear();
+        }
+    }
     /// Whether any attachment notices remain, including possibly retired identities.
     pub fn has_pending_on_load(&self) -> bool {
         !self.on_load.is_empty()
     }
-    /// Take the next newly attached mod identity. Removed or replaced entries
-    /// are stale and skipped; payload rewrites retain the queued generation.
-    pub fn next_on_load(&mut self) -> Option<(Pos, u64)> {
-        while let Some((pos, generation)) = self.on_load.pop_front() {
+    /// Number of queued notices, including retired entries, at a drain boundary.
+    pub fn pending_on_load_len(&self) -> usize {
+        self.on_load.len()
+    }
+    /// Take a live notice from a bounded prefix, counting stale entries too.
+    pub fn next_on_load_in_batch(&mut self, remaining: &mut usize) -> Option<(Pos, u64)> {
+        while *remaining > 0 {
+            *remaining -= 1;
+            let (pos, generation) = self.on_load.pop_front()?;
             if self.generation(&pos) == Some(generation)
                 && matches!(self.map.get(&pos), Some(BlockEntity::Mod(_)))
             {
@@ -270,6 +283,13 @@ impl BlockEntities {
         }
         None
     }
+    /// Take the next newly attached mod identity. Removed or replaced entries
+    /// are stale and skipped; payload rewrites retain the queued generation.
+    pub fn next_on_load(&mut self) -> Option<(Pos, u64)> {
+        let mut remaining = self.on_load.len();
+        self.next_on_load_in_batch(&mut remaining)
+    }
+
     /// Runtime identity, retained while an entity is temporarily taken for its tick.
     pub fn generation(&self, pos: &Pos) -> Option<u64> {
         self.generations.get(pos).copied()
@@ -511,12 +531,25 @@ impl BlockEntities {
     /// `/data merge block`), where vanilla keeps the object, so its
     /// attachments stay; any other replacement starts them over.
     pub fn insert(&mut self, pos: Pos, entity: BlockEntity) -> Option<BlockEntity> {
+        self.insert_impl(pos, entity, false)
+    }
+    /// Attach a different instance, even when its type matches the old instance.
+    /// Payload-only writes use `insert` and retain their identity instead.
+    pub fn replace(&mut self, pos: Pos, entity: BlockEntity) -> Option<BlockEntity> {
+        self.insert_impl(pos, entity, true)
+    }
+    fn insert_impl(
+        &mut self,
+        pos: Pos,
+        entity: BlockEntity,
+        replace_identity: bool,
+    ) -> Option<BlockEntity> {
         let new_is_mod = matches!(entity, BlockEntity::Mod(_));
         let same_type = |old: &BlockEntity| match (old, &entity) {
             (BlockEntity::Mod(old), BlockEntity::Mod(new)) => old.id() == new.id(),
             (old, new) => std::mem::discriminant(old) == std::mem::discriminant(new),
         };
-        let new_identity = !self.map.get(&pos).is_some_and(same_type);
+        let new_identity = replace_identity || !self.map.get(&pos).is_some_and(same_type);
         if new_identity {
             retire_attachments(
                 &mut self.attachments,
@@ -530,7 +563,7 @@ impl BlockEntities {
         let new_box = shows_box(&entity);
         self.asleep.remove(&pos);
         let old = self.map.insert(pos, entity);
-        if new_identity && new_is_mod {
+        if self.on_load_enabled && new_identity && new_is_mod {
             self.on_load.push_back((pos, self.generations[&pos]));
         }
         if old.is_none() {
@@ -571,7 +604,9 @@ impl BlockEntities {
         self.asleep.remove(&pos);
         let entity = self.map.entry(pos).or_insert_with(make);
         if absent && matches!(entity, BlockEntity::Mod(_)) {
-            self.on_load.push_back((pos, self.generations[&pos]));
+            if self.on_load_enabled {
+                self.on_load.push_back((pos, self.generations[&pos]));
+            }
             self.mods.entry(chunk_of(pos)).or_default().insert(pos);
         }
         if absent && shows_box(entity) {
@@ -744,7 +779,7 @@ impl BlockEntities {
             }
         }
         for p in order {
-            if matches!(self.map.get(&p), Some(BlockEntity::Mod(_))) {
+            if self.on_load_enabled && matches!(self.map.get(&p), Some(BlockEntity::Mod(_))) {
                 self.on_load.push_back((p, self.generations[&p]));
             }
             self.add(p);
