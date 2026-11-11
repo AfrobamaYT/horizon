@@ -63,6 +63,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ParticleProviders",
     "EnchantmentDamageEffects",
     "PoiTypeExtensions",
+    "VillagerProfessions",
     "CauldronFluidContents",
     "BlockAndTintGetter",
     "GroundLevel",
