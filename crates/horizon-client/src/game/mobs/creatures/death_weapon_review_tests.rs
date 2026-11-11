@@ -276,3 +276,30 @@ fn death_weapon_removal_and_vehicle_transfer_clear_capture() {
         game.mob_died(&dead);
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_weapon_same_tick_stronger_arrow_replaces_weapon() {
+    if isolated() {
+        return;
+    }
+    let expected = ItemStack::new("minecraft:bow", 1);
+    fixture(Some(expected.clone()), |game| {
+        game.mobs.push(victim(game));
+        assert!(hit(
+            game,
+            &arrow(Some(ItemStack::new("minecraft:crossbow", 1))),
+            1.0
+        ));
+        let first = game.mobs.iter().find(|m| m.id == 70).unwrap().last_damage;
+        assert!(hit(game, &arrow(Some(expected)), 2.0));
+        let mut dead = game.mobs.iter().find(|m| m.id == 70).unwrap().clone();
+        assert_eq!(
+            dead.last_damage, first,
+            "equal source values still commit a new hit"
+        );
+        assert!(dead.projectile_damage_committed);
+        dead.health = 0.0;
+        game.mob_died(&dead);
+    });
+}

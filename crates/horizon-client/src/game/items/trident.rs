@@ -1062,8 +1062,6 @@ impl Game<'_> {
                         let aim = self.attacker_aim(Some(Who::Player));
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let from = Some([t.position.x, t.position.y, t.position.z]);
-                            let before = mod_api::__private::listened(mod_api::HookId::LootDrops)
-                                .then_some(m.last_damage);
                             let hurt = m.damage_projectile(
                                 crate::game::entity::damage_level_of!(self),
                                 damage,
@@ -1077,7 +1075,9 @@ impl Game<'_> {
                                 [t.velocity.x, t.velocity.z],
                             );
                             if hurt {
-                                if before.is_some_and(|before| before != m.last_damage) {
+                                if mod_api::__private::listened(mod_api::HookId::LootDrops)
+                                    && m.projectile_damage_committed
+                                {
                                     accepted_source = m.last_damage;
                                 }
                                 hurt_at = Some([m.position.x, m.position.y, m.position.z]);

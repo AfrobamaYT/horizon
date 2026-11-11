@@ -44,8 +44,6 @@ impl Game<'_> {
                 .iter_mut()
                 .find(|mob| mob.id == id)
                 .map_or((false, None), |mob| {
-                    let before = mod_api::__private::listened(mod_api::HookId::LootDrops)
-                        .then_some(mob.last_damage);
                     let hurt = mob.damage_projectile(
                         crate::game::entity::damage_level_of!(self, scoped),
                         amount,
@@ -54,7 +52,8 @@ impl Game<'_> {
                         [projectile.velocity.x, projectile.velocity.z],
                     );
                     // An immune or wholly blocked hit returns true without committing a source.
-                    let changed = before.is_some_and(|before| before != mob.last_damage);
+                    let changed = mod_api::__private::listened(mod_api::HookId::LootDrops)
+                        && mob.projectile_damage_committed;
                     (hurt, changed.then_some(mob.last_damage).flatten())
                 });
         if let Some(accepted) = accepted {

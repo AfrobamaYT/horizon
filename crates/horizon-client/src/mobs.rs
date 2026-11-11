@@ -1863,6 +1863,8 @@ pub struct Mob {
     /// `Stats.DAMAGE_DEALT_ABSORBED` to the player whose turn it is (see [`Mob::soak_hit`]).
     pub dealt_absorbed: i32,
     pub last_damage: Option<(Damage, i64)>,
+    /// Whether the most recent projectile damage call committed its source.
+    pub projectile_damage_committed: bool,
     /// `DamageSource.getDirectEntity` of `last_damage` when [`Damage`] cannot name it (a
     /// thrown potion, an area effect cloud): its entity type.
     pub last_direct: Option<&'static str>,
@@ -4053,6 +4055,7 @@ impl Mob {
             absorption: 0.0,
             dealt_absorbed: 0,
             last_damage: None,
+            projectile_damage_committed: false,
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
@@ -4265,6 +4268,7 @@ impl Mob {
         aim: Option<Aim>,
         motion: [f64; 2],
     ) -> bool {
+        self.projectile_damage_committed = false;
         self.projectile_motion = Some(motion);
         let hurt = self.damage_aimed(level, amount, source, aim);
         self.projectile_motion = None;
@@ -4590,6 +4594,9 @@ impl Mob {
         let success = blocked <= 0.0 || amount > 0.0;
         if success {
             self.last_damage = Some((source, i64::from(self.age)));
+            if self.projectile_motion.is_some() {
+                self.projectile_damage_committed = true;
+            }
         }
         self.last_direct = None;
         if let Some(who) = source.attacker {
