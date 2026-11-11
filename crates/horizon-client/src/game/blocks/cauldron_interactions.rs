@@ -244,6 +244,22 @@ impl Game<'_> {
                 {
                     return Err(());
                 }
+                if plan.sound.as_ref().is_some_and(|sound| {
+                    !self
+                        .pack
+                        .block_registries
+                        .ids("minecraft:sound_event")
+                        .iter()
+                        .any(|known| known == &sound.to_string())
+                }) || plan.statistics.iter().any(|stat| {
+                    let name = stat.to_string();
+                    name != "minecraft:used"
+                        && !name.strip_prefix("minecraft:").is_some_and(|key| {
+                            horizon_client::scoreboard::CUSTOM_STATS.contains(&key)
+                        })
+                }) {
+                    return Err(());
+                }
                 let block = plan
                     .block
                     .map(|state| index.to_engine(state))

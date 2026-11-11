@@ -76,8 +76,9 @@ pub enum CauldronRegistrationError {
 
 /// NeoForge's documented `RegisterCauldronInteractionEvent.Interaction` counterpart.
 /// Uses the shared transaction and runtime limits; no cauldron-specific budget.
-/// Prediction uses matching mod IDs/versions and the local resource snapshot; matching binary
-/// builds and synchronized reload generations aren't established. Server correction keeps the client right.
+/// Custom handlers are server-only: clients suppress prediction and wait for the server result.
+/// Vanilla handlers still predict locally. Matching custom builds and resource generations
+/// are not established by the current handshake.
 pub trait Interaction: Send + Sync + 'static {
     /// Decide through read-only host access on either side, without authoritative writes.
     fn decide(&self, host: &dyn Host, input: &CauldronUse) -> CauldronDecision;

@@ -1,7 +1,6 @@
 //! Shared cauldron client selection. Prediction never invokes authoritative callbacks.
 use super::remote::DryUse;
 use super::*;
-use crate::game::api_values::TryIntoApi;
 use horizon_client::cauldron::{self, Outcome, interactions::Entry};
 use horizon_world::level::InteractionResult;
 
@@ -29,8 +28,8 @@ impl cauldron::Player for DryHand<'_> {
     fn drop_stack(&mut self, _: ItemStack) {}
 }
 impl Game<'_> {
-    /// Both prediction routes use this snapshot and one selected callback. Custom decisions
-    /// predict consumption only; authoritative block updates provide their visual correction.
+    /// Both prediction routes use this snapshot and one selected callback. Custom handlers
+    /// are not invoked locally; authoritative block updates supply the result.
     pub(super) fn client_cauldron_prediction(
         &self,
         pos: [i32; 3],
@@ -49,47 +48,10 @@ impl Game<'_> {
         let table = cauldron_interactions::snapshot();
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let entry = table.select(&state.name, &held.item, removes_dye);
-        if let Some(Entry::Mod(callback)) = &entry {
-            let Some(_active) = cauldron_interactions::enter_decision() else {
-                return (Outcome::Consume, DryUse::default());
-            };
-            let decision = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let index = api_values::block_state::current().ok()?;
-                let epoch = self.native_lifecycle.epoch()?;
-                let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
-                let actor = mod_api::EntityRef::new(epoch, u32::try_from(remote.entity_id).ok()?);
-                let input = mod_api::CauldronUse {
-                    dimension: mod_api::Identifier::parse(self.dim.id()).ok()?,
-                    pos,
-                    state: index
-                        .to_api(self.world.block(pos[0], pos[1], pos[2]))
-                        .ok()?,
-                    actor,
-                    hand: match self.hand {
-                        Hand::Main => mod_api::Hand::Main,
-                        Hand::Off => mod_api::Hand::Off,
-                    },
-                    held: held.try_into_api().ok()?,
-                    underwater,
-                    creative: self.creative,
-                };
-                let _owner = mod_api::__private::enter(callback.owner, "cauldron_prediction");
-                let host: &dyn mod_api::ClientHost = self;
-                let decision = callback.handler.decide(host, &input);
-                if !Arc::ptr_eq(&table, &cauldron_interactions::snapshot())
-                    || !api_values::block_state::current()
-                        .is_ok_and(|now| Arc::ptr_eq(&index, &now))
-                {
-                    return None;
-                }
-                Some(decision)
-            }));
-            let outcome = match decision {
-                Ok(Some(mod_api::CauldronDecision::Pass)) => Outcome::Pass,
-                Ok(Some(mod_api::CauldronDecision::Success(_))) => Outcome::Success,
-                _ => Outcome::Consume,
-            };
-            return (outcome, DryUse::default());
+        // Custom handlers have no matching-build/resource-generation admission handshake.
+        // Consume locally without running decide or predicting writes; wait for the server.
+        if matches!(entry, Some(Entry::Mod(_))) {
+            return (Outcome::Consume, DryUse::default());
         }
         let mut hand = DryHand {
             creative: self.creative,

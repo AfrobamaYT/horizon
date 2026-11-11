@@ -415,9 +415,9 @@ fn cauldron_transfer_awards_two_statistics_once() {
 }
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn cauldron_client_decides_without_firing_or_authoritative_writes() {
+fn cauldron_client_skips_custom_prediction() {
     if run_fresh_cases(
-        "game::cauldron_interactions::tests::cauldron_client_decides_without_firing_or_authoritative_writes",
+        "game::cauldron_interactions::tests::cauldron_client_skips_custom_prediction",
         "HORIZON_CAULDRON_CASE",
         &["run"],
     ) {
@@ -429,16 +429,16 @@ fn cauldron_client_decides_without_firing_or_authoritative_writes() {
         setup(game, "minecraft:cauldron", None, "test:syrup_bottle", 2);
         let held = game.inventory[0].clone();
         let (outcome, proposed) = game.client_cauldron_prediction(POS, held.as_ref());
-        assert_eq!(outcome, horizon_client::cauldron::Outcome::Success);
+        assert_eq!(outcome, horizon_client::cauldron::Outcome::Consume);
         assert!(proposed.0.is_empty());
         assert!(proposed.1.is_empty());
-        assert_eq!(seen.decide.load(Ordering::SeqCst), 1);
+        assert_eq!(seen.decide.load(Ordering::SeqCst), 0);
         assert_eq!(seen.fire.load(Ordering::SeqCst), 0);
         assert_eq!(
             game.cauldron_outcome(POS, held.as_ref()),
-            horizon_client::cauldron::Outcome::Success
+            horizon_client::cauldron::Outcome::Consume
         );
-        assert_eq!(seen.decide.load(Ordering::SeqCst), 2);
+        assert_eq!(seen.decide.load(Ordering::SeqCst), 0);
         let hit = Hit {
             pos: POS,
             face: [0, 1, 0],
@@ -447,8 +447,8 @@ fn cauldron_client_decides_without_firing_or_authoritative_writes() {
         };
         let (answer, _) = game.remote_cauldron_reacts(&hit, held.as_ref()).unwrap();
         assert!(answer.consumes_action());
-        assert_eq!(seen.decide.load(Ordering::SeqCst), 3);
-        assert_eq!(seen.actor.load(Ordering::SeqCst), 7);
+        assert_eq!(seen.decide.load(Ordering::SeqCst), 0);
+        assert_eq!(seen.actor.load(Ordering::SeqCst), 0);
         assert_eq!(seen.fire.load(Ordering::SeqCst), 0);
         unchanged(game, seen);
     });
