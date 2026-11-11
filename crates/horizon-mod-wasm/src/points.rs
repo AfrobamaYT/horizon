@@ -194,7 +194,7 @@ mod tests {
     fn unstaged_build_refuses_api_listener_by_mod_and_target() {
         assert!(!mod_points::STAGED);
         let manifest: Manifest = serde_json::from_value(serde_json::json!({
-            "id": "site_test", "name": "Sites", "version": "1.0.0", "description": "", "api": "0.2",
+            "id": "site_test", "name": "Sites", "version": "1.0.0", "description": "", "api": "0.2", "capabilities": [],
             "inject": [{"id": "head", "at": "game::tick", "kind": "head", "with": "listener"}]
         }))
         .unwrap();
