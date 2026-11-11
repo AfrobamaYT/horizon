@@ -18,6 +18,14 @@ fn live_bytes() -> usize {
 }
 
 fn assert_covers_live_layout<T: OwnedHeap>(case: &str, build: impl FnOnce() -> T) {
+    assert_covers_charge(case, build, OwnedHeap::owned_heap_bytes);
+}
+
+fn assert_covers_charge<T>(
+    case: &str,
+    build: impl FnOnce() -> T,
+    charge: impl FnOnce(&T) -> usize,
+) {
     assert_eq!(live_bytes(), 0, "previous case leaked tagged storage");
     let value = {
         // Direct tag() is unconditional: the alloc-census feature is unnecessary
@@ -29,7 +37,7 @@ fn assert_covers_live_layout<T: OwnedHeap>(case: &str, build: impl FnOnce() -> T
     // CensusAllocator records Layout::size(), excluding its own header and the
     // backing allocator's metadata/rounding, exactly the accounting boundary here.
     let observed = live_bytes();
-    let charged = value.owned_heap_bytes();
+    let charged = charge(&value);
     assert!(
         observed > 0,
         "{case}: census must observe real retained storage"
@@ -99,4 +107,71 @@ fn opaque_map_charges_cover_independently_observed_live_layouts() {
         }
         map
     });
+
+    use horizon_protocol::{
+        packets::configuration::{RegistryData, RegistryEntry, RegistryTags, TagEntry, UpdateTags},
+        registry::Dynamic,
+        retained::fresh_hash_table_bytes,
+    };
+    use std::collections::HashSet;
+    #[repr(align(128))]
+    #[derive(Hash, PartialEq, Eq)]
+    struct Aligned(u32);
+    for requested in [1, 2, 3, 7, 14, 15, 28, 56, 1000] {
+        assert_covers_charge(
+            "fresh aligned set table",
+            || HashSet::<Aligned>::with_capacity(requested),
+            |set| fresh_hash_table_bytes::<Aligned>(set.capacity()),
+        );
+        // Small/ZST elements exercise hashbrown's minimum table sizes too.
+        assert_covers_charge(
+            "fresh zero-sized set table",
+            || HashSet::<()>::with_capacity(requested),
+            |set| fresh_hash_table_bytes::<()>(set.capacity()),
+        );
+    }
+    assert_covers_charge(
+        "fresh dynamic snapshot with replacement",
+        || {
+            let mut dynamic = Dynamic::default();
+            for round in 0..2 {
+                for i in 0..40 {
+                    let mut entries = Vec::with_capacity(100);
+                    let mut nbt = BTreeMap::new();
+                    nbt.insert(
+                        JavaString::from("nested"),
+                        Tag::ByteArray(Vec::with_capacity(3000)),
+                    );
+                    let mut name = String::with_capacity(400);
+                    name.push_str("test:entry");
+                    entries.push(RegistryEntry {
+                        id: name,
+                        data: Some(Tag::Compound(nbt)),
+                    });
+                    dynamic.add(RegistryData {
+                        registry: format!("test:registry_{i}"),
+                        entries,
+                    });
+                    let tags = (0..(20 + round))
+                        .map(|j| {
+                            let mut ids = Vec::with_capacity(500);
+                            ids.push(j);
+                            TagEntry {
+                                name: format!("test:tag_{j}"),
+                                ids,
+                            }
+                        })
+                        .collect();
+                    dynamic.add_tags(&UpdateTags {
+                        registries: vec![RegistryTags {
+                            registry: format!("test:registry_{i}"),
+                            tags,
+                        }],
+                    });
+                }
+            }
+            dynamic
+        },
+        Dynamic::fresh_owned_heap_bytes,
+    );
 }

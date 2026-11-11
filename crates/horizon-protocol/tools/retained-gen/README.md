@@ -60,3 +60,33 @@ allocator rounding or an exact node-by-node census.
 There are no HashMap/HashSet fields in the decoded packet representations; the
 custom-payload codec registry uses these but is not retained by a packet and is
 not part of this traversal.
+
+## Fresh configuration snapshots and hash tables
+
+`registry::Dynamic::fresh_owned_heap_bytes()` sizes only a frozen snapshot built
+by configure's insertion/replacement-only `add` / `add_tags` boundary. Its public
+fields are not policed: erasing from any outer or nested hash table invalidates
+the sizing precondition. Exhaustive destructuring makes new Dynamic fields a
+compile error until their accounting is considered. Builtin/SyncedNames and other
+shared global registries remain excluded. A containing Arc's storage must be
+charged separately by the queue owner.
+
+`retained::fresh_hash_table_bytes<T>(capacity)` is the shared storage-only bound:
+pass `(K, V)` for a map or `T` for a set. It excludes inline table storage and
+owned descendants, which the snapshot traversal charges separately. It must not
+be used on arbitrary erased/tombstoned tables: public capacity reports
+`items + growth_left`, not the physical bucket count. With no erasures, the
+initial free-space budget and all insertions preserve the usable capacity.
+Rust 1.99.1's vendored hashbrown 0.17.1 reserves one slot in small tables or 1/8
+of buckets in larger tables; thus physical buckets are at most twice fresh
+capacity. Storage is at most `2 * capacity * (size_of::<T>() + 1)` plus 16 mirrored
+control bytes and `max(align_of::<T>(), 16) - 1` bytes for alignment before the
+controls. Capacity zero has no allocation at this fresh boundary. All arithmetic
+saturates rather than wrapping. The std audit now checks this hashbrown layout
+and target group representations too; toolchain upgrades require re-audit.
+
+The isolated census test also covers nested fresh Dynamic maps populated through
+add/add_tags, including replacement, and table capacities across small/growth
+boundaries with zero-sized and 128-byte-aligned set elements. It observes layouts
+independently of these formulas; no universal HashMap OwnedHeap implementation is
+provided.

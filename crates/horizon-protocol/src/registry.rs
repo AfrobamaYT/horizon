@@ -135,6 +135,49 @@ pub struct Dynamic {
 pub const MAX_TAG_REGISTRIES: usize = 512;
 
 impl Dynamic {
+    /// Retained heap charge for a frozen configuration snapshot built by
+    /// [`Self::add`] and [`Self::add_tags`] with insertion/replacement only.
+    ///
+    /// All outer and nested hash tables must be fresh, with no erasure history.
+    /// This method does not enforce that builder precondition on public fields.
+    /// It charges conservative hash table storage plus actual owned string/vector
+    /// capacities and recursive NBT allocations. It excludes inline `Dynamic`
+    /// storage, a containing Arc header and allocator metadata. Builtin registries
+    /// and other global caches are not traversed. This is not an allocator census.
+    pub fn fresh_owned_heap_bytes(&self) -> usize {
+        use crate::retained::{OwnedHeap, fresh_hash_table_bytes};
+        let Self {
+            registries,
+            tags,
+            custom_components: _,
+        } = self;
+        let registry_bytes = registries.iter().fold(
+            fresh_hash_table_bytes::<(String, Vec<(String, Option<Tag>)>)>(registries.capacity()),
+            |sum, (name, entries)| {
+                sum.saturating_add(name.owned_heap_bytes())
+                    .saturating_add(entries.owned_heap_bytes())
+            },
+        );
+        tags.iter().fold(
+            registry_bytes
+                .saturating_add(
+                    fresh_hash_table_bytes::<(String, HashMap<String, Vec<i32>>)>(tags.capacity()),
+                ),
+            |sum, (registry, entries)| {
+                entries.iter().fold(
+                    sum.saturating_add(registry.owned_heap_bytes())
+                        .saturating_add(fresh_hash_table_bytes::<(String, Vec<i32>)>(
+                            entries.capacity(),
+                        )),
+                    |sum, (name, ids)| {
+                        sum.saturating_add(name.owned_heap_bytes())
+                            .saturating_add(ids.owned_heap_bytes())
+                    },
+                )
+            },
+        )
+    }
+
     /// A `ClientboundUpdateTagsPacket`: the registries it names replace their
     /// tags, the others keep theirs. A registry beyond [`MAX_TAG_REGISTRIES`] is dropped.
     pub fn add_tags(&mut self, packet: &UpdateTags) {
