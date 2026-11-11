@@ -2879,7 +2879,7 @@ impl Game<'_> {
     }
     /// Every column goes with the client level. Returns the positions it
     /// freed (`forget_remote_columns`).
-    fn forget_all_remote_columns(&mut self) -> Vec<(i32, i32)> {
+    pub(in crate::game) fn forget_all_remote_columns(&mut self) -> Vec<(i32, i32)> {
         let mut gone = self.world.chunks.keys().copied().collect();
         self.forget_remote_columns(&mut gone, false)
     }
@@ -2889,7 +2889,7 @@ impl Game<'_> {
     /// far terrain keeps their last state (`server_terrain`). Returns the
     /// positions it freed, in `gone`'s order: only those still resident,
     /// so a later forget of the same positions frees nothing.
-    fn forget_remote_columns(
+    pub(in crate::game) fn forget_remote_columns(
         &mut self,
         gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
         keep_terrain: bool,
@@ -2905,7 +2905,7 @@ impl Game<'_> {
             .copied()
             .collect();
         for &(x, z) in &freed_at {
-            self.client_chunk_unload(x, z);
+            self.client_chunk_unload(x, z, keep_terrain);
         }
         let freed =
             horizon_client::streaming::Streaming::take_remote_columns(&mut self.world, gone);
