@@ -1,5 +1,6 @@
 import importlib.util
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -17,7 +18,8 @@ class SelectionTests(unittest.TestCase):
         for path in ("Cargo.lock", "Cargo.toml", "crates/new-crate/Cargo.toml",
                      "crates/horizon-mod-api-gen/src/main.rs", "crates/horizon-client/src/game.rs",
                      "crates/cargo-horizon-mod/template/native/lib.rs", "tools/native_dylib_probe/a.rs",
-                     "launcher/src/rust_toolchain.rs", "rust-toolchain.toml"):
+                     "launcher/src/rust_toolchain.rs", "rust-toolchain.toml",
+                     "packaging/windows/exe.rs", "packaging/executable_link.rs"):
             with self.subTest(path=path):
                 self.assertTrue(ci.selected([path], roots))
         for path in ("launcher/src/main.rs", "launcher/src/native_mods/plan.rs", "docs/native.md",
@@ -29,17 +31,19 @@ class SelectionTests(unittest.TestCase):
     def test_discovers_transitive_build_target_dependencies_not_dev(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "Cargo.toml").write_text("")
+            (root / "Cargo.toml").write_text('[workspace.dependencies]\nd = {path="crates/d"}\n')
             for name, manifest in {
                 "horizon-mod-host": '[build-dependencies]\nb = {path="../b"}\n',
                 "horizon-mod-api-gen": '',
                 "b": '[target."cfg(windows)".dependencies]\nc = {path="../c"}\n[dev-dependencies]\nmissing = {path="../missing"}\n',
-                "c": '',
+                "c": '[dependencies]\nd.workspace = true\n',
+                "d": '',
             }.items():
                 folder = root / "crates" / name
                 folder.mkdir(parents=True)
                 (folder / "Cargo.toml").write_text(manifest)
             self.assertIn("crates/c/", ci.sdk_roots(root))
+            self.assertIn("crates/d/", ci.sdk_roots(root))
 
 
 class SummaryTests(unittest.TestCase):
@@ -99,6 +103,50 @@ class RecoveryTests(unittest.TestCase):
             ci.write_failure("fork/repo", "C", green, pages, output.append)
             self.assertIn("lookup failed", output[-1])
             self.assertNotIn("No successful", "\n".join(output))
+
+
+class InputBoundaryTests(unittest.TestCase):
+    def test_packaging_inputs_reach_both_selection_layers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/native-dylib-probe.yml").read_text()
+        push_filter = workflow.split("permissions:", 1)[0]
+        for path in ("packaging/windows/exe.rs", "packaging/executable_link.rs"):
+            with self.subTest(path=path):
+                self.assertIn("- '" + path + "'", push_filter)
+                self.assertTrue(ci.selected([path], ci.sdk_roots(root)))
+
+    def test_rename_to_docs_preserves_deleted_sdk_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real_run = subprocess.run
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+            git("init", "-q")
+            source = root / "crates/sdk/src/lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("pub fn sdk() {}\n")
+            git("add", ".")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "SDK")
+            base = git("rev-parse", "HEAD")
+            (root / "docs").mkdir()
+            git("mv", "crates/sdk/src/lib.rs", "docs/moved.rs")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "Move")
+            with patch.object(ci.subprocess, "run", side_effect=lambda *a, **kw: real_run(*a, cwd=root, **kw)):
+                paths = ci.changed_paths(base, lambda _: self.fail("diff should succeed"))
+            self.assertIn("crates/sdk/src/lib.rs", paths)
+            self.assertIn("docs/moved.rs", paths)
+            self.assertTrue(ci.selected(paths, ["crates/sdk/"]))
+
+    def test_api_timeout_conservatively_proves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output, summary = Path(tmp) / "output", Path(tmp) / "summary"
+            env = dict(PROBE_SELECT="1", GITHUB_REPOSITORY="fork/repo", GH_TOKEN="test",
+                       GITHUB_RUN_ID="1", GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary))
+            with patch.dict(ci.os.environ, env), patch.object(ci.urllib.request, "urlopen", side_effect=TimeoutError) as request:
+                ci.main()
+            self.assertEqual(request.call_args.kwargs["timeout"], 30)
+            self.assertEqual(output.read_text(), "selected=true\n")
+            self.assertIn("Baseline history unavailable", summary.read_text())
 
 
 class BaselineDiscoveryTests(unittest.TestCase):

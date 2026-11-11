@@ -10,6 +10,8 @@ on:
       - 'crates/**'
       - 'third_party/**'
       - '.cargo/**'
+      - 'packaging/windows/exe.rs'
+      - 'packaging/executable_link.rs'
       - 'rust-toolchain*'
       - 'launcher/src/rust_toolchain.rs'
       - 'tools/prebuilt_game.py'

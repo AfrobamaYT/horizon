@@ -43,7 +43,8 @@ def sdk_roots(root):
 def selected(paths, roots):
     exact = {"Cargo.toml", "Cargo.lock", "launcher/src/rust_toolchain.rs",
              "tools/prebuilt_game.py", "tools/native_dylib_probe.py", "tools/native_probe_ci.py",
-             ".github/workflows/native-dylib-probe.yml"}
+             ".github/workflows/native-dylib-probe.yml", "packaging/windows/exe.rs",
+             "packaging/executable_link.rs"}
     for path in paths:
         if path in exact or path.startswith(("rust-toolchain", ".cargo/", "tools/native_dylib_probe/",
                                                "crates/cargo-horizon-mod/template/native/")):
@@ -123,7 +124,7 @@ def write_failure(repo, head, green, pages, emit):
 
 
 def changed_paths(base, emit):
-    result = subprocess.run(["git", "diff", "--name-only", base, "HEAD"],
+    result = subprocess.run(["git", "diff", "--name-only", "--no-renames", base, "HEAD"],
                             text=True, capture_output=True)
     if result.returncode:
         emit("Baseline diff unavailable (for example, removed by force-push); conservatively proving SDK linkage.")
@@ -138,7 +139,7 @@ def main():
         request = urllib.request.Request(f"https://api.github.com/repos/{repo}/{path}",
                                          headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}",
                                                   "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:
             return json.load(response)
     def pages(path, key=None):
         result = []
