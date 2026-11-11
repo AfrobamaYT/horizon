@@ -24,7 +24,7 @@ pub(super) fn compile(
     let sdk = prebuilt::identity(game)?;
     let lock = sdk.registry_lock.as_ref().ok_or("The prebuilt SDK does not declare a locked registry graph; install an SDK that supports registry-bearing native mods")?;
     let links = sdk.native_links.as_ref().ok_or("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely")?;
-    let catalog = internals::Catalog::read(game)?.with_mods(projects.iter().map(|p| p.bundle))?;
+    let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
@@ -55,7 +55,6 @@ pub(super) fn compile(
         let relative = format!("native-api/{id}");
         let dest = out.join(&relative);
         super::copy_bundle(bundle, &dest)?;
-        super::mod_points::stage(&dest, &catalog.wire)?;
         let mut todo = vec![PathBuf::new()];
         let mut seen = std::collections::BTreeSet::new();
         while let Some(local) = todo.pop() {

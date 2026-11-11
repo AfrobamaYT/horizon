@@ -52,7 +52,6 @@ pub(super) fn classify(
     {
         match prebuilt::planning_catalog(lease, &revision) {
             Ok(catalog) => {
-                let catalog = catalog.with_mods(projects.iter().map(|p| p.bundle))?;
                 for project in &projects {
                     if let Err(error) = catalog.check(&project.bundle.manifest) {
                         let (_, route) = result

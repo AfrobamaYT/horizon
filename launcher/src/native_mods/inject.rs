@@ -32,7 +32,6 @@ impl ListedPoint {
             returns: self.returns.clone(),
             host: self.host.clone(),
             return_ty: self.return_ty.clone(),
-            table: None,
         }
     }
 }
@@ -44,9 +43,6 @@ pub(super) const POINTS: &str = "points.json";
 #[derive(serde::Deserialize)]
 pub(super) struct Catalog {
     pub points: Vec<ListedPoint>,
-    /// The `mod_api` types with a `Wire` layout: what a mod point's `api` record may hold.
-    #[serde(default)]
-    pub wire: std::collections::BTreeSet<String>,
 }
 
 pub(super) fn catalog(path: &Path) -> Result<Catalog, String> {

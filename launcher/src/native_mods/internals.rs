@@ -15,8 +15,6 @@ pub(super) struct Catalog {
     pub(super) internals: Vec<ListedInternal>,
     pub(super) discovery: bool,
     pub(super) points: Vec<inject::ListedPoint>,
-    pub(super) wire: BTreeSet<String>,
-    pub(super) mods: Vec<super::mod_points::ModLibrary>,
 }
 
 pub(super) struct Facade {
@@ -125,8 +123,6 @@ impl Catalog {
         let listed = inject::catalog(&dir.join(inject::POINTS))?;
         Ok(Self {
             points: listed.points,
-            wire: listed.wire,
-            mods: Vec::new(),
             internals: internals::read(&path)?,
             discovery: false,
         })
@@ -167,7 +163,6 @@ impl Catalog {
 
     pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
         super::slots::check(self, manifest).map_err(Error::Inject)?;
-        super::mod_points::routes(self, manifest).map_err(|e| Error::Inject(e.to_string()))?;
         for declared in &manifest.internals {
             internals::check(&self.internals, &manifest.id, declared)?;
         }
@@ -402,7 +397,7 @@ mod tests {
         fs::write(path, text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let catalog = Catalog {
-            points: Vec::new(), wire: BTreeSet::new(), mods: Vec::new(),
+            points: Vec::new(),
             discovery: false,
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },

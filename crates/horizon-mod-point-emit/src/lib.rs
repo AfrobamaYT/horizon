@@ -23,10 +23,6 @@ pub struct Point {
     /// is `()`.
     #[serde(default)]
     pub return_ty: Option<String>,
-    /// The table module its constructors are in: none for the game's `mod_points`, or a mod
-    /// point's (#2339) table as the generated code names it (`mod_0::__horizon_points`).
-    #[serde(default)]
-    pub table: Option<String>,
 }
 
 /// Remove type arguments and whitespace exactly as the native launcher resolves point paths.
@@ -57,8 +53,7 @@ pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<St
         .map(|(place, entry, point)| {
             let (id, priority, inject) = (&manifest.id, entry.priority, &entry.id);
             let listener = format!("{prefix}{}", entry.with);
-            let table = point.table.as_deref().unwrap_or("mod_points");
-            let constructor = format!("{table}::listeners::{place}");
+            let constructor = format!("mod_points::listeners::{place}");
             if entry.kind == Kind::Replace {
                 let host = if point.host == "none" { "none" } else { "host" };
                 format!(
@@ -195,7 +190,6 @@ hash = "pin"
             returns: "cancel".into(),
             host: "both".into(),
             return_ty: Some("()".into()),
-            table: None,
         }];
         let native = api(&manifest, &points, "mod_3::")
             .unwrap()
@@ -244,17 +238,6 @@ hash = "pin"
         let mut untyped = points[0].clone();
         untyped.return_ty = None;
         assert!(api(&replace, &[untyped], "mod_3::").is_err());
-        // A mod point's constructor is in its own table.
-        let mut own = points[0].clone();
-        own.table = Some("mod_1::__horizon_points".into());
-        assert_eq!(
-            api(&manifest, &[own.clone()], "mod_3::").unwrap()[0],
-            "mod_1::__horizon_points::listeners::tick(\"fixture\", 12, \"before\", mod_3::head)"
-        );
-        assert_eq!(
-            api(&replace, &[own], "mod_3::").unwrap()[0],
-            "mod_points::replace!(mod_1::__horizon_points::listeners::tick, cancel, host, \"fixture\", 12, \"before\", mod_3::head)"
-        );
         let wasm = api(&manifest, &points, "original_mod::").unwrap();
         assert_eq!(
             wasm[0],

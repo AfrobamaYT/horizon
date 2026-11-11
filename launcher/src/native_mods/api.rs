@@ -59,7 +59,6 @@ pub(super) fn main_rs(
     let api_points = listed
         .iter()
         .map(super::inject::ListedPoint::emitted)
-        .chain(super::mod_points::emitted(catalog, mods))
         .collect::<Vec<_>>();
     let raw = mods
         .iter()
@@ -401,7 +400,6 @@ pub(super) fn stage(
         let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
         super::copy_bundle(bundle, &dest)?;
-        super::mod_points::stage(&dest, &catalog.wire)?;
 
         let path = dest.join("Cargo.toml");
         let mut manifest = project.cargo.clone();

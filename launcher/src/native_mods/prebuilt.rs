@@ -513,8 +513,7 @@ pub(super) fn compile(
             },
         );
     }
-    let catalog =
-        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
+    let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
@@ -553,7 +552,6 @@ pub(super) fn compile(
         // Compile an isolated copy of the mod crate.
         let staged = out.join("staged").join(id);
         super::copy_bundle(project.bundle, &staged)?;
-        super::mod_points::stage(&staged, &catalog.wire)?;
 
         let source = staged.join(
             lib.and_then(|l| l.get("path"))

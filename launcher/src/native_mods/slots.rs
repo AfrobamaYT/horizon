@@ -4,9 +4,6 @@ use horizon_mod_package::{manifest::inject::Kind, Manifest};
 
 pub(super) fn check(catalog: &Catalog, manifest: &Manifest) -> Result<(), String> {
     for entry in &manifest.inject {
-        if catalog.mod_owner(&entry.at).is_some() {
-            continue;
-        }
         let id = format!("{}:{}", manifest.id, entry.id);
         let point = catalog
             .points
