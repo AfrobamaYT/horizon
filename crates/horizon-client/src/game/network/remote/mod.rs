@@ -8803,20 +8803,19 @@ impl Game<'_> {
             use mod_api::InteractionResult as Answer;
             use mod_api::TriState;
             let spectator = self.spectator();
-            // RightClickBlock on this client, where performUseItemOn starts
-            // (a spectator's use only opens menus on the server): it may force
-            // the block's use or the item's useOn, or answer for both.
+            // RightClickBlock on this client, where performUseItemOn starts,
+            // for a spectator too (whose use only opens menus on the server):
+            // it may force the block's use or the item's useOn, or answer for
+            // both.
             let (mut canceled, mut use_block, mut use_item) =
                 (None, TriState::Default, TriState::Default);
-            if !spectator {
-                match self.right_click_block(&hit, hand, held.as_ref()) {
-                    super::native_hooks::BlockClickAnswer::Go {
-                        use_block: block,
-                        use_item: item,
-                    } => (use_block, use_item) = (block, item),
-                    super::native_hooks::BlockClickAnswer::Canceled(answer) => {
-                        canceled = Some(answer);
-                    }
+            match self.right_click_block(&hit, hand, held.as_ref()) {
+                super::native_hooks::BlockClickAnswer::Go {
+                    use_block: block,
+                    use_item: item,
+                } => (use_block, use_item) = (block, item),
+                super::native_hooks::BlockClickAnswer::Canceled(answer) => {
+                    canceled = Some(answer);
                 }
             }
             // The held item's onItemUseFirst on this client: the broadcast
@@ -8975,8 +8974,9 @@ impl Game<'_> {
             }));
             // MultiPlayerGameMode.performUseItemOn: a spectator's use predicts
             // nothing and ends the click (CONSUME, no swing); the server opens
-            // the block's menu.
-            if spectator {
+            // the block's menu. A cancelled RightClickBlock answers instead,
+            // as for any player (below).
+            if spectator && canceled.is_none() {
                 return true;
             }
             // A cancelled RightClickBlock's answer, once the packet went out
