@@ -1,9 +1,6 @@
 //! Render pipelines a client mod registers as plain data, and the quads it draws with them.
 use crate::{Identifier, WorldDepth};
 
-/// The most pipelines one mod may register; later ones are refused.
-pub const MAX_RENDER_PIPELINES_PER_MOD: usize = 64;
-
 /// A pipeline registered by `Hooks::register_render_pipelines`: a fragment shader from the
 /// mod's assets and the fixed state it draws with. The engine builds every GPU object.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,8 +127,8 @@ pub enum PipelineDrawError {
 }
 
 /// What `owner` added to `pipelines` in `register_render_pipelines`, checked as it returns: a
-/// pipeline outside the mod's namespaces, one whose id an earlier registration took, and any
-/// past [`MAX_RENDER_PIPELINES_PER_MOD`] are logged with the mod and dropped.
+/// pipeline outside the mod's namespaces or whose id an earlier registration took is logged
+/// with the mod and dropped.
 pub(crate) fn validate_render_pipelines(
     owner: &str,
     previous: &[RenderPipeline],
@@ -149,14 +146,12 @@ fn validate_in(
     owns: &dyn Fn(&str) -> bool,
 ) {
     let added = pipelines.split_off(previous.len().min(pipelines.len()));
-    let mut accepted = 0;
     for pipeline in added {
         let refusal = if !owns(pipeline.id.namespace()) {
             Some("its id is outside the mod's namespaces")
         } else if pipelines.iter().any(|kept| kept.id == pipeline.id) {
             Some("an earlier registration has that id")
-        } else if accepted == MAX_RENDER_PIPELINES_PER_MOD {
-            Some("the mod has registered its 64 already")
+
         } else {
             None
         };
@@ -166,7 +161,6 @@ fn validate_in(
                 pipeline.id
             ),
             None => {
-                accepted += 1;
                 pipelines.push(pipeline);
             }
         }
@@ -216,17 +210,17 @@ mod tests {
     }
 
     #[test]
-    fn a_mods_sixty_fifth_pipeline_is_dropped_and_the_next_mod_still_registers() {
-        let mut pipelines: Vec<_> = (0..MAX_RENDER_PIPELINES_PER_MOD + 3)
+    fn a_mod_can_register_more_than_vanillas_pipeline_count() {
+        let mut pipelines: Vec<_> = (0..131)
             .map(|i| pipeline(&format!("mine:p{i}")))
             .collect();
         validate_in("mine", &[], &mut pipelines, &|_| true);
-        assert_eq!(pipelines.len(), MAX_RENDER_PIPELINES_PER_MOD);
-        assert_eq!(pipelines.last().unwrap().id.to_string(), "mine:p63");
+        assert_eq!(pipelines.len(), 131);
+        assert_eq!(pipelines.last().unwrap().id.to_string(), "mine:p130");
 
         let previous = pipelines.clone();
         pipelines.push(pipeline("next:glow"));
         validate_in("next", &previous, &mut pipelines, &|_| true);
-        assert_eq!(pipelines.len(), MAX_RENDER_PIPELINES_PER_MOD + 1);
+        assert_eq!(pipelines.len(), 132);
     }
 }

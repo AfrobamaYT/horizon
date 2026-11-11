@@ -5,7 +5,7 @@ pub trait Hooks {
     /// `RegisterRenderPipelinesEvent`; 1.21.1 mods used `RegisterShadersEvent`): push a
     /// [`RenderPipeline`] for each into `event.pipelines`. The game builds them with its own at
     /// startup and again on every resource reload. An id outside the mod's namespaces, one an
-    /// earlier registration took, and any past 64 from one mod are logged with the mod and
+    /// earlier registration took are logged with the mod and
     /// dropped. A pipeline whose shader is missing or doesn't compile is logged and resolves to
     /// [`RenderPipelineError::Invalid`]; the game starts either way.
     #[notes = r#"## Render pipelines
