@@ -154,13 +154,6 @@ pub fn start<G>(
     log::info!("Horizon {}", crash::version());
     // Mod loading emits refusals; both client and dedicated logs must exist first.
     let (ids, _loaded_code) = load(&native, &launch);
-    if let (false, Some(slot)) = (mod_points::STAGED, slots.first()) {
-        eprintln!(
-            "Horizon: {}: this build has no point sites; start the game through the launcher's SDK build",
-            slot.id()
-        );
-        std::process::exit(game::exit_code::ERROR);
-    }
     for id in ids {
         for slot in slots.iter().filter(|slot| slot.id() == id) {
             if let Err(error) = mod_points::register(slot) {

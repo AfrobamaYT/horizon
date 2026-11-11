@@ -52,4 +52,23 @@ A library mod publishes its own hooks and functions for other mods to use.
 
 ## Ask for the hook
 
-If no suitable API point is available, request a named hook.
+A gap is a hook request. File one as an issue on
+[arismoko/horizon](https://github.com/arismoko/horizon/issues) with the contract below.
+Copy this, and fill every field:
+
+```markdown
+**Hook request: <short name>**
+
+- **What the mod needs:** <one sentence: the moment, and what the mod does there>
+- **NeoForge 26.3 counterpart:** <event or method name, or "none">
+- **Vanilla class and method:** <`net.minecraft…Class.method`, the call the hook wraps>
+- **The injection it replaces:** <the `[[inject]]` table, `at`, `kind`, `access` and callback signature>
+- **Mod:** <name, repository or `.hmod`>
+- **Side:** <server, client or both>
+- **Contract wanted:** <listen, cancel, replace a value, collect; what a listener may change>
+```
+
+A hook with a NeoForge counterpart takes its name, side and contract. One without is welcome and names the
+mod mixin or use it replaces. State the vanilla method: the hook fires where vanilla calls it.
+
+API points need the patchable (staged) build used by the launcher’s mod build; the plain game refuses them by mod and target name.

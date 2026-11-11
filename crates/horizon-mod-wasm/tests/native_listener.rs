@@ -58,7 +58,7 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
     let mut failure = None;
     remember_shutdown(&mut failure, "disk full".into());
     assert_eq!(failure.as_deref(), Some("disk full"));
-    mod_points::register(
+    mod_api::__private::points::register(
         &mod_points::listeners::game_server_lifecycle_remember_shutdown(
             "native",
             0,
@@ -68,7 +68,7 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
         .ordered(0, "shutdown"),
     )
     .unwrap();
-    mod_points::register(&mod_points::replace!(
+    mod_api::__private::points::register(&mod_points::replace!(
         mod_points::listeners::game_beacon_average,
         result,
         none,
@@ -78,14 +78,14 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
         replace::own_average
     ))
     .unwrap();
-    mod_points::register(&mod_points::listeners::listener_fixture_sum_return(
+    mod_api::__private::points::register(&mod_points::listeners::listener_fixture_sum_return(
         "native",
         0,
         "sum",
         matrix::sum_return,
     ))
     .unwrap();
-    mod_points::register(&mod_points::listeners::listener_fixture_mirrors(
+    mod_api::__private::points::register(&mod_points::listeners::listener_fixture_mirrors(
         "native",
         0,
         "mirrors",
@@ -93,7 +93,7 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
     ))
     .unwrap();
     // A head listener changing its argument (mixin `@ModifyVariable` on a parameter).
-    mod_points::register(&mod_points::listeners::game_commands_wrap_degrees(
+    mod_api::__private::points::register(&mod_points::listeners::game_commands_wrap_degrees(
         "native",
         0,
         "turn",

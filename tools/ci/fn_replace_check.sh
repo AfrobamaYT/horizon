@@ -3,6 +3,9 @@
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
 #   [FNR_MODS="alpha beta"] [FNR_MOD_ROOT=DIR] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
+# FNR_WASM_LAYOUT_PACKAGE=valid.hmod FNR_WASM_STD=std.wasm adds a wasm point-layout refusal check
+# to the with-RESOURCES server run (not the build/link-only CI mode):
+# its exported layout fingerprint is changed to zero, and its integrity hash is updated.
 # SDK is a folder from `tools/prebuilt_game.py build --server` at this checkout's HEAD. With
 # RESOURCES (a prepared `horizon-client/26.3` folder), the server starts, takes `/tick` commands
 # and stops; every mixin helper prints a line starting `fnr:`.
@@ -102,6 +105,12 @@ if [ -n "$resources" ]; then
   run=$scratch/run
   mkdir -p "$run"
   echo eula=true > "$run/eula.txt"
+  layout_mod=
+  if [ -n "${FNR_WASM_LAYOUT_PACKAGE:-}" ]; then
+    cp "${FNR_WASM_STD:?set FNR_WASM_STD to the matching horizon-wasm-std.wasm}" "$scratch/engine/horizon-wasm-std.wasm"
+    layout_mod=$(python3 "$root/tools/ci/mismatch_wasm_layout.py" "$FNR_WASM_LAYOUT_PACKAGE" "$run/horizon-mods/layout-refused.hmod")
+    printf 'mod.%s:true\n' "$layout_mod" > "$run/horizon-mods.txt"
+  fi
   # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them.
   hoppers=
   if [[ " ${FNR_MODS:-alpha beta} " == *" loop"* ]]; then
@@ -112,6 +121,9 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     (cd "$run" && env "${env_vars[@]}" timeout 180 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" \
       --dedicated --nogui) > "$scratch/server.log" 2>&1 || true
   grep -F 'fnr:' "$scratch/server.log"
+  if [ -n "$layout_mod" ]; then
+    grep -F "wasm mod $layout_mod refused: built for another version of the mod points API (mod layout 0, game layout " "$scratch/server.log"
+  fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" alpha "* ]]; then
     grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
   fi

@@ -223,6 +223,13 @@ fn lock() -> std::sync::MutexGuard<'static, Open> {
 pub enum RegisterError {
     /// The list was sealed: listeners register while the game loads, before its points are set.
     Sealed,
+    /// A game listener requires a staged build with point sites.
+    Unstaged {
+        /// Owning mod.
+        id: &'static str,
+        /// Target function.
+        target: &'static str,
+    },
     /// The guest table requires a typed API listener.
     Unsupported,
     /// A second `replace` listener at a place that already has one: two overwrites can't both win,
@@ -238,6 +245,10 @@ pub enum RegisterError {
 impl std::fmt::Display for RegisterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Unstaged { id, target } => write!(
+                f,
+                "{id}: {target}: this build has no point sites; start the game through the launcher's mod build"
+            ),
             Self::Sealed => f.write_str("the game's points were already set"),
             Self::Unsupported => f.write_str("the guest table requires a typed API listener"),
             Self::Replaced { first, second } => write!(

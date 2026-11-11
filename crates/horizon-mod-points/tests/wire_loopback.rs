@@ -126,7 +126,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
         (PointId::Tick, &LOOPBACK_HEAD),
         (PointId::TickReturn, &LOOPBACK_RETURN),
     ] {
-        mod_points::register(&SlotListener::forwarded(
+        mod_api::__private::points::register(&SlotListener::forwarded(
             "guest",
             place.place(),
             endpoint,
@@ -149,7 +149,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
         (PointId::GameServerLinksListTop, &LOOPBACK_TOP),
         (PointId::GameServerLinksListTopReturn, &LOOPBACK_TOP_RETURN),
     ] {
-        mod_points::register(&SlotListener::forwarded(
+        mod_api::__private::points::register(&SlotListener::forwarded(
             "guest",
             place.place(),
             endpoint,

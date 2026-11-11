@@ -36,6 +36,8 @@ the game by the launcher ([Native mods](native-mods.md)), or to `mod.wasm`, whic
 the same mod API runs with no rebuild. Only the build step differs: the hooks, Parts,
 `[dependencies]` and the manifest mean the same for both.
 
+The example counts ticks with the `server_tick` hook, so it also works on plain game builds.
+
 ```rust,ignore
 {{#include ../../examples/wasm-hello/src/lib.rs:mod}}
 ```

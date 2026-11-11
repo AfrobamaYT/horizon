@@ -902,6 +902,15 @@ pub(crate) fn records_selected(
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
+    let targets: Vec<_> = points
+        .iter()
+        .flat_map(|p| {
+            let variants = parse(&p.api[1]);
+            let ids: syn::ItemEnum =
+                syn::parse2(quote!(enum Places { #variants })).expect("point variants");
+            std::iter::repeat_n(p.target.clone(), ids.variants.len())
+        })
+        .collect();
     let mut api_places = proc_macro2::TokenStream::new();
     let mut api_refusals = proc_macro2::TokenStream::new();
     let mut layout = 0xcbf29ce484222325u64;
@@ -978,6 +987,9 @@ pub(crate) fn records_selected(
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
     quote! {
         #(#records)*
+        /// Target names for native load diagnostics.
+        #[doc(hidden)]
+        pub const POINT_TARGETS: &[&str] = &[#(#targets),*];
         /// The generated point export table and record layout, checked separately from the API layout.
         #[doc(hidden)]
         pub const POINT_LAYOUT: u64 = #layout;
@@ -1669,6 +1681,20 @@ name = 'horizon-mod-api-gen'
         );
         let staged = stage_with(&root, &WireTypes::new()).unwrap();
         assert_eq!((staged.points, staged.head_only, staged.refused), (7, 1, 3));
+        let generated = root.join("staged-generated");
+        std::fs::create_dir_all(&generated).unwrap();
+        // Only the stager's stamp on the source copy makes a build one with point sites.
+        for staged in [false, true] {
+            if staged {
+                std::fs::write(root.join(".horizon-source-staged"), "").unwrap();
+            }
+            crate::build::generate_points_inner(&root, &generated).unwrap();
+            let code = std::fs::read_to_string(generated.join("points_generated.rs")).unwrap();
+            assert_eq!(
+                code.contains("pub const STAGED : bool = true"),
+                staged || cfg!(feature = "listener-fixture")
+            );
+        }
         let game = std::fs::read_to_string(root.join("crates/horizon-client/src/game.rs")).unwrap();
         assert!(
             game.contains("#[horizon_mod_api_macros::point(side = \"both\")] fn tick(")
