@@ -72,8 +72,10 @@ pub trait Hooks {
     );
     /// An interaction mapping is about to act on the tick's crosshair target. `attempt`
     /// distinguishes a queued press from held use or mining. Use asks for each hand tried,
-    /// main first. Cancelling the main hand ends the click. A cancelled attack or use still
-    /// swings unless the listener clears `swing_hand`. Fires on the window client.
+    /// main first. Cancelling the main hand ends the click. Attack and use honour
+    /// `swing_hand` independently: false suppresses natural swings; cancellation with
+    /// true swings without acting. True preserves natural no-swing use outcomes. Pick
+    /// only vetoes its packet and never swings. Fires on the window client.
     #[hook(
         side = "client",
         contract = "cancel",

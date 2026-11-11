@@ -865,3 +865,6 @@ fn an_item_used_from_the_off_hand_reaches_the_use_hooks_on_the_server() {
         });
     });
 }
+
+#[path = "interaction_key_tests.rs"]
+mod interaction_key_tests;

@@ -22,6 +22,15 @@ and mining overlays without changing the server's gameplay events.
 
 ## Input and prediction contracts
 
+Cancellation and `swing_hand` are independent. For an otherwise successful attack,
+use (either hand), or held mining attempt, `(cancel, swing)` gives action/swing counts
+`(false, false) → 1/0`, `(false, true) → 1/1`, `(true, false) → 0/0`, and
+`(true, true) → 0/1`. An uncancelled use that naturally does not swing still does
+not swing when the flag is true. Main-hand cancellation skips the off-hand event.
+Pick retains its packet veto and never swings, including when `swing_hand` is true.
+Native and wasm listeners share this decision and the no-listener path retains
+vanilla behavior.
+
 Extend `interaction_key_mapping_triggered` at its existing call sites. The event should
 carry whether the attempt is from a queued press or a held mapping, alongside the
 existing key, hand, cancellation and swing controls. A press attempt and a held attempt
