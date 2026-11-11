@@ -115,7 +115,7 @@ place, each once under their own UUID, also while a guest's turn is running. Fak
 listed, nor is a player a nested guest turn displaced, whose handle resolves again when that turn
 ends. `entities_in` stays the one area query: on a server it finds players in a box too;
 on a client it includes only the window's own player, not other players
-([#3033](https://github.com/arismoko/horizon/issues/3033)).
+(arismoko/horizon#3033).
 
 `find_nearest_structure(host, structure, StructureSearch::new(origin, radius))` is
 `ServerLevel.findNearestMapStructure` without skipping known starts, the search `/locate

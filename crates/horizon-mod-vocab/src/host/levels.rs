@@ -254,7 +254,7 @@ pub trait LevelsBackend {
     /// cannot resolve until the level is in place. On a client (`ClientLevel`),
     /// the entities the server tracks to it and the window's own player, with
     /// the same walk; other players are left out, as their handles do not
-    /// resolve there (tracked in <https://github.com/arismoko/horizon/issues/3033>).
+    /// resolve there (tracked in arismoko/horizon#3033).
     /// None there before login and for a level it does not show. The walk
     /// is in entity-list order followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob

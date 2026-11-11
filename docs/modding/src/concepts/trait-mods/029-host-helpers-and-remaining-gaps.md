@@ -17,7 +17,7 @@ Both reads are available on either side.
 
 `level.entities_in(host, min, max)` also works on the client's displayed level: tracked
 entities and the window's own non-spectator player are returned as readable handles.
-Other players are omitted ([#3033](https://github.com/arismoko/horizon/issues/3033));
+Other players are omitted (arismoko/horizon#3033);
 a level the client does not show, or a read before login, returns `None`.
 Every entity list is walked once per call, O(entities) regardless of the box;
 each overlapping mob resolves through a mob-list scan, O(K*N) for K overlaps and N mobs.
