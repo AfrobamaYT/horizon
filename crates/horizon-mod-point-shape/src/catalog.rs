@@ -27,8 +27,6 @@ pub struct Point {
     pub hash: String,
     /// The signature the hash covers.
     pub signature: String,
-    /// Whether it has an internals form.
-    pub raw: bool,
     /// Whether its API listeners have a return place.
     pub at_return: bool,
     /// Why its API listeners are refused, naming the parameter and type.
@@ -40,11 +38,6 @@ pub struct Point {
     pub host: String,
     /// The function's return type as written.
     pub return_ty: String,
-    /// Its internals head and return listener types, by path from the crate root.
-    #[serde(default)]
-    pub listener: Option<String>,
-    #[serde(default)]
-    pub return_listener: Option<String>,
 }
 
 impl Catalog {

@@ -178,7 +178,6 @@ pub(crate) struct Found<'a> {
     attrs: &'a [syn::Attribute],
     vis: &'a syn::Visibility,
     pub(crate) sig: &'a syn::Signature,
-    pub(crate) body: &'a syn::Block,
     /// The `impl`'s type and generics; none for a free function.
     owner: Option<(&'a Type, &'a syn::Generics)>,
     /// The types its signature names that cross as `mod_api` types, as written, with the API
@@ -320,7 +319,6 @@ pub(crate) fn file_functions<'a>(
                     attrs: &function.attrs,
                     vis: &function.vis,
                     sig: &function.sig,
-                    body: &function.block,
                     owner: None,
                     mirrors: Vec::new(),
                 };
@@ -344,7 +342,6 @@ pub(crate) fn file_functions<'a>(
                             attrs: &method.attrs,
                             vis: &method.vis,
                             sig: &method.sig,
-                            body: &method.block,
                             owner: Some((&block.self_ty, &block.generics)),
                             mirrors: Vec::new(),
                         };

@@ -1,5 +1,5 @@
-//! `#[point]`: an injection point's slot check, record copy-in and copy-out, and raw listeners.
-use point_shape::{Arg, Pass, RawOutcome, Receiver, Returns, Side};
+//! `#[point]`: an injection point's slot check, record copy-in and copy-out,.
+use point_shape::{Arg, Pass, Receiver, Returns, Side};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ImplItemFn;
@@ -105,102 +105,6 @@ fn copy_out(arg: &Arg, input: usize, point: &str) -> TokenStream {
         quote!(#target = #converted;)
     }
 }
-
-/// Elided lifetimes of a method's return borrow from its receiver: `'s` names it.
-struct ElideTo(syn::Lifetime);
-
-impl syn::visit_mut::VisitMut for ElideTo {
-    fn visit_type_reference_mut(&mut self, reference: &mut syn::TypeReference) {
-        if reference.lifetime.is_none() {
-            reference.lifetime = Some(self.0.clone());
-        }
-        syn::visit_mut::visit_type_reference_mut(self, reference);
-    }
-    fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
-        if lifetime.ident == "_" {
-            *lifetime = self.0.clone();
-        }
-    }
-    // A function pointer or trait object in the return elides on its own.
-    fn visit_type_bare_fn_mut(&mut self, _: &mut syn::TypeBareFn) {}
-    fn visit_type_trait_object_mut(&mut self, _: &mut syn::TypeTraitObject) {}
-}
-
-/// The function-pointer type a replacement of `sig`'s body has (function replacement for
-/// `[[mixin]]`): the receiver as its first parameter, the function's own lifetimes bound for
-/// any call, and a return that borrows from the receiver as the method's elision says.
-fn redirect_type(sig: &syn::Signature, receiver: Receiver) -> TokenStream {
-    // The function's own lifetimes are renamed: the type is also written inside its body, where
-    // they are already in scope and a `for<>` binder may not shadow them.
-    struct Rename(Vec<(syn::Ident, syn::Lifetime)>);
-    impl syn::visit_mut::VisitMut for Rename {
-        fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
-            if let Some((_, fresh)) = self.0.iter().find(|(name, _)| *name == lifetime.ident) {
-                *lifetime = fresh.clone();
-            }
-        }
-    }
-    let mut rename = Rename(
-        sig.generics
-            .lifetimes()
-            .enumerate()
-            .map(|(index, param)| {
-                (
-                    param.lifetime.ident.clone(),
-                    syn::Lifetime::new(&format!("'__fnr_l{index}"), proc_macro2::Span::call_site()),
-                )
-            })
-            .collect(),
-    );
-    let mut lifetimes: Vec<syn::Lifetime> =
-        rename.0.iter().map(|(_, fresh)| fresh.clone()).collect();
-    let mut output = sig.output.clone();
-    syn::visit_mut::VisitMut::visit_return_type_mut(&mut rename, &mut output);
-    let first = match (receiver, sig.receiver()) {
-        (Receiver::None, _) | (_, None) => quote!(),
-        (receiver, Some(written)) => {
-            let named = written.reference.as_ref().and_then(|(_, lifetime)| {
-                lifetime.clone().map(|mut lifetime| {
-                    syn::visit_mut::VisitMut::visit_lifetime_mut(&mut rename, &mut lifetime);
-                    lifetime
-                })
-            });
-            let lifetime = named.unwrap_or_else(|| {
-                let fresh = syn::Lifetime::new("'__fnr_s", proc_macro2::Span::call_site());
-                lifetimes.push(fresh.clone());
-                fresh
-            });
-            syn::visit_mut::VisitMut::visit_return_type_mut(
-                &mut ElideTo(lifetime.clone()),
-                &mut output,
-            );
-            if receiver == Receiver::Mut {
-                quote!(&#lifetime mut Self,)
-            } else {
-                quote!(&#lifetime Self,)
-            }
-        }
-    };
-    let types: Vec<syn::Type> = sig
-        .inputs
-        .iter()
-        .filter_map(|input| match input {
-            syn::FnArg::Typed(typed) => {
-                let mut ty = (*typed.ty).clone();
-                syn::visit_mut::VisitMut::visit_type_mut(&mut rename, &mut ty);
-                Some(ty)
-            }
-            syn::FnArg::Receiver(_) => None,
-        })
-        .collect();
-    let bound = if lifetimes.is_empty() {
-        quote!()
-    } else {
-        quote!(for<#(#lifetimes),*>)
-    };
-    quote!(#bound fn(#first #(#types),*) #output)
-}
-
 /// `#[point]` on a function: see the attribute's documentation in the crate root.
 pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     if let Some(inline) = function.attrs.iter().find(|attr| {
@@ -221,9 +125,6 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     };
     let name = shape.name.clone();
     let table = shape.table.clone();
-    // A game point with a raw form takes a replacement body: `[[mixin]]`'s function replacement.
-    // A mod crate's own points (#2339) take no mixins.
-    let redirect = shape.raw && table.is_ident("mod_points");
     // The body moves to an inlined inner function, so the return listeners run however it
     // returns; the outer function takes each parameter by a plain, mutable name.
     let inner = syn::Ident::new(
@@ -244,6 +145,13 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         }
     }
     let api = shape.api();
+    if !api {
+        return syn::Error::new_spanned(
+            &function.sig.ident,
+            format!("point {} has no API record", function.sig.ident),
+        )
+        .to_compile_error();
+    }
     let args: Vec<(&Arg, usize)> = if api {
         shape.args.iter().zip(inputs.iter().copied()).collect()
     } else {
@@ -285,16 +193,11 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     } else {
         quote!(::<#(#generics),*>)
     };
-    let (receiver, callee) = match (shape.receiver, shape.free) {
+    let (_receiver, callee) = match (shape.receiver, shape.free) {
         (Receiver::None, true) => (quote!(), quote!(#inner)),
         (Receiver::None, false) => (quote!(), quote!(Self::#inner)),
         (Receiver::Shared, _) => (quote!(self,), quote!(self.#inner)),
         (Receiver::Mut, _) => (quote!(&mut *self,), quote!(self.#inner)),
-    };
-    let erased_receiver = match shape.receiver {
-        Receiver::None => quote!(::std::ptr::null_mut()),
-        Receiver::Shared => quote!(self as *const Self as *mut ()),
-        Receiver::Mut => quote!(&mut *self as *mut Self as *mut ()),
     };
     // What the API listeners get before their record: the shape's host, if it has one.
     let host = match (shape.receiver, shape.side) {
@@ -306,17 +209,15 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         (_, Some(_)) => quote!(self,),
     };
     let record = shape.record();
-    let outcome = shape.raw_outcome(&function.sig);
     let api_value = match &shape.returns {
         Returns::Value(value) if api => Some(value),
         _ => None,
     };
-    let cancels =
-        matches!(shape.returns, Returns::Unit | Returns::UnitResult) && (api || shape.raw);
-    let results = (shape.raw && matches!(outcome, RawOutcome::Result(_))) || api_value.is_some();
+    let cancels = matches!(shape.returns, Returns::Unit | Returns::UnitResult) && api;
+    let results = api_value.is_some();
     let listened = |variant: &syn::Ident| quote!(#table::__private::POINTS[#table::PointId::#variant as usize].load(::std::sync::atomic::Ordering::Acquire));
 
-    // The head: copy in, the API listeners, copy out; then the raw listeners on the same places.
+    // The head: copy in, the API listeners, copy out.
     let shared_locals =
         args.iter()
             .filter(|(arg, _)| arg.pass == Pass::Shared)
@@ -371,70 +272,6 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         };
         guarded(&names, &values, body, &name)
     });
-    let raw_places = |at_return: bool| {
-        let fields = point_shape::raw_fields(&function.sig)
-            .into_iter()
-            .map(|field| {
-                let (name, place) = (field.name, local(field.input));
-                quote!(#name: &mut #place)
-            });
-        let outcome = match (&outcome, at_return) {
-            (RawOutcome::Cancel, _) => quote!(cancel: &mut __cancel,),
-            (RawOutcome::Result(_), _) => quote!(result: &mut __result_slot,),
-            (RawOutcome::None, _) => quote!(),
-        };
-        let ty = shape.raw_record();
-        quote!(#ty { #(#fields,)* #outcome })
-    };
-    let head_raw = shape.raw.then(|| {
-        let listener = shape.raw_listener();
-        let variant = shape.variant();
-        let raw_record = raw_places(false);
-        let fire = quote! {
-            #table::__private::fire_raw(
-                #table::PointId::#variant,
-                &mut |__kind| match __kind {
-                    #table::__private::RawKind::Typed(__function) => {
-                        // SAFETY: registration guarantees this point's listener type.
-                        unsafe {
-                            ::std::mem::transmute::<*const (), #listener>(__function)(
-                                #receiver &mut #raw_record,
-                            )
-                        }
-                    }
-                    #table::__private::RawKind::Erased(__function) => {
-                        // SAFETY: this slot supplies its exact receiver and raw record types.
-                        unsafe {
-                            __function(
-                                #table::PointId::#variant as usize,
-                                #erased_receiver,
-                                &mut #raw_record as *mut _ as *mut (),
-                            )
-                        }
-                    }
-                },
-            );
-        };
-        // A `replace` listener (the last API one) owns the outcome: the internals listeners
-        // after it run, but its cancel and value stand whatever they leave.
-        if !api || !(cancels || results) {
-            return fire;
-        }
-        let keep = results.then(|| {
-            quote!(let __owned = if __replaced { __result_slot.take() } else { ::std::option::Option::None };)
-        });
-        let force = cancels.then(|| quote!(if __replaced { __cancel = true; }));
-        let restore = results.then(|| {
-            quote!(if let ::std::option::Option::Some(__value) = __owned { __result_slot = ::std::option::Option::Some(__value); })
-        });
-        quote! {
-            let __replaced = #table::__private::replaced(#table::PointId::#variant);
-            #keep
-            #fire
-            #force
-            #restore
-        }
-    });
     let stop = {
         let cancel = match (&shape.returns, cancels) {
             (Returns::Unit, true) => quote!(if __cancel {
@@ -458,7 +295,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     let head_listened = listened(&head_variant);
 
     // The return: the API listeners get the value returned and copies of the arguments (written
-    // back only for `&mut` ones); then the raw listeners get the value returned itself.
+    // back only for `&mut` ones).
     let has_api_return = api && shape.has_return();
     let back = has_api_return.then(|| {
         // A by-value argument is spent by the body: it is copied (or converted) before.
@@ -547,51 +384,11 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                 }
             }
         });
-        let raw_part = shape.raw.then(|| {
-            let variant = shape.return_variant();
-            let listener = shape.raw_return_listener();
-            let (receiver, erased_receiver) = if shape.borrowed_return {
-                (quote!(), quote!(::std::ptr::null_mut()))
-            } else {
-                (receiver.clone(), erased_receiver.clone())
-            };
-            let value = match &function.sig.output {
-                syn::ReturnType::Type(..) => quote!(&mut __result),
-                syn::ReturnType::Default => quote!(),
-            };
-            quote! {
-                {
-                    #table::__private::fire_raw(
-                        #table::PointId::#variant,
-                        &mut |__kind| match __kind {
-                            #table::__private::RawKind::Typed(__function) => {
-                                // SAFETY: registration guarantees this place's return listener type.
-                                unsafe {
-                                    ::std::mem::transmute::<*const (), #listener>(__function)(
-                                        #receiver #value
-                                    )
-                                }
-                            }
-                            #table::__private::RawKind::Erased(__function) => {
-                                // SAFETY: this slot supplies its exact receiver and return types.
-                                unsafe {
-                                    __function(
-                                        #table::PointId::#variant as usize,
-                                        #erased_receiver,
-                                        &mut __result as *mut _ as *mut (),
-                                    )
-                                }
-                            }
-                        },
-                    );
-                }
-            }
-        });
         // One check of the return's slot, before the body: the return path runs out of line.
-        (api_part.is_some() || raw_part.is_some()).then(|| {
+        api_part.is_some().then(|| {
             quote! {
                 if __returned {
-                    ::mod_api::__private::points::cold(|| { #api_part #raw_part });
+                    ::mod_api::__private::points::cold(|| { #api_part });
                 }
             }
         })
@@ -609,74 +406,20 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         .map(|(_, input)| local(*input))
         .collect();
     let cancel_local = cancels.then(|| quote!(let mut __cancel = false;));
-    let fnty = redirect_type(&function.sig, shape.receiver);
-    let redirect_local =
-        redirect.then(|| quote!(let mut __fnr_to: *const () = ::std::ptr::null();));
-    let redirect_load = redirect
-        .then(|| quote!(__fnr_to = #table::__private::redirect(#table::PointId::#head_variant);));
-    // With a replacement body installed, the listeners' path runs only if listeners are there.
-    let listeners_body = quote! {
-        (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api #head_raw (#(#owned,)*) });
+    let listeners_path = quote! {
+        (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api (#(#owned,)*) });
         #stop
     };
-    let listeners_path = if redirect {
-        quote! {
-            if __fnr_to.is_null() || #table::__private::listened(#table::PointId::#head_variant) {
-                #listeners_body
-            }
-        }
-    } else {
-        listeners_body
-    };
-    let recv_arg = match shape.receiver {
-        Receiver::None => quote!(),
-        Receiver::Shared => quote!(self,),
-        Receiver::Mut => quote!(&mut *self,),
-    };
-    let body_call = if redirect {
-        quote! {
-            if __fnr_to.is_null() {
-                #callee #turbofish(#(#call),*)
-            } else {
-                // SAFETY: the point's `__fnr_` constructor installed a function of this type.
-                let __fnr_body = unsafe { ::std::mem::transmute::<*const (), #fnty>(__fnr_to) };
-                __fnr_body(#recv_arg #(#call),*)
-            }
-        }
-    } else {
-        quote!(#callee #turbofish(#(#call),*))
-    };
-    let installer = redirect.then(|| {
-        let constructor = format_ident!(
-            "__fnr_{}",
-            function.sig.ident.to_string().trim_start_matches("r#")
-        );
-        let variant = shape.variant();
-        quote! {
-            #[doc(hidden)]
-            #[inline]
-            pub fn #constructor(replacement: #fnty) -> #table::__private::Redirect {
-                // SAFETY: the point casts it back to this same type before calling it.
-                unsafe {
-                    #table::__private::Redirect::new(
-                        #table::PointId::#variant.place(),
-                        replacement as *const (),
-                    )
-                }
-            }
-        }
-    });
+    let body_call = quote!(#callee #turbofish(#(#call),*));
     let result_local =
         results.then(|| quote!(let mut __result_slot = ::std::option::Option::None;));
     outer.block = syn::parse_quote!({
-        #redirect_local
         #cancel_local
         #result_local
         #(#shared_locals)*
         // The listened path stays out of line, so a point nothing listens at keeps the function
         // small enough to inline: one load and a branch.
         if #head_listened {
-            #redirect_load
             #listeners_path
         }
         #(#shared_refs)*
@@ -695,7 +438,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         .attrs
         .retain(|attr| !attr.path().is_ident("doc") && !attr.path().is_ident("inline"));
     function.attrs.push(syn::parse_quote!(#[inline(always)]));
-    quote!(#outer #function #installer)
+    quote!(#outer #function)
 }
 
 /// `body`, run only when every mirror converted; a value the API can't carry skips the listeners
@@ -739,5 +482,23 @@ fn result_out(value: &point_shape::Value, point: &str) -> TokenStream {
         quote!(::std::option::Option::Some(__value as #ty))
     } else {
         quote!(::std::option::Option::Some(__value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn refuses_missing_api_record_and_removed_raw_argument() {
+        let function: ImplItemFn = syn::parse_quote!(
+            fn opaque(value: Unknown) {}
+        );
+        let error = expand(quote!(free), function.clone()).to_string();
+        assert!(error.contains("point opaque has no API record"), "{error}");
+        assert!(
+            expand(quote!(raw, free), function)
+                .to_string()
+                .contains("compile_error")
+        );
     }
 }
