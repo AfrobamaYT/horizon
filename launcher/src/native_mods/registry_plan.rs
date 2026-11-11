@@ -421,12 +421,18 @@ mod tests {
         const ACTOR: &str = "HORIZON_REGISTRY_FETCH_TEST_ACTOR";
         if std::env::var_os(ACTOR).is_none() {
             let home = tempfile::tempdir().unwrap();
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "native_mods::registry_plan::tests::fetch_retains_actual_feature_closure_and_excludes_unreachable_pins", "--nocapture"])
                 .env(ACTOR, "1")
                 .env("HORIZON_LAUNCHER_HOME", home.path())
-                .status().unwrap();
-            assert!(status.success());
+                .output().unwrap();
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stdout}\n{stderr}");
+            assert!(
+                stdout.contains("test result: ok. 1 passed;"),
+                "exact-name child did not run one test:\n{stdout}\n{stderr}"
+            );
             return;
         }
         assert!(
