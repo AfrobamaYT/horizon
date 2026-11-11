@@ -170,7 +170,7 @@ def build(out: Path, server: bool) -> None:
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
-    rustflags = "-C prefer-dynamic -D warnings"
+    rustflags = "-C prefer-dynamic"
     # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
     if sys.platform == "darwin":
         rustflags += " -C rpath"
@@ -182,7 +182,7 @@ def build(out: Path, server: bool) -> None:
         ["cargo", "rustc", "--locked", "-p", "horizon-mod-host", "--lib", "--crate-type", "dylib",
          "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features, *link],
         cwd=staged,
-        env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
+        env={**os.environ, "RUSTFLAGS": rustflags + " -D warnings", "CARGO_TARGET_DIR": str(target_dir)},
     )
     artifacts = list(map(json.loads, messages.splitlines()))
     scripts = [
