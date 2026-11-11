@@ -28,7 +28,10 @@ impl Unsupported {
 }
 
 /// Platform-owned access to resources across the Wire boundary.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct ResourceAccess {
     pub intern: fn(&str) -> Result<&'static str, WireError>,
     pub store: fn(Box<dyn Any>) -> Result<Id, WireError>,
@@ -38,6 +41,7 @@ pub struct ResourceAccess {
 static ACCESS: OnceLock<ResourceAccess> = OnceLock::new();
 /// Install once. Unregistered reads refuse but do not seal this socket, so an
 /// application can establish a resource scope and retry after an earlier refusal.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 pub fn install_resource_access(access: ResourceAccess) -> Result<(), &'static str> {
     ACCESS

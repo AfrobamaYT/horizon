@@ -1,5 +1,6 @@
 //! Implementation-only owned metadata crossing from authoring to lookup storage.
 mod __private {
+    // hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
     #[doc(hidden)]
     pub use crate::parts::installation as parts_installation;
     pub use crate::parts::{RegistrationAccess, RegistrationKeyKind};

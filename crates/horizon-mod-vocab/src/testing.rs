@@ -61,6 +61,7 @@ const FAKE_EPOCH: u64 = 1;
 ///
 /// The test allocation is leaked because dispatch exposes a static slice. Nested scopes and
 /// panic unwinding restore the preceding list; other threads are unaffected.
+// hidden: API-owned test setup uses this vocabulary fixture, not mod authoring code.
 #[doc(hidden)]
 pub fn with_dispatch<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
     struct Restore(Option<&'static Installed>);
@@ -510,6 +511,7 @@ crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, 
 impl crate::prelude::PlayersClientBackend for FakeHost {}
 
 /// Scope the controller lookup rows prepared by the API-owned registration fixture.
+// hidden: API-owned test setup uses this vocabulary fixture, not mod authoring code.
 #[doc(hidden)]
 pub fn with_controller_tables<R>(
     controllers: Vec<crate::__private::parts_installation::ControllerInfoInput>,
@@ -525,7 +527,9 @@ pub fn with_controller_tables<R>(
 
 // no wire: read-only in-process phase fixture metadata.
 #[derive(Default)]
+// hidden: API-owned test setup uses this vocabulary fixture, not mod authoring code.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
 pub struct TestReader {
     pub registries: std::collections::BTreeMap<String, std::sync::Arc<[String]>>,
     pub tags: std::sync::Arc<[(String, std::sync::Arc<[String]>)]>,

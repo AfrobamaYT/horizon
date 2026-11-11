@@ -65,8 +65,10 @@ impl std::fmt::Display for PhaseError {
 impl std::error::Error for PhaseError {}
 
 // no wire: plain phase snapshot for the engine-owned load-state socket.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
 pub struct PhaseState {
     pub phase: ModPhase,
     pub resume: Option<ModPhase>,

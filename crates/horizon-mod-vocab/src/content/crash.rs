@@ -16,6 +16,7 @@ thread_local! {
         call: None, frame: 0, next_frame: 0,
     }) };
 }
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 pub fn native_frame() -> Option<u64> {
     CURRENT_CRASH_OWNER
@@ -191,6 +192,8 @@ pub fn details() -> Vec<(&'static str, String)> {
 }
 /// An allocation-free hosted package scope, restored by its owning backend.
 #[must_use]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct ConvertedPackageGuard {
     leave: fn(u64, Option<ConvertedScope>),
     token: u64,
@@ -198,7 +201,10 @@ pub struct ConvertedPackageGuard {
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 /// Per-call hosted attribution data, not process state.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct ConvertedScope {
     pub call: ConvertedCall,
     pub frame: u64,
@@ -206,6 +212,7 @@ pub struct ConvertedScope {
 }
 impl ConvertedPackageGuard {
     /// Construct a guard for a hosted attribution scope.
+    // hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
     #[doc(hidden)]
     pub fn new(
         leave: fn(u64, Option<ConvertedScope>),

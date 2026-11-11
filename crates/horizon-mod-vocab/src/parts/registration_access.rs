@@ -2,8 +2,10 @@
 use super::*;
 
 // no wire: this selector is native registration plumbing, never a mod payload.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
 pub enum RegistrationKeyKind {
     Block,
     Item,
@@ -15,7 +17,9 @@ pub enum RegistrationKeyKind {
 }
 
 // no wire: process-local callbacks and an API-owned activity counter.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
 pub struct RegistrationAccess {
     pub active: &'static std::sync::atomic::AtomicUsize,
     pub contains: fn(RegistrationKeyKind, u32) -> Option<bool>,

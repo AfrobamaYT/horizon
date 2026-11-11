@@ -9,7 +9,10 @@ use std::sync::OnceLock;
 static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 
 /// Platform callbacks, installed once before dispatch starts.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct Backend {
     pub registration: &'static crate::__private::RegistrationAccess,
     pub diagnostics: &'static Diagnostics,
@@ -33,7 +36,9 @@ pub struct Backend {
 
 // no wire: platform-owned diagnostic caches are observed through native callbacks.
 /// Cold diagnostic deduplication, owned by the platform rather than vocabulary lookups.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
 pub struct Diagnostics {
     pub first_broken_warning: fn(&str) -> bool,
     pub first_off_thread_warning: fn() -> bool,
@@ -41,8 +46,11 @@ pub struct Diagnostics {
 
 /// Plain per-call instrumentation data. The platform must validate the pool
 /// generation and slot before accessing its profiler storage.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct Timing {
     pub generation: usize,
     pub slot: usize,
@@ -50,14 +58,20 @@ pub struct Timing {
 }
 
 /// Platform-owned timing data bound to a scope's factory capability.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct State {
     pub timing: Option<Timing>,
 }
 
 /// A capability to bind exactly one guard to the installed leave callback.
 /// Its fields are private and it is neither Clone nor Copy.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct ModGuardFactory {
     leave: fn(State),
     owner: (u64, Option<ModCall>),
@@ -79,6 +93,8 @@ impl ModGuardFactory {
 /// An allocation-free dispatch scope. With no instrumentation backend this is
 /// inert; otherwise Drop restores attribution, including during unwinding.
 #[must_use]
+// exhaustive: the platform or fixture constructs this process-local record as a complete unit.
+// no wire: process-local scope ownership or callbacks cannot cross a mod boundary.
 pub struct ModGuard {
     owner: Option<(u64, Option<ModCall>)>,
     _timing: Option<TimingGuard>,
@@ -107,6 +123,7 @@ impl Drop for TimingGuard {
 
 /// Install the instrumentation backend. An already installed backend is never
 /// replaced, including after an unsuccessful second registration.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 pub fn install(backend: Backend) -> Result<(), &'static str> {
     BACKEND

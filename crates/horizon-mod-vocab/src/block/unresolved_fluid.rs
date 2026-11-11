@@ -58,6 +58,7 @@ pub fn identity_name(identity: FluidIdentity) -> String {
 
 // no wire: process-local callback table installed by the platform runtime.
 // exhaustive: the hidden installer builds every callback field together.
+// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
 #[doc(hidden)]
 pub struct UnresolvedFluidAccess {
     pub intern: fn(&str) -> Option<u64>,
