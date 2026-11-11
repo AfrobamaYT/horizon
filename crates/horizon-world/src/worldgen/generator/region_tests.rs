@@ -64,29 +64,21 @@ fn structure_biome_checks_read_the_region_at_their_own_quart() {
         noise_clamped: None,
     };
     let mut worker = generator.worker();
-    let ResolvedBiomeSource::Regions(regions) = &pipeline.source else {
-        panic!("the overworld preset takes regions");
-    };
-    let selector = regions.selector();
-    let border = (0..4096)
-        .find(|&x| selector.owner(x, 0) != selector.owner(x + 1, 0))
-        .expect("two regions of 4-quart cells meet within 4096 quarts");
-    let id = |slot: usize| {
-        pipeline
-            .data
-            .biome_id(biomes[slot - 1])
-            .expect("vanilla biome")
-    };
-    for x in [border, border + 1] {
-        let own = selector.owner(x, 0);
+    assert!(matches!(pipeline.source, ResolvedBiomeSource::Regions(_)));
+    let id = |biome| pipeline.data.biome_id(biome).expect("vanilla biome");
+    // Seed 12345, cell 4, weights [0, 1, 1]: independently calculated border quarts.
+    for (x, expected, other) in [
+        (7, "minecraft:ice_spikes", "minecraft:mushroom_fields"),
+        (8, "minecraft:mushroom_fields", "minecraft:ice_spikes"),
+    ] {
         let mut queries = StructureQueries {
             pipeline: &*pipeline,
             worker: &mut worker.state,
-            valid: BTreeSet::from([id(own)]),
+            valid: BTreeSet::from([id(expected)]),
         };
-        assert_eq!(queries.noise_biome([x, 16, 0]), id(own), "quart {x}");
+        assert_eq!(queries.noise_biome([x, 16, 0]), id(expected), "quart {x}");
         assert!(queries.column_has_valid_biome(x * 4, 0, 0, 64), "quart {x}");
-        queries.valid = BTreeSet::from([id(3 - own)]);
+        queries.valid = BTreeSet::from([id(other)]);
         assert!(
             !queries.column_has_valid_biome(x * 4, 0, 0, 64),
             "quart {x}"
