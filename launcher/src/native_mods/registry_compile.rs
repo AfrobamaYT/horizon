@@ -265,7 +265,8 @@ pub(super) fn compile(
         })
         .collect();
     let wanted = super::crates::wanted(out, &declared_paths)?;
-    let plan = registry_plan::Plan::read(lock, projects, &wanted)?;
+    let mut plan = registry_plan::Plan::read(lock, projects, &wanted)?;
+    plan.authorize_game_patches(&patches);
     plan.fetch_with_patches(rust, &out.join("fetch"), &patches)?;
     registry_plan::apply_patches(out, &patches)?;
     fs::write(

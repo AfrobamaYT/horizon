@@ -185,6 +185,41 @@ impl RegistryLock {
         Ok(())
     }
 
+    /// Authorize only same-version registry-to-SDK substitutions in mod-owned records.
+    /// Game records keep their original edges, and the registry identity being replaced
+    /// is removed so it cannot authorize a second, non-SDK copy of the patched crate.
+    pub fn allow_game_patch_edges(
+        &mut self,
+        game: &Self,
+        names: &std::collections::BTreeSet<String>,
+    ) {
+        let replacements: BTreeMap<_, _> = game
+            .local
+            .keys()
+            .filter(|id| names.contains(&id.name))
+            .map(|id| {
+                (
+                    Identity {
+                        source: CRATES_IO.into(),
+                        ..id.clone()
+                    },
+                    id.clone(),
+                )
+            })
+            .collect();
+        self.packages.retain(|id, _| !replacements.contains_key(id));
+        for (id, record) in &mut self.packages {
+            if game.packages.contains_key(id) {
+                continue;
+            }
+            record.edges = record
+                .edges
+                .iter()
+                .map(|edge| replacements.get(edge).unwrap_or(edge).clone())
+                .collect();
+        }
+    }
+
     /// A closed, inert fetch workspace: no mod manifest, source, SDK path or Cargo config.
     pub fn fetch_workspace(&self, roots: &Self, dir: &std::path::Path) -> Result<(), String> {
         std::fs::create_dir_all(dir.join("src")).map_err(|e| e.to_string())?;

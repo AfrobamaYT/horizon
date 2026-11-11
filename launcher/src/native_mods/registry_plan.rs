@@ -67,6 +67,21 @@ impl Plan {
         })
     }
 
+    /// Patches come only from the validated SDK identity, never from a mod manifest.
+    pub fn authorize_game_patches(&mut self, patches: &toml::Table) {
+        let names = patches
+            .values()
+            .flat_map(|registry| {
+                registry
+                    .as_table()
+                    .expect("validated SDK patch registry")
+                    .keys()
+                    .cloned()
+            })
+            .collect();
+        self.allowed.allow_game_patch_edges(&self.game, &names);
+    }
+
     pub fn check_mods(&self, resolved: &RegistryLock) -> Result<(), String> {
         for (id, root, pins) in &self.owned {
             let mut skip_local: std::collections::BTreeSet<String> = self
@@ -233,6 +248,103 @@ mod tests {
                 &RegistryLock::default(),
             )
             .unwrap();
+        assert!(!root.join("target").exists());
+    }
+
+    #[test]
+    fn mod_only_registry_edge_can_use_the_same_version_sdk_naga_patch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for path in ["vendor/mod-parent/src", "sdk/naga/src", "src", ".cargo"] {
+            std::fs::create_dir_all(root.join(path)).unwrap();
+        }
+        for (path, text) in [
+            ("Cargo.toml", "[package]\nname='fixture'\nversion='1.0.0'\n[workspace]\n[dependencies]\nmod-parent='1'\n"),
+            ("src/lib.rs", ""),
+            ("vendor/mod-parent/Cargo.toml", "[package]\nname='mod-parent'\nversion='1.0.0'\n[dependencies]\nnaga='30'\n"),
+            ("vendor/mod-parent/src/lib.rs", ""),
+            ("sdk/naga/Cargo.toml", "[package]\nname='naga'\nversion='30.0.1'\n"),
+            ("sdk/naga/src/lib.rs", ""),
+            (".cargo/config.toml", "[source.crates-io]\nreplace-with='fixture'\n[source.fixture]\ndirectory='vendor'\n"),
+        ] { std::fs::write(root.join(path), text).unwrap(); }
+        std::fs::write(
+            root.join("vendor/mod-parent/.cargo-checksum.json"),
+            format!(r#"{{"package":"{}","files":{{}}}}"#, "a".repeat(64)),
+        )
+        .unwrap();
+        let patches: toml::Table = format!(
+            "[crates-io]\nnaga={{path={:?}}}\n",
+            root.join("sdk/naga").to_string_lossy()
+        )
+        .parse()
+        .unwrap();
+        // First obtain the mod's independent registry lock, without SDK patches.
+        std::fs::create_dir_all(root.join("vendor/naga/src")).unwrap();
+        std::fs::write(
+            root.join("vendor/naga/Cargo.toml"),
+            "[package]\nname='naga'\nversion='30.0.1'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("vendor/naga/src/lib.rs"), "").unwrap();
+        std::fs::write(
+            root.join("vendor/naga/.cargo-checksum.json"),
+            format!(r#"{{"package":"{}","files":{{}}}}"#, "b".repeat(64)),
+        )
+        .unwrap();
+        let original = std::process::Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            original.status.success(),
+            "{}",
+            String::from_utf8_lossy(&original.stderr)
+        );
+        let mod_lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+        let pins = RegistryLock::parse(&mod_lock).unwrap();
+        apply_patches(root, &patches).unwrap();
+        let output = std::process::Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+        let resolved = RegistryLock::parse(&text).unwrap();
+        let game_lock = "version=4\n[[package]]\nname='naga'\nversion='30.0.1'\n";
+        let mut plan = Plan::read(game_lock, &[], &[]).unwrap();
+        plan.allowed.extend(&pins).unwrap();
+        let before = plan
+            .allowed
+            .check_resolution(&resolved, &RegistryLock::default())
+            .unwrap_err();
+        assert!(before.contains("mod-parent"), "{before}");
+        plan.authorize_game_patches(&patches);
+        plan.allowed
+            .check_resolution(&resolved, &RegistryLock::default())
+            .unwrap();
+        // Authorization is directional and version-exact: neither re-sourcing the
+        // SDK package nor actually moving its version is permission to change it.
+        for bad in [&mod_lock, &text.replace("30.0.1", "30.0.2")] {
+            assert!(plan
+                .allowed
+                .check_resolution(&RegistryLock::parse(bad).unwrap(), &RegistryLock::default())
+                .is_err());
+        }
+        // A game-owned parent's original edges remain strict, too.
+        let mut game_parent = Plan::read(&text, &[], &[]).unwrap();
+        game_parent.allowed.extend(&pins).unwrap();
+        game_parent.authorize_game_patches(&patches);
+        assert!(game_parent
+            .allowed
+            .check_resolution(&pins, &RegistryLock::default())
+            .is_err());
+        println!("ORIGINAL MOD LOCK:\n{mod_lock}\nSDK PATCHED RESOLUTION:\n{text}\nOLD CHECK REFUSAL: {before}\nAUTHORIZED CHECK: accepted");
         assert!(!root.join("target").exists());
     }
 
