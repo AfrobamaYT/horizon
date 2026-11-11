@@ -48,6 +48,11 @@ impl Transport {
             connection.bind_player(player);
         }
     }
+    pub fn closed(&self) -> bool {
+        self.connection
+            .as_ref()
+            .is_some_and(|connection| connection.closed())
+    }
     pub fn player(&self) -> Option<PlayerRef> {
         self.connection
             .as_ref()
@@ -74,6 +79,15 @@ impl Transport {
             connection.finish_configuration()?;
         }
         Ok(())
+    }
+    pub fn finish_configuration_with(
+        &self,
+        publish: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        match &self.connection {
+            Some(connection) => connection.finish_configuration_with(publish),
+            None => publish(),
+        }
     }
     pub fn close(&self) {
         if let Some(connection) = &self.connection {

@@ -18,6 +18,9 @@ impl ConfigSender {
     pub fn framing(&self) -> horizon_protocol::connection::Framing {
         self.writer.framing()
     }
+    pub(crate) fn payload_capacity(&self) -> usize {
+        self.writer.payload_capacity()
+    }
     pub fn payload_transport(&self) -> &Arc<Transport> {
         &self.transport
     }
@@ -71,29 +74,32 @@ impl<'a> ConfigIo<'a> {
             None => self.connection.send(body),
         }
     }
-    pub fn application(&self, payload: cfg::CustomPayload) -> Result<bool, String> {
+    pub fn application(
+        &self,
+        payload: cfg::CustomPayload,
+    ) -> Result<Option<cfg::CustomPayload>, String> {
         let Some(sender) = &self.sender else {
-            return Ok(false);
+            return Ok(Some(payload));
         };
-        let Some(epoch) = sender.transport.epoch() else {
-            return Ok(false);
-        };
-        if epoch
-            .peer
-            .receiver(Phase::Configuration, &payload.channel)
-            .is_err()
+        match Incoming::classify(&sender.transport, Phase::Configuration, payload)
+            .map_err(|error| error.to_string())?
         {
-            return Ok(false);
+            crate::raw_payloads::Classified::Other(payload) => Ok(Some(payload)),
+            crate::raw_payloads::Classified::Application(incoming) => {
+                let endpoint = crate::raw_payloads::Endpoint::configuration(sender.clone());
+                crate::raw_payloads::dispatch(incoming, endpoint.clone(), |incoming| {
+                    self.events
+                        .send(super::NetEvent::RawPayload(Box::new(
+                            crate::raw_payloads::Delivery {
+                                endpoint: endpoint.clone(),
+                                incoming,
+                            },
+                        )))
+                        .map_err(|_| "payload main receiver disconnected".to_owned())
+                });
+                Ok(None)
+            }
         }
-        let incoming = Incoming::new(&sender.transport, Phase::Configuration, payload)
-            .map_err(|e| format!("{e:?}"))?;
-        self.events
-            .send(super::NetEvent::ConfigurationPayload(
-                sender.clone(),
-                incoming,
-            ))
-            .map_err(|_| "server closed".to_owned())?;
-        Ok(true)
     }
     pub fn disconnect(&mut self, reason: horizon_core::nbt::Tag) {
         match &self.sender {

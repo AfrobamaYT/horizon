@@ -36,8 +36,16 @@ impl Epoch {
     /// Atomically publish against invalidation. The closure may only perform nonblocking
     /// queue publication, never user callbacks, waits or connection-state operations.
     pub fn with_active<T>(&self, publish: impl FnOnce() -> T) -> Option<T> {
-        let _publication = self.publication.lock().unwrap();
-        self.active().then(publish)
+        let publication = self.publication.lock().unwrap();
+        if !self.active() {
+            // A cancelled closure may own guest resources. Release it only after
+            // the publication lock, never while invoking their destructors under it.
+            drop(publication);
+            return None;
+        }
+        let result = publish();
+        drop(publication);
+        Some(result)
     }
     fn invalidate(&self) {
         let _publication = self.publication.lock().unwrap();
@@ -132,6 +140,9 @@ impl Connection {
             current.player = Some(player);
         }
     }
+    pub fn closed(&self) -> bool {
+        self.current.lock().unwrap().closed
+    }
     pub fn player(&self) -> Option<PlayerRef> {
         self.current.lock().unwrap().player
     }
@@ -145,7 +156,20 @@ impl Connection {
         }
     }
     pub fn accept(&self, entries: &[Entry]) -> Result<(), String> {
-        let peer = Arc::new(self.local.freeze(entries, self.side)?);
+        let mut peer = self.local.freeze(entries, self.side)?;
+        let bytes = peer.owned_snapshot_bytes();
+        let physical = self
+            .reserve_ingress(bytes)
+            .map_err(|error| format!("payload negotiation resource pressure: {error:?}"))?;
+        let shared = self
+            .local
+            .snapshot_budget
+            .as_ref()
+            .map(|(budget, _)| budget.reserve(bytes))
+            .transpose()
+            .map_err(|error| format!("payload negotiation snapshot pressure: {error:?}"))?;
+        peer.credit = Some((physical, shared));
+        let peer = Arc::new(peer);
         let mut current = self.current.lock().unwrap();
         if current.closed {
             return Err("payload connection disconnected".into());
@@ -161,6 +185,14 @@ impl Connection {
     /// No configuration acknowledgement overtakes a queued main-thread handler or its replies.
     /// Never hold the connection-state or writer lock while waiting for gameplay.
     pub fn finish_configuration(&self) -> Result<(), String> {
+        self.finish_configuration_with(|| Ok(()))
+    }
+    /// Publish the phase-transition acknowledgement after invalidating old replies,
+    /// before exposing the new Play epoch. The closure only queues engine bytes.
+    pub fn finish_configuration_with(
+        &self,
+        publish: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
         let old = self.epoch().ok_or("payload negotiation is not complete")?;
         if !old.wait_main() {
             return Err("payload configuration epoch ended".into());
@@ -177,6 +209,7 @@ impl Connection {
             return Err("payload configuration epoch was replaced".into());
         }
         old.invalidate();
+        publish()?;
         current.epoch = Some(Epoch::new(old.peer.clone(), Phase::Play));
         Ok(())
     }

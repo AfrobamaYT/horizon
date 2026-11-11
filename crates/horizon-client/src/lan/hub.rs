@@ -151,10 +151,7 @@ pub struct TickCtx<'a> {
 
 /// What the gameplay code has to do for a guest.
 pub enum HostEvent {
-    ConfigurationPayload(
-        super::config_payloads::ConfigSender,
-        crate::raw_payloads::Incoming,
-    ),
+    RawPayload(Box<crate::raw_payloads::Delivery>),
     /// A guest entered the world; load their saved state.
     Joined(u32),
     /// A guest left (state to save, entities to drop).
@@ -318,6 +315,8 @@ fn take_tracking(
 }
 
 pub struct Hub {
+    /// Main-thread world identity used to bind typed network-context player handles.
+    pub payload_player_epoch: Option<mod_api::WorldEpoch>,
     /// Clicks on and closings of native mods' menus, for the game.
     pub native_menu_events: Vec<super::menu::NativeMenuEvent>,
     /// The chunks players started and stopped watching, for the mods
@@ -776,6 +775,7 @@ impl Hub {
         let mut encoder = encoder;
         encoder.set_dimension(config.levels.get(&config.dimension));
         Self {
+            payload_player_epoch: None,
             lan,
             config,
             loop_context,
@@ -1433,6 +1433,15 @@ impl Hub {
         let entity_id = *ctx.next_entity as i32;
         let conn = j.conn;
         let mut guest = Guest::new(j, entity_id, ctx.spawn, self.config.view_distance);
+        if let Some(epoch) = self.payload_player_epoch {
+            guest
+                .sender
+                .payload_transport()
+                .bind_player(mod_api::__private::game::player_ref(
+                    mod_api::EntityRef::new(epoch, entity_id as u32),
+                    guest.uuid,
+                ));
+        }
         guest.last_action_tick = self.ticks;
         guest.game_mode = self.config.default_game_mode;
         guest.abilities.update_for_mode(guest.game_mode);
@@ -2322,8 +2331,8 @@ impl Hub {
         self.expire_arrivals(&mut events);
         for event in self.lan.poll() {
             match event {
-                NetEvent::ConfigurationPayload(sender, incoming) => {
-                    events.push(HostEvent::ConfigurationPayload(sender, incoming));
+                NetEvent::RawPayload(delivery) => {
+                    events.push(HostEvent::RawPayload(delivery));
                 }
                 NetEvent::Joined(j) => {
                     while let Some(i) = self

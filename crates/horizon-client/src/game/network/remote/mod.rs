@@ -2489,7 +2489,7 @@ impl Game<'_> {
                     self.offer_reconnect(retry);
                     return Ok(());
                 }
-                Event::RawPayload(incoming) => self.receive_client_payload(incoming)?,
+                Event::RawPayload(incoming) => self.receive_client_payload(*incoming)?,
                 Event::Packet(packet) => self.handle_packet(*packet)?,
             }
             chunks += started.map_or(Duration::ZERO, |t| t.elapsed());

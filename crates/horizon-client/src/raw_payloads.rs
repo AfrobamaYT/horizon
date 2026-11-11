@@ -2,9 +2,19 @@
 //! Application packets retain their declared vanilla custom-payload channel.
 pub mod connection;
 mod encode;
-pub use encode::encode;
+pub use encode::{encode, encoded_len};
 mod incoming;
-pub use incoming::Incoming;
+pub use incoming::{Body, Classified, Failure, Incoming};
+mod endpoint;
+pub use endpoint::{Endpoint, Prepared};
+mod executor;
+pub use executor::dispatch;
+/// Physical server ingress identity, moved unchanged from I/O through Hub to main.
+/// Boxed only on mod-bearing paths so ordinary event unions do not grow.
+pub struct Delivery {
+    pub endpoint: Endpoint,
+    pub incoming: Incoming,
+}
 mod transport;
 use horizon_protocol::{
     packets::custom_payload::{PayloadCodecs, PayloadFlow, PayloadProtocol as CodecProtocol},
@@ -45,6 +55,12 @@ pub struct Local {
     pub codecs: PayloadCodecs,
     registry: Option<Arc<Payloads>>,
     declarations: [HashMap<String, Flow>; 2],
+    // Shared by a server installation's connections: abandoned epochs must not
+    // accumulate uncharged tables while the main executor is stalled.
+    snapshot_budget: Option<(
+        horizon_mod_runtime::byte_channel::Sender<()>,
+        horizon_mod_runtime::byte_channel::Receiver<()>,
+    )>,
 }
 impl Local {
     /// Capture only enabled declarations. Client setup refuses missing client callbacks;
@@ -132,7 +148,11 @@ impl Local {
                 }
             }
         }
+        let snapshot_budget = (!manifest.entries().is_empty()).then(|| {
+            horizon_mod_runtime::byte_channel::channel(512 << 20).expect("positive snapshot budget")
+        });
         Self {
+            snapshot_budget,
             manifest,
             codecs: PayloadCodecs::from_channels(channels),
             registry,
@@ -184,6 +204,7 @@ impl Local {
             local: self.clone(),
             side,
             phases,
+            credit: None,
         })
     }
 }
@@ -193,8 +214,37 @@ pub struct Peer {
     pub local: Arc<Local>,
     side: Side,
     phases: [HashMap<String, Option<PayloadReceiver>>; 2],
+    // Declared last so owned table storage is released before its credits.
+    credit: Option<(
+        connection::IngressLease,
+        Option<horizon_mod_runtime::byte_channel::Permit<()>>,
+    )>,
 }
 impl Peer {
+    fn owned_snapshot_bytes(&self) -> usize {
+        // These immutable maps are constructed only by insertion in freeze: no
+        // erasure/tombstones. Rust 1.99 hashbrown has at least half of its buckets
+        // usable, at most 16 mirrored control bytes, and group alignment <= 16.
+        // Conservatively charge twice the public capacity, not an exact census.
+        // Callback objects and Local are shared installation state, not owned here.
+        let mut bytes = std::mem::size_of::<Self>() + 2 * std::mem::size_of::<usize>();
+        for map in &self.phases {
+            if map.capacity() != 0 {
+                let buckets = map.capacity().saturating_mul(2);
+                bytes = bytes
+                    .saturating_add(buckets.saturating_mul(
+                        std::mem::size_of::<(String, Option<PayloadReceiver>)>() + 1,
+                    ))
+                    .saturating_add(
+                        std::mem::align_of::<(String, Option<PayloadReceiver>)>().max(16) + 16,
+                    );
+            }
+            for key in map.keys() {
+                bytes = bytes.saturating_add(key.capacity());
+            }
+        }
+        bytes
+    }
     /// One lookup for an active receiving packet. An absent callback is a protocol refusal,
     /// never a silent skip. Callers separately distinguish unrelated engine/plugin channels.
     pub fn receiver(&self, phase: Phase, id: &str) -> Result<&PayloadReceiver, PayloadSendError> {

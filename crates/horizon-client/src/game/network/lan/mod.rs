@@ -2468,6 +2468,9 @@ impl Game<'_> {
                 previous = Some((Instant::now(), event_kind(&event), detail));
             }
             match event {
+                HostEvent::RawPayload(delivery) => {
+                    self.receive_server_payload(delivery.endpoint, delivery.incoming)
+                }
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
                 }
@@ -4040,6 +4043,7 @@ fn event_kind(event: &HostEvent) -> EventKind {
         HostEvent::Joined(c) => ("join", Some(*c), None),
         HostEvent::Left(g) => ("leave", None, Some(g.name.clone())),
         HostEvent::Packet(c, p) => (p.name(), Some(*c), None),
+        HostEvent::RawPayload(_) => ("raw payload", None, None),
         HostEvent::ClientInformation(c, _, _) => ("client settings", Some(*c), None),
         HostEvent::ChatSubmitted { .. } => ("chat submitted", None, None),
         HostEvent::ChatSessionStarted(_) => ("chat session", None, None),

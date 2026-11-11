@@ -23,6 +23,7 @@ use horizon_protocol::{
         configuration::{self as cfg, ClientInformation, KnownPack},
         handshake, login, play, status,
     },
+    payload_negotiation::Phase,
     text::translatable,
 };
 use mod_api::{PayloadFrameStage, PayloadId, PayloadSendError};
@@ -298,6 +299,13 @@ impl PlayerSender {
     /// The immutable codec snapshot and live epochs for this connection.
     pub fn payload_transport(&self) -> &Arc<Transport> {
         &self.payload_transport
+    }
+    /// Frozen physical framing, used to reject before copying a large raw body.
+    pub(crate) fn payload_framing(&self) -> horizon_protocol::connection::Framing {
+        self.framing
+    }
+    pub(crate) fn payload_capacity(&self) -> usize {
+        io_pool::MAX_PENDING
     }
     /// A sender whose packets go to `tx` (a test's).
     pub fn new(tx: Sender<Out>, pending: Arc<AtomicUsize>) -> Self {
@@ -1486,12 +1494,12 @@ fn receive_configuration(
         }
         return Ok(None);
     }
-    if let cfg::Serverbound::CustomPayload(payload) = &packet
-        && c.application(payload.clone())?
-    {
-        return Ok(None);
+    match packet {
+        cfg::Serverbound::CustomPayload(payload) => c
+            .application(payload)
+            .map(|payload| payload.map(cfg::Serverbound::CustomPayload)),
+        packet => Ok(Some(packet)),
     }
-    Ok(Some(packet))
 }
 
 /// ServerboundResourcePackPacket.Action.DECLINED.
@@ -1816,6 +1824,7 @@ fn play(
         .as_ref()
         .is_some_and(|p| p.required);
     let session = PlayConn {
+        payload_sender: sender.clone(),
         payload_transport: parts.payload_transport,
         conn,
         shared: shared.clone(),
@@ -1858,6 +1867,7 @@ fn play(
 
 /// A player's play state on its network thread.
 struct PlayConn {
+    payload_sender: PlayerSender,
     payload_transport: Arc<Transport>,
     conn: u32,
     shared: Arc<Shared>,
@@ -1885,6 +1895,9 @@ impl io_pool::Session for PlayConn {
             let body = play::Clientbound::Disconnect(cfg::Disconnect { reason }).encode();
             Verdict::Kick(text, body)
         };
+        if self.payload_transport.closed() {
+            return Verdict::Go;
+        }
         let now = Instant::now();
         if let Some(average) = self.rate.as_mut().and_then(|r| r.received(now)) {
             return kick(rate_exceeded(&self.shared, average));
@@ -1914,6 +1927,44 @@ impl io_pool::Session for PlayConn {
                 kick(pack_rejected(&self.shared, &self.name, r.id))
             }
             Ok(p) => {
+                let p = match p {
+                    play::Serverbound::CustomPayload(payload) => {
+                        match crate::raw_payloads::Incoming::classify(
+                            &self.payload_transport,
+                            Phase::Play,
+                            payload,
+                        ) {
+                            Ok(crate::raw_payloads::Classified::Application(incoming)) => {
+                                let endpoint = crate::raw_payloads::Endpoint::server(
+                                    self.payload_sender.clone(),
+                                );
+                                crate::raw_payloads::dispatch(
+                                    incoming,
+                                    endpoint.clone(),
+                                    |incoming| {
+                                        self.shared
+                                            .events
+                                            .send(NetEvent::RawPayload(Box::new(
+                                                crate::raw_payloads::Delivery {
+                                                    endpoint: endpoint.clone(),
+                                                    incoming,
+                                                },
+                                            )))
+                                            .map_err(|_| {
+                                                "payload main receiver disconnected".to_owned()
+                                            })
+                                    },
+                                );
+                                return Verdict::Go;
+                            }
+                            Ok(crate::raw_payloads::Classified::Other(payload)) => {
+                                play::Serverbound::CustomPayload(payload)
+                            }
+                            Err(error) => return Verdict::Close(error.to_string()),
+                        }
+                    }
+                    packet => packet,
+                };
                 // Bounded here, where packets are made, not only where the hub drains them.
                 if !self.undrained.handed(payload.len()) {
                     return kick(undrained_exceeded(&self.shared, &self.name));
@@ -1932,7 +1983,7 @@ impl io_pool::Session for PlayConn {
     /// after the last was answered. The game thread times a client out
     /// ([`PlayerSender::timed_out`]).
     fn tick(&mut self, now: Instant) -> Option<Vec<u8>> {
-        if self.sent_at.is_some() || now < self.next_keep_alive {
+        if self.payload_transport.closed() || self.sent_at.is_some() || now < self.next_keep_alive {
             return None;
         }
         let id = i64::try_from(self.watch.start.elapsed().as_millis()).unwrap_or(0);

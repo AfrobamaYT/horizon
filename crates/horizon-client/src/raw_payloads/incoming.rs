@@ -1,19 +1,45 @@
-//! An owned raw message queued in the same ingress stream as ordinary packets.
+//! Owned application messages and work retain ingress credit through root completion.
 use super::{
     Transport,
-    connection::{Epoch, MainTask},
+    connection::{Epoch, IngressLease, MainTask},
 };
 use horizon_protocol::{packets::custom_payload::CustomPayload, payload_negotiation::Phase};
-use mod_api::{__private::game::PayloadReceiver, PayloadBytes, PayloadId, PayloadSendError};
+use mod_api::{
+    __private::game::PayloadReceiver, PayloadBytes, PayloadContextError, PayloadId,
+    PayloadSendError, PayloadWork,
+};
 use std::sync::Arc;
 
+pub enum Body {
+    Payload(PayloadBytes),
+    Work(Arc<dyn PayloadWork>),
+}
 pub struct Incoming {
     pub epoch: Arc<Epoch>,
     pub id: PayloadId,
-    pub bytes: PayloadBytes,
+    pub body: Body,
     pub receiver: PayloadReceiver,
-    /// Held through the root transaction, not just until dequeue.
     pub main: MainTask,
+    /// Not refunded by moving from I/O to Hub, backlog, decoder barrier or executor.
+    pub lease: Arc<IngressLease>,
+    /// A queued work resource may retain its original payload buffer. Keep that
+    /// original credit as well as this additional work record's envelope credit.
+    pub work_lease: Option<IngressLease>,
+}
+const _: () = assert!(std::mem::size_of::<Incoming>() <= 256);
+pub enum Classified {
+    Application(Incoming),
+    Other(CustomPayload),
+}
+#[derive(Debug)]
+pub struct Failure {
+    pub id: PayloadId,
+    pub error: PayloadSendError,
+}
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "payload {} refused: {:?}", self.id.0, self.error)
+    }
 }
 impl Incoming {
     pub fn new(
@@ -21,23 +47,89 @@ impl Incoming {
         phase: Phase,
         packet: CustomPayload,
     ) -> Result<Self, PayloadSendError> {
-        let epoch = transport
-            .epoch()
-            .ok_or_else(|| PayloadSendError::UnsupportedPeer(PayloadId(packet.channel.clone())))?;
+        match Self::classify(transport, phase, packet).map_err(|failure| failure.error)? {
+            Classified::Application(incoming) => Ok(incoming),
+            Classified::Other(packet) => {
+                Err(PayloadSendError::UnknownPayload(PayloadId(packet.channel)))
+            }
+        }
+    }
+    /// One successful receiving-slot lookup; ownership fallback is only on a miss.
+    pub fn classify(
+        transport: &Transport,
+        phase: Phase,
+        packet: CustomPayload,
+    ) -> Result<Classified, Failure> {
+        let Some(epoch) = transport.epoch() else {
+            return if transport.local.owns(&packet.channel) {
+                Err(Failure {
+                    id: PayloadId(packet.channel),
+                    error: PayloadSendError::NotNegotiated,
+                })
+            } else {
+                Ok(Classified::Other(packet))
+            };
+        };
+        let fail = |error, packet: CustomPayload| Failure {
+            id: PayloadId(packet.channel),
+            error,
+        };
         if !epoch.active() {
-            return Err(PayloadSendError::StaleEpoch);
+            return Err(fail(PayloadSendError::StaleEpoch, packet));
         }
         if epoch.phase != phase {
-            return Err(PayloadSendError::WrongProtocol(PayloadId(packet.channel)));
+            return Err(fail(
+                PayloadSendError::WrongProtocol(PayloadId(packet.channel.clone())),
+                packet,
+            ));
         }
-        let receiver = epoch.peer.receiver(phase, &packet.channel)?.clone();
+        let receiver = match epoch.peer.receiver(phase, &packet.channel) {
+            Ok(receiver) => receiver.clone(),
+            Err(PayloadSendError::UnknownPayload(_)) => return Ok(Classified::Other(packet)),
+            Err(error) => return Err(fail(error, packet)),
+        };
+        let owned = packet
+            .channel
+            .capacity()
+            .saturating_add(packet.data.capacity());
+        let lease = transport.reserve_ingress(owned).map_err(|error| Failure {
+            id: PayloadId(packet.channel.clone()),
+            error,
+        })?;
         let main = epoch.main_task();
-        Ok(Self {
+        Ok(Classified::Application(Self {
             epoch,
             id: PayloadId(packet.channel),
-            bytes: PayloadBytes(packet.data),
+            body: Body::Payload(PayloadBytes(packet.data)),
             receiver,
             main,
+            lease: Arc::new(lease),
+            work_lease: None,
+        }))
+    }
+    /// Reserve before cloning the channel or retaining the guest's work resource.
+    pub fn work(
+        &self,
+        transport: &Transport,
+        work: Arc<dyn PayloadWork>,
+    ) -> Result<Self, PayloadContextError> {
+        if !self.epoch.active() {
+            return Err(PayloadContextError::Disconnected);
+        }
+        let lease = transport
+            .reserve_ingress(self.id.0.len())
+            .map_err(|error| match error {
+                PayloadSendError::Backpressure => PayloadContextError::Backpressure,
+                _ => PayloadContextError::Disconnected,
+            })?;
+        Ok(Self {
+            epoch: self.epoch.clone(),
+            id: self.id.clone(),
+            receiver: self.receiver.clone(),
+            main: self.epoch.main_task(),
+            body: Body::Work(work),
+            lease: self.lease.clone(),
+            work_lease: Some(lease),
         })
     }
 }

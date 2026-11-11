@@ -123,6 +123,9 @@ impl QueuedWriter {
     pub(crate) fn framing(&self) -> Framing {
         self.framing
     }
+    pub(crate) fn payload_capacity(&self) -> usize {
+        CAPACITY
+    }
     pub(crate) fn server_version(&self) -> ServerVersion {
         self.version
     }

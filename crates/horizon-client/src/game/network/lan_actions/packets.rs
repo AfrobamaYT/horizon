@@ -130,25 +130,6 @@ impl Game<'_> {
 
     /// A packet from a guest that the hub does not handle itself.
     pub(in crate::game) fn lan_guest_packet(&mut self, conn: u32, packet: S) {
-        let packet = match packet {
-            S::CustomPayload(payload)
-                if self
-                    .lan
-                    .as_ref()
-                    .and_then(|host| host.hub.guest(conn))
-                    .is_some_and(|guest| {
-                        guest
-                            .sender
-                            .payload_transport()
-                            .local
-                            .owns(&payload.channel)
-                    }) =>
-            {
-                self.receive_guest_payload(conn, payload);
-                return;
-            }
-            packet => packet,
-        };
         let Some(host) = self.lan.as_ref() else {
             return;
         };

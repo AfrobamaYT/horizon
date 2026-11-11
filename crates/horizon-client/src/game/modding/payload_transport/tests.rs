@@ -1,6 +1,7 @@
 use mod_api::{
-    Hooks, IPayloadContext, IPayloadHandler, ModEntry, PayloadBytes, PayloadDirection, PayloadId,
-    PayloadProtocol, Registrar,
+    HandlerThread, Hooks, IPayloadContext, IPayloadHandler, ModEntry, PayloadBytes,
+    PayloadContextError, PayloadDirection, PayloadId, PayloadProtocol, PayloadWork,
+    PayloadWorkStatus, Registrar,
 };
 use std::sync::{
     Arc,
@@ -15,11 +16,64 @@ struct Probe {
     expected: Arc<Vec<u8>>,
     server: Arc<AtomicUsize>,
     client: Arc<AtomicUsize>,
+    network: bool,
 }
 struct Handler {
     expected: Arc<Vec<u8>>,
     hits: Arc<AtomicUsize>,
     server: bool,
+    network: bool,
+}
+struct Work {
+    bytes: std::sync::Mutex<Option<PayloadBytes>>,
+    hits: Arc<AtomicUsize>,
+    server: bool,
+    network_thread: std::thread::ThreadId,
+}
+impl PayloadWork for Work {
+    fn run(&self, context: &mut dyn IPayloadContext) -> Result<(), String> {
+        assert_ne!(
+            std::thread::current().id(),
+            self.network_thread,
+            "work must actually switch executors"
+        );
+        assert_eq!(context.protocol(), PayloadProtocol::Play);
+        assert!(context.player().is_ok());
+        finish(
+            self.bytes.lock().unwrap().take().unwrap(),
+            context,
+            self.server,
+            &self.hits,
+        )
+    }
+}
+fn finish(
+    bytes: PayloadBytes,
+    context: &mut dyn IPayloadContext,
+    server: bool,
+    hits: &AtomicUsize,
+) -> Result<(), String> {
+    if server {
+        assert_eq!(std::thread::current().name(), Some("Server thread"));
+        assert_eq!(context.flow(), PayloadDirection::ToServer);
+        assert!(context.server_host().is_ok());
+        assert!(matches!(
+            context.client_host(),
+            Err(PayloadContextError::WrongSide)
+        ));
+        context
+            .reply(&PayloadId(CHANNEL.into()), bytes)
+            .map_err(|error| format!("reply: {error:?}"))?;
+    } else {
+        assert_eq!(context.flow(), PayloadDirection::ToClient);
+        assert!(context.client_host().is_ok());
+        assert!(matches!(
+            context.server_host(),
+            Err(PayloadContextError::WrongSide)
+        ));
+    }
+    hits.fetch_add(1, Ordering::SeqCst);
+    Ok(())
 }
 impl IPayloadHandler for Handler {
     fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
@@ -33,21 +87,39 @@ impl IPayloadHandler for Handler {
             context.player().is_ok(),
             "a live connection supplies the player"
         );
-        if self.server {
-            assert_eq!(std::thread::current().name(), Some("Server thread"));
-            assert_eq!(context.flow(), PayloadDirection::ToServer);
-            assert!(context.server_host().is_ok());
-            assert!(context.client_host().is_err());
-            context
-                .reply(&PayloadId(CHANNEL.into()), bytes)
-                .map_err(|e| format!("reply: {e:?}"))?;
+        if self.network {
+            if self.server {
+                assert!(matches!(
+                    context.server_host(),
+                    Err(PayloadContextError::WrongThread)
+                ));
+                assert!(matches!(
+                    context.client_host(),
+                    Err(PayloadContextError::WrongSide)
+                ));
+            } else {
+                assert!(matches!(
+                    context.client_host(),
+                    Err(PayloadContextError::WrongThread)
+                ));
+                assert!(matches!(
+                    context.server_host(),
+                    Err(PayloadContextError::WrongSide)
+                ));
+            }
+            assert_eq!(
+                context.enqueue_work(Arc::new(Work {
+                    bytes: std::sync::Mutex::new(Some(bytes)),
+                    hits: self.hits.clone(),
+                    server: self.server,
+                    network_thread: std::thread::current().id(),
+                })),
+                Ok(PayloadWorkStatus::Queued)
+            );
+            Ok(())
         } else {
-            assert_eq!(context.flow(), PayloadDirection::ToClient);
-            assert!(context.client_host().is_ok());
-            assert!(context.server_host().is_err());
+            finish(bytes, context, self.server, &self.hits)
         }
-        self.hits.fetch_add(1, Ordering::SeqCst);
-        Ok(())
     }
 }
 #[mod_api::__subscriptions]
@@ -56,17 +128,24 @@ impl Hooks for Probe {
         registrar
             .payload_handlers()
             .registrar("1")
+            .executes_on(if self.network {
+                HandlerThread::Network
+            } else {
+                HandlerThread::Main
+            })
             .play_bidirectional(
                 PayloadId(CHANNEL.into()),
                 Arc::new(Handler {
                     expected: self.expected.clone(),
                     hits: self.server.clone(),
                     server: true,
+                    network: self.network,
                 }),
                 Some(Arc::new(Handler {
                     expected: self.expected.clone(),
                     hits: self.client.clone(),
                     server: false,
+                    network: self.network,
                 })),
             );
     }
@@ -78,12 +157,21 @@ fn integrated_memory_delivers_registered_raw_payload_and_reply() {
     if super::super::native_entity_refs::tests::run_fresh_cases(
         NAME,
         "HORIZON_RAW_TRANSPORT_CHILD",
-        &["one_mib"],
+        &["one_mib", "network", "nine_mib"],
     ) {
         return;
     }
+    let (size, network) = match std::env::var("HORIZON_RAW_TRANSPORT_CHILD")
+        .unwrap()
+        .as_str()
+    {
+        "one_mib" => (1 << 20, false),
+        "network" => (1 << 20, true),
+        "nine_mib" => (9 << 20, false),
+        case => panic!("unknown transport fixture case {case}"),
+    };
     let expected = Arc::new(
-        (0..1024 * 1024)
+        (0..size)
             .map(|i| ((i * 31 + 7) % 251) as u8)
             .collect::<Vec<_>>(),
     );
@@ -95,6 +183,7 @@ fn integrated_memory_delivers_registered_raw_payload_and_reply() {
             expected: expected.clone(),
             server: server.clone(),
             client: client.clone(),
+            network,
         }),
     )]
     .into();
