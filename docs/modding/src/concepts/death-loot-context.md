@@ -1,20 +1,17 @@
 # Death sources at the loot hook
 
-The existing `loot_drops` hook receives `LootDrops::damage_source`, an optional
-`HurtSource` carrying the death's damage type, causing entity ID and direct entity
-ID. Non-death drops have no damage source. An environmental death still has its
-damage type; causing and direct IDs are 0 when absent or unknown. A remembered
-`player` is kill credit, not proof that the player caused this death.
+`LootDrops::damage_source` carries the death's damage type and causing/direct entity IDs.
+Non-death drops have no source. Environmental deaths retain their type, with 0 for
+absent or unknown IDs. `player` is remembered kill credit, not necessarily the attacker.
 
-`tool` remains the breaking or using tool for blocks and interactions. On a death
-it is the killing entity's held stack captured for this death invocation, including
-components, or `None` when unavailable. The snapshot is taken before the
-`living_death` listeners, so even a death listener changing the killer's hand
-cannot replace it. It is not a later inventory read. Each invocation owns its
-snapshot; a cancelled attempt discards it, and a retry captures a fresh one.
-Nested deaths cannot replace an outer invocation's snapshot.
+`tool` is the breaking or using tool (`LootContextParams.TOOL`), and is always `None`
+for entity deaths. To read the attacker's main hand, resolve `damage_source.causing`
+with `host.entity(id)`, then `host.living(entity)`, and call
+`living.hand_item(host, Hand::Main)`. Handle resolution can fail for an absent attacker.
+This is a live read, including all stack components: changes during `living_death`
+and by earlier `loot_drops` listeners are visible to later readers. No hand snapshot
+is carried in the context. Native and wasm use the same Host operations.
 
-The existing death source representation cannot recover a projectile ID: projectile
-direct IDs are 0; melee direct IDs equal the causing ID. A causing mob ID does not
-require that mob to remain loaded. Native and wasm listeners receive the same
-borrowed view through the generated owned call transport; neither gets engine types.
+Projectile direct IDs are currently 0; melee direct IDs equal the causing ID.
+The shooter's live hand is not the projectile's recorded firing weapon. Reading
+that recorded weapon through the damage source is separate work.
