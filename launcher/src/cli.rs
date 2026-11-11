@@ -744,6 +744,7 @@ enum Cmd {
         /// Allow missing original Java asset/data jars to be downloaded from Modrinth
         #[arg(long)]
         allow_jar_downloads: bool,
+        /// The installed version to play (default: the instance's selected version)
         #[arg(long)]
         version: Option<String>,
         /// The instance to play (its name or id; default: the selected one). A Java instance

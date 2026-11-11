@@ -58,7 +58,8 @@ Minecraft: Java Edition. For an unsigned developer installation with persisted d
 `HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` enables account-free, single-player-only Play if the
 installed game advertises `--developer-single-player` through `--launch-api`; rebuild and reinstall
 older developer games and their native mods. Signed builds and their native descendants still require
-the account. See [launcher commands](../../../../launcher-commands.md) for the offline restrictions. Starting the launcher or asking for `--help` alone does not register the
+the account. See [launcher commands](../../../../launcher-commands.md) for the offline restrictions.
+Starting the launcher or asking for `--help` alone does not register the
 directories. Standalone developer builds with no launcher registry among the executable's ancestors
 can still be run directly.
 
