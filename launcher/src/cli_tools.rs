@@ -363,7 +363,10 @@ fn collect(cmd: &Command, path: &mut Vec<String>, out: &mut Vec<(String, Command
 
 /// Whether an argument is part of a tool (not --help, --version or the global --json).
 fn shown(arg: &clap::Arg) -> bool {
-    !arg.is_hide_set() && !matches!(arg.get_id().as_str(), "help" | "version" | "json")
+    // Only clap's built-in `--version` flag is left out: a command's own `--version <tag>` argument is shown.
+    !arg.is_hide_set()
+        && !matches!(arg.get_id().as_str(), "help" | "json")
+        && !matches!(arg.get_action(), clap::ArgAction::Version)
 }
 
 /// Whether an argument takes several values (a list).
