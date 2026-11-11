@@ -11,6 +11,15 @@ pub struct ConditionError {
     pub message: String,
 }
 
+impl ConditionError {
+    /// A refusal with `message` as its diagnostic.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
 impl From<(Identifier, String)> for ConditionError {
     fn from((id, message): (Identifier, String)) -> Self {
         Self {
