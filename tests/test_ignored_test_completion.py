@@ -206,20 +206,37 @@ class Legs(unittest.TestCase):
 
     def test_missing_identity_framing_is_safe_and_still_fails(self):
         name = leg_names()[1][0]
+        # Expected counts are independent fixture facts, not classifier output.
         cases = [
-            (f"\x1b[0mPRIVATE_PAYLOAD test {name} ... ok\n", "ansi-prefix"),
-            (f"test other ... ok PRIVATE_PAYLOAD test {name} ... ok\n", "interleaved-record"),
-            (f"PRIVATE_PAYLOAD test {name} ...\nok\n", "split-status"),
-            ("test different ... ok PRIVATE_PAYLOAD\n", "absent-intact-identity"),
+            (f"\x1b[0mPRIVATE_PAYLOAD test {name} ... ok\n", "ansi-prefix", 1, 1, 0, 0),
+            (f"test other ... ok PRIVATE_PAYLOAD test {name} ... ok\n", "interleaved-record", 1, 0, 1, 0),
+            (f"PRIVATE_PAYLOAD test {name} ...\nok\n", "split-status", 1, 0, 0, 1),
+            ("test different ... ok PRIVATE_PAYLOAD\n", "absent-intact-identity", 0, 0, 0, 0),
+            (f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "unclassified-candidate", 1, 0, 0, 0),
+            # Complete ANSI sequence exactly inside the 512-character prefix.
+            (f"\x1b[0m{'P' * 503}test {name} ... ok\n", "ansi-prefix", 1, 1, 0, 0),
+            # One character farther away: ESC falls outside that window.
+            (f"\x1b[0m{'P' * 504}test {name} ... ok\n", "unclassified-candidate", 1, 0, 0, 0),
         ]
-        for record, framing in cases:
+        for record, framing, candidates, ansi, interleaved, split in cases:
             with self.subTest(framing=framing):
                 def fake(command, **_):
                     text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
                     return subprocess.CompletedProcess(command, 0, text)
                 with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
                     self.assertIsNone(ignored_tests.run("example", [], 1, 2))
-                self.assertIn(f"{name}; category=missing-result; framing={framing}", log.getvalue())
+                header = "example: 1 listed tests of this leg never reported a result:\n"
+                expected = (
+                    header
+                    + f"  {name}; category=missing-result; framing={framing}; "
+                    + f"candidate_lines={candidates}; ansi-prefix={ansi}; "
+                    + f"interleaved-record={interleaved}; split-status={split}; "
+                    + f"sampled_matches={candidates}; sample_limit=8\n"
+                    + "0 missing identities not shown (shared total byte budget)\n"
+                )
+                # Exact allowlist rejects arbitrary record/status fragments too,
+                # not just a private marker or terminal control sequence.
+                self.assertEqual(log.getvalue()[log.getvalue().index(header):], expected)
                 self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
                 self.assertNotIn("\x1b", log.getvalue())
 

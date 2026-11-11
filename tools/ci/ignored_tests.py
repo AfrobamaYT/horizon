@@ -303,7 +303,11 @@ def failure_diagnostics(output):
 
 
 def missing_result_framing(output, name):
-    """Describe bounded candidate framing, never captured line contents or results."""
+    """Describe bounded framing hints, never line contents or recovered results.
+
+    Text searches can also find prefix identities or incidental mentions; counts
+    describe candidate framing only and cannot establish that a test ran.
+    """
     counts = {"ansi-prefix": 0, "interleaved-record": 0, "split-status": 0}
     cursor = matches = 0
     seen = set()
