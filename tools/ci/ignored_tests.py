@@ -18,8 +18,8 @@ may pass or fail; one marked `harness` is a parity harness's step, run by its ha
 environment it sets, and is skipped here; one marked `gpu` needs a graphics adapter and runs only where
 the runner has a Vulkan driver (an ICD file), and must pass there.
 
-Only test names, results, panic locations and explicitly marked screen-effect event loop errors
-are printed: the prepared data is Mojang's, and a failing assertion could quote it.
+Runtime diagnostics expose identities and allowlisted panic categories, never arbitrary assertion
+payloads: the prepared data is Mojang's. Compile/list failures expose bounded compiler headings.
 """
 
 import os
@@ -45,6 +45,24 @@ INTEGRATION_TESTS = {"horizon-client"}
 LEG = re.compile(r"^(?P<package>[^#]+)#(?P<number>\d+)of(?P<count>\d+)$")
 LISTED = re.compile(r"^(\S+): test$")
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
+
+
+def compile_diagnostics(output):
+    """List mode never executes tests. Show headings, not source excerpts or arbitrary Cargo output."""
+    headings = []
+    for line in output.splitlines():
+        if re.match(r"^error(?:\[E\d+\])?:", line):
+            # Literals, URLs and assignments may contain credentials or private paths.
+            line = re.sub(r"`[^`]*`|\"[^\"]*\"|'[^']*'|https?://\S+|\S+=\S+", "<redacted>", line)
+            headings.append(line)
+        elif re.match(r"^\s*--> [\w./-]+:\d+:\d+$", line):
+            headings.append(line)
+    for line in headings[:20]:
+        print("  compiler: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
+    if len(headings) > 20:
+        print(f"  compiler diagnostics truncated: {len(headings) - 20} more headings")
+    if not headings:
+        print("  no recognized compiler diagnostic; non-diagnostic output withheld")
 
 
 def has_vulkan():
@@ -114,11 +132,12 @@ def run(package, skip, number=None, count=None):
             # List what exists, then skip every test another leg owns.
             listing = subprocess.run(
                 [*command, "--", "--list", "--include-ignored"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace", env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env,
             )
             names = {found[1] for line in listing.stdout.splitlines() if (found := LISTED.match(line))}
             if listing.returncode or not names:
                 print(f"{package}: could not list the tests to split into legs (cargo exit {listing.returncode})")
+                compile_diagnostics(listing.stderr)
                 return None
             others = sorted(name for name in names if not in_leg(name, number, count))
             # Every test this leg owns and does not skip must report a result.
@@ -145,7 +164,32 @@ def run(package, skip, number=None, count=None):
     target_number = 0
     awaiting_count = False
     incomplete = False
+    panic_reason_pending = False
+    panic_operands = 0
+    diagnostic_count = 0
     for line in process.stdout.splitlines():
+        if panic_operands and line.strip():
+            if operand := re.fullmatch(r"\s*(left|right):\s*(-?\d+(?:\.\d+)?|true|false)\s*", line):
+                if diagnostic_count < 50:
+                    print(f"  assertion {operand[1]}: {operand[2][:80]}")
+            elif re.match(r"\s*(?:left|right):", line) and diagnostic_count < 50:
+                print("  assertion operand withheld (private string/blob)")
+            panic_operands -= 1
+        if panic_reason_pending and line.strip():
+            # No free-form panic text or assertion operands cross the resource boundary.
+            reason = next((label for prefix, label in (
+                ("assertion `left == right` failed", "assertion equality failed"),
+                ("assertion `left != right` failed", "assertion inequality failed"),
+                ("assertion failed:", "assertion condition failed"),
+                ("called `Result::unwrap()`", "Result::unwrap on an error"),
+                ("called `Option::unwrap()`", "Option::unwrap on None"),
+                ("index out of bounds", "index out of bounds"),
+                ("attempt to", "arithmetic failure"),
+            ) if line.strip().startswith(prefix)), "custom panic")
+            if diagnostic_count < 50:
+                print(f"  panic reason: {reason}; payload withheld (resource privacy)")
+            panic_reason_pending = False
+            panic_operands = 2 if reason.startswith("assertion equality") or reason.startswith("assertion inequality") else 0
         if TARGET.match(line):
             incomplete |= target_count is not None or awaiting_count
             target_number += 1
@@ -156,8 +200,15 @@ def run(package, skip, number=None, count=None):
             awaiting_count = False
         if found := RESULT.match(line):
             results[found[1]] = found[2] == "ok"
+            if found[2] == "FAILED":
+                diagnostic_count += 1
+                if diagnostic_count <= 50:
+                    print(f"  failed test: {found[1][:200]}")
         elif found := PANIC.match(line):
-            print(f"  {found[1]} panicked at {found[2]}")
+            diagnostic_count += 1
+            if diagnostic_count <= 50:
+                print(f"  {found[1][:200]} panicked at {found[2][:200]}")
+            panic_reason_pending = True
         elif line.startswith("screen-effect event loop error: "):
             print(line)
         elif found := SUMMARY.match(line):
@@ -170,9 +221,15 @@ def run(package, skip, number=None, count=None):
         elif status := re.search(r"\((?:signal|exit status): \d+", line):
             # Emit only the numeric status, never adjacent test output.
             print(f"{package}: {status[0]})")
+    if diagnostic_count > 50:
+        print(f"{package}: diagnostics truncated after 50 identities/locations")
+    if panic_reason_pending:
+        print(f"{package}: panic reason missing from captured output")
     if incomplete or awaiting_count or target_count is not None:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
         return None
+    if process.returncode and not target_number:
+        compile_diagnostics(process.stdout)
     if process.returncode and all(results.values()):
         print(f"{package}: cargo exited {process.returncode} without a parsed test failure")
         return None
@@ -215,6 +272,8 @@ def main(shards):
             continue
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
+            if not passed and listed and known[(package, test)] != "gpu":
+                print(f"{package} {test}: accepted failure policy={KNOWN.name} mark={known[(package, test)] or 'known'}")
             if not passed and not listed:
                 problems.append(f"{package} {test}: failed, and isn't a known failure")
             elif not passed and known[(package, test)] == "gpu":
