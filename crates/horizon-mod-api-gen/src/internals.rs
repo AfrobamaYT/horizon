@@ -1468,7 +1468,7 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
             }
         }
     }
-    for (origin, path) in crate::replace::listed(root)? {
+    for (origin, path) in crate::replace::marked(root)? {
         pass.lower(root, &path, true)
             .map_err(|e| format!("{origin}: {path}: {e}"))?;
     }
@@ -2463,9 +2463,18 @@ const LABEL: &str = "é"; struct AfterUnicode;
     fn listed_function_module_helpers_compile_from_outside() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
-        fixture.put("crates/lower/src/hidden.rs", "const VALUE: u32 = 5; fn helper() -> u32 { 7 } fn listed() -> u32 { VALUE + helper() }\n");
-        fixture.put(crate::replace::LIST, "lower::hidden::listed\n");
+        fixture.put("crates/lower/src/hidden.rs", "const VALUE: u32 = 5; fn helper() -> u32 { 7 } #[horizon_mod_api_macros::replaceable] fn listed() -> u32 { VALUE + helper() }\n");
+
         widen_with(&fixture.0, &[]).unwrap();
+        // This standalone rustc fixture has no Cargo dependencies; the marker is a no-op.
+        let file = fixture.0.join("crates/lower/src/hidden.rs");
+        fs::write(
+            &file,
+            fs::read_to_string(&file)
+                .unwrap()
+                .replace("#[horizon_mod_api_macros::replaceable]", ""),
+        )
+        .unwrap();
         let out = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target")
             .join(format!("fnr-lower-external-{}", std::process::id()));
@@ -2514,7 +2523,11 @@ const LABEL: &str = "é"; struct AfterUnicode;
     fn listed_replaceable_functions_are_widened() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
-        fixture.put(crate::replace::LIST, "lower::hidden::inner::Thing::run\n");
+        let file = fixture.0.join("crates/lower/src/other.rs");
+        let text = fs::read_to_string(&file)
+            .unwrap()
+            .replace("fn run", "#[horizon_mod_api_macros::replaceable] fn run");
+        fs::write(file, text).unwrap();
         let result = widen_with(&fixture.0, &[]).unwrap();
         assert!(
             result
@@ -2534,16 +2547,15 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
         fixture.put(
-            crate::replace::LIST,
-            "# comment\nlower::hidden::inner::Thing::missing\n",
+            "crates/lower/src/other.rs",
+            "#[horizon_mod_api_macros::replaceable] const fn missing() {} ",
         );
-        // The error names the replaceable list and its own line, not the preceding internals list.
         let error =
             widen_with(&fixture.0, &[("internals.txt", "# one\n# two\n".into())]).unwrap_err();
         assert!(
-            error
-                .replace('\\', "/")
-                .contains("replaceable.txt:2: lower::hidden::inner::Thing::missing"),
+            error.replace('\\', "/").contains(
+                "#[horizon_mod_api_macros::replaceable] on lower::hidden::inner::missing"
+            ),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");

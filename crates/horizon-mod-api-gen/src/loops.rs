@@ -51,12 +51,7 @@ pub fn collect(root: &Path) -> Result<Vec<PublishedLoop>, String> {
                 let syn::ImplItem::Fn(function) = member else {
                     continue;
                 };
-                let Some(marker) = function.attrs.iter().find(|attr| {
-                    attr.path()
-                        .segments
-                        .last()
-                        .is_some_and(|s| s.ident == "horizon_loop")
-                }) else {
+                let Some(marker) = crate::source::marker(&function.attrs, "horizon_loop") else {
                     continue;
                 };
                 let at = format!("{}::{}", file.module, function.sig.ident);

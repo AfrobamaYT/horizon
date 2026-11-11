@@ -1876,6 +1876,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "horizon-client-core",
+ "horizon-mod-api-macros",
  "horizon-theme",
  "png",
  "winit",
@@ -1909,6 +1910,7 @@ dependencies = [
  "horizon-items",
  "horizon-mcp",
  "horizon-mod-api",
+ "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-runtime",
  "horizon-narrator",

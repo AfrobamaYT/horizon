@@ -338,3 +338,10 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+/// A function marker shared by source-discovery passes.
+pub(crate) fn marker<'a>(attrs: &'a [syn::Attribute], name: &str) -> Option<&'a syn::Attribute> {
+    attrs
+        .iter()
+        .find(|attr| attr.path().segments.last().is_some_and(|s| s.ident == name))
+}

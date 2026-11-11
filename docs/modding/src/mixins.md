@@ -34,7 +34,7 @@ A build that cannot apply a row stops and names the mod, the row and the reason.
 | --- | --- |
 | `E_MIXIN_TARGET_MISSING` | `target` names no function of the pinned game. |
 | `E_MIXIN_TARGET_AMBIGUOUS` | `target` matches more than one function. |
-| `E_MIXIN_NOT_REPLACEABLE` | The function takes no replacement: it is generic over types or consts, sits in a generic impl, takes `impl Trait`, is `const`, `async` or `unsafe`, takes `self` by value, is `#[inline(always)]`, or is a function below the game crate that the game's list of replaceable functions leaves out. The reason is named. |
+| `E_MIXIN_NOT_REPLACEABLE` | The function takes no replacement: it is generic over types or consts, sits in a generic impl, takes `impl Trait`, is `const`, `async` or `unsafe`, takes `self` by value, is `#[inline(always)]`, or is a function below the game crate without `#[horizon_mod_api_macros::replaceable]`. Ask for the marker in an issue or pull request on the game. The reason is named. |
 | `E_MIXIN_SOURCE` | The pinned source of the target cannot be read or copied. |
 | `E_MIXIN_INVALID` | A row's field is malformed; the field is named. |
 | `E_OVERWRITE_CONFLICT` | Two mods `OVERWRITE` one function (from the mixin tool). |

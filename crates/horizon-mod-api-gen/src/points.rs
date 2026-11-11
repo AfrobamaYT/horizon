@@ -1,11 +1,11 @@
 //! Injection points (#589): every function of the game module that [`point_shape::eligible`]
-//! admits and the API can carry is a point, and so is each such function `replaceable.txt` lists in
+//! admits and the API can carry is a point, and so is each such function marked `#[horizon_mod_api_macros::replaceable]` in
 //! the crates below it. The staging pass ([`stage`]) puts `#[point]` on each in a staged copy of the
 //! game's source, the copy the prebuilt game builds compile;
 //! the generator lists the same points from any copy, staged or not, as `mod_points` (each point's
 //! record, typed function slots, `PointId`) and as `points.json`, the compiled slot catalog. All of them are build outputs, never committed.
 
-use crate::replace::listed;
+use crate::replace::marked;
 use crate::source::{crate_files, crate_root, game_files, gated, offset, owner, plain_path, unraw};
 use quote::{ToTokens, quote};
 use std::{
@@ -143,14 +143,13 @@ pub(crate) fn below_points(root: &Path) -> Result<std::collections::BTreeSet<Str
     Ok(seen)
 }
 
-/// The game module's files, slot lists and listed crates' files, for a build script to track.
+/// The game module's files, slot lists and marked crates' files, for a build script to track.
 pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files: Vec<_> = game_files(&root.join("crates/horizon-client/src"), true)?
         .into_iter()
         .map(|file| file.path)
         .collect();
-    files.push(root.join(crate::replace::LIST));
-    let crates: std::collections::BTreeSet<_> = listed(root)?
+    let crates: std::collections::BTreeSet<_> = marked(root)?
         .into_iter()
         .filter_map(|(_, path)| path.split("::").next().map(str::to_owned))
         .collect();
@@ -370,7 +369,7 @@ struct Scanned {
 /// The `mod_api` types a record may hold ([`crate::build::wire_types`]), by path.
 pub type WireTypes = std::collections::BTreeSet<String>;
 
-/// Every file with points: the game module's, then each listed lower crate's that is not built
+/// Every file with points: the game module's, then each marked lower crate's that is not built
 /// under the points' own crate.
 fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut files = Vec::new();
@@ -392,7 +391,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
             ));
         }
     }
-    let list = listed(root)?;
+    let list = marked(root)?;
     let below = below_points(root)?;
     let mut crates = std::collections::BTreeSet::new();
     for (_, path) in &list {
@@ -425,7 +424,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
 }
 
 impl Scanned {
-    /// This file's points: all of a game-module file's, or the listed ones of a lower crate's.
+    /// This file's points: all of a game-module file's, or the marked ones of a lower crate's.
     fn points<'a>(&'a self, list: &[(String, String)], wire: &WireTypes) -> Vec<Found<'a>> {
         let mut out = Vec::new();
         let keep = |found: &Found<'_>| {
@@ -600,8 +599,8 @@ fn all_points<'a>(
     Ok(points)
 }
 
-/// The game's points, by name: every point function of the game module, and the listed ones of
-/// the crates below it. Unlisted targets have no compiled slot.
+/// The game's points, by name: every point function of the game module, and the marked ones of
+/// the crates below it. Unmarked targets have no compiled slot.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     points_with(root, &crate::build::wire_types(root)?)
 }
@@ -718,7 +717,7 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
     Ok(staged)
 }
 
-/// Give listed lower-crate points and sites their staged dependencies, including the lock file.
+/// Give marked lower-crate points and sites their staged dependencies, including the lock file.
 pub(crate) fn dependencies(
     root: &Path,
     packages: std::collections::BTreeSet<PathBuf>,
@@ -1495,11 +1494,7 @@ name = 'horizon-mod-api-gen'
         );
         put(
             "crates/horizon-client-render/src/mesher.rs",
-            "pub struct Mesher<'a>(&'a u8);\nimpl Mesher<'_> { pub fn mesh(&mut self, chunk: &Chunk) -> usize { 0 } fn face(&self) {} }\n",
-        );
-        put(
-            crate::replace::LIST,
-            "# lower points\nhorizon_client_render::mesher::Mesher<'_>::mesh\n",
+            "pub struct Mesher<'a>(&'a u8);\nimpl Mesher<'_> { #[horizon_mod_api_macros::replaceable] pub fn mesh(&mut self, chunk: &Chunk) -> usize { 0 } fn face(&self) {} }\n",
         );
         let points = points_with(&root, &WireTypes::new()).unwrap();
         let named: Vec<_> = points

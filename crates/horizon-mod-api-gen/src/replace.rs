@@ -10,7 +10,7 @@
 //! function carries it.
 //!
 //! Replaceable: every free function and inherent method of the game module that [`eligible`]
-//! admits, and each function `replaceable.txt` lists in the crates below it. The source tree
+//! admits, and each function marked with `#[horizon_mod_api_macros::replaceable]` in the crates below it. The source tree
 //! carries none of this: only a staged copy does, and everything the pass writes stays on the
 //! line it annotates, so the staged source's line numbers are the pinned source's.
 use crate::source::{self, GameFile};
@@ -22,16 +22,16 @@ use std::{
 };
 use syn::{FnArg, ImplItem, Item, Pat, Type};
 
-/// The list of replaceable functions below the game crate, one path per line.
-pub(crate) const LIST: &str = "crates/horizon-mod-api-gen/replaceable.txt";
-
 /// Whether a function with this signature and these attributes can take a replacement: its
 /// slot holds one function pointer, so one compiled copy must stand for every call.
 pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
     signature_exclusion(attrs, sig).is_none()
 }
 
-pub(crate) fn signature_exclusion(attrs: &[syn::Attribute], sig: &syn::Signature) -> Option<&'static str> {
+pub(crate) fn signature_exclusion(
+    attrs: &[syn::Attribute],
+    sig: &syn::Signature,
+) -> Option<&'static str> {
     struct Opaque(bool);
     impl<'ast> syn::visit::Visit<'ast> for Opaque {
         fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {
@@ -552,36 +552,121 @@ fn inventory(
     }
 }
 
-/// The listed lower-crate functions, each with its line in the list for diagnostics.
-pub(crate) fn listed(root: &Path) -> Result<Vec<(String, String)>, String> {
-    let file = root.join(LIST);
-    let text = match fs::read_to_string(&file) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("{}: {error}", file.display())),
-    };
-    Ok(text
-        .lines()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            let path = line.split('#').next().unwrap_or_default().trim();
-            (!path.is_empty()).then(|| (format!("{LIST}:{}", index + 1), source::plain_path(path)))
-        })
-        .collect())
+/// Marked lower-crate functions and their source locations.
+pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
+    fn scan(module: &str, items: &[Item], out: &mut Vec<(String, String)>) -> Result<(), String> {
+        for item in items {
+            match item {
+                Item::Fn(f) if source::marker(&f.attrs, "replaceable").is_some() => {
+                    let path = format!("{module}::{}", f.sig.ident);
+                    if let Some(reason) = signature_exclusion(&f.attrs, &f.sig) {
+                        return Err(format!(
+                            "#[horizon_mod_api_macros::replaceable] on {path}: {reason}"
+                        ));
+                    }
+                    out.push((
+                        format!("#[horizon_mod_api_macros::replaceable] on {path}"),
+                        path,
+                    ));
+                }
+                Item::Impl(block) => {
+                    for member in &block.items {
+                        if let ImplItem::Fn(f) = member
+                            && source::marker(&f.attrs, "replaceable").is_some()
+                        {
+                            let path = source::plain_path(&format!(
+                                "{module}::{}::{}",
+                                source::owner(&block.self_ty),
+                                f.sig.ident
+                            ));
+                            let reason = signature_exclusion(&f.attrs, &f.sig)
+                                .or_else(|| {
+                                    (!lifetimes_only(&block.generics))
+                                        .then_some("impl type/const generics")
+                                })
+                                .or_else(|| {
+                                    source::gated(&block.attrs).then_some("conditional impl")
+                                });
+                            if let Some(reason) = reason {
+                                return Err(format!(
+                                    "#[horizon_mod_api_macros::replaceable] on {path}: {reason}"
+                                ));
+                            }
+                            out.push((
+                                format!("#[horizon_mod_api_macros::replaceable] on {path}"),
+                                path,
+                            ));
+                        }
+                    }
+                }
+                Item::Mod(m) => {
+                    if let Some((_, items)) = &m.content {
+                        scan(&format!("{module}::{}", m.ident), items, out)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    let crates = root.join("crates");
+    if !crates.exists() {
+        return Ok(out);
+    }
+    for entry in fs::read_dir(&crates).map_err(|e| e.to_string())? {
+        let package = entry.map_err(|e| e.to_string())?.path();
+        if !package.join("Cargo.toml").exists() {
+            continue;
+        }
+        let name = library_name(&package)?;
+        if name == "horizon_client" {
+            continue;
+        }
+        let manifest: toml::Value = toml::from_str(
+            &fs::read_to_string(package.join("Cargo.toml")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let lib = package.join(
+            manifest
+                .get("lib")
+                .and_then(|v| v.get("path"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("src/lib.rs"),
+        );
+        if !lib.exists() {
+            continue;
+        }
+        for file in source::module_files(
+            name.clone(),
+            lib.clone(),
+            lib.parent().unwrap().to_owned(),
+            true,
+        )? {
+            let text = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
+            if !text.contains("replaceable") {
+                continue;
+            }
+            let parsed =
+                syn::parse_file(&text).map_err(|e| format!("{}: {e}", file.path.display()))?;
+            scan(&file.module, &parsed.items, &mut out)?;
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
 }
 
 /// Why `target` has no replacement slot when it names a function below the game crate that the
-/// list leaves out; none for a game-crate target or a listed one.
+/// marker is absent; none for a game-crate target or a marked one.
 pub fn refusal(root: &Path, target: &str) -> Result<Option<String>, String> {
     let target = source::plain_path(target);
     if target.split("::").next() == Some("horizon_client")
-        || listed(root)?.iter().any(|(_, path)| *path == target)
+        || marked(root)?.iter().any(|(_, path)| *path == target)
     {
         return Ok(None);
     }
-    Ok(Some(format!(
-        "a function below the game crate is replaceable only when {LIST} lists it; it is not listed"
-    )))
+    Ok(Some("a function below the game crate takes a replacement only when it carries #[horizon_mod_api_macros::replaceable]; ask for it in an issue or pull request on the game".to_owned()))
 }
 
 /// What [`stage`] did.
@@ -620,8 +705,8 @@ struct Crate {
     /// Its library root, where its slot array goes.
     lib: PathBuf,
     files: Vec<GameFile>,
-    /// Whether only its listed functions are replaceable.
-    listed_only: bool,
+    /// Whether only its marked functions are replaceable.
+    marked_only: bool,
 }
 
 /// The staging pass: in the staged copy at `root`, in place, gives every replaceable function its
@@ -629,14 +714,14 @@ struct Crate {
 /// never on a working tree.
 pub fn stage(root: &Path) -> Result<Staged, String> {
     let traits = declared_traits(root)?;
-    let list = listed(root)?;
+    let list = marked(root)?;
     let mut used = vec![false; list.len()];
     let client = root.join("crates/horizon-client/src");
     let mut crates = vec![Crate {
         name: "horizon_client".into(),
         lib: client.join("lib.rs"),
         files: source::game_files(&client, true)?,
-        listed_only: false,
+        marked_only: false,
     }];
     let lower: BTreeSet<&str> = list
         .iter()
@@ -645,7 +730,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     for name in lower {
         if name == "horizon_client" {
             return Err(format!(
-                "{LIST}: {name}: every function of the game crate's game module is replaceable already"
+                "{name}: every function of the game crate's game module is replaceable already"
             ));
         }
         let (package, lib) = source::crate_root(root, name)?;
@@ -653,7 +738,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             name: library_name(&package)?,
             lib,
             files: source::crate_files(root, name)?,
-            listed_only: true,
+            marked_only: true,
         });
     }
     let mut staged = Staged::default();
@@ -677,12 +762,12 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             parsed.push((file, text, items));
         }
         for (file, text, items) in &parsed {
-            if !krate.listed_only {
+            if !krate.marked_only {
                 inventory(items, &traits, &types, None, &mut counts);
             }
             let mut found = Vec::new();
             functions(&file.module, items, &traits, &types, &mut found);
-            if krate.listed_only {
+            if krate.marked_only {
                 found.retain(|found| {
                     let target = source::plain_path(&found.target());
                     list.iter()
@@ -706,7 +791,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             "replacement slots: {}: total={count}, trait_methods={trait_methods}",
             krate.lib.display()
         );
-        if !krate.listed_only {
+        if !krate.marked_only {
             debug_assert_eq!(counts.get("eligible").copied().unwrap_or_default(), count);
             eprintln!(
                 "replacement exclusions (first rule, module-scope definitions): {}",
@@ -731,7 +816,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         // The game crate arms the crates below it too: it is where the points are sealed.
         let below: Vec<String> = crates
             .iter()
-            .filter(|other| !krate.listed_only && other.listed_only)
+            .filter(|other| !krate.marked_only && other.marked_only)
             .map(|other| format!("::{}::__fnr_arm", other.name))
             .collect();
         let calls: String = armers
@@ -1270,14 +1355,19 @@ mod tests {
     #[test]
     fn an_unlisted_function_below_the_game_crate_is_refused_naming_the_list() {
         let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join(LIST).parent().unwrap()).unwrap();
-        fs::write(root.path().join(LIST), "horizon_low::Clock<'_>::advance\n").unwrap();
+        fs::create_dir_all(root.path().join("crates/horizon-low/src")).unwrap();
+        fs::write(
+            root.path().join("crates/horizon-low/Cargo.toml"),
+            "[package]\nname = \"horizon-low\"\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("crates/horizon-low/src/lib.rs"), "struct Clock; impl Clock { #[horizon_mod_api_macros::replaceable] fn advance(&self) {} }").unwrap();
         let refusal = |target| refusal(root.path(), target).unwrap();
         assert_eq!(refusal("horizon_client::game::Game<'_>::tick"), None);
         assert_eq!(refusal("horizon_low::Clock::advance"), None);
         assert_eq!(
             refusal("horizon_low::chunk::Chunk::get").unwrap(),
-            "a function below the game crate is replaceable only when crates/horizon-mod-api-gen/replaceable.txt lists it; it is not listed"
+            "a function below the game crate takes a replacement only when it carries #[horizon_mod_api_macros::replaceable]; ask for it in an issue or pull request on the game"
         );
     }
 
@@ -1390,9 +1480,9 @@ mod tests {
         );
         write(
             "crates/horizon-low/src/lib.rs",
-            "pub fn drawn() {}\npub fn unlisted() {}\n",
+            "#[horizon_mod_api_macros::replaceable] pub fn drawn() {}\npub fn unlisted() {}\n",
         );
-        write(LIST, "# listed\nhorizon_low::drawn\n");
+
         let staged = stage(root.path()).unwrap();
         assert_eq!(
             staged,
@@ -1413,11 +1503,13 @@ mod tests {
         assert!(low.contains("pub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; 1]"));
         syn::parse_file(&low).unwrap();
 
-        write(LIST, "horizon_low::missing\n");
-        write("crates/horizon-low/src/lib.rs", "pub fn drawn() {}\n");
+        write(
+            "crates/horizon-low/src/lib.rs",
+            "#[horizon_mod_api_macros::replaceable] pub const fn missing() {}\n",
+        );
         let error = stage(root.path()).unwrap_err();
         assert!(
-            error.contains("replaceable.txt:1: horizon_low::missing"),
+            error.contains("#[horizon_mod_api_macros::replaceable] on horizon_low::missing"),
             "{error}"
         );
     }

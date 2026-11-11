@@ -433,3 +433,30 @@ mod tests {
         assert!(uninspectable(&item));
     }
 }
+
+/// Marks a function below the game crate as accepting native function replacements.
+/// Game functions need no marker. This has no effect on a plain build: the stager
+/// rewrites the function only in its staged copy. Use on free functions or impl methods,
+/// without arguments.
+#[proc_macro_attribute]
+pub fn replaceable(args: TokenStream, item: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "replaceable takes no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    if syn::parse::<syn::ItemFn>(item.clone()).is_err()
+        && syn::parse::<syn::ImplItemFn>(item.clone()).is_err()
+    {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "replaceable requires a free function or impl method",
+        )
+        .to_compile_error()
+        .into();
+    }
+    item
+}
