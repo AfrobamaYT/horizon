@@ -96,13 +96,7 @@ pub fn rewrite(
         module,
         &parsed.items,
         &|_| true,
-        &|attrs, sig| {
-            if private {
-                point_shape::eligible(attrs, sig)
-            } else {
-                point_shape::eligible(attrs, sig)
-            }
-        },
+        &point_shape::eligible,
         &mut functions,
     );
     let rule = Rule::new(entries);
