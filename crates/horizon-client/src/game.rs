@@ -7202,12 +7202,15 @@ impl Game<'_> {
             self.use_failed = answer == Answer::Fail;
             return Ok(answer.consumes_action() || answer == Answer::Fail);
         }
-        // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates,
-        // BlockState.useItemOn runs before every block-specific behaviour.
+        // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates, BlockState.useItemOn
+        // first. ITEM_USED_ON_BLOCK sees the stack from before it, whichever phase consumes.
+        let held = self.held().cloned();
+        let before = held
+            .clone()
+            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
         if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
-            let held = self.held().cloned();
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
             let mut block_answer =
                 self.use_item_on_block(hit, self.hand, held.as_ref(), mod_api::UsePhase::Block);
@@ -7244,8 +7247,7 @@ impl Game<'_> {
                     return Ok(true);
                 }
                 if let Some(swings) = self.use_shelf(hit) {
-                    let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &before);
                     if swings {
                         self.swing_arm();
                     }
@@ -7443,8 +7445,7 @@ impl Game<'_> {
                     // the stack before the use, or DEFAULT_BLOCK_USE.
                     match branch {
                         horizon_world::level::UseBranch::ItemOn => {
-                            let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                            self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
+                            self.trigger_block("minecraft:item_used_on_block", hit.pos, &before);
                         }
                         horizon_world::level::UseBranch::WithoutItem => {
                             self.trigger_default_block_use(hit.pos);
@@ -7516,7 +7517,7 @@ impl Game<'_> {
                 mod_api::UsePhase::ItemAfterBlock,
             ) {
                 if answer.consumes_action() {
-                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &stack);
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &before);
                     if matches!(answer, Answer::Success | Answer::SuccessServer) {
                         self.swing_arm();
                     }
@@ -7567,9 +7568,8 @@ impl Game<'_> {
                 self.swing_arm();
             }
             if success {
-                // `ServerPlayerGameMode.useItemOn`: a consuming `useOn`
-                // triggers ITEM_USED_ON_BLOCK with the stack before the use.
-                self.trigger_block("minecraft:item_used_on_block", hit.pos, &stack);
+                // `ServerPlayerGameMode.useItemOn`: a consuming `useOn` triggers ITEM_USED_ON_BLOCK.
+                self.trigger_block("minecraft:item_used_on_block", hit.pos, &before);
             } else {
                 // DebugStickItem.useOn's FAIL.
                 self.use_failed = true;
