@@ -201,10 +201,12 @@ mod tests {
 
     #[test]
     fn duplicate_component_ids_refuse_blocks_and_items() {
-        for final_value in [Some(Tag::List(vec![])), None] {
+        let set = || Some(Tag::List(vec![]));
+        // Set then set, set then removal, removal then set, removal then removal.
+        for (first, second) in [(set(), set()), (set(), None), (None, set()), (None, None)] {
             let patch = vec![
-                ("minecraft:lore".into(), Some(Tag::List(vec![]))),
-                ("minecraft:lore".into(), final_value),
+                ("minecraft:lore".into(), first),
+                ("minecraft:lore".into(), second),
             ];
             let mut block = Block::new("test:block", "minecraft:stone");
             block.components = patch.clone();
@@ -219,6 +221,24 @@ mod tests {
                 "item test:item: duplicate component id minecraft:lore"
             );
         }
+    }
+
+    #[test]
+    fn distinct_component_ids_convert_for_blocks_and_items() {
+        let patch = vec![
+            ("minecraft:max_stack_size".into(), Some(Tag::Int(16))),
+            ("minecraft:damage".into(), None),
+        ];
+        let expected = BTreeMap::from([
+            ("minecraft:max_stack_size".into(), serde_json::json!(16)),
+            ("!minecraft:damage".into(), serde_json::json!({})),
+        ]);
+        let mut block = Block::new("test:block", "minecraft:stone");
+        block.components = patch.clone();
+        assert_eq!(block.try_into_engine(&()).unwrap().components, expected);
+        let mut item = Item::new("test:item", "minecraft:stick");
+        item.components = patch;
+        assert_eq!(item.try_into_engine(&()).unwrap().components, expected);
     }
 
     #[test]
