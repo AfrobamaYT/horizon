@@ -364,6 +364,21 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     for file in game_files(&root.join("crates/horizon-client/src"), true)? {
         files.push((file, None));
     }
+    // The wasm host's listener tests listen at points of their own fixture file.
+    #[cfg(feature = "listener-fixture")]
+    {
+        let path = root.join("crates/horizon-mod-wasm/tests/fixture/src/points.rs");
+        if path.is_file() {
+            files.push((
+                crate::source::GameFile {
+                    module: "listener_fixture".into(),
+                    path,
+                    cfg: Vec::new(),
+                },
+                None,
+            ));
+        }
+    }
     let list = listed(root)?;
     let below = below_points(root)?;
     let mut crates = std::collections::BTreeSet::new();
