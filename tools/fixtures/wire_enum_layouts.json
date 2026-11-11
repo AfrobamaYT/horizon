@@ -9,12 +9,6 @@
       "canonical_path": "crate::entity::behaviors::Activity"
     },
     {
-      "name": "AnimationTarget",
-      "path": "crate::client::keyframe_animation::AnimationTarget",
-      "hash": "248d83699651ec50",
-      "canonical_path": "crate::client::keyframe_animation::AnimationTarget"
-    },
-    {
       "name": "ArrowPickup",
       "path": "crate::item::types::ArrowPickup",
       "hash": "ff7e924dd8597b70",
@@ -417,12 +411,6 @@
       "path": "crate::item::types::InteractionResult",
       "hash": "c150152863b150a0",
       "canonical_path": "crate::item::types::InteractionResult"
-    },
-    {
-      "name": "Interpolation",
-      "path": "crate::client::keyframe_animation::Interpolation",
-      "hash": "ea10c70631c5b252",
-      "canonical_path": "crate::client::keyframe_animation::Interpolation"
     },
     {
       "name": "ItemDisplayContext",
@@ -911,5 +899,9 @@
       "hash": "1322c39e2b688618",
       "canonical_path": "crate::world::types::WorldPhase"
     }
+  ],
+  "retired_identities": [
+    "crate::client::keyframe_animation::AnimationTarget",
+    "crate::client::keyframe_animation::Interpolation"
   ]
 }

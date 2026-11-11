@@ -106,9 +106,18 @@ def validate(manifest, required, source):
     expected = {entry["canonical_path"] for entry in manifest["enums"]}
     if len(expected) != len(manifest["enums"]) or expected != set(required):
         raise ValueError("missing or duplicate frozen baseline pin")
-    actual = discover(source, expected)
+    retired = set(manifest.get("retired_identities", []))
+    actual = discover(source, expected | retired)
     if not expected <= actual:
-        raise ValueError(f"missing frozen baseline enum: {sorted(expected - actual)}")
+        raise ValueError(
+            "Frozen enum removed or no longer derives fieldless Wire: "
+            f"{sorted(expected - actual)}. Remove its matching pins from "
+            "wire_enum_layouts.json and wire_enum_baseline_identities.json in the "
+            "SAME PR as the source change, and record its identity in retired_identities. "
+            "Removal alone is not a layout hash regression.")
+    live_retired = retired & actual
+    if retired & expected or live_retired:
+        raise ValueError(f"cannot retire a live fieldless Wire enum pin: {sorted((retired & expected) | live_retired)}")
     return expected
 
 
