@@ -369,7 +369,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: wasm-std
-          path: ${{ env.BIN }}
+          path: ${{ matrix.musl && 'target/x86_64-unknown-linux-musl/release' || env.BIN }}
       - name: Build, check and package for musl in Alpine
         if: matrix.musl
         # Run Docker on the Ubuntu host: JavaScript actions themselves require glibc.

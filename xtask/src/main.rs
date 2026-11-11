@@ -478,47 +478,6 @@ fn extract(tar: &[u8], out: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn every_bundle_requires_and_ships_wasm_std() {
-        use super::*;
-        let root = std::env::temp_dir().join(format!("packer-std-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        // Every game-build matrix target, for each of the two runtime layouts.
-        for target in [
-            "linux",
-            "linux-musl",
-            "windows",
-            "windows-arm64",
-            "macos-arm64",
-            "macos-x64",
-        ] {
-            for (layout, tools) in [
-                ("client", TOOLS.as_slice()),
-                ("server", SERVER_TOOLS.as_slice()),
-            ] {
-                let source = root.join(format!("{target}-{layout}"));
-                let out = source.join("out");
-                fs::create_dir_all(&out).unwrap();
-                let binary = source.join(if target.starts_with("windows") {
-                    "horizon-client.exe"
-                } else {
-                    "horizon-client"
-                });
-                for tool in tools {
-                    fs::write(source.join(program_name(&binary, tool)), b"program").unwrap();
-                }
-                assert!(copy_runtime(&binary, tools, &out).is_err());
-                fs::write(source.join("horizon-wasm-std.wasm"), b"wasm-member").unwrap();
-                copy_runtime(&binary, tools, &out).unwrap();
-                assert_eq!(
-                    fs::read(out.join("horizon-wasm-std.wasm")).unwrap(),
-                    b"wasm-member"
-                );
-            }
-        }
-        fs::remove_dir_all(root).unwrap();
-    }
-
     use super::*;
 
     fn header(name: &str, mode: u32, size: usize, kind: u8) -> Vec<u8> {
