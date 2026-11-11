@@ -67,7 +67,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.1
-          components: rust-src
+          components: rust-src, rustfmt
           targets: wasm32-unknown-unknown
       - if: runner.environment == 'github-hosted'
         uses: Swatinem/rust-cache@v2
