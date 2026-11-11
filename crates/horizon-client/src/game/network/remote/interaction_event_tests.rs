@@ -1,6 +1,8 @@
 //! Behavioural proofs of the broadcast events around scoped interaction Parts.
 #[path = "item_fallthrough_tests.rs"]
 mod item_fallthrough_tests;
+#[path = "item_used_on_block_tests.rs"]
+mod item_used_on_block_tests;
 #[path = "use_item_hand_tests.rs"]
 mod use_item_hand_tests;
 #[path = "use_item_result_tests.rs"]
@@ -51,6 +53,8 @@ struct Controls {
     item_on_answer: Option<Answer>,
     air_answer: Option<Answer>,
     consume_item: bool,
+    /// The block phase takes one item from the hand before its answer.
+    take_in_block: bool,
     expected_hand: Option<Hand>,
     part_answer: Option<Answer>,
     part_pass: bool,
@@ -135,8 +139,8 @@ impl Hooks for Observer {
             _ => unreachable!("UsePhase: unhandled variant"),
         };
         if let Some(answer) = answer {
-            if state.consume_item
-                && event.phase == UsePhase::ItemAfterBlock
+            if ((state.consume_item && event.phase == UsePhase::ItemAfterBlock)
+                || (state.take_in_block && event.phase == UsePhase::Block))
                 && let HostSide::Server(host) = host
             {
                 let player = host.player(event.click.player).unwrap();
