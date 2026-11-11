@@ -354,8 +354,31 @@ fn defined(items: &[Item]) -> Vec<(syn::Ident, Vec<syn::Attribute>)> {
             .cloned()
             .collect::<Vec<_>>()
     };
+    // Test-only items are not in the prebuilt game.
+    let test_only = |attrs: &[syn::Attribute]| {
+        attrs.iter().any(|attr| {
+            attr.path().is_ident("test")
+                || (attr.path().is_ident("cfg")
+                    && attr.to_token_stream().to_string().contains("test"))
+        })
+    };
     items
         .iter()
+        .filter(|item| {
+            let attrs = match item {
+                Item::Fn(item) => &item.attrs,
+                Item::Mod(item) => &item.attrs,
+                Item::Struct(item) => &item.attrs,
+                Item::Enum(item) => &item.attrs,
+                Item::Const(item) => &item.attrs,
+                Item::Static(item) => &item.attrs,
+                Item::Type(item) => &item.attrs,
+                Item::Trait(item) => &item.attrs,
+                Item::Union(item) => &item.attrs,
+                _ => return true,
+            };
+            !test_only(attrs)
+        })
         .filter_map(|item| match item {
             Item::Fn(item) => Some((item.sig.ident.clone(), cfg(&item.attrs))),
             Item::Struct(item) => Some((item.ident.clone(), cfg(&item.attrs))),
@@ -600,9 +623,45 @@ fn mirror(
         .cloned()
         .chain(tree.own.iter().cloned())
         .collect();
+    // The crate root is not widened: only its public items are there to re-export.
+    let public: BTreeSet<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fn(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.sig.ident.to_string())
+            }
+            Item::Struct(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Enum(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Const(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Static(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Type(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Trait(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Mod(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            Item::Union(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                Some(item.ident.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    let root = path == "horizon_client";
     let explicit = defined(&items)
         .into_iter()
         .filter(|(ident, _)| !reserved.contains(&ident.to_string()))
+        .filter(|(ident, _)| !root || public.contains(&ident.to_string()))
         .map(|(ident, cfg)| quote!(#(#cfg)* pub use #original::#ident;));
     let uses = uses(&items).into_iter().filter(|item| {
         // A `use` naming a child mirror or a copy would collide with it.
@@ -678,5 +737,32 @@ mod tests {
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
         assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
+    }
+}
+
+#[cfg(test)]
+mod spike {
+    /// Writes the patch crate for `FNR_TARGETS` (comma-separated) into `FNR_OUT`, for trying
+    /// horizon-mixins on it by hand.
+    #[test]
+    #[ignore = "manual: writes a patch crate"]
+    fn write_patch_crate() {
+        let out = std::path::PathBuf::from(std::env::var("FNR_OUT").unwrap());
+        let targets: Vec<String> = std::env::var("FNR_TARGETS")
+            .unwrap()
+            .split(',')
+            .map(str::to_owned)
+            .collect();
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        match super::generate(&root, "horizon_patch", &targets) {
+            Ok(crate_) => {
+                std::fs::create_dir_all(out.join("horizon_patch/src")).unwrap();
+                std::fs::write(out.join("horizon_patch/src/lib.rs"), &crate_.lib).unwrap();
+                for patched in crate_.patched {
+                    println!("{} => {} | {}", patched.target, patched.id, patched.install);
+                }
+            }
+            Err(refusals) => refusals.iter().for_each(|r| println!("REFUSED {r}")),
+        }
     }
 }
