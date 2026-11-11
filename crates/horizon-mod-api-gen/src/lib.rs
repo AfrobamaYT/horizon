@@ -631,8 +631,16 @@ pub fn generated_on_stdout() {
     GENERATED_ON_STDOUT.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The paths `rerun_if_changed` was given while a test holds the capture.
+#[cfg(test)]
+static CAPTURED_RERUNS: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
 /// Tells the build script's Cargo to rerun it when `path` changes.
 pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
+    #[cfg(test)]
+    if let Some(captured) = CAPTURED_RERUNS.lock().unwrap().as_mut() {
+        captured.push(path.to_string());
+    }
     if !GENERATED_ON_STDOUT.load(std::sync::atomic::Ordering::Relaxed) {
         println!("cargo:rerun-if-changed={path}");
     }
