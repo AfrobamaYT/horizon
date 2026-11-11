@@ -38,6 +38,18 @@ Native code that needs game internals uses [`[[native.mixin]]`](mixins.md); `acc
 
 A library mod publishes its own hooks and functions for other mods to use.
 
+## Refusals
+
+| Code or message | When |
+| --- | --- |
+| `E_INJECT_INVALID` | A field is malformed; the field is named. `access = "internals"` is refused by name, pointing to `[[native.mixin]]`. |
+| `E_INJECT_NO_SLOT` | A removed kind (`before_call`, `after_call`, `modify_value`, `wrap_call`, `wrap_if` and the other source-level kinds): the message names the `[[native.mixin]]` form to use. Also a function whose record the API cannot carry. |
+| `E_INJECT_MISSING` | `at` names no function the pinned game lists. |
+| `E_INJECT_CHANGED` | The pinned `hash` no longer matches the function's signature; run `cargo horizon-mod inject update`. |
+| "no API listener at …" | The function is listed but takes no API listener. The reason follows: a parameter with no API type, named; or "the function has no point site: it takes no replacement (…)" for a generic function, a function in a generic impl, or one taking `impl Trait`. |
+| "no replace listener at …" | A `replace` at a function whose return value has no API form. |
+| "this build has no point sites; start the game through the launcher's mod build" | The game was not built as the SDK. |
+
 ## Ask for the hook
 
 If no suitable API point is available, request a named hook.
