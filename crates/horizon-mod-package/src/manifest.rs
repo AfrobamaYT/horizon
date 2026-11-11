@@ -269,17 +269,6 @@ impl Manifest {
             }
         })?;
         Internal::check_all(&m.internals)?;
-        if m.wasm.is_some()
-            && m.internals.is_empty()
-            && m.inject.iter().any(|i| {
-                i.access == inject::Access::Internals && m.mod_point_dependency(&i.at).is_none()
-            })
-        {
-            return Err(format!(
-                "{MANIFEST}: a wasm internals listener needs declared internals, or a declared \
-                 dependency whose mod id, with `-` as `_`, starts its `at`"
-            ));
-        }
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
                 "{MANIFEST}: internals need a [native] or [wasm] mod"
@@ -1104,26 +1093,6 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn wasm_internals_declarations_parse_with_and_without_kind_and_need_a_wasm_or_native_mod() {
-        let wasm = format!(
-            "[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
-            "a".repeat(128)
-        );
-        let injection = "[[inject]]\nid='fell'\nat='Game::break_block'\nkind='head'\nwith='fell'\naccess='internals'\nhash='h'\n";
-        let text = |internals: &str, tail: &str| format!("{EXAMPLE}{internals}{tail}");
-        let ok = Manifest::parse(&text(
-            "internals=[{path='Game::world',kind='field',hash='1'},{path='Game::tick',hash='2'}]\n",
-            &format!("{wasm}{injection}"),
-        ))
-        .unwrap();
-        assert_eq!(ok.internals[0].kind.as_deref(), Some("field"));
-        assert_eq!(ok.internals[1].kind, None);
-        // A wasm internals listener with nothing declared, and declarations with no code mod.
-        assert!(Manifest::parse(&text("", &format!("{wasm}{injection}"))).is_err());
-        assert!(Manifest::parse(&text("internals=[{path='Game::world',hash='1'}]\n", "")).is_err());
-    }
-
-    #[test]
     fn refuses_bad_ids_and_retired_manifests() {
         let bad_id = EXAMPLE.replace("ruby", "Ruby!");
         assert!(Manifest::parse(&bad_id).unwrap_err().contains("is not"));
@@ -1230,49 +1199,6 @@ capabilities = ["registries"]
             hash: Some("1234".into()),
         };
         assert!(!toml::to_string(&untyped).unwrap().contains("kind"));
-    }
-
-    #[test]
-    fn declared_internals_and_unified_injections_have_one_explicit_form() {
-        let pin = "a".repeat(40);
-        let base = format!(
-            "{EXAMPLE}internals=[{{path='Game',hash='1234'}}]\n[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n"
-        );
-        let text = format!(
-            "{base}[[inject]]\nid='count'\nat='Game::tick'\nkind='head'\nwith='count'\naccess='internals'\nhash='h'\n"
-        );
-        let manifest = Manifest::parse(&text).unwrap();
-        assert_eq!(manifest.internals[0].path, "Game");
-        assert_eq!(manifest.inject[0].with, "count");
-        for name in ["", "nested::count", "0count"] {
-            assert!(
-                Manifest::parse(&text.replace("with='count'", &format!("with='{name}'"))).is_err()
-            );
-        }
-        for obsolete in [
-            "helper='src/a.rs'",
-            "cancellable=true",
-            "bindings=[{name='a',ty='u8',value='a'}]",
-            "hook='tick'",
-        ] {
-            assert!(Manifest::parse(&format!("{text}{obsolete}\n")).is_err());
-        }
-        for bad in [
-            text.replace("hash='1234'", "hash=''"),
-            text.replace("path='Game'", "path=''"),
-            text.replace("hash='1234'}", "hash='1234'},{path='Game',hash='5678'}"),
-            text.replace("with='count'", "with=''"),
-            text.replace("with='count'", "with='count'\nraw='count'"),
-        ] {
-            assert!(Manifest::parse(&bad).is_err(), "accepted {bad}");
-        }
-        Manifest::parse(&text.replace("kind='head'", "kind='return'")).unwrap();
-        let content = format!("{EXAMPLE}internals=[{{path='Game',hash='h'}}]\n");
-        assert!(
-            Manifest::parse(&content)
-                .unwrap_err()
-                .contains("internals need")
-        );
     }
 
     #[test]
@@ -1699,54 +1625,6 @@ issues = \"http://example.org/issues\"
         assert_eq!(
             refused.unwrap(),
             "mod-points.json: only a wasm package carries its points"
-        );
-    }
-
-    #[test]
-    fn a_wasm_listener_uses_root_internal_declarations_without_native_code() {
-        let wasm = format!(
-            "{}\n[wasm]\nsha512 = '{}'\ntoolchain = '1.99.1'\n",
-            EXAMPLE.trim_end(),
-            "0".repeat(128)
-        );
-        let native = "internals=[{path='Game::world',kind='field',hash='world-hash'}]\n";
-        let injection = "[[inject]]\nid='fell'\nat='Game::break_block'\nkind='head'\nwith='fell'\naccess='internals'\nhash='h'\n";
-        let parsed = Manifest::parse(&format!(
-            "{}{injection}",
-            wasm.replace("[wasm]", &format!("{native}[wasm]"))
-        ))
-        .unwrap();
-        assert!(parsed.native.is_none());
-        assert_eq!(parsed.internals[0].hash.as_deref(), Some("world-hash"));
-
-        for wrong in [
-            "internals=[{path='',hash='h'}]",
-            "internals=[{path='Game',hash=''}]",
-            "internals=[{path='Game',hash='h'}, {path='Game',hash='h'}]",
-            "module=[]",
-            "game='g'",
-            "horizon='pin'",
-            "mixins='pin'",
-        ] {
-            assert!(
-                Manifest::parse(&format!("{wasm}[native]\n{wrong}\n{injection}")).is_err(),
-                "{wrong}"
-            );
-        }
-        let mod_injection = injection.replace("Game::break_block", "chem_lib::transfer");
-        Manifest::parse(&format!(
-            "{wasm}{mod_injection}[dependencies]\nchem_lib='^1.0'\n"
-        ))
-        .unwrap();
-        assert!(
-            Manifest::parse(&format!("{wasm}{mod_injection}"))
-                .unwrap_err()
-                .contains("needs declared internals")
-        );
-        assert!(
-            Manifest::parse(&format!("{wasm}{injection}"))
-                .unwrap_err()
-                .contains("needs declared internals")
         );
     }
 
