@@ -266,8 +266,8 @@ fn an_internals_replace_needs_a_listed_point_whose_raw_record_carries_the_outcom
             "{text}"
         );
     }
-    // An unlisted function takes no internals replace on the source route: the refusal names the
-    // slot row that lists it.
+    // An unlisted function takes no internals replace: the refusal names the slot row that
+    // would list it.
     catalog.points.clear();
     let text = refused(&catalog, &manifest, NoSlotReason::NotListed);
     assert!(text.contains("slots/example.txt: game::run"), "{text}");
