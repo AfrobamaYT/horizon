@@ -824,6 +824,9 @@ impl Game<'_> {
     ) -> Result<(), TransferError> {
         for cell in cells {
             let pos = cell.world;
+            if super::spill::saved_entity(&self.world, pos).is_some() {
+                return Err(TransferError::SavedBlockEntity(pos));
+            }
             let state = self.world.block(pos[0], pos[1], pos[2]);
             let descriptor = registry
                 .state(state)
@@ -1398,6 +1401,62 @@ mod tests {
                 Err(TransferError::SavedBlockEntity([4, 64, 4]))
             ));
             assert_eq!(game.world.block(4, 64, 4), air);
+            assert_eq!(
+                super::spill::saved_entity(&game.world, [4, 64, 4]),
+                Some(tag)
+            );
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn assembly_revalidation_refuses_saved_tag_without_mutation() {
+        let root = transfer_root("assembly-revalidation-saved-tag");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.carrier_data_existed_at_open = true;
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            let entity = horizon_client::chunk::block_entity::BlockEntity::Chest(vec![
+                None,
+                Some(horizon_client::items::ItemStack {
+                    item: "minecraft:stone".into(),
+                    count: 3,
+                    damage: 0,
+                    extra: None,
+                }),
+            ]);
+            let tag =
+                horizon_client::save::encode_block_entity((4, 64, 4), &entity, "minecraft:chest");
+            super::spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
+            let images = [crate::carrier_store::OperationCell {
+                world: [4, 64, 4],
+                local: [0, 0, 0],
+                before: crate::carrier_store::CellImage {
+                    name: "minecraft:chest".to_string(),
+                    properties: Vec::new(),
+                    entity: None,
+                },
+                after: crate::carrier_store::CellImage {
+                    name: "minecraft:air".to_string(),
+                    properties: Vec::new(),
+                    entity: None,
+                },
+            }];
+            assert!(matches!(
+                game.revalidate_cells(&images, registry),
+                Err(TransferError::SavedBlockEntity([4, 64, 4]))
+            ));
+            assert_eq!(game.world.block(4, 64, 4), chest);
             assert_eq!(
                 super::spill::saved_entity(&game.world, [4, 64, 4]),
                 Some(tag)
