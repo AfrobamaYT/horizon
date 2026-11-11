@@ -9847,8 +9847,8 @@ impl Game<'_> {
             *sat = (*sat + saturation).clamp(0.0, *food as f32);
             self.apply_remote_health();
         }
-        // ItemStack.finishUsingItem's applyAfterUseComponentSideEffects.
-        self.apply_use_cooldown(&stack);
+        // applyAfterUseComponentSideEffects, then LivingEntityUseItemEvent.Finish.
+        self.remote_use_item_finished(slot, &stack, &info);
     }
     /// MouseHandler updates KeyMapping; handleKeybinds sends packets on a tick.
     pub(super) fn remote_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {

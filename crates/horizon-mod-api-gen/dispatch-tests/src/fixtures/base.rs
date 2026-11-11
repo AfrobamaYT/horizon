@@ -271,16 +271,25 @@ fn item_finish_can_clear_vanilla_result() {
     )];
     let mods: Arc<[ModEntry]> = mods.into();
     install(mods.clone());
-    let mut result = Some(ItemStack::default());
-    dispatch_living_entity_use_item_finish(
-        &mut TestHost,
-        &ItemStack::default(),
-        None,
-        Hand::Main,
-        0,
-        &mut result,
-    );
-    assert!(result.is_none());
+    // Both sides reach the listener, which clears the result.
+    for client in [false, true] {
+        let mut host = TestHost;
+        let side = if client {
+            HostSide::Client(&mut host)
+        } else {
+            HostSide::Server(&mut host)
+        };
+        let mut result = Some(ItemStack::default());
+        dispatch_living_entity_use_item_finish(
+            side,
+            &ItemStack::default(),
+            None,
+            Hand::Main,
+            0,
+            &mut result,
+        );
+        assert!(result.is_none(), "client={client}");
+    }
 }
 
 #[test]
