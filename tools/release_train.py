@@ -475,8 +475,19 @@ def gather(kind, head, releases=None):
 def merged_between(kind, base, head):
     """The pull requests merged into main between base and head, with their player-facing paths ("paths")."""
     exporter_paths = exporters()
+    candidates = merged_pull_requests(base, head)
+    if not candidates:
+        return []
+    # Merge subjects survive imports and PR numbers are repository-local. Enumerate this
+    # repository's closed PRs without a history cap, then require the actual merge SHA.
+    # A missing PR here is imported history, not a failed metadata request to suppress.
+    pages = gh_json("api", f"repos/{REPO}/pulls?state=closed&per_page=100", "--paginate", "--slurp")
+    owned = {(entry["number"], entry["merge_commit_sha"]) for page in pages for entry in page
+             if entry["merged_at"]}
     prs = []
-    for number, commit in merged_pull_requests(base, head):
+    for number, commit in candidates:
+        if (number, commit) not in owned:
+            continue
         pr = pull_request(number)
         pr["paths"] = [path for path in changed_paths(commit) if player_facing(path, kind, exporter_paths)]
         prs.append(pr)
