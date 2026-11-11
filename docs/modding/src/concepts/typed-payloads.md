@@ -95,22 +95,6 @@ methods are removed, without aliases or fallback handlers. Private custom books
 advertise their own version on `horizon:recipe_book_settings`; book support does not
 depend on a mod transport flag.
 
-## Stage 1: capacities, tokens and send services
-
-`crates/horizon-mod-vocab/src/content/payloads.rs` holds the API-owned types the later stages build on. Token values, including Wire-decoded ones, are untrusted claims. Only admission against the engine-owned frozen declaration table grants a slot; there is no send implementation yet.
-
-| Item | Contract |
-| --- | --- |
-| `SERVERBOUND_PAYLOAD_CAPACITY`, `CLIENTBOUND_PAYLOAD_CAPACITY` | Discard-fallback body limits only, not registered-payload caps |
-| `PayloadPhase` (`Configuration`, `Play`, `Common`), `ConnectionPhase` | `permits` says whether a declaration may travel in the connection's phase |
-| `PeerPolicy` (`Required`, `Optional`) | As under [Negotiation and absent mods](#negotiation-and-absent-mods) |
-| `PayloadToken` | The erased token: slot, phases, direction and the load session that issued it. Private fields, issued by the game. `admit(direction, load_session, phase, declarations)` returns the slot or `StaleToken`, `WrongDirection`, `WrongPhase`, after exact comparison against the engine-owned frozen slot table, before any codec or handler runs |
-| `ToServer<T>`, `ToClient<T>` | A `PayloadToken` bound to its value type and direction. Binding a token of the other direction fails |
-| `ServerboundPayloads::send_erased(token, body)`, `ClientboundPayloads::send_erased(player, token, body)` | The two object-safe send services, one erased operation each. A constant in the module stops compiling if either stops being usable behind `dyn` |
-| `PayloadSendError` | `PayloadTooLarge`, `UnsupportedPeer`, `Backpressure`, `StaleToken`, `WrongDirection`, `WrongPhase`, `NotConnected`; has a Wire form |
-
-The typed send helper (stage 2, with the codec) is generic and lives on the token: `ToServer<T>` encodes a value and calls `ServerboundPayloads::send_erased`, `ToClient<T>` calls `ClientboundPayloads::send_erased`. A `ToClient<T>` has no method taking the serverbound service, which is the compile-time refusal the acceptance matrix asks for. The connection epoch is the connection's, not the token's: the send service checks it with the token.
-
 ## Stage 2: the value codec
 
 `crates/horizon-mod-vocab/src/content/payload_codec.rs` holds the pure codec half of stage 2, exported from `mod_api`, and `#[derive(PayloadCodec)]` writes a type's codec from its fields. It is the part that touches neither registration nor delivery, so it stands apart from the raw transport of [#2882](https://github.com/arismoko/horizon/issues/2882). Nothing calls it yet: the typed handler adapter that decodes a received body, and the typed send helper that encodes one, arrive with registration.
