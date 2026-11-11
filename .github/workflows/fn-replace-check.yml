@@ -68,30 +68,49 @@ jobs:
           pinned=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";$/\1/p' launcher/src/rust_toolchain.rs)
           rustup toolchain install "$pinned" --profile minimal
           echo "RUSTUP_TOOLCHAIN=$pinned" >> "$GITHUB_ENV"
+      # On a Dyna runner RUNNER_TEMP is a small tmpfs and the build volume is shared: the SDK and the
+      # check's scratch go in a private folder on the build volume, removed when the job ends.
+      - name: Allocate private scratch
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            umask 077
+            mkdir -p "${CARGO_TARGET_DIR:?}"
+            scratch=$(mktemp -d "$CARGO_TARGET_DIR/fn-replace-check.XXXXXX")
+          else
+            scratch="$RUNNER_TEMP/fn-replace-check"
+            mkdir -p "$scratch"
+          fi
+          echo "FNR_SCRATCH=$scratch" >> "$GITHUB_ENV"
       # The SDK is built with the launcher's Rust: a mod's code is compiled against its metadata.
       - name: Server SDK, warnings denied
-        run: python3 tools/prebuilt_game.py build "$RUNNER_TEMP/prebuilt" --server
+        run: python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
       - name: Build the launcher
         run: cargo build --release --locked --manifest-path launcher/Cargo.toml
       - name: Function replacement check (build and link)
         run: |
           launcher="${CARGO_TARGET_DIR:-launcher/target}/release/horizon-launcher"
           FNR_MODS="alpha beta one ten fdshape support registry lower loop" tools/ci/fn_replace_check.sh \
-            "$launcher" "$RUNNER_TEMP/prebuilt" "$RUNNER_TEMP/fnr-scratch" 2>&1 | tee "$RUNNER_TEMP/fnr-check.log"
-          grep -F 'Function replacement:' "$RUNNER_TEMP/fnr-check.log" >> "$GITHUB_STEP_SUMMARY"
+            "$launcher" "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/check" 2>&1 | tee "$FNR_SCRATCH/fnr-check.log"
+          grep -F 'Function replacement:' "$FNR_SCRATCH/fnr-check.log" >> "$GITHUB_STEP_SUMMARY"
       - name: Refusals by name
         run: |
           launcher="${CARGO_TARGET_DIR:-launcher/target}/release/horizon-launcher"
           for set in "alpha overwrite2" refused refused_state loop_refused; do
-            log="$RUNNER_TEMP/refusal-${set// /_}.log"
-            if FNR_KEEP=1 FNR_MODS="$set" tools/ci/fn_replace_check.sh "$launcher" "$RUNNER_TEMP/prebuilt" \
-              "$RUNNER_TEMP/fnr-scratch" > "$log" 2>&1; then
+            log="$FNR_SCRATCH/refusal-${set// /_}.log"
+            if FNR_KEEP=1 FNR_MODS="$set" tools/ci/fn_replace_check.sh "$launcher" "$FNR_SCRATCH/prebuilt" \
+              "$FNR_SCRATCH/check" > "$log" 2>&1; then
               echo "$set built, and it must be refused"
               exit 1
             fi
             grep -E 'E_[A-Z_]+' "$log" | head -5 | tee -a "$GITHUB_STEP_SUMMARY"
             grep -qE 'E_[A-Z_]+' "$log" || { echo "$set failed without a named refusal"; tail -40 "$log"; exit 1; }
           done
+      - name: Clean private scratch
+        if: always()
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ] && [ -n "${FNR_SCRATCH:-}" ]; then
+            rm -rf "$FNR_SCRATCH"
+          fi
       - name: Memory and kills after the build
         if: always()
         run: |
