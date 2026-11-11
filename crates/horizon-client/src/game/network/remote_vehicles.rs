@@ -633,6 +633,7 @@ impl Game<'_> {
             steer,
             sprint: sprinting,
             jumping: keys.jump,
+            sneak: keys.shift,
             client: false,
         });
         // #4821: footstep, gallop, breathe, splash and landing sounds from mob.tick

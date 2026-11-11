@@ -2738,17 +2738,7 @@ mod tests {
         for ridden in [false, true] {
             let mut m = Mob::new(1, kind.clone(), Vec3::new(8.5, 64.0, 8.5), 0.0);
             if ridden {
-                m.rider = Some(super::super::equine::Rider {
-                    strafe: 0.0,
-                    forward: 0.0,
-                    yaw: 0.0,
-                    pitch: 0.0,
-                    jump: 0.0,
-                    steer: false,
-                    sprint: false,
-                    jumping: false,
-                    client: false,
-                });
+                m.rider = Some(super::super::equine::Rider::default());
             }
             m.fluids.in_water = true;
             m.fluids.water = 1.0;
