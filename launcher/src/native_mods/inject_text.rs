@@ -30,7 +30,7 @@ pub(super) fn inject_error(error: &InjectError) -> String {
             reason,
             declaration,
         } => trf(
-            "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; [[inject]] never compiles game code: use [[mixin]] in a native mod, or request the slot",
+            "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; [[inject]] never compiles game code: use [[native.mixin]] in a native mod, or request the slot",
             &[
                 ("id", id),
                 ("reason", no_slot_reason(*reason)),

@@ -26,7 +26,7 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 /// Why a build compiles the game from source instead of using the prebuilt game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceReason {
-    /// A mod has a `[[mixin]]`, bridge, state field or support module, which change game code.
+    /// A mod has a `[[native.mixin]]`, bridge, state field or support module, which change game code.
     Mixins { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },

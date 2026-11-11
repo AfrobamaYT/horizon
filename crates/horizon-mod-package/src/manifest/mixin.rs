@@ -1,10 +1,10 @@
-//! `[[mixin]]`: a source-level edit of a game function, the only form that compiles game code.
+//! `[[native.mixin]]`: a source-level edit of a game function, the only form that compiles game code.
 //! Each row is one horizon-mixins `[[injection]]`, forwarded to the pinned tool, which owns the
 //! vocabulary beyond the keys named here. Native only.
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// One `[[mixin]]` row. `options` holds every other key of the tool's `[[injection]]`
+/// One `[[native.mixin]]` row. `options` holds every other key of the tool's `[[injection]]`
 /// (`selector`, `ordinal`, `bindings`, `cancellable`, `require`, `slice`, `variable`...), which
 /// the tool validates when the game is built.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -118,7 +118,7 @@ impl fmt::Display for MixinError {
         match self {
             Self::NativeOnly { id } => write!(
                 f,
-                "E_MIXIN_NATIVE_ONLY: {id}: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook"
+                "E_MIXIN_NATIVE_ONLY: {id}: [[native.mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook"
             ),
             Self::Invalid { id, field, fix } => {
                 write!(f, "E_MIXIN_INVALID: {id}: invalid {field}; {fix}")
@@ -174,7 +174,7 @@ mod tests {
 
     const HEADER: &str =
         "id='sample'\nname='Sample'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n";
-    const ROW: &str = "[[mixin]]\nid='autosave'\ntarget='game::Game::next_autosave'\nkind='MODIFY_EXPRESSION_VALUE'\nhelper='src/longer.rs'\n";
+    const ROW: &str = "[[native.mixin]]\nid='autosave'\ntarget='game::Game::next_autosave'\nkind='MODIFY_EXPRESSION_VALUE'\nhelper='src/longer.rs'\n";
 
     fn native() -> String {
         format!(
@@ -243,7 +243,7 @@ mod tests {
             assert_eq!(
                 parse(&native(), &mixin_row(kind)).is_ok(),
                 mixins.contains(kind),
-                "[[mixin]] {kind}"
+                "[[native.mixin]] {kind}"
             );
         }
         let error = parse(&native(), &mixin_row("head")).unwrap_err();
@@ -259,7 +259,7 @@ mod tests {
             "[wasm]\nsha512='{}'\ntoolchain='nightly'\n",
             "a".repeat(128)
         );
-        let expected = "E_MIXIN_NATIVE_ONLY: sample:autosave: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook";
+        let expected = "E_MIXIN_NATIVE_ONLY: sample:autosave: [[native.mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook";
         for code in [wasm.as_str(), ""] {
             let error = parse(code, ROW).unwrap_err();
             assert!(error.ends_with(expected), "{error}");

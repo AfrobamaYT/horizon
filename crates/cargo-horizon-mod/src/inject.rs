@@ -507,7 +507,7 @@ mod tests {
         .unwrap_err();
         assert!(
             error.contains("E_INJECT_NO_SLOT")
-                && error.contains("[[mixin]]")
+                && error.contains("[[native.mixin]]")
                 && error.contains("request the slot"),
             "{error}"
         );

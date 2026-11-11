@@ -54,7 +54,7 @@ trusting native code is the player's decision, never an agent's.
    63 MB unpacked), with the commit in `.horizon-revision`. Never the player's own checkout. Links in the
    archive are left out: the tool refuses them and nothing needs them to build.
 4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
-   folder meanwhile. Compiled slot listeners register without a source splice. For `[[mixin]]`
+   folder meanwhile. Compiled slot listeners register without a source splice. For `[[native.mixin]]`
    declarations the launcher forwards helpers and options to horizon-mixins and rebuilds the game.
    `[[inject]]` never compiles game code; a missing compiled slot is refused.
    It stages the mod crates and generated executable, copying only changed files into `native/stage/`,

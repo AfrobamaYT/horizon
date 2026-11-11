@@ -81,7 +81,7 @@ impl Serialize for Kind {
 }
 
 /// A removed spelling is refused naming the form that replaced it; it is never read as that form.
-/// The source-level kinds name the `[[mixin]]` form that compiles them.
+/// The source-level kinds name the `[[native.mixin]]` form that compiles them.
 impl<'de> Deserialize<'de> for Kind {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let name = std::borrow::Cow::<str>::deserialize(deserializer)?;
@@ -97,10 +97,10 @@ impl<'de> Deserialize<'de> for Kind {
             "modify_call_arg" => "kind `modify_call_arg` was removed: use `before_call`, whose \
                                   listener gets the call's arguments mutably before it runs"
                 .to_owned(),
-            "modify_local" => source_level(&name, "`[[mixin]]` kind `MODIFY_VARIABLE`"),
+            "modify_local" => source_level(&name, "`[[native.mixin]]` kind `MODIFY_VARIABLE`"),
             "expression" => source_level(
                 &name,
-                "`[[mixin]]` kind `MODIFY_CONSTANT` or `MODIFY_EXPRESSION_VALUE`",
+                "`[[native.mixin]]` kind `MODIFY_CONSTANT` or `MODIFY_EXPRESSION_VALUE`",
             ),
             "field" => source_level(&name, "`[[native.state]]`"),
             other => format!(
@@ -340,7 +340,7 @@ impl fmt::Display for InjectError {
                 declaration,
             } => write!(
                 f,
-                "{id}: {reason}; slot declaration {declaration}; [[inject]] never compiles game code: use [[mixin]] in a native mod, or request the slot"
+                "{id}: {reason}; slot declaration {declaration}; [[inject]] never compiles game code: use [[native.mixin]] in a native mod, or request the slot"
             ),
         }
     }
@@ -559,10 +559,10 @@ mod tests {
         }
         // A source-level kind names the form that compiles it, whatever keys follow it.
         for (old, new) in [
-            ("modify_local", "`[[mixin]]` kind `MODIFY_VARIABLE`"),
+            ("modify_local", "`[[native.mixin]]` kind `MODIFY_VARIABLE`"),
             (
                 "expression",
-                "`[[mixin]]` kind `MODIFY_CONSTANT` or `MODIFY_EXPRESSION_VALUE`",
+                "`[[native.mixin]]` kind `MODIFY_CONSTANT` or `MODIFY_EXPRESSION_VALUE`",
             ),
             ("field", "`[[native.state]]`"),
         ] {
@@ -667,7 +667,7 @@ mod tests {
         let error = run(&i, Target::Wasm, &[place()]).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "E_INJECT_NO_SLOT: sample:ground: wasm does not support internals or call-site injections; use a hook; slot declaration slots/sample.txt: game::tick | self.callee | 0 | context; [[inject]] never compiles game code: use [[mixin]] in a native mod, or request the slot"
+            "E_INJECT_NO_SLOT: sample:ground: wasm does not support internals or call-site injections; use a hook; slot declaration slots/sample.txt: game::tick | self.callee | 0 | context; [[inject]] never compiles game code: use [[native.mixin]] in a native mod, or request the slot"
         );
     }
 
