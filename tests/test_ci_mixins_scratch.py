@@ -20,7 +20,9 @@ class MixinsScratchTests(unittest.TestCase):
         script = textwrap.dedent(block)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            stub = root / "tools/ci/mixins_check.sh"
+            workspace = root / "checkout"
+            persistent_target = root / "persistent-target"
+            stub = workspace / "tools/ci/mixins_check.sh"
             stub.parent.mkdir(parents=True)
             stub.write_text('#!/bin/bash\nset -eu\n'
                             'printf "%s\\n" "$2" >> "$RECEIPT"\n'
@@ -32,16 +34,19 @@ class MixinsScratchTests(unittest.TestCase):
                             'fi\n')
             stub.chmod(0o755)
             receipt = root / "receipt"
-            env = dict(os.environ, GITHUB_WORKSPACE=str(root), RUNNER_TEMP=str(root / "tmpfs"),
+            env = dict(os.environ, GITHUB_WORKSPACE=str(workspace),
+                       CARGO_TARGET_DIR=str(persistent_target), RUNNER_TEMP=str(root / "tmpfs"),
                        RUNNER_ENVIRONMENT="self-hosted", RECEIPT=str(receipt))
             for _ in range(2):
-                subprocess.run(["bash", "-e", "-c", script], cwd=root, env=env, check=True)
+                subprocess.run(["bash", "-e", "-c", script], cwd=workspace, env=env, check=True)
             paths = [Path(p) for p in receipt.read_text().splitlines()]
             self.assertEqual(len(set(paths)), 2)
             for path in paths:
-                self.assertEqual(path.parent, root / "target")
+                self.assertEqual(path.parent, persistent_target)
+                self.assertFalse(path.is_relative_to(workspace))
+                self.assertFalse(path.is_relative_to(root / "tmpfs"))
                 self.assertFalse(path.exists(), "scratch is cleaned even on a persistent build volume")
-            subprocess.run(["bash", "-e", "-c", script], cwd=root,
+            subprocess.run(["bash", "-e", "-c", script], cwd=workspace,
                            env=dict(env, RUNNER_ENVIRONMENT="github-hosted"), check=True)
             self.assertEqual(receipt.read_text().splitlines()[-1], str(root / "tmpfs/mixins-check"))
 

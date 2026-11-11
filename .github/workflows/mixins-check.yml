@@ -82,8 +82,8 @@ jobs:
         run: |
           if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
             umask 077
-            mkdir -p "$GITHUB_WORKSPACE/target"
-            scratch=$(mktemp -d "$GITHUB_WORKSPACE/target/mixins-check.XXXXXX")
+            mkdir -p "${CARGO_TARGET_DIR:?}"
+            scratch=$(mktemp -d "$CARGO_TARGET_DIR/mixins-check.XXXXXX")
             trap 'rm -rf "$scratch"' EXIT
           else
             scratch="$RUNNER_TEMP/mixins-check"
