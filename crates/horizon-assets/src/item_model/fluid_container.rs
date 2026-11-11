@@ -51,9 +51,10 @@ pub struct FluidContainer {
     pub fluid: String,
     /// The cover masks `base` rather than drawing itself (`cover_is_mask`).
     pub cover_is_mask: bool,
-    /// Turn the model upside down for a fluid lighter than air (`flip_gas`). Honoured as
-    /// written: no fluid Horizon has is lighter than air (vanilla's water and lava are not,
-    /// and a mod fluid's look carries no density), so it flips nothing, as in NeoForge.
+    /// Turn the model upside down for a fluid lighter than air (`flip_gas`, which NeoForge
+    /// checks with `FluidType.isLighterThanAir`). Unsupported: nothing reads it, because no
+    /// fluid's appearance carries density yet, so a gas would be drawn the right way up.
+    /// A known gap until fluids have density metadata.
     pub flip_gas: bool,
     /// Draw a light-emitting fluid's front and back at full brightness, unshaded
     /// (`apply_fluid_luminosity`). Not drawn yet: an item layer carries no light, so lava
