@@ -100,14 +100,7 @@ impl Game<'_> {
             return true;
         }
         if self.mod_attack_targets() {
-            self.swing_arm();
-            if self
-                .remote
-                .as_ref()
-                .is_none_or(|r| r.interaction_swing[usize::from(self.hand == Hand::Off)])
-            {
-                self.send(S::Punch(Empty));
-            }
+            self.remote_swing_packet();
             return false;
         }
         let mut instant = false;

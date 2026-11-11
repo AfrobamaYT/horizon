@@ -56,6 +56,7 @@ fn interaction_key_literal_matrix_preserves_actions_and_swing_independently() {
             (InteractionKey::Attack, Hand::Main, InteractionAttempt::Held),
         ] {
             let calls = Arc::new(Mutex::new(Vec::new()));
+            let packets = Arc::new(Mutex::new(Vec::new()));
             let mods = vec![mod_api::ModEntry::new(
                 "key_matrix",
                 Box::new(KeyControl {
@@ -63,7 +64,7 @@ fn interaction_key_literal_matrix_preserves_actions_and_swing_independently() {
                     swing,
                     hand,
                     calls: calls.clone(),
-                    packets: Arc::default(),
+                    packets: packets.clone(),
                 }),
             )]
             .into();
@@ -100,13 +101,32 @@ fn interaction_key_literal_matrix_preserves_actions_and_swing_independently() {
                         game.inventory[game.selected] = None;
                         game.offhand = Some(ItemStack::new("minecraft:stone", 1));
                         game.world.set(0, 64, 0, stone).unwrap();
-                        game.remote_use_hands(attempt);
+                        game.remote_use(attempt);
                     }
                     assert_eq!(
                         game.remote.as_ref().unwrap().sequence - before,
-                        actions,
+                        actions + u32::from(hand == Hand::Off),
                         "{key:?} {hand:?} {attempt:?} cancel={cancel} swing={swing}"
                     );
+                    let sent = packets.lock().unwrap();
+                    let punch = sent.iter().filter(|p| p.ends_with(":punch")).count();
+                    let uses = sent
+                        .iter()
+                        .filter(|p| p.ends_with(":use_item_on") || p.ends_with(":use_item"))
+                        .count();
+                    if key == InteractionKey::Use {
+                        assert_eq!(punch, 0, "use never sends an extra client swing");
+                        assert_eq!(uses, usize::from(!cancel) + usize::from(hand == Hand::Off));
+                        if cancel && hand == Hand::Main {
+                            assert!(sent.is_empty(), "cancelled use sends nothing: {sent:?}");
+                        }
+                    } else {
+                        assert_eq!(
+                            punch,
+                            usize::from(swing && (!cancel || attempt == InteractionAttempt::Held))
+                        );
+                    }
+                    drop(sent);
                     assert_eq!(
                         game.swings_started - before_swings,
                         swings,
@@ -211,4 +231,116 @@ fn no_listener_preserves_natural_swing_and_unsuccessful_use_stays_quiet() {
             assert_eq!(game.swings_started, 0);
         })
     });
+}
+
+struct FirstSilent(std::sync::atomic::AtomicBool);
+#[mod_api::__subscriptions]
+impl Hooks for FirstSilent {
+    fn interaction_key_mapping_triggered(
+        &self,
+        _: &mut dyn ClientHost,
+        e: &mut InteractionKeyMappingTriggeredEvent,
+    ) -> Flow {
+        if !self.0.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            e.swing_hand = false;
+        }
+        Flow::Continue
+    }
+}
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn silent_policy_does_not_leak_into_next_ordinary_use() {
+    let mods = vec![mod_api::ModEntry::new(
+        "first_silent",
+        Box::new(FirstSilent(std::sync::atomic::AtomicBool::new(false))),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            let lever = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:lever")
+                .unwrap();
+            game.world.set(0, 63, 0, stone).unwrap();
+            game.world.set(0, 64, 0, lever).unwrap();
+            game.forced_hit = Some(hit());
+            game.remote_use(InteractionAttempt::Press);
+            assert_eq!(game.swings_started, 0);
+            assert_eq!(
+                game.remote.as_ref().unwrap().interaction_swing,
+                [true, true]
+            );
+            game.remote_use(InteractionAttempt::Press);
+            assert_eq!(game.swings_started, 1);
+            assert_eq!(
+                game.remote.as_ref().unwrap().interaction_swing,
+                [true, true]
+            );
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn no_interaction_listener_attack_mining_offhand_and_pick() {
+    for path in 0..4 {
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            with_interaction_game(true, |game| {
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(0, 63, 0, stone).unwrap();
+                game.world.set(0, 64, 0, stone).unwrap();
+                game.forced_hit = Some(hit());
+                let sequence = game.remote.as_ref().unwrap().sequence;
+                let swings = game.swings_started;
+                match path {
+                    0 => {
+                        game.remote_start_attack();
+                    }
+                    1 => game.remote_continue_attack(true),
+                    2 => {
+                        game.inventory[game.selected] = None;
+                        game.offhand = Some(ItemStack::new("minecraft:stone", 1));
+                        game.remote_use(InteractionAttempt::Press);
+                    }
+                    _ => {
+                        use horizon_client::interaction_input::InteractionWorld;
+                        super::super::RemoteInputWorld(game).pick();
+                    }
+                }
+                assert_eq!(
+                    game.remote.as_ref().unwrap().sequence - sequence,
+                    if path == 3 {
+                        0
+                    } else if path == 2 {
+                        2
+                    } else {
+                        1
+                    },
+                    "path {path}"
+                );
+                assert_eq!(
+                    game.swings_started - swings,
+                    if path == 3 { 0 } else { 1 },
+                    "path {path}"
+                );
+                assert_eq!(
+                    game.remote.as_ref().unwrap().interaction_swing,
+                    [true, true]
+                );
+            })
+        });
+    }
 }
