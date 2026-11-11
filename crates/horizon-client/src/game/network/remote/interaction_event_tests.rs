@@ -1464,10 +1464,10 @@ fn resource_gated_unknown_held_item_forced_use_predicts_pass_without_a_swing() {
                 let state = observer.0.lock().unwrap();
                 assert_eq!(state.clicks, 1, "the forcing listener must have run");
                 assert!(
-                    !state.steps.iter().any(|step| matches!(
-                        step,
-                        Step::Phase(UsePhase::ItemAfterBlock, _)
-                    )),
+                    !state
+                        .steps
+                        .iter()
+                        .any(|step| matches!(step, Step::Phase(UsePhase::ItemAfterBlock, _))),
                     "unknown items cannot reach the forced item's success listener"
                 );
             });

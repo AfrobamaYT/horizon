@@ -64,7 +64,11 @@ impl FaceSprite {
         };
         let normal = side.normal().map(|n| n as f32);
         let axis = normal.iter().position(|n| *n != 0.0).unwrap_or(1);
-        let plane = if normal[axis] > 0.0 { to[axis] } else { from[axis] };
+        let plane = if normal[axis] > 0.0 {
+            to[axis]
+        } else {
+            from[axis]
+        };
         let mut ab = [
             [from[a], from[b]],
             [from[a], to[b]],

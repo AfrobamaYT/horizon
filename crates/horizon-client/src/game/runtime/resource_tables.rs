@@ -234,7 +234,9 @@ impl PackResources {
         )
         .map(Arc::new);
         Self {
-            layer_names: Arc::new(horizon_client::block_sprites::texture_names(&render.sprite_layers)),
+            layer_names: Arc::new(horizon_client::block_sprites::texture_names(
+                &render.sprite_layers,
+            )),
             context: Arc::new(WorkerContext {
                 assets: assets.clone(),
                 render: render.clone(),

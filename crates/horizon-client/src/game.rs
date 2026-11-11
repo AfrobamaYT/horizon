@@ -2621,14 +2621,11 @@ struct Game<'a> {
     /// Controllers (Horizon's own).
     pad: pad::Pads,
     frames: u64,
-    /// The glint clock and options, read once at the start of each frame
-    /// (game/interface/item_draw.rs).
+    /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
     glint_frame: horizon_client::item_render::GlintFrame,
-    /// Mod block entities' geometry their mods kept
-    /// (game/modding/native_block_entity_draw.rs).
+    /// Mod block entities' kept geometry (game/modding/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
-    /// Glyphs mods' world text added to the font atlas this frame
-    /// (`native_draw_text`, reached through `&self`): uploaded with the frame.
+    /// Glyphs from `native_draw_text` (`&self`): uploaded to the font atlas with the frame.
     text_patches: std::cell::RefCell<Vec<horizon_client::font::Patch>>,
     /// Prepared block-entity copies for this frame, in entity-stream order.
     prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
@@ -2637,8 +2634,7 @@ struct Game<'a> {
     debug_renderers: Vec<String>,
     /// `DebugRenderer.lastDebugEntriesVersion`: none before the first view of a world.
     debug_renderers_version: Option<u64>,
-    /// The next place in the HUD's layer order (`gui_layers::order`) whose mod layers are not
-    /// drawn yet this frame; `None` while the HUD is hidden or outside its pass.
+    /// Next undrawn mod layer in HUD `gui_layers::order`; `None` while hidden or outside its pass.
     hud_layer_next: Option<usize>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
@@ -13876,9 +13872,7 @@ impl Game<'_> {
         }
         (out, runs)
     }
-    /// Forget runtime atlas slots after replacing the renderer or its atlas.
-    /// Skins, maps, glyphs and corners must be uploaded again; queued uploads
-    /// and kept geometry refer to the old atlas and are discarded.
+    /// Reset replaced atlas: re-upload skins/maps/glyphs/corners; discard queued uploads and kept geometry.
     pub(super) fn forget_atlas_slots(&mut self) {
         self.skin_slots.forget();
         self.maps.slots.forget();
