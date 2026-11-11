@@ -233,10 +233,15 @@ impl ModPipelines {
             self.pipelines = set
                 .built()
                 .iter()
-                .map(|built| {
-                    built
-                        .as_ref()
-                        .and_then(|built| self.pipeline(device, built))
+                .enumerate()
+                .map(|(slot, built)| {
+                    built.as_ref().and_then(|built| {
+                        let pipeline = self.pipeline(device, built);
+                        if pipeline.is_none() {
+                            set.invalidate(slot);
+                        }
+                        pipeline
+                    })
                 })
                 .collect();
         }
