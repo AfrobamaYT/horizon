@@ -1941,3 +1941,57 @@ fn wrong_phase_service_call_is_a_named_refusal_not_a_panic() {
     ));
     assert!(out.bytes().is_empty());
 }
+
+#[test]
+fn wrong_phase_fallible_call_returns_unavailable_to_guest() {
+    use mod_api::prelude::*;
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Packages);
+    let cx = std::cell::RefCell::new(boundary::Cx::default());
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, &mut *cx.borrow_mut(), bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+    let level = mod_api::LevelRef::new(
+        mod_api::WorldEpoch::new(1),
+        mod_api::DimensionKey::OVERWORLD,
+    );
+    let result = guest::Guest.level_game_rules(level);
+    guest::set_transport(None);
+    assert_eq!(result, Err(mod_api::LevelReadError::Unavailable));
+}
+
+#[test]
+fn world_phase_messages_round_trip_returns_filter_decision() {
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World, except(services));
+    impl mod_api::prelude::ServicesServerHost for World {
+        fn messages(&self) -> &dyn mod_api::Messages {
+            self
+        }
+    }
+    impl mod_api::Messages for World {
+        fn text_allowed(&self, text: &str) -> Option<bool> {
+            assert_eq!(text, "blocked by server filter");
+            Some(false)
+        }
+    }
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let world = World;
+    let mut frame = boundary::Frame::default();
+    frame.set_server_host(&world);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let id = boundary::import_id("Messages", "text_allowed").unwrap();
+    let mut input = Writer::new();
+    input.put("blocked by server filter");
+    let mut out = Writer::new();
+    unsafe { boundary::serve(id, &mut cx, input.bytes(), &mut out) }.unwrap();
+    assert_eq!(
+        Reader::decode::<Option<bool>>(out.bytes()).unwrap(),
+        Some(false)
+    );
+}

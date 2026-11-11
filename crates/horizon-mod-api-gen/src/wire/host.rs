@@ -504,7 +504,20 @@ impl Cx {
         for checked in accessor.into_iter().chain(std::iter::once(m)) {
             if let Some(level) = &checked.access {
                 let operation = &checked.name;
-                write!(access, "if !mod_api::__private::access_allowed({operation:?}, mod_api::__private::LoadAccess::{level}) {{ return Err(ServeError::Phase {{ operation: {operation:?}, phase: mod_api::__private::current_phase() }}); }}").unwrap();
+                let refusal = match &checked.ret {
+                    Ty::Result(_, error) if matches!(&**error, Ty::Named(d) if matches!(types.defs[*d].rust.rsplit("::").next().map(str::trim), Some("LevelReadError" | "LevelWriteError"))) =>
+                    {
+                        let result = rust_ty(types, &checked.ret, true);
+                        let error = rust_ty(types, error, true);
+                        format!(
+                            "out.put_owned(<{result}>::Err({error}::Unavailable)); return Ok(());"
+                        )
+                    }
+                    _ => format!(
+                        "return Err(ServeError::Phase {{ operation: {operation:?}, phase: mod_api::__private::current_phase() }});"
+                    ),
+                };
+                write!(access, "if !mod_api::__private::access_allowed({operation:?}, mod_api::__private::LoadAccess::{level}) {{ {refusal} }}").unwrap();
             }
         }
         // Keep decoded values on the selected method's stack, not in the dispatcher's
