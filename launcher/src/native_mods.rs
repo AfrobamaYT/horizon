@@ -3947,6 +3947,89 @@ mod tests {
 
     #[test]
     fn server_install_is_not_playable_and_export_survives_cache_removal() {
+        if std::env::var_os("HORIZON_SERVER_EXPORT_TEST_CHILD").as_deref()
+            != Some(std::ffi::OsStr::new("1"))
+        {
+            // Environment overrides belong to this exact-test process only;
+            // unrelated libtest threads must never see a temporary cache root.
+            let home = tempfile::tempdir().unwrap();
+            let temporary = home.path().join("tmp");
+            fs::create_dir(&temporary).unwrap();
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "native_mods::tests::server_install_is_not_playable_and_export_survives_cache_removal",
+                    "--nocapture",
+                ])
+                .env("HORIZON_SERVER_EXPORT_TEST_CHILD", "1")
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
+                .env("HORIZON_NO_AUDIO", "1")
+                .env("RUST_BACKTRACE", "0")
+                .env("TMPDIR", &temporary)
+                .env("TMP", &temporary)
+                .env("TEMP", &temporary)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            for (variable, directory) in [
+                ("HORIZON_LAUNCHER_HOME", "launcher"),
+                ("HORIZON_HOME", "home"),
+                ("XDG_DATA_HOME", "data"),
+                ("XDG_CONFIG_HOME", "config"),
+                ("XDG_CACHE_HOME", "cache"),
+                ("HORIZON_LAUNCHER_TRASH", "trash"),
+                ("HORIZON_LAUNCHER_CLIPBOARD", "clipboard"),
+                ("HORIZON_LAUNCHER_DESKTOP", "desktop"),
+            ] {
+                command.env(variable, home.path().join(directory));
+            }
+            // wait_with_output consumes the child, waits and closes its pipes
+            // before any removal of the private home. Never replay raw stderr.
+            let output = command
+                .spawn()
+                .expect("operation=spawn path_class=test_binary")
+                .wait_with_output()
+                .expect("operation=wait path_class=test_binary");
+            let diagnostic = [
+                ("install", "NATIVE_SERVER_EXPORT_INSTALL_OS="),
+                ("remove", "NATIVE_SERVER_EXPORT_REMOVE_OS="),
+            ]
+            .into_iter()
+            .find_map(|(operation, prefix)| {
+                output.stderr.split(|byte| *byte == b'\n').find_map(|line| {
+                    std::str::from_utf8(line)
+                        .ok()?
+                        .trim_end_matches('\r')
+                        .strip_prefix(prefix)?
+                        .parse::<i32>()
+                        .ok()
+                        .map(|code| (operation, code))
+                })
+            })
+            .unwrap_or(("isolated_test", 0));
+            let completion = b"NATIVE_SERVER_EXPORT_COMPLETE";
+            let completed = output
+                .stdout
+                .windows(completion.len())
+                .filter(|window| *window == completion)
+                .count()
+                == 1;
+            assert!(
+                output.status.success() && completed,
+                "operation={} path_class=server_cache os_error={}",
+                diagnostic.0,
+                diagnostic.1
+            );
+            drop(output);
+            home.close().unwrap_or_else(|error| {
+                panic!(
+                    "operation=remove path_class=private_home os_error={:?}",
+                    error.raw_os_error()
+                )
+            });
+            return;
+        }
         let base = "native-test-server-base";
         let version = "native-test-server-cache";
         let source = backend::version_dir(base);
@@ -3982,12 +4065,28 @@ mod tests {
             &serde_json::json!({"target":"server"}),
             &[bundle],
         )
-        .unwrap();
+        .unwrap_or_else(|error| {
+            // install's public error is a String. Recover only the numeric std
+            // I/O suffix, never its arbitrary message or filesystem paths.
+            let code = error
+                .rsplit_once("(os error ")
+                .and_then(|(_, tail)| tail.strip_suffix(')'))
+                .and_then(|number| number.parse::<i32>().ok())
+                .unwrap_or(0);
+            panic!("NATIVE_SERVER_EXPORT_INSTALL_OS={code}")
+        });
         assert!(!backend::installed().contains(&version.to_string()));
         let cached = Target::Server.directory(version);
         let output = dir("server-independent").join("export");
         export(&cached, &output).unwrap();
-        fs::remove_dir_all(cached).unwrap();
+        // install/export retain no files, iterators or compiler/tool children;
+        // their synchronous calls have returned before this cache deletion.
+        fs::remove_dir_all(cached).unwrap_or_else(|error| {
+            panic!(
+                "NATIVE_SERVER_EXPORT_REMOVE_OS={}",
+                error.raw_os_error().unwrap_or(0)
+            )
+        });
         assert_eq!(
             fs::read(output.join(Target::Server.binary())).unwrap(),
             b"modded"
@@ -4019,7 +4118,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(runtime.packages()[0].path, package);
+        drop(runtime);
         let _ = fs::remove_dir_all(source);
+        println!("NATIVE_SERVER_EXPORT_COMPLETE");
     }
 
     /// The export's own gate: an output that already exists is refused before anything is
