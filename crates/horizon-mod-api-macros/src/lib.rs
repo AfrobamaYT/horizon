@@ -327,33 +327,18 @@ pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
     expand(parse_macro_input!(input as ItemImpl), false)
 }
 
-/// `#[no_point]` (as `mod_api::no_point`) on a function of a mod crate: `cargo horizon-mod build`
-/// gives it no injection point, so no addon can listen at it (#2339). It changes nothing else: the
-/// function compiles as written. An addon declaring a listener there is refused at load, the
-/// function named as opted out.
-#[proc_macro_attribute]
-pub fn no_point(attribute: TokenStream, input: TokenStream) -> TokenStream {
-    if !attribute.is_empty() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "#[no_point] takes no arguments",
-        )
-        .to_compile_error()
-        .into();
-    }
-    let function = parse_macro_input!(input as ImplItemFn);
-    quote::quote!(#function).into()
-}
-
-/// `#[point(side = "server" | "client" | "both", name = "…", table = "…", free, mirror(…))]` on a
-/// function: an injection point (#589), a slot the launcher fills at load for the mods that listen
-/// there. The staging pass that builds the prebuilt game (and the launcher's source builds) puts it
-/// on each eligible function with an API record; functions without one are refused by this
-/// attribute, naming the function. The source tree carries none. Its head checks
-/// the slot (one atomic load and a branch while nothing listens). An API listener, native or wasm,
-/// gets the side's host (on a `Game` method) and a record holding a copy of every parameter as an
-/// API value (an engine type `mirror(…)` names as its `mod_api` mirror): the function runs with the
-/// record's by-value and `&T` values, and a `&mut T` parameter's place gets the record's value back.
+/// `#[point(side = "server" | "client" | "both", name = "…", slot = N, free, api(…), mirror(…))]`
+/// on a function: an injection point (#589), where mods listen through the API. The staging pass
+/// that builds the prebuilt game puts it on each replaceable function with an API record, with
+/// the function's replacement cell (`slot`); a function without a record is refused by this
+/// attribute, naming it. The source tree carries none. The function's head is its cell's one load
+/// and a branch, the same check a mixin build's copy is installed through: while a mod listens
+/// at the head or the return, the cell holds the point's dispatcher, which runs the head
+/// listeners, the body (or the installed copy) and the return listeners. An API listener, native
+/// or wasm, gets the side's host (on a `Game` method) and a record holding a copy of every
+/// parameter as an API value (an engine type `mirror(…)` names as its `mod_api` mirror): the
+/// function runs with the record's by-value and `&T` values, and a `&mut T` parameter's place
+/// gets the record's value back.
 #[proc_macro_attribute]
 pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()

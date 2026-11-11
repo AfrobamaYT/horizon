@@ -162,7 +162,12 @@ mod tests {
             }
             let before = std::fs::read(&source).unwrap();
             let text = String::from_utf8_lossy(&before);
-            assert!(text.contains("horizon_mod_api_macros") && text.contains("__fnr_unit"));
+            assert!(text.contains("horizon_mod_api_macros"));
+            // The slots follow the points: a pass that failed between them left none.
+            assert_eq!(
+                text.contains("slot = 0") && text.contains("__fnr_unit"),
+                copy != 2
+            );
             for mode in [Mode::Build, Mode::Discovery] {
                 let error = stage(&root, &output, &root.join("internals.json"), mode)
                     .err()

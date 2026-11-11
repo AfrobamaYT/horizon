@@ -6,17 +6,13 @@
 //! record, typed function slots, `PointId`) and as `points.json`, the compiled slot catalog. All of them are build outputs, never committed.
 
 use crate::replace::listed;
-use crate::source::{
-    crate_files, crate_root, game_files, gated, module_files, offset, owner, plain_path, unraw,
-};
+use crate::source::{crate_files, crate_root, game_files, gated, offset, owner, plain_path, unraw};
 use quote::{ToTokens, quote};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 use syn::{ImplItem, Item, Type};
-
-pub mod mod_crate;
 
 #[cfg(test)]
 mod target_tests;
@@ -46,12 +42,6 @@ pub struct GamePoint {
     pub return_ty: String,
     /// Whether its API listeners run at the return: not when the value returned borrows.
     pub at_return: bool,
-    /// A mod point's signature hash (#2339): what an addon's declaration pins, checked at load.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash: Option<String>,
-    /// A mod point's signature as hashed: its path, receiver, parameters and return type.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
     #[serde(skip)]
     record_item: String,
     /// Its typed function constructors, place ids and dispatch functions
@@ -119,8 +109,6 @@ impl GamePoint {
                 syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
             },
             name: shape.name,
-            hash: None,
-            signature: None,
         }
     }
 }
@@ -369,8 +357,8 @@ struct Scanned {
 /// The `mod_api` types a record may hold ([`crate::build::wire_types`]), by path.
 pub type WireTypes = std::collections::BTreeSet<String>;
 
-/// Every file with points: the game module's, then each listed lower crate's. Fails on a listed
-/// path that names no point function, or a crate the points' own crate is built on.
+/// Every file with points: the game module's, then each listed lower crate's that is not built
+/// under the points' own crate.
 fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut files = Vec::new();
     for file in game_files(&root.join("crates/horizon-client/src"), true)? {
@@ -379,14 +367,13 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let list = listed(root)?;
     let below = below_points(root)?;
     let mut crates = std::collections::BTreeSet::new();
-    for (origin, path) in &list {
+    for (_, path) in &list {
         let krate = path.split("::").next().unwrap_or_default();
-        if below.contains(krate) || krate == "horizon_client" {
-            return Err(format!(
-                "{origin}: {path}: {krate} is built under the points' own crate (or is the game's): its functions can't be listed points"
-            ));
+        // A crate the points' own crate is built on has replaceable functions and no points:
+        // its slots would have to reach up to the table.
+        if !below.contains(krate) {
+            crates.insert(krate.to_owned());
         }
-        crates.insert(krate.to_owned());
     }
     for krate in &crates {
         let (package, _) = crate_root(root, krate)?;
@@ -411,26 +398,21 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
 
 impl Scanned {
     /// This file's points: all of a game-module file's, or the listed ones of a lower crate's.
-    fn points<'a>(
-        &'a self,
-        list: &[(String, String)],
-        wire: &WireTypes,
-        used: &mut Vec<bool>,
-    ) -> Vec<Found<'a>> {
+    fn points<'a>(&'a self, list: &[(String, String)], wire: &WireTypes) -> Vec<Found<'a>> {
         let mut out = Vec::new();
-        let used = std::cell::RefCell::new(used);
+        // A point is installed through its function's replacement cell: only a replaceable
+        // function has one.
+        let none = std::collections::BTreeSet::new();
+        let replaceable = crate::replace::targets(&self.module, &self.parsed, &none, &none);
         let keep = |found: &Found<'_>| {
+            if !replaceable.contains(&found.target()) {
+                return false;
+            }
             if self.package.is_none() {
                 return true;
             }
             let target = plain_path(&found.target());
-            match list.iter().position(|(_, path)| *path == target) {
-                Some(index) => {
-                    used.borrow_mut()[index] = true;
-                    true
-                }
-                None => false,
-            }
+            list.iter().any(|(_, path)| *path == target)
         };
         file_points(&self.module, &self.parsed.items, &keep, &mut out);
         let uses = imports(&self.parsed.items, "horizon_client");
@@ -553,19 +535,13 @@ fn all_points<'a>(
     list: &[(String, String)],
     wire: &WireTypes,
 ) -> Result<Vec<(usize, Found<'a>)>, String> {
-    let mut used = vec![false; list.len()];
     let mut points = Vec::new();
     for (index, file) in scanned.iter().enumerate() {
         points.extend(
-            file.points(list, wire, &mut used)
+            file.points(list, wire)
                 .into_iter()
                 .map(|found| (index, found)),
         );
-    }
-    if let Some(((origin, path), _)) = list.iter().zip(&used).find(|(_, used)| !**used) {
-        return Err(format!(
-            "{origin}: {path}: no function every build compiles that can be a point"
-        ));
     }
     let mut names = std::collections::BTreeMap::new();
     for (_, found) in &points {
@@ -635,9 +611,6 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
             .filter(|(i, _)| *i == index)
             .map(|(_, found)| found)
             .collect();
-        if here.is_empty() {
-            continue;
-        }
         let source = &file.source;
         let lines: Vec<usize> = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(i, _)| i + 1))
@@ -679,6 +652,9 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
             ));
             staged.points += 1;
             staged.head_only += usize::from(!shape.has_return());
+        }
+        if edits.is_empty() {
+            continue;
         }
         edits.sort_by_key(|(at, _)| *at);
         let mut out = String::with_capacity(
@@ -994,8 +970,6 @@ mod tests {
                 returns: "cancel",
                 return_ty: "()".into(),
                 at_return: true,
-                hash: None,
-                signature: None,
                 record_item: shape.record_item(name).to_string(),
                 api: [
                     api.listeners.to_string(),
@@ -1505,7 +1479,7 @@ name = 'horizon-mod-api-gen'
                     "client_render_mesher_mesher_mesh",
                     "horizon_client_render::mesher::Mesher<'_>::mesh",
                     "none",
-                    true
+                    false
                 ),
                 (
                     "dive",
@@ -1526,16 +1500,10 @@ name = 'horizon-mod-api-gen'
                     true
                 ),
                 (
-                    "game_remote_decode",
-                    "horizon_client::game::remote::decode",
-                    "none",
-                    false
-                ),
-                (
                     "game_remote_other_send",
                     "horizon_client::game::remote::Other::send",
                     "none",
-                    true
+                    false
                 ),
                 (
                     "join",
@@ -1556,110 +1524,42 @@ name = 'horizon-mod-api-gen'
         let api = records(&points);
         assert!(
             api.contains("fn tick_return")
-                // A borrowed return has a raw return place only.
+                // A borrowed return has no return place.
                 && !api.contains("fn slot_return")
-                && api.contains("SlotReturn")
-                // `Other` has no API handle: its point keeps only its raw places.
-                && !api.contains("fn game_remote_other_send (")
-                && api.contains("GameRemoteOtherSendReturn"),
+                // `Other` has no API handle: it has no point.
+                && !api.contains("fn game_remote_other_send ("),
             "{api}"
         );
-        assert_eq!(
-            stage_with(&root, &WireTypes::new()).unwrap(),
-            Staged {
-                points: 10,
-                head_only: 1,
-                refused: 9,
-                files: 6
-            }
-        );
+        let staged = stage_with(&root, &WireTypes::new()).unwrap();
+        assert_eq!((staged.points, staged.head_only, staged.refused), (7, 1, 2));
         let game = std::fs::read_to_string(root.join("crates/horizon-client/src/game.rs")).unwrap();
-        let parsed = syn::parse_file(&game).unwrap();
-        for name in ["tick", "slot"] {
-            let method = parsed
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    syn::Item::Impl(item) => Some(&item.items),
-                    _ => None,
-                })
-                .flatten()
-                .find_map(|item| match item {
-                    syn::ImplItem::Fn(method) if method.sig.ident == name => Some(method),
-                    _ => None,
-                })
-                .unwrap();
-            assert!(
-                method
-                    .attrs
-                    .iter()
-                    .any(|attr| attr.to_token_stream().to_string()
-                        == "# [horizon_mod_api_macros :: point (side = \"both\" , raw)]")
-            );
-        }
         assert!(
-            game.contains("fn tick(")
-                && game.contains("pub(super) fn slot(")
-                && !game.contains("raw)] fn native_tick")
+            game.contains("#[horizon_mod_api_macros::point(side = \"both\")] fn tick(")
+                && game.contains("#[horizon_mod_api_macros::point(side = \"both\")] pub(super) fn slot(")
+                && !game.contains(")] fn native_tick")
                 // `Game`'s associated functions are named and hosted like any other type's.
-                && game.contains("point(name = \"game_game_new\"")
-                && game.contains("pub type __TickListener")
-                && game.contains("pub type __SlotReturnListener"),
+                && game.contains("point(name = \"game_game_new\""),
             "{game}"
         );
+        // A function the API can't carry, or that takes no replacement, is not marked.
         let remote =
             std::fs::read_to_string(root.join("crates/horizon-client/src/game/remote.rs")).unwrap();
         assert!(
-            remote.contains("point(name = \"game_remote_decode\", free)] fn decode")
-                && remote.contains("pub type __GameRemoteOtherSendListener"),
+            !remote.contains("game_remote_decode") && !remote.contains("game_remote_other_send"),
             "{remote}"
         );
+        // A lower crate with no marked function keeps its manifest.
         let render = root.join("crates/horizon-client-render");
         let mesher = std::fs::read_to_string(render.join("src/mesher.rs")).unwrap();
-        assert!(
-            mesher.contains("point(name = \"client_render_mesher_mesher_mesh\", raw)]")
-                && mesher.contains("pub fn mesh")
-                && !mesher.contains("client_render_mesher_mesher_face")
-                && mesher.contains("& 'r mut Mesher < '__self0 >"),
-            "{mesher}"
-        );
+        assert!(!mesher.contains("point("), "{mesher}");
         let manifest = std::fs::read_to_string(render.join("Cargo.toml")).unwrap();
-        assert!(
-            manifest.contains("horizon-mod-points") && manifest.contains("../horizon-mod-points"),
-            "{manifest}"
-        );
-        // The lock file lists them too, in order, so a `--locked` build accepts the manifest.
-        let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
-        assert!(
-            lock.contains("name = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api\",\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n \"log\",\n]\n\n[[package]]\nname = \"log\""),
-            "{lock}"
-        );
+        assert!(!manifest.contains("horizon-mod-points"), "{manifest}");
         // A second pass finds the attribute and refuses: the source tree never carries one.
         assert!(
             stage_with(&root, &WireTypes::new())
                 .unwrap_err()
                 .contains("already has")
         );
-        // A crate the points' own crate is built on can't be listed.
-        put(crate::replace::LIST, "horizon_world::level::tick\n");
-        assert!(
-            points_with(&root, &WireTypes::new())
-                .unwrap_err()
-                .contains("built under")
-        );
-        // Nor one it builds with (the generator), nor the points' own crate.
-        for listed in [
-            "horizon_mod_api_gen::points::stage\n",
-            "horizon_mod_points::register\n",
-        ] {
-            put(crate::replace::LIST, listed);
-            assert!(
-                points_with(&root, &WireTypes::new())
-                    .unwrap_err()
-                    .contains("built under"),
-                "{listed}"
-            );
-        }
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1677,7 +1577,8 @@ name = 'horizon-mod-api-gen'
         .unwrap();
         std::fs::write(src.join("control/unix.rs"), "pub fn a() {}").unwrap();
         std::fs::write(src.join("control/windows.rs"), "pub fn b() {}").unwrap();
-        let files = module_files("k".into(), src.join("lib.rs"), src.clone(), false).unwrap();
+        let files = crate::source::module_files("k".into(), src.join("lib.rs"), src.clone(), false)
+            .unwrap();
         let mut found: Vec<_> = files
             .iter()
             .map(|f| {
@@ -1706,7 +1607,7 @@ name = 'horizon-mod-api-gen'
             ]
         );
         // Every build compiles neither, so the point walk leaves the module out.
-        let every = module_files("k".into(), src.join("lib.rs"), src, true).unwrap();
+        let every = crate::source::module_files("k".into(), src.join("lib.rs"), src, true).unwrap();
         assert_eq!(every.len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }

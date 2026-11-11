@@ -124,7 +124,17 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         Err(e) => return e.to_compile_error(),
     };
     let name = shape.name.clone();
-    let table = shape.table.clone();
+    let Some(slot) = shape.slot else {
+        return syn::Error::new_spanned(
+            &function.sig.ident,
+            format!(
+                "point {} has no replacement cell: the staging pass writes `slot = N`",
+                function.sig.ident
+            ),
+        )
+        .to_compile_error();
+    };
+    let table = quote!(mod_points);
     // The body moves to an inlined inner function, so the return listeners run however it
     // returns; the outer function takes each parameter by a plain, mutable name.
     let inner = syn::Ident::new(
@@ -408,7 +418,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     let result_local =
         results.then(|| quote!(let mut __result_slot = ::std::option::Option::None;));
     // The body, or the copy a mixin build installed in its place: the listeners run around either.
-    let reader = |kind: &str, slot: usize| {
+    let reader = |kind: &str| {
         let reader = format_ident!("__fnr_read_{kind}_{slot}");
         if shape.free {
             quote!(#reader())
@@ -416,27 +426,24 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
             quote!(Self::#reader())
         }
     };
-    let own_body = quote!(#callee #turbofish(#(#call),*));
-    let body_call = match shape.slot {
-        Some(slot) => {
-            let installed = reader("body", slot);
-            quote! {
-                match #installed {
-                    ::std::option::Option::Some(__fnr) => __fnr(#receiver #(#call),*),
-                    ::std::option::Option::None => #own_body,
-                }
-            }
-        }
-        None => own_body,
-    };
-    // The listeners' path: the function's own block where the point checks its table slot, the
-    // dispatcher's where the function has a replacement cell.
-    let listened_block: syn::Block = syn::parse_quote!({
+    let installed = reader("body");
+    // The dispatcher: what the function's cell holds while a mod listens here. Its listened
+    // paths stay out of line.
+    let stem = function.sig.ident.to_string();
+    let stem = stem.trim_start_matches("r#");
+    let dispatcher = format_ident!("__pointd_{stem}");
+    let armer = format_ident!("__pointa_{stem}");
+    let mut dispatch = outer.clone();
+    dispatch.sig.ident = dispatcher.clone();
+    dispatch.vis = syn::Visibility::Inherited;
+    dispatch.attrs = vec![
+        syn::parse_quote!(#[doc(hidden)]),
+        syn::parse_quote!(#[allow(clippy::all)]),
+    ];
+    dispatch.block = syn::parse_quote!({
         #cancel_local
         #result_local
         #(#shared_locals)*
-        // The listened path stays out of line, so a point nothing listens at keeps the function
-        // small enough to inline: one load and a branch.
         if #head_listened {
             #listeners_path
         }
@@ -444,74 +451,57 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         #returned_local
         #back
         #[allow(unused_mut)]
-        let mut __result = #body_call;
+        let mut __result = match #installed {
+            ::std::option::Option::Some(__fnr) => __fnr(#receiver #(#call),*),
+            ::std::option::Option::None => #callee #turbofish(#(#call),*),
+        };
         #returned
         __result
     });
-    // The outer function keeps the function's own `#[inline]`: a small accessor in a lower crate
-    // (`Chunk::get`) stays inlinable into its callers, head check and all.
-    let dispatch = shape.slot.map(|slot| {
-        let stem = function.sig.ident.to_string();
-        let stem = stem.trim_start_matches("r#");
-        let dispatcher = format_ident!("__pointd_{stem}");
-        let armer = format_ident!("__pointa_{stem}");
-        let mut listened_function = outer.clone();
-        listened_function.sig.ident = dispatcher.clone();
-        listened_function.vis = syn::Visibility::Inherited;
-        listened_function.attrs = vec![
-            syn::parse_quote!(#[doc(hidden)]),
-            syn::parse_quote!(#[allow(clippy::all)]),
-        ];
-        listened_function.block = listened_block.clone();
-        let entry = reader("slot", slot);
-        let plain = inputs.iter().map(|&input| local(input));
-        let own = match shape.receiver {
-            Receiver::None => quote!(),
-            _ => quote!(self,),
-        };
-        let pass = inputs.iter().map(|&input| local(input));
-        outer.block = syn::parse_quote!({
-            // The function's one head check: a mixin build's copy, or this point's dispatcher
-            // while a mod listens here.
-            if let ::std::option::Option::Some(__fnr) = #entry {
-                return __fnr(#own #(#plain),*);
-            }
-            #callee #turbofish(#(#pass),*)
-        });
-        let path = if shape.free {
-            quote!(#dispatcher)
-        } else {
-            quote!(Self::#dispatcher)
-        };
-        let places = std::iter::once(shape.variant())
-            .chain(shape.has_return().then(|| shape.return_variant()))
-            .map(|variant| listened(&variant));
-        quote! {
-            #listened_function
-            /// Installs this point's dispatcher as the function's entry while a mod listens at
-            /// its head or return. Called once, after the points are sealed.
-            #[doc(hidden)]
-            #[allow(dead_code, clippy::all)]
-            pub fn #armer() {
-                if #(#places)||* {
-                    crate::__REPLACE[#slot].store(
-                        #path as *mut (),
-                        ::std::sync::atomic::Ordering::Release,
-                    );
-                }
+    // The function itself: its one head check, then the body. It keeps the function's own
+    // `#[inline]`, so a small accessor stays inlinable into its callers, check and all.
+    let entry = reader("slot");
+    let own = match shape.receiver {
+        Receiver::None => quote!(),
+        _ => quote!(self,),
+    };
+    let plain: Vec<_> = inputs.iter().map(|&input| local(input)).collect();
+    outer.attrs.push(syn::parse_quote!(#[allow(unused_mut)]));
+    outer.block = syn::parse_quote!({
+        if let ::std::option::Option::Some(__fnr) = #entry {
+            return __fnr(#own #(#plain),*);
+        }
+        #callee #turbofish(#(#plain),*)
+    });
+    let dispatcher_path = if shape.free {
+        quote!(#dispatcher)
+    } else {
+        quote!(Self::#dispatcher)
+    };
+    let places = std::iter::once(shape.variant())
+        .chain(shape.has_return().then(|| shape.return_variant()))
+        .map(|variant| listened(&variant));
+    let arm = quote! {
+        /// Installs this point's dispatcher as the function's entry while a mod listens at its
+        /// head or return. Called once, after the points are sealed.
+        #[doc(hidden)]
+        #[allow(dead_code, clippy::all)]
+        pub fn #armer() {
+            if #(#places)||* {
+                crate::__REPLACE[#slot].store(
+                    #dispatcher_path as *mut (),
+                    ::std::sync::atomic::Ordering::Release,
+                );
             }
         }
-    });
-    if dispatch.is_none() {
-        outer.block = listened_block;
-    }
+    };
     function.sig.ident = inner;
     function.vis = syn::Visibility::Inherited;
     function
         .attrs
         .retain(|attr| !attr.path().is_ident("doc") && !attr.path().is_ident("inline"));
     function.attrs.push(syn::parse_quote!(#[inline(always)]));
-    quote!(#outer #function #dispatch)
+    quote!(#outer #function #dispatch #arm)
 }
 
 /// `body`, run only when every mirror converted; a value the API can't carry skips the listeners

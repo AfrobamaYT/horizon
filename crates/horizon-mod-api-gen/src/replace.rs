@@ -1046,9 +1046,15 @@ mod tests {
             &mut found,
         );
         let mut count = 0;
-        rewrite(Path::new("k.rs"), source, &found, &mut count)
-            .unwrap()
-            .unwrap_or_else(|| source.to_owned())
+        rewrite(
+            Path::new("k.rs"),
+            source,
+            &found,
+            &mut count,
+            &mut Vec::new(),
+        )
+        .unwrap()
+        .unwrap_or_else(|| source.to_owned())
     }
 
     fn eligible_fn(source: &str) -> bool {
@@ -1166,9 +1172,15 @@ mod tests {
             &mut found,
         );
         let mut count = 0;
-        let mut out = rewrite(Path::new("k.rs"), source, &found, &mut count)
-            .unwrap()
-            .unwrap();
+        let mut out = rewrite(
+            Path::new("k.rs"),
+            source,
+            &found,
+            &mut count,
+            &mut Vec::new(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(count, 1);
         out.push_str(" pub static __REPLACE: [std::sync::atomic::AtomicPtr<()>; 1] = [std::sync::atomic::AtomicPtr::new(std::ptr::null_mut())];");
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1234,9 +1246,15 @@ mod tests {
             &mut found,
         );
         let mut count = 7;
-        let out = rewrite(Path::new("k.rs"), source, &found, &mut count)
-            .unwrap()
-            .unwrap();
+        let out = rewrite(
+            Path::new("k.rs"),
+            source,
+            &found,
+            &mut count,
+            &mut Vec::new(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(count, 9);
         assert!(!out.contains("macro_rules!"));
         assert_eq!(source.lines().count(), out.lines().count());
@@ -1275,7 +1293,8 @@ mod tests {
             &BTreeSet::new(),
             &mut found,
         );
-        let error = rewrite(Path::new("k.rs"), source, &found, &mut 0).unwrap_err();
+        let error =
+            rewrite(Path::new("k.rs"), source, &found, &mut 0, &mut Vec::new()).unwrap_err();
         assert!(error.contains("replaced!(elsewhere)"), "{error}");
     }
 
@@ -1312,7 +1331,7 @@ mod tests {
         );
         let mut found = Vec::new();
         functions("k", &file.items, &traits, &types, &mut found);
-        let out = rewrite(Path::new("k.rs"), source, &found, &mut 0)
+        let out = rewrite(Path::new("k.rs"), source, &found, &mut 0, &mut Vec::new())
             .unwrap()
             .unwrap();
         assert!(
