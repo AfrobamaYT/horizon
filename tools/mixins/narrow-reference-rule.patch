@@ -1,5 +1,23 @@
+diff --git a/crates/horizon-mixins-cli/tests/cases/local_scope.rs b/crates/horizon-mixins-cli/tests/cases/local_scope.rs
+index a2ac95a..170dd7b 100644
+--- a/crates/horizon-mixins-cli/tests/cases/local_scope.rs
++++ b/crates/horizon-mixins-cli/tests/cases/local_scope.rs
+@@ -172,11 +172,11 @@ fn local_use_that_could_change_generated_code_is_refused() {
+         &before("before", "sink", 1, 0),
+     );
+     reject(&f, "E_UNSUPPORTED_MACRO");
+-    // OVERWRITE rewrites the whole body and keeps its old restriction.
++    // OVERWRITE drops the whole body, its local `use` with it.
+     let f = fixture(
+         "use std::vec::Vec; sink(1)",
+         "\n[[injection]]\nid=\"overwrite\"\ntarget=\"fixture_game::run\"\nkind=\"OVERWRITE\"\nhelper=\"over.rs\"\n",
+     );
+     fs::write(f.mods.join("alpha/over.rs"), "fn over() -> i32 { 1 }").unwrap();
+-    reject(&f, "E_UNSUPPORTED_CONTROL_FLOW");
++    build_plan(&f.root, &f.mods).unwrap();
+ }
 diff --git a/crates/horizon-mixins-cli/tests/cases/returns.rs b/crates/horizon-mixins-cli/tests/cases/returns.rs
-index bca7938..dca15b8 100644
+index bca7938..41b46aa 100644
 --- a/crates/horizon-mixins-cli/tests/cases/returns.rs
 +++ b/crates/horizon-mixins-cli/tests/cases/returns.rs
 @@ -104,7 +104,7 @@ fn return_hooks_still_refuse_references_to_calls_and_closures_in_the_values_they
@@ -27,7 +45,7 @@ index bca7938..dca15b8 100644
  }
  
  #[test]
-@@ -200,3 +201,89 @@ fn the_helper_sees_each_exit_value_once() {
+@@ -200,3 +201,142 @@ fn the_helper_sees_each_exit_value_once() {
      .unwrap();
      f.run("check");
  }
@@ -117,8 +135,61 @@ index bca7938..dca15b8 100644
 +    assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{e}");
 +    assert!(e.message.contains("beneath a reference"), "{e}");
 +}
++
++#[test]
++fn overwrite_drops_a_body_that_borrows_a_call_or_holds_closures() {
++    let f = fixture(
++        r#"let extended = &Guard::new("extended", 3); let n = Some(1).map(|n| n + 1)?; sink(size(extended) + n)"#,
++    );
++    fs::write(
++        f.root.join("engine/src/lib.rs"),
++        fs::read_to_string(f.root.join("engine/src/lib.rs"))
++            .unwrap()
++            .replace(
++                "pub fn run(early: bool) -> i32 {",
++                "pub fn run(early: bool) -> Option<i32> { Some({",
++            )
++            .replace(
++                "sink(size(extended) + n) }",
++                "sink(size(extended) + n) }) }",
++            ),
++    )
++    .unwrap();
++    fs::write(
++        f.mods.join("alpha/horizon-mixin.toml"),
++        r#"
++[mod]
++id="alpha"
++version="1"
++[[injection]]
++id="overwrite"
++target="fixture_game::run"
++kind="OVERWRITE"
++helper="overwrite.rs"
++"#,
++    )
++    .unwrap();
++    fs::write(
++        f.mods.join("alpha/overwrite.rs"),
++        "fn run() -> Option<i32> { crate::mark(\"overwrite\"); Some(7) }",
++    )
++    .unwrap();
++    fs::write(
++        f.root.join("driver/src/lib.rs"),
++        r#"
++#[test]
++fn the_body_is_replaced() {
++    use fixture_game::{run, LOG};
++    assert_eq!(run(false), Some(7));
++    assert_eq!(*LOG.lock().unwrap(), ["overwrite"]);
++}
++"#,
++    )
++    .unwrap();
++    f.run("check");
++}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index 46479ee..d8a7e39 100644
+index fcf5a46..be03da9 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -703,8 +703,8 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -133,12 +204,12 @@ index 46479ee..d8a7e39 100644
          ),
          (
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 4b46623..8a568ac 100644
+index 848dcc0..e35b758 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
-@@ -614,6 +614,27 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
-                 if site.const_context {
-                     return Err(context(Diagnostic::new("E_UNSUPPORTED_SITE", "injection cannot introduce runtime helpers into a compile-time array length or const argument").file(&f.file)));
+@@ -633,6 +633,27 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+                 {
+                     return Err(context(Diagnostic::new("E_UNSUPPORTED_SITE", "the selected site contains a closure, which this hook would move into generated code").file(&f.file)));
                  }
 +                // The site moves into generated code: a borrow of a call inside it could have
 +                // been extended (a tuple-struct argument, say) where the generated call is not.
@@ -164,7 +235,7 @@ index 4b46623..8a568ac 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -949,6 +970,9 @@ pub(crate) fn validate_target(index: &Index, f: &Function, kind: Kind) -> Result
+@@ -979,6 +1000,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -174,15 +245,27 @@ index 4b46623..8a568ac 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1053,6 +1077,7 @@ struct Safety {
+@@ -1005,7 +1029,10 @@ pub(crate) fn validate_target_with(
+     // any exit or expression inside a macro, just like ordinary HEAD.
+     safety.body_macros = safety.boundary;
+     safety.in_body = true;
+-    safety.visit_block(&f.block);
++    // OVERWRITE drops the body: nothing in it reaches the staged function.
++    if kind != Kind::Overwrite {
++        safety.visit_block(&f.block);
++    }
+     if safety.error.is_none() && kind == Kind::Return {
+         safety.error = exit_value_error(&f.block);
+     }
+@@ -1173,6 +1200,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
 +    site_only: bool,
      try_outside_value: bool,
      body_macros: bool,
-     in_body: bool,
-@@ -1125,7 +1150,10 @@ impl<'ast> Visit<'ast> for Safety {
+     relaxed: bool,
+@@ -1247,7 +1275,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -194,7 +277,7 @@ index 4b46623..8a568ac 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1199,6 +1227,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1377,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -219,36 +302,36 @@ index 4b46623..8a568ac 100644
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
 diff --git a/crates/horizon-mixins-core/src/sites.rs b/crates/horizon-mixins-core/src/sites.rs
-index 40eb6c1..04f8fa3 100644
+index 47fee7d..ca8e3eb 100644
 --- a/crates/horizon-mixins-core/src/sites.rs
 +++ b/crates/horizon-mixins-core/src/sites.rs
-@@ -101,6 +101,9 @@ pub struct Site {
-     pub fingerprint: String,
-     pub whole_expression: bool,
+@@ -114,6 +114,9 @@ pub struct Site {
      pub const_context: bool,
+     /// Inside a closure body: the closure may run later, elsewhere or never.
+     pub in_closure: bool,
 +    /// Inside the operand of a `&` or `&mut`, where its value may be a temporary whose
 +    /// lifetime the borrow extends.
 +    pub beneath_reference: bool,
  }
  #[derive(Default)]
  pub struct Sites {
-@@ -110,6 +113,7 @@ pub struct Sites {
-     pub values: Vec<Site>,
+@@ -124,6 +127,7 @@ pub struct Sites {
      next_is_root: bool,
      const_context: bool,
+     closures: usize,
 +    references: usize,
  }
  impl Sites {
      pub fn in_block(block: &syn::Block) -> Self {
-@@ -166,6 +170,7 @@ impl<'ast> Visit<'ast> for Sites {
-             fingerprint: source::fingerprint(tokens(expr)),
+@@ -186,6 +190,7 @@ impl<'ast> Visit<'ast> for Sites {
              whole_expression: root,
              const_context: self.const_context,
+             in_closure: self.closures > 0,
 +            beneath_reference: self.references > 0,
          };
          self.values.push(site(expression));
          if is_call(expr) {
-@@ -178,7 +183,10 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -198,7 +203,10 @@ impl<'ast> Visit<'ast> for Sites {
          if matches!(expr, Expr::Paren(_)) {
              self.next_is_root = root;
          }

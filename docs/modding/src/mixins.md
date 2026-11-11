@@ -28,11 +28,11 @@ MODIFY_ARG, MODIFY_ARGS, MODIFY_CONSTANT, MODIFY_VARIABLE, MODIFY_EXPRESSION_VAL
 WRAP_OPERATION and OVERWRITE. Read the pinned upstream documentation rather than
 assuming Java annotation semantics:
 
-- [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/5a64af938ec86b00d53d16a408aabc0038fb3e57/docs/mixin-api.md)
-- [Advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/5a64af938ec86b00d53d16a408aabc0038fb3e57/docs/advanced-injections.md)
-- [Scopes, slices and bridges](https://github.com/horizon-rust/horizon-mixins/blob/5a64af938ec86b00d53d16a408aabc0038fb3e57/docs/scopes-and-bridges.md)
-- [Effects and state](https://github.com/horizon-rust/horizon-mixins/blob/5a64af938ec86b00d53d16a408aabc0038fb3e57/docs/effects-and-state.md)
-- [Boundary HEAD and modules](https://github.com/horizon-rust/horizon-mixins/blob/5a64af938ec86b00d53d16a408aabc0038fb3e57/docs/boundary-head-and-modules.md)
+- [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/mixin-api.md)
+- [Advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/advanced-injections.md)
+- [Scopes, slices and bridges](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/scopes-and-bridges.md)
+- [Effects and state](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/effects-and-state.md)
+- [Boundary HEAD and modules](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/boundary-head-and-modules.md)
 
 The launcher pins this tool with `MIXINS_REV`. `[[native.bridge]]`,
 `[[native.state]]` and `[[native.module]]` become upstream `[[bridge]]`, `[[state]]`
