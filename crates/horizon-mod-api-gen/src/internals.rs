@@ -1562,7 +1562,6 @@ mod tests {
             "horizon_client::game",
             &entries,
             &declarations.calls,
-            false,
         )
         .unwrap();
         assert_eq!(sites.len(), 1);
@@ -2050,7 +2049,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             "horizon_client::game",
             &entries,
             &[request],
-            true,
         )
         .unwrap();
         assert!(sites[0].once);

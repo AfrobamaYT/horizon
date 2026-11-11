@@ -60,16 +60,7 @@ pub fn ids(root: &Path) -> Result<String, Error> {
 
 /// Validate the entire union before writing any expression rewrite. Widening precedes this pass.
 pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
-    let declarations = slots(&root.join(DIRECTORY))?.calls;
-    stage_declarations(root, entries, &declarations, false)
-}
-
-pub(super) fn stage_declarations(
-    root: &Path,
-    entries: &[Internal],
-    declarations: &[Declaration],
-    private: bool,
-) -> Result<Vec<Site>, Error> {
+    let declarations = &slots(&root.join(DIRECTORY))?.calls;
     if declarations.is_empty() {
         return Ok(Vec::new());
     }
@@ -96,7 +87,7 @@ pub(super) fn stage_declarations(
         }
         let source = fs::read_to_string(&file.path)?;
         let source = crate::game_modules::expand(&file.path, &source).map_err(Cause::Source)?;
-        let (rewritten, found) = rewrite(&source, &file.module, entries, &selected, private)?;
+        let (rewritten, found) = rewrite(&source, &file.module, entries, &selected)?;
         if found.is_empty() {
             continue;
         }

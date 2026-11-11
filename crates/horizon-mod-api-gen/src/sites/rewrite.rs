@@ -93,7 +93,6 @@ pub fn rewrite(
     module: &str,
     entries: &[Internal],
     declarations: &[Declaration],
-    private: bool,
 ) -> Result<(String, Vec<Site>), Error> {
     let parsed = syn::parse_file(source)?;
     let mut functions = Vec::new();
@@ -195,11 +194,6 @@ pub fn rewrite(
                         return Err(Cause::Identity(Refusal::Lost).into());
                     }
                 };
-                if private && declaration.selector != path {
-                    return Err(
-                        Cause::Signature("source requests require the canonical callee").into(),
-                    );
-                }
                 let expr = calls[index];
 
                 let Resolved {
