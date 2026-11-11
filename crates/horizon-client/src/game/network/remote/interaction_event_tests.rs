@@ -924,6 +924,7 @@ fn air_event_skips_the_item_and_consuming_results_end_the_click() {
                     *observer.0.lock().unwrap() = Controls {
                         air_answer: Some(Answer::Pass),
                         air_main_only: true,
+                        part_pass: true,
                         ..Controls::default()
                     };
                     game.remote_use(mod_api::InteractionAttempt::Press);
@@ -933,7 +934,11 @@ fn air_event_skips_the_item_and_consuming_results_end_the_click() {
                     );
                     assert_eq!(
                         observer.0.lock().unwrap().steps,
-                        [Step::Air(side, Hand::Main), Step::Air(side, Hand::Off)]
+                        [
+                            Step::Air(side, Hand::Main),
+                            Step::Air(side, Hand::Off),
+                            Step::ItemPart
+                        ]
                     );
                 }
                 if !client {
