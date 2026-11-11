@@ -2313,6 +2313,7 @@ dependencies = [
  "glam",
  "horizon-mod-api",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "wgpu",
 ]
 
