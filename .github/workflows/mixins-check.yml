@@ -79,9 +79,22 @@ jobs:
       - name: Build the launcher
         run: cargo +stable build --locked --manifest-path launcher/Cargo.toml
       - name: Build the mod through the launcher at this commit
-        run: tools/ci/mixins_check.sh "${CARGO_TARGET_DIR:-launcher/target}/debug/horizon-launcher" "$RUNNER_TEMP/mixins-check"
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            umask 077
+            mkdir -p "$GITHUB_WORKSPACE/target"
+            scratch=$(mktemp -d "$GITHUB_WORKSPACE/target/mixins-check.XXXXXX")
+            trap 'rm -rf "$scratch"' EXIT
+          else
+            scratch="$RUNNER_TEMP/mixins-check"
+          fi
+          tools/ci/mixins_check.sh "${CARGO_TARGET_DIR:-launcher/target}/debug/horizon-launcher" "$scratch"
       - name: Memory and kills after the build
         if: always()
         run: |
           free -g
-          dmesg 2>/dev/null | grep -iE 'out of memory|oom|killed process' | tail -5 || true
+          if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
+            sudo dmesg 2>/dev/null | grep -iE 'out of memory|oom|killed process' | tail -5 || true
+          else
+            dmesg 2>/dev/null | grep -iE 'out of memory|oom|killed process' | tail -5 || true
+          fi
