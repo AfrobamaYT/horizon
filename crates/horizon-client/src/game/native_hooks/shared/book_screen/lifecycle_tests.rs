@@ -30,7 +30,8 @@ fn receive(game: &mut Game<'_>, message: Message) {
     game.remote_book_or_mod_payload(
         horizon_client::recipe_book::settings_sync::CHANNEL,
         &settings_codec::encode(&message).unwrap(),
-    );
+    )
+    .unwrap();
 }
 struct BoundBookMod;
 #[mod_api::__subscriptions]

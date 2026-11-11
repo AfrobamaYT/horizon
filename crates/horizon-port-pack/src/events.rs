@@ -57,7 +57,11 @@ pub const CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/hook-counterpa
 /// categories of a recipe book and a recipe type's category lookup;
 /// `RegisterRecipeBookSearchCategoriesEvent` registers search categories
 /// only, and the hook label that mentions it says what Horizon has instead.
-const RENAMED: [(&str, &str); 21] = [
+/// `RegisterShadersEvent` registered shader instances; vanilla replaced those
+/// with render pipelines, and `RegisterRenderPipelinesEvent` registers a
+/// pipeline: its shaders with the vertex format, blend and depth state it
+/// draws with.
+const RENAMED: [(&str, &str); 22] = [
     ("Capabilities.ItemHandler.", "Capabilities.Item."),
     ("Capabilities.FluidHandler.", "Capabilities.Fluid."),
     ("Capabilities.EnergyStorage.", "Capabilities.Energy."),
@@ -112,6 +116,7 @@ const RENAMED: [(&str, &str); 21] = [
         "RegisterRecipeBookCategoriesEvent",
         "RegisterRecipeBookSearchCategoriesEvent",
     ),
+    ("RegisterShadersEvent", "RegisterRenderPipelinesEvent"),
 ];
 
 /// Types nested in an event that listener-shaped code takes without being

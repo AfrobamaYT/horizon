@@ -1012,7 +1012,12 @@ impl Mob {
     }
     /// Entity.applyMovementEmissionAndPlaySound: walked distance, footsteps
     /// and swimming sounds.
-    fn movement_emission(&mut self, w: &MobWorld, moved: Vec3, events: &mut Vec<MobEvent>) {
+    pub(super) fn movement_emission(
+        &mut self,
+        w: &MobWorld,
+        moved: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         if !super::ai::emits_movement(self) || self.extra.mount.is_some() {
             return;
         }
@@ -1043,7 +1048,7 @@ impl Mob {
                         super::equine::play_step(self, w, legacy, legacy_state, events);
                     }
                 } else if let Some((sound, volume, pitch)) =
-                    super::ai::step_sound(self, w, legacy, legacy_state)
+                    super::entity_sounds::step(self, w, legacy, legacy_state)
                     && heard
                     && !self.silent
                 {

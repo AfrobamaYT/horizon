@@ -14,6 +14,7 @@
 //! Worlds saved by older Horizon builds (`region/`, `DIM-1/`, `Player` in
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
+pub mod level_mods;
 mod respawn;
 
 use crate::{
@@ -4015,6 +4016,8 @@ pub struct Level {
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
     pub enabled_features: std::sync::Arc<[String]>,
+    /// `fml.LoadingModList` at the root beside `Data`, the code mods the world was saved with; `None` without one.
+    pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
     /// Definitions used by this world session.
@@ -4167,14 +4170,9 @@ impl Level {
         // WorldDataConfiguration.MAP_CODEC's `enabled_features`, flat in the
         // Data compound and omitted when the flags are vanilla's default.
         if let Some(Tag::List(flags)) = data.get("enabled_features") {
-            level.enabled_features = flags
-                .iter()
-                .filter_map(|f| match f {
-                    Tag::String(s) => Some(s.to_string_lossy()),
-                    _ => None,
-                })
-                .collect();
+            level.enabled_features = flags.iter().filter_map(|f| text(Some(f))).collect();
         }
+        level.saved_mods = level_mods::saved(&root);
         if let Some(packs) = data.get("DataPacks") {
             let ids = |key| match packs.get(key) {
                 Some(Tag::List(ids)) => ids.iter().filter_map(|id| text(Some(id))).collect(),
@@ -4719,11 +4717,11 @@ impl Level {
     fn write_internal(&mut self, dir: &Path, write_player: bool, upload: bool) -> Result<()> {
         fs::create_dir_all(dir)?;
         restore_level_dat(dir);
-        let existing = read_dat(&dir.join("level.dat")).and_then(|r| r.get("Data").cloned());
-        let legacy = existing
-            .as_ref()
+        let mut root = compound_or_empty(read_dat(&dir.join("level.dat")));
+        let legacy = root
+            .get("Data")
             .is_some_and(|d| d.get("Player").is_some() || d.get("WorldGenSettings").is_some());
-        let mut data = compound_or_empty(existing);
+        let mut data = compound_or_empty(root.get("Data").cloned());
         if let Tag::Compound(map) = &mut data {
             // Pre-26.3 keys now stored elsewhere (a legacy Horizon level.dat).
             for key in [
@@ -4846,6 +4844,7 @@ impl Level {
         ] {
             put(&mut data, key, value);
         }
+        level_mods::write(&mut root);
         if let Some(uuid) = uuid {
             put(&mut data, "singleplayer_uuid", uuid_tag(uuid));
         }
@@ -4971,7 +4970,8 @@ impl Level {
         if write_player {
             self.write_player(dir)?;
         }
-        write_dat(&dir.join("level.dat"), Tag::compound([("Data", data)]))?;
+        put(&mut root, "Data", data);
+        write_dat(&dir.join("level.dat"), root)?;
         Ok(())
     }
 }

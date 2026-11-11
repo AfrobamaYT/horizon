@@ -46,6 +46,30 @@ world-aware item predicates; it is not a conditions-only snapshot. See
 [advancement triggers](../../reference/hook-notes.md#advancement-triggers) for the contract and
 the wasm runtime's current same-group callback limitation.
 
+A mod that consumes a block use can run vanilla advancement predicates and rewards
+through `PlayerRef::trigger_block_use(host, pos)` or
+`PlayerRef::trigger_item_used_on_block(host, pos, original, after)`. These server
+operations use the player's own level and never read inventory. Default use fires
+`default_block_use`, then `any_block_use`, both without a tool: the default helper
+is specifically tool-free, not general default block use while holding an item.
+Item use fires `item_used_on_block` against `original` (copied after a before-block
+PASS and before block/item effects), then `any_block_use` against `after` (that
+original hand stack mutated in place, excluding a replacement swapped into the
+hand), in that order. Consuming right-click/before-block cancellation already
+fires automatic `any_block_use` only; do not call either pair helper for it,
+which would duplicate any and add an inner trigger. This follows
+`ServerPlayerGameMode.useItemOn` and `ServerGamePacketListenerImpl.handleUseItemOn`;
+the predicate evaluators are `DefaultBlockInteractionTrigger`,
+`ItemUsedOnLocationTrigger`, and `AnyBlockInteractionTrigger`.
+
+`Ok(())` means the player was reached, even if no criterion matched. Failures are
+`NotServer` for a remote client, `PlayerUnavailable` for a stale, offline or
+displaced handle, `UnloadedChunk` for a position outside loaded chunks, and
+`Stack(StackWriteError)` when the item boundary rejects either stack before any
+trigger fires. Native and wasm use the same generated operations. The
+`minecraft:` guard on `trigger_criterion` remains: this grants no general access
+to fire arbitrary vanilla triggers.
+
 The following catalog hooks are not in the trait:
 
 - `player_command`, `item_decorations`,
@@ -58,3 +82,17 @@ The following catalog hooks are not in the trait:
   and `tags_updated`.
 
 The client `render_tooltip_texture` hook (NeoForge's `RenderTooltipEvent.Texture`) picks a tooltip box's look. Setting `texture` to a tooltip style `<namespace>:<name>` draws the GUI sprites `<namespace>:tooltip/<name>_background` and `_frame` from the resource packs, nine-sliced by their `gui.scaling` metadata or stretched without it, as vanilla draws an item's `tooltip_style`; the atlas a resource reload restitches is the one drawn. Left `None`, the box keeps Horizon's solid fills, whose background and top and bottom border gradient colours it changes as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered.
+
+### Tooltip component geometry
+
+`render_tooltip_gather_components` preserves the mixed text/image list, including
+an image inserted immediately after the name. Wrapping splits text in place.
+The text pass visits the entire list before the image pass starts; both passes
+advance through the same component heights, with 2 extra pixels after the first
+component of an item tooltip. Each image callback receives the box's left edge
+and its own running top, but the **whole content box size**, not `TooltipImage.size`.
+That field is the component measurement used to reserve space. The box width is
+the widest component; its height is the sum of heights, minus 2 normally, with no
+subtraction for item tooltips containing multiple components. Text components
+measure 10 pixels high. Factory registration and selectable fonts are separate
+capabilities, not provided by this geometry contract.

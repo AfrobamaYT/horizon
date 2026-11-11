@@ -103,7 +103,7 @@ pub(super) struct ModsState {
     pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,
     /// The entries of the mods' datapack registries this world session has published, at the
     /// generation of the load or reload that built them; `None` when no mod declared one.
-    pub(super) datapack_registries: Option<mod_api::DatapackRegistrySet>,
+    pub(super) datapack_registries: Option<Arc<mod_api::DatapackRegistrySet>>,
     /// The entries a table load decoded and checked, until its world open or reload takes them
     /// to publish.
     pub(super) datapack_candidate: Option<mod_api::DatapackCandidate>,
@@ -475,8 +475,10 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
 /// The types native mods register for resource definitions, kept once at start, before
 /// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
 /// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
-/// definitions' entries on them list the mod's sprites; and model loaders
-/// (`native_register_model_loaders`), so models naming one get the mod's quads.
+/// definitions' entries on them list the mod's sprites; model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads; and item model
+/// node types (`native_register_item_models`), so item definitions' nodes of them draw what the
+/// mod answers.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -490,6 +492,9 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut loaders = Vec::new();
     Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
     horizon_client_render::mod_model_loaders::register(loaders);
+    let mut models = Vec::new();
+    Game::native_register_item_models(&RegistrationContext::new(), &mut models);
+    horizon_assets::item_model::register_item_models(models);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
@@ -497,6 +502,7 @@ pub(super) fn register_client_presentations(role: ExecutionRole) {
     register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
+    register_render_pipelines(role);
 }
 
 /// Resolve client dimension-transition registrations once, before the first level opens.
@@ -526,6 +532,17 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     let mut editors = Vec::new();
     Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
     horizon_client::title::preset_editors::register(editors);
+}
+
+/// Keep the mods' render pipeline registrations once at startup, before resources load: every
+/// load builds them from its own shader files.
+pub(super) fn register_render_pipelines(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut pipelines = Vec::new();
+    Game::native_register_render_pipelines(&RegistrationContext::new(), &mut pipelines);
+    horizon_client_render::mod_pipelines::register(pipelines);
 }
 
 /// The native mods' meshing registrations, kept once at start, before resources load: colour
