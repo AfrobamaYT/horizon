@@ -181,9 +181,6 @@ mod tests {
             access: Access::Api,
             priority: 0,
             hash: Some("pin".into()),
-            call: None,
-            nth: None,
-            ctx: None,
         }
     }
 

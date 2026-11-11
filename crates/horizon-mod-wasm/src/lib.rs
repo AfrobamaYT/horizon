@@ -43,7 +43,7 @@ pub(crate) fn call_refused<E: From<(mod_api::Identifier, String)>>() -> E {
 }
 
 use horizon_mod_package::dependencies;
-use horizon_mod_package::manifest::{Manifest, inject::Access};
+use horizon_mod_package::manifest::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -137,13 +137,7 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
         .collect();
     // Engine internals are native-only. A mod dependency's internals stay inside the group.
     for (i, package) in packages.iter().enumerate() {
-        if !package.manifest.internals.is_empty()
-            || package
-                .manifest
-                .inject
-                .iter()
-                .any(|inject| inject.access == Access::Internals)
-        {
+        if !package.manifest.internals.is_empty() {
             refused.insert(i, Refusal::Internals);
         }
     }
