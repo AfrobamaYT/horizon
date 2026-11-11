@@ -141,17 +141,18 @@ impl HiddenParts {
     }
 
     /// The hidden parts' names, in the order they were hidden.
-    pub fn names(&self) -> impl Iterator<Item = &str> + '_ {
+    pub fn names<'a>(&'a self) -> impl Iterator<Item = &'a str> + 'a {
+        let (names, lens) = (&self.names, &self.lens);
         (0..usize::from(self.count))
             .map(move |i| {
                 // Construction and Wire decoding validate the byte lengths and UTF-8 once.
-                std::str::from_utf8(&self.names[i][..usize::from(self.lens[i])]).unwrap()
+                std::str::from_utf8(&names[i][..usize::from(lens[i])]).unwrap()
             })
             .chain(
                 HumanoidPart::ALL
                     .into_iter()
                     .filter(move |part| self.typed & (1 << (*part as u16)) != 0)
-                    .map(HumanoidPart::model_name),
+                    .map(|part| -> &'a str { part.model_name() }),
             )
     }
 }
