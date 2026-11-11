@@ -5,6 +5,8 @@
 use mod_api::wire::{Id, Reader, WireError, Writer, guest};
 use mod_api::{Hooks, LoopContext, StructurePiece};
 use std::{rc::Rc, sync::Arc};
+#[path = "wire_loopback/block_entity_on_load.rs"]
+mod block_entity_on_load;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }

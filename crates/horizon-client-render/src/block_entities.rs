@@ -75,6 +75,7 @@ pub enum Ticking {
 pub struct BlockEntities {
     map: HashMap<Pos, BlockEntity>,
     generations: FxHashMap<Pos, u64>,
+    on_load: std::collections::VecDeque<(Pos, u64)>,
     attachments: HashMap<Pos, Attachments>,
     attachment_observer: Option<Arc<dyn AttachmentObserver<BlockEntityIdentity>>>,
     /// `Level.blockEntityTickers`: positions and the slot each was given.
@@ -253,6 +254,22 @@ pub fn chunk_map_order(positions: impl IntoIterator<Item = Pos>) -> Vec<Pos> {
 }
 
 impl BlockEntities {
+    /// Whether any attachment notices remain, including possibly retired identities.
+    pub fn has_pending_on_load(&self) -> bool {
+        !self.on_load.is_empty()
+    }
+    /// Take the next newly attached mod identity. Removed or replaced entries
+    /// are stale and skipped; payload rewrites retain the queued generation.
+    pub fn next_on_load(&mut self) -> Option<(Pos, u64)> {
+        while let Some((pos, generation)) = self.on_load.pop_front() {
+            if self.generation(&pos) == Some(generation)
+                && matches!(self.map.get(&pos), Some(BlockEntity::Mod(_)))
+            {
+                return Some((pos, generation));
+            }
+        }
+        None
+    }
     /// Runtime identity, retained while an entity is temporarily taken for its tick.
     pub fn generation(&self, pos: &Pos) -> Option<u64> {
         self.generations.get(pos).copied()
@@ -499,7 +516,8 @@ impl BlockEntities {
             (BlockEntity::Mod(old), BlockEntity::Mod(new)) => old.id() == new.id(),
             (old, new) => std::mem::discriminant(old) == std::mem::discriminant(new),
         };
-        if !self.map.get(&pos).is_some_and(same_type) {
+        let new_identity = !self.map.get(&pos).is_some_and(same_type);
+        if new_identity {
             retire_attachments(
                 &mut self.attachments,
                 self.attachment_observer.as_ref(),
@@ -512,6 +530,9 @@ impl BlockEntities {
         let new_box = shows_box(&entity);
         self.asleep.remove(&pos);
         let old = self.map.insert(pos, entity);
+        if new_identity && new_is_mod {
+            self.on_load.push_back((pos, self.generations[&pos]));
+        }
         if old.is_none() {
             self.add(pos);
         }
@@ -550,6 +571,7 @@ impl BlockEntities {
         self.asleep.remove(&pos);
         let entity = self.map.entry(pos).or_insert_with(make);
         if absent && matches!(entity, BlockEntity::Mod(_)) {
+            self.on_load.push_back((pos, self.generations[&pos]));
             self.mods.entry(chunk_of(pos)).or_default().insert(pos);
         }
         if absent && shows_box(entity) {
@@ -678,6 +700,7 @@ impl BlockEntities {
     pub fn clear(&mut self) {
         self.unload_attachments();
         self.generations.clear();
+        self.on_load.clear();
         self.attachments.clear();
         self.map.clear();
         self.mods.clear();
@@ -721,6 +744,9 @@ impl BlockEntities {
             }
         }
         for p in order {
+            if matches!(self.map.get(&p), Some(BlockEntity::Mod(_))) {
+                self.on_load.push_back((p, self.generations[&p]));
+            }
             self.add(p);
         }
     }
@@ -1150,3 +1176,7 @@ mod tests {
         assert!(b.boxes.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "block_entities/on_load_tests.rs"]
+mod on_load_tests;

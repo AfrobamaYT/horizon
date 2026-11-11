@@ -23,6 +23,12 @@ impl ItemStack {
 }
 mod content {
     pub(super) mod registry_keys {
+        pub(in crate::tests) fn block_entity_type_name(
+            _: super::super::BlockEntityTypeKey,
+        ) -> Option<&'static str> {
+            None
+        }
+
         pub(in crate::tests) fn block_key(name: &str) -> Option<super::super::BlockKey> {
             match name {
                 "test:block" => Some(super::super::BlockKey::Test),
