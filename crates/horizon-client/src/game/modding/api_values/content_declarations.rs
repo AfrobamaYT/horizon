@@ -162,15 +162,22 @@ impl TryIntoEngine<()> for mod_api::Item {
 fn component_patch(
     patch: &[(String, Option<mod_api::Tag>)],
 ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {
-    patch
-        .iter()
-        .map(|(id, value)| match value {
-            Some(value) => horizon_core::json_nbt::tag_to_json(value)
-                .map(|value| (id.clone(), value))
-                .map_err(|error| error.to_string()),
-            None => Ok((format!("!{id}"), serde_json::json!({}))),
-        })
-        .collect()
+    let mut seen = std::collections::BTreeSet::new();
+    let mut result = std::collections::BTreeMap::new();
+    for (id, value) in patch {
+        if !seen.insert(id) {
+            return Err(format!("duplicate component id {id}"));
+        }
+        let (key, value) = match value {
+            Some(value) => (
+                id.clone(),
+                horizon_core::json_nbt::tag_to_json(value).map_err(|error| error.to_string())?,
+            ),
+            None => (format!("!{id}"), serde_json::json!({})),
+        };
+        result.insert(key, value);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -178,6 +185,26 @@ mod tests {
     use super::*;
     use mod_api::{Block, BlockProperties, Item, Tag};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn duplicate_component_ids_refuse_blocks_and_items() {
+        for final_value in [Some(Tag::List(vec![])), None] {
+            let patch = vec![
+                ("minecraft:lore".into(), Some(Tag::List(vec![]))),
+                ("minecraft:lore".into(), final_value),
+            ];
+            let mut block = Block::new("test:block", "minecraft:stone");
+            block.components = patch.clone();
+            let mut item = Item::new("test:item", "minecraft:stick");
+            item.components = patch;
+            for error in [
+                block.try_into_engine(&()).unwrap_err(),
+                item.try_into_engine(&()).unwrap_err(),
+            ] {
+                assert_eq!(error, "duplicate component id minecraft:lore");
+            }
+        }
+    }
 
     #[test]
     fn context_shape_declarations_preserve_categories_and_boxes() {
