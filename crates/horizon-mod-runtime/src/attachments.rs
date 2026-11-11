@@ -81,6 +81,8 @@ pub enum Holder {
     BlockEntity([i32; 3]),
     Chunk([i32; 2]),
     Level,
+    /// A detached player's map, available only during its clone hook.
+    OriginalPlayer(u64),
 }
 
 /// Whether borrowing a map may create publication authority for a new value.
@@ -241,6 +243,9 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
             policy,
             write,
         } = form;
+        if matches!(holder, Holder::OriginalPlayer(_)) && write == AttachmentWrite::Set {
+            return Err(AttachmentError::MissingHolder);
+        }
         Attachments::store(
             self.attachments(holder, AttachmentAccess::Store)?,
             namespace,
@@ -261,6 +266,9 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         name: &str,
         sync: bool,
     ) -> Result<(), AttachmentError> {
+        if matches!(holder, Holder::OriginalPlayer(_)) {
+            return Err(AttachmentError::MissingHolder);
+        }
         Attachments::discard(
             self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,

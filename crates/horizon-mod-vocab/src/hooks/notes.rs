@@ -182,12 +182,17 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   captured stack before consumption (count and components included). A fox's listener receives the full server
   host before its living movement and before the next mob ticks; writes to actors or the level survive the
   continuation. Changing the consumer's mouth item, position or eligibility refuses the captured effect.
-- **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
-  `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
-  leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and
-  before the new player is placed, once each, on a server. The uuid stays the same, so `player` names the old and the
-  new player alike; no player's state is swapped in, so the helpers that look a player up may find nothing. It cannot
-  stop anything.
+- **`native_player_clone(player, name, was_death, original)`**: after a death respawn (`was_death` true)
+  or End return (`was_death` false), after the copy and before placement. `player` is the replacement's
+  UUID. `original: OriginalPlayerRef` reads the old player's position, dimension, level, health,
+  experience, effects, inventory slots and every attachment, including non-copy-on-death and
+  unserialized values. Death inventory is after drops (empty unless keep-inventory or spectator);
+  End-return inventory is intact. The replacement's vanilla state and attachments have already
+  been copied before dispatch. Original attachments permit lazy decoding and defaults, not set/remove.
+  Snapshots are not taken without subscribers. For example,
+  `event.original.attachment(host, &DATA)` reads the old value while `DATA.get(host, Holder::Player(event.player))`
+  reads the replacement's retained value or fresh default. The original expires when the hook returns;
+  retained handles refuse reads. No player's state is swapped in. Native and wasm use the same handle.
 - **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
   (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
   join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for
@@ -2682,7 +2687,7 @@ registration path.
 
 - A statistic about to be awarded to a server player: `native_player_stat_award(player, name, stat_type, stat, value, cancel)`, with `stat_type` such as `minecraft:mined` or `minecraft:custom`, `stat` such as `minecraft:stone` or `minecraft:walk_one_cm`, and `value` the amount added. Set `cancel` to award nothing: the count and its scoreboard criteria stay as they were.
 
-- A player's data copied to their new player: `native_player_clone(player, name, was_death)` is heard from `ServerPlayer.restoreFrom` once for each death respawn (`was_death` true) and for each exit from the End after the credits (`was_death` false), after the retained data is copied and before the new player is placed (NeoForge's `PlayerEvent.Clone`). The uuid stays the same, so `player` names both the old and the new player. It cannot change or stop anything; no player's state is swapped in.
+- A player's data copied to their replacement: `native_player_clone(player, name, was_death, original)` fires after death (`was_death` true) and the credits-showing End return (`was_death` false), after vanilla state and attachments are copied and before placement (`ServerPlayer.restoreFrom`, NeoForge's `PlayerEvent.Clone`). `player` is the replacement's UUID; `original: OriginalPlayerRef` reads all pre-copy attachments, health, experience, effects, inventory after death drops (or intact with keep-inventory and on End return), position, dimension and level only during the hook, on native and wasm. Set/remove on the original refuse; lazy reads/defaults work. No subscriber means no snapshot. Nothing swaps a player's state in.
 
 - A player loaded from the world's save: `native_player_load_from_file(player, name, directory)` is heard once for each join (the owner of an integrated server too), after the player's `.dat` is read and applied and before they are placed in a level (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`). `directory` is the world's player directory (`players/data`); a mod reads its own file there, named `<uuid>.<suffix>`. It cannot change or stop anything; no player's state is swapped in.
 

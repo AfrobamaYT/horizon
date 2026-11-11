@@ -3905,17 +3905,17 @@ impl Game<'_> {
     /// A player's data was copied to their new player (NeoForge's
     /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
     /// true after a death, false when they left the End after the credits
-    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
-    /// old and the new player share `player`. Heard before the new player is
-    /// placed, on a server, with no player's state swapped in. Not
-    /// cancellable.
+    /// (`respawn` with `keepAllPlayerData`). `original` reads the old player's
+    /// complete data until this hook returns; `player` names the replacement.
+    /// Heard before the new player is placed, on a server. Not cancellable.
     pub(in crate::game) fn native_player_clone(
         &mut self,
         player: u128,
         name: &str,
         was_death: bool,
+        original: mod_api::OriginalPlayerRef,
     ) {
-        self.fire_player_clone(player, name, was_death);
+        self.fire_player_clone(player, name, was_death, original);
     }
     /// The number of players with the mod container at `pos` of `dimension`
     /// open went from `previous` to `viewers` (vanilla's

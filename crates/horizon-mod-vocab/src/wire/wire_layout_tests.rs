@@ -908,3 +908,10 @@ fn every_attachment_error_and_write_case_has_declared_tag_type() {
     fields(AttachmentWrite::Default, (1u32,));
     fields(AttachmentWrite::Set, (2u32,));
 }
+
+#[test]
+fn original_player_identity_and_attachment_selector_cross_the_boundary() {
+    let original = crate::__private::game::original_player_ref(0x1234_5678);
+    fields(original, (0x1234_5678u64,));
+    fields(Holder::OriginalPlayer(0x1234_5678), (5u32, 0x1234_5678u64));
+}

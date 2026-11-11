@@ -3349,6 +3349,7 @@ struct Game<'a> {
     lan_guest_swaps: Vec<u32>,
     /// The active player's map; a guest turn moves it from its owning record.
     player_attachments: horizon_mod_runtime::attachments::ResidentAttachments,
+    original_players: Vec<original_player::OriginalPlayerSnapshot>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -16669,6 +16670,7 @@ impl<'a> Game<'a> {
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
+            original_players: Vec::new(),
             lan_break_pos: None,
             break_collect: None,
             guest_packets: Vec::new(),
