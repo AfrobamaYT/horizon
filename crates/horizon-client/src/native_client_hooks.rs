@@ -51,6 +51,8 @@ pub(crate) fn menu_slot_rules(
     }
 }
 
+/// Ask the installed adapter for a mod menu type's `stillValid` answer; with
+/// none installed, `valid` keeps the game's answer.
 pub(crate) fn menu_still_valid(
     context: &LoopContext,
     player: u128,

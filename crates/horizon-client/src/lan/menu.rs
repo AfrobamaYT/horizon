@@ -116,21 +116,18 @@ impl Menu {
     /// menus whose type no part answers are not asked, nor is one whose block
     /// entities are gone: it closes.
     pub fn still_valid(&self, context: &LoopContext, world: &World, guest: &Guest) -> bool {
-        let mut valid = self.slots.still_valid(world, guest, self.pos);
-        if !self.asks_still_valid {
-            return valid;
-        }
         let block = match self.slots {
             Slots::Block(k) | Slots::Double(k, _) => Some(k),
             Slots::Ender => self.pos,
             Slots::Native => None,
         };
-        let Some(k) = block.filter(|k| k.1 != VEHICLE_KEY_Y) else {
-            return valid;
+        let Some(k) = block.filter(|k| self.asks_still_valid && k.1 != VEHICLE_KEY_Y) else {
+            return self.slots.still_valid(world, guest, self.pos);
         };
         if !self.slots.valid(world) {
             return false;
         }
+        let mut valid = self.slots.in_reach(guest, self.pos);
         native_menu_still_valid(
             context,
             guest.uuid,
@@ -290,6 +287,11 @@ impl Slots {
     /// and the guest is within reach of each (`stillValidBlockEntity`). The
     /// ender chest's block is `at` (`PlayerEnderChestContainer.activeChest`).
     pub fn still_valid(self, world: &World, guest: &Guest, at: Option<(i32, i32, i32)>) -> bool {
+        self.valid(world) && self.in_reach(guest, at)
+    }
+    /// The reach half of `still_valid`: the guest is within its block
+    /// interaction range plus 4 of each block behind the slots.
+    fn in_reach(self, guest: &Guest, at: Option<(i32, i32, i32)>) -> bool {
         let blocks = match self {
             Slots::Ender => at.into_iter().collect(),
             Slots::Native => Vec::new(),
@@ -297,10 +299,9 @@ impl Slots {
         };
         // A vehicle's container is kept under a key, not a block: the game
         // checks its reach to the vehicle (`isChestVehicleStillValid`).
-        self.valid(world)
-            && blocks
-                .iter()
-                .all(|k| k.1 == VEHICLE_KEY_Y || guest.within_block_range([k.0, k.1, k.2], 4.0))
+        blocks
+            .iter()
+            .all(|k| k.1 == VEHICLE_KEY_Y || guest.within_block_range([k.0, k.1, k.2], 4.0))
     }
     /// Container slot `n`.
     pub fn get(self, world: &World, guest: &Guest, mut n: usize) -> Option<ItemStack> {
