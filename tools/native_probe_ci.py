@@ -62,6 +62,7 @@ def baseline(runs, current):
     eligible = [r for r in runs if r["id"] != current["id"]
                 and r["run_number"] < current["run_number"]
                 and r["event"] == "push" and r["head_branch"] == "main"
+                and r["head_repository"] is not None
                 and r["head_repository"]["full_name"] == current["repository"]
                 and r["conclusion"] == "success"]
     return max(eligible, key=lambda r: r["run_number"], default=None)
@@ -102,7 +103,10 @@ def find_green(api, pages, current):
 def select_interval(root, green, diff):
     # Coalesced pending runs must include every change since the last actual proof,
     # not merely event.before..HEAD. Unknown/first baseline always needs a proof.
-    return green is None or selected(diff(green["head_sha"]), sdk_roots(root))
+    if green is None:
+        return True
+    paths = diff(green["head_sha"])
+    return paths is None or selected(paths, sdk_roots(root))
 
 
 def write_failure(repo, head, green, pages, emit):
@@ -116,6 +120,15 @@ def write_failure(repo, head, green, pages, emit):
         emit(summary(repo, head, green, commits, lambda sha: pages(f"commits/{sha}/pulls")))
     except (OSError, RuntimeError, ValueError, KeyError) as error:
         emit(f"PR attribution lookup failed ({type(error).__name__}); inspect the known compare range above.")
+
+
+def changed_paths(base, emit):
+    result = subprocess.run(["git", "diff", "--name-only", base, "HEAD"],
+                            text=True, capture_output=True)
+    if result.returncode:
+        emit("Baseline diff unavailable (for example, removed by force-push); conservatively proving SDK linkage.")
+        return None
+    return result.stdout.splitlines()
 
 
 def main():
@@ -149,9 +162,7 @@ def main():
             raise
         green = None
     if os.environ.get("PROBE_SELECT"):
-        def diff(base):
-            return subprocess.check_output(["git", "diff", "--name-only", base, "HEAD"], text=True).splitlines()
-        chosen = select_interval(root, green, diff)
+        chosen = select_interval(root, green, lambda base: changed_paths(base, emit))
         with open(os.environ["GITHUB_OUTPUT"], "a") as out:
             out.write(f"selected={str(chosen).lower()}\n")
         return

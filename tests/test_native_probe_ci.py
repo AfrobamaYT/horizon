@@ -2,6 +2,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
     "native_probe_ci", Path(__file__).resolve().parents[1] / "tools/native_probe_ci.py")
@@ -48,7 +49,7 @@ class SummaryTests(unittest.TestCase):
         runs = [good]
         for patch in ({"id": 9, "run_number": 9}, {"event": "pull_request"},
                       {"head_branch": "topic"}, {"head_repository": {"full_name": "upstream/repo"}},
-                      {"conclusion": "failure"}):
+                      {"conclusion": "failure"}, {"head_repository": None}):
             runs.append({**good, "id": 2, "run_number": 2, **patch})
         self.assertEqual(ci.baseline(runs, dict(id=9, run_number=9, repository="fork/repo")), good)
         self.assertIsNone(ci.baseline([], dict(id=9, run_number=9, repository="fork/repo")))
@@ -98,6 +99,59 @@ class RecoveryTests(unittest.TestCase):
             ci.write_failure("fork/repo", "C", green, pages, output.append)
             self.assertIn("lookup failed", output[-1])
             self.assertNotIn("No successful", "\n".join(output))
+
+
+class BaselineDiscoveryTests(unittest.TestCase):
+    def run_record(self, number):
+        return dict(id=number, run_number=number, event="push", head_branch="main",
+                    head_repository={"full_name": "fork/repo"}, conclusion="success", head_sha=str(number))
+
+    def discover(self, batches, jobs):
+        current = dict(id=200, run_number=200, repository="fork/repo")
+        def api(path):
+            page = int(path.rsplit("page=", 1)[1])
+            return dict(total_count=sum(map(len, batches)), workflow_runs=batches[page - 1].copy())
+        def pages(path, key):
+            self.assertEqual(key, "jobs")
+            number = int(path.split("/")[2])
+            return [dict(name="linkage " + str(i), conclusion=status)
+                    for i, status in enumerate(jobs[number])]
+        return ci.find_green(api, pages, current)
+
+    def test_noop_above_proof_and_coalesced_selection(self):
+        a, b = self.run_record(1), self.run_record(2)
+        green = self.discover([[b, a]], {1: ["success", "success"], 2: []})
+        self.assertEqual(green, a)
+        root = Path(__file__).resolve().parents[1]
+        changes = {"1": ["crates/horizon-client/src/game.rs"], "2": ["crates/horizon-client/README.md"]}
+        self.assertTrue(ci.select_interval(root, green, changes.__getitem__))
+
+    def test_one_successful_leg_is_not_green(self):
+        a, b = self.run_record(1), self.run_record(2)
+        for other in ("failure", "skipped"):
+            with self.subTest(other=other):
+                self.assertEqual(self.discover([[b, a]], {1: ["success", "success"],
+                                                       2: ["success", other]}), a)
+
+    def test_baseline_on_second_page(self):
+        a = self.run_record(1)
+        noops = [self.run_record(n) for n in range(101, 1, -1)]
+        jobs = {r["id"]: [] for r in noops}
+        jobs[1] = ["success", "success"]
+        self.assertEqual(self.discover([noops, [a]], jobs), a)
+
+    def test_current_and_newer_proofs_are_excluded(self):
+        a = self.run_record(1)
+        self.assertEqual(self.discover([[self.run_record(201), self.run_record(200), a]],
+                                       {1: ["success", "success"]}), a)
+
+    def test_missing_baseline_sha_conservatively_proves(self):
+        output = []
+        with patch.object(ci.subprocess, "run", return_value=ci.subprocess.CompletedProcess([], 128, "", "bad revision")):
+            root = Path(__file__).resolve().parents[1]
+            self.assertTrue(ci.select_interval(root, {"head_sha": "gone"},
+                                               lambda base: ci.changed_paths(base, output.append)))
+        self.assertIn("conservatively proving", output[0])
 
 
 if __name__ == "__main__":
