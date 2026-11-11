@@ -67,14 +67,12 @@ class NightlyTests(unittest.TestCase):
             self.assertTrue(notes().startswith(nightly.train.PLAYERS + "\n\nNightly 2026-10-28 · bbbbbbb: "))
             self.assertIn(nightly.PLAYERS, notes())
 
-    def test_fork_notes_use_source_launcher_instructions_and_keep_build_details(self):
+    def test_fork_notes_use_loaded_intro_and_keep_build_details(self):
         with mock.patch.object(nightly.train, "REPO", "arismoko/horizon"):
             # An older selected checkout may not contain the template. It must already be loaded.
             with mock.patch.object(Path, "read_text", side_effect=AssertionError("late template read")):
                 text = notes(merged=[merged_pr(9, "Fix fork install", [])], issues=["- Known issue"])
-        self.assertIn("git clone --depth 1 https://github.com/arismoko/horizon.git", text)
-        self.assertIn("--bin horizon-launcher -- install nightly", text)
-        self.assertNotIn("https://playhorizon.dev", text)
+        self.assertTrue(text.startswith(nightly.FORK_PLAYERS + "\n\n"))
         self.assertNotIn(nightly.PLAYERS, text)
         self.assertIn("Nightly 2026-10-28 · bbbbbbb: main (mmmmmmm)", text)
         self.assertIn("nightly-source/2026-10-28-bbbbbbb", text)
