@@ -380,6 +380,7 @@ impl SecureChat {
 
 /// State shared with the connection threads.
 pub struct Shared {
+    payload_local: Arc<crate::raw_payloads::Local>,
     /// What the next login is sent; `PlayerList.reloadResources` swaps it.
     sync: Mutex<Arc<data::SyncData>>,
     pub events: Sender<NetEvent>,
@@ -648,6 +649,8 @@ impl Lan {
         let hide_online_players = config.hide_online_players;
         let enable_status = config.enable_status;
         let shared = Arc::new(Shared {
+            payload_local: crate::raw_payloads::Local::capture(crate::raw_payloads::Side::Server)
+                .map_err(io::Error::other)?,
             sync: Mutex::new(sync),
             events: tx,
             motd: Mutex::new(config.motd.clone()),
