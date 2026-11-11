@@ -958,3 +958,11 @@ pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
 pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
     boundary::export_id(owner, method)
 }
+
+/// The private compiler cache key under the production engine configuration, for executable
+/// smoke tests of the hidden compiler entry.
+#[cfg(feature = "runtime-fixture")]
+pub fn compile_child_key(bytes: &[u8]) -> Result<String, String> {
+    let engine = runtime::engine().map_err(|error| error.to_string())?;
+    Ok(module_cache::ModuleCache::key(&engine, bytes))
+}
