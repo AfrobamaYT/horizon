@@ -385,10 +385,12 @@ mod tests {
             ready.send(()).unwrap();
         }
         worker.join().unwrap();
-        assert_eq!(held.len(), 2);
+        let (values, leases): (Vec<_>, Vec<_>) =
+            held.into_iter().map(OwnedReceipt::into_parts).unzip();
+        assert_eq!(values, [1, 2]);
         assert_eq!(rx.stats().queued_items, 2);
         assert_eq!(rx.stats().reserved_bytes, 4 * message_overhead::<u32>());
-        drop(held);
+        drop(leases);
         assert_eq!(rx.stats().reserved_bytes, 2 * message_overhead::<u32>());
     }
 
