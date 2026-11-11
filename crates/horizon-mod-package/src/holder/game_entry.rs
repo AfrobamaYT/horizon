@@ -196,6 +196,60 @@ mod tests {
     use crate::locks::Release;
 
     #[test]
+    fn missing_registration_is_displayed_and_information_does_not_register() {
+        const ACTOR: &str = "HORIZON_MISSING_LEASE_ACTOR";
+        if let Some(mode) = std::env::var_os(ACTOR) {
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            if mode == "help" {
+                command.arg("--help");
+            }
+            let selection = LaunchArguments::for_command(&command).unwrap();
+            acquire(&selection);
+            return;
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let install = data.join("target/fast");
+        std::fs::create_dir_all(&install).unwrap();
+        let home = root.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        drop(Registry::with_release(&data, Release::Close).unwrap());
+        let executable = install.join(format!("actor{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        let run = |mode| {
+            Command::new(&executable)
+                .args([
+                    "--exact",
+                    "holder::game_entry::tests::missing_registration_is_displayed_and_information_does_not_register",
+                    "--nocapture",
+                ])
+                .env(ACTOR, mode)
+                .env("HORIZON_HOME", &home)
+                .env_remove(ENTRY)
+                .current_dir(root.path())
+                .output()
+                .unwrap()
+        };
+        assert!(run("help").status.success());
+        let registry = Registry::existing(&data).unwrap();
+        assert!(matches!(
+            registry.lock(&open_directory(&install).unwrap(), LockMode::Shared),
+            Err(crate::runtime_leases::Error::Io(error)) if error.kind() == io::ErrorKind::NotFound
+        ));
+        drop(registry);
+        let output = run("game");
+        assert_eq!(output.status.code(), Some(78));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unregistered"), "{stderr}");
+        assert!(
+            stderr.contains("horizon-launcher play --instance <instance> --version <tag>"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("start the launcher once"), "{stderr}");
+    }
+
+    #[test]
     fn managed_launch_binds_external_instance_and_log_roots() {
         for separate in [false, true] {
             let root = tempfile::tempdir().unwrap();
