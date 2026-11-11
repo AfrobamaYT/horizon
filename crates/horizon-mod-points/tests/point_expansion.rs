@@ -36,7 +36,7 @@ mod mod_points {
     }
 }
 
-#[point(name = "double", free)]
+#[point(slot = 0, name = "double", free)]
 fn double(value: i64) -> i64 {
     value * 2
 }
@@ -46,6 +46,7 @@ fn api_head_body_return_and_early_result() {
     use mod_points::__private::POINTS;
     assert_eq!(double(2), 4);
     POINTS[0].store(true, Ordering::Release);
+    __pointa_double();
     assert_eq!(double(2), 6);
     POINTS[1].store(true, Ordering::Release);
     assert_eq!(double(2), 16);
@@ -54,4 +55,23 @@ fn api_head_body_return_and_early_result() {
         42,
         "head result skips body and return listeners"
     );
+}
+
+static __REPLACE: [std::sync::atomic::AtomicPtr<()>; 2] =
+    [const { std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }; 2];
+fn __fnr_read_slot_0() -> Option<fn(i64) -> i64> {
+    let pointer = crate::__REPLACE[0].load(std::sync::atomic::Ordering::Relaxed);
+    if pointer.is_null() {
+        None
+    } else {
+        Some(unsafe { std::mem::transmute::<*mut (), fn(i64) -> i64>(pointer) })
+    }
+}
+fn __fnr_read_body_0() -> Option<fn(i64) -> i64> {
+    let pointer = crate::__REPLACE[1].load(std::sync::atomic::Ordering::Relaxed);
+    if pointer.is_null() {
+        None
+    } else {
+        Some(unsafe { std::mem::transmute::<*mut (), fn(i64) -> i64>(pointer) })
+    }
 }

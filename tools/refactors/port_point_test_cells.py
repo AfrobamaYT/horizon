@@ -2,9 +2,10 @@
 import re
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
-paths = list((root/'crates/horizon-mod-points/tests').glob('*.rs')) + [root/'crates/horizon-mod-wasm/tests/native_listener.rs', root/'crates/horizon-mod-wasm/tests/support/checks.rs']
+paths = list((root/'crates/horizon-mod-points/tests').glob('*.rs')) + [root/'crates/horizon-mod-wasm/tests/native_listener.rs', root/'crates/horizon-mod-wasm/tests/real_member.rs', root/'crates/horizon-mod-wasm/tests/support/checks.rs']
 for p in paths:
     s = p.read_text(); additions=[]; arms=[]
+    if 'point(slot =' in s: continue
     def point(m):
         slot = len(arms) * 2 + (6 if p.name == 'checks.rs' else 0)
         name, args, ret = m.group(2,3,4)
@@ -17,7 +18,7 @@ for p in paths:
     s = re.sub(r'#\[(?:horizon_mod_api_macros::)?point\(([^\n]*)\)\]\nfn (\w+)\(([^\n]*)\)(\s*->\s*[^\{]+)?\s*\{', point, s)
     if not arms: continue
     if p.name != 'checks.rs':
-        count = 8 if p.name == 'native_listener.rs' else len(arms)*2
+        count = 8 if p.name in ('native_listener.rs', 'real_member.rs') else len(arms)*2
         additions.insert(0, f'static __REPLACE: [std::sync::atomic::AtomicPtr<()>; {count}] = [const {{ std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }}; {count}];')
     s += '\n' + '\n'.join(additions) + '\n'
     if p.name == 'checks.rs': s=s.replace('pub fn check() {','pub fn check() {\n'+'\n'.join(arms))

@@ -138,10 +138,11 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
     // Engine internals are native-only. A mod dependency's internals stay inside the group.
     for (i, package) in packages.iter().enumerate() {
         if !package.manifest.internals.is_empty()
-            || package.manifest.inject.iter().any(|inject| {
-                inject.access == Access::Internals
-                    && package.manifest.mod_point_dependency(&inject.at).is_none()
-            })
+            || package
+                .manifest
+                .inject
+                .iter()
+                .any(|inject| inject.access == Access::Internals)
         {
             refused.insert(i, Refusal::Internals);
         }
