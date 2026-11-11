@@ -233,7 +233,11 @@ impl Drop for Endpoint {
 #[test]
 fn runtime_addresses_validate_candidates_and_exchange() {
     use std::os::unix::fs::{PermissionsExt, symlink};
-    let root = tempfile::tempdir().unwrap();
+    #[cfg(target_os = "macos")]
+    let fallback = "/private/tmp";
+    #[cfg(not(target_os = "macos"))]
+    let fallback = "/tmp";
+    let root = tempfile::tempdir_in(fallback).unwrap();
     let safe = root.path().canonicalize().unwrap().join("runtime");
     std::fs::create_dir(&safe).unwrap();
     std::fs::set_permissions(&safe, std::fs::Permissions::from_mode(0o700)).unwrap();
