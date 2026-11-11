@@ -1,4 +1,4 @@
-//! The code mods a world was saved with: `level.dat`'s `Data.fml.LoadingModList`, the list
+//! The code mods a world was saved with: `level.dat`'s `fml.LoadingModList`, the list
 //! NeoForge keeps, and how it compares with the mods loaded now (`ModMismatchEvent`).
 use super::{Level, Tag, compound_or_empty, put, string, text};
 use std::sync::RwLock;
@@ -29,7 +29,7 @@ pub fn loaded() -> Option<Vec<ModRecord>> {
     LOADED.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// The list a level.dat's `Data` holds; `None` without one (vanilla, or saved before Horizon
+/// The list a level.dat's root holds; `None` without one (vanilla, or saved before Horizon
 /// wrote it).
 pub(super) fn saved(data: &Tag) -> Option<Vec<ModRecord>> {
     let Some(Tag::List(mods)) = data.get("fml").and_then(|fml| fml.get("LoadingModList")) else {
@@ -121,19 +121,19 @@ mod tests {
         };
         write_dat(
             &dir.join("level.dat"),
-            Tag::compound([(
-                "Data",
-                Tag::compound([
-                    ("LevelName", Tag::String("Test".into())),
-                    (
-                        "fml",
-                        Tag::compound([
-                            ("Other", Tag::Int(7)),
-                            ("LoadingModList", Tag::List(vec![entry("old", "0.1.0")])),
-                        ]),
-                    ),
-                ]),
-            )]),
+            Tag::compound([
+                (
+                    "Data",
+                    Tag::compound([("LevelName", Tag::String("Test".into()))]),
+                ),
+                (
+                    "fml",
+                    Tag::compound([
+                        ("Other", Tag::Int(7)),
+                        ("LoadingModList", Tag::List(vec![entry("old", "0.1.0")])),
+                    ]),
+                ),
+            ]),
         )
         .unwrap();
         let mut level = Level::read(&dir).unwrap();
@@ -143,11 +143,7 @@ mod tests {
             Level::read(&dir).unwrap().saved_mods,
             Some(vec![record("old", "0.1.0")])
         );
-        let mut data = read_dat(&dir.join("level.dat"))
-            .unwrap()
-            .get("Data")
-            .unwrap()
-            .clone();
+        let mut data = read_dat(&dir.join("level.dat")).unwrap();
         write_list(&mut data, &[record("first", "1.2.0"), record("second", "")]);
         assert_eq!(
             saved(&data),
