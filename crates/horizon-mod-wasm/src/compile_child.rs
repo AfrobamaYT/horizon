@@ -3,7 +3,7 @@ use crate::module_cache::{CACHE_DIR, ModuleCache};
 use std::{
     ffi::OsString,
     fs::{self, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -113,7 +113,32 @@ pub(crate) fn compile(input: &Path, expected_key: &str) -> wasmtime::Result<()> 
     if cache.disabled.is_some() {
         return Err(io::Error::other("cache folder refused").into());
     }
-    let bytes = fs::read(input)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+        );
+    }
+    let mut file = options.open(input)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::other("input is not a regular file").into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.uid() != rustix::process::getuid().as_raw()
+            || metadata.nlink() != 1
+            || metadata.mode() & 0o7777 != 0o600
+        {
+            return Err(io::Error::other("input is not private").into());
+        }
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
     let engine = crate::runtime::engine()?;
     if expected_key != ModuleCache::key(&engine, &bytes) {
         return Err(io::Error::other("output does not match module cache key").into());
@@ -183,3 +208,43 @@ pub(crate) fn run(
 /// Linux x86_64, AMD Ryzen 7 5700X; no environment variables needed to start.
 #[cfg(unix)]
 pub(crate) const TIMEOUT: std::time::Duration = std::time::Duration::from_nanos(37_743_749_290);
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn refuses_linked_nonregular_and_replaced_inputs_without_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(CACHE_DIR);
+        fs::create_dir_all(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let bytes = b"\0asm\x01\0\0\0";
+        let engine = crate::runtime::engine().unwrap();
+        let key = ModuleCache::key(&engine, bytes);
+        let input = Input::new(&root, bytes).unwrap();
+        let original = root.join("original");
+        fs::rename(&input.0, &original).unwrap();
+        symlink(&original, &input.0).unwrap();
+        assert!(compile(&input.0, &key).is_err());
+        fs::remove_file(&input.0).unwrap();
+        fs::hard_link(&original, &input.0).unwrap();
+        assert!(compile(&input.0, &key).is_err());
+        fs::remove_file(&input.0).unwrap();
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &input.0,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            0,
+        )
+        .unwrap();
+        assert!(compile(&input.0, &key).is_err());
+        fs::remove_file(&input.0).unwrap();
+        let replacement = Input::new(&root, b"different bytes").unwrap();
+        fs::rename(&replacement.0, &input.0).unwrap();
+        assert!(compile(&input.0, &key).is_err());
+        assert!(!root.join(format!("{key}.cwasm")).exists());
+    }
+}
