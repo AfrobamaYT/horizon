@@ -2002,13 +2002,15 @@ mod tests {
                 data: Vec::new()
             }
         );
+        // An index past the table (a placeholder for a saved biome the world lacks) is sent as
+        // plains, network id 1 here, not as whichever biome sorts first.
         section.biomes =
             horizon_core::paletted::PalettedContainer::new(section.biomes.strategy(), 99);
         assert_eq!(
             encoder.coder.biomes(&section),
             Paletted {
                 bits: 0,
-                palette: vec![0],
+                palette: vec![1],
                 data: Vec::new()
             }
         );
