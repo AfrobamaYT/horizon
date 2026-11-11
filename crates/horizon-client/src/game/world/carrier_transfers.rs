@@ -39,6 +39,8 @@ pub(crate) enum TransferError {
     /// A cell holds a block this slice does not move (not a plain block
     /// or a passive block entity).
     UnsupportedBlock([i32; 3]),
+    /// Saved block-entity tags have no transfer payload adapter.
+    SavedBlockEntity([i32; 3]),
     /// The registry's own states cannot fit the operation envelope.
     Envelope,
     /// The model refused the assembled carrier.
@@ -83,6 +85,9 @@ impl std::fmt::Display for TransferError {
                 "cell ({},{},{}) holds a block this slice does not transfer",
                 pos[0], pos[1], pos[2]
             ),
+            Self::SavedBlockEntity(pos) => {
+                write!(f, "saved block entity at {pos:?} prevents transfer")
+            }
             Self::Envelope => write!(f, "the registry's states exceed the operation envelope"),
             Self::Model(invalid) => write!(f, "{invalid}"),
             Self::Store(text) => write!(f, "{text}"),
@@ -217,7 +222,7 @@ impl Game<'_> {
             }
             // Saved-only entities have no carrier payload adapter yet.
             if super::spill::saved_entity(&self.world, [pos.x, pos.y, pos.z]).is_some() {
-                return Err(TransferError::UnsupportedBlock([pos.x, pos.y, pos.z]));
+                return Err(TransferError::SavedBlockEntity([pos.x, pos.y, pos.z]));
             }
             // The passive-or-supported rule runs before anything is
             // lifted: a block entity this slice does not carry (ticking
@@ -582,6 +587,9 @@ impl Game<'_> {
                 .contains_key(&(world[0], world[1], world[2]));
             let replaceable =
                 self.with_level(|b, _level, _ticks| b.facts(state).flags & REPLACEABLE != 0);
+            if super::spill::saved_entity(&self.world, world).is_some() {
+                return Err(TransferError::SavedBlockEntity(world));
+            }
             if !replaceable || occupied {
                 return Err(TransferError::DestinationOccupied(world));
             }
@@ -770,6 +778,9 @@ impl Game<'_> {
                 .world
                 .block_entities
                 .contains_key(&(pos[0], pos[1], pos[2]));
+            if super::spill::saved_entity(&self.world, pos).is_some() {
+                return Err(TransferError::SavedBlockEntity(pos));
+            }
             if !replaceable || entity {
                 return Err(TransferError::Revalidation(pos));
             }
@@ -1315,6 +1326,82 @@ mod tests {
             assert!(store.journal().in_progress.is_none());
             assert!(store.journal().carriers.is_empty());
             assert!(!root.join("dimensions/minecraft/overworld/region").exists());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn saved_tag_refuses_assembly_and_disassembly_without_mutation() {
+        let root = transfer_root("saved-tag");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.carrier_data_existed_at_open = true;
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            let air = registry.default_state("minecraft:air").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            let entity = horizon_client::chunk::block_entity::BlockEntity::Chest(vec![
+                None,
+                Some(horizon_client::items::ItemStack {
+                    item: "minecraft:stone".into(),
+                    count: 3,
+                    damage: 0,
+                    extra: None,
+                }),
+            ]);
+            let tag =
+                horizon_client::save::encode_block_entity((4, 64, 4), &entity, "minecraft:chest");
+            super::spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
+            assert!(matches!(
+                game.carrier_assemble(7, &[BlockPos::new(4, 64, 4)]),
+                Err(TransferError::SavedBlockEntity([4, 64, 4]))
+            ));
+            assert_eq!(game.world.block(4, 64, 4), chest);
+            assert!(
+                std::fs::read_dir(root.join("data"))
+                    .unwrap()
+                    .next()
+                    .is_none()
+            );
+            Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).saved = None;
+            game.carrier_assemble(7, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+            super::spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
+            assert!(matches!(
+                game.carrier_disassemble(7, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0]),
+                Err(TransferError::SavedBlockEntity([4, 64, 4]))
+            ));
+            let images = [crate::carrier_store::OperationCell {
+                world: [4, 64, 4],
+                local: [0, 0, 0],
+                before: crate::carrier_store::CellImage {
+                    name: "minecraft:chest".to_string(),
+                    properties: Vec::new(),
+                    entity: None,
+                },
+                after: crate::carrier_store::CellImage {
+                    name: "minecraft:air".to_string(),
+                    properties: Vec::new(),
+                    entity: None,
+                },
+            }];
+            assert!(matches!(
+                game.revalidate_destinations(&images),
+                Err(TransferError::SavedBlockEntity([4, 64, 4]))
+            ));
+            assert_eq!(game.world.block(4, 64, 4), air);
+            assert_eq!(
+                super::spill::saved_entity(&game.world, [4, 64, 4]),
+                Some(tag)
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
