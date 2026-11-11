@@ -24,7 +24,7 @@ fn message(missing: &[(String, String)]) -> String {
 pub(super) fn screen_info(missing: &[(String, String)]) -> crate::widgets::ScreenInfo {
     crate::widgets::ScreenInfo::new(
         "missing_biome_regions",
-        join(&[
+        crate::widgets::join_for_narration(&[
             &lang::get("horizon.biome_regions.missing.title"),
             &message(missing),
         ]),

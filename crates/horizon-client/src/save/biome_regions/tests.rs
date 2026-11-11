@@ -337,3 +337,30 @@ fn adopting_takes_installed_regions_and_keeps_saved_weights() {
     );
     assert_eq!(adopted.differences(&everyone, &now), Differences::default());
 }
+
+#[test]
+fn interrupted_replacement_refuses_to_drop_the_layout() {
+    let dir =
+        std::env::temp_dir().join(format!("horizon-region-interrupted-{}", std::process::id()));
+    fs::create_dir_all(path(&dir).parent().unwrap()).unwrap();
+    for name in ["biome_regions.dat_old", "biome_regions.dat_new"] {
+        let leftover = path(&dir).with_file_name(name);
+        fs::write(&leftover, b"saved layout").unwrap();
+        let why = BiomeRegions::read(&dir).unwrap_err();
+        assert!(why.contains(name), "{why}");
+        assert_eq!(fs::read(&leftover).unwrap(), b"saved layout");
+        assert!(!path(&dir).exists());
+        fs::remove_file(leftover).unwrap();
+    }
+}
+
+#[test]
+fn choices_refuse_a_world_already_open_in_another_session() {
+    let scratch = tempfile::tempdir().unwrap();
+    let dir = scratch.path();
+    let lock = super::super::SessionLock::acquire(&dir).unwrap();
+    assert!(choose_with(&dir, &mods(&[]), &[], true, true).is_err());
+    assert!(!path(&dir).exists());
+    drop(lock);
+    assert!(choose_with(&dir, &mods(&[]), &[], true, true).is_ok());
+}
