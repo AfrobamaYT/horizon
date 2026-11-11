@@ -23,11 +23,7 @@ static VANILLA_ASKED: AtomicUsize = AtomicUsize::new(0);
 struct Shell;
 #[mod_api::horizon_part]
 impl MenuPart for Shell {
-    fn menu_still_valid(
-        &self,
-        _: &dyn mod_api::LoopContext,
-        event: &mut MenuStillValidEvent<'_>,
-    ) {
+    fn menu_still_valid(&self, _: &dyn mod_api::LoopContext, event: &mut MenuStillValidEvent<'_>) {
         ASKED.fetch_add(1, Ordering::Relaxed);
         assert_eq!(event.menu, "test:shell");
         event.valid = KEEP.load(Ordering::Relaxed);
@@ -37,11 +33,7 @@ impl MenuPart for Shell {
 struct VanillaChest;
 #[mod_api::horizon_part]
 impl MenuPart for VanillaChest {
-    fn menu_still_valid(
-        &self,
-        _: &dyn mod_api::LoopContext,
-        event: &mut MenuStillValidEvent<'_>,
-    ) {
+    fn menu_still_valid(&self, _: &dyn mod_api::LoopContext, event: &mut MenuStillValidEvent<'_>) {
         VANILLA_ASKED.fetch_add(1, Ordering::Relaxed);
         event.valid = true;
     }
@@ -106,8 +98,7 @@ fn a_mod_menu_part_decides_whether_its_menu_stays_open() {
                         menu.registry_id = "test:shell".into();
                         menu.mod_type = Some(shell);
                     }
-                    menu.asks_still_valid =
-                        asks_still_valid(menu.mod_type, &menu.registry_id);
+                    menu.asks_still_valid = asks_still_valid(menu.mod_type, &menu.registry_id);
                 });
             };
             let is_open = |game: &crate::game::Game<'_>| {
