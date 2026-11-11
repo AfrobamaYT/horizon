@@ -29,6 +29,7 @@
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
 - [Injections](injections.md)
+- [Mixins](mixins.md)
 
 # Reference
 
