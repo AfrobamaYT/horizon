@@ -150,6 +150,27 @@ impl Game<'_> {
         self.rockets.retain(|r| !gone(r.position));
         self.tridents.retain(|t| !gone(t.position));
         self.tnts.retain(|t| !gone(t.position));
+        // A general row leaves with its chunk, its riders with it: a rider's
+        // record saved inside its root's, a rider goes when its root's chunk
+        // goes and stays while the root stays, whatever its own position.
+        let gone_general_roots: HashSet<u32> = self
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .filter(|row| row.mount.is_none() && gone(row.position))
+            .map(|row| row.id)
+            .collect();
+        self.resident_entities.general.rows.retain(|row| {
+            let keep = match row.mount {
+                None => !gone(row.position),
+                Some(root) => !gone_general_roots.contains(&root),
+            };
+            if !keep {
+                removed.push(row.id);
+            }
+            keep
+        });
         self.persist
             .anon
             .retain(|_, (at, _)| !keys.contains(&chunk_of(*at)));

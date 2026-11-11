@@ -229,3 +229,60 @@ fn unknown_rider_type_hands_the_tree_back() {
         assert!(game.resident_entities.general.rows.is_empty());
     });
 }
+
+/// The unload path: `unload_entities` (game.rs) runs `entity_chunks` with
+/// `remove`, whose sweep (persist/unload_sweep.rs) first saves every row
+/// through `save_lists!` and then removes them and forgets their ids. A
+/// root and its rider leave together as one record; the resident table no
+/// longer knows the old id (what an `EntityRef` resolves through), and the
+/// record that comes back loads as exactly one tree of the same UUIDs,
+/// under fresh ids from the never-decreasing counter.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn general_row_unloads_with_its_chunk_and_reloads_once() {
+    use crate::game::entity_residency::SlotAccess;
+    use mod_api::DimensionKey;
+    use std::num::NonZeroU32;
+    with_types(|game| {
+        game.reset_entity_residency();
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"rider", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"root", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        let (old_root, old_rider) = (rows[0].id, rows[1].id);
+        let id = |value: u32| NonZeroU32::new(value).unwrap();
+        for known in [old_root, old_rider] {
+            assert!(matches!(
+                game.with_resident_slot(&DimensionKey::OVERWORLD, id(known), |_| true),
+                SlotAccess::Done(true)
+            ));
+        }
+        // The chunk unloads: one record leaves (the rider inside its root),
+        // and both rows are gone.
+        let mut chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+        assert_eq!(chunks.len(), 1);
+        let (_, mut records) = chunks.remove(0);
+        assert_eq!(records.len(), 1);
+        assert!(game.resident_entities.general.rows.is_empty());
+        // The old ids no longer resolve: a stale handle cannot reach either
+        // row again, and the counter never hands their ids back out.
+        for gone in [old_root, old_rider] {
+            assert!(matches!(
+                game.with_resident_slot(&DimensionKey::OVERWORLD, id(gone), |_| panic!(
+                    "a stale id resolved"
+                )),
+                SlotAccess::Missing
+            ));
+        }
+        // The same record loads back as one tree of the same UUIDs.
+        game.load_listed("mymod:robot", None, None, records.remove(0))
+            .unwrap();
+        let rows = &game.resident_entities.general.rows;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
+        assert_eq!(rows[1].uuid, [9, 9, 9, 9]);
+        assert_eq!(rows[1].mount, Some(rows[0].id));
+        assert_ne!(rows[0].id, old_root);
+        assert_ne!(rows[1].id, old_rider);
+    });
+}
