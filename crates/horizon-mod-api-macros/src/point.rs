@@ -124,16 +124,6 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         Err(e) => return e.to_compile_error(),
     };
     let name = shape.name.clone();
-    let Some(slot) = shape.slot else {
-        return syn::Error::new_spanned(
-            &function.sig.ident,
-            format!(
-                "point {} has no replacement cell: the staging pass writes `slot = N`",
-                function.sig.ident
-            ),
-        )
-        .to_compile_error();
-    };
     let table = quote!(mod_points);
     // The body moves to an inlined inner function, so the return listeners run however it
     // returns; the outer function takes each parameter by a plain, mutable name.
@@ -161,6 +151,16 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         )
         .to_compile_error();
     }
+    let Some(slot) = shape.slot else {
+        return syn::Error::new_spanned(
+            &function.sig.ident,
+            format!(
+                "point {} has no replacement cell: the staging pass writes `slot = N`",
+                function.sig.ident
+            ),
+        )
+        .to_compile_error();
+    };
     let args: Vec<(&Arg, usize)> = shape.args.iter().zip(inputs.iter().copied()).collect();
     // What the body gets: a `&T` the listeners may have replaced, a `&mut` reborrowed so the
     // return listeners can still copy it.
