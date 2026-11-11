@@ -1,5 +1,11 @@
 //! Frozen raw-payload declarations and per-connection dispatch tables.
 //! Application packets retain their declared vanilla custom-payload channel.
+pub mod connection;
+mod encode;
+pub use encode::encode;
+mod incoming;
+pub use incoming::Incoming;
+mod transport;
 use horizon_protocol::{
     packets::custom_payload::{PayloadCodecs, PayloadFlow, PayloadProtocol as CodecProtocol},
     payload_negotiation::{self as negotiation, Flow, Manifest, Phase, RegistrationPhase},
@@ -10,6 +16,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
+pub use transport::Transport;
 
 /// Logical receiving side, never inferred from application bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,7 +92,7 @@ impl Local {
         }
         Ok(Arc::new(Self::new(manifest, Some(registry))))
     }
-    fn empty() -> Arc<Self> {
+    pub(crate) fn empty() -> Arc<Self> {
         static EMPTY: OnceLock<Arc<Local>> = OnceLock::new();
         EMPTY
             .get_or_init(|| Arc::new(Self::new(Manifest::default(), None)))

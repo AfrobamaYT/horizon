@@ -519,28 +519,33 @@ impl Game<'_> {
         let (ready_tx, ready) = channel();
         let (tasks, server_tasks) = channel();
         let server_flags = flags.clone();
+        let run_server = move |_: &()| {
+            // MinecraftServer.spin's Thread.setPriority(8).
+            horizon_threads::favour_current();
+            let result = serve(
+                &res,
+                pack,
+                options,
+                settings,
+                launch,
+                server_flags.clone(),
+                server_tasks,
+                &ready_tx,
+            );
+            if let Err(e) = result {
+                log::error!("Horizon: integrated server: {e}");
+                *server_flags.failure.lock().unwrap() = Some(e.to_string());
+                let _ = ready_tx.send(Err(e.to_string()));
+            }
+        };
+        // Production installations are process-wide. A test installation is scoped
+        // to its owning thread; the real server thread must inherit that snapshot.
+        #[cfg(test)]
+        let run_server = mod_api::testing::inherit_mods(run_server);
         let thread = std::thread::Builder::new()
             .name("Server thread".into())
             .stack_size(server_thread_stack())
-            .spawn(move || {
-                // MinecraftServer.spin's Thread.setPriority(8).
-                horizon_threads::favour_current();
-                let result = serve(
-                    &res,
-                    pack,
-                    options,
-                    settings,
-                    launch,
-                    server_flags.clone(),
-                    server_tasks,
-                    &ready_tx,
-                );
-                if let Err(e) = result {
-                    log::error!("Horizon: integrated server: {e}");
-                    *server_flags.failure.lock().unwrap() = Some(e.to_string());
-                    let _ = ready_tx.send(Err(e.to_string()));
-                }
-            })?;
+            .spawn(move || run_server(&()))?;
         let handle = Integrated {
             flags,
             thread: Some(thread),

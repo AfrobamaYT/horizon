@@ -21,6 +21,8 @@ for match in re.finditer(r"\b(configure|receive_play)\s*\(", source):
         elif token.group() == ")":
             depth -= 1
             if depth == 0:
+                if re.search(r"(?:\bpayloads|&crate::raw_payloads::Transport::empty\(\)),\s*$", source[match.end():token.start()]):
+                    break
                 line = source.rfind("\n", 0, token.start()) + 1
                 indent = source[line:token.start()]
                 if indent.strip():
@@ -32,4 +34,9 @@ for match in re.finditer(r"\b(configure|receive_play)\s*\(", source):
         raise ValueError("unclosed receive call")
 for position, insertion in reversed(changes):
     source = source[:position] + insertion + source[position:]
+source = re.sub(
+    r"(\bSession\s*\{\s*\n(?P<indent>\s*)events,)(\n\s*writer:)",
+    lambda match: match[1] + "\n" + match["indent"] + "payloads: crate::raw_payloads::Transport::empty()," + match[3],
+    source,
+)
 path.write_text(source)

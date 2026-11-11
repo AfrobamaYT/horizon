@@ -7,9 +7,10 @@
 //! (crate::auth): the login joins the server through the session service and
 //! encrypts the connection (ClientHandshakePacketListenerImpl.handleHello).
 use crate::auth::AuthSession;
+mod queued_writer;
 use horizon_protocol::{
     PROTOCOL_VERSION,
-    connection::{ConnReader, ConnWriter, Connection, Counters},
+    connection::{ConnReader, Connection, Counters},
     crypto::{generate_secret, offline_uuid, server_hash},
     packets::{Empty, configuration as cfg, handshake, login, play},
     registry::Dynamic,
@@ -17,6 +18,8 @@ use horizon_protocol::{
     servers::parse_address,
     text::{Language, plain, translatable},
 };
+pub use queued_writer::PreparedPayload;
+use queued_writer::QueuedWriter;
 use std::path::Path;
 use std::{
     collections::HashMap,
@@ -93,6 +96,8 @@ pub enum Event {
         name: String,
     },
     Packet(Box<play::Clientbound>),
+    /// Registered application bytes, owned until the receiving root transaction ends.
+    RawPayload(crate::raw_payloads::Incoming),
     /// A packet that failed to decode (skipped, like vanilla's skippable packets).
     DecodeError(String),
     /// The server sent us back to configuration (`ClientboundStartConfigurationPacket`):
@@ -136,7 +141,8 @@ pub enum Event {
 
 pub struct Session {
     events: Receiver<Event>,
-    writer: Arc<Mutex<Option<ConnWriter>>>,
+    payloads: Arc<crate::raw_payloads::Transport>,
+    writer: Arc<Mutex<Option<QueuedWriter>>>,
     /// The connection is in configuration (else in play). Changed only
     /// with `writer` locked, as the packet that switches is sent.
     configuring: Arc<AtomicBool>,
@@ -172,7 +178,7 @@ impl Session {
     pub fn server_version(&self) -> horizon_protocol::adapter::ServerVersion {
         self.writer.lock().unwrap().as_ref().map_or(
             horizon_protocol::adapter::ServerVersion::Current,
-            ConnWriter::server_version,
+            QueuedWriter::server_version,
         )
     }
 
@@ -182,7 +188,7 @@ impl Session {
             .lock()
             .unwrap()
             .as_ref()
-            .and_then(ConnWriter::legacy_secure_chat_enforcement)
+            .and_then(QueuedWriter::legacy_secure_chat_enforcement)
     }
 
     /// Start connecting in the background, as `auth`'s account when there is one.
@@ -266,6 +272,7 @@ impl Session {
             writer: Arc::new(Mutex::new(None)),
             configuring: Arc::new(AtomicBool::new(false)),
             thread: None,
+            payloads: crate::raw_payloads::Transport::empty(),
             address: "studio-replay".to_owned(),
             name: name.to_owned(),
             counters: Arc::new(Mutex::new(None)),
@@ -288,6 +295,13 @@ impl Session {
         lan: bool,
     ) -> Self {
         let (send, events) = channel();
+        let captured_payloads =
+            crate::raw_payloads::Transport::capture(crate::raw_payloads::Side::Client);
+        let payloads = captured_payloads
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|_| crate::raw_payloads::Transport::empty());
+        let thread_payloads = payloads.clone();
         let writer = Arc::new(Mutex::new(None));
         let configuring = Arc::new(AtomicBool::new(true));
         let counters = Arc::new(Mutex::new(None));
@@ -307,24 +321,28 @@ impl Session {
             .name("horizon-net".into())
             .spawn(move || {
                 horizon_threads::favour_current();
-                let result = run(
-                    local,
-                    &address_owned,
-                    &name_owned,
-                    auth.as_deref(),
-                    info,
-                    &lang,
-                    &send,
-                    &thread_writer,
-                    &thread_configuring,
-                    &thread_counters,
-                    &thread_cookies,
-                    &thread_far,
-                    transferred,
-                    &resources,
-                    lan,
-                    &thread_recorder,
-                );
+                let result = captured_payloads.map_err(Reason::plain).and_then(|_| {
+                    run(
+                        local,
+                        &address_owned,
+                        &name_owned,
+                        auth.as_deref(),
+                        info,
+                        &lang,
+                        &send,
+                        &thread_writer,
+                        &thread_configuring,
+                        &thread_counters,
+                        &thread_cookies,
+                        &thread_far,
+                        transferred,
+                        &resources,
+                        lan,
+                        &thread_recorder,
+                        &thread_payloads,
+                    )
+                });
+                thread_payloads.close();
                 thread_far.cancel();
                 let from_server = result.is_ok();
                 let why = result.unwrap_or_else(|e| e);
@@ -341,6 +359,7 @@ impl Session {
         let debug = std::env::var_os("HORIZON_NET_DEBUG").is_some();
         Self {
             events,
+            payloads,
             writer,
             configuring,
             thread,
@@ -397,6 +416,29 @@ impl Session {
                 rec.record_packet(id, reader.rest());
             }
         }
+    }
+    /// This physical session's frozen declarations and current epoch.
+    pub fn payload_transport(&self) -> &Arc<crate::raw_payloads::Transport> {
+        &self.payloads
+    }
+    /// Prepare a registered payload without publishing it before root commit.
+    /// The caller resolves its channel against the frozen peer table first.
+    pub fn prepare_payload(
+        &self,
+        phase: horizon_protocol::payload_negotiation::Phase,
+        body: Vec<u8>,
+        id: &mod_api::PayloadId,
+    ) -> Result<PreparedPayload, mod_api::PayloadSendError> {
+        let writer = self.writer.lock().unwrap();
+        if self.configuring.load(Ordering::Relaxed)
+            != (phase == horizon_protocol::payload_negotiation::Phase::Configuration)
+        {
+            return Err(mod_api::PayloadSendError::WrongProtocol(id.clone()));
+        }
+        writer
+            .as_ref()
+            .ok_or(mod_api::PayloadSendError::Disconnected)?
+            .prepare_payload(body, id)
     }
     /// Send a play packet; silently dropped once the connection is gone,
     /// and while the server has the connection back in configuration (a
@@ -511,6 +553,7 @@ impl Session {
     /// doesn't wake a read already waiting, so joining it held the window until
     /// the server dropped the connection, many seconds later.
     pub fn disconnect(&mut self) {
+        self.payloads.close();
         if let Some(w) = self.writer.lock().unwrap().take() {
             w.shutdown();
         }
@@ -760,7 +803,7 @@ fn run(
     info: cfg::ClientInformation,
     lang: &Language,
     send: &Sender<Event>,
-    shared_writer: &Mutex<Option<ConnWriter>>,
+    shared_writer: &Mutex<Option<QueuedWriter>>,
     configuring: &AtomicBool,
     shared_counters: &Mutex<Option<Arc<Counters>>>,
     cookies: &Cookies,
@@ -769,6 +812,7 @@ fn run(
     resources: &ItemData,
     lan: bool,
     recorder: &RecorderSlot,
+    payloads: &crate::raw_payloads::Transport,
 ) -> Result<Reason, Reason> {
     let (host, port, mut c) = if let Some(pipe) = local {
         (address.to_owned(), 0, Connection::local(pipe))
@@ -933,7 +977,8 @@ fn run(
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
         .map_err(e)?;
     let (mut reader, writer) = c.split();
-    *shared_writer.lock().unwrap() = Some(writer);
+    *shared_writer.lock().unwrap() =
+        Some(QueuedWriter::new(writer).map_err(|error| Reason::plain(error.to_string()))?);
     let registries = configure(
         &mut reader,
         shared_writer,
@@ -942,6 +987,7 @@ fn run(
         send,
         cookies,
         resources,
+        payloads,
     )?;
     let _ = send.send(Event::Joined {
         registries: Arc::new(registries),
@@ -958,12 +1004,13 @@ fn run(
         far,
         resources,
         recorder,
+        payloads,
     )
 }
 
 fn receive_play(
     reader: &mut ConnReader,
-    shared_writer: &Mutex<Option<ConnWriter>>,
+    shared_writer: &Mutex<Option<QueuedWriter>>,
     configuring: &AtomicBool,
     lang: &Language,
     send: &Sender<Event>,
@@ -971,12 +1018,17 @@ fn receive_play(
     far: &crate::lod_net::Inbox,
     resources: &ItemData,
     recorder: &RecorderSlot,
+    payloads: &crate::raw_payloads::Transport,
 ) -> Result<Reason, Reason> {
     loop {
         let (id, payload) = reader
             .recv()
             .map_err(|e| Reason::plain(connection_lost(e, lang)))?;
-        let packet = match play::Clientbound::decode(id, &payload) {
+        let packet = match play::Clientbound::decode_with_payload_codecs(
+            id,
+            &payload,
+            &payloads.local.codecs,
+        ) {
             Ok(p) => p,
             Err(err) => {
                 let name = horizon_protocol::ids::name(
@@ -1022,6 +1074,7 @@ fn receive_play(
                     send,
                     cookies,
                     resources,
+                    payloads,
                 )?;
                 let _ = send.send(Event::Reconfigured(Arc::new(registries)));
             }
@@ -1053,6 +1106,16 @@ fn receive_play(
             play::Clientbound::CustomPayload(p) if p.channel == "minecraft:brand" => {
                 receive_brand(&p, send);
             }
+            play::Clientbound::CustomPayload(p) if payloads.local.owns(&p.channel) => {
+                let incoming = crate::raw_payloads::Incoming::new(
+                    payloads,
+                    horizon_protocol::payload_negotiation::Phase::Play,
+                    p,
+                )
+                .map_err(|error| Reason::plain(format!("play payload refused: {error:?}")))?;
+                send.send(Event::RawPayload(incoming))
+                    .map_err(|_| Reason::plain("Disconnected"))?;
+            }
             // A far tile, straight to the sampler waiting for it.
             play::Clientbound::CustomPayload(p) if p.channel == crate::lod_net::CHANNEL => {
                 far.deliver(p.data);
@@ -1070,32 +1133,76 @@ fn receive_play(
 /// server finishes it (ClientConfigurationPacketListenerImpl).
 fn configure(
     reader: &mut ConnReader,
-    writer: &Mutex<Option<ConnWriter>>,
+    writer: &Mutex<Option<QueuedWriter>>,
     configuring: &AtomicBool,
     lang: &Language,
     send: &Sender<Event>,
     cookies: &Cookies,
     resources: &ItemData,
+    payloads: &crate::raw_payloads::Transport,
 ) -> Result<Dynamic, Reason> {
     let mut registries = Dynamic::default();
     let mut content_verified = false;
+    payloads.begin_configuration();
+    let mut negotiation =
+        horizon_protocol::payload_negotiation::Negotiation::new(payloads.local.manifest.clone());
     let reply = |p: cfg::Serverbound| -> Result<(), Reason> {
         match writer.lock().unwrap().as_mut() {
             Some(w) => p
-                .try_encode()
+                .try_encode_with_payload_codecs(&payloads.local.codecs)
                 .and_then(|body| w.send(&body))
                 .map_err(|e| Reason::plain(connection_lost(e, lang))),
             None => Err(Reason::plain("Disconnected")),
         }
     };
+    if let Some(control) = negotiation.initial() {
+        reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+            channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
+            data: control
+                .encode()
+                .map_err(|error| Reason::plain(error.to_string()))?,
+        }))?;
+    }
     loop {
         let (id, payload) = reader
             .recv()
             .map_err(|e| Reason::plain(connection_lost(e, lang)))?;
-        match cfg::Clientbound::decode(id, &payload)
+        match cfg::Clientbound::decode_with_payload_codecs(id, &payload, &payloads.local.codecs)
             .map_err(|e| Reason::plain(connection_lost(e, lang)))?
         {
             cfg::Clientbound::KeepAlive(k) => reply(cfg::Serverbound::KeepAlive(k))?,
+            cfg::Clientbound::CustomPayload(p)
+                if p.channel == horizon_protocol::payload_negotiation::CHANNEL =>
+            {
+                let control = horizon_protocol::payload_negotiation::Control::decode(&p.data)
+                    .map_err(|error| Reason::plain(error.to_string()))?;
+                if let Some(control) = negotiation
+                    .receive(control)
+                    .map_err(|error| Reason::plain(error.to_string()))?
+                {
+                    reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                        channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
+                        data: control
+                            .encode()
+                            .map_err(|error| Reason::plain(error.to_string()))?,
+                    }))?;
+                }
+                if let Some(accepted) = negotiation.accepted() {
+                    payloads.accept(accepted).map_err(Reason::plain)?;
+                }
+            }
+            cfg::Clientbound::CustomPayload(p) if payloads.local.owns(&p.channel) => {
+                let incoming = crate::raw_payloads::Incoming::new(
+                    payloads,
+                    horizon_protocol::payload_negotiation::Phase::Configuration,
+                    p,
+                )
+                .map_err(|error| {
+                    Reason::plain(format!("configuration payload refused: {error:?}"))
+                })?;
+                send.send(Event::RawPayload(incoming))
+                    .map_err(|_| Reason::plain("Disconnected"))?;
+            }
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::content_identity::CHANNEL => {
                 let hash =
                     crate::content_identity::identity(resources.root(), resources.defaults())
@@ -1190,6 +1297,19 @@ fn configure(
             }
             cfg::Clientbound::Disconnect(d) => return Err(Reason::tag(&d.reason, lang)),
             cfg::Clientbound::FinishConfiguration(_) => {
+                negotiation
+                    .finish_without_offer()
+                    .map_err(|error| Reason::plain(error.to_string()))?;
+                if payloads.epoch().is_none() {
+                    payloads
+                        .accept(
+                            negotiation
+                                .accepted()
+                                .expect("configuration barrier freezes negotiation"),
+                        )
+                        .map_err(Reason::plain)?;
+                }
+                payloads.finish_configuration().map_err(Reason::plain)?;
                 registries.custom_components = content_verified;
                 let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
                 let w = w.as_mut().ok_or_else(|| Reason::plain("Disconnected"))?;
@@ -1498,12 +1618,13 @@ mod tests {
                 let (send, _events) = channel();
                 configure(
                     &mut reader,
-                    &Mutex::new(Some(writer)),
+                    &Mutex::new(Some(QueuedWriter::new(writer).unwrap())),
                     &AtomicBool::new(true),
                     &Language::new(),
                     &send,
                     &Cookies::default(),
                     &data,
+                    &crate::raw_payloads::Transport::empty(),
                 )
             });
             let mut server = Connection::local(server);
@@ -1849,7 +1970,7 @@ mod tests {
             let (send, _events) = channel();
             let _ = done.send(receive_play(
                 &mut reader,
-                &Mutex::new(Some(writer)),
+                &Mutex::new(Some(QueuedWriter::new(writer).unwrap())),
                 &AtomicBool::new(false),
                 &disconnect_language(),
                 &send,
@@ -1857,6 +1978,7 @@ mod tests {
                 &crate::lod_net::Inbox::default(),
                 &data,
                 &Arc::new(Mutex::new(None)),
+                &crate::raw_payloads::Transport::empty(),
             ));
         });
         let ended = result
@@ -1899,7 +2021,7 @@ mod tests {
         let expected = crate::content_identity::identity(&root, data.defaults()).unwrap();
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
-        let writer = Mutex::new(Some(writer));
+        let writer = Mutex::new(Some(QueuedWriter::new(writer).unwrap()));
         let thread = std::thread::spawn(move || {
             let (send, _events) = channel();
             configure(
@@ -1910,6 +2032,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &data,
+                &crate::raw_payloads::Transport::empty(),
             )
         });
         let mut server = Connection::local(server);
@@ -1960,7 +2083,7 @@ mod tests {
         for explicit_disconnect in [true, false] {
             let (client, _server) = horizon_protocol::connection::Pipe::pair();
             let (_reader, writer) = Connection::local(client).split();
-            let writer = Arc::new(Mutex::new(Some(writer)));
+            let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
             let (_send, events) = channel();
             let (release, stalled) = channel();
             let (finished, completed) = channel();
@@ -1970,6 +2093,7 @@ mod tests {
             });
             let mut session = Session {
                 events,
+                payloads: crate::raw_payloads::Transport::empty(),
                 writer: writer.clone(),
                 configuring: Arc::new(AtomicBool::new(false)),
                 thread: Some(thread),
@@ -2018,7 +2142,7 @@ mod tests {
         let (root, data) = empty_item_data("pings");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
-        let writer = Arc::new(Mutex::new(Some(writer)));
+        let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
         let (send, events) = channel();
         let thread_writer = writer.clone();
         let thread = std::thread::spawn(move || {
@@ -2032,6 +2156,7 @@ mod tests {
                 &crate::lod_net::Inbox::default(),
                 &data,
                 &Arc::new(Mutex::new(None)),
+                &crate::raw_payloads::Transport::empty(),
             )
         });
         let mut server = Connection::local(server);
@@ -2076,7 +2201,8 @@ mod tests {
         let (_, events) = channel();
         let session = Session {
             events,
-            writer: Arc::new(Mutex::new(Some(writer))),
+            payloads: crate::raw_payloads::Transport::empty(),
+            writer: Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
             configuring: Arc::new(AtomicBool::new(false)),
             thread: None,
             address: "local".into(),
@@ -2118,7 +2244,8 @@ mod tests {
         let (send, events) = channel();
         let session = Session {
             events,
-            writer: Arc::new(Mutex::new(Some(writer))),
+            payloads: crate::raw_payloads::Transport::empty(),
+            writer: Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
             configuring: Arc::new(AtomicBool::new(false)),
             thread: None,
             address: "local".into(),
@@ -2146,6 +2273,7 @@ mod tests {
                 &crate::lod_net::Inbox::default(),
                 &data,
                 &thread_recorder,
+                &crate::raw_payloads::Transport::empty(),
             )
         });
         let mut server = Connection::local(server);
@@ -2182,7 +2310,7 @@ mod tests {
         let (root, data) = empty_item_data("cookies");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
-        let writer = Arc::new(Mutex::new(Some(writer)));
+        let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
         let (send, events) = channel();
         let cookies = Cookies::default();
         let (thread_writer, thread_cookies) = (writer.clone(), cookies.clone());
@@ -2197,6 +2325,7 @@ mod tests {
                 &crate::lod_net::Inbox::default(),
                 &data,
                 &Arc::new(Mutex::new(None)),
+                &crate::raw_payloads::Transport::empty(),
             )
         });
         let mut server = Connection::local(server);
@@ -2408,7 +2537,8 @@ mod tests {
         let (send, events) = channel();
         let session = Session {
             events,
-            writer: Arc::new(Mutex::new(Some(writer))),
+            payloads: crate::raw_payloads::Transport::empty(),
+            writer: Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
             configuring: Arc::new(AtomicBool::new(false)),
             thread: None,
             address: "local".into(),
@@ -2440,6 +2570,7 @@ mod tests {
                 &crate::lod_net::Inbox::default(),
                 &data,
                 &thread_recorder,
+                &crate::raw_payloads::Transport::empty(),
             )
         });
 

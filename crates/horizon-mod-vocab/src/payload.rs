@@ -95,6 +95,8 @@ pub enum PayloadSendError {
     WrongProtocol(PayloadId),
     /// There is no active connection.
     Disconnected,
+    /// The configuration exchange has not frozen a peer table yet.
+    NotNegotiated,
     /// Work belongs to a replaced connection incarnation.
     StaleEpoch,
     /// The connection's byte budget cannot accept the message now.
@@ -112,6 +114,12 @@ pub enum PayloadSendError {
     },
     /// A connection codec could not prepare the packet.
     EncodeFailed(String),
+}
+
+impl crate::NoBackend for PayloadSendError {
+    fn no_backend() -> Self {
+        Self::Disconnected
+    }
 }
 
 /// A context operation cannot run in this phase, side or executor.

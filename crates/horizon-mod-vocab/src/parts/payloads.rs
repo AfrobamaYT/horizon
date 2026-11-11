@@ -31,7 +31,8 @@ pub struct Payloads {
 #[derive(Clone)]
 pub struct PayloadReceiver {
     /// The sole registered receiver.
-    pub handler: Arc<dyn IPayloadHandler>,
+    handler: Arc<dyn IPayloadHandler>,
+    owner: &'static str,
     /// Its chosen executor.
     pub thread: HandlerThread,
     owner_index: usize,
@@ -41,6 +42,35 @@ impl PayloadReceiver {
     /// Recheck the owner without scanning registrations or resolving the id again.
     pub fn enabled(&self) -> bool {
         crate::mod_index_on(self.owner_index)
+    }
+    /// Invoke only this owner. The caller owns the root transaction and handles
+    /// a native panic exactly like an explicit application decoding error.
+    pub fn handle(
+        &self,
+        bytes: crate::PayloadBytes,
+        context: &mut dyn crate::IPayloadContext,
+    ) -> Result<(), String> {
+        self.call("payload", || self.handler.handle(bytes, context))
+    }
+    /// Scheduled work retains its original receiving owner and enable guard.
+    pub fn run_work(
+        &self,
+        work: &dyn crate::PayloadWork,
+        context: &mut dyn crate::IPayloadContext,
+    ) -> Result<(), String> {
+        self.call("payload work", || work.run(context))
+    }
+    fn call(
+        &self,
+        operation: &'static str,
+        call: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        if !self.enabled() {
+            return Err("payload owner is disabled".into());
+        }
+        let _guard = crate::mark_mod(self.owner, operation);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(call))
+            .unwrap_or_else(|_| Err("payload callback panicked".into()))
     }
 }
 
@@ -75,11 +105,13 @@ impl Payloads {
                 handler,
                 thread: entry.client_thread,
                 owner_index: entry.owner_index,
+                owner: entry.owner,
             }),
             PayloadDirection::ToServer => entry.server.clone().map(|handler| PayloadReceiver {
                 handler,
                 thread: entry.declaration.thread,
                 owner_index: entry.owner_index,
+                owner: entry.owner,
             }),
             PayloadDirection::Bidirectional => None,
         }
