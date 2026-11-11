@@ -3995,7 +3995,7 @@ mod tests {
             let step = stderr
                 .lines()
                 .filter_map(|line| line.strip_prefix("NATIVE_SERVER_EXPORT_STEP="))
-                .filter(|step| {
+                .rfind(|step| {
                     [
                         "prepare_base",
                         "prepare_package",
@@ -4012,7 +4012,6 @@ mod tests {
                     ]
                     .contains(step)
                 })
-                .next_back()
                 .unwrap_or("not_started");
             let diagnostic = [
                 ("install", "NATIVE_SERVER_EXPORT_INSTALL_OS="),
