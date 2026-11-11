@@ -86,6 +86,12 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
     if engine.is_empty() {
         return Ok(());
     }
+    if !mod_points::STAGED {
+        return Err(format!(
+            "{}: {}: this build has no point sites; start the game through the launcher's mod build",
+            manifest.id, engine[0].at
+        ));
+    }
     let listed: Vec<(u32, String)> = module
         .call(
             CallClass::Load,
@@ -181,6 +187,41 @@ mod tests {
             priority: 0,
             hash: Some("pin".into()),
         }
+    }
+
+    #[test]
+    #[cfg(not(feature = "listener-fixture"))]
+    fn unstaged_build_refuses_api_listener_by_mod_and_target() {
+        assert!(!mod_points::STAGED);
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "id": "site_test", "name": "Sites", "version": "1.0.0", "description": "", "api": "0.2",
+            "inject": [{"id": "head", "at": "game::tick", "kind": "head", "with": "listener"}]
+        }))
+        .unwrap();
+        let bytes = wat::parse_str(format!(
+            r#"(module
+            (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (func (export "horizon_layout") (result i64) i64.const {})
+            (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+            (func (export "horizon_hook") (param i32) (result i64) i64.const 0))"#,
+            *mod_api::wire::LAYOUT
+        ))
+        .unwrap();
+        let module = WasmMod::instantiate(
+            &crate::runtime::engine().unwrap(),
+            &[("libsite.so", &manifest)],
+            &[crate::link::Member {
+                name: "libsite.so",
+                module: &bytes,
+            }],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            listen_checked(&manifest, &module).unwrap_err(),
+            "site_test: game::tick: this build has no point sites; start the game through the launcher's mod build"
+        );
     }
 
     /// A module built without the build tool may subscribe a `replace` anywhere: the loader
