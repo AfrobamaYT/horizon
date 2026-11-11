@@ -313,7 +313,7 @@ fn data_nesting(tag: &Tag, passengers_key: &horizon_core::nbt::JavaString) -> u3
 /// included, strings counted as their UTF-8 bytes): the measure the
 /// quarantine record bound applies.
 pub(super) fn nbt_size(tag: &Tag) -> u64 {
-    let payload = match tag {
+    match tag {
         Tag::End => 1,
         Tag::Byte(_) => 1,
         Tag::Short(_) => 2,
@@ -334,8 +334,7 @@ pub(super) fn nbt_size(tag: &Tag) -> u64 {
         }
         Tag::IntArray(ints) => 4 + ints.len() as u64 * 4,
         Tag::LongArray(longs) => 4 + longs.len() as u64 * 8,
-    };
-    payload
+    }
 }
 
 /// One record compound as the save format reads it: the common fields (their
