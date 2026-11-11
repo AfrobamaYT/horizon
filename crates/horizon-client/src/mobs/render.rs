@@ -2033,12 +2033,12 @@ fn posed_parts(poses: &Poses) -> Option<mod_api::PosedParts> {
         Some((poses.pose_of(name)?, !poses.is_hidden_named(name)))
     })
 }
-#[allow(clippy::too_many_arguments)]
 // Validate names against this frame's model before mutating its body poses.
-fn hide_parts(poses: &mut Poses, hidden: mod_api::HiddenParts, kind: &str) -> Result<(), String> {
+// Return the borrowed name so a repeated refusal never allocates an error string.
+fn hide_parts<'a>(poses: &mut Poses, hidden: &'a mod_api::HiddenParts) -> Result<(), &'a str> {
     for name in hidden.names() {
         if poses.pose_of(name).is_none() {
-            return Err(format!("mob {kind}: unknown hidden part {name}"));
+            return Err(name);
         }
     }
     for name in hidden.names() {
@@ -2047,6 +2047,50 @@ fn hide_parts(poses: &mut Poses, hidden: mod_api::HiddenParts, kind: &str) -> Re
     Ok(())
 }
 
+#[derive(Default)]
+struct HiddenPartReports {
+    names: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    count: usize,
+}
+
+impl HiddenPartReports {
+    // Mods can change their eight hidden names between frames. Never evict an entry (which
+    // would report it again); after this process-wide budget, suppress new diagnostics too.
+    const LIMIT: usize = 4096;
+
+    fn first(&mut self, kind: &str, name: &str) -> bool {
+        if self.count >= Self::LIMIT
+            || self
+                .names
+                .get(kind)
+                .is_some_and(|names| names.contains(name))
+        {
+            return false;
+        }
+        self.names
+            .entry(kind.to_owned())
+            .or_default()
+            .insert(name.to_owned());
+        self.count += 1;
+        true
+    }
+}
+
+fn report_unknown_hidden_part(kind: &str, name: &str) {
+    // Shared by every renderer, including mirror views and different render threads.
+    static REPORTS: std::sync::Mutex<Option<HiddenPartReports>> = std::sync::Mutex::new(None);
+    let mut reports = REPORTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if reports
+        .get_or_insert_with(HiddenPartReports::default)
+        .first(kind, name)
+    {
+        eprintln!("mob {kind}: unknown hidden part {name}");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_visible(
     m: &Mob,
     alpha: f32,
@@ -2185,8 +2229,8 @@ fn render_visible(
         &poses
     } else {
         hidden_poses.copy_from(&poses);
-        if let Err(reason) = hide_parts(&mut hidden_poses, hidden, &m.kind.id) {
-            eprintln!("{reason}");
+        if let Err(name) = hide_parts(&mut hidden_poses, &hidden) {
+            report_unknown_hidden_part(&m.kind.id, name);
             return;
         }
         &hidden_poses
@@ -2807,6 +2851,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unknown_hidden_parts_report_once_per_kind_and_name() {
+        let mut reports = HiddenPartReports::default();
+        assert!(reports.first("minecraft:cow", "nose"));
+        for _ in 0..10 {
+            assert!(!reports.first("minecraft:cow", "nose"));
+        }
+        assert!(reports.first("minecraft:pig", "nose"));
+        assert!(reports.first("minecraft:cow", "hat_rim"));
+        assert!(!reports.first("minecraft:pig", "nose"));
+        assert!(!reports.first("minecraft:cow", "hat_rim"));
+        assert_eq!(reports.count, 3);
+
+        for i in 3..HiddenPartReports::LIMIT {
+            assert!(reports.first("minecraft:cow", &format!("part_{i}")));
+        }
+        assert!(!reports.first("minecraft:cow", "over_budget"));
+        assert!(!reports.first("minecraft:sheep", "nose"));
+        assert!(!reports.first("minecraft:cow", "nose"));
+        assert_eq!(reports.count, HiddenPartReports::LIMIT);
+        assert_eq!(reports.names.len(), 2);
+    }
+
+    #[test]
     fn profession_texture_preserves_nested_namespaces() {
         assert_eq!(
             profession_texture("entity/villager", "minecraft:farmer"),
@@ -3045,8 +3112,8 @@ mod tests {
             "the leg's face leaves the CPU draw"
         );
         let mut poses = Poses::pooled();
-        let reason = hide_parts(&mut poses, absent, "minecraft:cow").unwrap_err();
-        assert!(reason.contains("minecraft:cow") && reason.contains("nose"));
+        let name = hide_parts(&mut poses, &absent).unwrap_err();
+        assert_eq!(name, "nose");
         assert_eq!(cpu(&cow, absent), 0, "unknown names refuse the draw");
         let gpu = |mob: &Mob, hidden| {
             let mut models = super::super::skin::SkinModels::default();
