@@ -123,15 +123,14 @@ fn special_type_keeps_its_base_model() {
 }
 
 /// A node type no mod registered is an error naming it, so the item definition holding it isn't
-/// loaded and the item draws the missing model, whatever keys the node has (a NeoForge type
-/// such as `neoforge:fluid_container` included: #2606 makes it a built-in node).
+/// loaded and the item draws the missing model, whatever keys the node has. NeoForge's own
+/// types are no exception, except `neoforge:fluid_container`, which the engine decodes (#2606).
 #[test]
 fn an_unregistered_node_type_fails_by_name() {
     for json in [
         r#"{"type":"mod:thing","model":"mod:item/thing"}"#,
         r#"{"type":"neoforge:trimmed_armor","base_model":{"type":"minecraft:model","model":"mod:item/boots"}}"#,
         r#"{"type":"mod:facade"}"#,
-        r#"{"type":"neoforge:fluid_container","textures":{"base":"minecraft:item/bucket"}}"#,
     ] {
         let kind = serde_json::from_str::<Value>(json).unwrap()["type"]
             .as_str()
