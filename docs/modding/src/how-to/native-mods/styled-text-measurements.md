@@ -53,8 +53,6 @@ to identify original input scalars. Use the records to re-layout existing toolti
 lines without losing click, hover, font or other style information. Like the
 other reads, invalid component input returns its boundary error.
 
-The shared decoder currently resolves action keybind IDs such as `key.jump` to
-translated action captions rather than the currently assigned key. Physical key
-names resolve normally. This existing limitation also affects measurements and visual-order reads;
-canonical action-binding parity is tracked in
-[#2718](https://github.com/arismoko/horizon/issues/2718).
+Action keybind IDs such as `key.jump` resolve through the client's current key
+binding to their assigned physical key display name, matching vanilla's `KeybindContents`.
+Physical key names resolve normally.

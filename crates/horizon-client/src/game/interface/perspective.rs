@@ -234,7 +234,7 @@ fn load_player_type(models: &horizon_client::mobs::EntityModelDocument) -> Optio
                 "entity.player.hurt",
                 "entity.player.death",
             ],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Arc::from([]),
             tempt: Arc::from([]),
             passenger_attachments: Vec::new(),

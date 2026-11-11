@@ -1,6 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/lending.rs"]
+mod lending;
 #[path = "fixture/src/matrix.rs"]
 mod matrix;
 #[path = "support/checks.rs"]
@@ -24,6 +26,8 @@ impl mod_api::prelude::ItemsHost for Quiet {
         mod_api::__private::item_key_by_identifier(id)
     }
 }
+impl mod_api::ClientHost for Quiet {}
+mod_api::impl_client_host_areas!(Quiet);
 impl mod_api::ServerHost for Quiet {}
 mod_api::impl_server_host_areas!(Quiet, except(projectiles));
 static OWNER_LAUNCH_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -130,6 +134,56 @@ fn real_member() {
                 .any(|kind| kind.id == "wasm_fixture:counter")
         );
         mod_api::__private::mark_game_thread();
+        // Independent expected values cross the actual wasm guest boundary. Game packet
+        // and observer behavior must be checked at the higher client layer, not by Quiet.
+        for key in [
+            mod_api::InteractionKey::Attack,
+            mod_api::InteractionKey::Use,
+            mod_api::InteractionKey::PickBlock,
+        ] {
+            for (hand, attempt, expected_cancel, expected_swing) in [
+                (
+                    mod_api::Hand::Main,
+                    mod_api::InteractionAttempt::Press,
+                    false,
+                    false,
+                ),
+                (
+                    mod_api::Hand::Main,
+                    mod_api::InteractionAttempt::Held,
+                    false,
+                    true,
+                ),
+                (
+                    mod_api::Hand::Off,
+                    mod_api::InteractionAttempt::Press,
+                    true,
+                    false,
+                ),
+                (
+                    mod_api::Hand::Off,
+                    mod_api::InteractionAttempt::Held,
+                    true,
+                    true,
+                ),
+            ] {
+                let (mut swing, mut canceled) = (true, false);
+                mod_api::dispatch_interaction_key_mapping_triggered(
+                    &mut Quiet,
+                    key,
+                    hand,
+                    attempt,
+                    &mut swing,
+                    &mut canceled,
+                );
+                assert_eq!(
+                    (canceled, swing),
+                    (expected_cancel, expected_swing),
+                    "{key:?} {hand:?} {attempt:?}"
+                );
+            }
+        }
+        lending::check(&mut Quiet);
         // Exercise the same three subscriptions as the native residency regression.
         // The guest only observes; terminal falling-block retirement belongs to
         // the engine and does not depend on the listener's target.
@@ -174,6 +228,28 @@ fn real_member() {
         assert_eq!(
             entity.nbt.get(&"counter".into()),
             Some(&mod_api::Tag::Int(17))
+        );
+        // An answered collect run by the wasm guest: its entry comes back named after it.
+        let mut types = Vec::new();
+        {
+            use mod_api::__private::game::RegistrationContextNew;
+            mod_api::dispatch_register_json_animation_types(
+                &mod_api::RegistrationContext::new(),
+                &mut types,
+            );
+        }
+        let named: Vec<_> = types
+            .iter()
+            .map(|entry| (entry.answer.clone(), entry.mod_id))
+            .collect();
+        assert_eq!(
+            named,
+            [(
+                mod_api::JsonAnimationType::Target(
+                    mod_api::Identifier::parse("wasm_fixture:pulse").unwrap()
+                ),
+                "wasm_fixture"
+            )]
         );
     });
     mod_points::__private::seal();

@@ -77,6 +77,15 @@ jobs:
           if [[ -z "${DYNA_CI_BUILD:-}" ]]; then bash tools/ci/runner-env.sh; fi
         env:
           HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
+      - name: Build the shared wasm standard library
+        shell: bash
+        run: |
+          cargo run --locked -p cargo-horizon-mod -- horizon-mod wasm-std horizon-wasm-std.wasm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wasm-std
+          path: horizon-wasm-std.wasm
+          if-no-files-found: error
       - name: Private exporter inputs
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
@@ -199,6 +208,7 @@ jobs:
             tools/check_glibc.py
             tools/ci/game_smoke.sh
             tools/ci/with_xvfb.py
+            tools/ci/nightly_catalog.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -220,6 +230,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Export the pinned Nightly SDK catalog
+        if: github.repository == 'arismoko/horizon' && inputs.nightly != '' && matrix.name == 'linux'
+        env:
+          CATALOG_COMMIT: ${{ inputs.ref }}
+        run: python3 .workflow-tools/tools/ci/nightly_catalog.py --root "$PWD" --commit "$CATALOG_COMMIT" --output "$RUNNER_TEMP/mod-catalog.json"
+      - uses: actions/upload-artifact@v7
+        if: github.repository == 'arismoko/horizon' && inputs.nightly != '' && matrix.name == 'linux'
+        with:
+          name: horizon-mod-catalog
+          path: ${{ runner.temp }}/mod-catalog.json
+          if-no-files-found: error
+          retention-days: 3
       - name: Build the official game, horizon-ctl, horizon-prepare and horizon-server
         if: ${{ !matrix.musl }}
         run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-official --bin horizon-official -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
@@ -343,6 +365,11 @@ jobs:
         with:
           name: original-exporters
           path: exporters
+      # The wasm member is target-independent, including on musl and Windows.
+      - uses: actions/download-artifact@v8
+        with:
+          name: wasm-std
+          path: ${{ matrix.musl && 'target/x86_64-unknown-linux-musl/release' || env.BIN }}
       - name: Build, check and package for musl in Alpine
         if: matrix.musl
         # Run Docker on the Ubuntu host: JavaScript actions themselves require glibc.

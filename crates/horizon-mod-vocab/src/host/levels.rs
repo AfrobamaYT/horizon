@@ -75,6 +75,39 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
     /// Side: both.
+    /// The entry ids (`addon:fire`) of a datapack registry a mod declared
+    /// (`declare_datapack_registry`), sorted, as this world session last loaded them. On a client
+    /// they are the ones its server sent at the join and after each reload, and only for a
+    /// registry declared `Required` or `Optional`. None for a stale or parked level and a
+    /// registry no mod declared (or, on a client, one the server did not send). Reads nothing
+    /// from disk.
+    #[access(WorldOnly)]
+    fn level_datapack_entries(&self, level: LevelRef, registry: &str) -> Option<Vec<String>>;
+    /// Side: both.
+    /// A handle to `entry` of `registry` at the generation now loaded (on a client, the one its
+    /// server last sent). A handle kept across a reload fails its next read with
+    /// `StaleGeneration`, one from an earlier world session with `WrongSession`. A stale or parked
+    /// level and a registry no mod declared are `UnknownRegistry`; an entry no pack defines is
+    /// `MissingEntry`.
+    #[access(WorldOnly)]
+    fn level_datapack_handle(
+        &self,
+        level: LevelRef,
+        registry: &str,
+        entry: &str,
+    ) -> Result<DatapackHandle, DatapackReadError>;
+    /// Side: both.
+    /// The decoded fields of the entry a handle names, in the registry's schema order, as plain
+    /// values: a copy, which carries no authority after the read. The handle is checked first
+    /// (session, then generation), then the entry; the errors are those of
+    /// [`level_datapack_handle`](Self::level_datapack_handle).
+    #[access(WorldOnly)]
+    fn level_datapack_read(
+        &self,
+        level: LevelRef,
+        handle: &DatapackHandle,
+    ) -> Result<Vec<(String, DatapackValue)>, DatapackReadError>;
+    /// Side: both.
     /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
     /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool; for a block it has no
     /// rule for, the tool's default mining speed), before the player's enchantments, attributes, water, ground and
@@ -214,13 +247,18 @@ pub trait LevelsBackend {
     /// O(n log n), followed by one authoritative handle lookup per candidate.
     #[access(WorldOnly)]
     fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>>;
-    /// Side: server.
+    /// Side: both.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
-    /// Returns None on a client, for a stale handle, or for a parked level:
-    /// its entity handles cannot resolve until the level is in place. The walk
-    /// is in entity-list order followed by players; each overlap requires a
-    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// Returns None for a stale handle or a parked level: its entity handles
+    /// cannot resolve until the level is in place. On a client (`ClientLevel`),
+    /// the entities the server tracks to it and the window's own player, with
+    /// the same walk; other players are left out, as their handles do not
+    /// resolve there (tracked in arismoko/horizon#3033).
+    /// None there before login and for a level it does not show. The walk
+    /// is in entity-list order followed by players. Every entity list is walked
+    /// once per call: O(entities) regardless of the box. Each overlapping mob
+    /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents cannot
     /// yet resolve; frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
@@ -628,7 +666,7 @@ pub trait LevelsBackend {
     /// filter (`canHitEntity`, `isPickable`) is the caller's: take the first hit it accepts.
     /// Candidates are those `entities_in` finds, so spectators are not hit and the same kinds
     /// are left out. None for a negative or non-finite margin, a non-finite point, and where
-    /// `entities_in` is None (a client, a stale handle, a parked level).
+    /// `entities_in` is None (a stale handle, a parked level).
     #[access(WorldOnly)]
     fn level_ray_trace_entities(
         &self,

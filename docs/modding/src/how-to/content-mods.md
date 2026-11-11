@@ -571,6 +571,30 @@ only for attributes the template has; one it lacks stops the content root's buil
 { "template": "minecraft:zombie", "attributes": { "minecraft:max_health": 40.0, "minecraft:movement_speed": 0.3 } }
 ```
 
+A living type can set `sounds.ambient`, `sounds.hurt`, `sounds.death` and `sounds.step`:
+
+```json
+{
+  "template": "minecraft:wandering_trader",
+  "sounds": {
+    "ambient": "bird:entity.vulture.ambient",
+    "hurt": "bird:hurt",
+    "death": "bird:death",
+    "step": "none"
+  }
+}
+```
+
+Each omitted slot inherits the template's existing selection, including runtime choices
+such as a villager's trading voice and the supporting block's footstep sound. An explicit
+full `namespace:path` id selects that sound event from the resource packs; `"none"` mutes
+only that slot. Omission and `"none"` are different: a villager with no step override
+still plays `minecraft:block.stone.step` on stone. Invalid ids stop content admission,
+with the entity and sound slot in the error. These four slots cover ordinary ambient,
+hurt, death and footstep playback; additional events such as trading interactions or
+projectile attacks keep their existing sounds. Native and wasm packages use this same
+content definition and resource table.
+
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
 min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
 packages may declare attributes; client-only and server-only packages refuse with `WrongSide` so extra
@@ -646,6 +670,45 @@ clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks
 mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook notes](../reference/hook-notes.md#menu-slot-rules)).
 Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
 data, and client prediction of its clicks.
+
+##### Lending ingredients and linking containers
+
+For a mod crafting menu, a server `recipe_sources` listener can lend the chest
+beside its machine to recipe-book placement and transfer checks:
+
+```rust,ignore
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for Machine {
+    fn recipe_sources(
+        &self,
+        _host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RecipeSourcesEvent<'_>,
+    ) {
+        if event.menu == "machine:crafting" {
+            let [x, y, z] = event.pos;
+            event.sources.push([x + 1, y, z]);
+        }
+    }
+}
+```
+
+`player` is the requesting player's UUID; their state is not swapped in. The
+engine uses the player's inventory first, then answered containers in mod/push
+order. It silently skips the open machine itself, duplicate positions (first
+wins), missing or non-lendable containers, and anything after 64 accepted
+containers. Chest-like block entities (including barrels, shulkers, hoppers,
+dispensers and droppers) and mod containers' declared slots can lend. No answer
+keeps vanilla placement. The engine owns ingredient removal, container
+write-back and `container_changed` notifications, not the listener.
+
+`menu_links` has the same input fields and an append-only `links` output for menu
+types declaring linked slots. It silently skips `pos`, duplicate positions, missing
+or non-lendable containers, and positions after 64 accepted containers
+(`MAX_MENU_LINKS`), preserving first-accepted answer order. It refreshes the named containers' displayed items
+in the same server tick. `recipe_sources` is asked per player action, never per
+tick; `menu_links` is asked per open linked mod menu each tick, only when a mod
+subscribes. With no listener its tick path does no work or allocation. Both hooks
+are public server collect hooks with identical native and wasm behavior.
 
 #### Namespaces and limits
 
@@ -748,7 +811,7 @@ removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own 
 `MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
 type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
 (`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
-`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+`foliage_color`, `dry_foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
 
 ```json
 {
@@ -765,6 +828,43 @@ sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 2
 type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
 modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
 here, so the API names no phase for them.
+
+A `null` for `foliage_color`, `dry_foliage_color` or `grass_color` removes that override from the biome's `effects`, so the
+colormap tints it again; removing one the biome lacks changes nothing. The other colours are required or are attributes,
+so a `null` there skips the modifier with a warning. The removal form is inferred from the title of NeoForge's change
+"Add ability to remove color overrides in BiomeSpecialEffectsBuilder" (neoforged/NeoForge#3528, `26.3.0.19-beta`), whose
+field list is not public; it is not confirmed against NeoForge's code. In code, `foliage_color`, `dry_foliage_color` and
+`grass_color` are `Option<BiomeColourChange>` (`Set { rgb }` or `Remove`).
+
+A modifier also sets the biome's ambient and music attributes, in an `attributes` object with the vanilla keys and
+values of a biome file (`warped_forest.json` has all of them). Each key present replaces the biome's whole value;
+the keys it leaves out stay:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "minecraft:plains",
+  "attributes": {
+    "minecraft:visual/ambient_particles": [{ "particle": { "type": "minecraft:ash" }, "probability": 0.25 }],
+    "minecraft:audio/ambient_sounds": {
+      "loop": "minecraft:ambient.warped_forest.loop",
+      "additions": { "sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111 },
+      "mood": { "sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000, "block_search_extent": 8, "offset": 2.0 }
+    },
+    "minecraft:audio/background_music": { "default": { "sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000 } },
+    "minecraft:audio/music_volume": 0.5
+  }
+}
+```
+
+The particle list may also be written `{ "argument": [...] }`. A particle or sound is a namespaced id and a chance or
+volume is 0 to 1; the mood needs its sound, `tick_delay`, `block_search_extent` and `offset`; `additions` is one
+object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and independently nonnegative `min_delay` and
+`max_delay`. Any other attribute, or a value that is not valid, skips the modifier with a warning naming the mod,
+file and attribute. A client plays these from the biome data the server sends. In code, `ModifyBiome` has
+`ambient_particles`, `ambient_loop`, `ambient_additions`, `ambient_mood`, `background_music` and `music_volume`; the
+three ambient sound fields together make the one `ambient_sounds` value, and a value out of range refuses the mods at
+startup.
 
 **When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `horizon_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`horizon-client --dedicated`, [server.md](../../../server.md)), so it takes this path too; `horizon-server` only supervises it.
 
@@ -809,6 +909,15 @@ content mods ("content mods not loaded: ..." in the log). Feature tags are vanil
 doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
 it too.
 
+**A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
+The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
+never move. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
+it from that data, and plays its colours, ambient particles, ambient sounds and music from it; a client with the same
+mod already has it. Its network id is its place in the registry sorted by path, then namespace, as in vanilla.
+Saved worlds name a column's biomes, not their ids: a world saved before the mod existed holds only vanilla names and
+loads unchanged; a world saved with the mod and opened without it reads the mod's biomes as plains, and the next save
+writes plains. A mod biome appears in the world only where a dimension's biome source or a worldgen file uses it.
+
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,
 `min_depth`) is tried before its pool's other elements at each jigsaw that reaches that pool (as target or fallback)
@@ -836,3 +945,21 @@ Seats follow passenger order; extra passengers use the last point. Offsets scale
 the entity and rotate with its yaw.
 
 Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.
+
+Ambient additions accept any finite `tick_chance`, without clamping to the unit interval. Music delays need not be ordered.
+
+### Custom block-state definition types
+
+Register a type id with `Hooks::register_block_state_models` before client resources
+load. Set `neoforge:definition_type` to that id in the blockstate JSON, and answer
+`Hooks::instantiate_block_state_definition` on every load and reload. Read the whole
+file from `event.config` and enumerate `event.states` in registry order. Append a
+`BlockStateModelPick::Model` for each state you choose, with its index, model id,
+quarter turns and UV-lock setting; append `Refuse` with a reason to reject a file.
+See the generated hook notes for a powered-block example.
+
+A state not picked inherits the lower pack layer's selection when present;
+otherwise it draws no model. Pack layers bind independently. An unknown type,
+explicit refusal, invalid model, out-of-range state, duplicate state or answer
+with no picks rejects the whole layer with a diagnostic, leaving lower layers
+available. Vanilla `variants` and `multipart` remain available for ordinary files.

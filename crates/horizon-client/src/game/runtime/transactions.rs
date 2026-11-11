@@ -27,6 +27,9 @@ use horizon_mod_runtime::attachments::{Attachments, Holder};
 use mod_api::{Transaction, TransactionSeal};
 use std::collections::HashMap;
 
+#[path = "transactions/decision.rs"]
+pub(in crate::game) mod decision;
+
 type Pos = (i32, i32, i32);
 
 /// One open transaction.
@@ -62,6 +65,9 @@ pub(super) struct Level {
     attachments: HashMap<Holder, KeptAttachments>,
     /// What the root commit does, in order.
     after: Vec<After>,
+    /// Internal decide/fire/apply state. No menu route uses this yet.
+    actions: decision::Journal,
+    action: Option<decision::ActiveAction>,
 }
 
 struct KeptAttachments {
@@ -124,6 +130,7 @@ struct KeptMenus {
 
 /// What a write tells the world, at the root commit.
 pub(super) enum After {
+    Cauldron(super::cauldron_interactions::Effects),
     /// `BlockEntity.setChanged`.
     Changed(Pos),
     /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
@@ -196,6 +203,9 @@ impl Game<'_> {
     }
     /// Opens a transaction and gives back its write and close tokens.
     fn open_storage_transaction(&mut self) -> (u64, u64) {
+        if let Some(scope) = &mut self.block_entity_tick_items {
+            scope.open_transaction();
+        }
         let (token, close_token) = (frame_token(), frame_token());
         self.transactions.push(Level {
             token,
@@ -203,6 +213,9 @@ impl Game<'_> {
             dimension: Some(self.dim),
             ..Level::default()
         });
+        if let Some(key) = &mut self.block_entity_tick_key {
+            key.unbalanced = true;
+        }
         (token, close_token)
     }
     /// Closes the transaction `seal` ends, first aborting every one opened inside it and left
@@ -240,6 +253,12 @@ impl Game<'_> {
         let Some(level) = self.transactions.pop() else {
             return;
         };
+        if let Some(scope) = &mut self.block_entity_tick_items {
+            scope.close_transaction(commit);
+        }
+        if let Some(key) = &mut self.block_entity_tick_key {
+            key.unbalanced = self.transactions.len() != key.transaction_depth;
+        }
         debug_assert_eq!(
             level.dimension,
             Some(self.dim),
@@ -247,6 +266,7 @@ impl Game<'_> {
         );
         match (commit, self.transactions.last_mut()) {
             (true, Some(outer)) => {
+                outer.actions.merge(level.actions);
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
@@ -400,27 +420,6 @@ impl Game<'_> {
         };
         level.equipment.insert(id, kept);
     }
-    /// Sets item entity `id`'s stack, keeping it as it was if a transaction is open and hasn't
-    /// yet. Emptied in one, it stays, empty, until the root commit removes it, so an abort can
-    /// put its stack back. False where no such item entity is.
-    pub(super) fn journal_set_item_entity(&mut self, id: u32, stack: ItemStack) -> bool {
-        let Some(level) = self.transactions.last_mut() else {
-            let dimension = self.dim.id();
-            return self.native_set_item_entity(dimension, id, stack);
-        };
-        let Some(e) = self.dropped.iter_mut().find(|e| e.id == id) else {
-            return false;
-        };
-        level
-            .item_entities
-            .entry(id)
-            .or_insert_with(|| e.stack.clone());
-        if stack.count == 0 {
-            level.after.push(After::Emptied(id));
-        }
-        e.stack = stack;
-        true
-    }
     /// `drop_plain` by the player whose state is in `Game` now, `uuid`: at once, or at the root
     /// commit inside a transaction.
     pub(super) fn drop_after_commit(&mut self, uuid: u128, stack: ItemStack) {
@@ -457,6 +456,7 @@ impl Game<'_> {
     }
     fn run_after(&mut self, after: After) {
         match after {
+            After::Cauldron(effects) => self.commit_cauldron_effects(effects),
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
@@ -561,6 +561,8 @@ impl Game<'_> {
         }
     }
     fn roll_back(&mut self, mut level: Level) {
+        // Discard deferred effects before undoing tentative action storage.
+        level.after.clear();
         // Each mob's equipment goes back as it was, and the attribute map is
         // made over it again (#932).
         let equipment = std::mem::take(&mut level.equipment);
@@ -655,6 +657,7 @@ impl Game<'_> {
                 });
             }
         }
+        level.actions.rollback();
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
                 g.inventory = kept.inventory;
@@ -666,6 +669,8 @@ impl Game<'_> {
         }
     }
 }
+
+include!("transactions/item_entity.rs");
 
 #[cfg(test)]
 #[path = "transactions/player_tests.rs"]

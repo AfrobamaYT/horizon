@@ -35,6 +35,7 @@ pub mod dolphin;
 pub mod doors;
 pub mod drops;
 pub mod enderman;
+pub mod entity_sounds;
 pub mod equine;
 pub mod equip;
 pub mod farm;
@@ -502,9 +503,8 @@ pub struct MobType {
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
-    /// Ambient, hurt and death sound events (without the namespace).
     pub sounds: [&'static str; 3],
-    pub step_sound: Option<&'static str>,
+    pub sound_overrides: entity_sounds::Sounds,
     /// Animal.isFood items (resolved from the item tag).
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
@@ -841,7 +841,7 @@ impl MobTypes {
                     brain: def.brain(),
                     anim: def.anim,
                     sounds: def.sounds,
-                    step_sound: def.step_sound,
+                    sound_overrides: entity_sounds::Sounds::load(&id, t)?,
                     food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
@@ -1045,7 +1045,7 @@ pub struct Aim {
     pub feet: [f64; 3],
 }
 /// A damage source: its type, the attacking entity and where it came from.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Damage {
     pub kind: DamageKind,
     pub attacker: Option<Who>,
@@ -1863,6 +1863,8 @@ pub struct Mob {
     /// `Stats.DAMAGE_DEALT_ABSORBED` to the player whose turn it is (see [`Mob::soak_hit`]).
     pub dealt_absorbed: i32,
     pub last_damage: Option<(Damage, i64)>,
+    /// Whether the most recent projectile damage call committed its source.
+    pub projectile_damage_committed: bool,
     /// `DamageSource.getDirectEntity` of `last_damage` when [`Damage`] cannot name it (a
     /// thrown potion, an area effect cloud): its entity type.
     pub last_direct: Option<&'static str>,
@@ -2025,6 +2027,7 @@ pub enum MobEvent {
         count: u32,
     },
     Sound(&'static str, [f64; 3], f32, f32),
+    ProfessionWorkSound(Arc<str>, [f64; 3], f32, f32),
     /// `level.playSound(null, mob, sound, source, volume, pitch)`: a sound
     /// bound to mob `mob` (`ServerLevel.playSeededSound`'s entity overload),
     /// in vanilla's `source`, from where the mob stands.
@@ -2361,11 +2364,11 @@ pub enum MobEvent {
         target: Who,
     },
     PiglinAlertTarget(undead::PiglinAlert),
-    /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
-    /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
+    /// `HoglinAi.broadcastAttackTarget`: receiver and source player connection.
     HoglinAttackTarget {
         mob: u32,
         target: Who,
+        player: Option<u32>,
     },
     /// `StartHuntingHoglin` for a nearby adult piglin: it takes the hoglin as
     /// its anger target (when it has none) and starts its `HUNTED_RECENTLY` wait.
@@ -2978,6 +2981,7 @@ pub struct Seen {
     pub meeting: Option<[i32; 3]>,
     /// A villager's vanilla profession projection, absent for unknown IDs.
     pub profession: Option<u8>,
+    pub custom_profession: Option<Arc<str>>,
     /// A llama's strength or a horse's markings.
     pub secondary_variant: u8,
     /// A villager's experience.
@@ -3041,19 +3045,7 @@ impl Seen {
 impl Mob {
     /// The name used by command replies: CustomName takes precedence over the type.
     pub fn command_name(&self) -> crate::text::Text {
-        if let Some(name) = &self.custom_name {
-            return crate::text::Text::literal(name);
-        }
-        // Villager.getTypeName returns its registered profession's name.
-        if self.species() == Species::Villager {
-            let profession = villager::profession(self.extra.profession.index().unwrap_or(0)).id;
-            return crate::text::Text::translate(
-                &format!("entity.minecraft.villager.{profession}"),
-                &[],
-            );
-        }
-        let id = crate::command::args::normalize(&self.kind.id);
-        crate::text::Text::translate(&format!("entity.{}", id.replace(':', ".")), &[])
+        villager::command_name(self)
     }
 
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
@@ -3213,6 +3205,7 @@ impl Mob {
             potential_job: villager_brain::potential_job_site(m),
             meeting: villager.then_some(m.extra.meeting).flatten(),
             profession: villager.then(|| m.extra.profession.index()).flatten(),
+            custom_profession: villager::seen_profession_name(m, villager),
             secondary_variant: m.extra.variant2,
             xp: villager::xp(m),
             villager: villager.then(|| Arc::new(villager::seen(m))),
@@ -3611,6 +3604,7 @@ pub trait LiveMobs {
 
 #[derive(Clone)]
 pub struct MobWorld<'a> {
+    pub professions: &'a villager::ResolvedProfessions,
     /// What the motion value hooks are given: the loop context of the side that
     /// ticks these mobs.
     pub loop_context: &'a horizon_world::native_load_context::LoopContext,
@@ -4061,6 +4055,7 @@ impl Mob {
             absorption: 0.0,
             dealt_absorbed: 0,
             last_damage: None,
+            projectile_damage_committed: false,
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
@@ -4261,21 +4256,6 @@ impl Mob {
         self.attacker_aim = aim;
         let hurt = self.damage(level, amount, source);
         self.attacker_aim = None;
-        hurt
-    }
-    /// `damage` of a blow dealt by a projectile (`motion`: its horizontal movement) whose owner
-    /// is `aim`.
-    pub fn damage_projectile(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        amount: f32,
-        source: Damage,
-        aim: Option<Aim>,
-        motion: [f64; 2],
-    ) -> bool {
-        self.projectile_motion = Some(motion);
-        let hurt = self.damage_aimed(level, amount, source, aim);
-        self.projectile_motion = None;
         hurt
     }
     /// `hurtServer` of `amount` from `source` in `level`.
@@ -4598,6 +4578,9 @@ impl Mob {
         let success = blocked <= 0.0 || amount > 0.0;
         if success {
             self.last_damage = Some((source, i64::from(self.age)));
+            if self.projectile_motion.is_some() {
+                self.projectile_damage_committed = true;
+            }
         }
         self.last_direct = None;
         if let Some(who) = source.attacker {
@@ -4636,7 +4619,7 @@ impl Mob {
             let sound = if absorbed {
                 "item.wolf_armor.damage"
             } else {
-                ai::voice_sounds(self)[if dead { 2 } else { 1 }]
+                entity_sounds::voices(self)[if dead { 2 } else { 1 }]
             };
             if !dead {
                 self.ambient_timer = -self.ambient_interval();
@@ -5751,7 +5734,7 @@ pub(crate) mod sensor_scan_tests {
             brain: Brain::Passive,
             anim: Anim::Rabbit,
             sounds: [""; 3],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Arc::default(),
             tempt: Arc::default(),
             passenger_attachments: Vec::new(),
@@ -7825,3 +7808,5 @@ mod hidden_speed_mob_tick_tests {
         }
     }
 }
+
+mod projectile_damage;

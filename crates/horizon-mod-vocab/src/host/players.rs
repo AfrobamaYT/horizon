@@ -529,6 +529,36 @@ pub trait PlayersBackendMut {
         trigger: &Identifier,
         test: Arc<dyn CriterionTest>,
     ) -> Result<(), TriggerCriterionError>;
+    /// Side: server. Fires only `default_block_use`, without a tool.
+    /// The engine fires `any_block_use` once when the enclosing block use consumes.
+    /// It sees the hand after the use; a replacement stack is visible, unlike vanilla's original object.
+    /// Evaluates vanilla predicates and rewards in the player's own level; never reads inventory.
+    /// `Ok(())` means reached, even if no criterion matched. Refuses remote clients
+    /// (`NotServer`), stale/offline/displaced players (`PlayerUnavailable`), and
+    /// unloaded positions (`UnloadedChunk`).
+    #[access(WorldOnly)]
+    fn player_trigger_block_use(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server. Fires only `item_used_on_block` with `original`.
+    /// `original` is copied after a before-block PASS and before block/item effects.
+    /// The stack is not read from inventory. The engine fires `any_block_use`
+    /// once when the enclosing block use consumes, including a consuming cancel.
+    /// Call this helper only when the mod also intends the inner criterion.
+    /// An invalid stack returns `Stack(StackWriteError)` before the trigger fires.
+    /// Evaluates vanilla predicates and rewards in the player's own level.
+    /// `Ok(())` means reached, even if nothing matched. Refuses remote clients
+    /// (`NotServer`), stale/offline/displaced players (`PlayerUnavailable`), and
+    /// unloaded positions (`UnloadedChunk`).
+    #[access(WorldOnly)]
+    fn player_trigger_item_used_on_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        original: &ItemStack,
+    ) -> Result<(), TriggerCriterionError>;
     /// Side: server.
     /// `Player.setLastDeathLocation`: stores where the player died, or
     /// forgets it for None. The client hears of it with the player's next

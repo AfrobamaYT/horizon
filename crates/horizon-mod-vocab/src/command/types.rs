@@ -4,14 +4,19 @@
 /// `<name:kind>`, optional ones last in brackets `[name:kind]`:
 /// `pay <player:player> <amount:integer>`, `balance [player:player]`,
 /// `eco give <player:player> <amount:integer>`. Kinds: `word`, `text` (the
-/// rest of the line, last), `integer`, `number`, `boolean`, `player`,
-/// `item`, `block_pos`, or a command argument type a mod registered with
+/// rest of the line, last), `integer`, `number`, `boolean`, `player`, `players`,
+/// `entity`, `entities`, `item`, `block_pos`, or a command argument type a mod registered with
 /// `Registrar::register_command_argument`, named by its namespaced id:
 /// `machine use <machine:mymod:machine>`. Usages of one command share their
 /// words; the server merges them into one tree. Each executable usage keeps its own level:
 /// a public `foo bar` lets everyone traverse `foo`, but does not make an
 /// operator-only `foo` executable. Optional arguments also allow execution at
 /// their preceding prefixes, at that usage's level.
+///
+/// Side: server. Selector arguments use vanilla's source position, permissions,
+/// cardinality and selection order; `player`/`entity` require one result and
+/// `players`/`entities` require a nonempty result. Unresolvable entity handles are
+/// omitted; lists have no extra cap beyond the wire frame limits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]

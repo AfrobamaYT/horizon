@@ -308,6 +308,18 @@ pub fn behind_server() -> bool {
     HELPERS_BEHIND.load(Ordering::Relaxed) && behind()
 }
 
+/// The parameter `SCHED_IDLE` takes: priority 0, the only value that class accepts.
+/// Zeroed first because musl's `sched_param` has more fields (`sched_ss_*`) than
+/// glibc's, so a struct literal doesn't compile there.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn idle_param() -> libc::sched_param {
+    // SAFETY: `sched_param` is a plain C struct of integers (and, on musl, a
+    // timespec pair); all-zero is a valid value.
+    let mut param: libc::sched_param = unsafe { std::mem::zeroed() };
+    param.sched_priority = 0;
+    param
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn behind() -> bool {
     // SAFETY: these read and set the calling thread's own nice value or
@@ -318,7 +330,7 @@ fn behind() -> bool {
         if nice + BEHIND <= 19 {
             libc::setpriority(libc::PRIO_PROCESS as _, 0, nice + BEHIND) == 0
         } else {
-            let param = libc::sched_param { sched_priority: 0 };
+            let param = idle_param();
             libc::sched_setscheduler(0, libc::SCHED_IDLE, &param) == 0
         }
     }
@@ -403,7 +415,7 @@ pub fn idle_current() -> bool {
 
 #[cfg(target_os = "linux")]
 fn idle() -> bool {
-    let param = libc::sched_param { sched_priority: 0 };
+    let param = idle_param();
     // SAFETY: sets the calling thread's own policy (pid 0); `param` lives
     // across the call.
     unsafe { libc::sched_setscheduler(0, libc::SCHED_IDLE, &param) == 0 }
@@ -469,9 +481,16 @@ pub fn catch_stop_signals() {}
 /// World generation, meshing and the tick allocate and free small blocks on
 /// every worker at once; the system heaps serialise them (Windows' heap was
 /// 16% of a chunk's generation time), mimalloc keeps a heap per thread.
+#[cfg(not(feature = "test-allocation-count"))]
 pub type Allocator = mimalloc::MiMalloc;
 /// The game's mimalloc allocator.
+#[cfg(not(feature = "test-allocation-count"))]
 pub const ALLOCATOR: Allocator = mimalloc::MiMalloc;
+
+#[cfg(feature = "test-allocation-count")]
+pub mod allocation_count;
+#[cfg(feature = "test-allocation-count")]
+pub use allocation_count::{ALLOCATOR, Allocator};
 
 /// The global allocator of a build with the `alloc-census` feature: live
 /// heap bytes by startup step and thread, for `horizon-ctl memory`.
