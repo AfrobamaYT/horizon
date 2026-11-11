@@ -209,6 +209,9 @@ impl Game<'_> {
         if let Some(c) = self.cmds.guest_cameras.get_mut(&conn) {
             c.teleports = teleports;
         }
+        if let Some(entity_id) = camera {
+            self.native_player_start_spectating_entity(uuid, &name, entity_id);
+        }
         if camera.is_none()
             && let Some(entity_id) = previous
         {
