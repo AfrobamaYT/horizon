@@ -435,7 +435,7 @@ pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
 }
 
 /// [`installed_mods`] into `out`, which it empties first.
-fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String> {
+pub(crate) fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String> {
     let _ = fs::remove_dir_all(&out);
     let mut paths: Vec<PathBuf> = fs::read_dir(home.join(INSTALLED))
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
@@ -454,6 +454,15 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String>
             let to = dir.join(name);
             fs::create_dir_all(to.parent().unwrap_or(&dir)).map_err(|e| e.to_string())?;
             fs::write(&to, bytes).map_err(|e| format!("{}: {e}", to.display()))?;
+        }
+        count += 1;
+    }
+    for bundle in crate::native_status::wasm_points(home) {
+        let dir = out.join(&bundle.manifest.id);
+        for (name, bytes) in &bundle.files {
+            let to = dir.join(name);
+            fs::create_dir_all(to.parent().unwrap_or(&dir)).map_err(|e| e.to_string())?;
+            fs::write(&to, bytes).map_err(|e| e.to_string())?;
         }
         count += 1;
     }
@@ -1563,20 +1572,24 @@ fn pipeline(
         .iter()
         .map(|b| (b.manifest.id.clone(), source_digest(b)))
         .collect();
-    let mods: Vec<Bundle> = found
+    // The cache identifies every requested input, including a mod left out after a failure:
+    // replacing its files must retry it rather than reuse a build that excluded the old copy.
+    let requested: Vec<Bundle> = found
         .into_iter()
         .map(|b| Bundle {
             dir: incoming.join(&b.manifest.id),
             ..b
         })
         .collect();
+    let mods: Vec<Bundle> = requested
+        .iter()
+        .filter(|b| b.manifest.native.is_some())
+        .cloned()
+        .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
         .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
         .collect();
-    // The cache identifies every requested input, including a mod left out after a failure:
-    // replacing its files must retry it rather than reuse a build that excluded the old copy.
-    let requested = mods.clone();
     let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
         .iter()
         .zip(&declared)
@@ -1588,7 +1601,7 @@ fn pipeline(
         .zip(declared)
         .filter(|(b, _)| !left_out.iter().any(|l| l.id == b.manifest.id))
         .unzip();
-    if mods.is_empty() {
+    if mods.is_empty() && requested.iter().all(|b| b.manifest.wasm.is_none()) {
         return Err(Failed::Nothing);
     }
     let inputs: Vec<_> = mods
@@ -1730,7 +1743,7 @@ fn pipeline(
             "target": target.name(),
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
-            "mods": mods.iter().map(|m| {
+            "mods": requested.iter().filter(|m| !left_out.iter().any(|l| l.id == m.manifest.id)).map(|m| {
                 let pinned = catalog.pinned(&m.manifest);
                 serde_json::json!({
                     "id": m.manifest.id,
