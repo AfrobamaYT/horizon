@@ -49,11 +49,14 @@ pub trait Hooks {
     /// where they were, a mob does not board, a `/ride` fails, and a rider whose dismount is
     /// canceled keeps riding. Players hear boarding and dismounts by input, `/ride`, hits,
     /// bucking, teleport or spectator mode; mobs hear boarding and dismounts (jockeys,
-    /// ravager raiders, `/ride`, hits), including removal cleanup. Live cancellation keeps
-    /// the relationship. Actual boat/cart destruction currently unlinks remaining Mob
-    /// edges after notification even if canceled, avoiding dangling vehicles; preserving
-    /// canceled relationships is deferred (#2446). Loading a save does not notify. The
-    /// acting player is the one whose action runs, a guest on a server. Server-side.
+    /// ravager raiders, `/ride`, hits), including removal cleanup. A Mob's canceled
+    /// dismount keeps its relationship even when a boat or cart is destroyed; the
+    /// removed vehicle is not a valid handle or query result. Each later dismount asks again.
+    /// A resident Mob retries immediately before its next eligible entity tick:
+    /// its chunk must be entity-ticking and its tick must not have been canceled.
+    /// A server player retries on its next vehicle tick. Either can be later in the
+    /// same world tick. A rejected, nonresident passenger does not autonomously
+    /// tick or retry. Loading a save does not notify. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",

@@ -1568,16 +1568,13 @@ fn read_lock(dir: &Path) -> Result<String, String> {
 
 fn lock_crates(
     rust: &Toolchain,
-    source: &Path,
+    game: &registry_lock::RegistryLock,
     stage: &Path,
     allowed: &registry_lock::RegistryLock,
 ) -> Result<(), String> {
     let text = read_lock(stage)?;
     crates::check_game_graph(stage, &text)?;
-    allowed.check_resolution(
-        &registry_lock::RegistryLock::parse(&text)?,
-        &registry_lock::RegistryLock::parse(&read_lock(source)?)?,
-    )?;
+    allowed.check_resolution(&registry_lock::RegistryLock::parse(&text)?, game)?;
     let mut fetch = cargo(rust, stage, "fetch");
     fetch.arg("--locked");
     run(fetch, "Downloading the crates", |_| {})
@@ -2234,6 +2231,10 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
+        // Source generators add trusted game path edges. Freeze their lock before api::stage
+        // inserts mod projects, and before Cargo resolves any mod-controlled dependencies.
+        let game_lock = read_lock(&fresh)?;
+        let game = registry_lock::RegistryLock::parse(&game_lock)?;
         let catalog = internals::Catalog::read(&real)?.with_mods(mods.iter())?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
@@ -2254,7 +2255,7 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
-        let dependency_plan = registry_plan::Plan::read(&read_lock(&source)?, &projects, &wanted)?;
+        let dependency_plan = registry_plan::Plan::read(&game_lock, &projects, &wanted)?;
         dependency_plan.fetch(&rust, &real.join("registry-fetch"))?;
         fs::write(
             fresh.join("Cargo.lock"),
@@ -2281,7 +2282,7 @@ fn pipeline(
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage, &dependency_plan.allowed)?;
+            lock_crates(&rust, &game, &stage, &dependency_plan.allowed)?;
         }
         let mut target_dir = real.join("target");
         if let Some(cache_dir) = platform.cache_dir {
@@ -4790,3 +4791,7 @@ mod registry_binary_tests {
 #[cfg(all(test, unix))]
 #[path = "native_mods/tests/runtime_leases.rs"]
 mod runtime_leases_tests;
+
+#[cfg(test)]
+#[path = "native_mods/tests/staged_lock.rs"]
+mod staged_lock_tests;

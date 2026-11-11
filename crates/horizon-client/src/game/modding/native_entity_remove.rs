@@ -62,13 +62,18 @@ impl Game<'_> {
                 // it removed; then the passengers get off and the level is told.
                 // Only players and mobs ride, so this kind has no vehicle to leave.
                 self.persist.removals.push(t);
+                self.retire_vehicle_registration(t);
+                if vehicle_y.is_some() {
+                    self.persist.notified_vehicle_removals.insert(entity.id());
+                }
                 for passenger in passengers {
                     self.entity_stop_riding(passenger);
                 }
                 if let Some(y) = vehicle_y {
-                    // Complete actual Mob edges here, including rejected objects.
-                    // The deferred physical removal then has no edge to notify twice.
+                    // Notify actual Mob edges here, including rejected objects.
+                    // A reentrant physical sweep must not notify them again.
                     self.dismount_destroyed_vehicle_mobs(entity.id(), y);
+                    self.score_destroyed_vehicle_once(entity.id());
                 }
                 self.native_entity_left(entity.id());
                 true
@@ -185,20 +190,43 @@ impl Game<'_> {
         if self.persist.removals.is_empty() {
             return;
         }
-        for t in std::mem::take(&mut self.persist.removals) {
+        // Keep every deferred vehicle logically removed while callbacks in
+        // this sweep can inspect the remaining physical owning slots.
+        let pending = std::mem::take(&mut self.persist.removals);
+        let mut already_marked = Vec::new();
+        for &target in &pending {
+            if matches!(target, Target::Boat(_) | Target::Cart(_))
+                && !self.persist.destroying_vehicles.insert(target)
+            {
+                already_marked.push(target);
+            }
+        }
+        for t in pending {
             match t {
                 Target::Crystal(id) => self.crystals.retain(|c| c.id != id),
                 Target::Dragon(id) => {
                     if self.dragon.as_ref().is_some_and(|d| d.id == id) {
-                        self.dragon.discard();
+                        self.discard_resident_dragon();
                     }
                 }
-                Target::Player | Target::Guest(_) | Target::Mob(_) => {}
-                // The kinds `/kill` already removes with no death.
-                t => {
+                Target::Boat(id) | Target::Cart(id) => {
+                    let marked = !already_marked.contains(&t);
                     self.spill_vehicle(t);
-                    self.kill_target_in_level(t);
+                    // Actual native removals already notified the edges. A
+                    // raw deferred entry still needs its own guarded pass.
+                    if marked && !self.persist.notified_vehicle_removals.contains(&id) {
+                        self.persist.destroying_vehicles.remove(&t);
+                    }
+                    self.kill_vehicle_object(t);
+                    self.score_destroyed_vehicle_once(id);
+                    if marked {
+                        self.persist.destroying_vehicles.remove(&t);
+                    }
+                    self.native_entity_left(id);
                 }
+                Target::Player | Target::Guest(_) | Target::Mob(_) => {}
+                // The remaining kinds `/kill` already removes with no death.
+                t => self.kill_target_in_level(t),
             }
         }
     }

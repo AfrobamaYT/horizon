@@ -1,14 +1,16 @@
-//! The item model properties and tint sources native mods register (NeoForge's
-//! `RegisterRangeSelectItemModelPropertyEvent`, `RegisterSelectItemModelPropertyEvent` and
-//! `RegisterColorHandlersEvent.ItemTintSources`). A `range_dispatch` or `select` on a
-//! registered property and a tint of a registered source read their value from the host
-//! per stack; one nobody registered stays foreign (`foreign.rs`).
+//! The item model properties, tint sources and node types native mods register (NeoForge's
+//! `RegisterRangeSelectItemModelPropertyEvent`, `RegisterSelectItemModelPropertyEvent`,
+//! `RegisterColorHandlersEvent.ItemTintSources` and `RegisterItemModelsEvent`). A
+//! `range_dispatch` or `select` on a registered property, a tint of a registered source and a node
+//! of a registered type read their answer from the host per stack; a property or tint nobody
+//! registered stays foreign (`foreign.rs`), and a node type nobody registered fails to decode.
 use super::identifier;
 use std::{collections::BTreeSet, sync::RwLock};
 
 static RANGE: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
 static SELECT: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
 static TINT: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
+static NODE: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
 
 /// Keeps the numeric `range_dispatch` properties native mods registered, before
 /// resources load. An id that is not `<namespace>:<path>` in a namespace other than
@@ -59,6 +61,17 @@ pub fn is_select_property(id: &str) -> bool {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .contains(id)
+}
+
+/// Keeps the item model node types native mods registered, before resources load, checked as
+/// [`register_range_properties`] checks its ids.
+pub fn register_item_models(ids: Vec<String>) -> Vec<String> {
+    keep_mod_ids(&NODE, "item model type", ids)
+}
+
+/// Whether a native mod registered `id` as an item model node type.
+pub fn is_item_model_type(id: &str) -> bool {
+    NODE.read().unwrap_or_else(|e| e.into_inner()).contains(id)
 }
 
 /// Whether a native mod registered `id` as an item tint source.

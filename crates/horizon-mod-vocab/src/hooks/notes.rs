@@ -448,8 +448,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   Part and template. `UsePhase::ItemBeforeBlock`, `Block` and `ItemAfterBlock` all fire; `ItemBeforeBlock` precedes the item's
   `on_item_use_first` Part.
 - **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
-  `PlayerInteractEvent.RightClickItem`, on both sides, before air `Item.use` and its Part, never for a
-  block/entity target. Canceling answers with `cancellation_result` (default `Pass`). On the client,
+  `PlayerInteractEvent.RightClickItem`, on both sides, before `Item.use` and its Part after target
+  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). On the client,
   every canceled result except `Success` continues to the other hand without a predicted swing.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_pre(dimension, piston,
   direction, extending, push, destroy, canceled)`** and **`native_piston_post(dimension, piston, direction, extending, push, destroy)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
@@ -2285,7 +2285,7 @@ registration path.
 
 - A projectile's impact, which a mod can cancel, through `native_projectile_impact` (NeoForge's `ProjectileImpactEvent`): it fires when a projectile has found what it meets, before the hit acts, with the projectile's id, type (`minecraft:arrow`) and owner, the level, and what it hit: an entity (its id and type) or a block (its position and the face's normal) and the point. Set `canceled` and the impact does not happen: no damage, knockback, sound or block reaction, an arrow does not stick, a pearl does not teleport, a potion or a fireball does not burst. The projectile flies on and is not discarded, so a mod that cancels decides what becomes of it. It covers arrows, tridents, thrown items, fireballs, wither skulls, wind charges, llama spit and shulker bullets, on the single player server thread and on a dedicated server. It does not fire for a breeze's deflection, a hit on a wind charge, fireworks or fishing bobbers. A mod hooks `native_hears_projectile_impacts(hears)` too and sets `hears`: without it the server keeps no copy of its flying projectiles and the impact hook is not called.
 
-- An entity getting on or off a vehicle, which a mod can cancel, through `native_entity_mount` (NeoForge's `EntityMountEvent`): the rider's id and type (`minecraft:player`, `minecraft:zombie`), the vehicle's id and type (`minecraft:oak_boat`, `minecraft:horse`), whether it is mounting, and a `canceled` flag. Set `canceled` and the rider does not board, or keeps riding; a `/ride` that is canceled fails. It is told for a player boarding a boat, minecart, cushion or mount (pig, strider, horse and its kin, llama, nautilus, happy ghast) and getting off by their own input, `/ride`, a stab, a buck, a teleport or spectator mode, and for the mobs Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one with `/ride` or a stab. Mob removal cleanup also notifies dismounts. When a boat or cart is actually destroyed, the current safe interim unlinks remaining Mob edges after notification even if canceled, avoiding a dangling vehicle; retaining those canceled relationships is deferred to #2446. Cancellation on a live vehicle remains effective. Loading a save does not notify. On the single player server thread and on a dedicated server.
+- An entity getting on or off a vehicle, which a mod can cancel, through `native_entity_mount` (NeoForge's `EntityMountEvent`): the rider's id and type, the vehicle's id and type, whether it is mounting, and a `canceled` flag. Cancellation keeps the relationship even when a boat or cart is destroyed; the removed vehicle is no longer a valid handle or selector result. A resident Mob retries before its next eligible entity tick, after the tick's cancellable Pre event; a server player retries on its next vehicle tick. A rejected, nonresident passenger does not autonomously retry. Explicit later dismounts ask again. Loading a save does not notify. On the single player server thread and on a dedicated server.
 
 - `native_interaction_key_mapping_triggered(key, hand, attempt, swing_hand, canceled)` fires while playing when an interaction key is about to act on the crosshair (NeoForge's `InputEvent.InteractionKeyMappingTriggered`): `key` is `InteractionKey::Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). `attempt` distinguishes a queued press from a held mapping. Set `canceled` to skip the action; a cancelled use ends the click, so the other hand gets no turn. Attack and use honour `swing_hand` (true on entry) independently of cancellation: false suppresses natural swings, cancellation with true swings without acting, and uncancelled true preserves natural no-swing outcomes. Pick only vetoes its packet and never swings. The window client on any server, including single player.
 
@@ -2850,13 +2850,13 @@ registration path.
   `use_item_on_block`'s `ItemBeforeBlock` phase.
 
 - `Hooks::right_click_item(host, event)` is NeoForge's `PlayerInteractEvent.RightClickItem`, before
-  `Item.use` and the item's `use_item` Part on both sides, only when no block or entity is targeted.
+  `Item.use` and the item's `use_item` Part on both sides, after the same hand's target interaction falls through.
   `event.click` (`ItemClick`) contains the dimension, player's feet block position, player,
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
   (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
   canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
-  target that `use_item_on_block` was asked about, even one the block passed on, is still a block
-  target: the hook never fires for that click.
+  success, block FAIL, or entity success prevents item fallback; the server fires this on the separate UseItem packet
+  rather than on UseItemOn.
 
 - A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces
   `Block.useWithoutItem` on the server, on the main hand only, after `useItemOn` returns
