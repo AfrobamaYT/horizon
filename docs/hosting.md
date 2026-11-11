@@ -614,6 +614,21 @@ legacy = true
 
 Players join with any vanilla 26.3 client: only the server decides the damage.
 
+### Mods' biome regions: `[biome_regions]`
+
+A world made with a mod that adds a [biome region](modding/src/how-to/biome-regions.md) saves that region with the
+world. If the mod is later removed, the server refuses to start and names the mod and region. To start anyway with
+vanilla's biomes where that region was (chunks that already exist stay as they are), add to `server.toml`, then
+restart:
+
+```toml
+[biome_regions]
+missing = "vanilla"      # "refuse", the default: don't start
+adopt_installed = true   # optional: new chunks use the installed mods' regions instead of the world's saved ones
+```
+
+The choice for a missing mod is saved in the world, so it holds even if the setting is removed later.
+
 ## 8. Start it with the computer
 
 ```sh

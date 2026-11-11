@@ -80,3 +80,6 @@ pub mod reload_recipes;
 
 /// Worldgen states resolved at construction and saved-piece load.
 pub mod worldgen;
+
+/// Biome regions in the Overworld and the Nether.
+pub mod biome_regions;
