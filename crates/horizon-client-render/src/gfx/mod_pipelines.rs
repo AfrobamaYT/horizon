@@ -519,6 +519,26 @@ mod tests {
     /// are vanilla's 2.2 encoding worked out by hand: linear 0.5 is 0.5^(1/2.2) = 0.7297,
     /// stored as 186.
     #[test]
+    fn gpu_validation_failure_is_contained_and_invalidates_handle() {
+        let Some((device, _)) = device() else {
+            return;
+        };
+        let set = load(
+            41,
+            &[(PASS, PipelineBlend::Translucent, WorldDepth::Tested)],
+        );
+        let id = Identifier::parse("test:p0").unwrap();
+        let handle = set.resolve(&id).unwrap();
+        let renderer = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        let mut broken = set.built()[0].clone().unwrap();
+        broken.shader = "not wgsl".into();
+        assert!(renderer.pipeline(&device, &broken).is_none());
+        set.invalidate(0);
+        assert_eq!(set.resolve(&id), Err(mod_api::RenderPipelineError::Invalid));
+        assert_eq!(set.slot(handle), Err(mod_api::RenderPipelineError::Invalid));
+    }
+
+    #[test]
     fn pipelines_convert_colour_both_ways_and_keep_their_blend_depth_and_stage() {
         let Some(gpu) = device() else {
             eprintln!("no GPU adapter: skipped");

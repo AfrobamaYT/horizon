@@ -106,6 +106,7 @@ pub struct Pipelines {
     built: Vec<Option<Built>>,
     /// The render assets' generation this set was loaded for; 0 for none.
     generation: u64,
+    invalid: std::sync::Arc<std::sync::Mutex<Vec<usize>>>,
 }
 
 impl Pipelines {
@@ -146,7 +147,15 @@ impl Pipelines {
             ids: registered.iter().map(|p| p.id.clone()).collect(),
             built,
             generation,
+            invalid: Default::default(),
         }
+    }
+
+    pub(crate) fn invalidate(&self, slot: usize) {
+        self.invalid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(slot);
     }
 
     /// The load this set belongs to: a renderer holding another builds its pipelines again.
@@ -166,7 +175,13 @@ impl Pipelines {
             .iter()
             .position(|registered| registered == id)
             .ok_or(RenderPipelineError::Unknown)?;
-        if self.built[slot].is_none() {
+        if self.built[slot].is_none()
+            || self
+                .invalid
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&slot)
+        {
             return Err(RenderPipelineError::Invalid);
         }
         Ok(mod_api::__private::built::render_pipeline_ref(
@@ -181,6 +196,14 @@ impl Pipelines {
         let fields = pipeline.fields();
         if fields.generation != self.generation {
             return Err(RenderPipelineError::Stale);
+        }
+        if self
+            .invalid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(fields.slot as usize))
+        {
+            return Err(RenderPipelineError::Invalid);
         }
         match self.built.get(fields.slot as usize) {
             Some(Some(_)) => Ok(fields.slot),
