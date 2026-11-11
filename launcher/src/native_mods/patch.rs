@@ -219,10 +219,7 @@ impl Prepared<'_> {
 /// are asked, from the game's `loops.json`. A row naming no published loop, and a mixin that
 /// replaces or redirects a filled loop's entry (anything but `HEAD` and `RETURN`, which compose
 /// around the loop), are refused by name.
-fn loop_slots(
-    game: &Path,
-    bundles: &[&Bundle],
-) -> Result<Vec<api_gen::patch::LoopSlots>, String> {
+fn loop_slots(game: &Path, bundles: &[&Bundle]) -> Result<Vec<api_gen::patch::LoopSlots>, String> {
     use horizon_mod_package::manifest::mixin::Kind;
     let rows: Vec<(&Bundle, &horizon_mod_package::manifest::loops::Loop)> = bundles
         .iter()
