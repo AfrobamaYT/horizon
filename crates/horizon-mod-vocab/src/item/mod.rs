@@ -35,6 +35,7 @@ pub(crate) mod recipe_rule;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod stations;
+pub(crate) mod storage;
 pub(crate) mod tooltip_appender;
 pub(crate) mod tooltip_element;
 pub(crate) mod transaction;

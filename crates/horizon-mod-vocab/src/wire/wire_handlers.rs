@@ -70,6 +70,7 @@ handler!(
     "ResourceHandler<FluidResource>"
 );
 handler!(dyn EnergyHandler, "EnergyHandler");
+handler!(dyn ItemStorage, "ItemStorage");
 handler!(
     dyn BlockCapabilityProvider<dyn ResourceHandler<ItemResource>>,
     "BlockCapabilityProvider<dyn ResourceHandler<ItemResource>>"
@@ -81,6 +82,10 @@ handler!(
 handler!(
     dyn BlockCapabilityProvider<dyn EnergyHandler>,
     "BlockCapabilityProvider<dyn EnergyHandler>"
+);
+handler!(
+    dyn BlockCapabilityProvider<dyn ItemStorage>,
+    "BlockCapabilityProvider<dyn ItemStorage>"
 );
 handler!(
     dyn ItemCapabilityProvider<dyn ResourceHandler<ItemResource>>,
