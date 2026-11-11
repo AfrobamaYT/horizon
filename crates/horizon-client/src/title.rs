@@ -25,8 +25,8 @@ mod create_world;
 mod experiments;
 mod flat;
 mod onboarding;
-mod splash;
 pub mod preset_editors;
+mod splash;
 #[cfg(test)]
 mod tests;
 pub mod world_management;
