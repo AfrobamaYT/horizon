@@ -29,7 +29,7 @@ impl Game<'_> {
             return;
         };
         let mismatches = self.level.mod_mismatches(&loaded);
-        if mismatches.is_empty() {
+        if self.level.saved_mods.is_none() {
             return;
         }
         let mut resolved = Vec::new();
@@ -73,5 +73,46 @@ impl Game<'_> {
         if !mismatches.is_empty() {
             log::warn!("Horizon: changed mods may cause the world to work incorrectly");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mod_api::{Hooks, HostSide, ModEntry, ModMismatchEvent};
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn existing_lists_fire_on_client_and_dedicated_even_without_differences() {
+        struct Listener(Arc<Mutex<usize>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Listener {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
+                assert!(event.mismatches.is_empty());
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+        let heard = Arc::new(Mutex::new(0));
+        let old = level_mods::set_loaded(Some(vec![]));
+        mod_api::testing::with_mods(
+            vec![ModEntry::new("listener", Box::new(Listener(heard.clone())))].into(),
+            || {
+                for role in [
+                    execution_role::ExecutionRole::Client,
+                    execution_role::ExecutionRole::DedicatedServer,
+                ] {
+                    super::super::super::native_entity_refs::tests::with_game(|game| {
+                        game.options.execution_role = role;
+                        game.level.saved_mods = None;
+                        game.check_mod_mismatch();
+                        game.level.saved_mods = Some(vec![]);
+                        game.check_mod_mismatch();
+                    });
+                }
+            },
+        );
+        level_mods::set_loaded(old);
+        assert_eq!(*heard.lock().unwrap(), 2);
     }
 }

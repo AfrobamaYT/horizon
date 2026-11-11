@@ -1385,13 +1385,13 @@ mod tests {
             Level,
             level_mods::{ModRecord, set_loaded},
         };
-        use mod_api::{Hooks, ModEntry, ModMismatch, ModMismatchEvent, ServerHost};
+        use mod_api::{Hooks, HostSide, ModEntry, ModMismatch, ModMismatchEvent};
         use std::sync::{Arc, Mutex};
 
         struct Migrating(Arc<Mutex<Vec<Vec<ModMismatch>>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Migrating {
-            fn mod_mismatch(&self, _: &mut dyn ServerHost, event: &mut ModMismatchEvent<'_>) {
+            fn mod_mismatch(&self, _: HostSide, event: &mut ModMismatchEvent<'_>) {
                 self.0.lock().unwrap().push(event.mismatches.to_vec());
                 event.resolved.push("mismatch_test".into());
             }
@@ -1490,15 +1490,15 @@ mod tests {
                     Level::read(&changed).unwrap().saved_mods,
                     Some(vec![record("mismatch_test", "2.0.0")])
                 );
-                // The reopened world's list is the loaded mods: nothing fires.
+                // An unchanged list still fires.
                 with_game(|game| {
                     game.load_world(request(&changed)).unwrap();
-                    assert_eq!(heard.lock().unwrap().len(), 1);
+                    assert_eq!(heard.lock().unwrap().len(), 2);
                 });
                 // A world without the list fires nothing and gets the list on its save.
                 with_game(|game| {
                     game.load_world(request(&plain)).unwrap();
-                    assert_eq!(heard.lock().unwrap().len(), 1);
+                    assert_eq!(heard.lock().unwrap().len(), 2);
                     game.save_game_with(true).unwrap();
                 });
                 assert_eq!(

@@ -1251,9 +1251,6 @@ impl Game<'_> {
     /// mods hear its saved mod list's differences (NeoForge's
     /// `ModMismatchEvent`), then the level it opens in.
     pub(super) fn native_world_opened(&mut self, dim: Dim) {
-        if self.remote.is_none() && !self.options.execution_role.is_client() {
-            self.check_mod_mismatch();
-        }
         self.native_level_opened(dim);
     }
 
