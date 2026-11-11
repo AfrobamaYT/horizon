@@ -4,8 +4,16 @@ use crate::game::commands::Target;
 use horizon_client::motion::PlayerMotion;
 
 #[test]
-#[ignore = "needs prepared resources, a scratch HORIZON_HOME and HORIZON_TEST_SEEDS=1"]
+#[ignore = "needs prepared resources and a scratch HORIZON_HOME"]
 fn constructed_and_saved_mob_uuids_survive_repeated_reconstruction() {
+    // Opt in only in a fresh child; never mutate the parallel parent's environment.
+    if crate::game::native_entity_refs::tests::run_fresh_cases(
+        "game::persist::summon_uuid_conflict_tests::constructed_and_saved_mob_uuids_survive_repeated_reconstruction",
+        "HORIZON_TEST_SEEDS",
+        &["1"],
+    ) {
+        return;
+    }
     use horizon_core::random::RandomSource;
 
     // Independent Java 48-bit LCG calculation: uniquifier 12345 multiplied

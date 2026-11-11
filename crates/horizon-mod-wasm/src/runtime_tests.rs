@@ -1,23 +1,6 @@
 use super::*;
 
-struct Capture(Mutex<Vec<String>>);
-impl log::Log for Capture {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-    fn log(&self, record: &log::Record<'_>) {
-        self.0.lock().unwrap().push(record.args().to_string());
-    }
-    fn flush(&self) {}
-}
-static CAPTURE: Capture = Capture(Mutex::new(Vec::new()));
-fn capture_logs() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        log::set_logger(&CAPTURE).unwrap();
-        log::set_max_level(log::LevelFilter::Warn);
-    });
-}
+use crate::test_log::{CAPTURE, capture_logs};
 
 #[test]
 fn released_queue_empty_fast_path_does_not_wait_for_its_mutex() {

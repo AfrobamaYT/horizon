@@ -211,7 +211,9 @@ impl Game<'_> {
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None for a stale handle or a parked level: its entity handles
-    /// cannot resolve until the level is in place. On a client, see
+    /// cannot resolve until the level is in place, and for a bound that is not
+    /// finite (NaN or infinite). A minimum above its maximum is the same box
+    /// with the two swapped, as vanilla's `AABB`. On a client, see
     /// `client_entities_in`. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
@@ -226,7 +228,9 @@ impl Game<'_> {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
-        if self.native_lifecycle.epoch() != Some(level.epoch()) {
+        if self.native_lifecycle.epoch() != Some(level.epoch())
+            || !min.iter().chain(&max).all(|v| v.is_finite())
+        {
             return None;
         }
         let bounds = Aabb::new(
@@ -4154,6 +4158,55 @@ pub(super) mod tests {
             assert_eq!(ids(game, stale, [-1.0; 3], [3.0; 3]), None);
             game.remote.as_mut().unwrap().logged_in = false;
             assert_eq!(ids(game, level, [-1.0; 3], [3.0; 3]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_refuses_a_box_with_a_bound_that_is_not_finite_and_swaps_an_inverted_one() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::connection::Pipe;
+        use mod_api::{Host, LevelRef};
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EntitiesInTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
+            let level = game.level("minecraft:overworld").unwrap();
+            let ids = |host: &dyn Host, level: LevelRef, min, max| {
+                level
+                    .entities_in(host, min, max)
+                    .map(|found| found.into_iter().map(|e| e.id()).collect::<Vec<_>>())
+            };
+            // Mod code chooses the bounds: one that is not finite is refused, never panics,
+            // and nothing is walked by the box's size.
+            for (min, max) in [
+                ([f64::NAN, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                ([-1.0, -1.0, -1.0], [3.0, f64::NAN, 1.0]),
+                ([f64::NEG_INFINITY, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                ([-1.0, -1.0, -1.0], [3.0, 2.0, f64::INFINITY]),
+                ([f64::NEG_INFINITY; 3], [f64::INFINITY; 3]),
+            ] {
+                assert_eq!(ids(game, level, min, max), None, "{min:?} {max:?}");
+            }
+            // A minimum above its maximum on one axis is the same box swapped (vanilla's
+            // AABB): the tracked pig, then the window's own player.
+            assert_eq!(
+                ids(game, level, [3.0, -1.0, -1.0], [-1.0, 2.0, 1.0]),
+                Some(vec![15, 7])
+            );
+            assert_eq!(
+                ids(game, level, [3.0, 2.0, 1.0], [-1.0, -1.0, -1.0]),
+                Some(vec![15, 7])
+            );
         });
     }
 }
