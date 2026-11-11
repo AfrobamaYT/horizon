@@ -84,7 +84,6 @@ pub struct Manifest {
     /// Game internals used by this mod, fingerprinted against its pinned build.
     #[serde(default)]
     pub internals: Vec<Internal>,
-    /// Listeners at compiled slots; they never compile game code.
     #[serde(default, deserialize_with = "inject::rows")]
     pub inject: Vec<inject::Inject>,
 }
@@ -110,9 +109,8 @@ pub struct Native {
     pub game: String,
     pub horizon: String,
     pub mixins: String,
-    /// Source-level edits of game functions, forwarded as horizon-mixins' `[[injection]]`.
-    /// Only the tables of `[native]` compile game code.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Source-level edits of game functions, native only: the one form that compiles game code.
+    #[serde(default)]
     pub mixin: Vec<mixin::Mixin>,
     #[serde(default)]
     pub module: Vec<Module>,
@@ -238,15 +236,6 @@ impl Internal {
 }
 
 impl Manifest {
-    /// The declared dependency whose normalized crate namespace owns a mod-point target.
-    /// Targets outside these namespaces belong to the engine catalog.
-    pub fn mod_point_dependency(&self, at: &str) -> Option<&str> {
-        self.dependencies
-            .keys()
-            .find(|id| at.split("::").next() == Some(id.replace('-', "_").as_str()))
-            .map(String::as_str)
-    }
-
     pub fn parse(text: &str) -> Result<Self, String> {
         let both = || {
             format!(
@@ -268,6 +257,19 @@ impl Manifest {
                 format!("{MANIFEST}: {e}")
             }
         })?;
+        inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
+            .map_err(|e| e.to_string())?;
+        for entry in &m.inject {
+            if m.dependencies
+                .keys()
+                .any(|id| entry.at.split("::").next() == Some(id.replace('-', "_").as_str()))
+            {
+                return Err(format!(
+                    "{}: target {} is another mod's function; use the library mod's own hooks and functions",
+                    entry.id, entry.at
+                ));
+            }
+        }
         Internal::check_all(&m.internals)?;
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
@@ -292,15 +294,43 @@ impl Manifest {
             }
         }
         if m.native.is_some() && m.wasm.is_some() {
-            return Err(both());
+            return Err(format!(
+                "{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module"
+            ));
         }
-        inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
-            .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        mixin::Mixin::check_all(
+            m.native
+                .as_ref()
+                .map(|n| n.mixin.as_slice())
+                .unwrap_or_default(),
+            &m.id,
+        )
+        .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if let Some(entry) = m
+            .native
+            .as_ref()
+            .map(|n| n.mixin.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .find(|entry| {
+                m.dependencies.keys().any(|id| {
+                    entry.target.split("::").next() == Some(id.replace('-', "_").as_str())
+                })
+            })
+        {
+            return Err(format!(
+                "{MANIFEST}: {}",
+                mixin::MixinError::Invalid {
+                    id: format!("{}:{}", m.id, entry.id),
+                    field: "target",
+                    fix: "a mixin targets a game function",
+                }
+            ));
+        }
         if let Some(native) = &m.native {
-            // horizon-mixins keeps one id space per mod, which injects share.
+            // Native source edits share one id space.
             let mut ids: std::collections::HashSet<_> =
                 m.inject.iter().map(|entry| &entry.id).collect();
-            mixin::Mixin::check_all(&native.mixin, &m).map_err(|e| format!("{MANIFEST}: {e}"))?;
             for id in native
                 .mixin
                 .iter()
@@ -430,9 +460,6 @@ pub struct Package {
     pub manifest: Manifest,
     pub icon: Option<crate::icon::Icon>,
     pub layouts: crate::layouts::Layouts,
-    /// A wasm mod's own points (#2339), as its build listed them; a native mod's are listed from
-    /// its source when it is built.
-    pub points: Option<point_shape::catalog::Catalog>,
 }
 impl Package {
     /// The kind of this validated package, independent of its install folder.
@@ -569,22 +596,6 @@ impl Package {
             Err(e) => return Err(format!("layouts.json: {e}")),
         }
         if let Some(wasm) = &package.manifest.wasm {
-            let bytes = match std::fs::File::open(path.join(inject::mod_points::FILE)) {
-                Ok(file) => {
-                    check_folder_file(path, inject::mod_points::FILE)?;
-                    Some(inject::mod_points::read_bytes(file)?)
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => return Err(format!("{}: {e}", inject::mod_points::FILE)),
-            };
-            package.points = inject::mod_points::bound(bytes.as_deref(), wasm.points())?;
-        } else if std::fs::symlink_metadata(path.join(inject::mod_points::FILE)).is_ok() {
-            return Err(format!(
-                "{}: only a wasm package carries its points",
-                inject::mod_points::FILE
-            ));
-        }
-        if let Some(wasm) = &package.manifest.wasm {
             let bytes = std::fs::read(path.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?;
             wasm.check(&bytes).map_err(|e| e.to_string())?;
         }
@@ -600,7 +611,6 @@ impl Package {
         let mut has_wasm = false;
         let mut entries = Vec::new();
         let mut layouts = None;
-        let mut points = None;
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
             let name = entry.name().map_err(|e| e.to_string())?.into_owned();
@@ -628,13 +638,6 @@ impl Package {
                     return Err("duplicate layouts.json".into());
                 }
                 layouts = Some(crate::layouts::Layouts::read(&mut entry)?);
-                continue;
-            }
-            if name == inject::mod_points::FILE && matches!(mode & 0o170000, 0 | 0o100000) {
-                if points.is_some() {
-                    return Err(format!("duplicate {name}"));
-                }
-                points = Some(inject::mod_points::read_bytes(&mut entry)?);
                 continue;
             }
             check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
@@ -675,18 +678,6 @@ impl Package {
             wasm.check(&bytes).map_err(|e| e.to_string())?;
         }
         package.layouts = layouts.unwrap_or_default();
-        match &package.manifest.wasm {
-            Some(wasm) => {
-                package.points = inject::mod_points::bound(points.as_deref(), wasm.points())?;
-            }
-            None if points.is_some() => {
-                return Err(format!(
-                    "{}: only a wasm package carries its points",
-                    inject::mod_points::FILE
-                ));
-            }
-            None => {}
-        }
         if package.has_source() || package.manifest.wasm.is_some() {
             let mut names = std::collections::HashSet::new();
             let mut source_count = 0usize;
@@ -705,7 +696,6 @@ impl Package {
                 if !directory {
                     if name != MANIFEST
                         && name != crate::layouts::FILE
-                        && !(name == inject::mod_points::FILE && package.manifest.wasm.is_some())
                         && name != "icon.png"
                         && !(name == WASM && package.manifest.wasm.is_some())
                         && !name.starts_with("assets/")
@@ -756,7 +746,6 @@ impl Package {
             manifest,
             icon,
             layouts: Default::default(),
-            points: None,
         };
         if has_cargo != package.has_source() || has_source != has_cargo {
             return Err("inconsistent code declaration ([native] or [wasm]) and source".into());
@@ -801,14 +790,6 @@ impl Package {
                 .map_err(|e| e.to_string())?;
             crate::layouts::Layouts::read(bytes.as_slice())?;
             files.insert(crate::layouts::FILE.into(), bytes);
-        }
-        if self.manifest.wasm.is_some()
-            && let Ok(file) = std::fs::File::open(root.join(inject::mod_points::FILE))
-        {
-            files.insert(
-                inject::mod_points::FILE.into(),
-                inject::mod_points::read_bytes(file)?,
-            );
         }
         if let Some(icon) = &self.icon {
             files.insert("icon.png".to_string(), icon.bytes().to_vec());
@@ -902,10 +883,6 @@ impl Package {
             let source = code && source_file(name) && plain_path(name);
             if *name == crate::layouts::FILE {
                 crate::layouts::Layouts::read(*bytes)?;
-                put(name, bytes)?;
-                continue;
-            }
-            if *name == inject::mod_points::FILE && manifest.wasm.is_some() {
                 put(name, bytes)?;
                 continue;
             }
@@ -1054,6 +1031,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn injections_at_dependency_functions_are_refused_by_name() {
+        let text = format!(
+            "{EXAMPLE}[dependencies]\nchemlib='1'\n[[inject]]\nid='listen'\nat='chemlib::transfer'\nkind='head'\nwith='listen'\n"
+        );
+        let error = Manifest::parse(&text).unwrap_err();
+        assert!(
+            error.contains("chemlib::transfer") && error.contains("own hooks and functions"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn windows_device_mod_ids_are_refused() {
         for id in ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"] {
             assert!(
@@ -1078,19 +1067,6 @@ version = "0.1.0"
 api = "0.2"
 capabilities = ["registries"]
 "#;
-
-    #[test]
-    fn unified_injections_and_native_modules_share_the_id_namespace() {
-        let pin = "a".repeat(40);
-        let text = |module_id| {
-            format!(
-                "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n[[inject]]\nid='shared'\nat='game::tick'\nkind='head'\nwith='tick'\nhash='signature'\n[[native.module]]\nid='{module_id}'\nfile='game.rs'\nname='runtime'\nsource='src/runtime.rs'\n"
-            )
-        };
-        assert!(Manifest::parse(&text("distinct")).is_ok());
-        let error = Manifest::parse(&text("shared")).unwrap_err();
-        assert!(error.contains("duplicate module id"), "{error}");
-    }
 
     #[test]
     fn refuses_bad_ids_and_retired_manifests() {
@@ -1202,7 +1178,7 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn native_modules_are_validated_like_injections() {
+    fn native_modules_are_validated() {
         let native = format!(
             "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
             "a".repeat(40),
@@ -1223,10 +1199,10 @@ capabilities = ["registries"]
             valid.replace("source = 'src/runtime.rs'", "source = '../escape.rs'"),
             // unknown field
             format!("{valid}order = 1\n"),
-            // duplicate id, also against an injection's
+            // duplicate module id
             format!("{valid}{valid}"),
             format!(
-                "{valid}[[inject]]\nid = 'runtime'\nat = 'a'\nkind = 'head'\nwith = 'b'\nhash = 'h'\n"
+                "{valid}[[native.module]]\nid='runtime'\nfile='game.rs'\nname='other'\nsource='src/other.rs'\n"
             ),
             // not an identifier
             valid.replace("name = 'runtime'", "name = 'run time'"),
@@ -1472,12 +1448,12 @@ issues = \"http://example.org/issues\"
         assert!(
             Manifest::parse(&both)
                 .unwrap_err()
-                .contains("a mod is [native] or [wasm], not both")
+                .contains("a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module")
         );
     }
 
     #[test]
-    fn wasm_packages_refuse_native_tables_even_with_injects() {
+    fn wasm_packages_refuse_unknown_native_fields() {
         use sha2::{Digest, Sha512};
         use std::io::Write;
         let module = b"\0asm\x01\0\0\0";
@@ -1492,10 +1468,7 @@ issues = \"http://example.org/issues\"
                 .unwrap_err()
                 .contains("a mod is [native] or [wasm], not both")
         );
-        for unified in [
-            "",
-            "[[inject]]\nid='new'\nat='game::tick'\nkind='head'\nwith='tick'\nhash='signature'\n",
-        ] {
+        for unified in [""] {
             assert!(Manifest::parse(&format!("{base}{unified}")).is_ok());
             // Build an input archive directly: the public writer rightly refuses its manifest.
             let text = format!("{base}{foreign}{unified}");
@@ -1508,124 +1481,12 @@ issues = \"http://example.org/issues\"
             let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
             let error = Package::read_zip(&mut archive)
                 .err()
-                .expect("native tables refused before package classification");
+                .expect("unknown native field refused before package classification");
             assert!(
                 error.contains("a mod is [native] or [wasm], not both"),
                 "{error}"
             );
         }
-    }
-
-    #[test]
-    fn only_a_wasm_package_carries_its_points_and_only_the_ones_its_build_pinned() {
-        use std::io::Write;
-        let module = wat::parse_str(
-            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "horizon_layout")) (func (export "horizon_in")) (func (export "horizon_hook")))"#,
-        )
-        .unwrap();
-        let points = br#"{"crate":"ruby","table":"__horizon_points","points":[]}"#;
-        let manifest = |pin: Option<&[u8]>| {
-            format!(
-                "{}\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n{}",
-                EXAMPLE.trim_end(),
-                sha512_of(&module),
-                pin.map(|bytes| format!("points = \"{}\"\n", sha512_of(bytes)))
-                    .unwrap_or_default()
-            )
-        };
-        // Build an archive directly: the writer refuses what the reader must refuse too.
-        let archive = |text: &str, catalog: Option<&[u8]>| {
-            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-            let mut files = vec![(MANIFEST, text.as_bytes()), (WASM, module.as_slice())];
-            files.extend(catalog.map(|bytes| (inject::mod_points::FILE, bytes)));
-            for (name, bytes) in files {
-                zip.start_file(name, zip::write::SimpleFileOptions::default())
-                    .unwrap();
-                zip.write_all(bytes).unwrap();
-            }
-            let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
-            Package::read_zip(&mut archive).map(|package| package.points)
-        };
-        let pinned = manifest(Some(points));
-        assert_eq!(
-            archive(&pinned, Some(points)).unwrap().unwrap().krate,
-            "ruby"
-        );
-        assert!(
-            Package::write_files(
-                &pinned,
-                &[(WASM, &module), (inject::mod_points::FILE, points)]
-            )
-            .is_ok()
-        );
-        assert_eq!(archive(&manifest(None), None).unwrap(), None);
-        let tampered = br#"{"crate":"attacker","table":"other","points":[]}"#;
-        for (case, text, catalog, error) in [
-            (
-                "missing but pinned",
-                &pinned,
-                None,
-                "mod-points.json: missing; [wasm] pins one",
-            ),
-            (
-                "changed after the build",
-                &pinned,
-                Some(tampered.as_slice()),
-                "mod-points.json: does not match the hash [wasm] pins: changed after the build",
-            ),
-            (
-                "present but unpinned",
-                &manifest(None),
-                Some(points.as_slice()),
-                "mod-points.json: [wasm] pins no points; only the build writes mod-points.json",
-            ),
-        ] {
-            assert_eq!(archive(text, catalog).err().unwrap(), error, "read: {case}");
-            let mut files = vec![(WASM, module.as_slice())];
-            files.extend(catalog.map(|bytes| (inject::mod_points::FILE, bytes)));
-            assert_eq!(
-                Package::write_files(text, &files).unwrap_err(),
-                error,
-                "write: {case}"
-            );
-        }
-        // A pinned but malformed catalog is refused by its parse.
-        let malformed = b"{";
-        assert!(
-            archive(&manifest(Some(malformed)), Some(malformed))
-                .err()
-                .unwrap()
-                .starts_with("mod-points.json:")
-        );
-        // A content package carrying one is refused: no build of it wrote points.
-        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (name, bytes) in [
-            (MANIFEST, EXAMPLE.as_bytes()),
-            (inject::mod_points::FILE, points.as_slice()),
-        ] {
-            zip.start_file(name, zip::write::SimpleFileOptions::default())
-                .unwrap();
-            zip.write_all(bytes).unwrap();
-        }
-        let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
-        assert_eq!(
-            Package::read_zip(&mut archive).err().unwrap(),
-            "mod-points.json: only a wasm package carries its points"
-        );
-        // The folder reader holds the same rule.
-        let folder = std::env::temp_dir().join(format!("mod-points-folder-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&folder);
-        std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join(MANIFEST), EXAMPLE).unwrap();
-        assert!(Package::read(&folder).is_ok());
-        std::fs::write(folder.join(inject::mod_points::FILE), points).unwrap();
-        let refused = Package::read(&folder).err();
-        std::fs::remove_dir_all(&folder).unwrap();
-        assert_eq!(
-            refused.unwrap(),
-            "mod-points.json: only a wasm package carries its points"
-        );
     }
 
     #[test]

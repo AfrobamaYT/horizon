@@ -292,6 +292,8 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
+pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> { group::build(root, catalog, additional) }
+
 fn member_export(name: &str) -> bool {
     !matches!(name, "__horizon_mod_hooks" | "__dso_handle" | "__tls_base")
         && !rustc_demangle::try_demangle(name)

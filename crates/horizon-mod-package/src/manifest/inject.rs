@@ -4,8 +4,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub mod mod_points;
-
 const RESERVED: &str = concat!(
     "_ as async await break const continue crate dyn else enum extern false fn for if ",
     "impl in let loop match mod move mut pub ref return self Self static struct super ",
@@ -72,9 +70,8 @@ impl<'de> Deserialize<'de> for Kind {
                              every argument to change"
                     .to_owned()
             }
-            "modify_call_arg" => "kind `modify_call_arg` was removed: use `before_call`, whose \
-                                  listener gets the call's arguments mutably before it runs"
-                .to_owned(),
+            "modify_call_arg" | "before_call" | "after_call" | "modify_value" | "wrap_call"
+            | "wrap_if" => source_level(&name, "`[[native.mixin]]` function replacement"),
             "modify_local" => source_level(&name, "`[[native.mixin]]` kind `MODIFY_VARIABLE`"),
             "expression" => source_level(
                 &name,
@@ -270,7 +267,7 @@ impl fmt::Display for InjectError {
                 declaration,
             } => write!(
                 f,
-                "{id}: {reason}; slot declaration {declaration}; [[inject]] never compiles game code: use [[native.mixin]] in a native mod, or request the slot"
+                "{id}: {reason}; engine API point {declaration}; use an engine function with an API record, or [[native.mixin]] in a native mod"
             ),
         }
     }
@@ -279,7 +276,7 @@ impl std::error::Error for InjectError {}
 
 /// The compiled slot a validated entry attaches to, against a resolved catalog and without I/O.
 /// A place or kind with no slot is refused on every target: nothing here rebuilds the game.
-/// Wasm call-site injections are permanently unsupported.
+/// Native and wasm use the same API records.
 pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<SlotKind, InjectError> {
     let inject = entry.inject;
     let id = format!("{}:{}", entry.mod_id, inject.id);

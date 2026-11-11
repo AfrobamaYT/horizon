@@ -123,12 +123,9 @@ impl fmt::Display for MixinError {
 impl std::error::Error for MixinError {}
 
 impl Mixin {
-    pub(super) fn check_all(
-        entries: &[Self],
-        manifest: &super::Manifest,
-    ) -> Result<(), MixinError> {
+    pub(super) fn check_all(entries: &[Self], mod_id: &str) -> Result<(), MixinError> {
         for entry in entries {
-            let id = format!("{}:{}", manifest.id, entry.id);
+            let id = format!("{mod_id}:{}", entry.id);
             let invalid = |field, fix| MixinError::Invalid {
                 id: id.clone(),
                 field,
@@ -136,12 +133,6 @@ impl Mixin {
             };
             if entry.target.trim().is_empty() {
                 return Err(invalid("target", "name the game function's path"));
-            }
-            if manifest.mod_point_dependency(&entry.target).is_some() {
-                return Err(invalid(
-                    "target",
-                    "a mixin targets a game function; inject at another mod's point with [[inject]]",
-                ));
             }
             if !super::plain_path(&entry.helper)
                 || !entry.helper.starts_with("src/")
@@ -249,7 +240,7 @@ mod tests {
         let error = parse(&format!("{dependency}{}", native()), &row).unwrap_err();
         assert!(
             error.ends_with(
-                "E_MIXIN_INVALID: sample:autosave: invalid target; a mixin targets a game function; inject at another mod's point with [[inject]]"
+                "E_MIXIN_INVALID: sample:autosave: invalid target; a mixin targets a game function"
             ),
             "{error}"
         );

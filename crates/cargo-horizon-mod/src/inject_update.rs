@@ -16,30 +16,12 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         .native
         .as_ref()
         .ok_or("inject update needs a [native] mod")?;
-    let mut internals = crate::internals::load(dir, &native.horizon)?;
+    let internals = crate::internals::load(dir, &native.horizon)?;
     let cache = dir.join("target/horizon-mod/prebuilt");
     let points = cache.join(&native.horizon).join("points.json");
     let catalog: Catalog =
         serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| e.to_string())?;
-    // A declaration at a dependency's function is checked against that mod's points (#2339).
-    let mut libraries = std::collections::BTreeSet::new();
-    for inject in &manifest.inject {
-        let krate = inject.at.split("::").next().unwrap_or_default();
-        if !libraries.insert(krate) {
-            continue;
-        }
-        if let Some(library) = super::library(dir, &inject.at, &catalog.wire)? {
-            internals.extend(library.points.into_iter().map(|point| ListedInternal {
-                path: point.target,
-                kind: "fn".into(),
-                cfg: String::new(),
-                signature: point.signature,
-                hash: point.hash,
-                shape_only: false,
-            }));
-        }
-    }
     // Older cached snapshots provide the signature behind a declaration's old hash.
     let mut old = Vec::new();
     for entry in fs::read_dir(cache).map_err(|e| e.to_string())? {
@@ -208,10 +190,9 @@ fn plan(
             .and_then(|a| a.get_mut(index))
             .ok_or("missing inject table")?;
         // Replacing the scalar payload retains its existing comments and spacing.
-        for (key, replacement) in [(
-            "hash",
-            changed.then(|| toml_edit::Value::from(item.hash.as_str())),
-        )] {
+        {
+            let key = "hash";
+            let replacement = changed.then(|| toml_edit::Value::from(item.hash.as_str()));
             if let Some(mut replacement) = replacement {
                 edited = true;
                 if let Some(existing) = table.get(key).and_then(|i| i.as_value()) {
@@ -254,18 +235,19 @@ pub(crate) fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
         crate::bounded::MAX_CATALOG,
     )?)
     .map_err(|e| e.to_string())?;
-    let text = crate::bounded::read(&dir.join(MANIFEST), crate::bounded::MAX_MANIFEST)?;
     for inject in &manifest.inject {
-        let args = Request {
-            at: &inject.at,
-            kind: inject.kind,
-            kind_name: inject.kind.name(),
-            with: &inject.with,
-        };
-        if let Some(library) = super::library(dir, &inject.at, &points.wire)? {
-            append_mod_point(&text, &manifest, &args, &library)?;
-        } else {
-            append(&text, &manifest, &args, &internals, &points)?;
+        let item =
+            target(&internals, inject).ok_or_else(|| format!("E_INJECT_MISSING: {}", inject.at))?;
+        if inject.hash.as_ref().is_some_and(|hash| hash != &item.hash) {
+            return Err(format!("E_INJECT_CHANGED: {}", inject.at));
+        }
+        let point = points
+            .points
+            .iter()
+            .find(|p| p.target == inject.at)
+            .ok_or_else(|| format!("E_INJECT_MISSING: {}", inject.at))?;
+        if let Some(reason) = &point.api_refusal {
+            return Err(format!("E_INJECT_NO_SLOT: {}: {reason}", inject.at));
         }
     }
     Ok(())
