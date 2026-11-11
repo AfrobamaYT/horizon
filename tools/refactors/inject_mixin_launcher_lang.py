@@ -15,6 +15,9 @@ for path in Path("launcher/lang").glob("*.json"):
     data = json.loads(path.read_text())
     for old in RENAMED:
         data.pop(old, None)
+    for key in list(data):
+        if key.startswith(("E_INJECT_FIELD_TYPE:", "E_INJECT_EXPRESSION_TYPE:")):
+            data.pop(key)
     for key in REMOVED:
         data.pop(key, None)
     if OLD in data:
