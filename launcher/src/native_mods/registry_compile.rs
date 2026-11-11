@@ -560,7 +560,9 @@ mod tests {
             "-o".into(),
             scratch.path().join("facade.rmeta").into_os_string(),
         ];
-        let (program, arguments) = plan.arguments(args.clone(), Some(facade.clone())).unwrap();
+        let (program, arguments) = plan
+            .arguments(args.clone(), Some(facade.clone()), scratch.path())
+            .unwrap();
         let result = Command::new(program).args(arguments).output().unwrap();
         assert!(
             result.status.success(),
@@ -644,7 +646,7 @@ mod tests {
         wrapper_args[5] = "bin".into();
         *wrapper_args.last_mut().unwrap() = scratch.path().join("wrapper.rmeta").into_os_string();
         let (program, arguments) = wrapper_plan
-            .arguments(wrapper_args.clone(), Some(wrapper.clone()))
+            .arguments(wrapper_args.clone(), Some(wrapper.clone()), scratch.path())
             .unwrap();
         let result = Command::new(program).args(arguments).output().unwrap();
         assert!(
@@ -658,13 +660,15 @@ mod tests {
             .unwrap()
             .externs
             .remove("horizon_mod_host");
-        let (program, arguments) = wrapper_plan.arguments(wrapper_args, Some(wrapper)).unwrap();
+        let (program, arguments) = wrapper_plan
+            .arguments(wrapper_args, Some(wrapper), scratch.path())
+            .unwrap();
         let result = Command::new(program).args(arguments).output().unwrap();
         assert!(!result.status.success());
         assert!(String::from_utf8_lossy(&result.stderr).contains("E0433"));
         // The old registry route supplied deps alone, unlike the direct SDK route.
         plan.search = vec![game.join("deps")];
-        let (program, arguments) = plan.arguments(args, Some(facade)).unwrap();
+        let (program, arguments) = plan.arguments(args, Some(facade), scratch.path()).unwrap();
         let result = Command::new(program).args(arguments).output().unwrap();
         assert!(!result.status.success());
         assert!(String::from_utf8_lossy(&result.stderr).contains("E0463"));
