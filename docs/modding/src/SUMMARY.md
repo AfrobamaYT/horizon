@@ -22,6 +22,7 @@
 - [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
 - [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
 - [Design: villager professions and trades](concepts/villager-professions.md)
+- [Design: tooltip components in full](concepts/tooltip-components.md)
 
 # How-to
 
