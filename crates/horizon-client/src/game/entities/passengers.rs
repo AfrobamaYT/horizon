@@ -22,7 +22,11 @@ const TRAP_INVULNERABLE: i32 = 60;
 
 impl Game<'_> {
     /// Keep the actual removed object only while a passenger still refers to it.
-    pub(super) fn retain_removed_vehicle(&mut self, id: u32, vehicle: super::persist::RemovedVehicle) {
+    pub(super) fn retain_removed_vehicle(
+        &mut self,
+        id: u32,
+        vehicle: super::persist::RemovedVehicle,
+    ) {
         if self.riding == Some(id)
             || self.ridden_by_guest(id)
             || self.mob_objects().any(|mob| mob.extra.mount == Some(id))
@@ -1171,7 +1175,10 @@ mod nested_vehicle_discard_tests {
                     "nested removal must not dispatch the same in-flight dismount twice"
                 );
                 assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
-                assert_eq!(game.mob_object(72).unwrap().position, Vec3::new(2.0, 190.0, 3.0));
+                assert_eq!(
+                    game.mob_object(72).unwrap().position,
+                    Vec3::new(2.0, 190.0, 3.0)
+                );
                 let child = game.mob_object(73).unwrap();
                 assert_eq!(child.extra.mount, Some(72));
                 assert_eq!(child.position, Vec3::ZERO);
@@ -1287,24 +1294,37 @@ mod nested_vehicle_discard_tests {
             let cancel_tick = Arc::new(AtomicBool::new(true));
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![
-                mod_api::ModEntry::new("cancel_mount", Box::new(CancelUntilAllowed {
-                    cancel: cancel_mount.clone(), calls: calls.clone(),
-                })),
-                mod_api::ModEntry::new("cancel_tick", Box::new(CancelPassengerTick(cancel_tick.clone()))),
-            ].into();
+                mod_api::ModEntry::new(
+                    "cancel_mount",
+                    Box::new(CancelUntilAllowed {
+                        cancel: cancel_mount.clone(),
+                        calls: calls.clone(),
+                    }),
+                ),
+                mod_api::ModEntry::new(
+                    "cancel_tick",
+                    Box::new(CancelPassengerTick(cancel_tick.clone())),
+                ),
+            ]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.settings.simulation_distance = 4;
                     game.settings.render_distance = 12;
-                    game.player = Some(horizon_client::motion::PlayerMotion::new(
-                        game.motion, Vec3::new(8.5, 200.0, 8.5),
-                    ).unwrap());
+                    game.player = Some(
+                        horizon_client::motion::PlayerMotion::new(
+                            game.motion,
+                            Vec3::new(8.5, 200.0, 8.5),
+                        )
+                        .unwrap(),
+                    );
                     super::super::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
-                        game, horizon_core::position::ChunkPos::new(0, 0),
+                        game,
+                        horizon_core::position::ChunkPos::new(0, 0),
                     );
-                    game.world.chunks.insert(
-                        (8, 0), Arc::new(horizon_client::chunk::Chunk::empty(8, 0)),
-                    );
+                    game.world
+                        .chunks
+                        .insert((8, 0), Arc::new(horizon_client::chunk::Chunk::empty(8, 0)));
                     game.update_chunk_tickets();
                     assert!(game.entity_ticking_area()(2, 3));
                     assert!(!game.entity_ticking_area()(136, 3));
@@ -1317,11 +1337,19 @@ mod nested_vehicle_discard_tests {
                     cancel_mount.store(false, Ordering::Relaxed);
                     game.mob_object_mut(72).unwrap().position = Vec3::new(136.0, 190.0, 3.0);
                     game.tick_creature_entities().unwrap();
-                    assert_eq!(calls.load(Ordering::Relaxed), 1, "non-ticking resident must not retry");
+                    assert_eq!(
+                        calls.load(Ordering::Relaxed),
+                        1,
+                        "non-ticking resident must not retry"
+                    );
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
                     game.mob_object_mut(72).unwrap().position = Vec3::new(2.0, 190.0, 3.0);
                     game.tick_creature_entities().unwrap();
-                    assert_eq!(calls.load(Ordering::Relaxed), 1, "canceled Pre must suppress retry");
+                    assert_eq!(
+                        calls.load(Ordering::Relaxed),
+                        1,
+                        "canceled Pre must suppress retry"
+                    );
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
                     assert!(game.persist.removed_vehicles.contains_key(&71));
                     cancel_tick.store(false, Ordering::Relaxed);
@@ -1330,7 +1358,11 @@ mod nested_vehicle_discard_tests {
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
                     assert!(!game.persist.removed_vehicles.contains_key(&71));
                     game.tick_creature_entities().unwrap();
-                    assert_eq!(calls.load(Ordering::Relaxed), 2, "completed dismount must not replay");
+                    assert_eq!(
+                        calls.load(Ordering::Relaxed),
+                        2,
+                        "completed dismount must not replay"
+                    );
                 });
             });
         }
@@ -1365,14 +1397,22 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "cancel_player_dismount",
-                Box::new(CancelPlayerDismount { cancel: cancel.clone(), calls: calls.clone() }),
-            )].into();
+                Box::new(CancelPlayerDismount {
+                    cancel: cancel.clone(),
+                    calls: calls.clone(),
+                }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.mobs.clear();
-                    game.player = Some(horizon_client::motion::PlayerMotion::new(
-                        game.motion, Vec3::new(2.0, 190.0, 3.0),
-                    ).unwrap());
+                    game.player = Some(
+                        horizon_client::motion::PlayerMotion::new(
+                            game.motion,
+                            Vec3::new(2.0, 190.0, 3.0),
+                        )
+                        .unwrap(),
+                    );
                     super::super::native_entity_refs::tests::bind_local_player(game, 70, 70);
                     game.riding = Some(71);
                     let vehicle = game.entity(71).unwrap();
@@ -1408,13 +1448,22 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "cancel_guest_dismount",
-                Box::new(CancelPlayerDismount { cancel: cancel.clone(), calls: calls.clone() }),
-            )].into();
+                Box::new(CancelPlayerDismount {
+                    cancel: cancel.clone(),
+                    calls: calls.clone(),
+                }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.mobs.clear();
                     super::super::native_player_death::tests::add_guest(game);
-                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| guest.vehicle = Some(71));
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.vehicle = Some(71));
                     if cart {
                         game.hurt_cart(0, 5.0, false, false);
                     } else {
@@ -1448,9 +1497,10 @@ mod nested_vehicle_discard_tests {
                 && event.vehicle == 71
                 && self.0.fetch_add(1, Ordering::Relaxed) == 0
             {
-                assert!(host.commands().run_command(
-                    "tp 000000a0-0000-0000-0000-000000000048 30.5 180 40.5"
-                ));
+                assert!(
+                    host.commands()
+                        .run_command("tp 000000a0-0000-0000-0000-000000000048 30.5 180 40.5")
+                );
                 return mod_api::Flow::Cancel;
             }
             mod_api::Flow::Continue
@@ -1463,8 +1513,10 @@ mod nested_vehicle_discard_tests {
         for cart in [false, true] {
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "reposition_passenger", Box::new(RepositionCanceledPassenger(calls.clone())),
-            )].into();
+                "reposition_passenger",
+                Box::new(RepositionCanceledPassenger(calls.clone())),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     super::super::native_player_death::tests::add_guest(game);
@@ -1478,11 +1530,17 @@ mod nested_vehicle_discard_tests {
                     }
                     assert_eq!(calls.load(Ordering::Relaxed), 1);
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
-                    assert_eq!(game.mob_object(72).unwrap().position, Vec3::new(30.5, 180.0, 40.5));
+                    assert_eq!(
+                        game.mob_object(72).unwrap().position,
+                        Vec3::new(30.5, 180.0, 40.5)
+                    );
                     game.dismount_mob(72);
                     assert_eq!(calls.load(Ordering::Relaxed), 2);
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
-                    assert_eq!(game.mob_object(72).unwrap().position, Vec3::new(30.5, 200.0, 40.5));
+                    assert_eq!(
+                        game.mob_object(72).unwrap().position,
+                        Vec3::new(30.5, 200.0, 40.5)
+                    );
                     assert!(!game.persist.removed_vehicles.contains_key(&71));
                 });
             });
@@ -1499,38 +1557,60 @@ mod nested_vehicle_discard_tests {
     };
 
     fn bind_vehicle_test_attachment(game: &mut Game<'_>, cart: bool) {
-        VEHICLE_VALUE.set(game, mod_api::Holder::Entity(71), 37).unwrap();
+        VEHICLE_VALUE
+            .set(game, mod_api::Holder::Entity(71), 37)
+            .unwrap();
         let entity = game.entity(71).unwrap();
         let index = game.attachment_indexes[&game.dim].clone();
         let holder = mod_api::AttachmentHolder::Entity(entity);
         let values = game.entity_attachments.get_mut(&71).unwrap();
         if cart {
-            game.carts.update(0, |owner| owner.attachment_lifetime.bind(values, &index, holder));
+            game.carts.update(0, |owner| {
+                owner.attachment_lifetime.bind(values, &index, holder)
+            });
         } else {
-            game.boats.update(0, |owner| owner.attachment_lifetime.bind(values, &index, holder));
+            game.boats.update(0, |owner| {
+                owner.attachment_lifetime.bind(values, &index, holder)
+            });
         }
     }
 
     fn assert_vehicle_queries_hidden(host: &mut dyn mod_api::ServerHost, kind: &str) {
         assert!(host.entity(71).is_none());
-        assert!(host.entity(73).is_some(), "removal must not hide unrelated live handles");
+        assert!(
+            host.entity(73).is_some(),
+            "removal must not hide unrelated live handles"
+        );
         let level = host.level("minecraft:overworld").unwrap();
         for entities in [
-            level.all_entities(host).expect("the level remains queryable"),
-            level.entities_in(host, [-1000.0; 3], [1000.0; 3])
+            level
+                .all_entities(host)
+                .expect("the level remains queryable"),
+            level
+                .entities_in(host, [-1000.0; 3], [1000.0; 3])
                 .expect("spatial queries remain available"),
         ] {
             assert!(!entities.iter().any(|entity| entity.id() == 71));
             assert!(entities.iter().any(|entity| entity.id() == 73));
         }
-        assert!(!host.commands().run_command(&format!(
-            "execute if entity @e[type=minecraft:{kind}]"
-        )));
-        assert!(!host.commands().run_command(
-            "execute if entity 000000a0-0000-0000-0000-000000000047"
-        ));
-        assert_eq!(host.attachment_query("vehicle_boundary", "value")
-            .query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
+        assert!(
+            !host
+                .commands()
+                .run_command(&format!("execute if entity @e[type=minecraft:{kind}]"))
+        );
+        assert!(
+            !host
+                .commands()
+                .run_command("execute if entity 000000a0-0000-0000-0000-000000000047")
+        );
+        assert_eq!(
+            host.attachment_query("vehicle_boundary", "value")
+                .query(&VEHICLE_VALUE)
+                .unwrap()
+                .iter()
+                .count(),
+            0
+        );
     }
 
     struct RemovalBoundaryObserver {
@@ -1588,8 +1668,13 @@ mod nested_vehicle_discard_tests {
         // share the same visibility/retention contract for both vehicle lists.
         for mode in 0..9 {
             let cart = matches!(mode, 1 | 2 | 4 | 6 | 8);
-            let kind = if mode == 2 { "tnt_minecart" }
-                else if cart { "minecart" } else { "oak_boat" };
+            let kind = if mode == 2 {
+                "tnt_minecart"
+            } else if cart {
+                "minecart"
+            } else {
+                "oak_boat"
+            };
             let cancel = Arc::new(AtomicBool::new(true));
             let mounts = Arc::new(AtomicUsize::new(0));
             let leaves = Arc::new(AtomicUsize::new(0));
@@ -1597,10 +1682,14 @@ mod nested_vehicle_discard_tests {
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "removal_boundary",
                 Box::new(RemovalBoundaryObserver {
-                    kind, cancel: cancel.clone(), mounts: mounts.clone(),
-                    leaves: leaves.clone(), destroys: destroys.clone(),
+                    kind,
+                    cancel: cancel.clone(),
+                    mounts: mounts.clone(),
+                    leaves: leaves.clone(),
+                    destroys: destroys.clone(),
                 }),
-            )].into();
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, true, |game| {
                     super::super::native_player_death::tests::add_guest(game);
@@ -1608,7 +1697,8 @@ mod nested_vehicle_discard_tests {
                     game.build_registries();
                     game.set_allow_commands(true);
                     if mode == 2 {
-                        game.carts.update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
+                        game.carts
+                            .update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
                     }
                     bind_vehicle_test_attachment(game, cart);
                     let vehicle = game.entity(71).unwrap();
@@ -1618,14 +1708,22 @@ mod nested_vehicle_discard_tests {
                     game.score.board.set(&holder, "boundary", 7);
                     assert!(game.native_joins_flush(false, 0));
                     match mode {
-                        0 => { assert!(game.hurt_boat(0, 5.0, false)); }
+                        0 => {
+                            assert!(game.hurt_boat(0, 5.0, false));
+                        }
                         1 => game.hurt_cart(0, 5.0, false, false),
-                        2 => { game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false); }
+                        2 => {
+                            game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false);
+                        }
                         3 | 4 => {
                             assert!(game.run_command(&format!("kill @e[type=minecraft:{kind}]")));
                         }
-                        5 | 6 => { assert!(vehicle.discard(game)); }
-                        _ => { assert!(game.entity_remove(vehicle, mod_api::RemovalReason::Killed)); }
+                        5 | 6 => {
+                            assert!(vehicle.discard(game));
+                        }
+                        _ => {
+                            assert!(game.entity_remove(vehicle, mod_api::RemovalReason::Killed));
+                        }
                     }
                     assert_vehicle_queries_hidden(game, kind);
                     assert!(game.entity_position(vehicle).is_none());
@@ -1648,11 +1746,29 @@ mod nested_vehicle_discard_tests {
                         assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
                         assert!(game.persist.mount_notifications.is_empty());
                         game.prune_entity_memory();
-                        assert_eq!(game.score.board.score(&holder, "boundary").map(|score| score.value), Some(11));
+                        assert_eq!(
+                            game.score
+                                .board
+                                .score(&holder, "boundary")
+                                .map(|score| score.value),
+                            Some(11)
+                        );
                     }
-                    assert_eq!(game.score.board.score(&holder, "boundary").map(|score| score.value), Some(11));
+                    assert_eq!(
+                        game.score
+                            .board
+                            .score(&holder, "boundary")
+                            .map(|score| score.value),
+                        Some(11)
+                    );
                     game.score_destroyed_entities();
-                    assert_eq!(game.score.board.score(&holder, "boundary").map(|score| score.value), Some(11));
+                    assert_eq!(
+                        game.score
+                            .board
+                            .score(&holder, "boundary")
+                            .map(|score| score.value),
+                        Some(11)
+                    );
                     cancel.store(false, Ordering::Relaxed);
                     game.dismount_mob(72);
                     assert_eq!(mounts.load(Ordering::Relaxed), 2);
@@ -1666,7 +1782,13 @@ mod nested_vehicle_discard_tests {
                     assert_eq!(mounts.load(Ordering::Relaxed), 2);
                     assert_eq!(leaves.load(Ordering::Relaxed), 1);
                     assert_eq!(destroys.load(Ordering::Relaxed), usize::from(mode < 2));
-                    assert_eq!(game.score.board.score(&holder, "boundary").map(|score| score.value), Some(11));
+                    assert_eq!(
+                        game.score
+                            .board
+                            .score(&holder, "boundary")
+                            .map(|score| score.value),
+                        Some(11)
+                    );
                 });
             });
         }
@@ -1680,9 +1802,15 @@ mod nested_vehicle_discard_tests {
             host: &mut dyn mod_api::ServerHost,
             event: &mut mod_api::EntityJoinLevelEvent<'_>,
         ) -> mod_api::Flow {
-            assert_ne!(event.entity, 71, "a removed vehicle must not join during its sweep");
+            assert_ne!(
+                event.entity, 71,
+                "a removed vehicle must not join during its sweep"
+            );
             if event.kind == "minecraft:item" {
-                assert!(host.entity(71).is_none(), "spill callbacks cannot resolve the removed owner");
+                assert!(
+                    host.entity(71).is_none(),
+                    "spill callbacks cannot resolve the removed owner"
+                );
                 self.0.fetch_add(1, Ordering::Relaxed);
             }
             mod_api::Flow::Continue
@@ -1700,14 +1828,24 @@ mod nested_vehicle_discard_tests {
                 let mods: mod_api::Mods = vec![
                     mod_api::ModEntry::new(
                         "cancel_spilling_vehicle",
-                        Box::new(CancelUntilAllowed { cancel: cancel.clone(), calls: calls.clone() }),
+                        Box::new(CancelUntilAllowed {
+                            cancel: cancel.clone(),
+                            calls: calls.clone(),
+                        }),
                     ),
-                    mod_api::ModEntry::new("observe_spill", Box::new(ObserveSpillItem(item_joins.clone()))),
-                ].into();
+                    mod_api::ModEntry::new(
+                        "observe_spill",
+                        Box::new(ObserveSpillItem(item_joins.clone())),
+                    ),
+                ]
+                .into();
                 mod_api::testing::with_mods(mods, || {
                     with_vehicle_tree(cart, true, |game| {
                         game.next_entity = game.next_entity.max(100);
-                        let items = vec![Some(horizon_client::items::ItemStack::new("minecraft:diamond", 5))];
+                        let items = vec![Some(horizon_client::items::ItemStack::new(
+                            "minecraft:diamond",
+                            5,
+                        ))];
                         if cart {
                             game.carts.update(0, |vehicle| {
                                 vehicle.kind = super::super::minecarts::CartKind::Chest;
@@ -1721,17 +1859,22 @@ mod nested_vehicle_discard_tests {
                         }
                         match mode {
                             0 if cart => game.hurt_cart(0, 5.0, false, false),
-                            0 => { assert!(game.hurt_boat(0, 5.0, false)); }
+                            0 => {
+                                assert!(game.hurt_boat(0, 5.0, false));
+                            }
                             1 => game.kill_target_in_level(if cart {
                                 super::super::commands::Target::Cart(71)
                             } else {
                                 super::super::commands::Target::Boat(71)
                             }),
-                            _ => { assert!(game.entity(71).unwrap().discard(game)); }
+                            _ => {
+                                assert!(game.entity(71).unwrap().discard(game));
+                            }
                         }
                         game.native_removals_flush();
                         let diamonds = |game: &Game<'_>| -> u32 {
-                            game.dropped.iter()
+                            game.dropped
+                                .iter()
                                 .filter(|item| item.stack.item.as_ref() == "minecraft:diamond")
                                 .map(|item| item.stack.count)
                                 .sum()
@@ -1772,7 +1915,8 @@ mod nested_vehicle_discard_tests {
                 self.calls.fetch_add(1, Ordering::Relaxed);
                 assert!(host.entity(event.vehicle).is_none());
                 assert!(!host.commands().run_command(&format!(
-                    "execute if entity @e[type=minecraft:{}]", self.kind
+                    "execute if entity @e[type=minecraft:{}]",
+                    self.kind
                 )));
                 let batch = host.attachment_query("vehicle_boundary", "value");
                 assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
@@ -1790,8 +1934,12 @@ mod nested_vehicle_discard_tests {
             let kind = if cart { "minecart" } else { "oak_boat" };
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "observe_destroyed_vehicle",
-                Box::new(ObserveDestroyedVehicle { kind, calls: calls.clone() }),
-            )].into();
+                Box::new(ObserveDestroyedVehicle {
+                    kind,
+                    calls: calls.clone(),
+                }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     super::super::native_player_death::tests::add_guest(game);
@@ -1799,8 +1947,14 @@ mod nested_vehicle_discard_tests {
                     game.build_registries();
                     game.set_allow_commands(true);
                     bind_vehicle_test_attachment(game, cart);
-                    assert_eq!(game.attachment_query("vehicle_boundary", "value")
-                        .query(&VEHICLE_VALUE).unwrap().iter().count(), 1);
+                    assert_eq!(
+                        game.attachment_query("vehicle_boundary", "value")
+                            .query(&VEHICLE_VALUE)
+                            .unwrap()
+                            .iter()
+                            .count(),
+                        1
+                    );
                     if cart {
                         game.hurt_cart(0, 5.0, false, false);
                     } else {
@@ -1820,15 +1974,18 @@ mod nested_vehicle_discard_tests {
             let cancel = Arc::new(AtomicBool::new(true));
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "cancel_visibility", Box::new(CancelUntilAllowed { cancel, calls }),
-            )].into();
+                "cancel_visibility",
+                Box::new(CancelUntilAllowed { cancel, calls }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.native_level_opened(super::super::Dim::Overworld);
                     game.build_registries();
                     game.set_allow_commands(true);
                     super::super::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
-                        game, horizon_core::position::ChunkPos::new(0, 0),
+                        game,
+                        horizon_core::position::ChunkPos::new(0, 0),
                     );
                     let kind = if cart { "minecart" } else { "oak_boat" };
                     let command = format!("execute if entity @e[type=minecraft:{kind}]");
@@ -1862,8 +2019,12 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "cancel_destroyed_vehicle",
-                Box::new(CancelUntilAllowed { cancel: cancel.clone(), calls: calls.clone() }),
-            )].into();
+                Box::new(CancelUntilAllowed {
+                    cancel: cancel.clone(),
+                    calls: calls.clone(),
+                }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(mode != 0, true, |game| {
                     let uuid = [160, 0, 0, 71];
@@ -1875,7 +2036,8 @@ mod nested_vehicle_discard_tests {
                     } else if mode == 1 {
                         game.hurt_cart(0, 5.0, false, false);
                     } else {
-                        game.carts.update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
+                        game.carts
+                            .update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
                         game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false);
                     }
                     assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -1886,17 +2048,27 @@ mod nested_vehicle_discard_tests {
                     assert!(game.score.board.score(&holder, "retained").is_none());
                     game.score.board.set(&holder, "retained", 11);
                     game.score_destroyed_entities();
-                    assert_eq!(game.score.board.score(&holder, "retained").map(|s| s.value), Some(11));
+                    assert_eq!(
+                        game.score.board.score(&holder, "retained").map(|s| s.value),
+                        Some(11)
+                    );
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
                     assert_eq!(game.mob_object(73).unwrap().position, Vec3::ZERO);
                     game.sync_riders();
-                    assert_eq!(calls.load(Ordering::Relaxed), 1, "rejected riders do not tick");
+                    assert_eq!(
+                        calls.load(Ordering::Relaxed),
+                        1,
+                        "rejected riders do not tick"
+                    );
                     assert_eq!(game.mob_object(73).unwrap().age, 19);
                     cancel.store(false, Ordering::Relaxed);
                     game.dismount_mob(72);
                     assert_eq!(calls.load(Ordering::Relaxed), 2);
                     assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
-                    assert_eq!(game.mob_object(72).unwrap().position, Vec3::new(2.0, 200.0, 3.0));
+                    assert_eq!(
+                        game.mob_object(72).unwrap().position,
+                        Vec3::new(2.0, 200.0, 3.0)
+                    );
                     let child = game.mob_object(73).unwrap();
                     assert_eq!(child.extra.mount, Some(72));
                     assert_eq!(child.position.x, 2.0);
@@ -1916,15 +2088,21 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "cancel_multiseat",
-                Box::new(CancelUntilAllowed { cancel: cancel.clone(), calls }),
-            )].into();
+                Box::new(CancelUntilAllowed {
+                    cancel: cancel.clone(),
+                    calls,
+                }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, true, |game| {
                     let camel = game.res.mob_types().get("minecraft:camel").unwrap().clone();
                     let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
                     let mut parent = Mob::new(72, camel, Vec3::new(2.0, 190.0, 3.0), 0.0);
                     parent.extra.mount = Some(71);
-                    game.persist.off_level.insert(72, super::super::persist::OffLevel::Mob(parent));
+                    game.persist
+                        .off_level
+                        .insert(72, super::super::persist::OffLevel::Mob(parent));
                     game.mob_object_mut(73).unwrap().extra.vehicle_order = 1;
                     let mut front = Mob::new(74, pig.clone(), Vec3::ZERO, 0.0);
                     front.extra.mount = Some(72);
@@ -1963,8 +2141,12 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "cancel_resident",
-                Box::new(CancelUntilAllowed { cancel: cancel.clone(), calls: calls.clone() }),
-            )].into();
+                Box::new(CancelUntilAllowed {
+                    cancel: cancel.clone(),
+                    calls: calls.clone(),
+                }),
+            )]
+            .into();
             mod_api::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     let vehicle = game.entity(71).unwrap();
@@ -1980,7 +2162,10 @@ mod nested_vehicle_discard_tests {
                     cancel.store(false, Ordering::Relaxed);
                     assert!(game.entity_stop_riding(rider));
                     assert_eq!(calls.load(Ordering::Relaxed), 2);
-                    assert_eq!(game.mob_object(72).unwrap().position, Vec3::new(2.0, 200.0, 3.0));
+                    assert_eq!(
+                        game.mob_object(72).unwrap().position,
+                        Vec3::new(2.0, 200.0, 3.0)
+                    );
                     assert!(!game.persist.removed_vehicles.contains_key(&71));
                 });
             });
@@ -2042,7 +2227,10 @@ mod nested_vehicle_discard_tests {
                         assert_eq!(count.load(Ordering::Relaxed), 1);
                         assert!(game.entity(71).is_none());
                         assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
-                        assert_eq!(game.mob_object(72).unwrap().position, Vec3::new(2.0, 190.0, 3.0));
+                        assert_eq!(
+                            game.mob_object(72).unwrap().position,
+                            Vec3::new(2.0, 190.0, 3.0)
+                        );
                         assert!(game.persist.removed_vehicles.contains_key(&71));
                         assert!(game.entity(72).is_none());
                         assert!(game.persist.off_level.contains_key(&72));
@@ -2100,11 +2288,15 @@ mod nested_vehicle_discard_tests {
                     game.mobs.push(Mob::new(74, kind, Vec3::ZERO, 0.0));
                     match mode {
                         0 => game.kill_target_in_level(super::super::commands::Target::Boat(71)),
-                        1 => { assert!(game.hurt_boat(0, 5.0, false)); }
+                        1 => {
+                            assert!(game.hurt_boat(0, 5.0, false));
+                        }
                         2 => game.kill_target_in_level(super::super::commands::Target::Cart(71)),
                         3 => game.hurt_cart(0, 5.0, false, false),
                         _ => {
-                            game.carts.update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
+                            game.carts.update(0, |cart| {
+                                cart.kind = super::super::minecarts::CartKind::Tnt
+                            });
                             game.arrow_hits_cart(0, 1.0, Vec3::ZERO, true, false);
                         }
                     }

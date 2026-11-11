@@ -832,7 +832,9 @@ impl Game<'_> {
             Position([f64; 3]),
             Rider([f64; 3]),
         }
-        let released_vehicle = host.hub.guests[i].vehicle.filter(|id| Some(*id) != guest_vehicle);
+        let released_vehicle = host.hub.guests[i]
+            .vehicle
+            .filter(|id| Some(*id) != guest_vehicle);
         let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
             let mut teleport = None;
             g.attachments = std::mem::replace(&mut self.player_attachments, attachments);

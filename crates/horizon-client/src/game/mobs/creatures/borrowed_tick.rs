@@ -224,7 +224,8 @@ impl Game<'_> {
                     // The wither overrides `checkDespawn` without `super`, so the
                     // event, patched into `Mob.checkDespawn`, never fires for it;
                     // a mannequin is no `Mob` and never checks despawning.
-                    if !resuming && !retried
+                    if !resuming
+                        && !retried
                         && mod_api::__private::listened(mod_api::HookId::MobDespawn)
                         && !matches!(
                             m.species(),
@@ -293,7 +294,8 @@ impl Game<'_> {
                         cursor += 1;
                         continue;
                     }
-                    if !resuming && !retried
+                    if !resuming
+                        && !retried
                         && m.extra.mount.is_some_and(|vehicle| {
                             self.persist.removed_vehicles.contains_key(&vehicle)
                         })

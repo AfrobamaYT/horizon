@@ -159,11 +159,10 @@ impl Game<'_> {
             DimensionKey::END => Dim::End,
             key => Dim::Extra(key),
         };
-        self.levels
-            .parked
-            .get(&dim)
-            .is_none_or(|parked| !parked.persist.removals.contains(&target)
-                && !parked.persist.destroying_vehicles.contains(&target))
+        self.levels.parked.get(&dim).is_none_or(|parked| {
+            !parked.persist.removals.contains(&target)
+                && !parked.persist.destroying_vehicles.contains(&target)
+        })
     }
 
     /// Visit exactly the actual physical lifetime slot. Resolution releases the

@@ -370,15 +370,29 @@ impl Game<'_> {
         let Some(id) = self.riding else {
             return;
         };
-        let removed_y = self.persist.removed_vehicles.get(&id).map(|vehicle| vehicle.position().y)
+        let removed_y = self
+            .persist
+            .removed_vehicles
+            .get(&id)
+            .map(|vehicle| vehicle.position().y)
             .or_else(|| {
                 use super::commands::Target;
                 let boat = Target::Boat(id);
                 let cart = Target::Cart(id);
-                if self.persist.removals.contains(&boat) || self.persist.destroying_vehicles.contains(&boat) {
-                    self.boats.iter().find(|vehicle| vehicle.id == id).map(|vehicle| vehicle.position.y)
-                } else if self.persist.removals.contains(&cart) || self.persist.destroying_vehicles.contains(&cart) {
-                    self.carts.iter().find(|vehicle| vehicle.id == id).map(|vehicle| vehicle.position.y)
+                if self.persist.removals.contains(&boat)
+                    || self.persist.destroying_vehicles.contains(&boat)
+                {
+                    self.boats
+                        .iter()
+                        .find(|vehicle| vehicle.id == id)
+                        .map(|vehicle| vehicle.position.y)
+                } else if self.persist.removals.contains(&cart)
+                    || self.persist.destroying_vehicles.contains(&cart)
+                {
+                    self.carts
+                        .iter()
+                        .find(|vehicle| vehicle.id == id)
+                        .map(|vehicle| vehicle.position.y)
                 } else {
                     None
                 }

@@ -5,7 +5,10 @@ impl Game<'_> {
     /// `MinecartTNT.explode`: with explosions disabled, only a primed cart is
     /// discarded. An unprimed cart survives, including its current tick.
     pub(super) fn explode_cart(&mut self, c: &mut Minecart, speed_sqr: f64) -> bool {
-        let explodes = self.ui.rules.bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES);
+        let explodes = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES);
         if !explodes && c.fuse < 0 {
             return false;
         }
@@ -32,19 +35,33 @@ impl Game<'_> {
         // The cart is the explosion's source: it is gone before the blast
         // looks for entities, so it can't hit itself.
         let silent = explodes && self.entity_silent(c.id);
-        if self.with_destroying_vehicle(target, |game| {
-            game.dismount_destroyed_vehicle_players(c.id);
-            if let Some(i) = game.carts.iter().position(|x| x.id == c.id && x.join == c.join) {
-                game.eject_cart_mobs(i);
-            }
-            if game.carts.iter().any(|x| x.id == c.id && x.join == c.join) {
-                game.release_vehicle_container(c.id);
-            }
-            if let Some(i) = game.carts.iter().position(|x| x.id == c.id && x.join == c.join) {
-                let removed = game.carts.remove(i);
-                game.retain_removed_vehicle(c.id, super::super::persist::RemovedVehicle::Cart(removed));
-            }
-        }).is_none() {
+        if self
+            .with_destroying_vehicle(target, |game| {
+                game.dismount_destroyed_vehicle_players(c.id);
+                if let Some(i) = game
+                    .carts
+                    .iter()
+                    .position(|x| x.id == c.id && x.join == c.join)
+                {
+                    game.eject_cart_mobs(i);
+                }
+                if game.carts.iter().any(|x| x.id == c.id && x.join == c.join) {
+                    game.release_vehicle_container(c.id);
+                }
+                if let Some(i) = game
+                    .carts
+                    .iter()
+                    .position(|x| x.id == c.id && x.join == c.join)
+                {
+                    let removed = game.carts.remove(i);
+                    game.retain_removed_vehicle(
+                        c.id,
+                        super::super::persist::RemovedVehicle::Cart(removed),
+                    );
+                }
+            })
+            .is_none()
+        {
             return true;
         }
         if !explodes {
@@ -95,7 +112,8 @@ impl Game<'_> {
             return false;
         }
         let Some(i) = self.carts.iter().position(|c| {
-            c.id == id && c.join == join
+            c.id == id
+                && c.join == join
                 && !self
                     .persist
                     .removals

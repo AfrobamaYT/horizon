@@ -1826,7 +1826,11 @@ impl Game<'_> {
         creative: bool,
     ) -> Option<bool> {
         let id = self.boats[i].id;
-        if self.persist.destroying_vehicles.contains(&super::commands::Target::Boat(id)) {
+        if self
+            .persist
+            .destroying_vehicles
+            .contains(&super::commands::Target::Boat(id))
+        {
             return Some(true);
         }
         let mut cancel = false;
@@ -1863,12 +1867,15 @@ impl Game<'_> {
             }) {
                 return Some(true);
             }
-            if self.with_destroying_vehicle(super::commands::Target::Boat(id), |game| {
-                game.dismount_destroyed_vehicle_players(id);
-                if let Some(i) = game.boats.iter().position(|boat| boat.id == id) {
-                    game.eject_boat_mobs(i, true);
-                }
-            }).is_none() {
+            if self
+                .with_destroying_vehicle(super::commands::Target::Boat(id), |game| {
+                    game.dismount_destroyed_vehicle_players(id);
+                    if let Some(i) = game.boats.iter().position(|boat| boat.id == id) {
+                        game.eject_boat_mobs(i, true);
+                    }
+                })
+                .is_none()
+            {
                 return Some(true);
             }
             let Some(i) = self.boats.iter().position(|b| {

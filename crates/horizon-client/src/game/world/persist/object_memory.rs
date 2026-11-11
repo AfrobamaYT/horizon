@@ -925,8 +925,13 @@ impl Game<'_> {
             self.persist.off_level.remove(&id);
             self.forget_entity(id);
         }
-        let gone: Vec<_> = self.persist.removed_vehicles.keys().copied()
-            .filter(|id| !retained.contains(id)).collect();
+        let gone: Vec<_> = self
+            .persist
+            .removed_vehicles
+            .keys()
+            .copied()
+            .filter(|id| !retained.contains(id))
+            .collect();
         for id in gone {
             self.persist.removed_vehicles.remove(&id);
             self.forget_entity(id);

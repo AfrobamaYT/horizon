@@ -64,8 +64,12 @@ impl RemovedVehicle {
 
     pub(super) fn retire_attachment_registration(&self) {
         match self {
-            Self::Boat(boat) => { boat.attachment_lifetime.retire(); }
-            Self::Cart(cart) => { cart.attachment_lifetime.retire(); }
+            Self::Boat(boat) => {
+                boat.attachment_lifetime.retire();
+            }
+            Self::Cart(cart) => {
+                cart.attachment_lifetime.retire();
+            }
         }
     }
 
@@ -1206,7 +1210,8 @@ impl Game<'_> {
             return Some(self.mob_object_tree_nbt(object));
         }
         if self.boats.iter().any(|b| b.id == root)
-            && self.resident_source_target_visible(self.dim.key(), super::commands::Target::Boat(root))
+            && self
+                .resident_source_target_visible(self.dim.key(), super::commands::Target::Boat(root))
         {
             let uuid = self.uuid_for(root);
             let b = self.boats.iter().find(|b| b.id == root)?;
@@ -1216,7 +1221,8 @@ impl Game<'_> {
             return Some(tag);
         }
         if !self.carts.iter().any(|c| c.id == root)
-            || !self.resident_source_target_visible(self.dim.key(), super::commands::Target::Cart(root))
+            || !self
+                .resident_source_target_visible(self.dim.key(), super::commands::Target::Cart(root))
         {
             return None;
         }
@@ -1270,9 +1276,15 @@ impl Game<'_> {
             (found == uuid
                 && (self.mobs.iter().any(|mob| mob.id == id && !mob.removed)
                     || (self.boats.iter().any(|boat| boat.id == id)
-                        && self.resident_source_target_visible(self.dim.key(), super::commands::Target::Boat(id)))
+                        && self.resident_source_target_visible(
+                            self.dim.key(),
+                            super::commands::Target::Boat(id),
+                        ))
                     || (self.carts.iter().any(|cart| cart.id == id)
-                        && self.resident_source_target_visible(self.dim.key(), super::commands::Target::Cart(id)))))
+                        && self.resident_source_target_visible(
+                            self.dim.key(),
+                            super::commands::Target::Cart(id),
+                        ))))
             .then_some(id)
         })
     }
@@ -1962,9 +1974,11 @@ impl Game<'_> {
     }
     pub(super) fn prune_entity_memory(&mut self) {
         if !self.persist.removed_vehicles.is_empty()
-            || self.persist.off_level.values().any(
-                |object| matches!(object, OffLevel::Mob(mob) if mob.removed),
-            )
+            || self
+                .persist
+                .off_level
+                .values()
+                .any(|object| matches!(object, OffLevel::Mob(mob) if mob.removed))
         {
             // Complete the former resident's destruction before graph GC can
             // forget the UUID retained solely for dismount geometry.

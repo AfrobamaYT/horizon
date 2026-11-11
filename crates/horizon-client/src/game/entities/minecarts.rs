@@ -1656,9 +1656,11 @@ impl Game<'_> {
                     self.riding = None;
                 }
                 for (_, rider, player) in self.seated_passengers(c.id) {
-                    if !player && self.mob_object(rider).is_some_and(|mob| {
-                        !mob.removed && mob.extra.mount == Some(c.id)
-                    }) {
+                    if !player
+                        && self
+                            .mob_object(rider)
+                            .is_some_and(|mob| !mob.removed && mob.extra.mount == Some(c.id))
+                    {
                         self.dismount_mob_from_cart(rider, c);
                     }
                 }
@@ -1999,7 +2001,9 @@ impl Game<'_> {
         let (id, y) = (self.carts[i].id, self.carts[i].position.y);
         for (_, rider, player) in self.seated_passengers(id) {
             if player
-                || self.mob_object(rider).is_none_or(|mob| mob.removed || mob.extra.mount != Some(id))
+                || self
+                    .mob_object(rider)
+                    .is_none_or(|mob| mob.removed || mob.extra.mount != Some(id))
             {
                 continue;
             }
@@ -2198,7 +2202,8 @@ impl Game<'_> {
         let result = self.with_entity_held_out(id, |game| {
             let mut c = game.carts[i].clone();
             let alive = game.tick_cart(&mut c, intent, i, &mut CartIndex::default());
-            if alive && game.riding == Some(c.id)
+            if alive
+                && game.riding == Some(c.id)
                 && let Some(p) = game.player.as_mut()
             {
                 game.previous_position = p.position;
@@ -2207,7 +2212,8 @@ impl Game<'_> {
                 p.fall_distance = 0.0;
             }
             let Some(i) = game.carts.iter().position(|x| x.id == c.id) else {
-                if alive && game.riding == Some(id)
+                if alive
+                    && game.riding == Some(id)
                     && !game.persist.removed_vehicles.contains_key(&id)
                 {
                     game.riding = None;

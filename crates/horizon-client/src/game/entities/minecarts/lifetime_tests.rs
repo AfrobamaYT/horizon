@@ -80,7 +80,8 @@ fn connecting_to_a_remote_level_clears_the_existing_cart_list() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn exploding_a_cart_removes_only_its_owner_and_keeps_a_bound_survivor() {
     bound_cart_case(CartKind::Rideable, |game| {
-        game.carts.push(Minecart::new(72, CartKind::Tnt, Vec3::new(40.5, 70.0, 0.5)));
+        game.carts
+            .push(Minecart::new(72, CartKind::Tnt, Vec3::new(40.5, 70.0, 0.5)));
         let mut doomed = game.carts[1].clone();
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
         let mut values = Attachments::default();
@@ -126,11 +127,18 @@ impl mod_api::Hooks for CancelCartDismount {
         event: &mut mod_api::EntityMountEvent<'_>,
     ) -> mod_api::Flow {
         if !event.mounting && event.entity == 72 {
-            self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // Destruction is visible before the callback, but the hook can
             // still mutate other resident entities and thus the cart list.
             assert!(host.entity(event.vehicle).is_none());
-            assert!(self.index.lock().unwrap().snapshot(&("test".into(), "cart_lifetime".into())).is_empty());
+            assert!(
+                self.index
+                    .lock()
+                    .unwrap()
+                    .snapshot(&("test".into(), "cart_lifetime".into()))
+                    .is_empty()
+            );
             assert!(host.entity(73).unwrap().set_velocity(host, [7.0, 8.0, 9.0]));
             return mod_api::Flow::Cancel;
         }
@@ -163,13 +171,15 @@ fn exploding_driven_cart_does_not_reseat_a_player_moved_by_its_dismount_hook() {
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "teleport_cart_rider",
         Box::new(TeleportPlayerOnCartDismount(calls.clone())),
-    )].into();
+    )]
+    .into();
     mod_api::testing::with_mods(mods, || {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
-            game.player = Some(horizon_client::motion::PlayerMotion::new(
-                game.motion, Vec3::new(0.5, 200.0, 0.5),
-            ).unwrap());
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(0.5, 200.0, 0.5))
+                    .unwrap(),
+            );
             super::super::native_entity_refs::tests::bind_local_player(game, 70, 70);
             let mut cart = Minecart::new(71, CartKind::Tnt, Vec3::new(0.5, 200.0, 0.5));
             cart.no_gravity = true;
@@ -179,7 +189,10 @@ fn exploding_driven_cart_does_not_reseat_a_player_moved_by_its_dismount_hook() {
             assert!(game.tick_cart_riding(Keys::default()));
             assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
             assert_eq!(game.riding, Some(71));
-            assert_eq!(game.player.as_ref().unwrap().position, Vec3::new(30.5, 210.0, 40.5));
+            assert_eq!(
+                game.player.as_ref().unwrap().position,
+                Vec3::new(30.5, 210.0, 40.5)
+            );
             assert!(game.persist.removed_vehicles.contains_key(&71));
         });
     });
@@ -197,7 +210,8 @@ impl mod_api::Hooks for ToggleActivatorDismount {
         event: &mut mod_api::EntityMountEvent<'_>,
     ) -> mod_api::Flow {
         if !event.mounting && event.vehicle == 71 {
-            self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if self.cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return mod_api::Flow::Cancel;
             }
@@ -213,14 +227,17 @@ fn activator_respects_canceled_player_dismount() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "cancel_activator_dismount",
-        Box::new(ToggleActivatorDismount { cancel: cancel.clone(), calls: calls.clone() }),
-    )].into();
+        Box::new(ToggleActivatorDismount {
+            cancel: cancel.clone(),
+            calls: calls.clone(),
+        }),
+    )]
+    .into();
     mod_api::testing::with_mods(mods, || {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
-            game.player = Some(horizon_client::motion::PlayerMotion::new(
-                game.motion, Vec3::ZERO,
-            ).unwrap());
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             super::super::native_entity_refs::tests::bind_local_player(game, 70, 70);
             let mut cart = Minecart::new(71, CartKind::Rideable, Vec3::ZERO);
             game.carts.push(cart.clone());
@@ -246,7 +263,8 @@ fn disabled_tnt_rule_discards_primed_carts_but_keeps_unprimed_ticks() {
                 game.tickets.update(None);
                 game.reset_entity_residency();
                 assert!(game.ui.rules.set(
-                    "tnt_explodes", horizon_client::gamerules::Value::Bool(false),
+                    "tnt_explodes",
+                    horizon_client::gamerules::Value::Bool(false),
                 ));
                 let start = Vec3::new(0.5, 200.0, 0.5);
                 let mut cart = Minecart::new(71, CartKind::Tnt, start);
@@ -260,9 +278,9 @@ fn disabled_tnt_rule_discards_primed_carts_but_keeps_unprimed_ticks() {
                 }
                 game.carts.push(cart);
                 if ridden {
-                    game.player = Some(horizon_client::motion::PlayerMotion::new(
-                        game.motion, start,
-                    ).unwrap());
+                    game.player = Some(
+                        horizon_client::motion::PlayerMotion::new(game.motion, start).unwrap(),
+                    );
                     super::super::native_entity_refs::tests::bind_local_player(game, 70, 70);
                     game.riding = Some(71);
                     assert!(game.tick_cart_riding(Keys::default()));
@@ -308,8 +326,12 @@ fn destroyed_carts_retain_authoritative_state_and_retire_their_registration() {
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "cancel_cart_explosion_dismount",
-            Box::new(CancelCartDismount { calls: calls.clone(), index: index.clone() }),
-        )].into();
+            Box::new(CancelCartDismount {
+                calls: calls.clone(),
+                index: index.clone(),
+            }),
+        )]
+        .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
@@ -317,7 +339,13 @@ fn destroyed_carts_retain_authoritative_state_and_retire_their_registration() {
                 game.reset_entity_residency();
                 let start = Vec3::new(0.5, 70.0, 0.5);
                 let mut cart = Minecart::new(
-                    71, if mode == 2 { CartKind::Rideable } else { CartKind::Tnt }, start,
+                    71,
+                    if mode == 2 {
+                        CartKind::Rideable
+                    } else {
+                        CartKind::Tnt
+                    },
+                    start,
                 );
                 cart.velocity = Vec3::new(0.4, 0.0, 0.0);
                 cart.no_gravity = true;
@@ -328,14 +356,18 @@ fn destroyed_carts_retain_authoritative_state_and_retire_their_registration() {
                 cart.fuse = 0;
                 game.carts.push(cart);
                 game.carts.push(Minecart::new(
-                    73, CartKind::Rideable, Vec3::new(400.5, 70.0, 0.5),
+                    73,
+                    CartKind::Rideable,
+                    Vec3::new(400.5, 70.0, 0.5),
                 ));
                 // Prevent the other cart's own tick from changing the hook's write.
                 game.riding = Some(73);
                 let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
                 let mut rider = horizon_client::mobs::Mob::new(72, kind, start, 0.0);
                 rider.extra.mount = Some(71);
-                game.persist.off_level.insert(72, super::super::persist::OffLevel::Mob(rider));
+                game.persist
+                    .off_level
+                    .insert(72, super::super::persist::OffLevel::Mob(rider));
 
                 let holder = game.entity(71).unwrap();
                 let mut values = Attachments::default();
@@ -368,10 +400,17 @@ fn destroyed_carts_retain_authoritative_state_and_retire_their_registration() {
                     panic!("the canceled passenger must retain the removed cart");
                 };
                 assert_eq!(cart.join, join);
-                assert!(registration.same_registration(
-                    &cart.attachment_lifetime.registration().unwrap()
-                ));
-                assert!(index.lock().unwrap().snapshot(&("test".into(), "cart_lifetime".into())).is_empty());
+                assert!(
+                    registration
+                        .same_registration(&cart.attachment_lifetime.registration().unwrap())
+                );
+                assert!(
+                    index
+                        .lock()
+                        .unwrap()
+                        .snapshot(&("test".into(), "cart_lifetime".into()))
+                        .is_empty()
+                );
                 assert_eq!(cart.random.clone().next_double(), next_random);
                 if mode == 0 {
                     assert_eq!(cart.tick_count, 10);
@@ -657,11 +696,20 @@ fn terminal_vehicle_damage_and_native_removal_retire_residency() {
                 game.reset_entity_residency();
                 game.tickets.update(None);
                 game.summon_with_nbt(
-                    if cart { "minecraft:minecart" } else { "minecraft:oak_boat" },
+                    if cart {
+                        "minecraft:minecart"
+                    } else {
+                        "minecraft:oak_boat"
+                    },
                     [0.5, 70.0, 0.5],
                     "{}",
-                ).unwrap();
-                let id = if cart { game.carts[0].id } else { game.boats[0].id };
+                )
+                .unwrap();
+                let id = if cart {
+                    game.carts[0].id
+                } else {
+                    game.boats[0].id
+                };
                 assert!(matches!(
                     game.with_resident_slot(
                         &mod_api::DimensionKey::OVERWORLD,
@@ -678,11 +726,14 @@ fn terminal_vehicle_damage_and_native_removal_retire_residency() {
                     }
                 } else {
                     let entity = game.entity(id).unwrap();
-                    assert!(game.entity_remove(entity, if mode == 1 {
-                        mod_api::RemovalReason::Discarded
-                    } else {
-                        mod_api::RemovalReason::Killed
-                    }));
+                    assert!(game.entity_remove(
+                        entity,
+                        if mode == 1 {
+                            mod_api::RemovalReason::Discarded
+                        } else {
+                            mod_api::RemovalReason::Killed
+                        }
+                    ));
                     game.native_removals_flush();
                 }
                 assert_vehicle_residency_retired(game, id);

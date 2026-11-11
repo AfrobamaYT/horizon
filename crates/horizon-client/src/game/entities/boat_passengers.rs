@@ -512,14 +512,16 @@ impl Game<'_> {
             _ => unreachable!("only boat and cart removals use this helper"),
         };
         if !self.persist.notified_vehicle_removals.remove(&id)
-            && self.with_destroying_vehicle(target, |game| {
-                game.dismount_destroyed_vehicle_players(id);
-                match target {
-                    Target::Boat(_) => game.dismount_killed_boat(id),
-                    Target::Cart(_) => game.dismount_killed_cart(id),
-                    _ => unreachable!(),
-                }
-            }).is_none()
+            && self
+                .with_destroying_vehicle(target, |game| {
+                    game.dismount_destroyed_vehicle_players(id);
+                    match target {
+                        Target::Boat(_) => game.dismount_killed_boat(id),
+                        Target::Cart(_) => game.dismount_killed_cart(id),
+                        _ => unreachable!(),
+                    }
+                })
+                .is_none()
         {
             return false;
         }
@@ -549,19 +551,30 @@ impl Game<'_> {
     /// `Entity.setRemoved` also attempts the player edges, using their own
     /// server context and rechecking each after earlier callbacks.
     pub(super) fn dismount_destroyed_vehicle_players(&mut self, vehicle: u32) {
-        let players: Vec<_> = self.seated_passengers(vehicle).into_iter()
+        let players: Vec<_> = self
+            .seated_passengers(vehicle)
+            .into_iter()
             .filter_map(|(_, id, player)| player.then_some(id))
             .collect();
-        let local_listed = self.lan_acting_entity.is_some_and(|id| players.contains(&id));
+        let local_listed = self
+            .lan_acting_entity
+            .is_some_and(|id| players.contains(&id));
         for id in players {
-            if self.seated_passengers(vehicle).iter().any(|&(_, rider, player)| player && rider == id)
+            if self
+                .seated_passengers(vehicle)
+                .iter()
+                .any(|&(_, rider, player)| player && rider == id)
                 && let Some(rider) = self.entity(id)
             {
                 self.entity_stop_riding(rider);
             }
         }
         // A local player outside a server guest turn has no seated entity ID.
-        if !local_listed && self.lan_acting.is_none() && self.player.is_some() && self.riding == Some(vehicle) {
+        if !local_listed
+            && self.lan_acting.is_none()
+            && self.player.is_some()
+            && self.riding == Some(vehicle)
+        {
             self.stop_riding();
         }
     }

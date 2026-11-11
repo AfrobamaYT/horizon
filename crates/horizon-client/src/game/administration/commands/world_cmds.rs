@@ -1874,12 +1874,16 @@ impl Game<'_> {
         let at = if let Some(y) = removed_y {
             self.mob_object(rider).map(|mob| {
                 self.removed_vehicle_dismount_point(
-                    mob.position, f64::from(mob.width()), f64::from(mob.height()), y,
+                    mob.position,
+                    f64::from(mob.width()),
+                    f64::from(mob.height()),
+                    y,
                 )
             })
         } else {
             match cart.filter(|cart| cart.id == v) {
-                Some(cart) => self.mob_object(rider)
+                Some(cart) => self
+                    .mob_object(rider)
                     .and_then(|rider| self.cart_dismount_point_from(cart, rider)),
                 None => self.mob_dismount_point(v, rider),
             }
@@ -1911,17 +1915,32 @@ impl Game<'_> {
                 vehicle.position.y,
             ));
         }
-        let removed_y = self.persist.removed_vehicles.get(&v).map(|vehicle| vehicle.position().y)
+        let removed_y = self
+            .persist
+            .removed_vehicles
+            .get(&v)
+            .map(|vehicle| vehicle.position().y)
             .or_else(|| {
-                self.persist.removals.iter().chain(self.persist.destroying_vehicles.iter()).find_map(|target| match *target {
-                    Target::Boat(id) if id == v => self.boats.iter().find(|b| b.id == v).map(|b| b.position.y),
-                    Target::Cart(id) if id == v => self.carts.iter().find(|c| c.id == v).map(|c| c.position.y),
-                    _ => None,
-                })
+                self.persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .find_map(|target| match *target {
+                        Target::Boat(id) if id == v => {
+                            self.boats.iter().find(|b| b.id == v).map(|b| b.position.y)
+                        }
+                        Target::Cart(id) if id == v => {
+                            self.carts.iter().find(|c| c.id == v).map(|c| c.position.y)
+                        }
+                        _ => None,
+                    })
             });
         if let Some(y) = removed_y {
             return Some(self.removed_vehicle_dismount_point(
-                mob.position, f64::from(mob.width()), f64::from(mob.height()), y,
+                mob.position,
+                f64::from(mob.width()),
+                f64::from(mob.height()),
+                y,
             ));
         }
         let (width, yaw) = (f64::from(mob.width()), mob.yaw);

@@ -1099,8 +1099,9 @@ impl Game<'_> {
         candidates.extend(self.natural_knot_ids().into_iter().map(Target::Knot));
         // `isRemoved` from a mod's call on, though the sweep has not taken it out.
         if !self.persist.removals.is_empty() || !self.persist.destroying_vehicles.is_empty() {
-            candidates.retain(|t| !self.persist.removals.contains(t)
-                && !self.persist.destroying_vehicles.contains(t));
+            candidates.retain(|t| {
+                !self.persist.removals.contains(t) && !self.persist.destroying_vehicles.contains(t)
+            });
         }
         candidates
     }
