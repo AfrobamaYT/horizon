@@ -492,9 +492,23 @@ fn stepped_move(
 /// handed to the decoder (with the format it decodes with), whose column
 /// comes back from `ChunkDecoder::next`.
 enum Received {
-    Event(Event),
-    Chunk(Arc<ChunkFormat>),
+    Event(Event, horizon_client::net::ingress::ReceiveLease<Event>),
+    Chunk(
+        Arc<ChunkFormat>,
+        horizon_client::net::ingress::ReceiveLease<Event>,
+    ),
 }
+
+// Keep net::Event's transport-owned staging slot bound honest as the actor evolves.
+const _: () = assert!(
+    std::mem::size_of::<Received>()
+        <= std::mem::size_of::<(
+            Event,
+            horizon_client::net::ingress::ReceiveLease<Event>,
+            usize,
+            usize,
+        )>()
+);
 
 /// `Minecraft.services().profileKeySignatureValidator()`: the services' profile-key keys, which a
 /// player's chat key must be signed by. Asked for once per connection to a server, off the game
@@ -2267,15 +2281,16 @@ impl Game<'_> {
         let mut events = std::mem::take(&mut r.backlog);
         // Chunk packets start decoding now; the frame that reaches one in
         // order inserts its column.
-        for event in r.session.poll() {
+        for receipt in r.session.poll() {
+            let (event, credit) = receipt.into_parts();
             events.push_back(match event {
                 Event::Packet(p) if matches!(*p, C::LevelChunkWithLight(_)) => {
                     match r.decoder.submit(r.chunk_format.clone(), p) {
-                        None => Received::Chunk(r.chunk_format.clone()),
-                        Some(p) => Received::Event(Event::Packet(p)),
+                        None => Received::Chunk(r.chunk_format.clone(), credit),
+                        Some(p) => Received::Event(Event::Packet(p), credit),
                     }
                 }
-                event => Received::Event(event),
+                event => Received::Event(event, credit),
             });
         }
         let overdue = r
@@ -2285,24 +2300,30 @@ impl Game<'_> {
         // A run of ForgetLevelChunk (thousands when the server's view moves far: a
         // teleport at 32 chunks) is forgotten at once, before whatever follows it.
         let mut forgotten = horizon_client::fast_hash::FxHashSet::default();
+        let mut forgotten_credits = Vec::new();
         while let Some(item) = events.pop_front() {
-            if let Received::Event(Event::Packet(packet)) = &item
+            if let Received::Event(Event::Packet(packet), _) = &item
                 && let C::ForgetLevelChunk(p) = &**packet
             {
                 self.observe_client_packet(packet);
                 forgotten.insert((p.pos[0], p.pos[1]));
+                let Received::Event(_, credit) = item else {
+                    unreachable!()
+                };
+                forgotten_credits.push(credit);
                 continue;
             }
             self.forget_remote_columns(&mut forgotten, true);
-            let chunk = matches!(item, Received::Chunk(_));
+            forgotten_credits.clear();
+            let chunk = matches!(item, Received::Chunk(_, _));
             if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
                 events.push_front(item);
                 break;
             }
             let started = chunk.then(Instant::now);
-            let event = match item {
-                Received::Event(event) => event,
-                Received::Chunk(format) => {
+            let (event, _credit) = match item {
+                Received::Event(event, credit) => (event, credit),
+                Received::Chunk(format, credit) => {
                     // A column still decoding waits for the next frame, with
                     // what came after it, overdue or not.
                     let Some(next) = self.remote.as_ref().map(|r| r.decoder.next()) else {
@@ -2311,7 +2332,7 @@ impl Game<'_> {
                     let (packet, column) = match next {
                         Next::Ready(decoded) => decoded,
                         Next::Decoding => {
-                            events.push_front(Received::Chunk(format));
+                            events.push_front(Received::Chunk(format, credit));
                             break;
                         }
                         Next::Lost => {

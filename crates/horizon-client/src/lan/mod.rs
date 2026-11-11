@@ -139,9 +139,14 @@ impl NetEvent {
         // Source snapshot, guest inbox, derived HostEvent batch and credit marker,
         // with spare-capacity allowance. No wire-length proxy for owned buffers.
         owned.saturating_add(
-            8 * (size_of::<Self>()
-                + size_of::<hub::HostEvent>()
-                + size_of::<crate::net::ingress::ReceiveLease<Self>>()),
+            8 * size_of::<(
+                Self,
+                play::Serverbound,
+                hub::HostEvent,
+                crate::net::ingress::ReceiveLease<Self>,
+                usize,
+                usize,
+            )>(),
         )
     }
 }

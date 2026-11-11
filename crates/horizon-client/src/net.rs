@@ -192,11 +192,7 @@ impl Event {
         // Layout-derived allowance for a frozen receiving vector, actor backlog,
         // decoder marker and retained receipt, including vector spare capacity.
         // Raw application buffers themselves are never multiplied.
-        owned.saturating_add(
-            8 * (size_of::<Self>()
-                + size_of::<ingress::ReceiveLease<Self>>()
-                + 2 * size_of::<usize>()),
-        )
+        owned.saturating_add(8 * size_of::<(Self, ingress::ReceiveLease<Self>, usize, usize)>())
     }
 }
 
