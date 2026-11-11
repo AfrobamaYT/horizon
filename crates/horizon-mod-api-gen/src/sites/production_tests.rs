@@ -8,6 +8,7 @@ fn production_listed_records() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let entries = internals::catalog(&root).unwrap();
     let slots = sites::slots(&root.join(sites::DIRECTORY)).unwrap();
+    let mut proof = Vec::new();
     for (file, module, suffix, ordinal, once) in [
         (
             "crates/horizon-client/src/mobs/villager_secondary.rs",
@@ -65,5 +66,36 @@ fn production_listed_records() {
         .unwrap();
         assert_eq!(listed, rebuilt, "same listener and record on both routes");
         println!("{}", serde_json::to_string_pretty(&metadata).unwrap());
+        use quote::ToTokens;
+        let name = &metadata[0].name;
+        let raw = syn::parse_file(&listed)
+            .unwrap()
+            .items
+            .into_iter()
+            .filter(|item| match item {
+                syn::Item::Struct(item) => item.ident.to_string().starts_with(&format!("__{name}")),
+                syn::Item::Type(item) => item.ident.to_string().starts_with(&format!("__{name}")),
+                syn::Item::Impl(item) => item
+                    .self_ty
+                    .to_token_stream()
+                    .to_string()
+                    .starts_with(&format!("__{name}")),
+                _ => false,
+            })
+            .map(|item| item.to_token_stream().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!raw.is_empty());
+        let enclosing = sites::identity::enclosing(
+            &declaration.target,
+            &entries,
+            &crate::crossing::Rule::new(&entries),
+        )
+        .unwrap();
+        proof.push(serde_json::json!({"site": metadata[0], "raw": raw, "enclosing": enclosing}));
+    }
+    // The launcher layer consumes these production-generated records, never hand-kept metadata.
+    if let Some(path) = std::env::var_os("HORIZON_LISTED_PROOF_OUT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&proof).unwrap()).unwrap();
     }
 }

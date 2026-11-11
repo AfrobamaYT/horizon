@@ -661,6 +661,15 @@ listener to that listed site does not rebuild the game, and uses the same listen
 and lifetime rules as source routing. A stale listed declaration is refused by name;
 it never falls back to a source build.
 
+The reviewed Portizon rows use the catalog's physical caller paths:
+- `horizon_client_lib::mobs::villager_brain::secondary::sense_secondary`: `farmland`, ordinal 0;
+- `horizon_client::game::sign_edit::Game<'_>::draw_sign_editor`: `editor_sprite`, ordinals 0 and 1;
+- `horizon_client::game::machines::Game<'_>::dispense_from`: `Game::dispense_item`, ordinal 0.
+
+Use these caller paths in the manifest. The nominal `horizon_client::game::Game::...`
+caller spelling is currently refused as Missing by the loader; listing a call does not
+add a nominal alias or change identity matching.
+
 With no listener, these sites cost what every already-listed site costs: one relaxed
 atomic load and a branch, without constructing Args or allocating. This is not literally
 zero overhead relative to an uninstrumented call. An optimized author benchmark on an
