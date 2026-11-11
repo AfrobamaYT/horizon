@@ -4,8 +4,8 @@
 //! the mods load sets every table that has listeners; a table nobody listens at is never touched,
 //! and each of its points costs one load of a slot that stays `false`.
 //!
-//! Sealing orders each place's listeners: a `replace` last, then priority descending, then registration order (the mods register in
-//! dependency order), then inject id within a mod.
+//! Sealing orders each place's listeners: a `replace` last, then priority descending, then
+//! registration order (the mods register in dependency order), then inject id within a mod.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 

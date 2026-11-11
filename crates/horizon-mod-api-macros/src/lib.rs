@@ -348,7 +348,8 @@ pub fn no_point(attribute: TokenStream, input: TokenStream) -> TokenStream {
 /// `#[point(side = "server" | "client" | "both", name = "…", table = "…", free, mirror(…))]` on a
 /// function: an injection point (#589), a slot the launcher fills at load for the mods that listen
 /// there. The staging pass that builds the prebuilt game (and the launcher's source builds) puts it
-/// on every function [`point_shape::eligible`] admits; the source tree carries none. Its head checks
+/// on each eligible function with an API record; functions without one are refused by this
+/// attribute, naming the function. The source tree carries none. Its head checks
 /// the slot (one atomic load and a branch while nothing listens). An API listener, native or wasm,
 /// gets the side's host (on a `Game` method) and a record holding a copy of every parameter as an
 /// API value (an engine type `mirror(…)` names as its `mod_api` mirror): the function runs with the
