@@ -91,7 +91,15 @@ impl BiomeRegions {
     fn read(world: &Path) -> Decoded<Option<Self>> {
         match try_read_dat(&path(world)) {
             Ok(tag) => decode(&tag).map(Some),
-            Err(DatIssue::Missing) => Ok(None),
+            Err(DatIssue::Missing) => {
+                for name in ["biome_regions.dat_old", "biome_regions.dat_new"] {
+                    let leftover = path(world).with_file_name(name);
+                    if leftover.try_exists().map_err(|why| why.to_string())? {
+                        return Err(format!("{}: incomplete record replacement; refusing to discard the saved layout", leftover.display()));
+                    }
+                }
+                Ok(None)
+            },
             Err(DatIssue::Unreadable(why)) => Err(why),
         }
         .map_err(|why| format!("{}: {why}", path(world).display()))
@@ -334,6 +342,7 @@ fn choose_with(
     vanilla_for_missing: bool,
     adopt_installed: bool,
 ) -> Result<()> {
+    let _lock = super::SessionLock::acquire(world)?;
     let saved = BiomeRegions::read(world)?.unwrap_or_default();
     let mut chosen = if adopt_installed {
         saved.adopted(declarations)
