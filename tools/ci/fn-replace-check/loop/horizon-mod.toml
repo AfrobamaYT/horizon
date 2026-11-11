@@ -1,0 +1,35 @@
+id = "fnr_loop"
+name = "Function replacement check: loop"
+version = "0.1.0"
+description = "fn-replace: two slots in the published loop block_entities.tick, and a HEAD mixin on its entry"
+authors = []
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "HEAD"
+mixins = "MIXINS"
+
+# Asked second: hoppers cooling down wait one tick less and skip their tick.
+[[native.loop]]
+id = "throttle"
+loop = "block_entities.tick"
+with = "crate::Throttle"
+priority = 20
+
+# Asked first: counts what the loop visits and always answers Continue.
+[[native.loop]]
+id = "count"
+loop = "block_entities.tick"
+with = "crate::Count"
+priority = 10
+
+# A HEAD mixin on the loop's entry composes around the loop's copy.
+[[native.mixin]]
+id = "entry"
+target = "horizon_client::game::block_entity_ticks::Game<'_>::tick_block_entities"
+kind = "HEAD"
+helper = "src/mixins/entry.rs"
+bindings = [{ name = "time", ty = "i64", value = "self.world.game_time" }]

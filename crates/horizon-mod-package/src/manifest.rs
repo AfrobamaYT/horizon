@@ -4,6 +4,7 @@
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 pub mod inject;
 mod jar;
+pub mod loops;
 pub mod mixin;
 mod wasm;
 pub use jar::{
@@ -120,6 +121,9 @@ pub struct Native {
     /// State fields added to game types, forwarded as horizon-mixins' `[[state]]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state: Vec<mixin::Forwarded>,
+    /// Slots of published game loops, native only (`mod_api::loops`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub r#loop: Vec<loops::Loop>,
 }
 
 /// One declared game internal, as listed in the pinned game's `internals.json`.
@@ -245,6 +249,22 @@ impl Manifest {
         };
         // A wasm manifest whose only fault is its `[native]` table is told that, not which
         // pin a half-written `[native]` lacks. Any other error stays the one reported.
+        // A wasm mod's loop row is refused by its own name, whatever else the manifest holds.
+        let wasm_loop = || {
+            let table = toml::from_str::<toml::Table>(text).ok()?;
+            table.get("wasm")?;
+            let row = table.get("native")?.get("loop")?.as_array()?.first()?;
+            Some(format!(
+                "{MANIFEST}: {}",
+                loops::LoopError::Wasm {
+                    id: format!(
+                        "{}:{}",
+                        table.get("id").and_then(toml::Value::as_str).unwrap_or("?"),
+                        row.get("id").and_then(toml::Value::as_str).unwrap_or("?")
+                    )
+                }
+            ))
+        };
         let m: Manifest = toml::from_str(text).map_err(|e| {
             let native_alone = toml::from_str::<toml::Table>(text).is_ok_and(|mut table| {
                 table.contains_key("wasm")
@@ -252,7 +272,7 @@ impl Manifest {
                     && table.try_into::<Manifest>().is_ok()
             });
             if native_alone {
-                both()
+                wasm_loop().unwrap_or_else(both)
             } else {
                 format!("{MANIFEST}: {e}")
             }
@@ -294,6 +314,9 @@ impl Manifest {
             }
         }
         if m.native.is_some() && m.wasm.is_some() {
+            if let Some(refusal) = wasm_loop() {
+                return Err(refusal);
+            }
             return Err(format!(
                 "{MANIFEST}: a mod is [native] or [wasm], not both; only [native] tables compile game code, so a wasm mod has no mixin, bridge, state or module"
             ));
@@ -302,6 +325,14 @@ impl Manifest {
             m.native
                 .as_ref()
                 .map(|n| n.mixin.as_slice())
+                .unwrap_or_default(),
+            &m.id,
+        )
+        .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        loops::Loop::check_all(
+            m.native
+                .as_ref()
+                .map(|n| n.r#loop.as_slice())
                 .unwrap_or_default(),
             &m.id,
         )
@@ -336,10 +367,11 @@ impl Manifest {
                 .iter()
                 .map(|entry| &entry.id)
                 .chain(native.bridge.iter().chain(&native.state).map(|row| &row.id))
+                .chain(native.r#loop.iter().map(|row| &row.id))
             {
                 if id.trim().is_empty() || !ids.insert(id) {
                     return Err(format!(
-                        "{MANIFEST}: empty or duplicate mixin, bridge or state id"
+                        "{MANIFEST}: empty or duplicate mixin, bridge, state or loop id"
                     ));
                 }
             }

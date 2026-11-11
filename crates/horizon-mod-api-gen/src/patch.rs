@@ -59,11 +59,30 @@ pub struct Bridge {
     pub member: Option<String>,
 }
 
+/// A published loop with mods' slots (`[[native.loop]]`): its entry's copy runs the loop with them.
+#[derive(Debug, Clone)]
+pub struct LoopSlots {
+    pub published: crate::loops::PublishedLoop,
+    /// The slots, in the order they are asked: `(priority, mod id)`.
+    pub slots: Vec<LoopSlot>,
+}
+
+/// One mod's slot in a published loop.
+#[derive(Debug, Clone)]
+pub struct LoopSlot {
+    /// The mod's `[mod] id`.
+    pub mod_id: String,
+    /// The slot type's path from the patch crate's root: `<mod crate>::<type>`.
+    pub ty: String,
+}
+
 /// What a mod set adds to the patch crate beside its copies.
 #[derive(Debug, Clone, Default)]
 pub struct Extras {
     pub modules: Vec<SupportModule>,
     pub bridges: Vec<Bridge>,
+    /// The loops whose entries are among the targets, with their slots.
+    pub loops: Vec<LoopSlots>,
     /// The identifiers the rows' helpers and bindings use: a lower crate's mirror keeps a module's
     /// `use` only if a copied body or one of these names it.
     pub idents: BTreeSet<String>,
@@ -686,7 +705,13 @@ pub fn generate(
         }
         let attrs = kept(&found.function.attrs);
         let mut sig = found.function.sig.clone();
-        let block = &found.function.block;
+        let entry_of = extras.loops.iter().find(|l| l.published.entry == *target);
+        let loop_block = entry_of.map(|slots| {
+            let (items, block) = loop_entry(slots);
+            node.copies.push(items);
+            block
+        });
+        let block = loop_block.as_ref().unwrap_or(&found.function.block);
         let install = format_ident!("__fnr_install_{}", name);
         let constructor = format_ident!("__fnr_{}", name);
         let module_path = found.module.split("::").skip(1).collect::<Vec<_>>();
@@ -885,6 +910,56 @@ pub fn generate(
         ));
     }
     Ok(PatchCrate { libs, patched })
+}
+
+/// A loop entry's copy: the mods' slot types beside it, and its body, which runs the loop with them
+/// in this game's state for it (`Game::run_published_loop`). Each slot's calls are marked as inside
+/// its mod for the crash report.
+fn loop_entry(slots: &LoopSlots) -> (proc_macro2::TokenStream, syn::Block) {
+    let published = &slots.published;
+    let tag: String = published
+        .name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let hook = format!("loop {}", published.name);
+    let mut items = Vec::new();
+    let mut nested = quote!(());
+    for (index, slot) in slots.slots.iter().enumerate().rev() {
+        let marker = format_ident!("__FnrLoop_{}_{}", tag, index);
+        let id = &slot.mod_id;
+        let part = &slot.ty;
+        let ty: syn::Path = syn::parse_str(&format!("::{}", slot.ty)).expect("a checked type path");
+        items.push(quote! {
+            #[doc(hidden)]
+            #[allow(non_camel_case_types)]
+            pub struct #marker;
+            impl ::mod_api::loops::LoopMod for #marker {
+                const CALL: ::mod_api::content::crash::ModCall = ::mod_api::content::crash::ModCall {
+                    id: #id,
+                    hook: #hook,
+                    part: Some(#part),
+                };
+            }
+        });
+        nested = quote!((::mod_api::loops::Attributed<#marker, #ty>, #nested));
+    }
+    let slots_ty = format_ident!("__FnrLoopSlots_{}", tag);
+    items.push(quote! {
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        pub type #slots_ty = #nested;
+    });
+    let name = &published.name;
+    let generic = format_ident!("{}", published.generic);
+    let block = syn::parse_quote!({
+        self.run_published_loop(
+            #name,
+            |game, slots: &mut #slots_ty| game.#generic(slots),
+            |game| game.#generic(&mut ()),
+        )
+    });
+    (quote!(#(#items)*), block)
 }
 
 /// Every copy's tokens in `tree` and its children.
@@ -1535,6 +1610,7 @@ mod tests {
                 member: Some("ticks_until_autosave".into()),
             }],
             idents: BTreeSet::new(),
+            loops: Vec::new(),
         };
         let crate_ = generate(
             &root(),
@@ -1573,6 +1649,7 @@ mod tests {
                     ..extras.bridges[0].clone()
                 }],
                 idents: BTreeSet::new(),
+                loops: Vec::new(),
             },
         )
         .unwrap_err();
@@ -1580,6 +1657,58 @@ mod tests {
         assert_eq!(
             codes,
             ["E_MIXIN_MODULE_DESTINATION", "E_MIXIN_BRIDGE_TARGET"]
+        );
+    }
+
+    #[test]
+    fn a_filled_loops_entry_runs_the_loop_with_the_mods_slots_in_order() {
+        let published = crate::loops::collect(&root())
+            .unwrap()
+            .into_iter()
+            .find(|l| l.name == "block_entities.tick")
+            .expect("the game publishes block_entities.tick");
+        let extras = Extras {
+            loops: vec![LoopSlots {
+                published: published.clone(),
+                slots: vec![
+                    LoopSlot {
+                        mod_id: "first".into(),
+                        ty: "first_mod::Count".into(),
+                    },
+                    LoopSlot {
+                        mod_id: "second".into(),
+                        ty: "second_mod::slots::Skip".into(),
+                    },
+                ],
+            }],
+            ..Extras::default()
+        };
+        let crate_ = generate(
+            &root(),
+            "horizon_patch",
+            &[published.entry.clone()],
+            &extras,
+        )
+        .unwrap();
+        assert_eq!(crate_.patched.len(), 1);
+        let lib = crate_.libs[0].1.replace(char::is_whitespace, "");
+        // First by priority outside, then the next, then the empty slot.
+        assert!(
+            lib.contains("pubtype__FnrLoopSlots_block_entities_tick=(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_0,::first_mod::Count,>,(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_1,::second_mod::slots::Skip,>,(),),);")
+                || lib.contains("pubtype__FnrLoopSlots_block_entities_tick=(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_0,::first_mod::Count>,(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_1,::second_mod::slots::Skip>,()),);"),
+            "{}",
+            crate_.libs[0].1
+        );
+        assert!(lib.contains("id:\"second\",hook:\"loopblock_entities.tick\",part:Some(\"second_mod::slots::Skip\")"), "{}", crate_.libs[0].1);
+        assert!(
+            lib.contains("self.run_published_loop(\"block_entities.tick\","),
+            "{}",
+            crate_.libs[0].1
+        );
+        assert!(
+            lib.contains("|game|game.tick_block_entities_with(&mut())"),
+            "{}",
+            crate_.libs[0].1
         );
     }
 }
