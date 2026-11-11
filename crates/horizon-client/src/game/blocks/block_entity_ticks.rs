@@ -84,6 +84,10 @@ impl BlockEntityTick<'_, '_> {
 /// not asleep, and asks each slot about each. Pinned to this build like a mixin's target: its
 /// signatures and the cursor may change in any build.
 pub(crate) trait BlockEntityTickSlot {
+    /// Whether this slot defines [`Self::after`]. A mod build sets it for a slot that does, so the
+    /// loop enters a mod after an entry only when that mod has something to run there.
+    #[allow(dead_code, reason = "read by a mod build's copy of the loop")]
+    const HAS_AFTER: bool = false;
     /// Just before the visited block entity ticks. [`LoopFlow::Skip`] leaves it out this tick;
     /// [`LoopFlow::Stop`] ends the pass (what follows the loop, such as shulker box lids, still runs).
     #[inline(always)]
@@ -103,6 +107,7 @@ impl BlockEntityTickSlot for () {}
 
 /// Two slots in order: `A` first, and `B` only while `A` answers [`LoopFlow::Continue`].
 impl<A: BlockEntityTickSlot, B: BlockEntityTickSlot> BlockEntityTickSlot for (A, B) {
+    const HAS_AFTER: bool = A::HAS_AFTER || B::HAS_AFTER;
     #[inline(always)]
     fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
         match self.0.before(tick) {
@@ -118,13 +123,16 @@ impl<A: BlockEntityTickSlot, B: BlockEntityTickSlot> BlockEntityTickSlot for (A,
 }
 
 impl<N: LoopMod, T: BlockEntityTickSlot> BlockEntityTickSlot for Attributed<N, T> {
+    const HAS_AFTER: bool = T::HAS_AFTER;
     #[inline(always)]
     fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
         self.call(|slot| slot.before(tick))
     }
     #[inline(always)]
     fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
-        self.call(|slot| slot.after(tick));
+        if T::HAS_AFTER {
+            self.call(|slot| slot.after(tick));
+        }
     }
 }
 
@@ -1002,5 +1010,85 @@ mod furnace_changed_tests {
             game.world.modified.contains(&(0, 0)),
             "a refuel left the chunk unmarked"
         );
+    }
+}
+
+#[cfg(test)]
+mod slot_guard_tests {
+    use super::{BlockEntityTick, BlockEntityTickSlot, TickedKind};
+    use crate::game::game_tests::tests::server_game;
+    use crate::game::published_loops::{Attributed, LoopFlow, LoopMod};
+    use mod_api::content::crash::{ModCall, current_native_call};
+
+    struct Row;
+    impl LoopMod for Row {
+        const CALL: ModCall = ModCall {
+            id: "slot_guard",
+            hook: "loop block_entities.tick",
+            part: Some("slot_guard::Probe"),
+        };
+    }
+
+    /// What ran, and the mod call each ran inside.
+    #[derive(Default)]
+    struct Probe {
+        before: Vec<Option<ModCall>>,
+        after: Vec<Option<ModCall>>,
+    }
+    /// A slot whose `after` the build did not announce: only `before` is entered.
+    #[derive(Default)]
+    struct BeforeOnly(Probe);
+    impl BlockEntityTickSlot for BeforeOnly {
+        fn before(&mut self, _: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+            self.0.before.push(current_native_call());
+            LoopFlow::Continue
+        }
+        fn after(&mut self, _: &mut BlockEntityTick<'_, '_>) {
+            self.0.after.push(current_native_call());
+        }
+    }
+    #[derive(Default)]
+    struct Both(Probe);
+    impl BlockEntityTickSlot for Both {
+        const HAS_AFTER: bool = true;
+        fn before(&mut self, _: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+            self.0.before.push(current_native_call());
+            LoopFlow::Continue
+        }
+        fn after(&mut self, _: &mut BlockEntityTick<'_, '_>) {
+            self.0.after.push(current_native_call());
+        }
+    }
+
+    /// One visited entity enters a mod once for a slot without `after`, and twice, each time
+    /// named, for a slot with one; a pair has an `after` when either side does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_slot_without_after_is_entered_once_per_entity() {
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
+        let mut tick = BlockEntityTick {
+            game: &mut game,
+            pos: (8, 64, 8),
+            kind: TickedKind::Hopper,
+        };
+        let mut slots = (
+            Attributed::<Row, BeforeOnly>::default(),
+            (Attributed::<Row, Both>::default(), ()),
+        );
+        assert_eq!(slots.before(&mut tick), LoopFlow::Continue);
+        slots.after(&mut tick);
+        let seen = slots.0.call(|slot| std::mem::take(&mut slot.0));
+        assert_eq!(seen.before, [Some(Row::CALL)]);
+        assert_eq!(seen.after, []);
+        let seen = slots.1.0.call(|slot| std::mem::take(&mut slot.0));
+        assert_eq!(seen.before, [Some(Row::CALL)]);
+        assert_eq!(seen.after, [Some(Row::CALL)]);
+        assert_eq!(current_native_call(), None);
+        const {
+            assert!(!<Attributed<Row, BeforeOnly> as BlockEntityTickSlot>::HAS_AFTER);
+            assert!(<(Attributed<Row, BeforeOnly>, (Attributed<Row, Both>, ())) as BlockEntityTickSlot>::HAS_AFTER);
+            assert!(!<() as BlockEntityTickSlot>::HAS_AFTER);
+        }
     }
 }
