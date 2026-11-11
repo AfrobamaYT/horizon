@@ -114,6 +114,30 @@ impl<K: OwnedHeap, V: OwnedHeap> OwnedHeap for BTreeMap<K, V> {
     }
 }
 
+/// Conservative requested storage for a fresh, no-erasure std hash table.
+///
+/// `capacity` must be the public capacity of a table built only by allocation,
+/// insertion/replacement and reservation, with no erasure/tombstone history.
+/// This is NOT a bound for arbitrary HashMap/HashSet histories. Pass the pair
+/// `(K, V)` layout for a map, or the element layout for a set. Inline table
+/// storage, owned key/value descendants and allocator metadata are excluded.
+///
+/// Audited Rust 1.99.1 / hashbrown 0.17.1: at least half the buckets are usable;
+/// table storage is aligned element slots, one control byte per bucket and at
+/// most 16 mirrored control bytes. `max(align(T), 16) - 1` bounds padding before
+/// controls. Twice fresh capacity bounds the physical bucket count, including
+/// small tables. Empty fresh tables have no allocation. See the std audit tool.
+pub fn fresh_hash_table_bytes<T>(capacity: usize) -> usize {
+    if capacity == 0 {
+        return 0;
+    }
+    capacity
+        .saturating_mul(2)
+        .saturating_mul(size_of::<T>().saturating_add(1))
+        .saturating_add(align_of::<T>().max(16) - 1)
+        .saturating_add(16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
