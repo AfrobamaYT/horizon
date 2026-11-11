@@ -1,5 +1,7 @@
 mod api {
     pub struct ModMismatch;
+    #[derive(Clone)]
+    pub struct ModMismatchResolution;
 }
 mod crate_root {
     mod game {
