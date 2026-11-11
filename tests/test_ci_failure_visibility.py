@@ -2,6 +2,9 @@
 import contextlib
 import io
 import subprocess
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -21,6 +24,41 @@ class Visibility(unittest.TestCase):
         self.assertIn("failed test: suite::broken", log)
         self.assertIn("assertion equality failed", log)
         self.assertNotIn("PRIVATE_RESOURCE", log)
+
+    def test_source_comes_from_head_not_private_worktree(self):
+        with tempfile.TemporaryDirectory() as folder:
+            old = os.getcwd()
+            try:
+                os.chdir(folder)
+                subprocess.run(["git", "init", "-q"], check=True)
+                path = Path("crates/example/src/lib.rs")
+                path.parent.mkdir(parents=True)
+                path.write_text('panic!("checked-in reason");\n')
+                Path("crates/link.rs").symlink_to("/tmp/private.rs")
+                subprocess.run(["git", "add", str(path), "crates/link.rs"], check=True)
+                subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "fixture"], check=True)
+                path.write_text("PRIVATE_WORKTREE")
+                Path("crates/private.rs").write_text("PRIVATE_UNTRACKED")
+                ignored_tests.source_lines.cache_clear()
+                with contextlib.redirect_stdout(io.StringIO()) as log:
+                    ignored_tests.panic_source(str(path) + ":1:1")
+                    ignored_tests.panic_source("crates/private.rs:1:1")
+                    ignored_tests.panic_source("crates/link.rs:1:1")
+                    for invalid in ("/tmp/private.rs", "crates/../private.rs", "target/private.rs", ".local/private.rs"):
+                        ignored_tests.panic_source(invalid + ":1:1")
+                self.assertIn("checked-in reason", log.getvalue())
+                self.assertNotIn("PRIVATE", log.getvalue())
+                self.assertEqual(log.getvalue().count("source unavailable"), 6)
+            finally:
+                os.chdir(old)
+                ignored_tests.source_lines.cache_clear()
+
+    def test_invalid_source_never_invokes_git(self):
+        ignored_tests.source_lines.cache_clear()
+        with patch.object(ignored_tests.subprocess, "run") as run:
+            for path in ("/etc/private.rs", "crates/../../private.rs", "crates/x/target/private.rs", "crates/x/.local/private.rs"):
+                self.assertIsNone(ignored_tests.source_lines(path))
+            run.assert_not_called()
 
     def test_numeric_boolean_and_private_operands(self):
         for left, right, expected in (("96", "93", "assertion left: 96"),

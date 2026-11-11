@@ -23,6 +23,7 @@ payloads: the prepared data is Mojang's. Compile/list failures expose bounded co
 """
 
 import os
+from functools import lru_cache
 import re
 import subprocess
 import sys
@@ -63,6 +64,37 @@ def compile_diagnostics(output):
         print(f"  compiler diagnostics truncated: {len(headings) - 20} more headings")
     if not headings:
         print("  no recognized compiler diagnostic; non-diagnostic output withheld")
+
+
+@lru_cache(maxsize=32)
+def source_lines(path):
+    """Only immutable tracked Rust blobs, never a working-tree or resource file."""
+    if not re.fullmatch(r"(?:crates|launcher)/[A-Za-z0-9_./-]+\.rs", path):
+        return None
+    if any(part in ("", ".", "..", "target", ".local") for part in path.split("/")):
+        return None
+    # ls-tree mode rejects symlinks and bounds blobs before git-show allocates output.
+    entry = subprocess.run(["git", "ls-tree", "-l", "HEAD", "--", path],
+                           capture_output=True, text=True, errors="replace")
+    fields = entry.stdout.split()
+    if entry.returncode or len(fields) != 5 or fields[0] not in ("100644", "100755") or fields[1] != "blob":
+        return None
+    if not fields[3].isdigit() or int(fields[3]) > 256_000:
+        return None
+    blob = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True, errors="replace")
+    return blob.stdout.splitlines() if blob.returncode == 0 else None
+
+
+def panic_source(location):
+    found = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", location)
+    lines = source_lines(found[1]) if found else None
+    if lines is None or not 1 <= int(found[2]) <= len(lines):
+        print("  panic source unavailable (not a bounded tracked Rust location)")
+        return
+    line = lines[int(found[2]) - 1]
+    # Prefix and escape controls so checked-in text cannot inject workflow commands.
+    line = line.encode("unicode_escape").decode("ascii")
+    print("  panic source: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
 
 
 def has_vulkan():
@@ -208,6 +240,7 @@ def run(package, skip, number=None, count=None):
             diagnostic_count += 1
             if diagnostic_count <= 50:
                 print(f"  {found[1][:200]} panicked at {found[2][:200]}")
+                panic_source(found[2])
             panic_reason_pending = True
         elif line.startswith("screen-effect event loop error: "):
             print(line)
