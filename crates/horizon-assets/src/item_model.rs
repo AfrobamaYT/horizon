@@ -1334,6 +1334,15 @@ struct Resolve<'a> {
     env: &'a dyn ItemEnv,
 }
 
+/// A `Transformation` of scale `(1, 1, z)` as `FaceBakery.bakeVertex` applies a model
+/// state's: about `BLOCK_MIDDLE` (0.5, 0.5, 0.5), in the model's 0..1 space.
+fn depth_scale(z: f32) -> Mat4 {
+    Mat4::IDENTITY
+        .translate([0.5; 3])
+        .scale([1.0, 1.0, z])
+        .translate([-0.5; 3])
+}
+
 fn compose(parent: &Mat4, own: &Option<Mat4>) -> Mat4 {
     own.as_ref().map_or(*parent, |t| parent.mul(t))
 }
@@ -1522,7 +1531,10 @@ impl Resolve<'_> {
         }
     }
     /// `DynamicFluidContainerModel.bakeModelForFluid`: the base layer, then the held
-    /// fluid's still sprite through the `fluid` mask, then the cover.
+    /// fluid's still sprite through the `fluid` mask, then the cover. The fluid layer is
+    /// baked under `FLUID_TRANSFORM` and the cover under `COVER_TRANSFORM` (offsets 403-415,
+    /// 617-629), Z scales of 1.002 and 1.004 (`<clinit>` 0-83) that `FaceBakery` applies
+    /// about the block's middle: each sits a little further out than the one below it.
     fn fluid_container(&self, out: &mut ResolvedItem, container: &FluidContainer, parent: &Mat4) {
         let textures = &container.textures;
         // `update`: the fluid the stack holds, else the model's own (offsets 0-29).
@@ -1538,7 +1550,8 @@ impl Resolve<'_> {
             // so -1, even while the declared fluid is drawn. A stack that holds one draws that
             // same fluid, so its tint is the appearance already looked up.
             let tint = if held.is_some() { appearance.tint } else { -1 };
-            self.sprite_layer(out, &appearance.still, Some(mask), vec![tint], parent);
+            let parent = parent.mul(&depth_scale(1.002));
+            self.sprite_layer(out, &appearance.still, Some(mask), vec![tint], &parent);
         }
         // The cover is always the mask (`bakeItemMaskQuads(baker, 0, cover, drawn, ...)`, offsets
         // 631-639). With `cover_is_mask` it picks out the parts of `base` drawn again over the
@@ -1550,7 +1563,8 @@ impl Resolve<'_> {
                 Some(cover.as_str())
             };
             if let Some(drawn) = drawn {
-                self.sprite_layer(out, drawn, Some(cover), Vec::new(), parent);
+                let parent = parent.mul(&depth_scale(1.004));
+                self.sprite_layer(out, drawn, Some(cover), Vec::new(), &parent);
             }
         }
     }

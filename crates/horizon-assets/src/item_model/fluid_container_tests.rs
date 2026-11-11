@@ -198,6 +198,46 @@ fn a_held_fluid_is_looked_up_once_per_draw() {
     assert_eq!(env.lookups.get(), 1);
 }
 
+/// `m` applied to a point of the model's 0..1 space.
+fn transformed(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|row| {
+        m.0[0][row] * p[0] + m.0[1][row] * p[1] + m.0[2][row] * p[2] + m.0[3][row]
+    })
+}
+
+/// `FLUID_TRANSFORM` scales the fluid layer by 1.002 in Z and `COVER_TRANSFORM` the cover
+/// by 1.004, about the block's middle: the extruded front at z = 8.5/16 moves out to
+/// 0.5 + 0.03125 * 1.002 and 0.5 + 0.03125 * 1.004, the back at 7.5/16 the same distance
+/// the other way, and X and Y stay put. The base is not scaled.
+#[test]
+fn the_fluid_and_cover_layers_sit_in_front_of_the_base() {
+    let drawn = layers(
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
+            "textures":{"base":"mod:item/flask","fluid":"neoforge:item/mask/bucket_fluid",
+                        "cover":"mod:item/flask_cover"}}"#,
+        &Fluids {
+            held: Some("mod:gas"),
+        },
+    );
+    assert_eq!(drawn.len(), 3);
+    let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(&b).all(|(a, b)| (a - b).abs() < 1e-6);
+    let corner = [0.25, 0.75, 8.5 / 16.0];
+    let back = [0.25, 0.75, 7.5 / 16.0];
+    assert!(close(transformed(&drawn[0].transform, corner), corner));
+    assert!(close(
+        transformed(&drawn[1].transform, corner),
+        [0.25, 0.75, 0.531_312_5]
+    ));
+    assert!(close(
+        transformed(&drawn[1].transform, back),
+        [0.25, 0.75, 0.468_687_5]
+    ));
+    assert!(close(
+        transformed(&drawn[2].transform, corner),
+        [0.25, 0.75, 0.531_375]
+    ));
+}
+
 #[test]
 fn an_empty_container_draws_its_declared_fluid_or_none() {
     let empty = r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
