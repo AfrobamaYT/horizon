@@ -69,9 +69,9 @@ pub enum GeneralRecordError {
     /// mod payloads only, never to a record of a vanilla type.
     PayloadTooLarge { size: usize },
     /// The decoded data of a payload is nested deeper than
-    /// [`limits::MAX_NESTING`]. Stage 3's payload decode owns this check —
-    /// the record walk never fires it, because a passenger tree reaches
-    /// [`GeneralRecordError::PassengerDepthTooDeep`] first.
+    /// [`limits::MAX_NESTING`]. The record's own NBT walk fires this when a
+    /// record carries data nested past the bound; the passenger tree's depth
+    /// has its own, stricter refusal.
     NestingTooDeep { depth: u32 },
     /// A passenger chain is deeper than [`limits::MAX_PASSENGER_DEPTH`].
     PassengerDepthTooDeep { depth: u32 },
@@ -81,6 +81,11 @@ pub enum GeneralRecordError {
     DuplicateUuid { uuid: [i32; 4] },
     /// A position, velocity or rotation component is not finite.
     NotFinite,
+    /// The type envelope is not what the format writes: a field of the wrong
+    /// tag kind or shape (`Payload` not a byte array, `Pos` not three
+    /// doubles, a passenger list of things that are not compounds). The
+    /// record never reaches a row and nothing of it is kept.
+    InvalidEnvelope { field: &'static str },
 }
 
 #[allow(
@@ -111,6 +116,9 @@ impl GeneralRecordError {
             }
             GeneralRecordError::NotFinite => {
                 "general entity has a non-finite coordinate".to_owned()
+            }
+            GeneralRecordError::InvalidEnvelope { field } => {
+                format!("general entity envelope field {field:?} is malformed")
             }
         }
     }
@@ -208,6 +216,257 @@ fn check_record(
         return Ok(GeneralRecordCheck::UnknownType);
     }
     Ok(GeneralRecordCheck::Ready)
+}
+
+/// The save format's common field names, vanilla's own (`Entity.saveWithoutId`)
+/// for the fields every kind shares, and the envelope's names for the rest.
+mod format {
+    /// The type's namespaced id (`id`, as every entity compound carries it).
+    pub const TYPE: &str = "id";
+    /// `Pos`: three doubles.
+    pub const POSITION: &str = "Pos";
+    /// `Motion`: three doubles.
+    pub const VELOCITY: &str = "Motion";
+    /// `Rotation`: two floats (yaw, pitch).
+    pub const ROTATION: &str = "Rotation";
+    /// `UUID`: four ints.
+    pub const UUID: &str = "UUID";
+    /// The payload's schema version, a short.
+    pub const PAYLOAD_VERSION: &str = "PayloadVersion";
+    /// The payload bytes, a byte array.
+    pub const PAYLOAD: &str = "Payload";
+    /// `Passengers`: the riding records, stored inside their vehicle's.
+    pub const PASSENGERS: &str = "Passengers";
+}
+
+fn doubles(values: [f64; 3]) -> Tag {
+    Tag::List(values.map(|value| Tag::Double(value.to_bits())).to_vec())
+}
+
+/// Read one three-double field the format writes (`Pos`, `Motion`), with its
+/// vanilla default when the compound omits it.
+fn doubles3(tag: &Tag, field: &'static str) -> Result<[f64; 3], GeneralRecordError> {
+    let Some(Tag::List(values)) = tag.get(field) else {
+        return Ok([0.0; 3]);
+    };
+    if values.len() != 3 {
+        return Err(GeneralRecordError::InvalidEnvelope { field });
+    }
+    let mut out = [0.0; 3];
+    for (slot, value) in values.iter().enumerate() {
+        let Tag::Double(bits) = value else {
+            return Err(GeneralRecordError::InvalidEnvelope { field });
+        };
+        out[slot] = f64::from_bits(*bits);
+    }
+    Ok(out)
+}
+
+impl GeneralEntityRecord {
+    /// The record as one save compound: the common fields under their vanilla
+    /// names, the type envelope (`id`, `PayloadVersion`, `Payload`), and the
+    /// passenger tree inside `Passengers`, exactly what save writes and load
+    /// reads. Runtime slots, network ids and pointers never appear.
+    #[allow(dead_code, reason = "stage 3's save path is the first non-test caller")]
+    pub fn to_tag(&self) -> Tag {
+        let mut map = horizon_core::nbt::Compound::new();
+        map.insert(
+            format::TYPE.into(),
+            Tag::String(self.envelope.type_key.as_str().into()),
+        );
+        map.insert(format::POSITION.into(), doubles(self.position));
+        map.insert(format::VELOCITY.into(), doubles(self.velocity));
+        map.insert(
+            format::ROTATION.into(),
+            Tag::List(
+                self.rotation
+                    .map(|value| Tag::Float(value.to_bits()))
+                    .to_vec(),
+            ),
+        );
+        map.insert(format::UUID.into(), Tag::IntArray(self.uuid.to_vec()));
+        map.insert(
+            format::PAYLOAD_VERSION.into(),
+            Tag::Short(i16::from_ne_bytes(
+                self.envelope.payload_version.to_ne_bytes(),
+            )),
+        );
+        map.insert(
+            format::PAYLOAD.into(),
+            Tag::ByteArray(self.envelope.payload_bytes.clone()),
+        );
+        if !self.passengers.is_empty() {
+            map.insert(
+                format::PASSENGERS.into(),
+                Tag::List(self.passengers.iter().map(Self::to_tag).collect()),
+            );
+        }
+        Tag::Compound(map)
+    }
+}
+
+/// The deepest nesting of one record compound's own data, the passenger
+/// wrappers excluded: each riding record is a compound of the same shape as
+/// its root, so its depth is checked where it is read, and the passenger
+/// chain has its own bound ([`limits::MAX_PASSENGER_DEPTH`]).
+#[allow(dead_code, reason = "stage 3's load path is the first non-test caller")]
+fn data_nesting(tag: &Tag, passengers_key: &horizon_core::nbt::JavaString) -> u32 {
+    match tag {
+        Tag::Compound(map) => {
+            let riders = map.get(passengers_key);
+            1 + map
+                .values()
+                .filter(|value| !riders.is_some_and(|riding| std::ptr::eq(*value, riding)))
+                .map(|value| data_nesting(value, passengers_key))
+                .max()
+                .unwrap_or(0)
+        }
+        Tag::List(values) => {
+            1 + values
+                .iter()
+                .map(|value| data_nesting(value, passengers_key))
+                .max()
+                .unwrap_or(0)
+        }
+        _ => 1,
+    }
+}
+
+/// The encoded NBT size of a tag, as its writer emits it (name payloads
+/// included, strings counted as their UTF-8 bytes): the measure the
+/// quarantine record bound applies.
+#[allow(
+    dead_code,
+    reason = "stage 3's quarantine gate is the first non-test caller"
+)]
+pub(super) fn nbt_size(tag: &Tag) -> u64 {
+    let payload = match tag {
+        Tag::End => 1,
+        Tag::Byte(_) => 1,
+        Tag::Short(_) => 2,
+        Tag::Int(_) => 4,
+        Tag::Long(_) => 8,
+        Tag::Float(_) => 4,
+        Tag::Double(_) => 8,
+        Tag::ByteArray(bytes) => 4 + bytes.len() as u64,
+        Tag::String(text) => 2 + text.to_string_lossy().len() as u64,
+        Tag::List(values) => 5 + values.iter().map(nbt_size).sum::<u64>(),
+        Tag::Compound(map) => {
+            1 + map
+                .iter()
+                .map(|(field, value)| {
+                    1 + 2 + field.to_string_lossy().len() as u64 + nbt_size(value)
+                })
+                .sum::<u64>()
+        }
+        Tag::IntArray(ints) => 4 + ints.len() as u64 * 4,
+        Tag::LongArray(longs) => 4 + longs.len() as u64 * 8,
+    };
+    payload
+}
+
+/// One record compound as the save format reads it: the common fields (their
+/// vanilla defaults when absent), the type envelope and the passenger tree.
+/// The record's own data must nest no deeper than [`limits::MAX_NESTING`];
+/// shape faults refuse with [`GeneralRecordError::InvalidEnvelope`], and
+/// nothing is read from a record that refused.
+fn record_from_compound(tag: &Tag) -> Result<GeneralEntityRecord, GeneralRecordError> {
+    let passengers_key = horizon_core::nbt::JavaString::from(format::PASSENGERS);
+    let nesting = data_nesting(tag, &passengers_key);
+    if nesting > limits::MAX_NESTING {
+        return Err(GeneralRecordError::NestingTooDeep { depth: nesting });
+    }
+    let Some(Tag::String(type_key)) = tag.get(format::TYPE) else {
+        return Err(GeneralRecordError::InvalidEnvelope {
+            field: format::TYPE,
+        });
+    };
+    let position = doubles3(tag, format::POSITION)?;
+    let velocity = doubles3(tag, format::VELOCITY)?;
+    let rotation = match tag.get(format::ROTATION) {
+        None => [0.0; 2],
+        Some(Tag::List(values)) if values.len() == 2 => {
+            let mut out = [0.0f32; 2];
+            for (slot, value) in values.iter().enumerate() {
+                let Tag::Float(bits) = value else {
+                    return Err(GeneralRecordError::InvalidEnvelope {
+                        field: format::ROTATION,
+                    });
+                };
+                out[slot] = f32::from_bits(*bits);
+            }
+            out
+        }
+        Some(_) => {
+            return Err(GeneralRecordError::InvalidEnvelope {
+                field: format::ROTATION,
+            });
+        }
+    };
+    let uuid = match tag.get(format::UUID) {
+        Some(Tag::IntArray(ints)) if ints.len() == 4 => {
+            let mut out = [0i32; 4];
+            out.copy_from_slice(ints);
+            out
+        }
+        _ => {
+            return Err(GeneralRecordError::InvalidEnvelope {
+                field: format::UUID,
+            });
+        }
+    };
+    let payload_version = match tag.get(format::PAYLOAD_VERSION) {
+        None => 0,
+        Some(Tag::Short(version)) => u16::from_ne_bytes(version.to_ne_bytes()),
+        Some(_) => {
+            return Err(GeneralRecordError::InvalidEnvelope {
+                field: format::PAYLOAD_VERSION,
+            });
+        }
+    };
+    let payload_bytes = match tag.get(format::PAYLOAD) {
+        None => Vec::new(),
+        Some(Tag::ByteArray(bytes)) => bytes.clone(),
+        Some(_) => {
+            return Err(GeneralRecordError::InvalidEnvelope {
+                field: format::PAYLOAD,
+            });
+        }
+    };
+    let passengers = match tag.get(format::PASSENGERS) {
+        None => Vec::new(),
+        Some(Tag::List(values)) if values.iter().all(|value| matches!(value, Tag::Compound(_))) => {
+            values
+                .iter()
+                .map(record_from_compound)
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        Some(_) => {
+            return Err(GeneralRecordError::InvalidEnvelope {
+                field: format::PASSENGERS,
+            });
+        }
+    };
+    Ok(GeneralEntityRecord {
+        position,
+        velocity,
+        rotation,
+        uuid,
+        envelope: GeneralTypeEnvelope {
+            type_key: type_key.to_string_lossy(),
+            payload_version,
+            payload_bytes,
+        },
+        passengers,
+    })
+}
+
+/// A saved general entity tag as a record: every compound of the tree reads
+/// under the format's checks, so a refusal names the first fault and leaves
+/// nothing read behind (the caller discards the whole tree).
+#[allow(dead_code, reason = "stage 3's load path is the first non-test caller")]
+pub(super) fn record_from_tag(tag: &Tag) -> Result<GeneralEntityRecord, GeneralRecordError> {
+    record_from_compound(tag)
 }
 
 /// The frozen type registry: every declared general entity type, resolved
@@ -664,6 +923,195 @@ mod tests {
         assert_eq!(
             check_general_record(&good, known("mymod:robot")),
             Ok(GeneralRecordCheck::Ready)
+        );
+    }
+
+    /// The record codec round-trips a tree through the save format: what
+    /// `to_tag` writes is what `record_from_tag` reads back, passengers and
+    /// payload bytes included.
+    #[test]
+    fn record_round_trips_through_the_save_tag() {
+        let mut root = record([1, 2, 3, 4], "mymod:robot");
+        root.position = [0.5, 64.0, -12.25];
+        root.velocity = [0.0, -0.08, 0.25];
+        root.rotation = [90.0, -45.0];
+        root.envelope.payload_version = 7;
+        root.envelope.payload_bytes = vec![9, 8, 7, 6];
+        let mut rider = record([5, 6, 7, 8], "mymod:drone");
+        rider.rotation = [-180.0, 30.0];
+        rider.envelope.payload_bytes = vec![1];
+        root.passengers.push(rider);
+        let tag = root.to_tag();
+        assert_eq!(record_from_tag(&tag), Ok(root));
+    }
+
+    /// The writer names the fields the format fixes: the common fields under
+    /// their vanilla names, the envelope under its own.
+    #[test]
+    fn record_to_tag_uses_the_formats_field_names() {
+        let tag = record([1, 2, 3, 4], "mymod:robot").to_tag();
+        let Tag::Compound(map) = &tag else {
+            panic!("a record writes a compound");
+        };
+        for field in [
+            format::TYPE,
+            format::POSITION,
+            format::VELOCITY,
+            format::ROTATION,
+            format::UUID,
+            format::PAYLOAD_VERSION,
+            format::PAYLOAD,
+        ] {
+            let key = horizon_core::nbt::JavaString::from(field);
+            assert!(map.contains_key(&key), "{field} missing");
+        }
+        // A lone record writes no passenger list, as vanilla's save does not.
+        assert!(!map.contains_key(&horizon_core::nbt::JavaString::from(format::PASSENGERS)));
+        assert_eq!(
+            tag.get(format::TYPE),
+            Some(&Tag::String("mymod:robot".into()))
+        );
+    }
+
+    /// A record whose own data nests one level past the bound refuses with
+    /// the nesting fault, and one level inside it stands; the passenger
+    /// wrappers themselves never count toward this bound, so a tree at the
+    /// full passenger depth still parses (its depth has its own refusal).
+    #[test]
+    fn record_refuses_data_nested_past_the_bound() {
+        let deeply = |levels: u32| {
+            let mut tag = record([1, 2, 3, 4], "mymod:robot").to_tag();
+            let mut nested = Tag::Compound(Default::default());
+            for _ in 1..levels {
+                let mut next = Tag::Compound(Default::default());
+                if let Tag::Compound(map) = &mut next {
+                    map.insert("inner".into(), nested);
+                }
+                nested = next;
+            }
+            if let Tag::Compound(map) = &mut tag {
+                map.insert("Extra".into(), nested);
+            }
+            tag
+        };
+        // The root compound is the first level: an `Extra` field nested to
+        // the bound makes the record's data one level past it.
+        assert_eq!(
+            record_from_tag(&deeply(limits::MAX_NESTING)),
+            Err(GeneralRecordError::NestingTooDeep {
+                depth: limits::MAX_NESTING + 1
+            })
+        );
+        assert!(record_from_tag(&deeply(limits::MAX_NESTING - 1)).is_ok());
+        // The deepest legal passenger chain (16 riders) is not data nesting.
+        let mut root = record([1, 2, 3, 4], "mymod:robot");
+        let mut node = &mut root;
+        for index in 0..limits::MAX_PASSENGER_DEPTH {
+            node.passengers
+                .push(record([index as i32 + 5, 0, 0, 0], "mymod:drone"));
+            node = node.passengers.last_mut().unwrap();
+        }
+        assert_eq!(record_from_tag(&root.to_tag()).unwrap().passengers.len(), 1);
+    }
+
+    /// A field of the wrong shape refuses the whole record as a malformed
+    /// envelope, naming the field: no defaulting, no partial read.
+    #[test]
+    fn record_refuses_malformed_envelope_fields() {
+        let base = || record([1, 2, 3, 4], "mymod:robot").to_tag();
+        let malformed = |field: &'static str, value: Tag| {
+            let mut tag = base();
+            if let Tag::Compound(map) = &mut tag {
+                map.insert(field.into(), value);
+            }
+            tag
+        };
+        for (field, value, expected) in [
+            (
+                format::PAYLOAD,
+                Tag::Int(1),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::PAYLOAD,
+                },
+            ),
+            (
+                format::PAYLOAD_VERSION,
+                Tag::Int(1),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::PAYLOAD_VERSION,
+                },
+            ),
+            (
+                format::UUID,
+                Tag::IntArray(vec![1, 2, 3]),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::UUID,
+                },
+            ),
+            (
+                format::ROTATION,
+                Tag::List(vec![Tag::Float(0.0f32.to_bits())]),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::ROTATION,
+                },
+            ),
+            (
+                format::POSITION,
+                Tag::List(vec![
+                    Tag::Double(0.0f64.to_bits()),
+                    Tag::Float(64.0f32.to_bits()),
+                    Tag::Double(0.0f64.to_bits()),
+                ]),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::POSITION,
+                },
+            ),
+            (
+                format::PASSENGERS,
+                Tag::List(vec![Tag::String("robot".into())]),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::PASSENGERS,
+                },
+            ),
+            (
+                format::TYPE,
+                Tag::Int(1),
+                GeneralRecordError::InvalidEnvelope {
+                    field: format::TYPE,
+                },
+            ),
+        ] {
+            assert_eq!(
+                record_from_tag(&malformed(field, value)),
+                Err(expected),
+                "{field}"
+            );
+        }
+    }
+
+    /// The encoded size the quarantine bound reads: a payload's bytes count
+    /// into it one for one, so the gate can tell a record at the bound from
+    /// one byte past it.
+    #[test]
+    fn nbt_size_counts_payload_bytes_one_for_one() {
+        let at = GeneralEntityRecord {
+            envelope: GeneralTypeEnvelope {
+                payload_bytes: vec![0; 1024],
+                ..record([1, 2, 3, 4], "mymod:robot").envelope
+            },
+            ..record([1, 2, 3, 4], "mymod:robot")
+        };
+        let over = GeneralEntityRecord {
+            envelope: GeneralTypeEnvelope {
+                payload_bytes: vec![0; 1025],
+                ..at.envelope.clone()
+            },
+            ..at.clone()
+        };
+        assert_eq!(
+            nbt_size(&over.to_tag()) - nbt_size(&at.to_tag()),
+            1,
+            "one payload byte must add one encoded byte"
         );
     }
 }
