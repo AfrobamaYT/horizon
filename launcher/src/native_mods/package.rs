@@ -192,6 +192,19 @@ mod mixed_tests {
         super::super::tests::write_bundle(&dir, "tool_rows", "pub fn run() {}");
         let mut bundle = read(&dir).unwrap().unwrap();
         assert!(!bundle.needs_mixins());
+        bundle.manifest.inject.push(toml::from_str("id='slot'\nat='game::run'\nkind='head'\naccess='internals'\nwith='handler'\nhash='signature'\n").unwrap());
+        assert!(
+            !bundle.needs_mixins(),
+            "injects never invoke the source tool"
+        );
+        let module: toml::Value = toml::from_str("id='module'\nfile='game.rs'\nname='support'\nsource='src/helper.rs'\nvisibility='pub(crate)'\n").unwrap();
+        bundle
+            .manifest
+            .native
+            .as_mut()
+            .unwrap()
+            .module
+            .push(module.clone().try_into().unwrap());
         let injection: toml::Value = toml::from_str("id='edit'\ntarget='game::run'\nkind='HEAD'\nhelper='src/helper.rs'\ncancellable=true\npriority=17\nselector='call'\n").unwrap();
         bundle
             .manifest
@@ -246,6 +259,13 @@ mod mixed_tests {
         assert_eq!(tool["injection"][0], injection);
         assert_eq!(tool["bridge"][0], bridge);
         assert_eq!(tool["state"][0], state);
+        assert_eq!(tool["module"][0], module);
+        let copied = dir.join("input");
+        copy_tool_input(&bundle, &copied).unwrap();
+        assert_eq!(
+            fs::read_to_string(copied.join("src/helper.rs")).unwrap(),
+            "let a = 2;"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

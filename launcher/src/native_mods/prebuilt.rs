@@ -27,7 +27,7 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceReason {
     /// A mod has a checked private source point, legacy helper, or module changing game code.
-    Injections { mod_id: String },
+    Mixins { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
@@ -43,9 +43,7 @@ pub enum SourceReason {
 impl std::fmt::Display for SourceReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            Self::Injections { mod_id } => {
-                trf("{mod}: mixins compile game code", &[("mod", mod_id)])
-            }
+            Self::Mixins { mod_id } => trf("{mod}: mixins compile game code", &[("mod", mod_id)]),
             Self::BuildScript { mod_id } => trf(
                 "{mod} has a build script, so the game builds from source",
                 &[("mod", mod_id)],
@@ -81,7 +79,7 @@ pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
     projects.iter().find_map(project_refusal)
 }
 
-/// Checked private-source routes require an install-time game build, never a prebuilt retry.
+/// Refuse injections without compiled slots before selecting an artifact.
 pub(super) fn source_refusal(
     game: &Path,
     projects: &[api::Project<'_>],
@@ -98,7 +96,7 @@ pub(super) fn source_refusal(
     Ok(None)
 }
 
-/// One slot/source decision per project, including named refusals. Cargo restrictions are
+/// One slot attachment decision per project, including named refusals. Cargo restrictions are
 /// reported separately by `project_refusal`; both consumers use the same slot router here.
 pub(super) fn slot_routes(
     catalog: &internals::Catalog,
@@ -124,7 +122,7 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
     {
         let mod_id = || project.bundle.manifest.id.clone();
         if project.bundle.needs_mixins() {
-            return Some(SourceReason::Injections { mod_id: mod_id() });
+            return Some(SourceReason::Mixins { mod_id: mod_id() });
         }
         let cargo = &project.cargo;
         let package = cargo.get("package");

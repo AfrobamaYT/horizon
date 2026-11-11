@@ -113,7 +113,7 @@ fn unchanged_callback_compiles_against_both_canonical_facades() {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
-    let canonical = horizon_platform::mod_build::api_gen::sites::source::facade_name(
+    let canonical = horizon_platform::mod_build::api_gen::sites::facade_name(
         "horizon_client::game::Game::run",
         "horizon_client::game::Game::step",
         0,

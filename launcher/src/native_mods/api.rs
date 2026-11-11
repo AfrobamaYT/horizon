@@ -831,7 +831,6 @@ mod tests {
             .collect();
         let listed = [super::super::inject::ListedPoint {
             name: "tick".into(),
-            private: false,
             record_name: None,
             target: "game::Game::tick".into(),
             raw: true,

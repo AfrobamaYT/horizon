@@ -3,17 +3,11 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(super) struct Site {
-    #[serde(default)]
-    pub local: Option<horizon_platform::mod_build::api_gen::sites::Local>,
-    #[serde(default)]
-    pub expression: Option<horizon_platform::mod_build::api_gen::sites::Expression>,
     pub name: String,
     pub target: String,
     pub call: String,
     pub ctx: String,
     pub ordinal: usize,
-    #[serde(default)]
-    pub private: bool,
     pub listener: String,
     pub once: bool,
     pub record: String,
@@ -26,10 +20,7 @@ impl Site {
     }
 
     fn export(&self) -> String {
-        if self.local.is_some() || self.expression.is_some() {
-            return self.name.clone();
-        }
-        horizon_platform::mod_build::api_gen::sites::source::facade_name(
+        horizon_platform::mod_build::api_gen::sites::facade_name(
             &self.target,
             &self.call,
             self.ordinal,

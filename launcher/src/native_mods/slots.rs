@@ -74,7 +74,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<SlotK
             let point = catalog
                 .points
                 .iter()
-                .find(|point| !point.private && plain(&point.target) == plain(&item.path));
+                .find(|point| plain(&point.target) == plain(&item.path));
             Some(Place {
                 at: entry.at.clone(),
                 hash: item.hash.clone(),
@@ -98,7 +98,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<SlotK
                 calls: catalog
                     .sites
                     .iter()
-                    .filter(|site| !site.private && plain(&site.target) == plain(&item.path))
+                    .filter(|site| plain(&site.target) == plain(&item.path))
                     .map(|site| CallPlace {
                         call: site.call.clone(),
                         nth: site.ordinal,
