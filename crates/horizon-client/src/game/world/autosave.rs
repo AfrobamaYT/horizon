@@ -127,6 +127,17 @@ impl Game<'_> {
         if self.remote.is_some() {
             return Ok(());
         }
+        // A carrier transfer that broke after `prepared` stopped the
+        // session (`carrier_stop_session`): its recovery replays the
+        // affected regions from the disk state the transfer itself
+        // wrote, so no later save — the autosave a later tick would
+        // run, or any exit path's — may write over them.
+        if self.world.carrier_fences.is_broken() {
+            return Err(
+                "a carrier transfer did not finish; the world is left for recovery at reopen"
+                    .into(),
+            );
+        }
         Self::admit_entity_save()?;
         // `DedicatedServer.saveAllChunks` tells the management protocol's clients when a save starts and when
         // it ends without failing, for every save: the command, the autosave, the pause.

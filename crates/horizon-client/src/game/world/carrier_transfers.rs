@@ -65,6 +65,9 @@ pub(crate) enum TransferError {
     CarrierUnreadable(String),
     /// Plain I/O.
     Io(String),
+    /// Only the logical server transfers; a client's mirror of the
+    /// world receives the result through synchronization.
+    NotLogicalServer,
 }
 impl std::fmt::Display for TransferError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,6 +107,10 @@ impl std::fmt::Display for TransferError {
             ),
             Self::CarrierUnreadable(why) => write!(f, "carrier file: {why}"),
             Self::Io(text) => write!(f, "carrier transfer I/O: {text}"),
+            Self::NotLogicalServer => write!(
+                f,
+                "only the logical server transfers; this game is a client's mirror"
+            ),
         }
     }
 }
@@ -177,10 +184,11 @@ impl Game<'_> {
         use horizon_client::join_seq::visibility::PassLease;
 
         // A remote guest's mirror never transfers: the server's own
-        // transfer reaches it through synchronization, so this is a
-        // no-op on the guest, by design.
+        // transfer reaches it through synchronization, so a guest's
+        // call refuses with a reason rather than silently succeeding
+        // (the disassembly's gate refuses the same way).
         if !self.is_logical_server() {
-            return Ok(());
+            return Err(TransferError::NotLogicalServer);
         }
         if self.world.carrier_fences.is_broken() {
             return Err(TransferError::Store(
@@ -429,6 +437,7 @@ impl Game<'_> {
         if let Err(error) = self.finish_assemble(&mut store, uuid, generation, cells) {
             log::error!("carrier transfer did not finish: {error}");
             self.world.carrier_fences.mark_broken();
+            carrier_stop_session(self, &error);
             return Err(error);
         }
         for pos in cells {
@@ -463,6 +472,14 @@ impl Game<'_> {
         use horizon_client::join_seq::visibility::PassLease;
         use horizon_core::nbt::{self, Tag};
 
+        // A remote guest's mirror never transfers: the server's own
+        // transfer reaches it through synchronization, so a guest's
+        // call refuses with a reason rather than silently succeeding
+        // (the assembly's gate refuses the same way). This is the
+        // logical-server guard the review's item 5 asked for.
+        if !self.is_logical_server() {
+            return Err(TransferError::NotLogicalServer);
+        }
         if self.world.carrier_fences.is_broken() {
             return Err(TransferError::Store(
                 "a previous carrier transfer did not finish; reopen the world".into(),
@@ -659,6 +676,7 @@ impl Game<'_> {
         if let Err(error) = self.finish_disassemble(&mut store, uuid, generation, &cells) {
             log::error!("carrier transfer did not finish: {error}");
             self.world.carrier_fences.mark_broken();
+            carrier_stop_session(self, &error);
             return Err(error);
         }
         for cell in &operation_cells {
@@ -902,7 +920,7 @@ impl Game<'_> {
             .map_err(|e| e.to_string())
     }
 
-/// Saves every affected chunk and waits for the writer's barrier, so
+    /// Saves every affected chunk and waits for the writer's barrier, so
     /// the sectors are on disk with the regions synced.
     #[cfg_attr(not(test), allow(dead_code))]
     fn save_affected(&mut self, cells: &[BlockPos]) -> crate::Result<()> {
@@ -924,9 +942,22 @@ impl Game<'_> {
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         self.save.flush()
     }
-
 }
 
+/// Stops the session after a failed carrier commit, the same way any
+/// fatal save error does: `Game::error` is set (the first error wins),
+/// the event loop exits through it — a tick's error reaches
+/// `Game::exit_on_error` from the event handler's result
+/// (runtime/window_handler.rs), which calls `event_loop.exit()` — and
+/// every world save refuses while the fences are broken
+/// (`save_game_with`, world/autosave.rs), so the exit path's save and
+/// any autosave write nothing over the affected regions. The prepared
+/// operation stays on disk for recovery at the next open.
+fn carrier_stop_session(game: &mut Game<'_>, error: &TransferError) {
+    if game.error.is_none() {
+        game.error = Some(format!("carrier transfer failed: {error}").into());
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1598,6 +1629,104 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Review item 5's fail-closed: a commit that fails after
+    /// `prepared` stops the whole session, not just further transfers.
+    /// The game's fatal error is set (what the event loop's error path
+    /// turns into its exit), a further edit of the fenced cell refuses,
+    /// every save refuses so nothing is written over the region before
+    /// the exit, and the next open's recovery still finishes the
+    /// operation with exactly one owner.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_failed_commit_stops_the_session_until_recovery() {
+        let root = transfer_root("fail-closed");
+        with_game(|game| {
+            game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+
+            // The writer's barrier fails after prepared.
+            game.world.carrier_fences.fail_flush = true;
+            assert!(game.carrier_assemble(9, &[BlockPos::new(4, 64, 4)]).is_err());
+
+            // The session stopped like a fatal save error: `Game::error`
+            // is set — the same flag the event loop's error path exits
+            // the loop through (`exit_on_error`).
+            assert!(
+                game.error.is_some(),
+                "the failed commit stops the session"
+            );
+
+            // A further edit of the fenced cell refuses.
+            assert!(game.world.carrier_fences.locks_cell(&[4, 64, 4]));
+            assert!(game.break_block([4, 64, 4]).is_err());
+
+            // Every save refuses — the autosave's and the exit path's
+            // chokepoint — so nothing is written over the region
+            // between the failure and the exit.
+            let region = root.join("dimensions/minecraft/overworld/region");
+            let before = region_files(&region);
+            assert!(game.save_game().is_err(), "a save refuses after the failure");
+            assert_eq!(before, region_files(&region), "the region is untouched");
+
+            // Recovery, as the next open runs it: the operation replays
+            // or verifies, commits, and the chest has exactly one owner.
+            let mut store = match crate::carrier_store::Store::open(&root).unwrap() {
+                crate::carrier_store::Opened::Live(store) => store,
+                _ => panic!("the store must reopen"),
+            };
+            let states = crate::carrier_store::RegistryStates::new(registry);
+            let report =
+                crate::carrier_store::recover(&mut store, &region, &states, "minecraft:overworld")
+                    .unwrap();
+            assert_eq!(report.applied + report.verified, 1);
+            assert!(store.journal().in_progress.is_none());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Review item 5's logical-server guard: a client mirror's transfer
+    /// refuses with a reason — the assembly's and the disassembly's
+    /// gates alike — and the refusal leaves the world untouched: no
+    /// store is created, nothing is written.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mirror_transfer_refuses_without_touching_the_world() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-carrier-client-refusal-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            game.world_root = root.clone();
+
+            let refused = game.carrier_disassemble(3, 1, [0, 64, 0], [1.0, 0.0, 0.0, 0.0]);
+            assert!(matches!(refused, Err(TransferError::NotLogicalServer)));
+
+            // The assembly's gate refuses the same way, not silently.
+            let refused = game.carrier_assemble(3, &[BlockPos::new(0, 64, 0)]);
+            assert!(matches!(refused, Err(TransferError::NotLogicalServer)));
+
+            // The world is untouched: no store, no journal, no data.
+            assert!(!root.join("data").exists());
+            assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Assemble then disassemble: at every step the chest has exactly
     /// one owner — the world, the carrier's images or the carrier file.
     #[test]
@@ -2088,6 +2217,20 @@ mod tests {
 
     /// A fresh throwaway world root with `data/` and a readable
     /// `level.dat`, named after the test.
+    /// The region directory's files with their bytes, for before/after
+    /// comparisons that no save wrote anything.
+    fn region_files(region: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(region) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                files.push((name, std::fs::read(entry.path()).unwrap_or_default()));
+            }
+        }
+        files.sort();
+        files
+    }
+
     fn transfer_root(name: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!(
             "horizon-carrier-{name}-{}",
