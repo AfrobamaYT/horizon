@@ -13,8 +13,10 @@ compiler expansion and requires exact identity coverage against the manifest.
 Ambiguous names and unsupported generic/qualified/where-clause impl headers for
 local unit enums fail rather than silently dropping a type. The 151 pins cover
 locally defined fieldless Wire derives, including generated/private enums. They
-do not cover external types with manual codecs (such as horizon-core's Direction
-or horizon-mod-runtime's attachment types), which this derive change cannot affect.
+do not cover manual codecs, which this derive change cannot affect: the external
+Direction, EquipmentSlot, GameMode, UseAnimation, ConnectionKind and AttachmentWrite
+types, or the local Reduction enum's deliberate compact-u8 codec. Discovery uses
+the compiler's `#[automatically_derived]` marker, not the presence of a const block.
 The checked configuration is native/default features, not inactive target or
 feature branches.
 

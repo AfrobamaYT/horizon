@@ -15,8 +15,8 @@ class WireEnumDiscoveryTests(unittest.TestCase):
             #[doc = "{ fields } (tuple)"] First = 7, Second = 9 }
         enum Payload { Unit, Tuple(u32), Record { value: String } }
         enum Other { First }
-        impl ::mod_api::wire::Wire for Plain { fn layout() { runtime_before_or_const_after() } }
-        impl ::mod_api::wire::Wire for Payload {}
+        #[automatically_derived] impl ::mod_api::wire::Wire for Plain { fn layout() { runtime_before_or_const_after() } }
+        #[automatically_derived] impl ::mod_api::wire::Wire for Payload {}
         '''
         self.assertEqual(MODULE.discover(source), {"Plain"})
 
@@ -29,20 +29,22 @@ class WireEnumDiscoveryTests(unittest.TestCase):
         ]:
             with self.subTest(header=header):
                 with self.assertRaisesRegex(ValueError, "unsupported.*Flag"):
-                    MODULE.discover(f"enum Flag {{ A }} {header} {{}}")
+                    MODULE.discover(f"enum Flag {{ A }} #[automatically_derived] {header} {{}}")
 
-    def test_external_manual_codecs_do_not_enter_local_derive_inventory(self):
+    def test_manual_codecs_do_not_enter_derive_inventory(self):
         self.assertEqual(MODULE.discover('''
             enum Local { A }
-            impl ::mod_api::wire::Wire for Local {}
+            enum Manual { A }
+            #[automatically_derived] impl ::mod_api::wire::Wire for Local {}
+            impl crate::wire::Wire for Manual {}
             impl crate::wire::Wire for external::Other {}
         '''), {"Local"})
 
     def test_duplicate_leaf_identity_refuses_instead_of_dropping(self):
         with self.assertRaisesRegex(ValueError, "ambiguous"):
             MODULE.discover('''
-                mod one { enum Same { A } impl ::mod_api::wire::Wire for Same {} }
-                mod two { enum Same { B } impl ::mod_api::wire::Wire for Same {} }
+                mod one { enum Same { A } #[automatically_derived] impl ::mod_api::wire::Wire for Same {} }
+                mod two { enum Same { B } #[automatically_derived] impl ::mod_api::wire::Wire for Same {} }
             ''')
 
 
