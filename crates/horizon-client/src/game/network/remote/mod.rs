@@ -8252,7 +8252,7 @@ impl Game<'_> {
             }));
         }
     }
-    fn creative_stacks(&self) -> Vec<Option<ItemStack>> {
+    pub(in crate::game) fn creative_stacks(&self) -> Vec<Option<ItemStack>> {
         creative_sync_stacks(&self.inventory, &self.offhand, &self.armor)
     }
     /// `CreativeInventoryListener.slotChanged`: `handleCreativeModeItemAdd` for every slot the
@@ -8292,7 +8292,7 @@ impl Game<'_> {
     }
     /// The slots a server packet changed since `before` are as the server has them; the
     /// others keep what was last sent, so a creative click made since still goes out.
-    fn remote_synced_since(&mut self, before: &[Option<ItemStack>]) {
+    pub(in crate::game) fn remote_synced_since(&mut self, before: &[Option<ItemStack>]) {
         let now = self.creative_stacks();
         if let Some(r) = self.remote.as_mut() {
             mark_synced(&mut r.synced, before, now);
