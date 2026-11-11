@@ -404,6 +404,7 @@ impl Game<'_> {
         self.recipe_ui.book = None;
         self.recipe_ui.custom = mod_screen::ModRecipeUi::default();
         self.recipe_tables.books = None;
+        self.invalidate_mod_book_placement_catalogues();
     }
     /// Puts a server's entries over `book` (`Book::use_server_entries`). The
     /// names come from the connection's registries; a tag's items are the ones
@@ -1326,9 +1327,8 @@ impl Game<'_> {
             }
             return;
         }
-        let mut reader = horizon_protocol::buf::Reader::new(data);
-        if let (Ok(container), Ok(result)) = (reader.varint(), reader.u8())
-            && reader.remaining() == 0
+        if let Ok(Some((container, result))) =
+            horizon_client::lan::recipes::decode_transfer_reply(data)
             && container == self.remote_menu_id()
             && self.mod_recipe_screen()
             && self.panel.recipes.is_some()
@@ -1685,7 +1685,12 @@ impl Game<'_> {
     /// `slot` now, cycling like its draw; only while the open book is visible
     /// (`RecipeBookComponent.extractTooltip`).
     pub(super) fn ghost_stack(&self, slot: usize) -> Option<ItemStack> {
-        if !self.book_open(self.active_book()?) {
+        if self.native_screen_shown() {
+            if !self.mod_book_open() {
+                return None;
+            }
+            self.native_screen_slot(slot.checked_sub(300)?)?;
+        } else if !self.book_open(self.active_book()?) {
             return None;
         }
         let ghost = self

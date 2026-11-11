@@ -210,6 +210,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check repository artifacts and workflow YAML
         run: python3 tools/ci/check_repository_hygiene.py
+      - name: Check mod API boundary
+        if: needs.changes.outputs.rust_required != 'false'
+        run: python3 tools/ci/check_api_boundary.py --source-only
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -431,14 +434,27 @@ jobs:
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
-      # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
-      # success(), not !cancelled(): after an earlier step fails, the Rust install was skipped and tests that
-      # launch rustc would add a second, misleading failure.
+      # Last, so a tooling failure never skips the Rust tests. Only after every earlier step succeeded (success(),
+      # not !cancelled()): after a failure the Rust install was skipped, and tests that launch rustc would add a
+      # second, misleading failure.
       - name: Test offline research tooling
         if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
+      # The mod-host map's tables (#2534), built on main's pushes instead of committed, so no PR has to regenerate
+      # them: docs/layering/mod-host-map.md points here. Main pushes only, never pull requests; about 17 s of Python
+      # measured locally, no build.
+      - name: Build the mod-host map tables
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        run: python3 tools/layering/scan_engine_mod_edges.py --map target/layering/mod-host-map-tables.md
+      - name: Upload the mod-host map tables
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-host-map
+          path: target/layering/mod-host-map-tables.md
+          if-no-files-found: error
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -454,7 +470,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
     runs-on: dyna-large
-    timeout-minutes: 60
+    # Temporary: #2944 brings client data legs under 15 minutes and restores the 60-minute cap.
+    timeout-minutes: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 90 || 60 }}
     permissions:
       contents: read
     steps:
@@ -473,6 +490,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Record data-leg start and compiler cache
+        run: |
+          date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -497,9 +518,15 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: stable
           SHARD: ${{ matrix.shard }}
+          HORIZON_DATA_LEG_TIMING: '1'
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
+      - name: Record data-leg end and compiler cache
+        if: always()
+        run: |
+          date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
     needs: [changes, ignored-tests-shards]

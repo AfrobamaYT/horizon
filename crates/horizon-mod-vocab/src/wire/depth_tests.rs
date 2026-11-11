@@ -16,6 +16,36 @@ fn round<T: Wire>(value: &T, initial: u16) {
 }
 
 #[test]
+fn ingredient_at_limit_decodes_and_one_record_past_returns_wire_error() {
+    let mut ingredient = Ingredient::of(vec!["minecraft:stone".into()]);
+    for _ in 1..MAX_DEPTH {
+        let mut parent = Ingredient::of(vec!["minecraft:stone".into()]);
+        parent.children = Some((Shape::Compound, vec![ingredient]));
+        ingredient = parent;
+    }
+    let mut at_limit = Writer::new();
+    at_limit.put(&ingredient);
+    assert_eq!(at_limit.error(), None);
+    assert_eq!(
+        Reader::decode::<Ingredient>(at_limit.bytes()).unwrap(),
+        ingredient
+    );
+    // Write a complete extra record without charging its envelope to the
+    // writer. This is hostile input, not a truncated failed encoder output.
+    let parent = Ingredient::of(vec![]);
+    let mut past_limit = Writer::new();
+    past_limit.put(&parent.items);
+    past_limit.put(&parent.order);
+    past_limit.put(&parent.custom);
+    past_limit.put(&Some((Shape::Compound, vec![ingredient])));
+    assert_eq!(past_limit.error(), None);
+    assert!(matches!(
+        Reader::decode::<Ingredient>(past_limit.bytes()),
+        Err(WireError::Depth)
+    ));
+}
+
+#[test]
 fn structural_families_fit_the_guest_shadow_stack() {
     // The guest reserves 256 KiB; retain half for callers and transport plumbing.
     std::thread::Builder::new()

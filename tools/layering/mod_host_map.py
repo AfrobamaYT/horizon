@@ -1,4 +1,4 @@
-"""The generated tables of docs/layering/mod-host-map.md, from scan_engine_mod_edges.py's result."""
+"""The tables docs/layering/mod-host-map.md describes, from scan_engine_mod_edges.py's result (generated, not committed)."""
 
 from collections import Counter, defaultdict
 import itertools
