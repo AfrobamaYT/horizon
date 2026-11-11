@@ -182,17 +182,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   captured stack before consumption (count and components included). A fox's listener receives the full server
   host before its living movement and before the next mob ticks; writes to actors or the level survive the
   continuation. Changing the consumer's mouth item, position or eligibility refuses the captured effect.
-- **`native_player_clone(player, name, was_death, original)`**: after a death respawn (`was_death` true)
-  or End return (`was_death` false), after the copy and before placement. `player` is the replacement's
-  UUID. `original: OriginalPlayerRef` reads the old player's position, dimension, level, health,
-  experience, effects, inventory slots and every attachment, including non-copy-on-death and
-  unserialized values. Death inventory is after drops (empty unless keep-inventory or spectator);
-  End-return inventory is intact. The replacement's vanilla state and attachments have already
-  been copied before dispatch. Original attachments permit lazy decoding and defaults, not set/remove.
-  Snapshots are not taken without subscribers. For example,
-  `event.original.attachment(host, &DATA)` reads the old value while `DATA.get(host, Holder::Player(event.player))`
-  reads the replacement's retained value or fresh default. The original expires when the hook returns;
-  retained handles refuse reads. No player's state is swapped in. Native and wasm use the same handle.
+- **`native_player_clone(player, name, was_death, original)`**: after death (`was_death` true) or the
+  credits-showing End return (false), after copying vanilla state and attachments and before placement.
+  `player` is the replacement's UUID; `original: OriginalPlayerRef` lends read-only old state and all
+  attachments, including non-copy-on-death and unserialized values. Inventory follows death drops
+  (retained with keep-inventory or spectator) or is intact on End return. Reads expire after the hook;
+  no subscriber means no snapshot. No state is swapped in. See `Hooks::player_clone` for full API docs.
 - **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
   (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
   join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for

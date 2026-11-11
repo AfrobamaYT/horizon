@@ -2078,7 +2078,7 @@ impl Game<'_> {
             .iter()
             .position(|g| g.uuid == uuid && g.placed)
         {
-            let live = Some(self.player_attachments.clone());
+            let live = Some(self.player_state.attachments.clone());
             host.hub.guests.update(i, |g| {
                 let held = live.map(|a| std::mem::replace(&mut g.attachments, a));
                 playerdata::store(g, &mut self.level, vehicle);
@@ -6110,7 +6110,7 @@ mod owner_attachment_save_tests {
         // While the owner plays, its attachments are the game's, not the guest's.
         PROGRESS
             .set(
-                &mut game.player_attachments,
+                &mut game.player_state.attachments,
                 horizon_mod_runtime::attachments::Holder::Level,
                 7,
             )
@@ -6130,7 +6130,7 @@ mod owner_attachment_save_tests {
         // A later change is what the next autosave writes.
         PROGRESS
             .set(
-                &mut game.player_attachments,
+                &mut game.player_state.attachments,
                 horizon_mod_runtime::attachments::Holder::Level,
                 9,
             )

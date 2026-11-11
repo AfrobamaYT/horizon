@@ -665,6 +665,8 @@ mod api {
     pub struct DamageContainer(pub f32);
     #[derive(Clone, Copy)]
     pub struct LivingRef;
+    #[derive(Clone, Copy)]
+    pub struct OriginalPlayerRef;
 
     #[derive(Clone, Copy)]
     pub struct FluidKey;

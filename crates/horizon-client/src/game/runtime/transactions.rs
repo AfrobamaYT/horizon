@@ -1937,7 +1937,7 @@ mod mod_capability_tests {
             game.open_storage_transaction();
             game.lan_acting_uuid = Some(guest);
             std::mem::swap(
-                &mut game.player_attachments,
+                &mut game.player_state.attachments,
                 game.lan
                     .as_mut()
                     .unwrap()
@@ -1949,7 +1949,7 @@ mod mod_capability_tests {
             let host: &mut dyn ServerHost = game;
             ENERGY.set(host, player, 70).unwrap();
             std::mem::swap(
-                &mut game.player_attachments,
+                &mut game.player_state.attachments,
                 game.lan
                     .as_mut()
                     .unwrap()

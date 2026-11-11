@@ -1027,6 +1027,7 @@ impl From<PlayerRef> for EntityRef {
 
 /// The original player lent to `player_clone`. Every read expires when the hook returns;
 /// this is deliberately not a live player or entity handle.
+// exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(horizon_mod_api_macros::Wire)]
 #[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

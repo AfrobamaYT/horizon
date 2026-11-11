@@ -6628,7 +6628,7 @@ impl Game<'_> {
                 player.spectator = self.spectator();
                 player.velocity = delta;
                 self.hook.discard();
-                self.player_attachments.retire();
+                self.player_state.attachments.retire();
                 self.resident_entities.local_player.renew();
                 self.player = Some(player);
                 self.bind_local_player_residency();

@@ -4,6 +4,13 @@ use mod_api::__private::game::Fields;
 use mod_api::{Identifier, LevelRef, OriginalPlayerRef};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Per-player attachment state and the stack of originals retained during clone hooks.
+#[derive(Default)]
+pub(super) struct PlayerState {
+    pub(super) attachments: horizon_mod_runtime::attachments::ResidentAttachments,
+    pub(super) originals: Vec<OriginalPlayerSnapshot>,
+}
+
 pub(super) struct OriginalPlayerSnapshot {
     token: u64,
     uuid: u128,
@@ -64,16 +71,16 @@ impl Game<'_> {
         call: impl FnOnce(&mut Self, OriginalPlayerRef),
     ) {
         let handle = mod_api::__private::game::original_player_ref(original.token);
-        self.original_players.push(original);
+        self.player_state.originals.push(original);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(self, handle)));
-        self.original_players.pop();
+        self.player_state.originals.pop();
         if let Err(panic) = result {
             std::panic::resume_unwind(panic);
         }
     }
 
     fn original_player_snapshot(&self, original: OriginalPlayerRef) -> Option<&OriginalPlayerSnapshot> {
-        self.original_players.iter().rev().find(|snapshot| snapshot.token == original.fields())
+        self.player_state.originals.iter().rev().find(|snapshot| snapshot.token == original.fields())
     }
 
     pub(super) fn original_player_uuid(&self, original_player: OriginalPlayerRef) -> Option<u128> {
