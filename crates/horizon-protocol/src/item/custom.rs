@@ -182,9 +182,10 @@ pub fn entries() -> impl Iterator<Item = (i32, &'static str)> {
 // Generated retained-allocation traversals; regenerate with protocol-retained-gen.
 impl crate::retained::OwnedHeap for Types {
     fn owned_heap_bytes(&self) -> usize {
+        let Self { first, names } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.first))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.names))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(first))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(names))
     }
 }
 impl crate::retained::OwnedHeap for InstallError {
@@ -197,3 +198,4 @@ impl crate::retained::OwnedHeap for InstallError {
         }
     }
 }
+// End generated retained traversals.

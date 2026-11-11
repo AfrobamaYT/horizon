@@ -327,21 +327,25 @@ impl Codec<Commands> for Commands {
 // Generated retained-allocation traversals; regenerate with protocol-retained-gen.
 impl crate::retained::OwnedHeap for CommandNode {
     fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            kind,
+            executable,
+            restricted,
+            children,
+            redirect,
+            name,
+            parser,
+            suggestions,
+        } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.kind))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.executable,
-            ))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.restricted,
-            ))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.children))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.redirect))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.name))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.parser))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.suggestions,
-            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(kind))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(executable))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(restricted))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(children))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(redirect))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(parser))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(suggestions))
     }
 }
 impl crate::retained::OwnedHeap for ArgumentProperties {
@@ -383,8 +387,10 @@ impl crate::retained::OwnedHeap for ArgumentProperties {
 }
 impl crate::retained::OwnedHeap for Commands {
     fn owned_heap_bytes(&self) -> usize {
+        let Self { nodes, root } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.nodes))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.root))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(nodes))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(root))
     }
 }
+// End generated retained traversals.

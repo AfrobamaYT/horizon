@@ -656,69 +656,6 @@ impl Codec<PlaceRecipe> for PlaceRecipe {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn book_entries_round_trip() {
-        let add = RecipeBookAdd {
-            entries: vec![
-                RecipeBookEntry {
-                    id: 7,
-                    display: RecipeDisplay::Shaped {
-                        width: 2,
-                        height: 1,
-                        ingredients: vec![
-                            SlotDisplay::Tag(HolderSet::Tag("minecraft:planks".into())),
-                            SlotDisplay::Empty,
-                        ],
-                        result: SlotDisplay::ItemStack(Stack::new(12, 4)),
-                        station: SlotDisplay::Item(300),
-                    },
-                    group: 3,
-                    category: 3,
-                    requirements: Some(vec![HolderSet::Items(vec![1, 2])]),
-                    flags: 3,
-                },
-                RecipeBookEntry {
-                    id: 8,
-                    display: RecipeDisplay::Smithing {
-                        template: SlotDisplay::Composite(vec![SlotDisplay::Item(1)]),
-                        base: SlotDisplay::WithRemainder {
-                            input: Box::new(SlotDisplay::AnyFuel),
-                            remainder: Box::new(SlotDisplay::Item(2)),
-                        },
-                        addition: SlotDisplay::OnlyWithComponent(
-                            Box::new(SlotDisplay::WithAnyPotion(Box::new(SlotDisplay::Item(3)))),
-                            9,
-                        ),
-                        result: SlotDisplay::SmithingTrim {
-                            base: Box::new(SlotDisplay::Item(4)),
-                            material: Box::new(SlotDisplay::Dyed {
-                                dye: Box::new(SlotDisplay::Item(5)),
-                                target: Box::new(SlotDisplay::Item(6)),
-                            }),
-                            pattern: TrimPattern::Id(2),
-                        },
-                        station: SlotDisplay::Item(7),
-                    },
-                    group: 0,
-                    category: 11,
-                    requirements: None,
-                    flags: 0,
-                },
-            ],
-            replace: true,
-        };
-        let mut w = Writer::new();
-        RecipeBookAdd::write(&add, &mut w);
-        let mut r = Reader::new(&w.data);
-        assert_eq!(RecipeBookAdd::read(&mut r).unwrap(), add);
-        assert_eq!(r.remaining(), 0);
-    }
-}
-
 // Generated retained-allocation traversals; regenerate with protocol-retained-gen.
 impl crate::retained::OwnedHeap for HolderSet {
     fn owned_heap_bytes(&self) -> usize {
@@ -851,67 +788,144 @@ impl crate::retained::OwnedHeap for RecipeDisplay {
 }
 impl crate::retained::OwnedHeap for RecipeBookEntry {
     fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            id,
+            display,
+            group,
+            category,
+            requirements,
+            flags,
+        } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.display))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.group))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.category))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.requirements,
-            ))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.flags))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(group))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(category))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(requirements))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(flags))
     }
 }
 impl crate::retained::OwnedHeap for RecipeBookAdd {
     fn owned_heap_bytes(&self) -> usize {
+        let Self { entries, replace } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.entries))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.replace))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(entries))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(replace))
     }
 }
 impl crate::retained::OwnedHeap for RecipeBookRemove {
     fn owned_heap_bytes(&self) -> usize {
-        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.ids))
+        let Self { ids } = self;
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(ids))
     }
 }
 impl crate::retained::OwnedHeap for RecipeBookSettings {
     fn owned_heap_bytes(&self) -> usize {
-        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.books))
+        let Self { books } = self;
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(books))
     }
 }
 impl crate::retained::OwnedHeap for RecipeBookSeenRecipe {
     fn owned_heap_bytes(&self) -> usize {
-        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.recipe))
+        let Self { recipe } = self;
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(recipe))
     }
 }
 impl crate::retained::OwnedHeap for RecipeBookChangeSettings {
     fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            book_type,
+            open,
+            filtering,
+        } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.book_type,
-            ))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.open))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.filtering,
-            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(book_type))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(open))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(filtering))
     }
 }
 impl crate::retained::OwnedHeap for PlaceGhostRecipe {
     fn owned_heap_bytes(&self) -> usize {
+        let Self { container, display } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.container,
-            ))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.display))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(container))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display))
     }
 }
 impl crate::retained::OwnedHeap for PlaceRecipe {
     fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            container,
+            recipe,
+            use_max,
+        } = self;
         0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
-                &self.container,
-            ))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.recipe))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.use_max))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(container))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(recipe))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(use_max))
+    }
+}
+// End generated retained traversals.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn book_entries_round_trip() {
+        let add = RecipeBookAdd {
+            entries: vec![
+                RecipeBookEntry {
+                    id: 7,
+                    display: RecipeDisplay::Shaped {
+                        width: 2,
+                        height: 1,
+                        ingredients: vec![
+                            SlotDisplay::Tag(HolderSet::Tag("minecraft:planks".into())),
+                            SlotDisplay::Empty,
+                        ],
+                        result: SlotDisplay::ItemStack(Stack::new(12, 4)),
+                        station: SlotDisplay::Item(300),
+                    },
+                    group: 3,
+                    category: 3,
+                    requirements: Some(vec![HolderSet::Items(vec![1, 2])]),
+                    flags: 3,
+                },
+                RecipeBookEntry {
+                    id: 8,
+                    display: RecipeDisplay::Smithing {
+                        template: SlotDisplay::Composite(vec![SlotDisplay::Item(1)]),
+                        base: SlotDisplay::WithRemainder {
+                            input: Box::new(SlotDisplay::AnyFuel),
+                            remainder: Box::new(SlotDisplay::Item(2)),
+                        },
+                        addition: SlotDisplay::OnlyWithComponent(
+                            Box::new(SlotDisplay::WithAnyPotion(Box::new(SlotDisplay::Item(3)))),
+                            9,
+                        ),
+                        result: SlotDisplay::SmithingTrim {
+                            base: Box::new(SlotDisplay::Item(4)),
+                            material: Box::new(SlotDisplay::Dyed {
+                                dye: Box::new(SlotDisplay::Item(5)),
+                                target: Box::new(SlotDisplay::Item(6)),
+                            }),
+                            pattern: TrimPattern::Id(2),
+                        },
+                        station: SlotDisplay::Item(7),
+                    },
+                    group: 0,
+                    category: 11,
+                    requirements: None,
+                    flags: 0,
+                },
+            ],
+            replace: true,
+        };
+        let mut w = Writer::new();
+        RecipeBookAdd::write(&add, &mut w);
+        let mut r = Reader::new(&w.data);
+        assert_eq!(RecipeBookAdd::read(&mut r).unwrap(), add);
+        assert_eq!(r.remaining(), 0);
     }
 }

@@ -125,6 +125,15 @@ impl Codec<Empty> for Empty {
     fn write(_: &Empty, _: &mut Writer) {}
 }
 
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for Empty {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+// End generated retained traversals.
+
 #[cfg(test)]
 pub(crate) fn round_trip<T: Clone + PartialEq + std::fmt::Debug>(
     packet: T,
@@ -136,11 +145,4 @@ pub(crate) fn round_trip<T: Clone + PartialEq + std::fmt::Debug>(
     let id = r.varint().unwrap();
     let back = decode(id, r.rest()).unwrap();
     assert_eq!(back, packet);
-}
-
-// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
-impl crate::retained::OwnedHeap for Empty {
-    fn owned_heap_bytes(&self) -> usize {
-        0usize
-    }
 }

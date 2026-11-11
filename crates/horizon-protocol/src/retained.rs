@@ -63,7 +63,7 @@ impl<T: OwnedHeap + ?Sized> OwnedHeap for Arc<T> {
     fn owned_heap_bytes(&self) -> usize {
         size_of_val(&**self)
             .saturating_add(2 * size_of::<usize>())
-            .saturating_add(align_of_val(&**self) - 1)
+            .saturating_add(2 * (align_of_val(&**self).max(align_of::<usize>()) - 1))
             .saturating_add((**self).owned_heap_bytes())
     }
 }
@@ -93,7 +93,7 @@ impl OwnedHeap for horizon_core::nbt::Tag {
 }
 impl<K: OwnedHeap, V: OwnedHeap> OwnedHeap for BTreeMap<K, V> {
     fn owned_heap_bytes(&self) -> usize {
-        // Pinned Rust 1.99.1 alloc/collections/btree/node.rs: B=6, capacity=11,
+        // Audited Rust 1.99.1 alloc/collections/btree/node.rs: B=6, capacity=11,
         // non-root minimum=5, leaf header=(parent pointer,u16 index,u16 len),
         // internal nodes add 12 child pointers. Charge every node as internal.
         // At most 1 + len/5 nodes, including a possibly retained empty root.
@@ -111,5 +111,74 @@ impl<K: OwnedHeap, V: OwnedHeap> OwnedHeap for BTreeMap<K, V> {
                 sum.saturating_add(k.owned_heap_bytes())
                     .saturating_add(v.owned_heap_bytes())
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packets::{custom_payload::CustomPayload, play};
+    use horizon_core::nbt::{JavaString, Tag};
+    #[test]
+    fn packet_pressure_includes_spare_channel_and_body_capacity() {
+        let mut channel = String::with_capacity(160);
+        channel.push_str("test:raw");
+        let body = Vec::with_capacity(24000);
+        let expected = channel.capacity() + body.capacity();
+        let packet = play::Clientbound::CustomPayload(CustomPayload {
+            channel,
+            data: body,
+        });
+        assert_eq!(packet.owned_heap_bytes(), expected);
+        let unknown = play::Serverbound::Unknown(999, Vec::with_capacity(8000));
+        assert_eq!(unknown.owned_heap_bytes(), 8000);
+    }
+    #[test]
+    fn nested_nbt_counts_capacity_at_each_owned_layer() {
+        let mut units = Vec::with_capacity(100);
+        units.push(65);
+        let mut children = Vec::with_capacity(20);
+        children.push(Tag::String(JavaString(units)));
+        children.push(Tag::ByteArray(Vec::with_capacity(4000)));
+        let expected = children.capacity() * size_of::<Tag>() + 200 + 4000;
+        let packet = play::Clientbound::BlockEntityData(play::BlockEntityData {
+            pos: [0; 3],
+            kind: 0,
+            tag: Tag::List(children),
+        });
+        assert_eq!(packet.owned_heap_bytes(), expected);
+    }
+    #[test]
+    fn opaque_map_bound_covers_empty_roots_and_insert_remove_histories() {
+        let fresh = BTreeMap::<JavaString, Tag>::new();
+        let mut churned = BTreeMap::new();
+        for i in 0..2000 {
+            churned.insert(
+                JavaString::from(i.to_string().as_str()),
+                Tag::ByteArray(vec![0; 10]),
+            );
+        }
+        for i in 0..2000 {
+            churned.remove(&JavaString::from(i.to_string().as_str()));
+        }
+        assert_eq!(churned.len(), 0);
+        assert!(fresh.owned_heap_bytes() > 0); // Possible retained empty root charged even if absent.
+        assert_eq!(fresh.owned_heap_bytes(), churned.owned_heap_bytes());
+        let root_bound = fresh.owned_heap_bytes();
+        for i in 0..17 {
+            churned.insert(
+                JavaString::from(i.to_string().as_str()),
+                Tag::ByteArray(Vec::with_capacity(100)),
+            );
+        }
+        let child_allocations: usize = churned
+            .iter()
+            .map(|(k, v)| k.owned_heap_bytes() + v.owned_heap_bytes())
+            .sum();
+        assert_eq!(
+            churned.owned_heap_bytes(),
+            4 * root_bound + child_allocations
+        );
+        assert!(churned.owned_heap_bytes() >= 1700);
     }
 }

@@ -2,6 +2,27 @@
 //! Existing registered engine channels retain their own codec constraints.
 mod registry;
 pub use registry::{PayloadCodecs, PayloadFlow, PayloadProtocol};
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for CustomPayload {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { channel, data } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(channel))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(data))
+    }
+}
+impl crate::retained::OwnedHeap for PayloadTooLarge {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { id, size, limit } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(size))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(limit))
+    }
+}
+// End generated retained traversals.
+
 #[cfg(test)]
 #[path = "custom_payload/registry_tests.rs"]
 mod registry_tests;
@@ -352,22 +373,5 @@ mod tests {
         assert!(error.0.contains("test:opaque"));
         assert!(error.0.contains(&format!("size: {}", limit + 1)));
         assert!(error.0.contains(&format!("limit: {limit}")));
-    }
-}
-
-// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
-impl crate::retained::OwnedHeap for CustomPayload {
-    fn owned_heap_bytes(&self) -> usize {
-        0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.channel))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.data))
-    }
-}
-impl crate::retained::OwnedHeap for PayloadTooLarge {
-    fn owned_heap_bytes(&self) -> usize {
-        0usize
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.size))
-            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.limit))
     }
 }
