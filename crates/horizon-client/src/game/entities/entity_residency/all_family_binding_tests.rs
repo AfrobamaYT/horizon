@@ -112,7 +112,7 @@ fn every_ordinary_resident_family_binds_its_actual_owned_slot() {
         bind(game, id, Kind::Dragon);
         // #792: a general row joins its own family's list; the lookup is the
         // same table path every family takes.
-        game.general.rows.push(super::super::general::GeneralRow {
+        game.resident_entities.general.rows.push(super::super::general::GeneralRow {
             id: 4242,
             uuid: [11, 12, 13, 14],
             join: horizon_client::join_seq::JoinSeq::UNJOINED,

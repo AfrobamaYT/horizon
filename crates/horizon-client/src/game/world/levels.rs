@@ -117,7 +117,13 @@ pub(super) struct Parked {
 }
 
 impl Parked {
-    resident_owners!(define_resident_access, self, projectiles, knots);
+    resident_owners!(
+        define_resident_access,
+        self,
+        projectiles,
+        knots,
+        general.rows
+    );
 }
 
 impl Game<'_> {

@@ -719,7 +719,7 @@ macro_rules! entity_lists {
             Projectile(Projectile) projectiles: creatures.projectiles,
             Rocket(Rocket) rockets: rockets,
             Trident(ThrownTrident) tridents: tridents,
-            General(GeneralRow) general: general.rows,
+            General(GeneralRow) general: resident_entities.general.rows,
         }
     };
 }

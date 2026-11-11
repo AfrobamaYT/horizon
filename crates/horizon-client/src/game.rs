@@ -3059,7 +3059,6 @@ struct Game<'a> {
     arrow_model: Option<horizon_client::mobs::Part>,
     bee_stinger_model: Option<horizon_client::mobs::Part>,
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
-    general: general::GeneralStore,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     /// The open `host.transaction`s, innermost last (`transactions.rs`).
     transactions: Vec<transactions::Level>,
@@ -16524,7 +16523,6 @@ impl<'a> Game<'a> {
             arrow_model: prepared.arrow_model,
             bee_stinger_model: prepared.bee_stinger_model,
             tnts: Default::default(),
-            general: Default::default(),
             hoppers: HashMap::new(),
             transactions: Vec::new(),
             block_entity_tick_key: None,

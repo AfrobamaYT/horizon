@@ -65,19 +65,22 @@ mod general_handle_tests {
     fn removed_general_row_refuses_its_handle_and_the_next_row_takes_a_new_id() {
         with_game(|game| {
             let uuid = [21, 22, 23, 24];
-            game.general.rows.push(row(42, uuid, 7.0));
+            game.resident_entities.general.rows.push(row(42, uuid, 7.0));
             let handle = game.entity(42).expect("the row became a handle");
             assert_eq!(handle.id(), 42);
             assert!(game.native_entity_target(handle).is_some());
 
             // The row leaves; the handle refuses.
-            game.general.rows.retain(|row| row.id != 42);
+            game.resident_entities
+                .general
+                .rows
+                .retain(|row| row.id != 42);
             assert!(game.entity(42).is_none());
             assert!(game.native_entity_target(handle).is_none());
 
             // The next row is id 43 — the counter moved on, the same UUID
             // notwithstanding — and the old handle still refuses.
-            game.general.rows.push(row(43, uuid, 7.0));
+            game.resident_entities.general.rows.push(row(43, uuid, 7.0));
             let fresh = game.entity(43).expect("the next row became a handle");
             assert_ne!(fresh.id(), handle.id());
             assert!(
@@ -89,6 +92,7 @@ mod general_handle_tests {
                 .expect("the next row's handle resolves");
             assert!(matches!(target, Target::General(43)));
             let next = game
+                .resident_entities
                 .general
                 .rows
                 .iter()
@@ -105,7 +109,10 @@ mod general_handle_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn general_handle_of_an_earlier_epoch_refuses_by_the_epoch_check() {
         with_game(|game| {
-            game.general.rows.push(row(42, [21, 22, 23, 24], 7.0));
+            game.resident_entities
+                .general
+                .rows
+                .push(row(42, [21, 22, 23, 24], 7.0));
             let handle = game.entity(42).expect("the row became a handle");
             assert!(game.native_entity_target(handle).is_some());
             // A reload opens a new epoch; a handle minted against the old one
