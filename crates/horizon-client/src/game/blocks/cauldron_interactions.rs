@@ -245,12 +245,12 @@ impl Game<'_> {
                     return Err(());
                 }
                 if plan.sound.as_ref().is_some_and(|sound| {
-                    !self
-                        .pack
-                        .block_registries
-                        .ids("minecraft:sound_event")
-                        .iter()
-                        .any(|known| known == &sound.to_string())
+                    !chat::command_export(&self.options.resources, true).is_some_and(|registry| {
+                        registry
+                            .ids("minecraft:sound_event")
+                            .iter()
+                            .any(|known| known == &sound.to_string())
+                    })
                 }) || plan.statistics.iter().any(|stat| {
                     let name = stat.to_string();
                     name != "minecraft:used"
