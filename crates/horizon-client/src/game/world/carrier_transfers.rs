@@ -18,14 +18,14 @@
 //! (`refuse_locked_container`). With no operation in flight the check is
 //! one load of an empty set.
 
+use crate::carrier_store::{MAX_CARRIERS, Store};
 use crate::game::Game;
-use horizon_world::level::LevelAccess;
-use crate::carrier_store::{Store, MAX_CARRIERS};
 use crate::save::encode_block_entity;
 use horizon_core::position::BlockPos;
 use horizon_world::carrier::codec;
 use horizon_world::carrier::contact::RigidTransform;
 use horizon_world::carrier::model::{Carrier, Cell, Invalid, LocalPos, MAX_CELLS};
+use horizon_world::level::LevelAccess;
 use horizon_world::level::data::state_flags::REPLACEABLE;
 
 /// Why a transfer refused. Refusals leave no partial transfer.
@@ -93,10 +93,9 @@ impl std::fmt::Display for TransferError {
             ),
             Self::NotCubeSymmetry => write!(f, "the rotation is not a cube symmetry"),
             Self::EmptySelection => write!(f, "an empty selection refuses"),
-            Self::LocalRange => write!(
-                f,
-                "the selection's span exceeds the local coordinate range"
-            ),
+            Self::LocalRange => {
+                write!(f, "the selection's span exceeds the local coordinate range")
+            }
             Self::RotationNeedsAdapter => {
                 write!(f, "a rotated disassembly needs a state adapter")
             }
@@ -137,10 +136,7 @@ fn block_entity_is_passive(entity: &horizon_client::chunk::block_entity::BlockEn
 /// Whether a live block entity's serialized form carries exactly the
 /// image's content: the positional `x`/`y`/`z` are placement, not
 /// content, so the comparison strips them first.
-fn entities_content_equal(
-    live: &horizon_core::nbt::Tag,
-    image: &horizon_core::nbt::Tag,
-) -> bool {
+fn entities_content_equal(live: &horizon_core::nbt::Tag, image: &horizon_core::nbt::Tag) -> bool {
     let strip = |tag: &horizon_core::nbt::Tag| -> horizon_core::nbt::Tag {
         let mut clone = tag.clone();
         if let horizon_core::nbt::Tag::Compound(map) = &mut clone {
@@ -179,7 +175,7 @@ impl Game<'_> {
         uuid: u128,
         cells: &[BlockPos],
     ) -> Result<(), TransferError> {
-        use crate::carrier_store::{encode_operation, envelope_preflight, CellImage, OpKind};
+        use crate::carrier_store::{CellImage, OpKind, encode_operation, envelope_preflight};
         use crate::carrier_store::{Operation, OperationCell};
         use horizon_client::join_seq::visibility::PassLease;
 
@@ -233,7 +229,11 @@ impl Game<'_> {
         // The store exists only from the first actual transfer. The
         // capacity override is the tests' retention seam.
         #[cfg(test)]
-        let capacity = self.world.carrier_fences.capacity_override.unwrap_or(MAX_CARRIERS);
+        let capacity = self
+            .world
+            .carrier_fences
+            .capacity_override
+            .unwrap_or(MAX_CARRIERS);
         #[cfg(not(test))]
         let capacity = MAX_CARRIERS;
         let mut store = match Store::open_with_capacity(&self.world_root, capacity) {
@@ -258,7 +258,9 @@ impl Game<'_> {
         for pos in cells {
             let key = [pos.x, pos.y, pos.z];
             let state = self.world.block(pos.x, pos.y, pos.z);
-            let descriptor = registry.state(state).ok_or(TransferError::UnsupportedBlock(key))?;
+            let descriptor = registry
+                .state(state)
+                .ok_or(TransferError::UnsupportedBlock(key))?;
             let entity = self
                 .world
                 .block_entities
@@ -299,11 +301,20 @@ impl Game<'_> {
         ];
         for cell in &mut operation_cells {
             let local = [
-                cell.world[0].checked_sub(pivot[0]).ok_or(TransferError::LocalRange)?,
-                cell.world[1].checked_sub(pivot[1]).ok_or(TransferError::LocalRange)?,
-                cell.world[2].checked_sub(pivot[2]).ok_or(TransferError::LocalRange)?,
+                cell.world[0]
+                    .checked_sub(pivot[0])
+                    .ok_or(TransferError::LocalRange)?,
+                cell.world[1]
+                    .checked_sub(pivot[1])
+                    .ok_or(TransferError::LocalRange)?,
+                cell.world[2]
+                    .checked_sub(pivot[2])
+                    .ok_or(TransferError::LocalRange)?,
             ];
-            if local.iter().any(|v| !(i32::from(i8::MIN)..=i32::from(i8::MAX)).contains(v)) {
+            if local
+                .iter()
+                .any(|v| !(i32::from(i8::MIN)..=i32::from(i8::MAX)).contains(v))
+            {
                 return Err(TransferError::LocalRange);
             }
             cell.local = [local[0] as i8, local[1] as i8, local[2] as i8];
@@ -389,8 +400,8 @@ impl Game<'_> {
         // back BEFORE any intent exists: once `prepared` runs, the
         // cargo's only durable owner is this file, and recovery only
         // verifies it — nothing after the lift ever rewrites it.
-        let carrier_bytes = codec::encode(&carrier)
-            .map_err(|e| TransferError::Store(e.to_string()))?;
+        let carrier_bytes =
+            codec::encode(&carrier).map_err(|e| TransferError::Store(e.to_string()))?;
         store
             .write_carrier(uuid, generation, &carrier_bytes)
             .map_err(|e| TransferError::Store(e.to_string()))?;
@@ -466,8 +477,7 @@ impl Game<'_> {
         rotation: [f64; 4],
     ) -> Result<(), TransferError> {
         use crate::carrier_store::{
-            cube_symmetry_rotation, envelope_preflight, CellImage, OpKind, Operation,
-            OperationCell,
+            CellImage, OpKind, Operation, OperationCell, cube_symmetry_rotation, envelope_preflight,
         };
         use horizon_client::join_seq::visibility::PassLease;
         use horizon_core::nbt::{self, Tag};
@@ -495,7 +505,11 @@ impl Game<'_> {
         envelope_preflight(registry).map_err(|_| TransferError::Envelope)?;
 
         #[cfg(test)]
-        let capacity = self.world.carrier_fences.capacity_override.unwrap_or(MAX_CARRIERS);
+        let capacity = self
+            .world
+            .carrier_fences
+            .capacity_override
+            .unwrap_or(MAX_CARRIERS);
         #[cfg(not(test))]
         let capacity = MAX_CARRIERS;
         let mut store = match Store::open_with_capacity(&self.world_root, capacity) {
@@ -503,7 +517,7 @@ impl Game<'_> {
             _ => {
                 return Err(TransferError::Store(
                     "the carrier store does not open".into(),
-                ))
+                ));
             }
         };
         if !store.journal().lists(uuid, generation) {
@@ -538,7 +552,11 @@ impl Game<'_> {
                     .checked_add(offset[2])
                     .ok_or(TransferError::LocalRange)?,
             ];
-            if !self.world.chunks.contains_key(&(world[0] >> 4, world[2] >> 4)) {
+            if !self
+                .world
+                .chunks
+                .contains_key(&(world[0] >> 4, world[2] >> 4))
+            {
                 return Err(TransferError::CellNotLoaded(world));
             }
             let state = self.world.block(world[0], world[1], world[2]);
@@ -546,9 +564,8 @@ impl Game<'_> {
                 .world
                 .block_entities
                 .contains_key(&(world[0], world[1], world[2]));
-            let replaceable = self.with_level(|b, _level, _ticks| {
-                b.facts(state).flags & REPLACEABLE != 0
-            });
+            let replaceable =
+                self.with_level(|b, _level, _ticks| b.facts(state).flags & REPLACEABLE != 0);
             if !replaceable || occupied {
                 return Err(TransferError::DestinationOccupied(world));
             }
@@ -641,12 +658,7 @@ impl Game<'_> {
             let state = {
                 let descriptor = horizon_world::chunk::BlockState {
                     name: cell.after.name.clone(),
-                    properties: cell
-                        .after
-                        .properties
-                        .iter()
-                        .cloned()
-                        .collect(),
+                    properties: cell.after.properties.iter().cloned().collect(),
                 };
                 self.pack
                     .assets
@@ -735,9 +747,8 @@ impl Game<'_> {
         for cell in cells {
             let pos = cell.world;
             let state = self.world.block(pos[0], pos[1], pos[2]);
-            let replaceable = self.with_level(|b, _level, _ticks| {
-                b.facts(state).flags & REPLACEABLE != 0
-            });
+            let replaceable =
+                self.with_level(|b, _level, _ticks| b.facts(state).flags & REPLACEABLE != 0);
             let entity = self
                 .world
                 .block_entities
@@ -789,18 +800,16 @@ impl Game<'_> {
             let descriptor = registry
                 .state(state)
                 .ok_or(TransferError::Revalidation(pos))?;
-            let same_state = descriptor.name == cell.before.name
-                && descriptor.properties.len() == cell.before.properties.len()
-                && cell.before.properties.iter().all(|(key, value)| {
-                    descriptor.properties.get(key).is_some_and(|v| v == value)
-                });
+            let same_state =
+                descriptor.name == cell.before.name
+                    && descriptor.properties.len() == cell.before.properties.len()
+                    && cell.before.properties.iter().all(|(key, value)| {
+                        descriptor.properties.get(key).is_some_and(|v| v == value)
+                    });
             if !same_state {
                 return Err(TransferError::Revalidation(pos));
             }
-            let found_entity = self
-                .world
-                .block_entities
-                .get(&(pos[0], pos[1], pos[2]));
+            let found_entity = self.world.block_entities.get(&(pos[0], pos[1], pos[2]));
             match (found_entity, &cell.before.entity) {
                 (None, None) => {}
                 // Presence alone is not a witness: the live entity must
@@ -849,16 +858,18 @@ impl Game<'_> {
     pub(crate) fn carrier_recover_all_levels(&mut self) -> crate::Result<()> {
         // No pending operation: no level is touched at all.
         let dimension = match crate::carrier_store::Store::open(&self.world_root) {
-            Ok(crate::carrier_store::Opened::Live(store)) => match store.journal().in_progress.as_ref() {
-                Some(op) => op.dimension.clone(),
-                // No pending operation — but retention still runs: the
-                // production cleanup clears finished disassemblies'
-                // tombstones and orphaned files at every open.
-                None => {
-                    self.carrier_cleanup();
-                    return Ok(());
+            Ok(crate::carrier_store::Opened::Live(store)) => {
+                match store.journal().in_progress.as_ref() {
+                    Some(op) => op.dimension.clone(),
+                    // No pending operation — but retention still runs: the
+                    // production cleanup clears finished disassemblies'
+                    // tombstones and orphaned files at every open.
+                    None => {
+                        self.carrier_cleanup();
+                        return Ok(());
+                    }
                 }
-            },
+            }
             Ok(crate::carrier_store::Opened::NeverUsed) => return Ok(()),
             Err(error) => return Err(format!("world load refused: {error}").into()),
         };
@@ -915,8 +926,6 @@ impl Game<'_> {
             log::warn!("carrier store cleanup: {error}");
         }
     }
-
-
 
     /// Recovers the level in place: no store means nothing to do; a live
     /// store's in-progress operation replays against this level's region
@@ -992,10 +1001,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn assembling_moves_a_chest_to_one_owner_and_commits() {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-carrier-transfer-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-carrier-transfer-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
         crate::save::write_dat(
@@ -1013,10 +1020,9 @@ mod tests {
             // The fixture world pre-exists with its data folder, as an
             // opened world would.
             game.world.carrier_data_existed_at_open = true;
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             let air = registry.default_state("minecraft:air").unwrap();
@@ -1032,9 +1038,10 @@ mod tests {
 
             // One owner: the chest lives in the carrier file, and only
             // there — the op file is gone and the journal committed.
-            let carrier_bytes =
-                std::fs::read(root.join("data/horizon_carrier_00000000000000000000000000000007-1.nbt"))
-                    .unwrap();
+            let carrier_bytes = std::fs::read(
+                root.join("data/horizon_carrier_00000000000000000000000000000007-1.nbt"),
+            )
+            .unwrap();
             let carrier = codec::decode(&carrier_bytes).unwrap();
             assert_eq!(carrier.uuid(), 7);
             assert_eq!(carrier.cells().len(), 1);
@@ -1058,10 +1065,9 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn fenced_cells_refuse_every_route_at_its_chokepoint() {
         with_game(|game| {
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let fenced = [4, 64, 4];
             game.world.carrier_fences.lock_cell(fenced);
             game.world.carrier_fences.lock_carrier(7);
@@ -1100,11 +1106,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_empty_assembly_refuses() {
-        with_game(|game| {
-            match game.carrier_assemble(51, &[]) {
-                Err(TransferError::EmptySelection) => {}
-                other => panic!("an empty selection must refuse, got {other:?}"),
-            }
+        with_game(|game| match game.carrier_assemble(51, &[]) {
+            Err(TransferError::EmptySelection) => {}
+            other => panic!("an empty selection must refuse, got {other:?}"),
         });
     }
 
@@ -1123,31 +1127,26 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
             game.carrier_assemble(52, &[BlockPos::new(4, 64, 4)])
                 .unwrap();
             // A translation that overflows i32 on add refuses.
-            match game.carrier_disassemble(
-                52,
-                1,
-                [i32::MAX, 64, 4],
-                [1.0, 0.0, 0.0, 0.0],
-            ) {
+            match game.carrier_disassemble(52, 1, [i32::MAX, 64, 4], [1.0, 0.0, 0.0, 0.0]) {
                 // Overflow past the loaded area reports the unreachable
                 // chunk as often as the range: either refusal is honest.
                 Err(TransferError::LocalRange) | Err(TransferError::CellNotLoaded(_)) => {}
                 other => panic!("an overflowing destination must refuse, got {other:?}"),
             }
             // The carrier stays whole.
-            assert!(root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 52_u128))
-                .is_file());
+            assert!(
+                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 52_u128))
+                    .is_file()
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1167,10 +1166,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let furnace = registry.default_state("minecraft:furnace").unwrap();
             game.world.set(4, 64, 4, furnace).unwrap();
@@ -1196,13 +1194,12 @@ mod tests {
             // The world is untouched: the block and its entity remain,
             // and no store was created for this transfer.
             assert_eq!(game.world.block(4, 64, 4), furnace);
-            assert!(game
-                .world
-                .block_entities
-                .contains_key(&(4, 64, 4)));
-            assert!(!root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 53_u128))
-                .is_file());
+            assert!(game.world.block_entities.contains_key(&(4, 64, 4)));
+            assert!(
+                !root
+                    .join(format!("data/horizon_carrier_{:032x}-1.nbt", 53_u128))
+                    .is_file()
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1226,10 +1223,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             // Ten cycles against a capacity of eight: without the live
@@ -1240,13 +1236,8 @@ mod tests {
                 game.world.set(4, 64, 4, chest).unwrap();
                 game.carrier_assemble(1000 + i as u128, &[BlockPos::new(4, 64, 4)])
                     .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
-                game.carrier_disassemble(
-                    1000 + i as u128,
-                    1,
-                    [4, 64, 4],
-                    [1.0, 0.0, 0.0, 0.0],
-                )
-                .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
+                game.carrier_disassemble(1000 + i as u128, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0])
+                    .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
             }
             // Bounded: no operation files, no carrier files beyond the
             // journal's two slots.
@@ -1273,10 +1264,8 @@ mod tests {
         // The public constructors carry the default; a store built with
         // it enforces the same bound at encode, visible by refusing an
         // index past it.
-        let root = std::env::temp_dir().join(format!(
-            "horizon-capacity-default-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-capacity-default-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
         let mut journal = crate::carrier_store::Journal::default();
@@ -1307,10 +1296,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
@@ -1330,9 +1318,11 @@ mod tests {
             };
             assert!(store.journal().in_progress.is_none());
             assert!(!store.journal().tombstoned(61, 1));
-            assert!(!root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 61_u128))
-                .is_file());
+            assert!(
+                !root
+                    .join(format!("data/horizon_carrier_{:032x}-1.nbt", 61_u128))
+                    .is_file()
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1360,10 +1350,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let stone = registry.default_state("minecraft:stone").unwrap();
             for pos in sparse {
@@ -1371,10 +1360,9 @@ mod tests {
             }
             // Forward order.
             game.carrier_assemble(31, &sparse).unwrap();
-            let forward = std::fs::read(
-                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 31_u128)),
-            )
-            .unwrap();
+            let forward =
+                std::fs::read(root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 31_u128)))
+                    .unwrap();
             let carrier = codec::decode(&forward).unwrap();
             // Local positions are offsets from the minimum corner (4,64,4):
             // the gaps survive as gaps.
@@ -1394,14 +1382,14 @@ mod tests {
             let mut reversed = sparse.to_vec();
             reversed.reverse();
             game.carrier_assemble(32, &reversed).unwrap();
-            let backward = std::fs::read(
-                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 32_u128)),
-            )
-            .unwrap();
+            let backward =
+                std::fs::read(root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 32_u128)))
+                    .unwrap();
             let forward_carrier = codec::decode(&forward).unwrap();
             let backward_carrier = codec::decode(&backward).unwrap();
             assert_eq!(
-                forward_carrier.cells(), backward_carrier.cells(),
+                forward_carrier.cells(),
+                backward_carrier.cells(),
                 "the geometry is identical regardless of input order"
             );
         });
@@ -1425,10 +1413,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             // Oak stairs, facing north, half bottom — not the default
             // (the default stairs face north only by luck; resolve the
@@ -1452,9 +1439,9 @@ mod tests {
             let stairs_props = &registry.state(stairs).unwrap().properties;
             let default_props = &registry.state(default_stairs).unwrap().properties;
             assert!(
-                stairs_props.iter().any(|(k, v)| {
-                    default_props.get(k).is_some_and(|dv| dv != v)
-                }),
+                stairs_props
+                    .iter()
+                    .any(|(k, v)| { default_props.get(k).is_some_and(|dv| dv != v) }),
                 "south/top must differ from the default stairs state"
             );
             game.world.set(4, 64, 4, stairs).unwrap();
@@ -1466,7 +1453,8 @@ mod tests {
                 .unwrap();
             // The exact state came back, not the default.
             assert_eq!(
-                game.world.block(4, 64, 4), stairs,
+                game.world.block(4, 64, 4),
+                stairs,
                 "the non-default state survives the round trip"
             );
             let restored = registry.state(game.world.block(4, 64, 4)).unwrap();
@@ -1501,10 +1489,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             let air = registry.default_state("minecraft:air").unwrap();
@@ -1530,11 +1517,8 @@ mod tests {
             // Crash after prepared.
             game.world.carrier_fences.fail_flush = true;
             assert!(
-                game.carrier_assemble(
-                    21,
-                    &[BlockPos::new(4, 64, 4), BlockPos::new(6, 64, 4)]
-                )
-                .is_err()
+                game.carrier_assemble(21, &[BlockPos::new(4, 64, 4), BlockPos::new(6, 64, 4)])
+                    .is_err()
             );
 
             // Recovery, as the next open runs it.
@@ -1557,10 +1541,9 @@ mod tests {
 
             // The cargo lives in the published carrier: both cells, the
             // chest states, and the entities' items.
-            let bytes = std::fs::read(
-                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 21_u128)),
-            )
-            .unwrap();
+            let bytes =
+                std::fs::read(root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 21_u128)))
+                    .unwrap();
             let carrier = codec::decode(&bytes).unwrap();
             assert_eq!(carrier.cells().len(), 2, "the whole cargo is carried");
             let names: Vec<&str> = carrier.cells().iter().map(|c| c.name()).collect();
@@ -1586,10 +1569,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_flush_failure_after_prepared_recovers_on_reopen() {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-carrier-flush-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-carrier-flush-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
         write_level_dat(&root);
@@ -1602,10 +1583,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
@@ -1619,7 +1599,10 @@ mod tests {
             // The fences hold and the world refuses further transfers.
             assert!(game.world.carrier_fences.locks_cell(&[4, 64, 4]));
             assert!(game.world.carrier_fences.is_broken());
-            assert!(game.carrier_assemble(8, &[BlockPos::new(6, 64, 6)]).is_err());
+            assert!(
+                game.carrier_assemble(8, &[BlockPos::new(6, 64, 6)])
+                    .is_err()
+            );
 
             // Recovery, as the next open runs it: the operation replays,
             // the journal commits and the chest is air in the world.
@@ -1629,7 +1612,9 @@ mod tests {
             };
             let region = root.join("dimensions/minecraft/overworld/region");
             let states = crate::carrier_store::RegistryStates::new(registry);
-            let report = crate::carrier_store::recover(&mut store, &region, &states, "minecraft:overworld").unwrap();
+            let report =
+                crate::carrier_store::recover(&mut store, &region, &states, "minecraft:overworld")
+                    .unwrap();
             // The interrupted save left the post-state on disk, so the
             // reopen verifies it rather than replaying — either way the
             // operation commits and exactly one side owns the chest.
@@ -1640,9 +1625,10 @@ mod tests {
             );
             // One owner: the items live in the carrier file, and the
             // operation file is gone.
-            assert!(root
-                .join("data/horizon_carrier_00000000000000000000000000000007-1.nbt")
-                .is_file());
+            assert!(
+                root.join("data/horizon_carrier_00000000000000000000000000000007-1.nbt")
+                    .is_file()
+            );
             assert!(!root.join("data/horizon_carrier_op_1.nbt").is_file());
         });
         let _ = std::fs::remove_dir_all(&root);
@@ -1668,25 +1654,24 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
 
             // The writer's barrier fails after prepared.
             game.world.carrier_fences.fail_flush = true;
-            assert!(game.carrier_assemble(9, &[BlockPos::new(4, 64, 4)]).is_err());
+            assert!(
+                game.carrier_assemble(9, &[BlockPos::new(4, 64, 4)])
+                    .is_err()
+            );
 
             // The session stopped like a fatal save error: `Game::error`
             // is set — the same flag the event loop's error path exits
             // the loop through (`exit_on_error`).
-            assert!(
-                game.error.is_some(),
-                "the failed commit stops the session"
-            );
+            assert!(game.error.is_some(), "the failed commit stops the session");
 
             // A further edit of the fenced cell refuses.
             assert!(game.world.carrier_fences.locks_cell(&[4, 64, 4]));
@@ -1697,7 +1682,10 @@ mod tests {
             // between the failure and the exit.
             let region = root.join("dimensions/minecraft/overworld/region");
             let before = region_files(&region);
-            assert!(game.save_game().is_err(), "a save refuses after the failure");
+            assert!(
+                game.save_game().is_err(),
+                "a save refuses after the failure"
+            );
             assert_eq!(before, region_files(&region), "the region is untouched");
 
             // Recovery, as the next open runs it: the operation replays
@@ -1757,10 +1745,9 @@ mod tests {
             // The fixture world pre-exists with its data folder, as an
             // opened world would.
             game.world.carrier_data_existed_at_open = true;
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             let air = registry.default_state("minecraft:air").unwrap();
@@ -1769,20 +1756,20 @@ mod tests {
             game.carrier_assemble(9, &[BlockPos::new(4, 64, 4)])
                 .unwrap();
             assert_eq!(game.world.block(4, 64, 4), air);
-            let carrier_bytes = std::fs::read(root.join(format!(
-                "data/horizon_carrier_{:032x}-1.nbt",
-                9_u128
-            )))
-            .unwrap();
+            let carrier_bytes =
+                std::fs::read(root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 9_u128)))
+                    .unwrap();
             assert_eq!(codec::decode(&carrier_bytes).unwrap().cells().len(), 1);
 
             game.carrier_disassemble(9, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0])
                 .unwrap();
             assert_eq!(game.world.block(4, 64, 4), chest);
             // The carrier file is gone: one owner, the world.
-            assert!(!root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 9_u128))
-                .is_file());
+            assert!(
+                !root
+                    .join(format!("data/horizon_carrier_{:032x}-1.nbt", 9_u128))
+                    .is_file()
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1798,10 +1785,9 @@ mod tests {
             // The fixture world pre-exists with its data folder, as an
             // opened world would.
             game.world.carrier_data_existed_at_open = true;
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
@@ -1817,9 +1803,10 @@ mod tests {
                 Err(TransferError::DestinationOccupied(pos)) => assert_eq!(pos, [10, 64, 10]),
                 other => panic!("expected an occupied destination, got {other:?}"),
             }
-            assert!(root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 5_u128))
-                .is_file());
+            assert!(
+                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 5_u128))
+                    .is_file()
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1835,10 +1822,9 @@ mod tests {
             // The fixture world pre-exists with its data folder, as an
             // opened world would.
             game.world.carrier_data_existed_at_open = true;
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
@@ -1853,18 +1839,14 @@ mod tests {
             }
             // A quarter turn is a symmetry, but no adapter exists yet.
             let quarter = std::f64::consts::FRAC_1_SQRT_2;
-            match game.carrier_disassemble(
-                6,
-                1,
-                [8, 64, 8],
-                [quarter, 0.0, quarter, 0.0],
-            ) {
+            match game.carrier_disassemble(6, 1, [8, 64, 8], [quarter, 0.0, quarter, 0.0]) {
                 Err(TransferError::RotationNeedsAdapter) => {}
                 other => panic!("expected an adapter refusal, got {other:?}"),
             }
-            assert!(root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 6_u128))
-                .is_file());
+            assert!(
+                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 6_u128))
+                    .is_file()
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1875,10 +1857,9 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn revalidation_refuses_a_changed_cell_without_touching_the_world() {
         with_game(|game| {
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             let stone = registry.default_state("minecraft:stone").unwrap();
@@ -1941,10 +1922,9 @@ mod tests {
                 root.join("dimensions/minecraft/the_nether"),
                 horizon_client::save::LevelShape::NETHER,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             game.world.set(4, 64, 4, chest).unwrap();
             game.world.carrier_fences.fail_flush = true;
             let failed = game.carrier_assemble(11, &[BlockPos::new(4, 64, 4)]);
@@ -1973,9 +1953,10 @@ mod tests {
 
             // One owner: the items are in the carrier file, the Nether
             // cell is air, and the Overworld never wrote a thing.
-            assert!(root
-                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 11_u128))
-                .is_file());
+            assert!(
+                root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 11_u128))
+                    .is_file()
+            );
             assert!(!root.join("data/horizon_carrier_op_1.nbt").is_file());
             let nether = root.join("dimensions/minecraft/the_nether");
             let chunk = horizon_world::carrier::region_strict::read_chunk(
@@ -2079,8 +2060,10 @@ mod tests {
 
             // Both snapshots submitted back to back, one barrier: the
             // pre-image's write lands behind the post-state's.
-            save.save_later(&[pre], registry, world_biomes!(game)).unwrap();
-            save.save_later(&[post], registry, world_biomes!(game)).unwrap();
+            save.save_later(&[pre], registry, world_biomes!(game))
+                .unwrap();
+            save.save_later(&[post], registry, world_biomes!(game))
+                .unwrap();
             save.flush().unwrap();
 
             let chunk = horizon_world::carrier::region_strict::read_chunk(
@@ -2117,10 +2100,9 @@ mod tests {
             // The fixture world pre-exists with its data folder, as an
             // opened world would.
             game.world.carrier_data_existed_at_open = true;
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
@@ -2162,10 +2144,9 @@ mod tests {
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
             game.world.set(4, 64, 4, chest).unwrap();
@@ -2200,10 +2181,9 @@ mod tests {
                 std::fs::read(copy.join(&carrier)).unwrap(),
                 "the carrier file copies identically"
             );
-            let original = std::fs::read(
-                root.join("dimensions/minecraft/overworld/region/r.0.0.mca"),
-            )
-            .unwrap();
+            let original =
+                std::fs::read(root.join("dimensions/minecraft/overworld/region/r.0.0.mca"))
+                    .unwrap();
             let restored =
                 std::fs::read(copy.join("dimensions/minecraft/overworld/region/r.0.0.mca"))
                     .unwrap();
@@ -2251,10 +2231,8 @@ mod tests {
     }
 
     fn transfer_root(name: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-carrier-{name}-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-carrier-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
         write_level_dat(&root);
@@ -2281,24 +2259,21 @@ mod tests {
     /// holding it refuses, releasing it admits again.
     #[test]
     fn the_save_obligation_gates_saves() {
-        use horizon_client::join_seq::visibility::{passes_settled, PassLease};
+        use horizon_client::join_seq::visibility::{PassLease, passes_settled};
         let _lease = PassLease::enter();
         assert!(!passes_settled());
         assert!(Game::admit_entity_save().is_err());
         drop(_lease);
         assert!(passes_settled());
         assert!(Game::admit_entity_save().is_ok());
-        
     }
 
     /// A world without transfers creates nothing and fences nothing.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_world_without_transfers_writes_no_store_files() {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-carrier-quiet-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-carrier-quiet-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
         with_game(|game| {
@@ -2306,10 +2281,9 @@ mod tests {
             // The fixture world pre-exists with its data folder, as an
             // opened world would.
             game.world.carrier_data_existed_at_open = true;
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let stone = registry.default_state("minecraft:stone").unwrap();
             game.world.set(4, 64, 4, stone).unwrap();
@@ -2318,7 +2292,10 @@ mod tests {
                 .unwrap()
                 .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
                 .collect();
-            assert!(names.is_empty(), "a world without transfers wrote {names:?}");
+            assert!(
+                names.is_empty(),
+                "a world without transfers wrote {names:?}"
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }

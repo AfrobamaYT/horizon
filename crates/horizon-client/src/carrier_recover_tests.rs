@@ -1287,8 +1287,7 @@ fn an_undecodable_entity_payload_refuses() {
         .begin(OpKind::Assemble, 54, 1, "minecraft:overworld")
         .unwrap();
     store.commit().unwrap();
-    let mut cells = Vec::new();
-    cells.push(
+    let cells = vec![
         Cell::new(
             LocalPos::new(0, 0, 0),
             "minecraft:chest",
@@ -1296,7 +1295,7 @@ fn an_undecodable_entity_payload_refuses() {
             Some(vec![0xff, 0xff, 0xff, 0xff]),
         )
         .unwrap(),
-    );
+    ];
     let carrier = Carrier::new(
         54,
         1,

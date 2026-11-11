@@ -882,7 +882,7 @@ pub fn recover(
                 return Err(RecoveryRefused::CargoDisagreement { what: "cell state" });
             };
             let carried_entity = carried.data().map(|data| {
-                horizon_core::nbt::read_named(&data, horizon_core::nbt::Limits::saved())
+                horizon_core::nbt::read_named(data, horizon_core::nbt::Limits::saved())
                     .map(|(named, _)| named.tag)
             });
             let same_entity = match (&carried_entity, &cell.before.entity) {
