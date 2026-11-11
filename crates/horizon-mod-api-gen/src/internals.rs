@@ -191,6 +191,7 @@ struct Pass {
     /// Widening only: the items and fields visited are made public and listed nowhere, for a
     /// lower-crate shape the wasm internals table walks (#589 W).
     reaching: bool,
+    visibility_only: bool,
     discovery: bool,
 }
 
@@ -647,11 +648,58 @@ impl Pass {
         self.sources.push(Source {
             path: path.to_owned(),
             text,
-            parsed,
+            parsed: parsed.clone(),
             lines,
             edits: BTreeMap::new(),
             annotations: BTreeMap::new(),
         });
+        // Macro-generated declarations are absent from syn's item inventory. Widen
+        // literal type declarations in rule expansions too, without interpreting matches.
+        fn declarations(source: &mut Source, tokens: proc_macro2::TokenStream) {
+            use proc_macro2::TokenTree;
+            let tokens: Vec<_> = tokens.into_iter().collect();
+            for (index, token) in tokens.iter().enumerate() {
+                if let TokenTree::Group(group) = token {
+                    declarations(source, group.stream());
+                }
+                if let TokenTree::Ident(keyword) = token
+                    && matches!(
+                        keyword.to_string().as_str(),
+                        "struct" | "enum" | "trait" | "union"
+                    )
+                    && matches!(tokens.get(index + 1), Some(TokenTree::Ident(_)))
+                    && !matches!(index.checked_sub(1).and_then(|i| tokens.get(i)), Some(TokenTree::Ident(previous)) if previous == "pub")
+                {
+                    let visibility = if index >= 2
+                        && matches!(&tokens[index - 2], TokenTree::Ident(previous) if previous == "pub")
+                        && matches!(&tokens[index - 1], TokenTree::Group(_))
+                    {
+                        syn::parse2(tokens[index - 2..index].iter().cloned().collect())
+                            .expect("restricted macro visibility")
+                    } else {
+                        Visibility::Inherited
+                    };
+                    source.public(&visibility, keyword.span(), "macro type");
+                }
+            }
+        }
+        struct MacroDeclarations<'a>(&'a mut Source);
+        impl<'ast> syn::visit::Visit<'ast> for MacroDeclarations<'_> {
+            fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+                if item.mac.path.is_ident("macro_rules") {
+                    let tokens: Vec<_> = item.mac.tokens.clone().into_iter().collect();
+                    for window in tokens.windows(3) {
+                        if matches!(&window[0], proc_macro2::TokenTree::Punct(p) if p.as_char() == '=')
+                            && matches!(&window[1], proc_macro2::TokenTree::Punct(p) if p.as_char() == '>')
+                            && let proc_macro2::TokenTree::Group(group) = &window[2]
+                        {
+                            declarations(self.0, group.stream());
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::Visit::visit_file(&mut MacroDeclarations(&mut self.sources[index]), &parsed);
         Ok(index)
     }
 
@@ -869,7 +917,7 @@ impl Pass {
                 let (ident, generics) = (&value.ident, &value.generics);
                 let signature = shape_signature(item).expect("a struct");
                 expose!(value, "struct", value.struct_token.span(), signature);
-                if children || self.reaching {
+                if children || (self.reaching && !self.visibility_only) {
                     self.fields(
                         file,
                         module,
@@ -890,7 +938,7 @@ impl Pass {
                 };
                 signature.fields = fields;
                 expose!(value, "struct", value.union_token.span(), signature);
-                if children || self.reaching {
+                if children || (self.reaching && !self.visibility_only) {
                     self.fields(
                         file,
                         module,
@@ -1170,9 +1218,7 @@ impl Pass {
                                     (definition.module.clone(), TypeUses::item(&definition.item))
                                 });
                             }
-                        } else if !path.starts_with("horizon_client::")
-                            && !self.entries.contains_key(&key)
-                        {
+                        } else if !self.entries.contains_key(&key) {
                             self.cfg = definition.cfg;
                             self.entry(
                                 &definition.module,
@@ -1194,6 +1240,24 @@ impl Pass {
         self.cfg.clear();
         // Each shape's module path, item and fields, public in the staged copy, so the wasm
         // internals table at the game's root can walk it. The mod API's own types keep theirs.
+        // Visibility follows signature reachability, including traits and aliases. Layout
+        // eligibility below is a separate question and must not prevent widening.
+        let visible: BTreeSet<String> = self
+            .entries
+            .values()
+            .filter(|entry| {
+                matches!(entry.kind, "struct" | "enum" | "type" | "trait")
+                    && !API_CRATES.contains(&entry.path.split("::").next().unwrap_or_default())
+            })
+            .map(|entry| entry.path.clone())
+            .collect();
+        self.reaching = true;
+        self.visibility_only = true;
+        for path in visible {
+            let _ = self.lower(root, &path);
+        }
+        self.visibility_only = false;
+        self.reaching = false;
         let reached: Vec<String> = self
             .entries
             .values()
@@ -2032,10 +2096,66 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
                 .iter()
                 .all(|entry| !entry.path.starts_with("horizon_items::") || entry.shape_only)
         );
-        assert_eq!(result.files, 5);
+        assert_eq!(result.files, 6);
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    #[test]
+    fn macro_generated_types_widen_only_in_expansions() {
+        let fixture = shapes_fixture(
+            "macro_rules! types { () => { enum Hidden { Value } pub(crate) struct Restricted; pub struct Public; }; } types!(); fn value() -> Hidden { Hidden::Value }\n",
+        );
+        widen_with(&fixture.0, &[]).unwrap();
+        let staged = fixture.game();
+        assert!(staged.contains("pub enum Hidden"), "{staged}");
+        assert!(staged.contains("pub struct Restricted"), "{staged}");
+        assert!(staged.contains("pub struct Public"), "{staged}");
+        assert!(!staged.contains("pub pub"), "{staged}");
+        syn::parse_file(&staged).unwrap();
+    }
+
+    #[test]
+    fn staged_signatures_expose_private_types_and_traits() {
+        let fixture = shapes_fixture("struct Game;\n");
+        fixture.put("crates/horizon-items/src/items.rs",
+            "struct Hidden; trait Screen { type Page; } fn hidden() -> Hidden { Hidden } fn screen(_: &dyn Screen<Page = Hidden>) {}\n");
+        widen_with(
+            &fixture.0,
+            &[(
+                "internals.txt",
+                "horizon_items::hidden\nhorizon_items::screen\n".into(),
+            )],
+        )
+        .unwrap();
+        let staged =
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src/items.rs")).unwrap();
+        assert!(staged.contains("pub struct Hidden"), "{staged}");
+        assert!(staged.contains("pub trait Screen"), "{staged}");
+        assert!(staged.contains("pub fn hidden"), "{staged}");
+        let output = fixture.0.join("staged.rlib");
+        let compile = |source: &str| {
+            let path = fixture.0.join("visibility.rs");
+            fs::write(&path, source).unwrap();
+            std::process::Command::new("rustc")
+                .args([
+                    "--crate-type=lib",
+                    "--edition=2024",
+                    "-Dprivate_interfaces",
+                    "-Adead_code",
+                ])
+                .arg(path)
+                .arg("-o")
+                .arg(&output)
+                .output()
+                .unwrap()
+        };
+        assert!(compile(&staged).status.success());
+        let mutant = staged.replace("pub struct Hidden", "struct Hidden");
+        let refused = compile(&mutant);
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("more private"));
     }
 
     #[test]
@@ -2093,7 +2213,7 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             let source =
                 fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
                     .unwrap();
-            assert!(source.contains("pub(crate) struct ItemStack"));
+            assert!(source.contains("pub struct ItemStack"));
         }
     }
 

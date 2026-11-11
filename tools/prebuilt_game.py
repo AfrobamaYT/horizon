@@ -170,7 +170,7 @@ def build(out: Path, server: bool) -> None:
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
-    rustflags = "-C prefer-dynamic"
+    rustflags = "-C prefer-dynamic -D warnings"
     # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
     if sys.platform == "darwin":
         rustflags += " -C rpath"
