@@ -20,6 +20,24 @@ doesn't exist warns. Opening a world fails, naming the mod, when a part is attac
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
 
+## Right click on a block
+
+`Hooks::right_click_block` corresponds to NeoForge 26.3's
+`PlayerInteractEvent.RightClickBlock`, on the clicking client and server, with
+identical switches for native and wasm mods:
+
+- `use_block = TriState::True` allows block use even while sneaking with an item
+  in either hand. `Default` preserves vanilla's sneak skip; `False` skips block use.
+- `use_item = TriState::True` enters the item's `useOn` phase even with an empty
+  hand or an item on cooldown. `Default` requires a held stack off cooldown;
+  `False` skips this phase. Adventure placement restrictions still apply.
+
+A consuming block result ends the click before the item phase. For forced empty-hand
+use, `use_item_on_block` fires with `phase = UsePhase::ItemAfterBlock` and
+`click.stack = None`; a listener can consume that use. Without a listener answer,
+there is no item Part or vanilla item behaviour to run and the empty use passes.
+Canceling `right_click_block` skips both uses and substitutes `cancellation_result`.
+
 ## Instant item use
 
 `ItemPart::use_item` receives `UseItemEvent { stack, hand }`. `hand: Hand` is the

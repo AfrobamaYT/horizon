@@ -8833,29 +8833,27 @@ impl Game<'_> {
                     .filter(|answer| answer.consumes_action() || *answer == Answer::Fail);
             }
             // Player.isSecondaryUseActive with something in either hand
-            // keeps the block from reacting.
+            // keeps the block from reacting by default; an explicit block
+            // allow overrides that skip, and False always skips the block.
             let sneaking = self.remote_shift_down();
             let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
             let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
-            let cooldown_forced = use_item == TriState::True;
+            let item_forced = use_item == TriState::True;
             let item_used = canceled.is_none()
                 && use_item.or(true)
-                && held.as_ref().is_some_and(|stack| {
-                    if !self.may_build()
-                        && !self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
-                    {
-                        return false;
-                    }
-                    self.items().get(&stack.item).is_some_and(|info| {
-                        cooldown_forced
-                            || !self
+                && (self.may_build()
+                    || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)))
+                && (item_forced
+                    || held.as_ref().is_some_and(|stack| {
+                        self.items().get(&stack.item).is_some_and(|info| {
+                            !self
                                 .cooldowns
                                 .is_on_cooldown(&horizon_client::cooldowns::group(
                                     stack,
                                     info.use_cooldown.as_ref(),
                                 ))
-                    })
-                });
+                        })
+                    }));
             let block_answer = if !spectator && block_used {
                 self.use_item_on_block(&hit, hand, held.as_ref(), mod_api::UsePhase::Block)
             } else {
