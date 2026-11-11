@@ -275,7 +275,7 @@ fn wasm_weapon_dispatch(
     event: &mut mod_api::LootDropsEvent<'_>,
     expected: &mod_api::ItemStack,
 ) {
-    use mod_api::wire::{Id, Writer};
+    use mod_api::{Hooks, wire::Writer};
     let mut request = Writer::new();
     let mut answer = Writer::new();
     let recorded = event.context.weapon.is_some();
@@ -349,13 +349,12 @@ fn wasm_weapon_dispatch(
     ))
     .unwrap();
     let module = horizon_mod_wasm::fixture::module(&bytes).unwrap();
-    let handler = horizon_mod_wasm::WasmHandler::new(&module, Id(1));
     let mut sentinel = expected.clone();
     sentinel
         .set_count(if expected.count() == 1 { 2 } else { 1 })
         .unwrap();
     let mut drops = vec![sentinel];
-    handler.loot_drops(
+    module.loot_drops(
         host,
         &mut mod_api::LootDropsEvent {
             context: event.context,
