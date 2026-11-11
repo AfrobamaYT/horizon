@@ -9530,6 +9530,10 @@ impl Game<'_> {
     /// MultiPlayerGameMode.useItem for `hand`, if it holds something: whether
     /// the click ends there, as far as this client can tell (`use_ends_click`).
     fn remote_use_item(&mut self, hand: Hand) -> bool {
+        // MultiPlayerGameMode.useItem: spectators pass before sending or predicting.
+        if self.spectator() {
+            return false;
+        }
         let Some(held) = self.with_hand(hand, |g| g.held().cloned()) else {
             return false;
         };
