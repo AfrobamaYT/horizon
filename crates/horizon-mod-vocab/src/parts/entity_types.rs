@@ -374,4 +374,32 @@ mod tests {
         assert_eq!(registrar.general_entity_types.len(), 1);
         assert!(registrar.refused.is_empty());
     }
+
+    /// A mod's `Hooks::register` receives `&mut dyn Registrar`, and the
+    /// generated `Registrar` trait carries `GeneralTypesRegistrar` among its
+    /// supertraits: the declaration reaches mods through the registrar they
+    /// already hold, with no engine type leaking. Red if the supertrait
+    /// wiring is lost: `declare_general_entity` would not resolve on
+    /// `dyn Registrar`.
+    #[test]
+    pub(crate) fn declare_general_entity_reaches_mods_through_dyn_registrar() {
+        let _scope = PhaseOwner::scope(ModPhase::Registration);
+        let mut registrar = PartRegistrar::new("mymod");
+        let dynamic: &mut dyn crate::Registrar = &mut registrar;
+        dynamic
+            .declare_general_entity(
+                "robot",
+                GeneralEntityCategory::Misc,
+                0.8,
+                1.9,
+                GeneralSavePolicy::Save,
+                true,
+                8,
+                3,
+                1,
+                &[],
+            )
+            .unwrap();
+        assert_eq!(registrar.general_entity_types.len(), 1);
+    }
 }
