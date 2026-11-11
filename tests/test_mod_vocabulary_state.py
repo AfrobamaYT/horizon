@@ -13,6 +13,12 @@ class VocabularyStateGate(unittest.TestCase):
         mutant = 'macro_rules! slot { ($n:ident) => { static $n: AtomicBool = AtomicBool::new(false); }; } slot!(EXTRA);'
         self.assertTrue(expansion_violations({'macro.rs': mutant}))
 
+    def test_path_module_cannot_escape_the_scanned_source_set(self):
+        for source in ('#[path = "../hidden.rs"] mod hidden;', '#[path = "/outside/hidden.rs"] mod hidden;', 'mod hidden;'):
+            with self.subTest(source=source):
+                self.assertTrue(expansion_violations({'lib.rs': source}))
+        self.assertEqual(expansion_violations({'lib.rs': '#[path = "socket.rs"] mod socket;', 'socket.rs': ''}), [])
+
     def test_macro_keyword_argument_cannot_hide_a_new_static(self):
         mutant = 'macro_rules! slot { ($kind:ident) => { $kind HIDDEN: AtomicBool = AtomicBool::new(false); }; } slot!(static);'
         self.assertTrue(expansion_violations({'macro.rs': mutant}))

@@ -80,7 +80,7 @@ def unsafe_violations(files: dict[str, str]) -> list[str]:
     return errors
 
 
-def expansion_violations(files: dict[str, str]) -> list[str]:
+def expansion_violations(files: dict[str, str], source_root: Path = SOURCE) -> list[str]:
     """Refuse state-producing macro definitions and unchecked include boundaries.
 
     Listed OUT_DIR inputs pass the generator's token-level vocabulary validator
@@ -94,8 +94,28 @@ def expansion_violations(files: dict[str, str]) -> list[str]:
         'mod_api_exports_private.rs',
     }
     errors = []
+    scanned = {(source_root / path).resolve() for path in files}
     for path, source in files.items():
         code = blank(source)
+        if not (source_root / path).resolve().is_relative_to(source_root.resolve()):
+            errors.append(f'{path}: source symlink leaves the vocabulary source root')
+        if Path(path).parent.name != 'exports':
+            modules = re.compile(r'(?P<attrs>(?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+(?P<name>\w+)\s*;')
+            owner = Path(path)
+            directory = owner.parent if owner.name in ('lib.rs', 'mod.rs') else owner.with_suffix('')
+            for module in modules.finditer(code):
+                if re.search(r'#\[\s*path\s*=', module['attrs']):
+                    continue
+                choices = [directory / (module['name'] + '.rs'), directory / module['name'] / 'mod.rs']
+                if not any((source_root / child).resolve() in scanned for child in choices):
+                    errors.append(f'{path}: module {module["name"]} targets source outside the scanned vocabulary set')
+        for attr in re.finditer(r'#\[\s*path\s*=', code):
+            literal = re.match(r'#\[\s*path\s*=\s*"([^"\n]+)"\s*\]', source[attr.start():])
+            target = (source_root / Path(path).parent / literal[1]).resolve() if literal else None
+            if target not in scanned:
+                errors.append(f'{path}: path module target is outside the scanned vocabulary source set')
+        if re.search(r'#\[\s*cfg_attr\b[^\]]*\bpath\s*=', code):
+            errors.append(f'{path}: conditional path module targets are not supported by the state gate')
         tests = [(m.start(), item_end(code, m.end())[0]) for m in TEST.finditer(code)]
         declared = [(m.start(), m.end()) for m in STATE.finditer(code)]
         for token in re.finditer(r"(?<!')\bstatic\b", code):
@@ -163,7 +183,10 @@ Every production static/TLS declaration, including declarations behind the `test
 listed below. Unconditional unit-test items and explicitly test-only module files are excluded.
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
 exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
-include boundaries are refused. Every listed generated OUT_DIR input is token-checked before write by
+include boundaries are refused. Path modules must target the scanned vocabulary source set;
+generated module declarations are checked against its canonical file paths as well. Conditional
+path routing and module-declaring generated macros are refused instead of being skipped.
+Every listed generated OUT_DIR input is token-checked before write by
 `horizon-mod-api-gen`: no unlisted static declarations (including macro metavariables), unsafe,
 unsafe lint suppression, or further includes. The generated immutable ABI hash is checked against
 this same inventory by exact name and type; nested state is refused. Lifetimes and string literals are not declarations. The trusted
@@ -193,7 +216,7 @@ def main() -> int:
         if not entry.get('reason') or not entry.get('category'):
             parser.error(f"{name} needs an ownership category and reason")
     files = {p.relative_to(args.source).as_posix(): p.read_text() for p in args.source.rglob('*.rs')}
-    errors = violations(files, allowed) + unsafe_violations(files) + expansion_violations(files)
+    errors = violations(files, allowed) + unsafe_violations(files) + expansion_violations(files, args.source)
     expected_doc = inventory_document(allowed)
     if args.write_doc:
         DOCUMENT.write_text(expected_doc)

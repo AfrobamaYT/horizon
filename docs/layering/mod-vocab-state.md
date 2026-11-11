@@ -20,7 +20,10 @@ Every production static/TLS declaration, including declarations behind the `test
 listed below. Unconditional unit-test items and explicitly test-only module files are excluded.
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
 exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
-include boundaries are refused. Every listed generated OUT_DIR input is token-checked before write by
+include boundaries are refused. Path modules must target the scanned vocabulary source set;
+generated module declarations are checked against its canonical file paths as well. Conditional
+path routing and module-declaring generated macros are refused instead of being skipped.
+Every listed generated OUT_DIR input is token-checked before write by
 `horizon-mod-api-gen`: no unlisted static declarations (including macro metavariables), unsafe,
 unsafe lint suppression, or further includes. The generated immutable ABI hash is checked against
 this same inventory by exact name and type; nested state is refused. Lifetimes and string literals are not declarations. The trusted

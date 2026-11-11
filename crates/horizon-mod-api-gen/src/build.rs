@@ -9,8 +9,10 @@ fn write_vocab_output(
     name: &str,
     code: &str,
     inventory: &vocab_boundary::Inventory,
+    sources: &std::collections::BTreeSet<std::path::PathBuf>,
 ) -> Result<(), String> {
-    vocab_boundary::validate(name, code, inventory).map_err(|e| format!("{name}: {e}"))?;
+    vocab_boundary::validate_with_modules(name, code, inventory, sources)
+        .map_err(|e| format!("{name}: {e}"))?;
     write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())
 }
 
@@ -37,6 +39,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         vocab_boundary::inventory(root)?
     } else {
         vocab_boundary::Inventory::new()
+    };
+    let vocab_sources = if matches!(target, Target::Vocab) {
+        vocab_boundary::modules::sources(root)?
+    } else {
+        std::collections::BTreeSet::new()
     };
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
@@ -68,9 +75,10 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                     super::parts::OUTPUT,
                     &super::parts::source(root)?,
                     &inventory,
+                    &vocab_sources,
                 )?;
                 for (name, code) in super::exports::sources(root)? {
-                    write_vocab_output(out_dir, &name, &code, &inventory)?;
+                    write_vocab_output(out_dir, &name, &code, &inventory, &vocab_sources)?;
                 }
             }
             let hooks = generated.hooks;
@@ -112,7 +120,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     };
     for (name, code) in outputs {
         if matches!(target, Target::Vocab) {
-            write_vocab_output(out_dir, name, &code, &inventory)?;
+            write_vocab_output(out_dir, name, &code, &inventory, &vocab_sources)?;
         } else {
             write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
         }
