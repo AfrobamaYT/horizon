@@ -7190,11 +7190,13 @@ impl Game<'_> {
         }
         // ServerPlayerGameMode.useItemOn: the held item's onItemUseFirst, when
         // RightClickBlock didn't deny the item, ahead of the sneak gate and
-        // every block behaviour. Its answer ends the click for this hand.
+        // every block behaviour. Only a consuming answer or FAIL ends this
+        // hand's block interaction; PASS continues to the block.
         if use_item.or(true)
             && let Some(hit) = block_hit
             && let Some(held) = self.held().cloned()
             && let Some(answer) = self.item_use_first(hit, self.hand, &held)
+            && (answer.consumes_action() || answer == Answer::Fail)
         {
             if matches!(answer, Answer::Success | Answer::SuccessServer) {
                 self.swing_arm();

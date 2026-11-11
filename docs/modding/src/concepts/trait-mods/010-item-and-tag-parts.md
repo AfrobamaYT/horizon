@@ -46,6 +46,20 @@ unhandled block or entity interaction. A block success or FAIL, or an entity suc
 The server fires it for the separate use-item packet, once for that packet's hand.
 Canceling skips the item Part and vanilla action on native and wasm alike.
 
+## Item use on a block
+
+`Hooks::use_item_on_block` (`UseItemOnBlockEvent`) runs on native and wasm with
+`HostSide` before each selected phase: `ItemBeforeBlock`, `Block`, then
+`ItemAfterBlock`. `event.click` describes the hit, hand, held stack and player.
+Return `Flow::Cancel` to skip the selected phase's Part and vanilla behaviour,
+using `*event.cancellation_result` (initially `TryWithEmptyHand`) as its result.
+
+Canceling `ItemBeforeBlock` skips the item's `on_item_use_first` Part. `Pass`
+continues to the block phase; only `Fail` or a consuming result (`Success`,
+`SuccessServer`, `Consume`) ends this hand's block interaction. Cancellation
+alone does not suppress the later phases. A block-phase `TryWithEmptyHand`
+can still run the block's empty-hand behaviour on the main hand.
+
 ## Item wear
 
 `ItemPart::damage_item` is `IItemExtension.damageItem`: the wear a stack of the part's item is about to take
