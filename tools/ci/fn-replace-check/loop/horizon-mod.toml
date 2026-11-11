@@ -32,4 +32,4 @@ id = "entry"
 target = "horizon_client::game::block_entity_ticks::Game<'_>::tick_block_entities"
 kind = "HEAD"
 helper = "src/mixins/entry.rs"
-bindings = [{ name = "time", ty = "i64", value = "self.world.game_time" }]
+bindings = [{ name = "game", ty = "&mut Game<'_>", value = "&mut *self" }]

@@ -115,8 +115,8 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" loop_panic "* ]]; then
     # The slot's panic is the server's crash, and its report names the mod and the loop.
-    grep -rlF 'fnr_loop_panic' "$scratch/home" | grep -q .
-    grep -rF 'loop block_entities.tick' "$scratch/home" "$scratch/server.log"
+    grep -F 'in native mod fnr_loop_panic, hook loop block_entities.tick, part fnr_loop_panic::Tenth' "$run"/crash-reports/*.txt
+    grep -F 'Saving chunks for level' "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
