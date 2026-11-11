@@ -898,6 +898,15 @@ Declared modifiers are
 read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
 arismoko/horizon#2732).
 
+A modifier changes a biome that already generates. To add a mod's own biomes to the Overworld or the Nether, a code mod
+declares a **biome region** instead: `Registrar::declare_biome_region(path, region)` takes a `BiomeRegion` (its
+`dimension`, `minecraft:overworld` or `minecraft:nether`; a `weight` from 1 to 1000 against vanilla's 10; and its
+`points`, the same `BiomePoint`s as a mod dimension's). An area belongs to one region, and the region's own points
+choose the biome there. A malformed or repeated id, an id outside the mod's namespace, another dimension, a weight
+outside 1 to 1000, no points or an invalid point refuse the mods at startup, naming the mod. Declared regions are read
+by the API today; world generation does not use them yet (the stages are in
+[the design](../concepts/mod-biome-regions.md), arismoko/horizon#2554).
+
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
