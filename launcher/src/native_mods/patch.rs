@@ -1,4 +1,4 @@
-//! Function replacement (fn-replace): `[[mixin]]` rows built against the prebuilt game, with no
+//! Function replacement (fn-replace): `[[native.mixin]]` rows built against the prebuilt game, with no
 //! game rebuild. Each function the rows target is copied out of the pinned source into one patch
 //! crate (`horizon_mod_api_gen::patch`), horizon-mixins applies every mod's rows to those copies
 //! in one pass (one combined copy per function, in the tool's order), rustc compiles the crate
@@ -79,7 +79,7 @@ fn extras(bundles: &[&Bundle]) -> Result<api_gen::patch::Extras, String> {
     Ok(extras)
 }
 
-/// Builds the patch crate for `projects`' `[[mixin]]` rows against `game`, into `out`; `None`
+/// Builds the patch crate for `projects`' `[[native.mixin]]` rows against `game`, into `out`; `None`
 /// when no mod has one. `rlibs` and `crates` are the compiled mods and their crate names, which
 /// helpers may call.
 #[allow(clippy::too_many_arguments)]
@@ -116,7 +116,7 @@ pub(super) fn build(
     let started = std::time::Instant::now();
     let targets: Vec<String> = bundles
         .iter()
-        .flat_map(|bundle| bundle.manifest.mixin.iter().map(|row| row.target.clone()))
+        .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))
         .collect();
     // The generator's refusals first: they name why a function can't be copied at all (missing,
     // below the game crate, a body that can't move). Then only a point with a raw form has a
@@ -203,11 +203,11 @@ pub(super) fn build(
     let _ = fs::remove_dir_all(&mods);
     for bundle in bundles
         .iter()
-        .filter(|bundle| !bundle.manifest.mixin.is_empty())
+        .filter(|bundle| !bundle.native().mixin.is_empty())
     {
         let dir = mods.join(&bundle.manifest.id);
         super::package::copy_tool_input(bundle, &dir)?;
-        let mut rows = bundle.manifest.mixin.clone();
+        let mut rows = bundle.native().mixin.clone();
         for row in &mut rows {
             row.target = ids[row.target.as_str()].to_owned();
         }

@@ -1,10 +1,10 @@
-//! `[[mixin]]`: a source-level edit of a game function, the only form that compiles game code.
-//! Each row is one horizon-mixins `[[injection]]`, forwarded to the pinned tool, which owns the
-//! vocabulary beyond the keys named here. Native only.
+//! `[[native.mixin]]`: a source-level edit of a game function. Each row is one horizon-mixins
+//! `[[injection]]`, forwarded to the pinned tool, which owns the vocabulary beyond the keys
+//! named here. Only `[native]` tables compile game code, so a wasm mod cannot declare one.
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// One `[[mixin]]` row. `options` holds every other key of the tool's `[[injection]]`
+/// One `[[native.mixin]]` row. `options` holds every other key of the tool's `[[injection]]`
 /// (`selector`, `ordinal`, `bindings`, `cancellable`, `require`, `slice`, `variable`...), which
 /// the tool validates when the game is built.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -104,8 +104,6 @@ impl<'de> Deserialize<'de> for Kind {
 /// Why a package's mixins are refused before any tool runs; `id` is `package:mixin`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MixinError {
-    /// The package is not a native mod: nothing else compiles game code.
-    NativeOnly { id: String },
     Invalid {
         id: String,
         field: &'static str,
@@ -116,10 +114,6 @@ pub enum MixinError {
 impl fmt::Display for MixinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NativeOnly { id } => write!(
-                f,
-                "E_MIXIN_NATIVE_ONLY: {id}: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook"
-            ),
             Self::Invalid { id, field, fix } => {
                 write!(f, "E_MIXIN_INVALID: {id}: invalid {field}; {fix}")
             }
@@ -131,21 +125,23 @@ impl std::error::Error for MixinError {}
 impl Mixin {
     pub(super) fn check_all(
         entries: &[Self],
-        mod_id: &str,
-        native: bool,
+        manifest: &super::Manifest,
     ) -> Result<(), MixinError> {
         for entry in entries {
-            let id = format!("{mod_id}:{}", entry.id);
-            if !native {
-                return Err(MixinError::NativeOnly { id });
-            }
             let invalid = |field, fix| MixinError::Invalid {
-                id: id.clone(),
+                id: format!("{}:{}", manifest.id, entry.id),
                 field,
                 fix,
             };
             if entry.target.trim().is_empty() {
                 return Err(invalid("target", "name the game function's path"));
+            }
+            // A mixin edits the game's source. Another mod's functions are reached at its mod points.
+            if manifest.mod_point_dependency(&entry.target).is_some() {
+                return Err(invalid(
+                    "target",
+                    "a mixin targets a game function; inject at another mod's point with [[inject]]",
+                ));
             }
             if !super::plain_path(&entry.helper)
                 || !entry.helper.starts_with("src/")
@@ -174,7 +170,7 @@ mod tests {
 
     const HEADER: &str =
         "id='sample'\nname='Sample'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n";
-    const ROW: &str = "[[mixin]]\nid='autosave'\ntarget='game::Game::next_autosave'\nkind='MODIFY_EXPRESSION_VALUE'\nhelper='src/longer.rs'\n";
+    const ROW: &str = "[[native.mixin]]\nid='autosave'\ntarget='game::Game::next_autosave'\nkind='MODIFY_EXPRESSION_VALUE'\nhelper='src/longer.rs'\n";
 
     fn native() -> String {
         format!(
@@ -183,8 +179,13 @@ mod tests {
         )
     }
 
+    /// A `[[native.*]]` table follows `[native]`; a top-level one precedes it.
     fn parse(code: &str, rows: &str) -> Result<Manifest, String> {
-        Manifest::parse(&format!("{HEADER}{rows}{code}"))
+        Manifest::parse(&if rows.starts_with("[[native.") {
+            format!("{HEADER}{code}{rows}")
+        } else {
+            format!("{HEADER}{rows}{code}")
+        })
     }
 
     #[test]
@@ -243,7 +244,7 @@ mod tests {
             assert_eq!(
                 parse(&native(), &mixin_row(kind)).is_ok(),
                 mixins.contains(kind),
-                "[[mixin]] {kind}"
+                "[[native.mixin]] {kind}"
             );
         }
         let error = parse(&native(), &mixin_row("head")).unwrap_err();
@@ -254,16 +255,25 @@ mod tests {
     }
 
     #[test]
-    fn a_mixin_outside_a_native_mod_is_refused_by_name() {
+    fn only_a_native_mod_declares_a_mixin() {
         let wasm = format!(
             "[wasm]\nsha512='{}'\ntoolchain='nightly'\n",
             "a".repeat(128)
         );
-        let expected = "E_MIXIN_NATIVE_ONLY: sample:autosave: [[mixin]] compiles game code and needs a [native] mod; a wasm mod uses [[inject]] or a hook";
-        for code in [wasm.as_str(), ""] {
-            let error = parse(code, ROW).unwrap_err();
-            assert!(error.ends_with(expected), "{error}");
+        // With or without the pins `[native]` needs, a wasm manifest is told why.
+        for code in [format!("{wasm}{}", native()), wasm] {
+            let error = parse(&code, ROW).unwrap_err();
+            assert!(
+                error.ends_with(
+                    "a mod is [native] or [wasm], not both; only [native] tables compile game \
+                     code, so a wasm mod has no mixin, bridge, state or module"
+                ),
+                "{error}"
+            );
         }
+        // The table has one spelling: a top-level row is an unknown table.
+        let error = parse(&native(), &ROW.replace("[[native.mixin]]", "[[mixin]]")).unwrap_err();
+        assert!(error.contains("unknown field `mixin`"), "{error}");
         assert!(parse(&native(), ROW).is_ok());
     }
 
@@ -273,14 +283,14 @@ mod tests {
             "{ROW}selector='self.interval'\nordinal=1\nrequire=1\ncancellable=true\npriority=5\nbindings=[{{name='n',ty='u32',value='n'}}]\nslice={{from={{selector='a',ordinal=0,require=1}}}}\nvariable={{name='n',ordinal=0,at='STORE'}}\n"
         );
         let manifest = parse(&native(), &row).unwrap();
-        let mixin = &manifest.mixin[0];
+        let mixin = &manifest.native.as_ref().unwrap().mixin[0];
         assert_eq!(mixin.kind, Kind::ModifyExpressionValue);
         // What the tool reads back is the row as written.
         let forwarded: toml::Table = toml::from_str(&toml::to_string(mixin).unwrap()).unwrap();
         let written: toml::Table = toml::from_str(&row).unwrap();
         assert_eq!(
             toml::Value::Table(forwarded),
-            written["mixin"].as_array().unwrap()[0]
+            written["native"]["mixin"].as_array().unwrap()[0]
         );
         for (old, new, field) in [
             ("target='game::Game::next_autosave'", "target=' '", "target"),

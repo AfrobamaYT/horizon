@@ -68,7 +68,7 @@ file that receives it, a `name` that is a Rust module identifier, and a `source`
 [Mixins](../mixins.md).
 
 `[[inject]]` only fills compiled slots and never compiles game code. Native source edits
-use top-level `[[mixin]]` with `id`, `target`, uppercase `kind`, `helper` and upstream
+use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and upstream
 options. `[[native.bridge]]` and `[[native.state]]` forward upstream bridge and state
 tables unchanged. See [Mixins](../mixins.md) for the vocabulary and trust boundary.
 

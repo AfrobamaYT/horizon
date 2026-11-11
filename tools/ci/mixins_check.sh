@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build API and area-file slot listeners plus a `[[mixin]]` row at this exact head: the two
+# Build API and area-file slot listeners plus a `[[native.mixin]]` row at this exact head: the two
 # injects attach to compiled slots, and horizon-mixins compiles the mixin's helper into the game.
 # Compile-only: no game runs and no vanilla data is read.
 #   tools/ci/mixins_check.sh LAUNCHER SCRATCH

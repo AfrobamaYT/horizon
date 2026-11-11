@@ -1,10 +1,11 @@
 # Mixins
 
-A `[[mixin]]` is a source-level edit made by horizon-mixins. Its helper is compiled
+A `[[native.mixin]]` is a source-level edit made by horizon-mixins. Its helper is compiled
 inside a game function, where Rust privacy and explicit bindings determine what
-it can use. The game is rebuilt on the player's computer. Mixins are native only,
-trusted like internals, and are not sandboxed. A wasm mod declaring one is refused
-with `E_MIXIN_NATIVE_ONLY`.
+it can use. The game is rebuilt on the player's computer. Mixins are trusted like
+internals and are not sandboxed. Only the tables of `[native]` compile game code, and a
+manifest is `[native]` or `[wasm]`, never both, so a wasm mod cannot declare one: it is
+refused with that reason.
 
 ## Declaration
 
@@ -48,7 +49,7 @@ This manifest fragment inserts a helper at the head of the pinned game's command
 method. Check the target ID against that game's source catalog.
 
 ```toml
-[[mixin]]
+[[native.mixin]]
 id = "observe_command"
 target = "horizon_client::game::commands::Game<'_>::run_command"
 kind = "HEAD"
@@ -76,7 +77,7 @@ fall back to another target or to an inject.
 | --- | --- | --- | --- |
 | Hook or Part method | A documented named moment or object operation | No | Native and wasm |
 | `[[inject]]` | A compiled function point or listed call site | Never | API function points on native and wasm; engine internals and sites on native |
-| `[[mixin]]` | A source edit supported by horizon-mixins | Yes | Native only |
+| `[[native.mixin]]` | A source edit supported by horizon-mixins | Yes | Native only |
 
 Prefer the named hook. When none exists, [request one](injections.md#ask-for-the-hook)
 even if an inject or mixin supplies the moment today.

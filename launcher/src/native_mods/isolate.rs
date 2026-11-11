@@ -123,7 +123,7 @@ pub(super) fn from_mixins(output: &str, mods: &[Bundle]) -> Option<LeftOut> {
             let id = value["injection_id"].as_str()?;
             let mut declaring = mods
                 .iter()
-                .filter(|bundle| bundle.manifest.mixin.iter().any(|row| row.id == id));
+                .filter(|bundle| bundle.native().mixin.iter().any(|row| row.id == id));
             match (declaring.next(), declaring.next()) {
                 (Some(bundle), None) => Some(bundle),
                 _ => None,

@@ -12,7 +12,7 @@ game = "26.3"
 horizon = "HEAD"
 mixins = "MIXINS"
 
-[[mixin]]
+[[native.mixin]]
 id = "ported_block_entity_tick"
 kind = "HEAD"
 target = "horizon_client::game::api_values::super::Game<'_>::api_block_entity_tick"
@@ -22,7 +22,7 @@ bindings = [
   { name = "pos", ty = "[i32; 3]", value = "pos" },
 ]
 
-[[mixin]]
+[[native.mixin]]
 id = "knockback_0"
 kind = "MODIFY_VARIABLE"
 target = "horizon_client::game::creatures::knockback::Game<'_>::knock_back_player"
@@ -34,7 +34,7 @@ bindings = [{ name = "value", ty = "f64", value = "$value" }]
 
 # Farmer's Delight's sign-editor shape: a call directly beneath `&`, which the pinned tool refuses
 # for every call-site kind and the carried narrowing admits for a hook that wraps the value.
-[[mixin]]
+[[native.mixin]]
 id = "sign_sprite"
 kind = "WRAP_OPERATION"
 target = "horizon_client::game::sign_edit::Game<'_>::draw_sign_editor"

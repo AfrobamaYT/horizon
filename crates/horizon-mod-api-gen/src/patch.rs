@@ -1,4 +1,4 @@
-//! Function replacement for `[[mixin]]` (fn-replace): the patch crate a mixin build compiles
+//! Function replacement for `[[native.mixin]]` (fn-replace): the patch crate a mixin build compiles
 //! against the prebuilt game instead of rebuilding it. Each target function is copied, unchanged,
 //! out of the pinned source into a module that mirrors its own (`patch::game::autosave` for
 //! `horizon_client::game::autosave`), where every name the body uses resolves as it did in the
@@ -16,7 +16,7 @@ use syn::{ImplItem, Item};
 /// One target function, copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Patched {
-    /// The target as the `[[mixin]]` row writes it.
+    /// The target as the `[[native.mixin]]` row writes it.
     pub target: String,
     /// The copy's id for horizon-mixins, in the patch crate.
     pub id: String,
@@ -583,7 +583,7 @@ struct Tree {
     own: BTreeSet<String>,
 }
 
-/// The patch crate for `targets` (as `[[mixin]]` rows write them), from the pinned game source
+/// The patch crate for `targets` (as `[[native.mixin]]` rows write them), from the pinned game source
 /// at `root`. `krate` is the patch crate's name. Every target that can't be copied is refused by
 /// name; the crate is returned only when none is.
 pub fn generate(
