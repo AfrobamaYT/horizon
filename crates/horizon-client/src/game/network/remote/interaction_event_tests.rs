@@ -863,7 +863,7 @@ fn a_spectators_passing_block_click_skips_item_use_for_both_hands() {
 
 #[test]
 #[ignore = "requires prepared game resources"]
-fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() {
+fn air_event_skips_the_item_and_consuming_results_end_the_click() {
     let observer = Observer::default();
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "air_observer",
@@ -879,49 +879,45 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 } else {
                     LogicalSide::Server
                 };
-                for answer in [
-                    Answer::Success,
-                    Answer::SuccessServer,
-                    Answer::Consume,
-                    Answer::Pass,
-                    Answer::Fail,
-                    Answer::TryWithEmptyHand,
+                if client {
+                    game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+                }
+                for (answer, consumes, client_swings, server_swings) in [
+                    (Answer::Success, true, 1, 0),
+                    (Answer::SuccessServer, true, 0, 1),
+                    (Answer::Consume, true, 0, 0),
+                    (Answer::Pass, false, 0, 0),
+                    (Answer::Fail, false, 0, 0),
+                    (Answer::TryWithEmptyHand, false, 0, 0),
                 ] {
                     *observer.0.lock().unwrap() = Controls {
                         air_answer: Some(answer),
                         ..Controls::default()
                     };
-                    let used = if client {
-                        game.remote_use_item(Hand::Main)
-                    } else {
-                        game.use_hand(None).unwrap()
-                    };
-                    assert_eq!(
-                        used,
-                        if client {
-                            answer == Answer::Success
-                        } else {
-                            answer.consumes_action()
+                    game.swing = Default::default();
+                    let swings = game.swings_started;
+                    let mut expected = vec![Step::Air(side, Hand::Main)];
+                    if client {
+                        game.remote_use(mod_api::InteractionAttempt::Press);
+                        if !consumes {
+                            expected.push(Step::Air(side, Hand::Off));
                         }
+                        assert!(game.using.is_none(), "{answer:?}");
+                    } else {
+                        assert_eq!(game.use_hand(None).unwrap(), consumes, "{answer:?}");
+                    }
+                    assert_eq!(
+                        game.swings_started - swings,
+                        if client { client_swings } else { server_swings },
+                        "{side:?} {answer:?}"
                     );
                     assert_eq!(
                         observer.0.lock().unwrap().steps,
-                        [Step::Air(side, Hand::Main)]
+                        expected,
+                        "{side:?} {answer:?}"
                     );
                 }
-                if client {
-                    *observer.0.lock().unwrap() = Controls {
-                        air_answer: Some(Answer::Consume),
-                        ..Controls::default()
-                    };
-                    game.offhand = Some(ItemStack::new("minecraft:shield", 1));
-                    game.remote_use_hands(mod_api::InteractionAttempt::Press);
-                    assert_eq!(
-                        observer.0.lock().unwrap().steps,
-                        [Step::Air(side, Hand::Main), Step::Air(side, Hand::Off)]
-                    );
-                    assert!(game.using.is_none());
-                } else {
+                if !client {
                     *observer.0.lock().unwrap() = Controls::default();
                     assert!(game.use_hand(None).unwrap());
                     assert_eq!(
