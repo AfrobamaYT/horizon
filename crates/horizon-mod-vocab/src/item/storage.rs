@@ -59,12 +59,66 @@ pub const STORAGE: CapabilityKey<dyn ItemStorage> = CapabilityKey {
     name: "horizon:storage",
     default: Some(|host, at| {
         let slots = at.level.capability(host, &ITEMS, at.pos, at.side)?;
-        Some(Box::new(Slots(slots)) as Box<dyn ItemStorage>)
+        // The game's own slots are asked in one pass each; a mod's ITEMS, slot by slot.
+        Some(match slots.owner {
+            None => Box::new(GameStorage(at)) as Box<dyn ItemStorage>,
+            Some(_) => Box::new(Slots(slots)),
+        })
     }),
     handler: PhantomData,
 };
 
-/// The game's own [`STORAGE`]: the slots [`ITEMS`] reaches, asked by kind. It inserts as
+/// The game's own [`STORAGE`] for a block entity with slots: each question and write one pass
+/// over the slots `.side` reaches, in the game, by the rules hoppers follow.
+struct GameStorage(BlockSide);
+
+impl ItemStorage for GameStorage {
+    fn amount(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64 {
+        crate::backend_of(&*host).map_or(0, |b| b.container_kind_amount(self.0, resource))
+    }
+    fn space_for(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64 {
+        crate::backend_of(&*host).map_or(0, |b| b.container_kind_space(self.0, resource))
+    }
+    fn insert(
+        &self,
+        host: &mut dyn ServerHost,
+        tx: &Transaction,
+        resource: &ItemResource,
+        amount: u64,
+    ) -> u64 {
+        crate::backend_mut_of(host)
+            .map_or(0, |b| b.container_insert_kind(self.0, resource, amount, tx))
+            .min(amount)
+    }
+    fn extract(
+        &self,
+        host: &mut dyn ServerHost,
+        tx: &Transaction,
+        resource: &ItemResource,
+        amount: u64,
+    ) -> u64 {
+        crate::backend_mut_of(host)
+            .map_or(0, |b| b.container_extract_kind(self.0, resource, amount, tx))
+            .min(amount)
+    }
+    fn page(
+        &self,
+        host: &mut dyn ServerHost,
+        cursor: &mut usize,
+        limit: usize,
+        out: &mut Vec<(ItemResource, u64)>,
+    ) -> bool {
+        let slots = crate::backend_of(&*host)
+            .and_then(|b| b.container_listing(self.0, *cursor, limit))
+            .unwrap_or_default();
+        let end = slots.len() < limit;
+        out.extend(slots.iter().flatten().map(|s| (ItemResource::of(s), s.count() as u64)));
+        *cursor = if end { 0 } else { *cursor + slots.len() };
+        end
+    }
+}
+
+/// [`STORAGE`] over a mod's own [`ITEMS`] handler, asked slot by slot. It inserts as
 /// `SimpleContainer.addItem` orders it: the slots that hold the kind first, then the empty ones.
 struct Slots(Capability<dyn ResourceHandler<ItemResource>>);
 

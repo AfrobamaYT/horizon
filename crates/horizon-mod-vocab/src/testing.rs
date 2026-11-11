@@ -280,6 +280,43 @@ impl crate::prelude::BlockEntitiesBackend for FakeHost {
     }
 }
 impl crate::prelude::ItemsBackend for FakeHost {
+    fn container_kind_amount(&self, at: BlockSide, resource: &crate::ItemResource) -> u64 {
+        let Some(items) = self.level.standing(at.level, at.pos).and_then(|s| s.items.as_ref()) else {
+            return 0;
+        };
+        items
+            .slots
+            .iter()
+            .flatten()
+            .filter(|stack| resource.matches(stack))
+            .map(|stack| stack.count() as u64)
+            .sum()
+    }
+    fn container_kind_space(&self, at: BlockSide, resource: &crate::ItemResource) -> u64 {
+        let max_stack = self.max_stack(resource);
+        let Some(items) = self.level.standing(at.level, at.pos).and_then(|s| s.items.as_ref()) else {
+            return 0;
+        };
+        (0..items.slots.len())
+            .map(|slot| match &items.slots[slot] {
+                Some(held) if resource.matches(held) => {
+                    items.capacity(slot, max_stack).saturating_sub(held.count()) as u64
+                }
+                Some(_) => 0,
+                None => items.capacity(slot, max_stack) as u64,
+            })
+            .sum()
+    }
+    fn container_listing(
+        &self,
+        at: BlockSide,
+        from: usize,
+        limit: usize,
+    ) -> Option<Vec<Option<ItemStack>>> {
+        let items = self.level.standing(at.level, at.pos)?.items.as_ref()?;
+        let end = from.saturating_add(limit).min(items.slots.len());
+        Some(items.slots[from.min(end)..end].to_vec())
+    }
     fn container_size(&self, at: BlockSide) -> Option<usize> {
         let items = self.level.standing(at.level, at.pos)?.items.as_ref()?;
         Some(items.slots.len())
@@ -415,6 +452,65 @@ impl crate::prelude::ItemsBackendMut for FakeHost {
     ) -> Option<ItemStack> {
         let standing = self.level.standing_mut(at.level, at.pos)?;
         standing.items.as_mut()?.extract(slot, max)
+    }
+    fn container_insert_kind(
+        &mut self,
+        at: BlockSide,
+        resource: &crate::ItemResource,
+        amount: u64,
+        tx: &Transaction,
+    ) -> u64 {
+        use crate::prelude::ItemsBackend;
+        let size = self.container_size(at).unwrap_or(0);
+        let mut left = amount;
+        for holding in [true, false] {
+            for slot in 0..size {
+                if left == 0 {
+                    break;
+                }
+                let held = self.container_stack(at, slot);
+                let pick = match &held {
+                    Some(held) => holding && resource.matches(held),
+                    None => !holding,
+                };
+                if !pick {
+                    continue;
+                }
+                let ask = left.min(u32::MAX as u64) as u32;
+                let rest = self
+                    .container_insert(at, slot, resource, ask, tx)
+                    .ok()
+                    .flatten()
+                    .map_or(0, |rest| rest.count());
+                left -= (ask - rest) as u64;
+            }
+        }
+        amount - left
+    }
+    fn container_extract_kind(
+        &mut self,
+        at: BlockSide,
+        resource: &crate::ItemResource,
+        amount: u64,
+        tx: &Transaction,
+    ) -> u64 {
+        use crate::prelude::ItemsBackend;
+        let mut left = amount;
+        for slot in 0..self.container_size(at).unwrap_or(0) {
+            if left == 0 {
+                break;
+            }
+            if self
+                .container_stack(at, slot)
+                .is_some_and(|held| resource.matches(&held))
+            {
+                let ask = left.min(u32::MAX as u64) as u32;
+                left -= self
+                    .container_extract(at, slot, ask, tx)
+                    .map_or(0, |out| out.count()) as u64;
+            }
+        }
+        amount - left
     }
     fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
         let (player, slot) = self.players.place(place)?;

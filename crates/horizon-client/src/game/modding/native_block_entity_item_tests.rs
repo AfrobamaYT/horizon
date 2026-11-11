@@ -369,3 +369,79 @@ fn a_container_move_costs_the_same_whatever_saved_data_sits_beside_the_slots() {
         });
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+fn storage_asks_a_game_container_by_kind_and_rolls_back_with_its_transaction() {
+    const NAME: &str = "game::native_block_entity_item_tests::storage_asks_a_game_container_by_kind_and_rolls_back_with_its_transaction";
+    with_mod_parts(NAME, |root| {
+        super::native_entity_refs::tests::with_game_at(root, |game| {
+            let entity = mod_holder(game);
+            let level = entity.level(game).unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            game.world.set(3, 64, 1, chest).unwrap();
+            game.world
+                .block_entities
+                .insert((3, 64, 1), BlockEntity::Chest(vec![None; 27]));
+            let of = |id: &str| {
+                ItemResource::of(&ItemStack::new(id, 1).try_into_api().unwrap())
+            };
+            let (stone, dirt) = (of("minecraft:stone"), of("minecraft:dirt"));
+            let storage = level
+                .capability(game, &mod_api::STORAGE, [3, 64, 1], None)
+                .unwrap();
+            assert_eq!(storage.space_for(game, &stone), 27 * 64);
+            commit(game, |host, tx| {
+                assert_eq!(storage.insert(host, tx, &stone, 100), 100);
+                assert_eq!(storage.insert(host, tx, &dirt, 5), 5);
+            });
+            assert_eq!(storage.amount(game, &stone), 100);
+            assert_eq!(storage.space_for(game, &stone), 24 * 64 + 28, "two stone slots, one dirt");
+            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
+                assert_eq!(storage.extract(host, tx, &stone, 70), 70);
+                assert_eq!(storage.insert(host, tx, &dirt, 2000), 25 * 64 + 59);
+                Err(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(storage.amount(game, &stone), 100);
+            assert_eq!(storage.amount(game, &dirt), 5);
+            let BlockEntity::Chest(slots) = game.world.block_entities.get(&(3, 64, 1)).unwrap() else {
+                panic!()
+            };
+            let counts: Vec<u32> = slots.iter().flatten().map(|s| s.count).collect();
+            assert_eq!(counts, [64, 36, 5], "slots back as they were, in their order");
+            let mut cursor = 0;
+            let mut listed = Vec::new();
+            assert!(storage.page(game, &mut cursor, 64, &mut listed));
+            assert_eq!(listed.len(), 3);
+            // A furnace's top takes only into its input, and its bottom gives only its result.
+            let furnace = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:furnace")
+                .unwrap();
+            game.world.set(5, 64, 1, furnace).unwrap();
+            game.world.block_entities.insert(
+                (5, 64, 1),
+                BlockEntity::for_block("minecraft:furnace").unwrap(),
+            );
+            let top = level
+                .capability(game, &mod_api::STORAGE, [5, 64, 1], Some(mod_api::Direction::Up))
+                .unwrap();
+            let bottom = level
+                .capability(game, &mod_api::STORAGE, [5, 64, 1], Some(mod_api::Direction::Down))
+                .unwrap();
+            commit(game, |host, tx| {
+                assert_eq!(top.insert(host, tx, &stone, 200), 64, "the input slot only");
+                assert_eq!(bottom.extract(host, tx, &stone, 64), 0, "not the input");
+            });
+            assert!(game.transactions.is_empty());
+        });
+    });
+}
