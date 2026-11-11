@@ -169,6 +169,21 @@ pub(super) fn apply_patches(directory: &Path, patches: &toml::Table) -> Result<(
 mod tests {
     use super::*;
     #[test]
+    fn sdk_partial_graph_accepts_inactive_edges_but_refuses_new_registry_edges() {
+        let original = format!("version=4\n[[package]]\nname='game'\nversion='1.0.0'\ndependencies=['log']\n[[package]]\nname='log'\nversion='0.4.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\n", "a".repeat(64));
+        let plan = Plan::read(&original, &[], &[]).unwrap();
+        let narrower = original.replace("dependencies=['log']", "dependencies=[]");
+        plan.allowed
+            .check_partial_resolution(&RegistryLock::parse(&narrower).unwrap(), &plan.game)
+            .unwrap();
+        let added = format!("{original}dependencies=['game']\n");
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&RegistryLock::parse(&added).unwrap(), &plan.game)
+            .is_err());
+    }
+
+    #[test]
     fn production_plan_preserves_isolated_game_patch_identity() {
         let original = "version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n";
         let plan = Plan::read(original, &[], &[]).unwrap();
