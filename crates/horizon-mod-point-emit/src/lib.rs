@@ -94,12 +94,6 @@ fn resolve<'a, 'p>(
         .inject
         .iter()
         .map(|entry| {
-            if !matches!(entry.kind, Kind::Head | Kind::Replace | Kind::Return) {
-                return Err(format!(
-                    "{}: expected an API head, return or replace injection",
-                    entry.id
-                ));
-            }
             let point = points
                 .iter()
                 .find(|point| plain_path(&point.target) == plain_path(&entry.at))
