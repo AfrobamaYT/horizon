@@ -12,11 +12,7 @@ import unittest
 from unittest import mock
 import zipfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from tools import datafix_paths, pr_ready
-
-# Script consumers import their sibling module directly.
-sys.modules['datafix_paths'] = datafix_paths
 
 
 class DatafixPaths(unittest.TestCase):
@@ -143,6 +139,15 @@ class DatafixPaths(unittest.TestCase):
             self.assertEqual(output.getvalue().count('datafix parity not run:'), 0 if opt_in else 1)
 
     def test_download_and_lock_destinations_are_private(self):
+        # Script consumers import siblings directly and mutate sys.path. Keep
+        # those mutations scoped so later unittest discovery cannot import a
+        # tools/test_* module in place of a tests/test_* module with the same name.
+        with_path = mock.patch.object(sys, 'path', [str(Path(__file__).resolve().parents[1] / 'tools'), *sys.path])
+        with_path.start()
+        self.addCleanup(with_path.stop)
+        alias = mock.patch.dict(sys.modules, {'datafix_paths': datafix_paths})
+        alias.start()
+        self.addCleanup(alias.stop)
         # Import the actual consumers with the owning boundary selecting a temp root.
         for name in ('datafix_worlds', 'test_datafix_parity'):
             sys.modules.pop(name, None)
