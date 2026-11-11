@@ -52,8 +52,24 @@ fn generated_game_edges_are_frozen_before_mod_resolution() {
         .check_resolution(game, &RegistryLock::parse(&original).unwrap())
         .is_err());
     plan.allowed.check_resolution(game, game).unwrap();
+    let narrower = staged.replace(" \"horizon-mod-api\",\n", "");
+    assert_ne!(narrower, staged);
+    plan.allowed
+        .check_resolution(&RegistryLock::parse(&narrower).unwrap(), game)
+        .unwrap();
+    let mut added: toml::Table = staged.parse().unwrap();
+    let log = added["package"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|package| package["name"].as_str() == Some("log"))
+        .unwrap();
+    log.as_table_mut().unwrap().insert(
+        "dependencies".into(),
+        toml::Value::try_from(vec!["horizon-client-input"]).unwrap(),
+    );
     for changed in [
-        staged.replace(" \"horizon-mod-api\",\n", ""),
+        added.to_string(),
         staged.replace(
             "checksum = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
             "checksum = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"",
