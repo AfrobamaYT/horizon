@@ -50,7 +50,6 @@ mod picker;
 mod prebuilt;
 mod sites;
 mod slots;
-mod source;
 #[cfg(all(test, target_os = "linux"))]
 mod source_server;
 
@@ -649,10 +648,12 @@ impl Bundle {
             .expect("validated code package")
     }
 
-    /// Whether horizon-mixins adds supporting modules to the game's source.
-    /// Unified injects are routed separately by the launcher.
+    /// Whether horizon-mixins reads source to transform the game.
     fn needs_mixins(&self) -> bool {
-        !self.native().module.is_empty()
+        !self.manifest.mixin.is_empty()
+            || !self.native().module.is_empty()
+            || !self.native().bridge.is_empty()
+            || !self.native().state.is_empty()
     }
 }
 
@@ -1794,7 +1795,7 @@ impl std::fmt::Display for Failed {
         match self {
             Self::Mods { error, .. } | Self::Other(error) => f.write_str(error),
             Self::Nothing => Ok(()),
-            Self::NoConsent => f.write_str(tr("Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
+            Self::NoConsent => f.write_str(tr("Native mods run inside your game with your rights; mixins compile code into the game. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
         }
     }
 }
@@ -2205,8 +2206,6 @@ fn pipeline(
         }
         run(pass, "Marking the game's injection points", |_| {})
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        source::stage(&pending, &catalog_dir, &ordered)
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
             .and_then(|catalog| catalog.with_mods(mods.iter()))
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
@@ -2219,8 +2218,6 @@ fn pipeline(
             inject::POINTS,
             horizon_mod_package::SDK_CATALOG_FILE,
             internals::INTERNALS,
-            horizon_platform::mod_build::api_gen::points::source::FILE,
-            horizon_platform::mod_build::api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(&pending, &catalog_dir, error))?;
@@ -2296,12 +2293,7 @@ fn pipeline(
             .map_err(|error| Failed::Other(cache_error(error)))?;
         crate::run_leases::publish(&profile_dir).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
-        let mut declared_injections = diagnostics::Declared::expressions(
-            &horizon_platform::mod_build::api_gen::sites::source::read(&real)?,
-        );
-        declared_injections.extend(diagnostics::Declared::fields(
-            mods.iter().map(|bundle| &bundle.manifest),
-        ));
+        let declared_injections = Vec::new();
         let identities: Vec<_> = mods
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))

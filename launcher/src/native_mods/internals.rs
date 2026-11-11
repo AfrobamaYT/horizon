@@ -125,32 +125,8 @@ impl Catalog {
     pub(super) fn read(dir: &Path) -> Result<Self, String> {
         let path = dir.join(INTERNALS);
         let listed = inject::catalog(&dir.join(inject::POINTS))?;
-        let mut points = listed.points;
-        for point in horizon_platform::mod_build::api_gen::points::source::read(dir)? {
-            let name = horizon_platform::mod_build::point_shape::camel(&point.name);
-            points.push(inject::ListedPoint {
-                name: point.name,
-                target: point.target,
-                raw: true,
-                at_return: true,
-                api_refusal: Some("a private source point has no API record".into()),
-                returns: "none".into(),
-                host: "none".into(),
-                raw_shape: None,
-                return_ty: None,
-                listener: Some(format!("{}::__{name}Listener", point.module)),
-                return_listener: Some(format!("{}::__{name}ReturnListener", point.module)),
-                private: true,
-                record_name: Some(point.record_export),
-            });
-        }
-        let mut sites = listed.sites;
-        for site in horizon_platform::mod_build::api_gen::sites::source::read(dir)? {
-            if sites.iter().any(|public| public.name == site.name) {
-                return Err(format!("E_SOURCE_COLLISION: {}", site.name));
-            }
-            sites.push(site.into());
-        }
+        let points = listed.points;
+        let sites = listed.sites;
         Ok(Self {
             internals: internals::read(&path)?,
             points,
@@ -247,6 +223,12 @@ impl Catalog {
     }
 
     pub(super) fn log_raw(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), String> {
+        if !manifest.mixin.is_empty() {
+            super::append_log(&crate::i18n::trf(
+                "{mod}: mixins compile game code",
+                &[("mod", &manifest.id)],
+            ))?;
+        }
         for decision in super::slots::report(self, manifest) {
             super::append_log(&decision)?;
         }
@@ -713,15 +695,20 @@ pub mod raw {
                     )
                 ));
             } else {
-                assert!(matches!(error, Error::NotRaw { .. }));
-                assert!(error.to_string().contains("E_NOT_RAW"));
+                assert!(matches!(
+                    error,
+                    Error::Inject(
+                        horizon_mod_package::manifest::inject::InjectError::NoSlot { .. }
+                    )
+                ));
+                assert!(error.to_string().contains("E_INJECT_NO_SLOT"));
             }
         }
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn unified_source_fallback_does_not_bypass_raw_abi_refusal() {
+    fn missing_raw_slots_refuse_without_a_source_fallback() {
         let (dir, bundle, catalog) = fixture("raw-abi");
         for fault in 0..3 {
             let mut points = catalog.points.clone();
@@ -735,9 +722,13 @@ pub mod raw {
                 internals: catalog.internals.clone(),
                 ..Catalog::default()
             };
-            // Unified routing can select Source when a compiled slot lacks a raw form.
-            // The facade must still refuse its untyped/incomplete ABI, never erase it.
-            super::super::slots::check(&broken, &bundle.manifest).unwrap();
+            if fault < 2 {
+                assert!(super::super::slots::check(&broken, &bundle.manifest)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("E_INJECT_NO_SLOT"));
+                continue;
+            }
             let expected = Error::NotRaw {
                 mod_id: "example".into(),
                 target: "horizon_client::game::Game<'_>::tick".into(),
