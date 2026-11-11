@@ -211,6 +211,7 @@ fn catalog_for_mod_with(
     horizon_platform::mod_build::api_gen::staging::stage(
         &fresh,
         &fresh.join(internals::INTERNALS),
+        &fresh.join("points.json"),
         horizon_platform::mod_build::api_gen::staging::Mode::Discovery,
         horizon_mod_package::manifest::API,
     )?;

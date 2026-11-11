@@ -5,7 +5,7 @@
 use super::{internals::Catalog, Bundle};
 use crate::i18n::trf;
 use horizon_mod_package::manifest::inject::mod_points::{self, Library, Refusal, Routed};
-use horizon_mod_package::manifest::inject::{Access, Inject};
+use horizon_mod_package::manifest::inject::Inject;
 use horizon_mod_package::Manifest;
 use horizon_platform::mod_build::point_shape::catalog::Catalog as Points;
 use std::collections::BTreeSet;
@@ -109,31 +109,9 @@ pub(super) fn emitted(catalog: &Catalog, mods: &[&Manifest]) -> Vec<horizon_mod_
                     api_refusal: point.api_refusal.clone(),
                     returns: point.returns.clone(),
                     host: point.host.clone(),
-                    raw_shape: None,
                     return_ty: Some(point.return_ty.clone()),
                     table: Some(table.clone()),
                 })
-        })
-        .collect()
-}
-
-/// The generated `main`'s internals listeners at mod points, for mod `index` of `mods`.
-pub(super) fn internals(catalog: &Catalog, mods: &[&Manifest], index: usize) -> String {
-    let manifest = mods[index];
-    routes(catalog, manifest)
-        .expect("mod point routes checked")
-        .into_iter()
-        .filter(|(_, routed, _)| routed.access == Access::Internals)
-        .map(|(library, routed, inject)| {
-            let line = horizon_mod_point_emit::mod_internals(
-                &table(library, mods),
-                &routed.place,
-                &manifest.id,
-                &format!("mod_{index}::{}", inject.with),
-                inject.priority,
-                &inject.id,
-            );
-            format!("        {line},\n")
         })
         .collect()
 }
@@ -142,7 +120,7 @@ pub(super) fn internals(catalog: &Catalog, mods: &[&Manifest], index: usize) -> 
 /// command-line form, this is the translated one players see.
 pub(super) fn refusal(refusal: &Refusal) -> String {
     match refusal {
-        Refusal::Inject(error) => super::inject_text::inject_error(error),
+        Refusal::Inject(error) => error.to_string(),
         Refusal::Changed(changed) => trf(
             "E_INJECT_CHANGED: {id}: {library} {version} changed {at}: pinned {pinned}, installed {installed} ({signature}); update the declaration with `cargo horizon-mod inject update` and rebuild against it",
             &[
@@ -167,10 +145,6 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
                 ("krate", krate),
                 ("expected", &library.replace('-', "_")),
             ],
-        ),
-        Refusal::CrossTargetInternals { id, library } => trf(
-            "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm",
-            &[("id", id), ("library", library)],
         ),
         Refusal::CrossTargetNoWire {
             id,
@@ -223,7 +197,7 @@ mod tests {
         }
     }
 
-    const INJECTS: &str = "[[inject]]\nid = 'double'\nat = 'chemlib::transfer'\nkind = 'head'\nwith = 'double'\nhash = '0123456789abcdef'\n[[inject]]\nid = 'seen'\nat = 'chemlib::transfer'\nkind = 'return'\nwith = 'seen'\naccess = 'internals'\npriority = 4\nhash = '0123456789abcdef'\n";
+    const INJECTS: &str = "[[inject]]\nid = 'double'\nat = 'chemlib::transfer'\nkind = 'head'\nwith = 'double'\nhash = '0123456789abcdef'\n[[inject]]\nid = 'seen'\nat = 'chemlib::transfer'\nkind = 'return'\nwith = 'seen'\naccess = 'api'\npriority = 4\nhash = '0123456789abcdef'\n";
 
     #[test]
     fn the_generated_main_registers_an_addons_listeners_in_the_librarys_table() {

@@ -16,6 +16,9 @@ use std::sync::Arc;
 use horizon_mod_package::dependencies;
 
 mod api;
+mod inject;
+mod mod_points;
+mod slots;
 mod planning;
 pub use planning::routes;
 mod crates;

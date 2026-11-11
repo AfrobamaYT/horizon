@@ -8,6 +8,7 @@ description = "Downloads, prepares and starts Horizon builds"
 [workspace]
 
 [dependencies]
+horizon-mod-point-emit = { path = "../crates/horizon-mod-point-emit" }
 horizon-addresses = { path = "../crates/horizon-addresses" }
 # The catalog and mod-owned trait injections share their generation rules.
 # GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
