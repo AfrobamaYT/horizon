@@ -228,23 +228,8 @@ impl Game<'_> {
         if !remote.joined || remote.reconfiguring.is_some() {
             return Err(SendPacketError::NotInPlay);
         }
-        let id = match packet.id.namespace() {
-            "minecraft" => horizon_protocol::ids::play::serverbound::NAMES
-                .iter()
-                .position(|name| *name == packet.id.path()),
-            _ => None,
-        }
-        .ok_or(SendPacketError::UnknownPacket { id: packet.id })?;
-        let packet = S::decode(id as i32, &packet.body).map_err(|error| {
-            if let Some(detail) = error.payload_limit() {
-                return SendPacketError::PayloadTooLarge {
-                    size: detail.size as u64,
-                    limit: detail.limit as u64,
-                };
-            }
-            SendPacketError::InvalidBody
-        })?;
-        self.send(packet);
+        let prepared = remote.session.prepare_mod_packet(packet)?;
+        self.after_commit(super::transactions::After::Packet(prepared));
         Ok(())
     }
 }

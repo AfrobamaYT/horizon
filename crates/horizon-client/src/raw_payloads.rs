@@ -83,9 +83,9 @@ impl Local {
         }
         let mut manifest = Manifest::builder();
         for declaration in registry.declarations() {
-            if declaration.id.0 == negotiation::CHANNEL {
+            if horizon_protocol::packets::custom_payload::is_reserved_channel(&declaration.id.0) {
                 return Err(format!(
-                    "payload {} is reserved for transport metadata",
+                    "payload {} is reserved for an engine service or transport control",
                     declaration.id.0
                 ));
             }

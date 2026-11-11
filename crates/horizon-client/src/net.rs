@@ -8,6 +8,9 @@
 //! encrypts the connection (ClientHandshakePacketListenerImpl.handleHello).
 use crate::auth::AuthSession;
 pub mod ingress;
+#[cfg(test)]
+#[path = "net/mod_packet_tests.rs"]
+mod mod_packet_tests;
 pub(crate) mod queued_writer;
 use horizon_protocol::{
     PROTOCOL_VERSION,
@@ -19,8 +22,8 @@ use horizon_protocol::{
     servers::parse_address,
     text::{Language, plain, translatable},
 };
-pub use queued_writer::PreparedPayload;
 use queued_writer::QueuedWriter;
+pub use queued_writer::{PreparedPacket, PreparedPayload};
 use std::path::Path;
 #[cfg(test)]
 use std::sync::mpsc::channel;
@@ -434,7 +437,58 @@ impl Session {
             serial: next_serial(),
         }
     }
-    /// Everything received since the last poll.
+    /// Validate an untrusted mod packet once, reserve its physical writer credit,
+    /// and return an invisible root-publication record. This is not Session::send:
+    /// registered/engine channels must use their authority-aware service API.
+    pub fn prepare_mod_packet(
+        &self,
+        packet: mod_api::ServerboundPlayPacket,
+    ) -> std::result::Result<PreparedPacket, mod_api::SendPacketError> {
+        use horizon_protocol::{
+            buf::{Codec, Ident, Reader, Writer},
+            packets::custom_payload,
+        };
+        use mod_api::SendPacketError;
+        let id = match packet.id.namespace() {
+            "minecraft" => horizon_protocol::ids::play::serverbound::NAMES
+                .iter()
+                .position(|name| *name == packet.id.path()),
+            _ => None,
+        }
+        .ok_or(SendPacketError::UnknownPacket { id: packet.id })? as i32;
+        if id == horizon_protocol::ids::play::serverbound::CUSTOM_PAYLOAD {
+            // Check ownership before copying a potentially large application body.
+            // Ident is the same identifier boundary used by the packet codec.
+            let mut reader = Reader::new(&packet.body);
+            let channel = Ident::read(&mut reader).map_err(|_| SendPacketError::InvalidBody)?;
+            if self.payloads.local.owns(&channel) || custom_payload::is_reserved_channel(&channel) {
+                return Err(SendPacketError::ProtectedPayload {
+                    id: mod_api::PayloadId(channel),
+                });
+            }
+            if reader.remaining() > custom_payload::SERVERBOUND_LIMIT {
+                return Err(SendPacketError::PayloadTooLarge {
+                    size: reader.remaining() as u64,
+                    limit: custom_payload::SERVERBOUND_LIMIT as u64,
+                });
+            }
+        } else {
+            play::Serverbound::decode(id, &packet.body)
+                .map_err(|_| SendPacketError::InvalidBody)?;
+        }
+        let mut encoded = Writer::new();
+        encoded.varint(id);
+        encoded.bytes(&packet.body);
+        let writer = self
+            .writer
+            .lock()
+            .unwrap()
+            .as_ref()
+            .cloned()
+            .ok_or(SendPacketError::NotConnected)?;
+        writer.prepare_packet(encoded.data)
+    }
+    /// The frozen receiving turn, retaining every input credit through its actor.
     pub fn poll(&self) -> Vec<ingress::OwnedReceipt<Event>> {
         self.events.take_turn()
     }
@@ -1138,7 +1192,11 @@ fn receive_play(
                 configuring.store(true, Ordering::Release);
                 let _ = send.send(Event::Reconfiguring);
                 if let Some(w) = shared_writer.lock().unwrap().as_mut() {
-                    let _ = w.send(&play::Serverbound::ConfigurationAcknowledged(Empty).encode());
+                    w.transition_protocol(
+                        horizon_protocol::payload_negotiation::Phase::Configuration,
+                        &play::Serverbound::ConfigurationAcknowledged(Empty).encode(),
+                    )
+                    .map_err(|error| Reason::plain(connection_lost(error, lang)))?;
                     configuring.store(true, Ordering::Relaxed);
                 }
                 let registries = configure(
@@ -1422,8 +1480,11 @@ fn configure(
                     .finish_configuration_with(|| {
                         let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
                         let w = w.as_mut().ok_or_else(|| "Disconnected".to_owned())?;
-                        w.send(&cfg::Serverbound::FinishConfiguration(Empty).encode())
-                            .map_err(|e| connection_lost(e, lang))?;
+                        w.transition_protocol(
+                            horizon_protocol::payload_negotiation::Phase::Play,
+                            &cfg::Serverbound::FinishConfiguration(Empty).encode(),
+                        )
+                        .map_err(|e| connection_lost(e, lang))?;
                         configuring.store(false, Ordering::Release);
                         Ok(())
                     })
@@ -1727,7 +1788,7 @@ mod tests {
                 .set_read_timeout(Some(Duration::from_secs(10)))
                 .unwrap();
             let thread = std::thread::spawn(move || {
-                let (send, _events) = channel();
+                let (send, _events) = event_channel();
                 configure(
                     &mut reader,
                     &Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
@@ -2079,7 +2140,7 @@ mod tests {
         let (root, data) = empty_item_data("timeout");
         let (done, result) = channel();
         std::thread::spawn(move || {
-            let (send, _events) = channel();
+            let (send, _events) = event_channel();
             let _ = done.send(receive_play(
                 &mut reader,
                 &Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
@@ -2135,7 +2196,7 @@ mod tests {
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
         let thread = std::thread::spawn(move || {
-            let (send, _events) = channel();
+            let (send, _events) = event_channel();
             configure(
                 &mut reader,
                 &writer,

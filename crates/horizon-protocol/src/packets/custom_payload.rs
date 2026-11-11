@@ -85,6 +85,17 @@ fn uses_registered_payload_codec(channel: &str, play: bool, clientbound: bool) -
     }
 }
 
+/// Channels owned by engine services or transport control, not mod registrations
+/// or the generic mod packet API. Reuse the codec authority in every direction.
+pub fn is_reserved_channel(channel: &str) -> bool {
+    channel == crate::payload_negotiation::CHANNEL
+        || [false, true].into_iter().any(|play| {
+            [false, true]
+                .into_iter()
+                .any(|clientbound| uses_registered_payload_codec(channel, play, clientbound))
+        })
+}
+
 impl<const CLIENTBOUND: bool, const PLAY: bool> PayloadCodec<CLIENTBOUND, PLAY> {
     fn check(channel: &str, size: usize, codecs: Option<&PayloadCodecs>) -> Result<()> {
         let limit = if CLIENTBOUND {

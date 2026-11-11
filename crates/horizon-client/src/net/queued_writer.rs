@@ -1,15 +1,16 @@
 //! One bounded writer owner. Receiving callbacks never block their own receive loop
 //! while a large reply waits for the peer to drain its socket or memory pipe.
 use horizon_mod_runtime::byte_channel::{self, Permit, ReserveError, Sender, TrySendError};
+use horizon_protocol::payload_negotiation::Phase;
 use horizon_protocol::{
     Error, Result,
     adapter::ServerVersion,
     connection::{Closer, ConnWriter, Framing},
     frame::FrameSize,
 };
-use mod_api::{PayloadFrameStage, PayloadId, PayloadSendError};
+use mod_api::{PayloadFrameStage, PayloadId, PayloadSendError, SendPacketError};
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, Weak,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -36,6 +37,7 @@ pub(crate) struct Inner {
     terminal: AtomicBool,
     version: ServerVersion,
     secure_chat: Box<dyn Fn() -> Option<bool> + Send + Sync>,
+    phase: Mutex<(u64, Phase)>,
 }
 impl std::ops::Deref for QueuedWriter {
     type Target = Inner;
@@ -47,7 +49,7 @@ impl std::ops::Deref for QueuedWriter {
 /// Prepared once, charged immediately, invisible to the writer until root commit.
 pub struct PreparedPayload {
     permit: Permit<WriteJob>,
-    contents: Vec<u8>,
+    job: WriteJob,
     alive: Arc<AtomicBool>,
 }
 impl PreparedPayload {
@@ -56,11 +58,79 @@ impl PreparedPayload {
             return Err(PayloadSendError::Disconnected);
         }
         self.permit
-            .publish(WriteJob::Contents(self.contents))
+            .publish(self.job)
             .map_err(|_| PayloadSendError::Disconnected)
     }
 }
+enum PrepareFailure {
+    Closed,
+    Full,
+    Encode(Error),
+}
+/// An exact physical writer and protocol incarnation, never a Play/CFG boolean.
+pub struct PreparedPacket {
+    writer: Weak<Inner>,
+    generation: u64,
+    payload: PreparedPayload,
+}
+impl PreparedPacket {
+    pub fn publish(self) {
+        let Some(writer) = self.writer.upgrade() else {
+            return;
+        };
+        let phase = writer.phase.lock().unwrap();
+        if phase.0 == self.generation && phase.1 == Phase::Play {
+            let _ = self.payload.publish();
+        }
+    }
+}
 impl QueuedWriter {
+    /// Queue the ACK and change incarnation under the generic-publication gate.
+    /// Raw publication uses its separate epoch gate; this never acquires it.
+    pub(crate) fn transition_protocol(&self, protocol: Phase, ack: &[u8]) -> Result<()> {
+        let mut phase = self.phase.lock().unwrap();
+        let generation = phase
+            .0
+            .checked_add(1)
+            .ok_or_else(|| Error::new("network phase incarnation exhausted"))?;
+        self.send(ack)?;
+        *phase = (generation, protocol);
+        Ok(())
+    }
+    pub(crate) fn prepare_packet(
+        &self,
+        body: Vec<u8>,
+    ) -> std::result::Result<PreparedPacket, SendPacketError> {
+        let (generation, protocol) = *self.phase.lock().unwrap();
+        if protocol != Phase::Play {
+            return Err(SendPacketError::NotInPlay);
+        }
+        // Legacy adapters are stateful. Their FIFO worker must translate only
+        // after root publication, with all preceding ACKs applied in order.
+        let prepared = if self.version == ServerVersion::Current {
+            self.prepare_contents(body)
+        } else {
+            self.prepare_job(WriteJob::Packet(body))
+        };
+        let payload = prepared.map_err(|error| match error {
+            PrepareFailure::Closed => SendPacketError::NotConnected,
+            PrepareFailure::Full => SendPacketError::Backpressure,
+            PrepareFailure::Encode(error) => match error.frame_limit() {
+                Some(detail) => SendPacketError::FrameTooLarge {
+                    size: detail.size as u64,
+                    limit: detail.limit as u64,
+                },
+                None => SendPacketError::EncodeFailed {
+                    message: error.to_string(),
+                },
+            },
+        })?;
+        Ok(PreparedPacket {
+            writer: Arc::downgrade(&self.0),
+            generation,
+            payload,
+        })
+    }
     pub(crate) fn new(mut writer: ConnWriter) -> Result<Self> {
         let framing = writer.framing();
         let closer = Arc::new(writer.closer()?);
@@ -97,6 +167,7 @@ impl QueuedWriter {
             alive,
             version,
             secure_chat,
+            phase: Mutex::new((0, Phase::Configuration)),
         })))
     }
     /// Stop acceptance, cancel unpublished reservations and drain published writes.
@@ -178,36 +249,61 @@ impl QueuedWriter {
         body: Vec<u8>,
         id: &PayloadId,
     ) -> std::result::Result<PreparedPayload, PayloadSendError> {
-        if !self.alive.load(Ordering::Acquire) {
-            return Err(PayloadSendError::Disconnected);
-        }
-        let contents = self.framing.contents_owned(body).map_err(|error| {
-            if let Some(detail) = error.frame_limit() {
-                PayloadSendError::FrameTooLarge {
-                    id: id.clone(),
-                    stage: match detail.stage {
-                        FrameSize::Encoded => PayloadFrameStage::Encoded,
-                        FrameSize::Uncompressed => PayloadFrameStage::Uncompressed,
-                    },
-                    size: detail.size as u64,
-                    limit: detail.limit as u64,
+        self.prepare_contents(body)
+            .map_err(|failure| match failure {
+                PrepareFailure::Closed => PayloadSendError::Disconnected,
+                PrepareFailure::Full => PayloadSendError::Backpressure,
+                PrepareFailure::Encode(error) => {
+                    if let Some(detail) = error.frame_limit() {
+                        PayloadSendError::FrameTooLarge {
+                            id: id.clone(),
+                            stage: match detail.stage {
+                                FrameSize::Encoded => PayloadFrameStage::Encoded,
+                                FrameSize::Uncompressed => PayloadFrameStage::Uncompressed,
+                            },
+                            size: detail.size as u64,
+                            limit: detail.limit as u64,
+                        }
+                    } else {
+                        PayloadSendError::EncodeFailed(error.to_string())
+                    }
                 }
-            } else {
-                PayloadSendError::EncodeFailed(error.to_string())
+            })
+    }
+    fn prepare_contents(
+        &self,
+        body: Vec<u8>,
+    ) -> std::result::Result<PreparedPayload, PrepareFailure> {
+        if !self.alive.load(Ordering::Acquire) {
+            return Err(PrepareFailure::Closed);
+        }
+        let contents = self
+            .framing
+            .contents_owned(body)
+            .map_err(PrepareFailure::Encode)?;
+        self.prepare_job(WriteJob::Contents(contents))
+    }
+    fn prepare_job(&self, job: WriteJob) -> std::result::Result<PreparedPayload, PrepareFailure> {
+        if !self.alive.load(Ordering::Acquire) {
+            return Err(PrepareFailure::Closed);
+        }
+        let capacity = match &job {
+            WriteJob::Packet(bytes) | WriteJob::Contents(bytes) | WriteJob::Disconnect(bytes) => {
+                bytes.capacity()
             }
-        })?;
+        };
         let sender = self.sender.lock().unwrap();
         let permit = sender
             .as_ref()
-            .ok_or(PayloadSendError::Disconnected)?
-            .reserve(contents.capacity() + PUBLICATION_OVERHEAD)
+            .ok_or(PrepareFailure::Closed)?
+            .reserve(capacity.saturating_add(PUBLICATION_OVERHEAD))
             .map_err(|error| match error {
-                ReserveError::Full => PayloadSendError::Backpressure,
-                ReserveError::Disconnected => PayloadSendError::Disconnected,
+                ReserveError::Full => PrepareFailure::Full,
+                ReserveError::Disconnected => PrepareFailure::Closed,
             })?;
         Ok(PreparedPayload {
             permit,
-            contents,
+            job,
             alive: self.alive.clone(),
         })
     }
