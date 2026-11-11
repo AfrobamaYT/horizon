@@ -4129,6 +4129,50 @@ mod tests {
     }
 
     #[test]
+    fn server_automatic_profile_plans_before_building_and_never_edits_instances() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let original = backend::Settings::load();
+        backend::Settings::load().allow_native_mods().unwrap();
+        let file = backend::data_dir().join("instances.json");
+        let previous = fs::read(&file).ok();
+        let stored = br#"{"instances":{"horizon":{"native_profile":"developer"}}}"#;
+        fs::write(&file, stored).unwrap();
+        let folder = dir("server-automatic-profile");
+        fs::write(folder.join("horizon-mod.toml"), "not valid toml [").unwrap();
+        let output = folder.join("export");
+        // Automatic selection must inspect the actual folder via the shared planner.
+        // Explicit overrides skip planning and reach the unprepared-base check instead.
+        for requested in [None, Some(Profile::Balanced), Some(Profile::Developer)] {
+            let error = String::from(
+                build_server(
+                    "v2099.09.09",
+                    &folder,
+                    &output,
+                    requested,
+                    false,
+                    |_| {},
+                    |_| false,
+                )
+                .unwrap_err(),
+            );
+            if requested.is_none() {
+                assert!(!error.contains("is not prepared yet"), "{error}");
+                assert!(error.contains("horizon-mod.toml"), "{error}");
+            } else {
+                assert!(error.contains("is not prepared yet"), "{error}");
+            }
+            assert_eq!(fs::read(&file).unwrap(), stored);
+        }
+        if let Some(previous) = previous {
+            fs::write(file, previous).unwrap();
+        } else {
+            fs::remove_file(file).unwrap();
+        }
+        fs::remove_dir_all(folder).unwrap();
+        original.save().unwrap();
+    }
+
+    #[test]
     fn automatic_build_does_not_save_its_effective_profile() {
         let _guard = TEST_STATE.lock().unwrap();
         let original = backend::Settings::load();

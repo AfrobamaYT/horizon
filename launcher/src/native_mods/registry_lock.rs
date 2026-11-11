@@ -220,52 +220,6 @@ impl RegistryLock {
         }
     }
 
-    /// A closed, inert fetch workspace: no mod manifest, source, SDK path or Cargo config.
-    pub fn fetch_workspace(&self, roots: &Self, dir: &std::path::Path) -> Result<(), String> {
-        std::fs::create_dir_all(dir.join("src")).map_err(|e| e.to_string())?;
-        let mut dependencies = toml::Table::new();
-        let mut refs = Vec::new();
-        for (index, identity) in roots.packages.keys().enumerate() {
-            let mut dep = toml::Table::new();
-            dep.insert("package".into(), identity.name.clone().into());
-            dep.insert("version".into(), format!("={}", identity.version).into());
-            dep.insert("default-features".into(), false.into());
-            dependencies.insert(format!("pin-{index}"), dep.into());
-            refs.push(toml::Value::String(format!(
-                "{} {} ({})",
-                identity.name, identity.version, identity.source
-            )));
-        }
-        let manifest = toml::toml! {
-            [package]
-            name = "horizon-registry-fetch"
-            version = "0.0.0"
-            edition = "2021"
-            [workspace]
-        };
-        let mut manifest = manifest;
-        manifest.insert("dependencies".into(), dependencies.into());
-        let mut root = toml::toml! { name = "horizon-registry-fetch" version = "0.0.0" };
-        root.insert("dependencies".into(), refs.into());
-        let mut records = vec![toml::Value::Table(root)];
-        records.extend(
-            self.packages
-                .values()
-                .map(|record| toml::Value::Table(record.raw.clone())),
-        );
-        let mut lock = toml::Table::new();
-        lock.insert("version".into(), 4.into());
-        lock.insert("package".into(), records.into());
-        for (file, text) in [
-            ("Cargo.toml", manifest.to_string()),
-            ("Cargo.lock", lock.to_string()),
-            ("src/lib.rs", String::new()),
-        ] {
-            std::fs::write(dir.join(file), text).map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    }
-
     /// Compare resolved identities and checksums, and normalize Cargo's optional dependency
     /// qualifiers before comparing edges. Adding a second version qualifies existing edges.
     pub fn check_resolution(&self, resolved: &Self, game: &Self) -> Result<(), String> {
@@ -512,25 +466,6 @@ mod tests {
             error.contains("itoa") && error.contains("1.0.15") && error.contains("0.4.8"),
             "{error}"
         );
-    }
-
-    #[test]
-    fn fetch_workspace_disables_default_features_and_excludes_local_packages() {
-        let pins = RegistryLock::parse(&lock(CRATES_IO, &"a".repeat(64))).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        pins.fetch_workspace(&pins, dir.path()).unwrap();
-        let manifest: toml::Table = std::fs::read_to_string(dir.path().join("Cargo.toml"))
-            .unwrap()
-            .parse()
-            .unwrap();
-        let dep = &manifest["dependencies"]["pin-0"];
-        assert_eq!(dep["version"].as_str(), Some("=1.0.15"));
-        assert_eq!(dep["default-features"].as_bool(), Some(false));
-        assert!(!dir.path().join(".cargo").exists());
-        assert!(pins
-            .seed("version = 4\n[[package]]\nname = 'local-game'\nversion = '0.1.0'\n")
-            .unwrap()
-            .contains("local-game"));
     }
 
     #[test]

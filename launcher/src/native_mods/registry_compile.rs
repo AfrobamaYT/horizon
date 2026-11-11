@@ -267,13 +267,13 @@ pub(super) fn compile(
     let wanted = super::crates::wanted(out, &declared_paths)?;
     let mut plan = registry_plan::Plan::read(lock, projects, &wanted)?;
     plan.authorize_game_patches(&patches);
-    plan.fetch_with_patches(rust, &out.join("fetch"), &patches)?;
     registry_plan::apply_patches(out, &patches)?;
     fs::write(
         out.join("Cargo.lock"),
         plan.mods.seed("version=4\npackage=[]\n")?,
     )
     .map_err(|e| e.to_string())?;
+    plan.fetch_with_patches(rust, out, &patches)?;
     let metadata = super::registry_inventory::read(rust, out)
         .map_err(|error| plan.explain_resolution(error))?;
     plan.check_mods(&super::registry_lock::RegistryLock::parse(
