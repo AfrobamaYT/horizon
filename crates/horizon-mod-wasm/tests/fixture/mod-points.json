@@ -46,6 +46,20 @@
       "return_listener": "crate::__OnTickReturnListener"
     },
     {
+      "name": "payload_register",
+      "target": "wasm_fixture::payload::register",
+      "hash": "1baefd712c9be24a",
+      "signature": "wasm_fixture::payload::register: fnf(registrar:&mutdynRegistrar) []",
+      "raw": true,
+      "at_return": false,
+      "api_refusal": "argument 1 `registrar` (`&mutdynRegistrar`) has no API type yet",
+      "returns": "none",
+      "host": "none",
+      "return_ty": "()",
+      "listener": "crate::payload::__PayloadRegisterListener",
+      "return_listener": "crate::payload::__PayloadRegisterReturnListener"
+    },
+    {
       "name": "replace_own_average",
       "target": "wasm_fixture::replace::own_average",
       "hash": "3e519191499ad68e",
