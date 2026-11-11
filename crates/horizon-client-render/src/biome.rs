@@ -8,9 +8,13 @@ pub use mod_api::world::biome::{BiomeColors, SpawnEntry};
 use serde_json::Value;
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex},
 };
+
+/// The missing saved biomes already warned about in the open world: each dimension's table
+/// keeps its own placeholders, but a name is reported once per world.
+static WARNED_MISSING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GrassModifier {
@@ -460,14 +464,24 @@ impl Biomes {
         let slot = match placeholders.iter().position(|p| p == name) {
             Some(slot) => slot,
             None => {
-                log::warn!(
-                    "saved biome {name} is not in this world's biomes; it plays as plains and is saved unchanged"
-                );
+                let mut warned = WARNED_MISSING.lock().unwrap_or_else(|e| e.into_inner());
+                if warned.insert(name.to_owned()) {
+                    log::warn!(
+                        "saved biome {name} is not in this world's biomes; it plays as plains and is saved unchanged"
+                    );
+                }
                 placeholders.push(name.to_owned());
                 placeholders.len() - 1
             }
         };
         u16::try_from(self.list.len() + slot).unwrap_or_else(|_| self.id("minecraft:plains"))
+    }
+    /// A world is opening: its missing saved biomes are reported again, once each.
+    pub fn forget_missing_warnings() {
+        WARNED_MISSING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
     /// The name a chunk saves for biome `id`: a placeholder's saved name, else `name`'s.
     pub fn saved_name(&self, id: u16) -> Cow<'_, str> {

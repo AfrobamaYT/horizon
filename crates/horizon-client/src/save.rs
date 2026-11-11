@@ -6241,6 +6241,13 @@ mod tests {
         let names = palette(&resaved);
         assert!(names.contains(&"gone_mod:highland".to_owned()), "{names:?}");
         assert!(!names.contains(&"minecraft:plains".to_owned()), "{names:?}");
+        // Reopened again, still without the mod: the same name, still playing as plains.
+        let again = load();
+        let reloaded = decode(&resaved, assets.registry, &again).expect("chunk");
+        let id = reloaded.biome(4, 16, 8);
+        assert_eq!(again.name(id), "minecraft:plains");
+        assert_eq!(again.saved_name(id), "gone_mod:highland");
+        assert_eq!(palette(&encode(&reloaded, assets.registry, &again)), names);
     }
 
     #[test]

@@ -131,6 +131,7 @@ impl WorldRequest {
             owner,
         } = self;
         let name = name.as_deref();
+        horizon_client::biome::Biomes::forget_missing_warnings();
         let create = create.map(|mut create| {
             create.set_additional_data_packs(pack.additional_data.clone());
             create
