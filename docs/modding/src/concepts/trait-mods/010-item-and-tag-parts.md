@@ -33,7 +33,9 @@ Return `Some(InteractionResult::Success)` to consume and swing on the client,
 to consume without a swing. `Some(Fail)` skips this item's own use without
 swinging and allows the off-hand sequence to proceed; unlike a block-use Fail,
 it does not end the entire click.
-`None` (the default) and `Some(Pass)` continue to the item's own use.
+`None` (the default) lets later Parts answer; if none answers, the item's own use
+runs. `Some(Pass)` stops dispatch to later Parts and continues directly to the
+item's own use.
 `TryWithEmptyHand` belongs to block use and is treated as Pass here.
 A thrown item can return Success on the client and Consume on the server.
 The hand field corresponds to NeoForge's

@@ -35,8 +35,11 @@ pub trait Hooks {
     /// starts. Runs on both logical sides after the global right-click event.
     /// Return an interaction result: Success swings on the client, SuccessServer
     /// swings on the server, Consume handles without swinging. Fail skips this
-    /// item's use without swinging, then the off hand may be tried. None and Pass continue to the item's own use. TryWithEmptyHand
-    /// is block-phase-only and is treated as Pass here. Cooldown items are skipped.
+    /// item's use without swinging, then the off hand may be tried.
+    /// None lets later Parts answer; if none answers, the item's own use runs.
+    /// Some(Pass) skips later Parts and continues to the item's own use.
+    /// TryWithEmptyHand is block-phase-only and is treated as Pass here.
+    /// Cooldown items are skipped.
     /// `hand` is the interaction hand of THIS click, including an instantaneous
     /// air use. Unlike this field, `living_used_item_hand` answers only during
     /// active item use. This is `PlayerInteractEvent.RightClickItem.getHand`.
