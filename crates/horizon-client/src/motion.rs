@@ -155,6 +155,7 @@ pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
     Ok(Vec3::new(edited[0], edited[1], edited[2]))
 }
 
+mod auto_jump;
 pub(crate) mod environment;
 mod fluids;
 mod ladder;
@@ -2218,41 +2219,6 @@ impl MotionWorld<'_, '_, '_> {
         let dx = (self.player.position.x - before.x) as f32;
         let dz = (self.player.position.z - before.z) as f32;
         self.update_auto_jump(dx, dz)
-    }
-    /// `LocalPlayer.updateAutoJump` behind `canAutoJump`.
-    pub fn update_auto_jump(&mut self, xa: f32, za: f32) -> Result<()> {
-        let p = &*self.player;
-        // canAutoJump; MotionWorld drives an unmounted player (not a passenger).
-        let ready = crate::auto_jump::can_auto_jump(
-            p.auto_jump_enabled,
-            p.auto_jump_time,
-            p.ground.on_ground,
-            p.shift_key_down,
-            false,
-            p.move_vector,
-            1.0,
-        );
-        if !ready || f64::from(self.block_jump_factor()?) < 1.0 {
-            return Ok(());
-        }
-        // Player.getSpeed: the movement speed attribute as it is now.
-        let speed = self.player.attribute("minecraft:movement_speed")? as f32;
-        let p = &*self.player;
-        let jumper = crate::auto_jump::AutoJumper {
-            position: p.position,
-            max_y: p.bounds().max_position().y,
-            x_rot: p.pitch,
-            y_rot: p.yaw,
-            speed,
-            move_vector: p.move_vector,
-            width: p.dimensions.width,
-            height: p.dimensions.height,
-            jump_boost: p.status.jump_boost,
-        };
-        if crate::auto_jump::update_auto_jump(self, &jumper, xa, za)? {
-            self.player.auto_jump_time = 1;
-        }
-        Ok(())
     }
 }
 impl crate::auto_jump::AutoJumpWorld for MotionWorld<'_, '_, '_> {
