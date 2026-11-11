@@ -721,3 +721,128 @@ super::native_tags::impl_tags!(
     level.native_authoritative.then_some(level.items)
 );
 super::native_tags::impl_tags!(super::native_hooks::HitLevel<'_>, level, level.0.tags());
+
+#[cfg(test)]
+mod attachment_membership_tests {
+    use super::*;
+    use crate::game::{commands::Target, native_entity_refs::tests::with_game};
+    use horizon_client::{join_seq::Joined, mobs::Mob};
+    use horizon_core::geometry::Vec3;
+
+    fn old_membership(game: &Game<'_>, id: u32) -> bool {
+        use crate::game::entity::{Entity as _, entity_lists_of, for_each_entity};
+        let mut found = false;
+        for_each_entity!(entity_lists_of!(game), entity => {
+            found |= entity.id() == id && !entity.is_removed();
+        });
+        found || game.entity_ids_off_walk().any(|e| e == id) || game.level_dragon_part(id).is_some()
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attachment_membership_matches_old_walk() {
+        with_game(|game| {
+            game.reset_entity_residency();
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(410, kind, Vec3::ZERO, 0.0));
+            let check = |game: &Game<'_>| {
+                for id in [0, 410, 999] {
+                    assert_eq!(
+                        game.attachment_entity_exists(id),
+                        old_membership(game, id),
+                        "id {id}"
+                    );
+                }
+            };
+            check(game);
+            game.paintings.push(horizon_client::entities::Painting {
+                attachment_lifetime: Default::default(),
+                join: Default::default(),
+                id: 420,
+                pos: [0, 64, 0],
+                facing: 2,
+                variant: "minecraft:kebab".into(),
+                width: 1,
+                height: 1,
+                check_interval: 0,
+            });
+            game.persist.removals.push(Target::Painting(420));
+            assert_eq!(
+                game.attachment_entity_exists(420),
+                old_membership(game, 420)
+            );
+            assert!(
+                game.attachment_slot(mod_api::Holder::Entity(420), AttachmentAccess::Existing)
+                    .is_ok()
+            );
+            assert!(
+                game.attachment_slot(mod_api::Holder::Entity(420), AttachmentAccess::Store)
+                    .is_err()
+            );
+            let join = game.mobs[0].join_seq();
+            let taken = game.mobs.extract(join).unwrap();
+            assert!(matches!(
+                game.attachment_slot(mod_api::Holder::Entity(410), AttachmentAccess::Existing),
+                Err(mod_api::AttachmentError::HolderBusy)
+            ));
+            game.mobs.put_back(0, taken);
+            let mut dragon = crate::game::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 500;
+            game.dragon.replace(dragon);
+            for id in 500..=508 {
+                assert_eq!(game.attachment_entity_exists(id), old_membership(game, id));
+            }
+            game.persist.removals.push(Target::Dragon(500));
+            for id in 500..=508 {
+                assert_eq!(game.attachment_entity_exists(id), old_membership(game, id));
+            }
+            game.persist.removals.push(Target::Mob(410));
+            check(game);
+            game.persist.destroying_vehicles.insert(Target::Mob(410));
+            check(game);
+            game.mobs.update(0, |mob| mob.removed = true);
+            check(game);
+            game.enter_level(crate::game::Dim::Nether).unwrap();
+            check(game);
+            game.enter_level(crate::game::Dim::Overworld).unwrap();
+            let holder = mod_api::Holder::Entity(999);
+            game.entity_initialization.active = Some(holder);
+            assert!(
+                game.attachment_slot(holder, AttachmentAccess::Existing)
+                    .is_ok()
+            );
+            game.entity_initialization.active = None;
+            assert!(
+                game.attachment_slot(holder, AttachmentAccess::Existing)
+                    .is_err()
+            );
+        });
+    }
+    #[test]
+    #[ignore = "manual attachment scaling benchmark; needs HORIZON_TEST_RESOURCES"]
+    fn attachment_entity_read_bench() {
+        with_game(|game| {
+            game.reset_entity_residency();
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            for population in [300, 3000, 10000] {
+                while game.mobs.len() < population {
+                    let id = game.mobs.len() as u32 + 100;
+                    game.mobs.push(Mob::new(id, kind.clone(), Vec3::ZERO, 0.0));
+                }
+                let holder = mod_api::Holder::Entity(100);
+                game.attachment_slot(holder, AttachmentAccess::Existing)
+                    .unwrap();
+                let start = std::time::Instant::now();
+                for _ in 0..100_000 {
+                    std::hint::black_box(
+                        game.attachment_slot(holder, AttachmentAccess::Existing)
+                            .unwrap(),
+                    );
+                }
+                println!(
+                    "attachment entity population={population} ns/read={:.2}",
+                    start.elapsed().as_nanos() as f64 / 100_000.0
+                );
+            }
+        });
+    }
+}

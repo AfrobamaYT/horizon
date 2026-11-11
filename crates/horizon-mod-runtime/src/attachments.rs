@@ -1798,3 +1798,41 @@ mod tests {
         assert_eq!(host.0.take_sync_changes(), [change("synced", Some(4))]);
     }
 }
+
+#[cfg(test)]
+mod borrowed_key_tests {
+    use super::*;
+    #[test]
+    fn borrowed_order_matches_java_units() {
+        let samples = [
+            "", "a", "aa", "z", "é", "\u{d7ff}", "\u{e000}", "\u{ffff}", "😀", "𐀀", "a😀",
+        ];
+        for a in samples {
+            for b in samples {
+                for c in samples {
+                    for d in samples {
+                        let owned: (JavaString, JavaString) = (a.into(), b.into());
+                        let other: (JavaString, JavaString) = (c.into(), d.into());
+                        let borrowed = (a, b);
+                        let right = (c, d);
+                        assert_eq!(
+                            (&borrowed as &dyn AttachmentKeyView).cmp(&right),
+                            owned.cmp(&other)
+                        );
+                        assert_eq!(
+                            (&owned as &dyn AttachmentKeyView).cmp(&right),
+                            owned.cmp(&other)
+                        );
+                    }
+                }
+            }
+        }
+        // Saved Java names can contain unpaired surrogates as well.
+        let malformed = (JavaString(vec![0xd800]), JavaString(vec![0xdc00]));
+        let valid = ("𐀀", "");
+        assert_eq!(
+            (&malformed as &dyn AttachmentKeyView).cmp(&valid),
+            malformed.cmp(&(valid.0.into(), valid.1.into()))
+        );
+    }
+}
