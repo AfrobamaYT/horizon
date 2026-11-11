@@ -1763,7 +1763,7 @@ impl Game<'_> {
             self.ominous_spawners
                 .retain(|s| !gone(Vec3::new(s.position[0], s.position[1], s.position[2])));
             if self.dragon.as_ref().is_some_and(|d| gone(d.position)) {
-                self.dragon.discard();
+                self.discard_resident_dragon();
             }
             self.carts.retain(|c| {
                 let keep = !gone(c.position) || Some(c.id) == riding;

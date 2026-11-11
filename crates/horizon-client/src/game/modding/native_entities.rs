@@ -336,7 +336,7 @@ impl Game<'_> {
             Slot::Apart(Apart::Cushion(i)) => drop(self.cushions.remove(i)),
             Slot::Apart(Apart::Painting(i)) => drop(self.paintings.remove(i)),
             Slot::Apart(Apart::Frame(i)) => drop(self.item_frames.remove(i)),
-            Slot::Apart(Apart::Dragon) => self.dragon.discard(),
+            Slot::Apart(Apart::Dragon) => self.discard_resident_dragon(),
         }
     }
     /// Entities that were moved, not added (a portal's arrival keeps being
