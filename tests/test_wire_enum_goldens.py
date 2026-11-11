@@ -90,6 +90,23 @@ class WireEnumDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing.*pin"):
             MODULE.validate(manifest, required, "")
 
+    def test_removed_or_non_wire_enum_requires_paired_pin_removal(self):
+        identity = "crate::Gone"
+        manifest = {"enums": [{"canonical_path": identity}]}
+        for source in ["", "enum Gone { A }"]:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(ValueError, "Remove its matching pins.*SAME PR"):
+                    MODULE.validate(manifest, [identity], source)
+                retired = {"enums": [], "retired_identities": [identity]}
+                self.assertEqual(MODULE.validate(retired, [], source), set())
+                with self.assertRaisesRegex(ValueError, "missing.*pin"):
+                    MODULE.validate(retired, [identity], source)
+
+    def test_paired_pin_removal_cannot_retire_live_wire_enum(self):
+        source = "enum Live { A } #[automatically_derived] impl ::mod_api::wire::Wire for Live {}"
+        with self.assertRaisesRegex(ValueError, "cannot retire a live.*crate::Live"):
+            MODULE.validate({"enums": [], "retired_identities": ["crate::Live"]}, [], source)
+
     def test_frozen_pins_allow_new_enum_and_leaf_collision(self):
         source = """
             mod old { enum Same { A } #[automatically_derived] impl ::mod_api::wire::Wire for Same {} }
@@ -100,7 +117,7 @@ class WireEnumDiscoveryTests(unittest.TestCase):
         self.assertEqual(MODULE.validate(manifest, ["crate::old::Same"], source), {"crate::old::Same"})
         with self.assertRaisesRegex(ValueError, "missing.*pin"):
             MODULE.validate({"enums": []}, ["crate::old::Same"], source)
-        with self.assertRaisesRegex(ValueError, "missing frozen.*enum"):
+        with self.assertRaisesRegex(ValueError, "Remove its matching pins.*SAME PR"):
             MODULE.validate(manifest, ["crate::old::Same"], source.replace("mod old", "mod removed"))
 
 

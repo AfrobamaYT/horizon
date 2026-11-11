@@ -9,11 +9,6 @@ fn existing_fieldless_enum_layouts_match_baseline() {
         "Activity"
     );
     assert_eq!(
-        <crate::client::keyframe_animation::AnimationTarget as Wire>::layout(&mut vec![]),
-        0x248d83699651ec50,
-        "AnimationTarget"
-    );
-    assert_eq!(
         <crate::item::types::ArrowPickup as Wire>::layout(&mut vec![]),
         0xff7e924dd8597b70,
         "ArrowPickup"
@@ -349,11 +344,6 @@ fn existing_fieldless_enum_layouts_match_baseline() {
         <crate::item::types::InteractionResult as Wire>::layout(&mut vec![]),
         0xc150152863b150a0,
         "InteractionResult"
-    );
-    assert_eq!(
-        <crate::client::keyframe_animation::Interpolation as Wire>::layout(&mut vec![]),
-        0xea10c70631c5b252,
-        "Interpolation"
     );
     assert_eq!(
         <crate::item::types::ItemDisplayContext as Wire>::layout(&mut vec![]),

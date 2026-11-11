@@ -4,10 +4,15 @@ The regression is deliberately frozen to the 151 affected derives existing at
 `5c6c41f19f64c26231e0e49be505c5e2b1439be9`. It is not a registry that new enums
 must join. New enums, including a new enum sharing an old leaf name in another
 module, require no central manifest or generated-test edit. Discovery uses
-qualified module identities and checks that every frozen pin still exists.
-Deleting a required guard fails against the separate frozen identity inventory;
-removing/moving an old type also fails discovery or the ordinary Rust test.
-There are 150 absolute hash pins plus a same-source equivalence guard for HookId.
+qualified module identities and checks that every active frozen pin still exists.
+Deleting a required guard fails against the separate frozen identity inventory.
+Removing a type or its fieldless Wire derive is not a hash regression: remove its
+matching entries from both fixture files in the SAME PR as the source change and
+record the identity in the manifest's `retired_identities`. Retiring an enum that
+still derives fieldless Wire is rejected. The retirement list is not a type
+registry and is never extended for new enums. The two keyframe animation enums
+intentionally became non-Wire in #2983; their obsolete pins are now retired.
+There are 148 absolute hash pins plus a same-source equivalence guard for HookId.
 HookId is the only fieldless enum among these 151 defined in generator output;
 the other generated provider/host enums have payloads and are not in this set.
 
@@ -76,7 +81,7 @@ cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_m
 
 Omit `--check` only to regenerate the ordinary Rust file from the frozen pins.
 CI runs this discovery/generated-file check and the Rust test in the existing
-wasm-mods fixture job. These verify the 150 pins and same-source HookId guard,
+wasm-mods fixture job. These verify the 148 pins and same-source HookId guard,
 not the capture producer's compiler invocation. Expansion alone supplies no rlib;
 the fixture does not add an extra library build solely for a producer check.
 Producer invocation on a new source revision requires matching compiled artifacts
