@@ -14,7 +14,7 @@ and its vocabulary crate is exactly one of two kinds.
    the required fields and leaves the rest at their defaults, and no `Default` that would invent one.
 2. **A type a mod only receives** (event payloads, snapshots, contexts such as `HurtSource`, `Victim` or `Hit`):
    `#[non_exhaustive]`. A mod reads its fields but can't build it or match it without `..`. The game builds it
-   through its mirror in `__private::built` and `From`.
+   through its crate's private built mirror and `From`.
 
 The two can't overlap: `#[non_exhaustive]` forbids struct literals outside the crate.
 
@@ -30,7 +30,7 @@ The ceiling is a regression budget, not proof that every newly added struct has 
 
 This source scanner cannot expand `macro_rules!` or build scripts, can count fixed-name declarations
 inside unused macro templates, and does not follow `pub use` reachability. Mirrors are excluded only
-at `__private::built` paths.
+at the crate's private built-mirror paths.
 
 The batches go by module. Kind 2 is applied mechanically; which fields of a kind 1 type are required is decided by
 hand. Each batch updates the samples and this book in the same PR, with no aliases or shims.
