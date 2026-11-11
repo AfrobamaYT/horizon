@@ -82,8 +82,16 @@ fn positioned(kind: &str, uuid: Option<[i32; 4]>) -> Tag {
 }
 
 #[test]
-#[ignore = "needs prepared resources, a scratch HORIZON_HOME and HORIZON_TEST_SEEDS=1"]
+#[ignore = "needs prepared resources and a scratch HORIZON_HOME"]
 fn cloud_fangs_and_kept_entities_keep_their_constructor_uuid() {
+    // Opt in only in a fresh child; never mutate the parallel parent's environment.
+    if crate::game::native_entity_refs::tests::run_fresh_cases(
+        "game::persist::summon_uuid_conflict_tests::cloud_fangs_and_kept_entities_keep_their_constructor_uuid",
+        "HORIZON_TEST_SEEDS",
+        &["1"],
+    ) {
+        return;
+    }
     use horizon_core::random::RandomSource;
 
     // Independent Java LCG calculation, as in the mob test above: uniquifier 12345

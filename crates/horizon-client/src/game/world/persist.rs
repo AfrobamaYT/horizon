@@ -122,8 +122,6 @@ impl OffLevel {
     }
 }
 
-/// `Entity.saveWithoutId`: materialize the mandatory fields of an entity
-/// whose simulation state is still represented by its loaded compound.
 /// The UUID an entity loads with: the saved one, else the one its constructor made.
 /// `Entity.<init>` always draws it from the entity's own random, so the draw is taken
 /// whether or not the tag has a UUID (as `load_item_transferred` and `load_mob` do).
@@ -131,6 +129,8 @@ fn with_constructor_uuid(saved: Option<[i32; 4]>) -> Option<[i32; 4]> {
     let made = horizon_client::save::insecure_uuid(&mut random_source::entity());
     Some(saved.unwrap_or(made))
 }
+/// `Entity.saveWithoutId`: materialize the mandatory fields of an entity
+/// whose simulation state is still represented by its loaded compound.
 pub(super) fn write_static_entity_fields(tag: &mut Tag) {
     use horizon_client::{nbt_path::int_value, save::float};
 
