@@ -256,6 +256,8 @@ impl Game<'_> {
             Err(e) => return Err(TransferError::Store(e.to_string())),
         };
 
+        store.use_retention_snapshot(&self.carrier_retention_snapshot);
+
         // Before/after images from the live world, encoded in memory —
         // a transfer that cannot be stored never lifts a block.
         let mut operation_cells = Vec::with_capacity(cells.len());
@@ -527,6 +529,7 @@ impl Game<'_> {
                 ));
             }
         };
+        store.use_retention_snapshot(&self.carrier_retention_snapshot);
         if !store.journal().lists(uuid, generation) {
             return Err(TransferError::CarrierUnreadable(
                 "the journal does not list this carrier".into(),
@@ -847,6 +850,11 @@ impl Game<'_> {
     /// refusal fails the open, and no save runs after it.
     pub(in crate::game) fn carrier_world_opened(&mut self) -> crate::Result<()> {
         self.world.carrier_data_existed_at_open = self.world_root.join("data").is_dir();
+        self.carrier_retention_snapshot = match Store::open(&self.world_root) {
+            Ok(crate::carrier_store::Opened::Live(store)) => store.retention_snapshot(),
+            Ok(crate::carrier_store::Opened::NeverUsed) => Vec::new(),
+            Err(error) => return Err(format!("world load refused: {error}").into()),
+        };
         self.carrier_recover_all_levels()
     }
 

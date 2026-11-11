@@ -752,3 +752,56 @@ fn operation_signed_ranges_refuse_before_publication() {
     operation.op_id += 1;
     assert!(encode_operation(&operation).is_err());
 }
+
+#[test]
+fn transfer_opens_do_not_widen_retention_eligibility() {
+    let world = WorldDir::new("session-retention");
+    let mut store = world.first_use();
+    let (uuid, generation) = (0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10_u128, 4);
+    store.write_carrier(uuid, generation, b"carrier").unwrap();
+    store
+        .begin(OpKind::Assemble, uuid, generation, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
+    assert!(store.journal().lists(uuid, generation));
+    // A stale operation file from an interrupted run.
+    store.write_operation(1, b"stale").unwrap();
+    assert_eq!(
+        store.cleanup().unwrap(),
+        Cleanup {
+            orphan_carriers: 0,
+            stale_operations: 1,
+            resolved_tombstones: 0,
+        }
+    );
+    // Disassembly tombstones the carrier; its file outlives the commit.
+    store
+        .begin(OpKind::Disassemble, uuid, generation, "minecraft:overworld")
+        .unwrap();
+    store.commit().unwrap();
+    assert!(store.journal().tombstoned(uuid, generation));
+    // The cleanup interrupted by that crash deletes the file, but this
+    // session cannot prove the deletion durable (Windows has no directory
+    // fsync), so the tombstone holds.
+    assert_eq!(
+        store.cleanup().unwrap(),
+        Cleanup {
+            orphan_carriers: 0,
+            stale_operations: 0,
+            resolved_tombstones: 0,
+        }
+    );
+    assert!(store.journal().tombstoned(uuid, generation));
+    assert!(!world.carrier_path(uuid, generation).exists());
+    let Opened::Live(mut transfer) = Store::open(&world.root).unwrap() else {
+        panic!("must reopen");
+    };
+    transfer.use_retention_snapshot(&store.retention_snapshot());
+    transfer.finish_retention().unwrap();
+    assert!(transfer.journal().tombstoned(uuid, generation));
+    let Opened::Live(mut next_session) = Store::open(&world.root).unwrap() else {
+        panic!("must reopen");
+    };
+    next_session.finish_retention().unwrap();
+    assert!(!next_session.journal().tombstoned(uuid, generation));
+}

@@ -219,6 +219,16 @@ pub struct Store {
     tombstones_absent_at_open: Vec<(u128, u32)>,
 }
 impl Store {
+    /// Eligibility captured at the actual world open, shared by all transfers.
+    pub fn retention_snapshot(&self) -> Vec<(u128, u32)> {
+        self.tombstones_absent_at_open.clone()
+    }
+
+    /// Replace the constructor's disk sample with the world-session snapshot.
+    pub fn use_retention_snapshot(&mut self, snapshot: &[(u128, u32)]) {
+        self.tombstones_absent_at_open = snapshot.to_vec();
+    }
+
     /// Reads the world's store and applies the opening table: slot
     /// presence, the `level.dat` flag, leftover carrier files and slot
     /// validity decide between [`Opened::NeverUsed`], [`Opened::Live`]

@@ -2882,6 +2882,7 @@ struct Game<'a> {
     sleep_seen: (i64, i64),
     dim: Dim,
     world_root: PathBuf,
+    carrier_retention_snapshot: Vec<(u128, u32)>,
     /// The owner's offline-to-account UUID move of this world, when it opened under
     /// the account (`playerdata::migrate_owner`): entities the world loads still name
     /// the player by the offline UUID until their chunk is saved again.
@@ -16420,6 +16421,7 @@ impl<'a> Game<'a> {
             sleep_seen: (0, 0),
             dim: Dim::Overworld,
             world_root: PathBuf::new(),
+            carrier_retention_snapshot: Vec::new(),
             owner_migration: None,
             world_flat: false,
             world_debug: false,
