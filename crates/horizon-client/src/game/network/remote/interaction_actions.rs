@@ -1,6 +1,16 @@
 use super::*;
 
 impl Game<'_> {
+    /// Runs one interaction and restores the caller's swing policy afterwards, on every return path.
+    fn with_interaction_swing_scope<R>(&mut self, action: impl FnOnce(&mut Self) -> R) -> R {
+        let previous = self.remote.as_ref().map(|remote| remote.interaction_swing);
+        let result = action(self);
+        if let (Some(remote), Some(previous)) = (self.remote.as_mut(), previous) {
+            remote.interaction_swing = previous;
+        }
+        result
+    }
+
     /// Minecraft.startUseItem: use one crosshair target, then the item itself.
     fn remote_use_inner(&mut self, attempt: mod_api::InteractionAttempt) {
         // Minecraft.startUseItem returns before resetting rightClickDelay
@@ -37,11 +47,7 @@ impl Game<'_> {
         );
     }
     pub(in crate::game) fn remote_use(&mut self, attempt: mod_api::InteractionAttempt) {
-        let previous = self.remote.as_ref().map(|r| r.interaction_swing);
-        self.remote_use_inner(attempt);
-        if let (Some(remote), Some(previous)) = (self.remote.as_mut(), previous) {
-            remote.interaction_swing = previous;
-        }
+        self.with_interaction_swing_scope(|game| game.remote_use_inner(attempt));
     }
     fn remote_start_attack_inner(&mut self) -> bool {
         if self.clicks.miss_time > 0 || self.hands_busy() {
@@ -157,12 +163,7 @@ impl Game<'_> {
         instant
     }
     pub(in crate::game) fn remote_start_attack(&mut self) -> bool {
-        let previous = self.remote.as_ref().map(|r| r.interaction_swing);
-        let result = self.remote_start_attack_inner();
-        if let (Some(remote), Some(previous)) = (self.remote.as_mut(), previous) {
-            remote.interaction_swing = previous;
-        }
-        result
+        self.with_interaction_swing_scope(Game::remote_start_attack_inner)
     }
     fn remote_continue_attack_inner(&mut self, down: bool) {
         if !down {
@@ -227,10 +228,6 @@ impl Game<'_> {
         }
     }
     pub(in crate::game) fn remote_continue_attack(&mut self, down: bool) {
-        let previous = self.remote.as_ref().map(|r| r.interaction_swing);
-        self.remote_continue_attack_inner(down);
-        if let (Some(remote), Some(previous)) = (self.remote.as_mut(), previous) {
-            remote.interaction_swing = previous;
-        }
+        self.with_interaction_swing_scope(|game| game.remote_continue_attack_inner(down));
     }
 }
