@@ -40,3 +40,11 @@ fn validates_api_places_and_signature_before_codegen() {
         .unwrap_err()
         .contains("E_INJECT_MISSING"));
 }
+
+#[test]
+fn native_registration_refusal_names_mod_target_and_type() {
+    let (mut catalog, manifest) = fixture();
+    catalog.points[0].api_refusal =
+        Some("argument 1 `value` (`&RegistrationData`) has no API type yet".into());
+    assert_eq!(check(&catalog, &manifest).unwrap_err(), "addon:before: no API listener at game::tick: argument 1 `value` (`&RegistrationData`) has no API type yet");
+}
