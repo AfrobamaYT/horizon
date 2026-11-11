@@ -19,11 +19,21 @@ pub struct BiomeRegion {
     /// world records; the world's saved weight wins from then on.
     pub weight: u32,
     /// The region's biomes by climate, as a points biome source's: the nearest point to the
-    /// climate at a position inside the region wins.
+    /// climate at a position inside the region wins. Registration checks point shape,
+    /// not biome existence or ownership; world setup must resolve names and refuse missing biomes.
     pub points: Vec<BiomePoint>,
 }
 
 impl BiomeRegion {
+    /// Build a declaration; registration validates its dimension, weight and points.
+    pub fn new(dimension: String, weight: u32, points: Vec<BiomePoint>) -> Self {
+        Self {
+            dimension,
+            weight,
+            points,
+        }
+    }
+
     /// The highest weight a region may declare.
     pub const MAX_WEIGHT: u32 = 1000;
 
