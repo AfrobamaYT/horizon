@@ -452,7 +452,7 @@ mod derive_shapes {
     fn shapes_compile_and_match_independent_bytes() {
         assert_eq!(encode_payload(&Tuple(9), 1).unwrap(), [9]);
         assert_eq!(decode_payload::<Tuple>(&[9]).unwrap(), Tuple(9));
-        assert_eq!(encode_payload(&Unit, 0).unwrap(), []);
+        assert_eq!(encode_payload(&Unit, 0).unwrap(), Vec::<u8>::new());
         assert_eq!(decode_payload::<Unit>(&[]).unwrap(), Unit);
         let value = Generic::<u8, 3> { r#type: 7 };
         assert_eq!(encode_payload(&value, 1).unwrap(), [7]);
