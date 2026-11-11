@@ -2,7 +2,9 @@
 
 A client mod can draw world quads with its own fragment shader. The mod describes the pipeline as
 data, the game builds it, and the mod draws by handle. This is the counterpart of NeoForge 26.3's
-`RegisterRenderPipelinesEvent`, and what a 1.21.1 mod's `RegisterShadersEvent` listener ports to.
+`RegisterRenderPipelinesEvent`, in a restricted form: the mod supplies the fragment stage and
+ the host fixes the rest. Vanilla requires a vertex shader and a primitive type; this API fixes
+ both rather than exposing the full pipeline description.
 
 ## 1. Write the shader
 

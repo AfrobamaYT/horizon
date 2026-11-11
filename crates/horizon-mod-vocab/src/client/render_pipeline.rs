@@ -2,7 +2,9 @@
 use crate::{Identifier, WorldDepth};
 
 /// A pipeline registered by `Hooks::register_render_pipelines`: a fragment shader from the
-/// mod's assets and the fixed state it draws with. The engine builds every GPU object.
+/// mod's assets and the fixed state it draws with. This is a restricted form: the mod supplies
+/// the fragment stage and the host fixes the rest. Vanilla requires a vertex shader and a
+/// primitive type; this API fixes both. The engine builds every GPU object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
