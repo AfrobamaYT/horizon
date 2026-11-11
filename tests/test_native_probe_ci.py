@@ -110,7 +110,9 @@ class InputBoundaryTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/native-dylib-probe.yml").read_text()
         push_filter = workflow.split("permissions:", 1)[0]
-        for path in ("packaging/windows/exe.rs", "packaging/executable_link.rs"):
+        for path in ("packaging/windows/exe.rs", "packaging/executable_link.rs",
+                     "tools/ci/dyna_ci_deps.sh", "tools/ci/apt_retry.sh",
+                     "tools/ci/dyna_ci_runner.sh", "tools/ci/install_launcher_deps.sh"):
             with self.subTest(path=path):
                 self.assertIn("- '" + path + "'", push_filter)
                 self.assertTrue(ci.selected([path], ci.sdk_roots(root)))

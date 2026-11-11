@@ -170,7 +170,7 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 100)
         self.assertEqual(count, 3)
         self.assertEqual(result.stderr.count("E: File has unexpected size"), 3)
-        self.assertIn("apt-get failed after 3 tries (exit 100)", result.stderr)
+        self.assertIn("timeout failed after 3 tries (exit 100)", result.stderr)
 
     def test_lint_enforces_api_boundary_under_central_selection(self):
         from test_ci_runners import jobs
