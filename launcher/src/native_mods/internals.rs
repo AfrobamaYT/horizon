@@ -223,7 +223,11 @@ impl Catalog {
     }
 
     pub(super) fn log_raw(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), String> {
-        if !manifest.mixin.is_empty() {
+        if manifest
+            .native
+            .as_ref()
+            .is_some_and(|native| !native.mixin.is_empty())
+        {
             super::append_log(&crate::i18n::trf(
                 "{mod}: mixins compile game code",
                 &[("mod", &manifest.id)],

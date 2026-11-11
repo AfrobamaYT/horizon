@@ -46,7 +46,7 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
         )])),
     );
     for (name, rows) in [
-        ("injection", toml::Value::try_from(&bundle.manifest.mixin)),
+        ("injection", toml::Value::try_from(&bundle.native().mixin)),
         ("bridge", toml::Value::try_from(&bundle.native().bridge)),
         ("state", toml::Value::try_from(&bundle.native().state)),
     ] {
@@ -92,7 +92,7 @@ pub(super) fn copy_tool_input(bundle: &Bundle, to: &Path) -> Result<(), String> 
         to,
         checked_files(bundle)?.into_iter().filter(|(name, _)| {
             manifest::source_file(name)
-                || bundle.manifest.mixin.iter().any(|row| row.helper == *name)
+                || bundle.native().mixin.iter().any(|row| row.helper == *name)
         }),
     )
 }
@@ -208,6 +208,9 @@ mod mixed_tests {
         let injection: toml::Value = toml::from_str("id='edit'\ntarget='game::run'\nkind='HEAD'\nhelper='src/helper.rs'\ncancellable=true\npriority=17\nselector='call'\n").unwrap();
         bundle
             .manifest
+            .native
+            .as_mut()
+            .unwrap()
             .mixin
             .push(injection.clone().try_into().unwrap());
         let bridge: toml::Value =
@@ -234,9 +237,9 @@ mod mixed_tests {
         fs::write(dir.join(manifest::MANIFEST), {
             let mut document: toml::Value =
                 toml::from_str(&fs::read_to_string(dir.join(manifest::MANIFEST)).unwrap()).unwrap();
-            document.as_table_mut().unwrap().insert(
+            document["native"].as_table_mut().unwrap().insert(
                 "mixin".into(),
-                toml::Value::try_from(&bundle.manifest.mixin).unwrap(),
+                toml::Value::try_from(&bundle.native().mixin).unwrap(),
             );
             toml::to_string(&document).unwrap()
         })

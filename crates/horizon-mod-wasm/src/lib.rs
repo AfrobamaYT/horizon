@@ -625,7 +625,9 @@ mod tests {
         let loaded = load_installed(&root, &[package]);
         assert!(
             loaded.refused.iter().any(|(id, reason)| id == "bad_mixin"
-                && reason.to_string().contains("E_MIXIN_NATIVE_ONLY")),
+                && reason
+                    .to_string()
+                    .contains("only [native] tables compile game code")),
             "{:?}",
             loaded.refused
         );

@@ -2,9 +2,10 @@
 
 A `[[native.mixin]]` is a source-level edit made by horizon-mixins. Its helper is compiled
 inside a game function, where Rust privacy and explicit bindings determine what
-it can use. The game is rebuilt on the player's computer. Mixins are native only,
-trusted like internals, and are not sandboxed. A wasm mod declaring one is refused
-with `E_MIXIN_NATIVE_ONLY`.
+it can use. The game is rebuilt on the player's computer. Mixins are trusted like
+internals and are not sandboxed. Only the tables of `[native]` compile game code, and a
+manifest is `[native]` or `[wasm]`, never both, so a wasm mod cannot declare one: it is
+refused with that reason.
 
 ## Declaration
 
