@@ -105,6 +105,8 @@ pub struct RenderAssets {
     pub fusion: crate::fusion::FusionTextures,
     /// The keyframe animations mods and packs ship (`neoforge/animations/entity`), by id.
     pub mod_animations: crate::mod_animations::Animations,
+    /// The mods' registered render pipelines as this load built them.
+    pub mod_pipelines: crate::mod_pipelines::Pipelines,
     /// Counts up on every successful resource load, including model-only changes.
     /// Only publishing this store invalidates the previous store's model handles and sprites.
     pub generation: u64,
@@ -125,6 +127,14 @@ impl RenderAssets {
     /// (`assets/<namespace>/neoforge/animations/entity/<path>.json`).
     pub fn animation(&self, id: &mod_api::Identifier) -> Option<mod_api::AnimationHolder> {
         self.mod_animations.get(id).cloned()
+    }
+
+    /// The handle of the registered render pipeline `id` in this published store.
+    pub fn render_pipeline(
+        &self,
+        id: &mod_api::Identifier,
+    ) -> std::result::Result<mod_api::RenderPipelineRef, mod_api::RenderPipelineError> {
+        self.mod_pipelines.resolve(id)
     }
 
     /// Validate a handle once at consumption, before appending any geometry.
@@ -458,6 +468,7 @@ impl RenderAssets {
         }
         // `finish` grows the buffer by doubling: keep only the bytes in use.
         sprites.pixels.shrink_to_fit();
+        let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         Ok(Self {
             sprite_size: sprites.size,
             sprite_minimum_size: sprites.minimum_size,
@@ -478,7 +489,8 @@ impl RenderAssets {
             connected,
             fusion,
             mod_animations: crate::mod_animations::Animations::load(root.source()),
-            generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            mod_pipelines: crate::mod_pipelines::Pipelines::load(root.source(), generation),
+            generation,
         })
     }
 }
