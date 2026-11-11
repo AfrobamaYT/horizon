@@ -319,7 +319,8 @@ pub mod tests {
     }
 
     /// Install parts that answer a block's friction: glass is 0.98 to a player only, white wool
-    /// 0.98 to every entity, and red and blue wool answer NaN and 3.0, which are out of range.
+    /// 0.98 to every entity, and red, blue, green and black wool answer NaN, 3.0, infinity and
+    /// -0.5, which are out of range.
     pub fn friction_game_thread() {
         struct Answer(f32, Option<&'static str>);
         #[mod_api::horizon_part]
@@ -339,6 +340,8 @@ pub mod tests {
                     ("minecraft:white_wool", Answer(0.98, None)),
                     ("minecraft:red_wool", Answer(f32::NAN, None)),
                     ("minecraft:blue_wool", Answer(3.0, None)),
+                    ("minecraft:green_wool", Answer(f32::INFINITY, None)),
+                    ("minecraft:black_wool", Answer(-0.5, None)),
                 ] {
                     let key = r.block_key(block);
                     r.block_part(key, answer);

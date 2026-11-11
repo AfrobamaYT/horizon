@@ -72,7 +72,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_block_part_answers_the_friction_an_entity_reads() {
         // The fixture's parts: glass is 0.98 to a player only, white wool 0.98 to every entity,
-        // red wool NaN and blue wool 3.0.
+        // red wool NaN, blue wool 3.0, green wool infinity and black wool -0.5.
         mod_api::__private::part_tests::friction_game_thread();
         // The client library asks the mods through the executable's callbacks.
         crate::entry::install_client_hooks();
@@ -146,6 +146,8 @@ mod tests {
                 // Answers out of range are dropped for the block's own.
                 ("minecraft:red_wool", 0.6, 0.10920001, 0.6),
                 ("minecraft:blue_wool", 0.6, 0.10920001, 0.6),
+                ("minecraft:green_wool", 0.6, 0.10920001, 0.6),
+                ("minecraft:black_wool", 0.6, 0.10920001, 0.6),
             ] {
                 let state = registry.default_state(block).unwrap();
                 game.world.set(floor.x, floor.y, floor.z, state).unwrap();
