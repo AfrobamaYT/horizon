@@ -8,6 +8,7 @@
 //! everything else.
 mod attack_target;
 mod interaction_actions;
+mod raw_ingress;
 mod recipe_properties;
 mod use_item;
 
@@ -2252,20 +2253,7 @@ impl Game<'_> {
             return Ok(());
         };
         let mut events = std::mem::take(&mut r.backlog);
-        // Chunk packets start decoding now; the frame that reaches one in
-        // order inserts its column.
-        for receipt in r.session.poll() {
-            let (event, credit) = receipt.into_parts();
-            events.push_back(match event {
-                Event::Packet(p) if matches!(*p, C::LevelChunkWithLight(_)) => {
-                    match r.decoder.submit(r.chunk_format.clone(), p) {
-                        None => Received::Chunk(r.chunk_format.clone(), credit),
-                        Some(p) => Received::Event(Event::Packet(p), credit),
-                    }
-                }
-                event => Received::Event(event, credit),
-            });
-        }
+        r.receive_credited_backlog(&mut events);
         let overdue = r
             .backlog_since
             .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
