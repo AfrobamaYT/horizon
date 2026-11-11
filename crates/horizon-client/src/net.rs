@@ -1847,11 +1847,9 @@ mod tests {
                     .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
                     .unwrap();
             }
-            let error = thread
-                .join()
-                .unwrap()
-                .err()
-                .expect("old Horizon server admitted");
+            let Err(error) = thread.join().unwrap() else {
+                panic!("old Horizon server admitted");
+            };
             assert!(error.text.contains(if wrong_version {
                 "protocol version"
             } else {

@@ -316,6 +316,22 @@ fn refused_client(brand: &str) -> (String, bool) {
                         .encode(),
                 )
                 .unwrap(),
+            cfg::Clientbound::CustomPayload(p)
+                if brand == "horizon"
+                    && p.channel == horizon_protocol::payload_negotiation::CHANNEL =>
+            {
+                use horizon_protocol::payload_negotiation::{CHANNEL, Control, Manifest};
+                if Control::decode(&p.data).unwrap() == Control::Query {
+                    c.send(
+                        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                            channel: CHANNEL.into(),
+                            data: Control::Offer(Manifest::default()).encode().unwrap(),
+                        })
+                        .encode(),
+                    )
+                    .unwrap();
+                }
+            }
             cfg::Clientbound::CustomPayload(p) if p.channel == datapack_net::CHANNEL => {
                 registry_payload = true;
             }
