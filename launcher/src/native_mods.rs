@@ -2269,8 +2269,12 @@ fn pipeline(
             })
             .collect();
         let wanted = crates::wanted(&fresh, &paths)?;
-        let dependency_plan = registry_plan::Plan::read(&game_lock, &projects, &wanted)?;
-        dependency_plan.fetch(&rust, &real.join("registry-fetch"))?;
+        let mut dependency_plan = registry_plan::Plan::read(&game_lock, &projects, &wanted)?;
+        let fetch = real.join("registry-fetch");
+        registry_generate::stage_fetch(&projects, &declared, &fetch, &dependency_plan.mods)?;
+        let patches = registry_generate::source_patches(&fresh)?;
+        dependency_plan.authorize_game_patches(&patches);
+        dependency_plan.fetch_with_patches(&rust, &fetch, &patches)?;
         fs::write(
             fresh.join("Cargo.lock"),
             dependency_plan.allowed.seed(&read_lock(&fresh)?)?,
