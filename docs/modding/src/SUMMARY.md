@@ -17,6 +17,7 @@
 - [Wire types](how-to/wire-types.md)
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: server read tier](concepts/server-read-tier.md)
 - [Design: vehicle health layout](concepts/vehicle-health-layout.md)
 - [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
 - [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
