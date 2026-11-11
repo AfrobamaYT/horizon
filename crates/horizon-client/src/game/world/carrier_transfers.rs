@@ -1027,6 +1027,7 @@ fn carrier_stop_session(game: &mut Game<'_>, error: &TransferError) {
 mod tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
+    use crate::game::spill;
     use horizon_core::geometry::Direction as CoreDirection;
     use horizon_core::position::BlockPos;
     use std::sync::Arc;
@@ -1362,7 +1363,7 @@ mod tests {
             ]);
             let tag =
                 horizon_client::save::encode_block_entity((4, 64, 4), &entity, "minecraft:chest");
-            super::spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
+            spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
             assert!(matches!(
                 game.carrier_assemble(7, &[BlockPos::new(4, 64, 4)]),
                 Err(TransferError::SavedBlockEntity([4, 64, 4]))
@@ -1377,7 +1378,7 @@ mod tests {
             Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).saved = None;
             game.carrier_assemble(7, &[BlockPos::new(4, 64, 4)])
                 .unwrap();
-            super::spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
+            spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
             assert!(matches!(
                 game.carrier_disassemble(7, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0]),
                 Err(TransferError::SavedBlockEntity([4, 64, 4]))
@@ -1401,10 +1402,7 @@ mod tests {
                 Err(TransferError::SavedBlockEntity([4, 64, 4]))
             ));
             assert_eq!(game.world.block(4, 64, 4), air);
-            assert_eq!(
-                super::spill::saved_entity(&game.world, [4, 64, 4]),
-                Some(tag)
-            );
+            assert_eq!(spill::saved_entity(&game.world, [4, 64, 4]), Some(tag));
         });
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1437,7 +1435,7 @@ mod tests {
             ]);
             let tag =
                 horizon_client::save::encode_block_entity((4, 64, 4), &entity, "minecraft:chest");
-            super::spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
+            spill::put_saved_entity(&mut game.world, [4, 64, 4], tag.clone());
             let images = [crate::carrier_store::OperationCell {
                 world: [4, 64, 4],
                 local: [0, 0, 0],
@@ -1457,10 +1455,7 @@ mod tests {
                 Err(TransferError::SavedBlockEntity([4, 64, 4]))
             ));
             assert_eq!(game.world.block(4, 64, 4), chest);
-            assert_eq!(
-                super::spill::saved_entity(&game.world, [4, 64, 4]),
-                Some(tag)
-            );
+            assert_eq!(spill::saved_entity(&game.world, [4, 64, 4]), Some(tag));
         });
         let _ = std::fs::remove_dir_all(&root);
     }
