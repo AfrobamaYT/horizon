@@ -1090,15 +1090,25 @@ fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
             let server = LogicalSide::Server;
             let first = Step::Phase(UsePhase::ItemBeforeBlock, server);
 
-            // A Part's answer ends the click before the block is asked.
-            *observer.0.lock().unwrap() = Controls {
-                record_first: true,
-                first_part_answer: Some(Answer::Success),
-                ..Controls::default()
-            };
-            assert!(use_block(game, false));
-            assert_eq!(game.world.block(0, 64, 0), lever);
-            assert_eq!(observer.0.lock().unwrap().steps, [first, Step::FirstPart]);
+            // Every non-PASS Part answer stops before the block, including TRY.
+            for (answer, used, swings) in [
+                (Answer::Success, true, 1),
+                (Answer::SuccessServer, true, 1),
+                (Answer::Consume, true, 0),
+                (Answer::Fail, true, 0),
+                (Answer::TryWithEmptyHand, false, 0),
+            ] {
+                *observer.0.lock().unwrap() = Controls {
+                    record_first: true,
+                    first_part_answer: Some(answer),
+                    ..Controls::default()
+                };
+                let before = game.swings_started;
+                assert_eq!(use_block(game, false), used);
+                assert_eq!(game.swings_started - before, swings);
+                assert_eq!(game.world.block(0, 64, 0), lever);
+                assert_eq!(observer.0.lock().unwrap().steps, [first, Step::FirstPart]);
+            }
 
             // The broadcast event goes first: its cancel stops the Part.
             *observer.0.lock().unwrap() = Controls {
