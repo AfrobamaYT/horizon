@@ -1592,7 +1592,18 @@ pub fn render_skinned(
     skin: &mut super::skin::Skin,
 ) {
     if m.is_invisible() {
-        render_with_hidden(m, alpha, camera, atlas, light, data, &[], hidden, parts, out);
+        render_with_hidden(
+            m,
+            alpha,
+            camera,
+            atlas,
+            light,
+            data,
+            &[],
+            hidden,
+            parts,
+            out,
+        );
         return;
     }
     render_visible(
@@ -3000,7 +3011,16 @@ mod tests {
         let cpu = |hidden| {
             let mut out = Vec::new();
             render_with_hidden(
-                &cow, 0.5, glam::DVec3::ZERO, &atlas, 0xf0f0, &data, &[], hidden, None, &mut out,
+                &cow,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                &[],
+                hidden,
+                None,
+                &mut out,
             );
             out.len()
         };

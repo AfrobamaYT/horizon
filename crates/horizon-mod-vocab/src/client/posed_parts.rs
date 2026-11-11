@@ -88,7 +88,8 @@ pub struct HiddenParts {
 }
 
 /// Why [`HiddenParts::hide_named`] took no name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
 pub enum HideError {
     /// [`MAX_HIDDEN_PARTS`] names are hidden already.
     Full,
@@ -255,7 +256,10 @@ mod tests {
         assert!(!hidden.contains(HumanoidPart::Hat) && !hidden.contains_named("nos"));
         assert_eq!(hidden.names().collect::<Vec<_>>(), ["head", "nose"]);
         assert_eq!(hidden.hide_named(""), Err(HideError::BadName));
-        assert_eq!(hidden.hide_named(&"x".repeat(MAX_PART_NAME + 1)), Err(HideError::BadName));
+        assert_eq!(
+            hidden.hide_named(&"x".repeat(MAX_PART_NAME + 1)),
+            Err(HideError::BadName)
+        );
         for i in 0..MAX_HIDDEN_PARTS - 2 {
             assert_eq!(hidden.hide_named(&format!("part_{i}")), Ok(()));
         }
