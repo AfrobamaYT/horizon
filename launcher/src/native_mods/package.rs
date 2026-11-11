@@ -253,6 +253,12 @@ mod mixed_tests {
         let first = key();
         fs::write(dir.join("src/helper.rs"), "let a = 2;").unwrap();
         assert_ne!(first, key());
+        let copied = dir.join("input");
+        copy_tool_input(&bundle, &copied).unwrap();
+        assert_eq!(
+            fs::read_to_string(copied.join("src/helper.rs")).unwrap(),
+            "let a = 2;"
+        );
         tool_manifest(&bundle).unwrap();
         let tool: toml::Value =
             toml::from_str(&fs::read_to_string(dir.join(MANIFEST)).unwrap()).unwrap();
@@ -260,12 +266,6 @@ mod mixed_tests {
         assert_eq!(tool["bridge"][0], bridge);
         assert_eq!(tool["state"][0], state);
         assert_eq!(tool["module"][0], module);
-        let copied = dir.join("input");
-        copy_tool_input(&bundle, &copied).unwrap();
-        assert_eq!(
-            fs::read_to_string(copied.join("src/helper.rs")).unwrap(),
-            "let a = 2;"
-        );
         fs::remove_dir_all(dir).unwrap();
     }
 

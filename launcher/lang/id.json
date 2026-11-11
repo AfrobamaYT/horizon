@@ -1350,8 +1350,6 @@
   "← All servers": "← Semua server",
   "← Newer": "← Lebih baru",
   "replace needs a return its record carries": "replace needs a return its record carries",
-  "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.": "E_INJECT_EXPRESSION_TYPE: {injections}: the declared type `{type}` doesn't match the expression `{expr}` in {target}; set `type` in its [[inject]] to the type the game uses there.",
-  "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.": "E_INJECT_FIELD_TYPE: {injections}: the declared field type `{type}` for `{field}` in {target} failed to compile; use a visible type with the required Default and Clone bounds.",
   "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.": "The prebuilt game cannot expose {crate}: it is build-only or has ambiguous metadata.",
   "Allow executing this checkout's build code and unsigned game with your rights": "Allow executing this checkout's build code and unsigned game with your rights",
   "An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.": "An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.",
