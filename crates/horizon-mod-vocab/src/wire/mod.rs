@@ -1150,6 +1150,17 @@ macro_rules! layout_fields {
 pub(crate) use layout_fields;
 
 #[cfg(test)]
+fn hook_id_runtime_reference() -> u64 {
+    let names: &[&str] = &include!(concat!(env!("OUT_DIR"), "/hook_id_variant_names.rs"));
+    let mut hash = layout_name("HookId");
+    // Keep the independent reference as a runtime loop even in optimized tests.
+    for name in std::hint::black_box(names) {
+        hash = layout_mix(hash, layout_name(name));
+    }
+    layout_mix(layout_name("enum"), hash)
+}
+
+#[cfg(test)]
 mod fieldless_enum_goldens;
 
 #[cfg(test)]

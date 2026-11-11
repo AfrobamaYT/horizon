@@ -93,6 +93,10 @@ def main():
     manifest = {"base": args.base, "configuration": "native default features, normal dev opt0, before fieldless const fold", "enums": [
         {"name": path.split("::")[-1], "path": path, "hash": hashes[path], "canonical_path": path}
         for path in symbols]}
+    for entry in manifest["enums"]:
+        if entry["canonical_path"] == "crate::generated::HookId":
+            entry["baseline_hash"] = entry.pop("hash")
+            entry["comparison"] = "same_source_generated_variants"
     args.output.write_text(json.dumps(manifest, indent=2) + "\n")
     args.identities_output.write_text(json.dumps(sorted(symbols), indent=2) + "\n")
 

@@ -74,6 +74,15 @@ class WireEnumDiscoveryTests(unittest.TestCase):
         self.assertEqual(directory, Path("target/debug/deps"))
         self.assertEqual(externs, ["core=target/debug/deps/libcore-abc.rlib"])
 
+    def test_hook_id_guard_uses_same_source_reference_not_captured_constant(self):
+        manifest = json.loads(MODULE.GOLDENS.read_text())
+        hook = next(entry for entry in manifest["enums"] if entry["canonical_path"] == "crate::generated::HookId")
+        before = MODULE.render({"enums": [hook]})
+        self.assertIn("super::hook_id_runtime_reference()", before)
+        self.assertNotIn(hook["baseline_hash"], before)
+        hook["baseline_hash"] = "0000000000000000"
+        self.assertEqual(MODULE.render({"enums": [hook]}), before)
+
     def test_deleting_a_real_frozen_pin_is_rejected_before_discovery(self):
         manifest = json.loads(MODULE.GOLDENS.read_text())
         required = json.loads((ROOT / "tools/fixtures/wire_enum_baseline_identities.json").read_text())

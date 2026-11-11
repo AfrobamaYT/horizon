@@ -117,7 +117,8 @@ def render(manifest):
              "use super::Wire;", "", "#[test]",
              "fn existing_fieldless_enum_layouts_match_baseline() {"]
     for entry in manifest["enums"]:
-        lines.append(f'    assert_eq!(<{entry["path"]} as Wire>::layout(&mut vec![]), 0x{entry["hash"]}, "{entry["name"]}");')
+        expected = "super::hook_id_runtime_reference()" if entry.get("comparison") == "same_source_generated_variants" else f'0x{entry["hash"]}'
+        lines.append(f'    assert_eq!(<{entry["path"]} as Wire>::layout(&mut vec![]), {expected}, "{entry["name"]}");')
     lines.append("}\n")
     result = subprocess.run(["rustfmt", "--edition", "2024", "--emit", "stdout"],
                             input="\n".join(lines), text=True, capture_output=True, check=True)

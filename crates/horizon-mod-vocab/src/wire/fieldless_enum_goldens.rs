@@ -317,7 +317,7 @@ fn existing_fieldless_enum_layouts_match_baseline() {
     );
     assert_eq!(
         <crate::generated::HookId as Wire>::layout(&mut vec![]),
-        0x3a84501fc3f231ba,
+        super::hook_id_runtime_reference(),
         "HookId"
     );
     assert_eq!(

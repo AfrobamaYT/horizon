@@ -378,8 +378,9 @@
     {
       "name": "HookId",
       "path": "crate::generated::HookId",
-      "hash": "3a84501fc3f231ba",
-      "canonical_path": "crate::generated::HookId"
+      "canonical_path": "crate::generated::HookId",
+      "baseline_hash": "3a84501fc3f231ba",
+      "comparison": "same_source_generated_variants"
     },
     {
       "name": "HudMode",

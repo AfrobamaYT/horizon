@@ -5,8 +5,19 @@ The regression is deliberately frozen to the 151 affected derives existing at
 must join. New enums, including a new enum sharing an old leaf name in another
 module, require no central manifest or generated-test edit. Discovery uses
 qualified module identities and checks that every frozen pin still exists.
-Deleting a required pin fails against the separate frozen identity inventory;
+Deleting a required guard fails against the separate frozen identity inventory;
 removing/moving an old type also fails discovery or the ordinary Rust test.
+There are 150 absolute hash pins plus a same-source equivalence guard for HookId.
+HookId is the only fieldless enum among these 151 defined in generator output;
+the other generated provider/host enums have payloads and are not in this set.
+
+HookId grows whenever hooks are added. Its captured `baseline_hash` is historical,
+not an assertion about future builds. The vocabulary build script emits a private
+OUT_DIR array from that build's generated variant names. The ordinary test compares
+the const-folded actual layout with a runtime loop over those names, using the
+existing layout_name/layout_mix functions in the original order. A black-box slice
+keeps the reference loop from becoming another huge compile-time expression.
+No changing variant list is checked in, and the reference is cfg(test)-only.
 
 `tools/fixtures/wire_enum_layouts.json` contains hashes captured from the actual
 pre-fold library at that base, normal native/default-feature opt0.
@@ -65,7 +76,11 @@ cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_m
 
 Omit `--check` only to regenerate the ordinary Rust file from the frozen pins.
 CI runs this discovery/generated-file check and the Rust test in the existing
-wasm-mods fixture job. Expansion alone does not emit an rlib: its wrapper must be
+wasm-mods fixture job. These verify the 150 pins and same-source HookId guard,
+not the capture producer's compiler invocation. Expansion alone supplies no rlib;
+the fixture does not add an extra library build solely for a producer check.
+Producer invocation on a new source revision requires matching compiled artifacts
+and must not be claimed from expansion-only or old-base evidence. Expansion alone does not emit an rlib: its wrapper must be
 unset because sccache expects that artifact and otherwise fails. Bootstrap enables
 diagnostics only; neither flag changes production compilation.
 
