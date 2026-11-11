@@ -119,9 +119,15 @@ impl Game<'_> {
         };
         let now = self.world.game_time;
         let items = world_items!(self);
-        let meeting = villager::meet(&mut self.mobs, ia, ib, now, |item| {
-            items.get(item).map_or(64, |i| i.max_stack)
-        });
+        let professions = self.stations().professions.clone();
+        let meeting = villager::meet(
+            &mut self.mobs,
+            ia,
+            ib,
+            now,
+            |item| items.get(item).map_or(64, |i| i.max_stack),
+            &professions,
+        );
         for stack in meeting.thrown {
             self.villager_throw(meeting.from, meeting.eye, meeting.to, stack);
         }
@@ -328,7 +334,8 @@ impl Game<'_> {
         for i in due {
             let m = &self.mobs[i];
             let area = m.bounds().inflate(Vec3::new(32.0, 16.0, 32.0));
-            let requested = villager::requested_items(m);
+            let professions = self.stations().professions.clone();
+            let requested = villager::requested_items(m, &professions);
             let eye = Vec3::new(m.position.x, m.eye_y(), m.position.z);
             let mut best: Option<(f64, Vec3)> = None;
             for e in &self.dropped {
@@ -342,7 +349,7 @@ impl Game<'_> {
                 let item = &e.stack.item;
                 let wants = villager::food_points(item) > 0
                     || picks_up.as_ref().is_some_and(|t| t.contains(&**item))
-                    || requested.contains(&&**item);
+                    || requested.iter().any(|key| key == &**item);
                 let fits =
                     villager::ext(m).is_none_or(|x| x.can_add(&e.stack, self.item_max_stack(item)));
                 // ItemEntity's eye height is 0.2125.
@@ -397,7 +404,8 @@ impl Game<'_> {
             if scan.is_empty() {
                 continue;
             }
-            let requested = villager::requested_items(m);
+            let professions = self.stations().professions.clone();
+            let requested = villager::requested_items(m, &professions);
             let mut j = 0;
             loop {
                 j = scan.next_from(j, self.dropped.len());
@@ -415,7 +423,7 @@ impl Game<'_> {
                 let item = e.stack.item.clone();
                 let wants = villager::food_points(&item) > 0
                     || picks_up.as_ref().is_some_and(|t| t.contains(&*item))
-                    || requested.contains(&&*item);
+                    || requested.iter().any(|key| key == &*item);
                 if !wants {
                     j += 1;
                     continue;
@@ -693,6 +701,51 @@ mod nested_spawn_tests {
                 |game| {
                     game.wake_villager(99);
                 },
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod off_level_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn retained_ancestor_does_not_consume_a_due_villager_sensor() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            let mut m = Mob::new(73, kind.clone(), Vec3::new(1.0, 80.0, 0.5), 0.0);
+            villager_brain::init(&mut m, 0, 0, 0);
+            let mut health = horizon_client::health::TestLevel::new(0);
+            for _ in 0..40 {
+                villager_brain::tick(
+                    &mut m,
+                    &game.mob_world_base(&[]),
+                    &mut health.level(),
+                    &mut Vec::new(),
+                );
+            }
+            m.extra.mount = Some(72);
+            game.mobs.push(m);
+            let ghost = Mob::new(72, kind, Vec3::ZERO, 0.0);
+            game.persist
+                .off_level
+                .insert(72, crate::game::persist::OffLevel::Mob(ghost));
+            game.tick_creature_entities().unwrap();
+            assert!(
+                villager_brain::take_item_scan(game.mob_object_mut(73).unwrap()),
+                "a frozen resident's due sensor was consumed by independent item sensing"
             );
         });
     }

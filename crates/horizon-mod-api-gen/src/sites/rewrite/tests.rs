@@ -1,4 +1,6 @@
 use super::*;
+mod listed_bench;
+mod owned;
 use crate::crossing::tests::internal;
 
 fn rewrite(
@@ -7,7 +9,7 @@ fn rewrite(
     entries: &[Internal],
     declarations: &[Declaration],
 ) -> Result<(String, Vec<Site>), Error> {
-    super::rewrite(source, module, entries, declarations, false)
+    super::rewrite(source, module, entries, declarations)
 }
 
 fn entries() -> Vec<Internal> {
@@ -36,7 +38,6 @@ fn entries() -> Vec<Internal> {
 }
 fn declaration(selector: &str, ordinal: Option<usize>) -> Declaration {
     Declaration {
-        local: None,
         target: "horizon_client::game::Game::run".into(),
         selector: selector.into(),
         ordinal,
@@ -71,7 +72,6 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
         internal("lower::make", "fn", "fn make() -> Made"),
     ];
     let request = Declaration {
-        local: None,
         target: "lower::lower_run".into(),
         selector: "make".into(),
         ordinal: Some(0),
@@ -372,7 +372,7 @@ fn explicit_receivers_preserve_canonical_identity_and_execute() {
         .unwrap();
         assert_eq!(sites[0].call, "horizon_client::game::Game::step");
         assert_eq!(sites[0].ordinal, 1);
-        names.push(crate::sites::source::facade_name(
+        names.push(crate::sites::facade_name(
             &sites[0].target,
             &sites[0].call,
             sites[0].ordinal,
@@ -420,7 +420,7 @@ fn explicit_receivers_preserve_canonical_identity_and_execute() {
     assert_eq!(names[0], names[1]);
     assert_ne!(
         names[0],
-        crate::sites::source::facade_name(
+        crate::sites::facade_name(
             "horizon_client::game::Game::run",
             "horizon_client::game::other",
             1
@@ -456,246 +456,70 @@ fn changing_an_import_to_a_same_signature_callee_changes_the_fingerprint() {
 }
 
 #[test]
-fn modify_local_executes_real_binding_at_call_boundary() {
-    let catalog = [
-        internal("fixture::f", "fn", "fn f() -> i32"),
-        internal("fixture::sink", "fn", "fn sink(n: i32)"),
+fn borrowed_calls_have_call_scoped_records_for_both_ordinals() {
+    let source = "fn run(wood: &str) { editor_sprite(\"hanging_signs\", wood); editor_sprite(\"signs\", wood); }";
+    let entries = vec![
+        internal("horizon_client::game::run", "fn", "fn run(wood: &str)"),
+        internal(
+            "horizon_client::game::editor_sprite",
+            "fn",
+            "fn editor_sprite(folder: &str, wood: &str) -> String",
+        ),
     ];
-    for source in [
-        "fn f() -> i32 { let mut n: i32 = 3; sink(n); n * 2 }",
-        "fn f() -> i32 { let mut n = 3i32; sink(n); n * 2 }",
-    ] {
-        let (untouched, sites) = super::rewrite(source, "fixture", &catalog, &[], true).unwrap();
-        assert_eq!(untouched, source);
-        assert!(sites.is_empty());
-        for (after, listeners, expected_sink, expected_result) in [
-            (false, "", 3, 6),
-            (false, "*receiver = 7;", 7, 14),
-            (true, "*receiver = 7;", 3, 14),
-            (
-                false,
-                "let listeners: [fn(&mut i32); 2] = [|n| *n += 2, |n| *n *= 3]; for listener in listeners { listener(receiver); }",
-                15,
-                30,
-            ),
-        ] {
-            let request = Declaration {
-                target: "fixture::f".into(),
-                selector: "fixture::sink".into(),
-                ordinal: Some(0),
-                ctx: String::new(),
-                origin: "local fixture".into(),
-                local: Some(super::super::Local {
-                    binding: "n".into(),
-                    ty: "i32".into(),
-                    after,
-                }),
-            };
-            let (rewritten, sites) =
-                super::rewrite(source, "fixture", &catalog, &[request], true).unwrap();
-            let variant = &sites[0].name;
-            let enabled = !listeners.is_empty();
-            let fixture = format!(
-                r#"
-            extern crate self as mod_points;
-            extern crate self as horizon_mod_api_macros;
-            pub enum SiteId {{ {variant} }}
-            pub mod __private {{ pub static SITES: [std::sync::atomic::AtomicBool; 1] = [std::sync::atomic::AtomicBool::new({enabled})]; }}
-            #[macro_export] macro_rules! site {{ ($wrap:ident, $place:ident, $listener:ident, $recv_ty:ident, $record:ident, $output:ident, $receiver:expr, $args:expr, $original:expr) => {{{{ let receiver = $receiver; {listeners} }}}}; }}
-            static SINK: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-            fn sink(n: i32) {{ SINK.store(n, std::sync::atomic::Ordering::Relaxed); }}
-            {rewritten}
-            fn main() {{ assert_eq!(f(), {expected_result}); assert_eq!(SINK.load(std::sync::atomic::Ordering::Relaxed), {expected_sink}); }}
-        "#
-            );
-            let dir = std::env::temp_dir().join(format!(
-                "horizon-local-{}-{after}-{expected_result}",
-                std::process::id()
-            ));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("main.rs"), &fixture).unwrap();
-            let result = std::process::Command::new("rustc")
-                .args(["--edition", "2024"])
-                .arg(dir.join("main.rs"))
-                .arg("-o")
-                .arg(dir.join("run"))
-                .output()
-                .unwrap();
-            assert!(
-                result.status.success(),
-                "{}\n{fixture}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            assert!(
-                std::process::Command::new(dir.join("run"))
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-            std::fs::remove_dir_all(dir).unwrap();
-        }
+    for ordinal in [0, 1] {
+        let mut request = declaration("horizon_client::game::editor_sprite", Some(ordinal));
+        request.target = "horizon_client::game::run".into();
+        let (rewritten, sites) =
+            super::rewrite(source, "horizon_client::game", &entries, &[request]).unwrap();
+        syn::parse_file(&rewritten).unwrap();
+        assert_eq!(sites[0].ordinal, ordinal);
+        assert_eq!(sites[0].output, ":: std :: string :: String");
+        assert!(rewritten.contains("Args < 'a >"), "{rewritten}");
+        assert!(rewritten.contains("for < 'g , 'a >"));
+        assert!(rewritten.contains("folder : & 'a str"));
     }
 }
 
 #[test]
-fn modify_local_refuses_uncertain_bindings_by_name() {
-    let catalog = [
-        internal("fixture::f", "fn", "fn f() -> i32"),
-        internal("fixture::sink", "fn", "fn sink(n: i32)"),
+fn engine_borrow_and_copy_array_are_call_scoped() {
+    let source = "fn sense_secondary(w: &MobWorld) { farmland(w, [1, 2, 3]); }";
+    let module = "horizon_client_lib::mobs::villager_brain::secondary";
+    let entries = vec![
+        internal(
+            "horizon_client_lib::mobs::MobWorld",
+            "struct",
+            "pub struct MobWorld<'a> { marker: &'a u32 }",
+        ),
+        internal(
+            &format!("{module}::sense_secondary"),
+            "fn",
+            "fn sense_secondary(w: &MobWorld)",
+        ),
+        internal(
+            &format!("{module}::farmland"),
+            "fn",
+            "fn farmland(w: &MobWorld, p: [i32; 3]) -> bool",
+        ),
     ];
-    for (source, binding, ty, words) in [
-        (
-            "fn f() -> i32 { let mut n: i32 = 3; let n = n + 1; sink(n); n * 2 }",
-            "n",
-            "i32",
-            vec!["n", "shadowed"],
-        ),
-        (
-            "fn f() -> i32 { let n: i32 = 3; sink(n); n * 2 }",
-            "n",
-            "i32",
-            vec!["n", "mut"],
-        ),
-        (
-            "fn f() -> i32 { let mut n: i32 = 3; sink(n); n * 2 }",
-            "n",
-            "i64",
-            vec!["n", "i32", "i64"],
-        ),
-        (
-            "fn f() -> i32 { let mut n: i32 = 3; sink(n); n * 2 }",
-            "m",
-            "i32",
-            vec!["m", "not found"],
-        ),
-        (
-            "fn f() -> i32 { let mut n: i32 = 3; let r = &n; sink(n); n * 2 }",
-            "n",
-            "i32",
-            vec!["n", "borrowed"],
-        ),
-        (
-            "fn f() -> i32 { let mut n: Thing = make(); consume(n); sink(3); 6 }",
-            "n",
-            "Thing",
-            vec!["n", "moved"],
-        ),
-    ] {
-        let request = Declaration {
-            target: "fixture::f".into(),
-            selector: "fixture::sink".into(),
-            ordinal: Some(0),
-            ctx: String::new(),
-            origin: "local fixture".into(),
-            local: Some(super::super::Local {
-                binding: binding.into(),
-                ty: ty.into(),
-                after: false,
-            }),
-        };
-        let error = super::rewrite(source, "fixture", &catalog, &[request], true)
+    let mut entries = entries;
+    // The real catalog resolves this imported engine type before lowering.
+    let world_path = entries[0].path.clone();
+    entries[2].refs.insert("MobWorld".into(), world_path);
+    let mut request = declaration(&entries[2].path, Some(0));
+    request.target = entries[1].path.clone();
+    let (rewritten, sites) = super::rewrite(source, module, &entries, &[request.clone()]).unwrap();
+    syn::parse_file(&rewritten).unwrap();
+    assert!(
+        rewritten.contains("& 'a crate :: mobs :: MobWorld < 'g >"),
+        "{rewritten}"
+    );
+    assert!(rewritten.contains("p : [i32 ; 3]"));
+    assert_eq!(sites[0].output, "bool");
+    entries[2].signature = "fn farmland(w: &mut MobWorld, p: [i32; 3]) -> bool".into();
+    assert!(
+        super::rewrite(source, module, &entries, &[request])
             .unwrap_err()
-            .to_string();
-        for word in words {
-            assert!(error.contains(word), "{error}");
-        }
-    }
-}
-
-#[test]
-fn modify_local_refuses_pattern_borrows_uninitialized_and_inferred_bindings() {
-    let catalog = [
-        internal("fixture::f", "fn", "fn f() -> i32"),
-        internal("fixture::sink", "fn", "fn sink(n: i32)"),
-    ];
-    for (body, reason) in [
-        (
-            "let mut n: i32 = 3; let ref r = n; sink(0); *r",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32 = 3; let ref mut r = n; sink(0); *r",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32 = 3; let (ref r, _) = (n, 0); sink(0); *r",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32 = 3; match n { ref r => { retain(r); } } sink(0); n",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32 = 3; match Some(n) { Some(ref mut r) => { retain(r); }, _ => {} } sink(0); n",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32 = 3; if let Some(ref r) = Some(n) { retain(r); } sink(0); n",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32 = 3; while let Some(ref mut r) = Some(n) { retain(r); break; } sink(0); n",
-            "binding is borrowed across the position",
-        ),
-        (
-            "let mut n: i32; sink(0); n = 1; n",
-            "binding is not initialized at its declaration",
-        ),
-        (
-            "let mut n = 3; sink(0); n",
-            "cannot prove declared type `i32`",
-        ),
-    ] {
-        for after in [false, true] {
-            let request = Declaration {
-                target: "fixture::f".into(),
-                selector: "fixture::sink".into(),
-                ordinal: Some(0),
-                ctx: String::new(),
-                origin: "local fixture".into(),
-                local: Some(super::super::Local {
-                    binding: "n".into(),
-                    ty: "i32".into(),
-                    after,
-                }),
-            };
-            let error = super::rewrite(
-                &format!("fn f() -> i32 {{ {body} }}"),
-                "fixture",
-                &catalog,
-                &[request],
-                true,
-            )
-            .unwrap_err();
-            assert_eq!(
-                error.to_string(),
-                format!("local fixture: fixture::f: local `n`: {reason}")
-            );
-        }
-    }
-    // An after position also scans the selected call's argument expressions.
-    let request = Declaration {
-        target: "fixture::f".into(),
-        selector: "fixture::sink".into(),
-        ordinal: Some(0),
-        ctx: String::new(),
-        origin: "local fixture".into(),
-        local: Some(super::super::Local {
-            binding: "n".into(),
-            ty: "i32".into(),
-            after: true,
-        }),
-    };
-    let error = super::rewrite(
-        "fn f() -> i32 { let mut n: i32 = 3; sink(match n { ref r => *r }); n }",
-        "fixture",
-        &catalog,
-        &[request],
-        true,
-    )
-    .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "local fixture: fixture::f: local `n`: binding is borrowed across the position"
+            .to_string()
+            .contains("borrowing or non-Copy")
     );
 }

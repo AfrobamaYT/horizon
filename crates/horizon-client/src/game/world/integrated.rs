@@ -398,6 +398,11 @@ impl Game<'_> {
     pub(super) fn has_singleplayer_server(&self) -> bool {
         self.remote.is_none() || self.integrated.is_some()
     }
+    /// `Minecraft.isMultiplayerServer`: on another's server, or a world of one's own open to the
+    /// network.
+    pub(super) fn is_multiplayer_server(&self) -> bool {
+        !self.has_singleplayer_server() || self.is_published()
+    }
     /// `IntegratedServer.isPublished`: the world is open to the network.
     pub(super) fn is_published(&self) -> bool {
         self.lan.is_some()
@@ -1081,6 +1086,11 @@ impl Game<'_> {
     /// one) and announce the world. The socket is bound at once so a busy
     /// port fails here; the hub starts listening once it is at hand.
     pub(super) fn publish(&mut self, settings: LanSettings) -> std::result::Result<u16, String> {
+        if self.options.developer_single_player {
+            return Err(horizon_client::lang::get(
+                "horizon.developer_offline.single_player",
+            ));
+        }
         let Some(s) = self.serving.as_mut() else {
             return Err("not an integrated server".into());
         };

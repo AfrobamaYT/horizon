@@ -293,7 +293,7 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
-/// A wasm module gets a guest listener for each API head, return, `modify_arg` and `replace`
+/// A wasm module gets a guest listener for each API head, return and `replace`
 /// injection, which the shared emitter builds; `access = "internals"` and the call-site kinds
 /// exist only natively. The first that can't be built is refused, named with its reason.
 fn wasm_route(injects: &[horizon_mod_package::manifest::inject::Inject]) -> Result<(), String> {
@@ -308,13 +308,14 @@ fn wasm_route(injects: &[horizon_mod_package::manifest::inject::Inject]) -> Resu
         .ok()
         .and_then(|kind| kind.as_str().map(str::to_owned))
         .unwrap_or_default();
+
     let why = if entry.access != Access::Api {
         "`access = \"internals\"` is native-only".to_owned()
     } else {
         format!("the call-site kind `{kind}` is native-only")
     };
     Err(format!(
-        "{}: wasm takes API head, return, modify_arg and replace injections; {why}",
+        "{}: wasm takes API head, return and replace injections; {why}",
         entry.id
     ))
 }
@@ -333,7 +334,11 @@ fn member_export(name: &str) -> bool {
 }
 
 fn group_export(name: &str, krate: &str) -> bool {
-    if GUEST_EXPORTS.contains(&name) || name == "horizon_layout_ext" || name.starts_with("__wasm_")
+    if GUEST_EXPORTS.contains(&name)
+        || name == "horizon_layout_ext"
+        || name == "horizon_mod_points_register"
+        || name == "horizon_mod_points_seal"
+        || name.starts_with("__wasm_")
     {
         return true;
     }
@@ -626,16 +631,13 @@ mod route_tests {
 
     fn inject(id: &str, kind: Kind, access: Access, call: Option<&str>) -> Inject {
         Inject {
-            local: None,
-            local_type: None,
-            position: None,
             id: id.into(),
             at: "game::tick".into(),
             kind,
             with: "listen".into(),
             access,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: call.map(Into::into),
             nth: call.map(|_| 0),
             ctx: call.map(|_| "context".into()),
@@ -644,26 +646,22 @@ mod route_tests {
 
     #[test]
     fn wasm_takes_the_api_head_kinds_and_names_the_first_it_cant() {
-        let head_kinds = [Kind::Head, Kind::Return, Kind::ModifyArg, Kind::Replace]
+        let head_kinds = [Kind::Head, Kind::Return, Kind::Replace]
             .map(|kind| inject("ok", kind, Access::Api, None));
         assert_eq!(wasm_route(&head_kinds), Ok(()));
         let internals = inject("raw", Kind::Head, Access::Internals, None);
         assert_eq!(
             wasm_route(&[head_kinds[0].clone(), internals]),
-            Err(
-                "raw: wasm takes API head, return, modify_arg and replace injections; \
+            Err("raw: wasm takes API head, return and replace injections; \
                  `access = \"internals\"` is native-only"
-                    .into()
-            )
+                .into())
         );
         let site = inject("site", Kind::BeforeCall, Access::Api, Some("game::step"));
         assert_eq!(
             wasm_route(&[site]),
-            Err(
-                "site: wasm takes API head, return, modify_arg and replace injections; \
+            Err("site: wasm takes API head, return and replace injections; \
                  the call-site kind `before_call` is native-only"
-                    .into()
-            )
+                .into())
         );
     }
 }

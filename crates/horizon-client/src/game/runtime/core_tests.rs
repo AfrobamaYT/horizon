@@ -46,10 +46,22 @@ fn reload_resolves_parts_against_reloaded_tags() {
             &game.pack.additional_data,
         );
         let root = game.options.resources.clone();
+        let previous = std::sync::Arc::new(mod_api::DatapackRegistrySet::first(
+            mod_api::DatapackCandidate::build(&[], &[]).unwrap(),
+            horizon_client::datapack_net::next_session(),
+        ));
+        horizon_client::datapack_net::serve(Some(previous.clone()));
         let prepared = game
             .prepare_world_reload(&stack, &root, game.mods.data_switched)
             .unwrap();
+        // Preparation must not publish to joining clients.
+        assert!(std::sync::Arc::ptr_eq(
+            &previous,
+            &horizon_client::datapack_net::served().unwrap(),
+        ));
         game.install_world_tables(prepared);
+        // A successful empty publication clears the previous world's served registries too.
+        assert!(horizon_client::datapack_net::served().is_none());
         game.run_native_advancement_grants();
         assert_eq!(stone_key.id(game), name);
         assert_eq!(
@@ -569,8 +581,8 @@ fn glfw_button_indices_are_glfw_indices() {
 /// F3 left on when leaving a world kept the axes on the title screen.
 #[test]
 fn the_debug_crosshair_is_gone_once_the_world_is() {
-    assert!(debug_crosshair_drawn(true, true, false, false));
-    assert!(!debug_crosshair_drawn(true, true, false, true));
+    assert!(debug_crosshair_drawn(true, true, false, false, false));
+    assert!(!debug_crosshair_drawn(true, true, false, true, false));
 }
 
 /// Opening a world in front of a block left its outline over Loading terrain's panorama (#12872).
@@ -1271,3 +1283,8 @@ fn eager_saves_wait_for_an_open_world_and_for_light() {
 
 #[path = "incoming_tests/knot_command_view.rs"]
 mod knot_command_view_tests;
+
+#[test]
+fn the_debug_crosshair_gives_way_to_the_radial_menu() {
+    assert!(!debug_crosshair_drawn(true, true, false, false, true));
+}

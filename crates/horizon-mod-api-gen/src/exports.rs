@@ -4,7 +4,7 @@ use quote::ToTokens;
 use std::{collections::BTreeMap, fs, path::Path};
 use syn::Item;
 
-pub(crate) const DIRECTORY: &str = "crates/horizon-mod-api/src/exports";
+pub(crate) const DIRECTORY: &str = "crates/horizon-mod-vocab/src/exports";
 const PREFIX: &str = "mod_api_exports_";
 
 pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
@@ -39,7 +39,7 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
                     return Err("out-of-line export modules belong at the API root".into());
                 }
                 let path = root
-                    .join("crates/horizon-mod-api/src")
+                    .join("crates/horizon-mod-vocab/src")
                     .join(format!("{}.rs", module.ident));
                 let path = if path.is_file() {
                     path
@@ -152,7 +152,7 @@ mod tests {
             "../../target/export-module-roots-{}",
             std::process::id()
         ));
-        let api = root.join("crates/horizon-mod-api/src");
+        let api = root.join("crates/horizon-mod-vocab/src");
         fs::create_dir_all(api.join("exports")).unwrap();
         fs::create_dir_all(api.join("parts")).unwrap();
         fs::write(

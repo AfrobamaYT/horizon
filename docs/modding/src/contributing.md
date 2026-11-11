@@ -9,7 +9,7 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 | How-to | One task, steps only | How-to, Injections |
 | Reference | Facts, complete and dry | Reference, and the rustdoc of `horizon-mod-api` |
 
-- **A hook, event or `Host` method:** its `///` lines in the declaration under `crates/horizon-mod-api/src/hooks/`.
+- **A hook, event or `Host` method:** its `///` lines in the declaration under `crates/horizon-mod-vocab/src/hooks/`.
   The generator writes it as `///` on the generated item; `cargo doc -p horizon-mod-api` shows it. A hook without
   a `doc` fails the build.
 - **A hook whose game target has many parameters:** a `native_*` target takes at most 7 parameters (receiver included;
@@ -27,6 +27,10 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 - **A guide page:** `docs/modding/src/`. Code in a page is `{{#include}}`d from `docs/modding/examples`, which
   compiles, so a change to the API that breaks an example fails the build.
 - **A mod API change** updates its fragment `doc` and any page it affects in the same PR.
+- **A new concept or how-to page:** add the file directly under `concepts/` or `how-to/`; the book adds it
+  to its part, after the pages `SUMMARY.md` lists, in order of its `#` title. Don't add it to `SUMMARY.md`
+  unless it must come first or sit in another part. Any other new page needs its `SUMMARY.md` line: the
+  build fails on a page the book doesn't render, and on a `SUMMARY.md` link to a missing file.
 - **Trait-mod and native-mod concepts:** edit one source in `concepts/trait-mods/` or
   `how-to/native-mods/`. Sorted filenames set reading order; the leading `<!-- chapter: Title -->`
   supplies the navigation title. New files are discovered automatically, without a shared list edit.

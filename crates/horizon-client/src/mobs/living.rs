@@ -419,7 +419,7 @@ impl Mob {
     }
     /// `LivingEntity.onClimbable` (`Spider.onClimbable`: the climbing flag):
     /// the block it stands in is `#minecraft:climbable` (vines, ladders,
-    /// scaffolding...), or an open trapdoor over a ladder facing the same way
+    /// scaffolding...) or its mod parts' `is_ladder` says it is, or an open trapdoor over a ladder facing the same way
     /// (`trapdoorUsableAsLadder`). A mob gliding (`isFallFlying`) through a
     /// `#minecraft:can_glide_through` block (vines) is not on it: that test
     /// comes first.
@@ -437,7 +437,16 @@ impl Mob {
         if self.extra.fall_flying && w.has_tag("minecraft:can_glide_through", &facts.name) {
             return false;
         }
-        if w.has_tag("minecraft:climbable", &facts.name) {
+        // `IBlockExtension.isLadder`: the block's parts answer after the tag.
+        let mut ladder = w.has_tag("minecraft:climbable", &facts.name);
+        crate::motion::native_is_ladder(
+            w.loop_context,
+            self.id,
+            BlockPos::new(x, y, z),
+            state,
+            &mut ladder,
+        );
+        if ladder {
             return true;
         }
         facts.has_class("TrapDoorBlock")
@@ -936,6 +945,13 @@ impl Mob {
         if !self.fluids.in_water {
             self.update_fluids(w, events);
         }
+        // Strider.checkFallDamage: in lava the fall is reset and the base never
+        // runs, so a strider that drops into a lava sea lands with no damage and
+        // no dust, and walks out of it owing nothing.
+        if self.species() == super::Species::Strider && self.fluids.in_lava {
+            self.fall_distance = 0.0;
+            return;
+        }
         if !self.fluids.in_water && moved.y < 0.0 {
             self.fall_distance -= f64::from(moved.y as f32);
         }
@@ -1003,7 +1019,12 @@ impl Mob {
     }
     /// Entity.applyMovementEmissionAndPlaySound: walked distance, footsteps
     /// and swimming sounds.
-    fn movement_emission(&mut self, w: &MobWorld, moved: Vec3, events: &mut Vec<MobEvent>) {
+    pub(super) fn movement_emission(
+        &mut self,
+        w: &MobWorld,
+        moved: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         if !super::ai::emits_movement(self) || self.extra.mount.is_some() {
             return;
         }
@@ -1034,7 +1055,7 @@ impl Mob {
                         super::equine::play_step(self, w, legacy, legacy_state, events);
                     }
                 } else if let Some((sound, volume, pitch)) =
-                    super::ai::step_sound(self, w, legacy, legacy_state)
+                    super::entity_sounds::step(self, w, legacy, legacy_state)
                     && heard
                     && !self.silent
                 {
@@ -2527,6 +2548,7 @@ mod tests {
                 goal_host: None,
                 live_mobs: None,
                 teams: Default::default(),
+                professions: crate::mobs::villager::profession_table(),
                 loop_context: crate::test_resources::server_loop_context(),
                 world: &world,
                 registry,
@@ -2548,6 +2570,7 @@ mod tests {
                 who_lookup: None,
                 others_grid: None,
                 others_index: None,
+                passenger_objects: &[],
                 others_villagers: None,
                 others_solid: None,
                 daylight: true,
@@ -2666,6 +2689,7 @@ mod tests {
             goal_host: None,
             live_mobs: None,
             teams: Default::default(),
+            professions: crate::mobs::villager::profession_table(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
             registry,
@@ -2687,6 +2711,7 @@ mod tests {
             who_lookup: None,
             others_grid: None,
             others_index: None,
+            passenger_objects: &[],
             others_villagers: None,
             others_solid: None,
             daylight: true,
@@ -2722,17 +2747,7 @@ mod tests {
         for ridden in [false, true] {
             let mut m = Mob::new(1, kind.clone(), Vec3::new(8.5, 64.0, 8.5), 0.0);
             if ridden {
-                m.rider = Some(super::super::equine::Rider {
-                    strafe: 0.0,
-                    forward: 0.0,
-                    yaw: 0.0,
-                    pitch: 0.0,
-                    jump: 0.0,
-                    steer: false,
-                    sprint: false,
-                    jumping: false,
-                    client: false,
-                });
+                m.rider = Some(super::super::equine::Rider::default());
             }
             m.fluids.in_water = true;
             m.fluids.water = 1.0;
@@ -2806,6 +2821,7 @@ mod tests {
         let mut landing = |below: &Mob| -> f64 {
             let others = [below.seen(None)];
             let w = MobWorld {
+                professions: crate::mobs::villager::profession_table(),
                 loop_context: crate::test_resources::server_loop_context(),
                 attributes: &motion.attributes,
                 player_identity: None,
@@ -2834,6 +2850,7 @@ mod tests {
                 leash_boats: &[],
                 others_grid: None,
                 others_index: None,
+                passenger_objects: &[],
                 others_villagers: None,
                 others_solid: None,
                 daylight: true,
@@ -3587,41 +3604,8 @@ mod tests {
 }
 
 #[cfg(test)]
-mod size_answer_tests {
-    use super::*;
-    use crate::pose::SizeAnswer;
-
-    /// `EntityEvent.Size`: an `entity_size` answer replaces the mob's dimensions while its
-    /// pose and vanilla size hold; a change to either goes back to vanilla's.
-    #[test]
-    fn a_size_answer_holds_until_the_pose_or_vanilla_size_changes() {
-        let mut cow = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
-        let vanilla = cow.vanilla_dims();
-        assert_eq!(dims_array(cow.dims()), vanilla);
-        cow.size_answer = Some(SizeAnswer {
-            pose: cow.pose(),
-            vanilla,
-            size: Some([2.0, 3.0, 2.5]),
-        });
-        assert_eq!(cow.dims(), (2.0, 3.0, 2.5));
-        assert_eq!(
-            (cow.width(), cow.height(), cow.eye_height()),
-            (2.0, 3.0, 2.5)
-        );
-        assert_eq!(cow.vanilla_dims(), vanilla);
-        // A baby's vanilla size is another one: the answer no longer holds.
-        crate::mobs::finalize::set_baby(&mut cow, true);
-        assert_ne!(cow.vanilla_dims(), vanilla);
-        assert_eq!(dims_array(cow.dims()), cow.vanilla_dims());
-        // An answer that left vanilla's size changes nothing.
-        cow.size_answer = Some(SizeAnswer {
-            pose: cow.pose(),
-            vanilla: cow.vanilla_dims(),
-            size: None,
-        });
-        assert_eq!(dims_array(cow.dims()), cow.vanilla_dims());
-    }
-}
+#[path = "living/size_answer_tests.rs"]
+mod size_answer_tests;
 
 #[cfg(test)]
 mod farmland_event_tests {
@@ -3672,6 +3656,31 @@ mod farmland_event_tests {
         // cannot be built: the test has nothing to check.
         let _ = ran;
     }
+}
+
+/// `DeathProtection.TOTEM_EFFECTS`: clear, then regeneration II, absorption II
+/// and fire resistance.
+pub(super) fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
+    use crate::items::{ConsumeEffect, ConsumeEffectSpec};
+    let spec = |id: &str, duration, amplifier| ConsumeEffectSpec {
+        id: id.to_owned(),
+        duration,
+        amplifier,
+        ambient: false,
+        show_particles: true,
+        show_icon: true,
+    };
+    vec![
+        ConsumeEffect::ClearAllEffects,
+        ConsumeEffect::ApplyEffects {
+            effects: vec![
+                spec("minecraft:regeneration", 900, 1),
+                spec("minecraft:absorption", 100, 1),
+                spec("minecraft:fire_resistance", 800, 0),
+            ],
+            probability: 1.0,
+        },
+    ]
 }
 
 fn fall_reset_hit(w: &MobWorld, from: Vec3, moved: Vec3) -> bool {

@@ -82,7 +82,7 @@ fn request(args: &[String]) -> Result<Request<'_>, String> {
 }
 
 #[path = "inject_update.rs"]
-mod update;
+pub(crate) mod update;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if args.first().is_some_and(|command| command == "update") {
@@ -100,15 +100,17 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     // Manifest::parse owns mod id, native pin and existing declaration validation.
     let manifest = Manifest::parse(&original)?;
+    let directory = crate::internals::catalog_directory(dir, &manifest)?;
     let native = manifest
         .native
         .as_ref()
         .ok_or("inject add needs a [native] mod")?;
-    let internals = crate::internals::load(dir, &native.horizon)?;
-    let points = dir
-        .join("target/horizon-mod/prebuilt")
-        .join(&native.horizon)
-        .join("points.json");
+    let internals = if native.module.is_empty() {
+        crate::internals::load(dir, &native.horizon)?
+    } else {
+        horizon_mod_package::internals::read(&directory.join("internals.json"))?
+    };
+    let points = directory.join("points.json");
     let catalog: Catalog =
         serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| format!("{}: {e}", points.display()))?;
@@ -129,10 +131,7 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
 /// on native mods only.
 fn availability(catalog: &Catalog, request: &Request<'_>) -> String {
     use horizon_mod_point_emit::plain_path;
-    let api = if !matches!(
-        request.kind,
-        Kind::Head | Kind::Return | Kind::ModifyArg | Kind::Replace
-    ) {
+    let api = if !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace) {
         format!("refused, {} is internals only", request.kind_name)
     } else {
         match catalog
@@ -198,7 +197,7 @@ fn library(
     horizon_mod_api_gen::points::mod_crate::mod_points(root, wire).map(Some)
 }
 
-type ModPoints = horizon_mod_package::manifest::inject::mod_points::Catalog;
+type ModPoints = point_shape::catalog::Catalog;
 
 /// The `[[inject]]` for a mod point: its head or return, pinned to the function's hash.
 fn append_mod_point(
@@ -209,14 +208,12 @@ fn append_mod_point(
 ) -> Result<String, String> {
     use horizon_mod_package::manifest::inject::mod_points::Refusal;
     let id = format!("{}:{}", manifest.id, request.with);
-    if !matches!(
-        request.kind,
-        Kind::Head | Kind::Return | Kind::ModifyArg | Kind::Replace
-    ) || request.call.is_some()
+    if !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace)
+        || request.call.is_some()
         || request.nth.is_some()
     {
         return Err(format!(
-            "{id}: a mod point has head and return places only (--kind head, return, modify_arg or replace)"
+            "{id}: a mod point has head and return places only (--kind head, return or replace)"
         ));
     }
     let Some(point) = library
@@ -280,22 +277,17 @@ fn append(
     catalog: &Catalog,
 ) -> Result<String, String> {
     let missing = || {
-        InjectError::Missing {
+        InjectError::NoSlot {
             id: manifest.id.clone(),
-            at: request.at.into(),
+            reason: horizon_mod_package::manifest::inject::NoSlotReason::NotListed,
+            declaration: request.at.into(),
         }
         .to_string()
     };
     let item = internals
         .iter()
         .find(|i| {
-            i.path == request.at
-                && !i.shape_only
-                && if request.kind == Kind::Field {
-                    i.kind == "struct"
-                } else {
-                    matches!(i.kind.as_str(), "fn" | "method")
-                }
+            i.path == request.at && !i.shape_only && matches!(i.kind.as_str(), "fn" | "method")
         })
         .ok_or_else(missing)?;
     let item = horizon_mod_package::internals::resolve(
@@ -305,15 +297,7 @@ fn append(
         Some(&item.kind),
     )
     .map_err(|e| e.to_string())?;
-    let needs_call = !matches!(
-        request.kind,
-        Kind::Head
-            | Kind::Return
-            | Kind::ModifyArg
-            | Kind::Replace
-            | Kind::Field
-            | Kind::Expression
-    );
+    let needs_call = !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace);
     let selected = if needs_call {
         let candidates: Vec<_> = catalog
             .sites
@@ -363,6 +347,14 @@ fn append(
         }
         None
     };
+    if selected.is_none()
+        && !catalog
+            .points
+            .iter()
+            .any(|point| point.target == request.at)
+    {
+        return Err(missing());
+    }
     let mut doc: DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
     if doc.get("inject").is_none() {
         doc["inject"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
@@ -446,7 +438,10 @@ mod tests {
         add(&dir, &args("add game::tick --kind head --with before_tick")).unwrap();
         let result = read(&path);
         assert!(result.starts_with(TEXT));
-        assert_eq!(parse_manifest(&result).inject[0].hash, "signature-fixture");
+        assert_eq!(
+            parse_manifest(&result).inject[0].hash.as_deref(),
+            Some("signature-fixture")
+        );
         for id in ["../escape", "bad/name", "bad\\name"] {
             let invalid = TEXT.replace("id = 'example'", &format!("id = '{id}'"));
             fs::write(&path, &invalid).unwrap();
@@ -482,15 +477,58 @@ mod tests {
         unconditional.hash = "unconditional".into();
         internals.push(unconditional);
         let result = append(TEXT, &manifest, &request, &internals, &catalog).unwrap();
-        assert_eq!(parse_manifest(&result).inject[0].hash, "unconditional");
+        assert_eq!(
+            parse_manifest(&result).inject[0].hash.as_deref(),
+            Some("unconditional")
+        );
         for item in &mut internals {
             item.shape_only = true;
         }
         assert!(
             append(TEXT, &manifest, &request, &internals, &catalog)
                 .unwrap_err()
-                .contains("E_INJECT_MISSING")
+                .contains("E_INJECT_NO_SLOT")
         );
+    }
+
+    #[test]
+    fn inject_add_never_stages_an_unlisted_place() {
+        let manifest = parse_manifest(TEXT);
+        let (internals, mut catalog) = fixture();
+        catalog.points.clear();
+        let args = ["add", "game::tick", "--kind", "head"].map(String::from);
+        let error = append(
+            TEXT,
+            &manifest,
+            &request(&args).unwrap(),
+            &internals,
+            &catalog,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("E_INJECT_NO_SLOT")
+                && error.contains("[[native.mixin]]")
+                && error.contains("request the slot"),
+            "{error}"
+        );
+        let args = [
+            "add",
+            "game::tick",
+            "--kind",
+            "before_call",
+            "--call",
+            "game::absent",
+        ]
+        .map(String::from);
+        let error = append(
+            TEXT,
+            &manifest,
+            &request(&args).unwrap(),
+            &internals,
+            &catalog,
+        )
+        .unwrap_err();
+        assert!(error.contains("E_INJECT_NO_SLOT"), "{error}");
     }
 
     #[test]
@@ -501,7 +539,7 @@ mod tests {
         )
         .unwrap();
         let inject = &parse_manifest(&result).inject[0];
-        assert_eq!(inject.hash, "signature-fixture");
+        assert_eq!(inject.hash.as_deref(), Some("signature-fixture"));
         assert_eq!(inject.call.as_deref(), Some("game::first"));
         assert_eq!(inject.nth, Some(2));
         assert_eq!(inject.ctx.as_deref(), Some("context-two"));
@@ -527,7 +565,7 @@ mod tests {
             assert!(edit(TEXT, args).is_err(), "{args}");
         }
         let error = edit(TEXT, "add missing::place --kind head").unwrap_err();
-        assert!(error.contains("E_INJECT_MISSING") && error.contains("missing::place"));
+        assert!(error.contains("E_INJECT_NO_SLOT") && error.contains("missing::place"));
         let first = edit(TEXT, "add game::tick --kind head").unwrap();
         assert!(edit(&first, "add game::tick --kind head").is_err());
     }
@@ -564,7 +602,11 @@ mod tests {
             dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("internals.json"), r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap();
-        fs::write(cache.join("points.json"), r#"{"sites":[]}"#).unwrap();
+        fs::write(
+            cache.join("points.json"),
+            r#"{"points":[{"target":"game::tick"}],"sites":[]}"#,
+        )
+        .unwrap();
         fs::write(dir.join(MANIFEST), TEXT).unwrap();
         dir
     }
@@ -615,7 +657,7 @@ mod tests {
         );
         let result = edit(&original, "add game::tick --kind head --with first").unwrap();
         let inject = &parse_manifest(&result).inject[0];
-        assert_eq!(inject.hash, "signature-fixture");
+        assert_eq!(inject.hash.as_deref(), Some("signature-fixture"));
         assert_eq!(inject.with, "first");
         assert_eq!(inject.id, "first");
         assert_eq!(inject.nth, None);

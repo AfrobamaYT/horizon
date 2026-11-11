@@ -162,7 +162,7 @@ impl World<'_> {
         let (profession, variant) = (format!("minecraft:{}", p[0]), format!("minecraft:{}", p[1]));
         let max: i32 = p[2].parse().unwrap_or(1);
         for level in 1..=max {
-            let set = Trades::set_for(&profession, level);
+            let set = self.trades.set_for(&profession, level);
             if self.trades.sets.contains_key(&set) {
                 self.add_set(&mut offers, &set, &variant, origin);
             }
@@ -384,6 +384,7 @@ pub fn main() -> horizon_client::Result<()> {
                     maps: None,
                 };
                 let env = Env {
+                    crafting_remainder: None,
                     player: None,
                     player_entity_id: None,
                     loop_context: &crate::test_resources::loop_context(

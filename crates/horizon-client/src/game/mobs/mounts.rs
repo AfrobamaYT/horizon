@@ -512,16 +512,22 @@ impl Game<'_> {
         let Some(i) = self.mount_index() else {
             return false;
         };
-        if keys.shift || !self.mobs[i].alive() {
+        // `Player.rideTick`: a sneaking rider gets off (`wantsToStopRiding`), and so does one on a
+        // dead mount. `LivingEntity.baseTick`: so does a rider whose eyes are in water on a mount
+        // of the `dismounts_underwater` tag (a server's player too: `leave_guest` tells their
+        // client). When `entity_mount` keeps it on, the mount still reads this tick's input.
+        let i = if keys.shift
+            || !self.mobs[i].alive()
+            || (dismounts_underwater(self.mobs[i].species()) && self.rider_eyes_in_water())
+        {
             self.dismount_mount();
-            return true;
-        }
-        // `LivingEntity.baseTick`: a rider whose eyes are in water gets off a mount of the
-        // `dismounts_underwater` tag (a server's player too: `leave_guest` tells their client).
-        if dismounts_underwater(self.mobs[i].species()) && self.rider_eyes_in_water() {
-            self.dismount_mount();
-            return true;
-        }
+            let Some(i) = self.mount_index().filter(|&i| self.mobs[i].alive()) else {
+                return true;
+            };
+            i
+        } else {
+            i
+        };
         let strafe = f32::from(u8::from(keys.left)) - f32::from(u8::from(keys.right));
         let forward = f32::from(u8::from(keys.forward)) - f32::from(u8::from(keys.backward));
         // LocalPlayer.aiStep: the riding jump charges while space is held.
@@ -557,6 +563,7 @@ impl Game<'_> {
             steer,
             sprint: keys.sprint || self.keys.held(Action::Sprint),
             jumping: keys.jump,
+            sneak: keys.shift,
             // A server's player (a LAN guest, single player's window) drives
             // a horse from its own client (`handleMoveVehicle`).
             client: self.lan_acting.is_some(),
@@ -566,10 +573,11 @@ impl Game<'_> {
     /// `LivingEntity.baseTick` for the mobs that ride a mount of the `dismounts_underwater` tag (a baby
     /// zombie on a chicken): with their eyes in water they get off it.
     pub(super) fn dismount_underwater_mob_riders(&mut self) {
+        let blocked = self.mobs_below_off_level();
         let swimmers: Vec<u32> = self
             .mobs
             .iter()
-            .filter(|m| m.alive() && m.fluids.eye_in_water)
+            .filter(|m| !blocked.contains(&m.id) && m.alive() && m.fluids.eye_in_water)
             .filter_map(|m| {
                 let mount = m.extra.mount?;
                 let under = self.mobs.iter().find(|v| v.id == mount)?;
@@ -954,6 +962,7 @@ impl Game<'_> {
         let m = &self.mobs[i];
         let hearts = horizon_client::hud_layout::vehicle_max_hearts(m.attrs.max_health);
         let draws = horizon_client::hud_layout::vehicle_health(w, h, hearts, m.health);
+        self.keep_status_rows(&draws, w, h);
         self.gui_layer("minecraft:vehicle_health", batch, |g, batch| {
             horizon_client::hud_layout::paint(batch, &g.gui.atlas, &draws);
         });
@@ -1606,5 +1615,35 @@ mod tests {
 }
 
 #[cfg(test)]
+mod off_level_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn underwater_dismount_skips_deep_frozen_descendants() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            for (id, mount) in [(73, Some(72)), (74, Some(73)), (75, None), (76, Some(75))] {
+                let mut m = horizon_client::mobs::Mob::new(id, pig.clone(), Vec3::ZERO, 0.0);
+                m.extra.mount = mount;
+                m.fluids.eye_in_water = true;
+                game.mobs.push(m);
+            }
+            let ghost = horizon_client::mobs::Mob::new(72, pig, Vec3::ZERO, 0.0);
+            game.persist
+                .off_level
+                .insert(72, crate::game::persist::OffLevel::Mob(ghost));
+            game.dismount_underwater_mob_riders();
+            assert_eq!(game.mob_object(74).unwrap().extra.mount, Some(73));
+            assert_eq!(game.mob_object(76).unwrap().extra.mount, None);
+        });
+    }
+}
+
+#[cfg(test)]
 #[path = "mounts/camel_jump_tests.rs"]
 mod camel_jump_tests;
+
+#[cfg(test)]
+#[path = "mounts/sneak_dismount_tests.rs"]
+pub(in crate::game) mod sneak_dismount_tests;

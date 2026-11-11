@@ -843,38 +843,36 @@ fn hoglin_hurt(
         m.ai.last_hurt_by = None;
     } else {
         for &mob in &m.extra.piglin.adults {
-            events.push(MobEvent::HoglinAttackTarget { mob, target: by });
+            events.push(MobEvent::HoglinAttackTarget {
+                mob,
+                target: by,
+                player: None,
+            });
         }
     }
 }
 /// `HoglinAi.setAttackTargetIfCloserThanCurrent` for a hoglin that received a
 /// broadcast: nothing while pacified; otherwise `BehaviorUtils.getNearestTarget`,
 /// the new target unless the current one is strictly nearer
-/// (`getTargetNearestMe`). `position` gives a live mob target's place; a
-/// current target it cannot place counts as absent. A player on either side
-/// is not compared (`Who::Player` is each mob's own player): the current
-/// target stays.
-pub fn receive_attack_target(m: &mut Mob, target: Who, position: impl Fn(Who) -> Option<Vec3>) {
+/// (`getTargetNearestMe`). `position` gives the current (true) or incoming (false) target's place; a
+/// current target it cannot place counts as absent. Player positions must resolve the corresponding concrete identity. Returns a proposal for the event dispatcher to approve before
+/// committing the target, without changing the receiving mob.
+pub fn receive_attack_target(
+    m: &Mob,
+    target: Who,
+    position: impl Fn(Who, bool) -> Option<Vec3>,
+) -> Option<Who> {
     if m.extra.ints[0] > 0 {
-        return;
+        return None;
     }
     let Some(current) = m.ai.target else {
-        m.ai.target = Some(target);
-        return;
+        return Some(target);
     };
-    if current == Who::Player || target == Who::Player {
-        return;
-    }
-    let Some(now) = position(current) else {
-        m.ai.target = Some(target);
-        return;
+    let Some(now) = position(current, true) else {
+        return Some(target);
     };
-    let Some(new) = position(target) else {
-        return;
-    };
-    if m.distance_sqr(now) >= m.distance_sqr(new) {
-        m.ai.target = Some(target);
-    }
+    let new = position(target, false)?;
+    (m.distance_sqr(now) >= m.distance_sqr(new)).then_some(target)
 }
 /// `PiglinAi.stopHoldingOffHandItem` without bartering (`wasHurtBy`): a gold
 /// ingot is not bartered and is gone; anything else ends its admiring next
@@ -2281,6 +2279,67 @@ pub fn hoglin_anim(m: &Mob, s: &State, p: &mut Poses) {
     p.xrot("left_hind_leg", pos.mcos() * 1.2 * sp);
 }
 
+/// `Brain.Packed`: the guarded-block live ANGRY_AT entry. The existing
+/// anger counter supplies its remaining long TTL, not an absolute timestamp.
+pub fn write_guarded_anger(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::{Compound, Tag};
+    let Some(actor) = m.extra.piglin.guarded_angry_at else {
+        return;
+    };
+    let brain = map
+        .entry("Brain".into())
+        .or_insert_with(|| Tag::Compound(Compound::new()));
+    if !matches!(brain, Tag::Compound(_)) {
+        *brain = Tag::Compound(Compound::new());
+    }
+    let Tag::Compound(brain) = brain else { return };
+    let memories = brain
+        .entry("memories".into())
+        .or_insert_with(|| Tag::Compound(Compound::new()));
+    if !matches!(memories, Tag::Compound(_)) {
+        *memories = Tag::Compound(Compound::new());
+    }
+    let Tag::Compound(memories) = memories else {
+        return;
+    };
+    if let Some(uuid) = actor.filter(|_| m.extra.anger > 0) {
+        // ExpirableValue.codec: the UUID value and optional remaining Long TTL.
+        memories.insert(
+            "minecraft:angry_at".into(),
+            Tag::compound([
+                ("value", Tag::IntArray(uuid.to_vec())),
+                ("ttl", Tag::Long(i64::from(m.extra.anger))),
+            ]),
+        );
+    } else {
+        memories.remove(&"minecraft:angry_at".into());
+    }
+}
+
+/// `Piglin.readAdditionalSaveData` through `Brain.Packed`: the guarded-block
+/// `ANGRY_AT` entry is an entity UUID with the ticks left as its TTL. Vanilla
+/// reads the memory with the brain, and an expired one no longer angers the
+/// piglin; the counter is what Horizon's goals ask.
+pub fn read_guarded_anger(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
+    let memory = tag
+        .get("Brain")
+        .and_then(|b| b.get("memories"))
+        .and_then(|b| b.get("minecraft:angry_at"));
+    let Some(memory) = memory else { return };
+    let Some(uuid) = crate::save::uuid_from_tag(memory.get("value")) else {
+        return;
+    };
+    // The TTL is a long: one past the counter's range holds as long as it can.
+    let ttl = match memory.get("ttl") {
+        Some(Tag::Long(v)) => (*v).clamp(0, i64::from(i32::MAX)) as i32,
+        Some(t) => crate::nbt_path::int_value(t).unwrap_or(i32::MAX),
+        None => i32::MAX,
+    };
+    m.extra.anger = ttl.max(0);
+    m.extra.piglin.guarded_angry_at = Some(Some(uuid));
+}
+
 #[cfg(test)]
 mod brute_sound_tests {
     use super::*;
@@ -2367,6 +2426,46 @@ mod hurt_broadcast_tests {
         let mut kind = kind();
         Arc::make_mut(&mut kind).species = species;
         Mob::new(id, kind, at, 0.0)
+    }
+
+    #[test]
+    fn hoglin_broadcast_selection_proposes_without_mutating() {
+        let mut receiver = mob(1, Species::Hoglin, Vec3::ZERO);
+        let near = Who::Mob(2);
+        let far = Who::Mob(3);
+        let position = |who, _current| match who {
+            Who::Mob(2) => Some(Vec3::new(2.0, 0.0, 0.0)),
+            Who::Mob(3) => Some(Vec3::new(4.0, 0.0, 0.0)),
+            Who::Player => Some(Vec3::new(4.0, 0.0, 0.0)),
+            _ => None,
+        };
+        assert_eq!(receive_attack_target(&receiver, far, position), Some(far));
+        assert_eq!(receiver.ai.target, None);
+        receiver.extra.ints[0] = 1;
+        assert_eq!(receive_attack_target(&receiver, near, position), None);
+        receiver.extra.ints[0] = 0;
+        receiver.ai.target = Some(near);
+        assert_eq!(receive_attack_target(&receiver, far, position), None);
+        receiver.ai.target = Some(far);
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
+        assert_eq!(receiver.ai.target, Some(far));
+        assert_eq!(
+            receive_attack_target(&receiver, near, |_, _| position(near, false)),
+            Some(near)
+        );
+        assert_eq!(
+            receive_attack_target(&receiver, Who::Mob(4), position),
+            None
+        );
+        receiver.ai.target = Some(Who::Mob(4));
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
+        receiver.ai.target = Some(Who::Player);
+        assert_eq!(receive_attack_target(&receiver, near, position), Some(near));
+        receiver.ai.target = Some(far);
+        assert_eq!(
+            receive_attack_target(&receiver, Who::Player, position),
+            Some(Who::Player)
+        );
     }
 
     /// `PiglinBruteAi.wasHurtBy` is `PiglinAi.maybeRetaliate`, which calls the adult piglins

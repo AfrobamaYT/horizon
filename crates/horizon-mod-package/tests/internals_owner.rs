@@ -21,17 +21,17 @@ fn both_targets_read_the_same_root_records_in_both_toml_forms() {
         Internal {
             path: "Round::listening".into(),
             kind: Some("field".into()),
-            hash: "field-hash".into(),
+            hash: Some("field-hash".into()),
         },
         Internal {
             path: "Round::listening".into(),
             kind: Some("method".into()),
-            hash: "method-hash".into(),
+            hash: Some("method-hash".into()),
         },
         Internal {
             path: "Game".into(),
             kind: None,
-            hash: "game-hash".into(),
+            hash: Some("game-hash".into()),
         },
     ];
     for declarations in [
@@ -58,7 +58,13 @@ fn native_table_declarations_are_unknown_fields_not_an_alternate_reader() {
                 format!("{HEADER}{target}[native]\n{declarations}")
             };
             let error = Manifest::parse(&old).unwrap_err();
-            assert!(error.contains("unknown field `internals`"), "{error}");
+            // A wasm manifest is told it has no `[native]` at all before what the table held.
+            let expected = if index == 0 {
+                "unknown field `internals`"
+            } else {
+                "a mod is [native] or [wasm], not both"
+            };
+            assert!(error.contains(expected), "{error}");
         }
     }
 }

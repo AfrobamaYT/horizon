@@ -12,7 +12,10 @@ Call `host.query(&TYPE)` on `&dyn Host`, then borrow its rows with `batch.iter()
 Reads require `T: Send + Sync + 'static`, not `Clone`. Each successful row has a
 Copy `holder` and a borrowed `value: &T`. Match `AttachmentHolder` to work with the
 existing `EntityRef`, `PlayerRef`, `BlockEntityRef`, `ChunkRef` or `LevelRef`.
-Copying that identity does not keep its holder loaded.
+Copying that identity does not keep its holder loaded. Attachment ownership follows
+an entity object, not its saved UUID. A rejected passenger can own attachments
+without being in the level; it is absent from queries until admitted. Equal-UUID
+objects never share attachment contents.
 
 This example defines a serialized counter and sums its captured values:
 
@@ -129,9 +132,17 @@ type with the same key.
 
 ## First-store errors
 
-First stores on resident mobs and paintings bind their lifetime registration.
-Inspection and removal do not create one. First-store indexing for other
-families is not extended by this foundation. A store can return
+First stores on resident mobs, paintings and dragon parts bind their lifetime
+registration. Each actual dragon part owns its own registration: stores never
+alias its parent or siblings. Removing or replacing the dragon, or unloading its
+physical storage, retires all eight parts even while attachment maps or query
+snapshots remain retained. Parking a level preserves its resident parts.
+Constructor-listener stores are indexed even when the triggering access was only
+an inspection. Physical removal also releases the part's canonical attachment
+map and construction state during entity cleanup; immediate network-ID reuse
+clears the old part state before admitting its replacement.
+Inspection and removal do not create a registration. First-store indexing for
+other families is unchanged. A store can return
 `AttachmentError::HolderBusy` while the
 engine has lifted or extracted its physical storage: retry after the current
 pass. The refused store writes no value and creates no registration.
@@ -147,3 +158,15 @@ and `dragonpart`.
 Retained row writes report the matching `AttachmentRowError::HolderBusy` or
 `AttachmentRowError::UnsupportedHolder`; a missing holder is instead
 `StaleHolder`.
+
+For an immutable keyed read (including render hooks), capture a snapshot with
+`host.query(&TYPE)?`, then call `query.get(holder)?` with an `AttachmentHolder`.
+The result is an owned value: `Some(value)` on a hit and `None` before sync or
+when absent. `None` does not mean the holder is alive: absent and not-live
+(stale or displaced) holders alike return `Ok(None)` when absent from the
+snapshot. This read performs no host liveness check; only scoped residency
+probes report `StaleHolder`. The expected O(1) holder probe runs before decoding, never scans
+rows and never initializes defaults. Values require `Clone`; decode/type errors
+use `AttachmentRowError::Value`. Fresh queries see replacements and removals;
+retained queries keep their captured values. Scoped residency tokens still
+reject rebound holders with `StaleHolder`.

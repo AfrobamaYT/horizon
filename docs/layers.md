@@ -12,6 +12,10 @@ complete vanilla-like game. The Horizon layer moves to its own repository, publi
 ships with every official launcher download (see [The Horizon layer in its own repository](#the-horizon-layer-in-its-own-repository)).
 The split comes first, inside this repository, one checked step at a time. The repositories separate after that.
 
+Both checks below run in CI's verify job and in `tools/pr_ready.py`, against the fork's baseline: the explicit
+rows and reasons in `tools/layers.json` and `tools/addresses.json`, which cover the split mod crates and the separate
+launcher, registry and telemetry-server workspaces. No engine/API refactor is implied by importing these tools.
+
 This page says:
 
 - what belongs to each layer and which layer may depend on which;
@@ -181,13 +185,21 @@ The rule, in order (duckybertduck's):
 A feature often splits along this rule: the part others build on is platform, and the finished feature on top of it
 is Horizon (PvP & HUD and replays, [above](#controllers-splitscreen-replays-and-ui-pages)).
 
+The mod interface follows that split too: `horizon-mod-vocab` is an engine crate, while
+`horizon-mod-api` preserves the mod-facing paths through re-exports. The build-time generator,
+procedural macros and point-shape parser are engine dependencies of that interface. Horizon's launcher
+reaches the generator and point-shape parser through `horizon-platform`'s optional `mod-build` feature.
+The initial extraction also carries dispatch's crash markers, profiling, resource codec, phase access,
+and Parts registration state; it is not yet a stateless or unsafe-free interface ([#2587](https://github.com/arismoko/horizon/issues/2587)).
+
 | I add... | Layer | Where |
 |---|---|---|
 | A vanilla behaviour, block, mob, packet, command or screen | engine | the crate that owns the area ([CLAUDE.md](../CLAUDE.md) crate table) |
 | A speed-up that keeps vanilla's results | engine | next to the code it speeds up |
 | A call to a Mojang or Microsoft service vanilla makes | engine | `auth.rs`, `realms/`, `skins.rs`, `horizon-server-files` |
 | A place mods, ports or Horizon can hook into | engine + platform | an extension point in the engine crate, naming no type from above; its public face in the platform |
-| A mod hook, host method or mod format | platform | `horizon-mod-api`, with game owners under `game/modding/` and `game/native_hooks/` |
+| A mod hook or host interface | engine + platform | `horizon-mod-vocab` owns the engine vocabulary and dispatch; `horizon-mod-api` re-exports it for mods and owns guest transport |
+| A mod package format | platform | `horizon-mod-package` |
 | A shader or resource pack format vanilla doesn't read | platform | `horizon-shaders`, `horizon-optifine`, `horizon-polytone`, or a new platform crate |
 | A dedicated server option (anticheat, chat filter) | platform | `horizon-anticheat`, `horizon-chat-filter` |
 | Controller support: a device, bindings, glyphs, pad menus | platform | the pad modules, on the engine's input hooks ([Controllers](#controllers-splitscreen-replays-and-ui-pages)) |
@@ -529,18 +541,22 @@ proof, adding or raising an entry fails against `--base`. Missing network access
 shallow history fail closed. The addresses and layers checks reuse the same provenance helper to
 permit only exact rows or assignments from the verified upstream inventories. A PR can still merge
 a real upstream commit and add unrelated caps: review the sync and growth list
-(see `tools/sync/README.md`). A listed file must stay within its cap, and a cap above
-the current size (or naming a deleted file) fails: lower or remove the entry when the file shrinks. Sync
-PRs list every entry and its growth. This records restoration debt, not permission for other PRs to grow it.
+(see `tools/sync/README.md`). In a sync PR a listed file must stay within its cap, and a cap above
+the current size (or naming a deleted file) fails. Every other PR (no changed header) ignores the entries and holds each file to
+its size on the base, so shrinking a listed file never needs an edit to the baseline. Nobody edits the entries by hand: a sync, or a
+rollup that carries one, regenerates the file with `python3 tools/sync/write_file_size_baseline.py --base origin/main --marker <full
+upstream SHA>`, which lists the files that grew past the limit at their exact size. On a conflict in the file, run that command
+instead of merging by hand. Sync PRs list every entry and its growth. This records restoration debt, not permission for other PRs to grow it.
 Generated files and `third_party/` are not checked. Test code doesn't count either, since a normal
 build doesn't compile it: inline `#[cfg(test)] mod name { ... }` modules. Filenames such as `tests.rs`
 or `<name>_tests.rs` do not exempt a file; other `#[cfg(test)]` items count.
 
 ## The check
 
-`python3 tools/check_layers.py` reads the `cargo metadata` of the four workspaces `tools/layers.json` lists (the
-game, `launcher/`, `crates/horizon-mod-registry/` and `crates/horizon-telemetry-server/`; no build, about a second) and
-[`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It fails when:
+`python3 tools/check_layers.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the `cargo metadata` of the
+four workspaces `tools/layers.json` lists (the game, `launcher/`, `crates/horizon-mod-registry/` and
+`crates/horizon-telemetry-server/`; no build, about a second) and [`tools/layers.json`](../tools/layers.json), which
+gives every crate its layer. It fails when:
 
 - a crate has no layer;
 - a dependency goes up a layer and neither `allowed` lists it nor `optional` lists it as an optional dependency;
@@ -573,8 +589,9 @@ endpoints. Every other built-in address belongs to the Horizon layer, in one lis
 `crates/horizon-addresses/src/lib.rs` (#12993). The game's Horizon crates and the launcher read it, and it moves
 with the Horizon layer. Platform code gets its addresses passed in.
 
-`tools/check_addresses.py` reads the string literals of shipped Rust and finds every host. It skips tests,
-placeholders (`example.com`, `*.test`) and local IPs. `tools/addresses.json` says where each host may be:
+`tools/check_addresses.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the string literals of shipped
+Rust and finds every host. It skips tests, placeholders (`example.com`, `*.test`) and local IPs.
+`tools/addresses.json` says where each host may be:
 
 - `homes`: the list file;
 - `vanilla`: vanilla's endpoints, allowed anywhere;

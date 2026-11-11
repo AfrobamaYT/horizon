@@ -39,13 +39,10 @@ fn inject(at: &str, kind: Kind, access: Access, hash: &str) -> Inject {
         with: "listener".into(),
         access,
         priority: 0,
-        hash: hash.into(),
+        hash: Some(hash.into()),
         call: None,
         nth: None,
         ctx: None,
-        local: None,
-        local_type: None,
-        position: None,
     }
 }
 
@@ -139,6 +136,27 @@ fn each_refusal_names_what_changed_or_why() {
     let mut call = inject("chemlib::transfer", Kind::BeforeCall, Access::Api, &hash);
     call.call = Some("chemlib::helper".into());
     assert!(refused(call, &same).starts_with("E_INJECT_NO_SLOT"));
+    // Nothing records another mod's hash, so the declaration must carry it.
+    let mut unpinned = inject("chemlib::transfer", Kind::Head, Access::Api, &hash);
+    unpinned.hash = None;
+    let unpinned = refused(unpinned, &same);
+    assert!(
+        unpinned.contains("addon:listen")
+            && unpinned.contains("hash")
+            && unpinned.contains("inject add"),
+        "{unpinned}"
+    );
+    // Routed as a head, an internals replace would run beside the body instead of replacing it.
+    let replace = refused(
+        inject("chemlib::transfer", Kind::Replace, Access::Internals, &hash),
+        &same,
+    );
+    assert!(
+        replace.starts_with("E_INJECT_NO_SLOT")
+            && replace.contains("addon:listen")
+            && replace.contains("api replace only"),
+        "{replace}"
+    );
 }
 
 #[test]
@@ -191,4 +209,24 @@ fn a_package_catalog_is_read_bounded_and_strict() {
     );
     let huge = vec![b' '; (8 << 20) + 1];
     assert!(read_bytes(huge.as_slice()).unwrap_err().contains("exceeds"));
+}
+
+#[test]
+fn a_library_whose_crate_is_not_named_after_its_id_is_refused() {
+    let mut catalog = catalog();
+    catalog.krate = "chem_core".into();
+    for point in &mut catalog.points {
+        point.target = point.target.replace("chemlib::", "chem_core::");
+    }
+    let hash = catalog.points[0].hash.clone();
+    for access in [Access::Api, Access::Internals] {
+        let injection = inject("chem_core::transfer", Kind::Head, access, &hash);
+        assert_eq!(
+            route("addon", &injection, &library(&catalog))
+                .unwrap_err()
+                .to_string(),
+            "addon:listen: mod point library chemlib's crate is chem_core; a mod point library's \
+             crate is named after its mod id: chemlib"
+        );
+    }
 }

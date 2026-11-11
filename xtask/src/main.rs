@@ -1,13 +1,13 @@
 //! Repository tasks, run with `cargo run -p xtask -- TASK`.
 //!
 //! `package BINARY OUTDIR`: a playable Horizon folder with the game binary, horizon-ctl,
-//! horizon-prepare and horizon-server (built beside it: cargo build --release -p horizon-client -p horizon-client-lib
+//! horizon-prepare and horizon-server (built beside it: cargo build --release -p horizon-game -p horizon-client-lib
 //! --bins -p horizon-prepare -p horizon-server), the exporters horizon-prepare compiles, its sources (the launcher compares
 //! them to its own), and PLAY.txt. It holds none of Minecraft's files: players prepare those
 //! from their own copy. .github/workflows/release.yml makes the release folders with it.
 //!
 //! `package-server ENGINE OUTDIR`: a server folder (docs/server.md): the server build of the game
-//! (`cargo build --release -p horizon-client --no-default-features`, without sound or controllers)
+//! (`cargo build --release -p horizon-game --no-default-features`, without sound or controllers)
 //! as horizon-engine, with horizon-prepare and horizon-server from beside it and the same sources.
 //!
 //! `tokens`: writes `crates/horizon-theme/tokens.css`, the design tokens of `crates/horizon-theme` as CSS
@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const USAGE: &str = "usage: cargo run -p xtask -- package BINARY OUTDIR | package-server ENGINE OUTDIR | mod-api [notes] | tokens | icons";
+const USAGE: &str = "usage: cargo run -p xtask -- package BINARY OUTDIR | package-server ENGINE OUTDIR | mod-api [notes|coverage] | tokens | icons";
 
 /// What the release folder takes from the repository at HEAD, as `git archive` writes it.
 const ARCHIVED: [&str; 5] = [
@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         }
         [task] if task == "mod-api" => mod_api::run(),
         [task, notes] if task == "mod-api" && notes == "notes" => mod_api::notes(),
+        [task, coverage] if task == "mod-api" && coverage == "coverage" => mod_api::coverage(),
         [task] if task == "tokens" => tokens(),
         [task] if task == "icons" => icons(),
         _ => Err(USAGE.to_string()),
@@ -310,7 +311,7 @@ fn copy_beside(program: &Path, tools: &[&str], out: &Path) -> Result<(), String>
             .join(program_name(program, tool));
         if !path.is_file() {
             return Err(format!(
-                "{} is missing; build it too: cargo build --release -p horizon-client -p horizon-client-lib --bins -p horizon-prepare -p horizon-server",
+                "{} is missing; build it too: cargo build --release -p horizon-game -p horizon-client-lib --bins -p horizon-prepare -p horizon-server",
                 path.display()
             ));
         }

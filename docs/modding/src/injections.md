@@ -1,53 +1,99 @@
 # Injections
 
-A function-slot injection is a `[[inject]]` table in `horizon-mod.toml`. It is an escape hatch for a moment
-the mod API has no hook for, and **every injection is a request for a hook**: write it so it can become one
-by renaming its target, then [ask for the hook](#ask-for-the-hook).
+An `[[inject]]` attaches a typed listener to a compiled slot: a dispatch point already
+present in the game. An inject never compiles game code. No slot means refused,
+on native too; use a [mixin](mixins.md) or request the slot. The launcher-picked
+route from #1607 is gone.
 
-Choose `access = "api"` for API-owned records, or `access = "internals"` for a declared
-internals facade. API injections never rebuild the game: a missing prebuilt slot is refused, and source rebuilds and call-site injections require internals access or a hook request. Both use the same `[[inject]]` fields. Native internals listeners use a
-compiled slot when available; an unlisted function or supported call requires a source rebuild.
-The launcher generates the private horizon-mixins input; mods name a Rust `with` function,
-not a source payload file or expression selector.
+Prefer a named hook or Part method when one exists. Otherwise use `access = "api"`
+for API-owned records on native and wasm, or `access = "internals"` for raw native
+listeners and declared internals. Every injection is a request for a named hook.
 
-An API point injection names a crate-root `with` function and listens at an admitted head or return
-slot ([shape rules](#which-functions-are-points)). The prebuilt game fills those slots at load with the
-mods' listeners, without changing game source.
+## Declaration
 
-There are two access tiers, and they never mix:
+```toml
+[[inject]]
+id = "count"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "count"
+access = "api"
+priority = 0
+# hash = "<function hash written by inject add>"
+```
 
-- **`access = "api"`: native and `mod.wasm` alike.** A point is a hook whose signature comes from the
-  engine function. The listener gets the point's record (and the side's host at a `Game` method's
-  point, [below](#which-functions-are-points)): a copy of **every**
-  parameter as an API value (scalars, text, std containers, `mod_api` types, and the engine types
-  with a `mod_api` mirror, such as `Text` and `BlockStateId`), plus `cancel` or `result`. A `&mut`
-  parameter is copied in and its place gets the listener's value back; by-value and `&T` parameters
-  run the function with the listener's values. Both targets get the same record and the same
-  semantics. A point with a parameter that has no API type yet has no API record: an `api` listener
-  there is refused at registration on both targets, naming the parameter and its type.
-- **`access = "internals"`: native only.** The listener gets the real receiver and a `&mut` to every
-  parameter in its engine type, and the call kinds and support modules below. It is the mixin tier;
-  a `mod.wasm` declaring internals or an internals injection is refused at load:
-  "internals access is native-only".
+| Key | Meaning |
+| --- | --- |
+| `id` | Unique, nonempty declaration ID |
+| `at` | Canonical function path |
+| `kind` | One of the eight kinds below |
+| `with` | Listener function in the mod crate root |
+| `access` | `api` (default) or `internals` |
+| `priority` | Descending priority, default 0 |
+| `hash` | Optional function signature pin; required for another mod's point |
+| `call`, `nth`, `ctx` | Canonical resolved callee, zero-based occurrence and statement context; required together for call kinds |
 
-## Adding a pinned declaration
+| Kind | Contract |
+| --- | --- |
+| `head` | Before the body; mutable argument record and cancellation/result |
+| `return` | After the body; mutable returned value |
+| `replace` | Owns the function; returns its result without running the body |
+| `before_call` | Receiver and mutable evaluated arguments, before the call |
+| `after_call` | Receiver and shared result; keeps the result |
+| `modify_value` | Receiver and owned result; returns its replacement |
+| `wrap_call` | Receiver, arguments and original-call continuation; returns the result |
+| `wrap_if` | Receiver and shared arguments; returns whether to call; unit output only |
+
+API listeners get every parameter copied into an API record. Mutable parameters
+are copied back; by-value and shared parameters use the listener's replacement.
+A `Game` method's API point also supplies the side's Host. A parameter with no
+API/Wire form refuses registration, naming its type, on both targets.
+Internals listeners use the exact receiver and raw argument record exported in
+`internals::raw`; their listener types are in `points.json`. Declare engine types
+through the top-level `internals` list and depend on `horizon-internals`, not the
+game crate. Engine internals and call sites are native only; wasm uses API
+function points. There are no API call-site adapters.
+
+## Ordering
+
+Head cancellation skips the body and return point, but every head listener still
+runs and may clear cancellation. Return listeners run only after the body.
+API listeners precede internals listeners; priority descends, then dependency
+registration order, with inject ID breaking ties within a mod. A replace runs
+after head listeners of its tier; only one replace may own a point across both
+tiers. Disabling it restores the original body. It requires an outcome the record
+can carry: borrowed returns and `Result<(), E>` are refused. Calling the replaced
+function from its replacement re-enters the point, not the original body.
+
+## Writing a declaration
+
+An `[[inject]]` needs `id`, `at`, `kind` and `with` (plus `call`, `nth` and `ctx` for a call kind,
+copied from the pinned `points.json`). `hash` is optional pinning. Without it, the build takes the
+function's fingerprint from the catalog of the game `[native] horizon` pins, which fixes every
+signature exactly, and records it in the build's `native-mods.json`. With it, the build checks it
+as written and refuses a stale one with `E_INJECT_CHANGED`. The same holds for each `internals`
+entry's `hash` (`E_INTERNAL_CHANGED`). Moving the pin with `cargo horizon-mod update` compares the
+old and new games for every declaration without a hash: an inject whose function changed refuses the
+update with `E_INJECT_CHANGED` until you pass `--accept <inject id>`, as a stale hash refuses the
+build, and internals without a hash are reported and stay without one.
 
 Run `cargo horizon-mod inject add <at> --kind <kind> --with <listener>` in a native mod's folder.
 The tool appends `[[inject]]`, preserving comments, formatting and permissions. A symlinked
-manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`.
+manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`, pinning it.
 `--with` supplies both listener and unique inject id (default `on_inject`); implement it separately.
 Access defaults to `api`; edit it to `internals` when needed. The tool prints each tier's availability
 at the place, such as `api: refused, argument 2 `batch` (`&mut HudBatch`) has no API type yet` and
-`internals: native only`. The launcher validates route support.
+`internals: native only`. The launcher validates compiled slot support.
 Call kinds copy canonical `call`, `nth` and `ctx` from the pinned `points.json`. Use
 `--call <canonical callee> --nth N` (default 0, per callee). Omitting `--call` requires one callee
-at that ordinal. Ambiguous identities and unlisted source calls are refused; no discovery runs.
+at that ordinal. Ambiguous identities and unlisted calls are refused; no discovery runs.
 Unknown places return `E_INJECT_MISSING` naming the target. Invalid kinds, callbacks,
 duplicate ids, or call flags on function kinds leave the manifest untouched.
 
 ## Refreshing pinned declarations
 
-`cargo horizon-mod inject update` checks every declaration against the current game's catalogs;
+`cargo horizon-mod inject update` checks every declaration against the current game's catalogs (a
+declaration without a hash has none to refresh);
 it does not change `[native].horizon` (use top-level `update` to change that pin).
 A unique call context that moved reports `E_INJECT_MOVED` and updates only `nth`.
 Missing targets, missing contexts and ambiguous contexts are never retargeted.
@@ -82,222 +128,6 @@ including Windows device names (`con`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`, 
 and `horizon.txt` is reserved for the engine seed. Commit the generated list with the game
 change that supports it; this command does not compile slots or change the mod's build pin.
 
-## Function-slot declarations
-
-API listeners use `access = "api"` (the default) and the host/API record shown below. Native internals
-listeners choose `access = "internals"` and the generated facade's receiver/raw record:
-
-```toml
-[[inject]]
-id = "before_tick"
-at = "horizon_client::game::Game<'_>::tick"
-kind = "head"
-with = "before_tick"
-access = "internals"
-hash = "<the function hash in internals.json>"
-```
-
-The function takes the slot's exact receiver and raw record types from the generated internals
-facade. `head` and `return` use function slots. If no compiled slot exists, native internals
-listeners use a private source point and rebuild the game; the callback and its facade record path
-stay unchanged. The log says `source (private slot, reason)` and private rows are never published
-in `points.json`. Targets below `mod_points` are refused because dispatch would create a Cargo cycle.
-`before_call`, `after_call`, `modify_value`, `wrap_call` and `wrap_if` also use private source calls
-when the canonical callee is absent from every slot list. The launcher validates their exact identity
-against the staged SDK before any game build; missing, moved or ambiguous calls refuse. Listed stale
-calls never fall back to source. `wrap_call` controls whether and how often to invoke the original;
-`wrap_if` runs it only when its condition returns true and requires unit output. The unit check runs
-once the private site's metadata exists, before game compilation. For all call kinds, use the catalog's
-canonical `call`, `nth` and statement `ctx`, not its place fingerprint `hash`.
-The generated `Listener`, `Receiver`, `Args` and `Output` facade names derive from that canonical callee
-and are identical on listed and source routes; physical IDs and dispatch remain distinct. The same
-`with` function therefore compiles on either route without an alias or compatibility export.
-The build log prints `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
-hash or missing target is refused, not silently redirected. Points order by descending priority,
-then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
-and inject id order. `modify_arg` is accepted on listed head slots but is a typed refusal on the
-source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
-An API `replace` owns the function, as a mixin overwrite does: its function takes the head's inputs
-and returns the point's return type, which the caller gets, and the body never runs. At a point
-returning `()` it returns `()` and the cancel is forced. It runs after the point's other API head
-listeners, whatever its priority, so they may change its inputs but not its outcome; internals head
-listeners run after it and can't undo it either. A point whose return has no API form refuses it at
-load, naming the point and type, and so does one returning `Result<(), E>`, whose cancel would
-answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the same check when it
-loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
-mod that stops or is disabled hands the function back: it runs as written again.
-Native and wasm share it through `mod_points::replace!`.
-API call sites are refused; internals `replace` and extension fields are also refused. Locals use the native source route described below.
-The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
-API head/return functions also load from wasm, with the same record.
-
-## For agents
-
-Apply these rules in order and stop at the first that fits.
-
-1. A hook or a Part method exists for the moment: implement it. **No injection.**
-2. No hook: an API point declaration. Use `[[inject]]` with `at`, lowercase `kind = "head"` or
-   `"return"`, a crate-root `with` function, and the catalog's `hash`. Add `horizon-mod-points` beside
-   `horizon-mod-api`; the function takes the side's host and the point's public record. Keep its body
-   API-only so the same call can become a hook.
-3. You need game internals: declare them and use `access = "internals"` with the generated
-   receiver/record types. Native source routing rebuilds the game when no compiled slot exists.
-   File a hook request; do not splice a hand-written helper into game source.
-
-| Field | Rule |
-| --- | --- |
-| `id` | unique, nonempty |
-| `at`, `hash` | canonical function path and its tool-written signature hash |
-| `kind`, `with` | lowercase kind and a crate-root callback function |
-| `access` | `api` (default) or `internals` |
-| `priority` | descending; defaults to 0 |
-| `call`, `nth`, `ctx` | exact canonical callee, occurrence and statement context for a call kind |
-
-Function-slot errors name the declaration or target. The generated constructor checks the callback's
-signature. Freshness errors never redirect an injection to a different function or call.
-
-Naming: events and methods follow NeoForge 26.3 names with no `on_` prefix; the event is `&mut`, handles come from
-the event, and writes take `host`.
-
-## The decision ladder
-
-1. **A hook or Part method exists: use it.** Read [Hooks](concepts/trait-mods.md) and the
-   [rustdoc](reference/api.md). A per-block, per-item or per-entity moment is a Part method. Nothing in this
-   chapter applies.
-2. **No hook: an API `[[inject]]` function.** The default. Your crate-root function gets the side's host
-   and the point's record (`mod_points::<Point>Args`): every argument as an API value, and a
-   `cancel` or `result` where the function returns `()` or an API value. It uses only `mod_api` types.
-   Every `Game` method is a point on both routes: the prebuilt game was built with them all, and a source
-   build gets the same points, so a point injection builds against the prebuilt game.
-3. **You truly need private internals:** declare their paths and fingerprints, then choose
-   `access = "internals"`. The callback depends on that game build, not a stable API contract;
-   it remains a hook request. A missing compiled slot requires a native source rebuild.
-
-## The forms
-
-| Form | Where | Game rebuild | `mod.wasm` |
-| --- | --- | --- | --- |
-| API `[[inject]]` | admitted head/return slots | no | yes |
-| Internals `[[inject]]` | head/return slots and supported call sites | only without a compiled slot | no (refused at load) |
-| Hook or Part method (no injection) | its documented firing point | no | yes |
-
-## Ordering
-
-Head slots run before head source callbacks; return source callbacks run before return slots.
-Slots run API listeners before internals listeners. Within each phase priority descends, then
-stable dependency/registration order; inject id breaks ties within one mod. A call wrapper may
-invoke the original zero, one or several times. A head cancellation skips the body and the return
-point, not the listeners after it: every head listener runs and sees `cancel` as the ones before it
-left it, and one may clear it again. Return listeners observe the result only after the body actually
-ran. Trait-mod hooks run by `#[listener]`
-priority descending, then dependency order; a cancel skips later mods except those receiving cancelled
-events, which may undo it. Hook contracts determine their own cancellation and replacement rules.
-
-## Make your injection convertible
-
-An injection becomes a hook when its body is a single call a hook can take. Keep to four rules:
-
-- **Take the host**, never `&mut Game`.
-- **Never read `Game` fields.** Whatever you need comes from handles, attachments and services reached from the
-  host.
-- **One call.** Keep the body to a single call into your own code, so the hook's listener is that call.
-- **One injection per moment.** Two injections at a moment are two hook requests.
-
-Counting server ticks in an attachment needs no game internals. Prefer an API point until the
-matching hook exists; use exactly the same API-only call in either form.
-
-**1. A point injection** (the default). `Game::tick` is a point, so this builds on the prebuilt game. The
-mod depends on `horizon-mod-points` as well as `horizon-mod-api`:
-
-```toml
-[[inject]]
-id = "count"
-at = "horizon_client::game::Game<'_>::tick"
-kind = "head"
-with = "tick"
-hash = "98019f886ec32cc7"
-```
-
-```rust,ignore
-{{#include ../examples/src/lib.rs:points}}
-```
-
-**2. The hook it becomes.** Say the catalog has a hook at that moment (the `server_tick` hook, which fires every server tick, stands in here), so the injection disappears and the
-mod implements the hook. The listener body is the same call:
-
-```rust,ignore
-{{#include ../examples/src/lib.rs:tick_hook}}
-```
-
-```rust,ignore
-{{#include ../examples/src/lib.rs:count}}
-```
-
-The `COUNTER` attachment is the same in both:
-
-```rust,ignore
-{{#include ../examples/src/lib.rs:counter}}
-```
-
-Moving from the point to the hook keeps the same call: the function body becomes the hook's body, and its record becomes the hook's event. That is what "convertible" means, and why shape 2 is the default.
-
-## Ask for the hook
-
-A gap is a hook request. File one as an issue on
-[arismoko/horizon](https://github.com/arismoko/horizon/issues) with the contract below.
-Copy this, and fill every field:
-
-```markdown
-**Hook request: <short name>**
-
-- **What the mod needs:** <one sentence: the moment, and what the mod does there>
-- **NeoForge 26.3 counterpart:** <event or method name, or "none">
-- **Vanilla class and method:** <`net.minecraft…Class.method`, the call the hook wraps>
-- **The injection it replaces:** <the `[[inject]]` table, `at`, `kind`, `access` and callback signature>
-- **Mod:** <name, repository or `.hmod`>
-- **Side:** <server, client or both>
-- **Contract wanted:** <listen, cancel, replace a value, collect; what a listener may change>
-```
-
-A hook with a NeoForge counterpart takes its name, side and contract. One without is welcome and names the
-mod mixin or use it replaces. State the vanilla method: the hook fires where vanilla calls it.
-
-## The build log
-
-The launcher reports each unified declaration's target, access and selected slot/source route.
-A source route means a game rebuild, not a fallback after failed freshness checks. Compiler
-errors name the callback registration or source adapter. Inspect `native/build.log` for the
-mod and inject id rather than guessing which callback filled a slot.
-
-A panic inside a point listener reports the mod and the method
-(`in native mod <id>, hook <method>`).
-
-## Support modules
-
-A `[[native.module]]` table contributes a whole Rust module to a game crate, beside the injections:
-self-contained items for source-level support code. It is the shape
-for support code a moment needs and one function cannot hold — Portizon's runtime is the case that
-asked for it.
-
-```toml
-[[native.module]]
-id = "runtime"
-file = "crates/horizon-client/src/game.rs"
-name = "portizon"
-source = "src/runtime.rs"
-visibility = "pub"          # optional: "pub" or "pub(crate)" (the default)
-```
-
-`source` holds the module's items without an outer wrapper; the tool emits them into `file` as
-`mod name`. The destination file must carry no top-level glob import — horizon-mixins refuses one,
-because it cannot prove which names the glob introduces — and the payload must be self-contained: no
-`mod` items, `#[path]`, `include!` or file attributes; assemble multi-file code into one file first.
-Ids are unique across a package's injections and modules together.
-
-Modules are **native-only** and last-resort support code, outside the `mod_api`-only
-line: a mod's behaviour still goes through hooks, handles and Parts. Any capability a module needs
-that the API lacks is a hook request in #44's row form, not a reason to grow the module.
-
 ## Which functions are points
 
 Every function of the game module is a point: `Game` methods, methods of its other types (`GameLevel`,
@@ -313,7 +143,10 @@ each one there is measured first, since a slot on a hot function costs on every 
 A `Game` method that takes `self` has a point named after the method (`tick`). Any other is named by its full path, snake-cased
 without `horizon_client::`: `game_levels_levels_parked_dims` for `Levels::parked_dims`, and for a lower
 crate without `horizon_`: `client_render_chunk_chunk_get`, and `Game::new` is `game_game_new`. `Game` methods'
-points get a host; free and associated functions have none. A method of another type has no API
+points get a host; free and associated functions have none.
+A point name is always one snake-cased form, for engine and mod points alike. Snake-casing is not injective
+(`a::b_c` and `a_b::c` are both `a_b_c`), so uniqueness comes from refusal: the build fails, naming both
+functions, when two points have one name. A method of another type has no API
 record until `mod_api` has a handle for that type; it keeps its internals form.
 
 A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no API
@@ -345,7 +178,11 @@ by the same rules as the game's: every eligible function of the crate, public an
 functions, inherent methods and functions of inline modules (trait impl methods are not points). The
 build compiles a staged copy with a point on each, in a slot table of the mod's own
 (`<crate>::__horizon_points`); the author's source is never edited. A point is named by its path
-from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::fill`.
+from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::fill`. Two functions whose
+paths give one name (`a::b_c` and `a_b::c`) fail the build, naming both; rename one or opt it out.
+A library's crate must be named after its mod id, with `-` as `_` (`chem-lib` builds crate
+`chem_lib`): an addon's manifest names the library by id and each `at` by crate, and on both
+targets the points of a library whose crate is named otherwise are refused.
 
 - **Opting out.** `#[mod_api::no_point]` on a function gives it no point. An addon declaring a
   listener there is refused: `chemlib::audit has no point (opted out with #[mod_api::no_point])`.
@@ -364,7 +201,10 @@ from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::f
   from its own hooks, which get a `Host`.
 - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in
   their own types, through the raw form declared beside the function. It works from the library's
-  own target: the same binary on native, the same dependency group on wasm.
+  own target: the same binary on native, the same dependency group on wasm. A wasm listener
+  at a declared dependency's point needs no engine internals declaration. The group registers
+  listeners through typed functions exported by the library, then seals every library registry
+  before initialization; each member keeps its own `mod_api` copy.
 - **The signature check.** Each mod point's hash covers its path, its signature as written and its
   record's field types. When the library's function changes, the addon is refused at load:
   `E_INJECT_CHANGED: addon:double_rate: chemlib 1.1.0 changed chemlib::transfer: pinned …, installed …
@@ -383,123 +223,16 @@ the manifest's `[wasm] points`; a package whose `mod-points.json` is missing, un
 refused.
 The launcher lists a native mod's points from its source.
 
-## Raw listeners and declared internals
+## Listed call sites (native only)
 
-When an API-typed point cannot carry the state a mod needs, a native mod can declare game
-internals and a raw listener. Each internal is an API request: propose the missing hook, handle
-or Part on the [roadmap](https://github.com/arismoko/horizon/issues/771) so the mod can move back
-to the typed API.
-
-```toml
-internals = [
-    { path = "horizon_client::game::Game", hash = "<written by the tool>" },
-    { path = "horizon_client::game::native_ticks::TickRound::listening", kind = "method", hash = "<written by the tool>" },
-]
-
-[native]
-game = "26.3"
-horizon = "<exact game commit>"
-mixins = "<exact mixins commit>"
-
-[[inject]]
-id = "count"
-at = "horizon_client::game::Game<'_>::tick"
-kind = "head"
-with = "count"
-access = "internals"
-hash = "<written by inject add>"
-```
-
-Run `cargo horizon-mod internals sync` in the mod's folder after editing its Rust code. It
-checks the mod against a discovery-only copy of the pinned game's source, uses compiler
-warnings to find actual internal uses (including glob imports and macros), and replaces
-top-level `internals` with their exact paths, kinds and hashes. Unused declarations are removed;
-retained declarations keep their formatting. The command prints added and removed entries.
-It is explicit: a normal build never changes the declarations reviewers and players read.
-
-Install `horizon-launcher` on `PATH`, or set `HORIZON_LAUNCHER` to its executable. The command
-invokes `horizon-launcher native-build --sync-internals <mod folder> --trust-native-code`, whose
-stdout is a JSON list of discovered catalog entries for the tool. This runs `cargo check`, not
-the game, but Rust build scripts and procedural macros execute with your rights: run it only
-on code you trust. No installed game or instance is needed. The launcher caches the isolated
-source and metadata build per pin under `native/internals-sync/<commit>/`; the second check
-reuses those compiler outputs. Neither that cache nor its temporary diagnostic attributes is
-used by normal builds or published prebuilt games. The source must be cached or downloadable;
-`E_INTERNAL_SOURCE_UNAVAILABLE` explains when it cannot be obtained, without changing the
-manifest or falling back to a different pin. Any compiler or catalog error also leaves the
-manifest alone. Discovery checks the mod's library on the current host with default features;
-configuration-gated catalog entries are still refused. Mods with source-spliced helper files
-or module injections are refused with `E_INTERNAL_SOURCE_INJECTION`: declare their internals
-explicitly with `internals add` instead. This invocation stages one mod project; required mod
-dependencies that are not in that project are refused by the dependency resolver, not silently
-omitted.
-
-`cargo horizon-mod internals add <path>` remains useful for those explicit declarations and
-writes the path and hash from the pinned game's `internals.json`; don't invent hashes. When several member kinds share a path (such as a field
-and a method named `listening`), pass `--kind <kind>` to select the catalog entry, for example
-`cargo horizon-mod internals add horizon_client::game::native_ticks::TickRound::listening --kind method`.
-The tool reports the available kinds if the choice is missing and writes the resolved `kind`
-into each added declaration, even for unambiguous paths. A declaration may omit `kind` only
-when its path has a single kind. Kind names match `internals.json`: inherent methods use `method`, free
-functions use `fn`, and fields use `field`. A `--kind` applies to all paths in that invocation.
-`cargo horizon-mod update` shows the signature changes and refreshes hashes while retaining
-member kinds. Use `cargo horizon-mod inject add` to select the target and write a unified
-injection with its function hash. `with` names the callback in the mod's crate root.
-
-Depend on `horizon-internals` (library `internals`) at the same pin as `horizon-mod-api`, never
-on `horizon-client` directly. The build generates a facade for this mod alone. Its nested
-modules re-export declared types and free functions: the declaration above makes
-`internals::game::Game` available. Declaring a field or inherent method exports its owner type;
-a type necessarily brings all its public fields and inherent methods. Undeclared types have no
-name in the facade and do not compile.
-
-The facade is generated when the game builds the mod, and it re-exports items the prebuilt
-game makes public; the game's source keeps them private. So a plain `cargo check` of the
-mod resolves `horizon-internals` to an empty crate and can't see `internals::…`. Compile
-a mod that declares internals with `horizon-launcher native-build <mod folder>`, which stages it
-against the pinned game the same way the launcher does on install, and report its errors.
-
-A raw injection also exposes the point's listener and raw record in `internals::raw`, for
-example `__TickListener` and `__TickRaw`. Discovery keeps those same typed exports and does
-not change `[[inject]]`; slot listeners need no special sync step. Implement `pub fn count` with the exact listener type
-from `points.json` (including the receiver and argument-record lifetime). The facade's safe,
-typed `raw::tick` constructor registers it in the generated executable; a mismatched function
-fails at that registration line, naming the injection. `return` uses the point's return
-listener and `raw::tick_return` constructor. Raw listeners work against the prebuilt game as
-well as source builds; unlisted source points and modules require a game rebuild.
-
-Native slot and source routes check the actual game's metadata before compiling mods:
-
-- `E_INTERNAL_MISSING`: the declared path is absent (type shapes not exposed as internals
-  cannot be declared). Run `cargo horizon-mod internals sync` to discover this pin's used
-  internals. Undeclared-item compiler errors also point to this command.
-- `E_INTERNAL_CHANGED`: the hash changed; the error names the new signature and asks for
-  `cargo horizon-mod update`.
-- `E_INTERNAL_AMBIGUOUS`: several member kinds share the path; choose one of the listed kinds
-  with `internals add <path> --kind <kind>`.
-- `E_INTERNAL_GATED`: the entry exists only under a `cfg`; target-specific declarations are
-  not supported.
-- `E_NOT_RAW`: the injection's target has no raw form, for example because it is generic or
-  takes `impl Trait`.
-- `E_GAME_DEPENDENCY`: the mod depends directly on `horizon-client`; use the facade instead.
-- `E_INTERNAL_PATH`: the entry cannot be re-exported as an item, for example an entire module;
-  declare its types or free functions instead.
-
-The build log lists each mod's internals and raw places. The same information is recorded in
-`native-mods.json` beside the built game.
-
-### Listed call sites (native only)
-
-An internals `[[inject]]` with `call`, `nth` and `ctx` wraps that exact call, not the enclosing function. Both native
-build routes use the same `points.json` object: `points` lists function points and `sites` lists
+An internals `[[inject]]` with `call`, `nth` and `ctx` wraps that exact call, not the enclosing function. The compiled game publishes the `points.json` object: `points` lists function points and `sites` lists
 call sites. Only reviewed call entries in `crates/horizon-mod-api-gen/slots/<mod_id>.txt` become sites:
 
 ```text
 horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 | <ctx from points.json>
 ```
 
-Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (reserved for extension
-fields; not consumed yet). Files support `#` comments; identical declarations merge, and conflicting
+Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (a type listing). Files support `#` comments; identical declarations merge, and conflicting
 contexts name both files. The stage reads their sorted union, evaluates the receiver once, and rewrites
 only the selected call expression in its copy of the game.
 
@@ -515,7 +248,7 @@ A changed or missing context refuses with `E_INJECT_LOST`. Two calls to the same
 contexts are also lost, even when `nth` still matches: the tool cannot prove which identical statement
 was intended. Refresh a moved ordinal with `inject update`; reselect a lost call with `inject add`.
 Function signature changes and missing functions use `E_INJECT_CHANGED` and `E_INJECT_MISSING` at the
-unified routing boundary. `E_INJECT_NO_SLOT` reports an unsupported route or kind, with its reason
+slot validation boundary. `E_INJECT_NO_SLOT` reports an unsupported slot or kind, with its reason
 and requested slot declaration. `E_INJECT_INVALID` reports malformed declaration fields.
 Freshness errors never silently select a different call.
 
@@ -533,7 +266,7 @@ ctx = "<statement context written by inject add>"
 ```
 
 The facade's `internals::raw` module exports this site's exact `Args`, `Receiver`, `Output` and
-`Listener` aliases and a typed registration constructor, all named from the canonical callee (the same names on slot and source routes).
+`Listener` aliases and a typed registration constructor, all named from the canonical callee.
 Use those aliases for the callback. The generated main adapts each kind to one wrap listener:
 
 | Kind | Callback inputs and result |
@@ -544,73 +277,132 @@ Use those aliases for the callback. The generated main adapts each kind to one w
 | `wrap_call` | Receiver, mutable arguments and mutable `original` continuation; returns the result |
 | `wrap_if` | Receiver and shared arguments; returns whether to call the original; unit output only |
 
-Listeners nest by descending priority, then mod ID, then injection ID; the first is outermost.
-A wrap may call `original` zero, one or several times. `cancellable` is refused: returning from the
-caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
-and alias-dependent receiver arguments are refused with the declaration's file, line and reason.
+Listed native `internals` calls also admit immutable borrowed arguments, such as `&str`.
+Their generated `Args<'a>` record borrows the original values for the call; no implicit
+owned-string conversion occurs. The listener is higher-ranked over that lifetime, so safe
+callbacks cannot retain the record or its references beyond the call, or mutate the referent
+through an immutable reference (ordinary interior mutability still follows Rust's rules).
+A callback may replace an argument with another reference valid for the same lifetime.
+Engine types are borrowed too: `&MobWorld` becomes a shared reference to the native
+`horizon_client_lib::mobs::MobWorld<'g>` in `Args<'g, 'a>`, keeping the world's own
+lifetime separate from the record's borrow. The facade re-exports the typed record;
+it does not convert the world into a mod API value or expose private fields. A callback
+can read the world's public fields and call its shared-reference methods using Rust's
+normal field projection, including public nested values, even without naming every type.
+Naming `MobWorld` itself requires its internals facade export. It cannot obtain exclusive
+access or extend either lifetime. Copy arrays of scalar values, such as `[i32; 3]`, can
+accompany these references in listed records.
+`modify_value` still receives only the receiver and owned result, not the argument record.
+Mutable borrowed arguments remain refused, as do borrowed arguments on API routes;
+this does not enable API source adapters or wasm call sites.
 
-An unlisted canonical call can use native source routing after the same freshness checks.
-A listed stale call never falls back to source. Use the function hash and statement context,
-not a site's physical fingerprint, as the declaration identity. `wrap_if` needs unit output.
-These call kinds are not available to wasm mods.
+### Owned arguments at listed calls
 
-## Reference
+A listed native `internals` call can also move owned arguments, such as the `ItemStack`
+in `Game::dispense_item`, into its record. Argument expressions run once in their original
+order. No stack is implicitly cloned. A record with any owned non-Copy field selects the
+**single-use** listener contract; named value types are conservatively treated as owned,
+even when that particular type implements Copy. Non-generic private aliases are expanded
+from the catalog, so the record names the actual field types rather than an inaccessible alias
+in another implementation module. The existing scalar/shared-reference-only
+contract remains repeatable.
 
-- A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
-  its body: the value it returns), in a crate-root `with` function. Its record is `mod_points::<Point>Args`.
-- Depend on `horizon-mod-points` only to listen at points. It holds one record per point;
-  a mod without point injections leaves this dependency out.
-- A listener's host is a `HostSide` on a function that takes `&mut self`, and `&dyn Host` on one that takes
-  `&self`.
-- The game sets a point's slots once, after the mods are installed; a point no mod listens at costs one
-  atomic load and a branch.
-- A point injection's `hook`, bindings and horizon-mixins fields are refused: a hook is its own `Hooks` method,
-  and the record carries what the point passes.
-- `[[inject]]` has no binding or hook-version fields. Implement a catalog hook through `Hooks`;
-  use the slot's generated callback signature for an injection.
+`before_call` still receives `&mut Args`, allowing argument modification; an observing
+callback can inspect its fields through shared references. `after_call` and `modify_value`
+keep their result-only signatures. A single-use `wrap_call` instead receives `Args` **by
+value** and the site's generated `Original<'g, 'a, 'next>` capability (exported beside
+`Args`, `Receiver`, `Output` and `Listener` under the same canonical prefix):
 
-### Mutable locals (native source rebuild only)
-
-`modify_local` requires `access = "internals"` and a rebuild from source. It uses the
-same pinned `call`, `nth` and `ctx` identity as other call-site injections, with three
-required fields that every other kind rejects:
-
-```toml
-[[inject]]
-id = "adjust_count"
-at = "horizon_client::game::count"
-kind = "modify_local"
-access = "internals"
-with = "adjust_count"
-hash = "<function hash>"
-call = "horizon_client::game::sink"
-nth = 0
-ctx = "<statement context>"
-local = "n"
-type = "i32"
-position = "before" # or "after"
+```rust,ignore
+pub fn wrap(receiver: Receiver<'_, '_>, mut args: Args, original: Original<'_, '_, '_>) -> Output {
+    inspect(&args.stack);
+    modify(&mut args.stack);
+    original.call(receiver, args)
+}
 ```
 
-The callback `fn adjust_count(n: &mut i32)` receives the actual mutable binding.
-Before callbacks run before evaluating the call; after callbacks run after it returns,
-while preserving its result. There is no copy or deferred write-back. Listeners use
-the existing priority/mod/injection ordering at each position. They may mutate the
-value directly, with the same type and panic handling as native internals listeners.
-No Host is passed by this raw internals route.
+`original.call` consumes both the forwarding capability and the record. A second call,
+using the moved record again, or retaining the capability past this call fails to compile.
+A wrapper that does not forward must supply its own correctly typed output; its unconsumed
+arguments drop normally. `wrap_if` remains unit-output-only and drops the arguments when
+its condition is false. Panics unwind through ordinary Rust ownership: a value is not leaked
+or dropped twice by the engine, whether the listener panics before or after forwarding.
+No per-call heap allocation is needed for the capability.
 
-The initial implementation accepts direct call statements in the enclosing function
-block. It refuses nested expression positions whose scope or evaluation order cannot
-be proven. The binding must be a single mutable local with a matching explicit Rust
-type, or a directly initialized suffixed integer literal (such as `3i32`) or boolean
-literal. Unsuffixed integer literals are refused because their inferred type cannot
-be proven. The declaration must include an initializer; later assignments do not
-establish initialization for this analysis.
-Missing, shadowed, immutable, type-mismatched, moved or borrowed bindings are refused
-by name. Non-scalar uses before the position, references (including `ref`/`ref mut`
-patterns in let, match and if-let over expressions mentioning the local), closures
-and opaque macros are conservatively refused when their dataflow cannot be proven.
-This may refuse bindings that Rust's borrow checker could otherwise accept.
+Borrowed and owned fields share one lifetime-bearing record. Forwarding moves owned fields
+and copies shared references; dropping the record does not drop their referents. Native
+`internals` callbacks are trusted code, not a sandbox: a callback may explicitly take an
+owned value through replacement or by owning Args, and may call `mem::forget`. The engine
+promises no hidden copies or leaks; it cannot prohibit these explicit mod-side transfers.
+Mutable-reference arguments and API/wasm call-site records remain refused.
+Owned shapes containing further borrows remain refused; direct immutable-reference fields
+can accompany owned fields.
 
-API access and wasm permanently refuse mutable locals; use native internals or request
-a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when
-no mod declares a local injection, so an unused local injection has zero runtime cost.
+A reviewed call row compiles the typed record into the prebuilt game. Attaching a listener
+to that listed site does not rebuild the game. A stale listed declaration is refused by name.
+
+The reviewed Portizon rows use the catalog's physical caller paths:
+- `horizon_client_lib::mobs::villager_brain::secondary::sense_secondary`: `farmland`, ordinal 0;
+- `horizon_client::game::sign_edit::Game<'_>::draw_sign_editor`: `editor_sprite`, ordinals 0 and 1;
+- `horizon_client::game::machines::Game<'_>::dispense_from`: `Game::dispense_item`, ordinal 0.
+
+Use these caller paths in the manifest. The nominal `horizon_client::game::Game::...`
+caller spelling is currently refused as Missing by the loader; listing a call does not
+add a nominal alias or change identity matching.
+
+With no listener, these sites cost what every listed site costs: one relaxed atomic load
+and a branch, without constructing Args or allocating. This is not literally zero overhead
+relative to an uninstrumented call. An optimized author benchmark on an Intel Core i9-13900H
+measured 1.44 ns per plain call versus 1.93 ns per unsubscribed listed call, a difference of
++0.49 ns per call (six alternating samples of 50 million calls, with the subscription flag
+opaque to the optimizer). Run the generator's ignored `unsubscribed_listed_call_cost` test
+to reproduce the measurement on another machine.
+
+Listeners nest by descending priority, then mod ID, then injection ID; the first is outermost.
+A repeatable wrap may call `original` zero, one or several times; a single-use wrap forwards
+at most once. `cancellable` is refused: returning from the caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
+and alias-dependent receiver arguments are refused with the declaration's file, line and reason.
+
+An unlisted call is refused, never retargeted. Use the function hash and statement
+context, not the site's physical fingerprint. Call kinds are not available to wasm.
+
+## Refusals
+
+| Code | Meaning |
+| --- | --- |
+| `E_INJECT_INVALID` | Malformed fields, unsupported kind or callback declaration |
+| `E_INJECT_MISSING` | Target function is absent |
+| `E_INJECT_CHANGED` | Function signature hash changed |
+| `E_INJECT_MOVED` | Unique context moved to another `nth`; run `inject update` |
+| `E_INJECT_LOST` | Context missing, changed or ambiguous; reselect with `inject add` |
+| `E_INJECT_NO_SLOT` | Not listed, kind has no slot, native-only place, wasm call sites unsupported, API call sites require internals, no API record, or replace lacks a carried return value |
+
+Refusals name the declaration and target. A missing slot includes the requested
+slot row; freshness errors never silently select another function or call.
+
+## Coming from Mixin
+
+Use the [mixins chapter](mixins.md) for upstream horizon-mixins' source-level
+vocabulary, selectors, bindings and state. It is a separate mechanism, not a
+translation to a narrower inject kind.
+
+## Ask for the hook
+
+A gap is a hook request. File one as an issue on
+[arismoko/horizon](https://github.com/arismoko/horizon/issues) with the contract below.
+Copy this, and fill every field:
+
+```markdown
+**Hook request: <short name>**
+
+- **What the mod needs:** <one sentence: the moment, and what the mod does there>
+- **NeoForge 26.3 counterpart:** <event or method name, or "none">
+- **Vanilla class and method:** <`net.minecraft…Class.method`, the call the hook wraps>
+- **The injection it replaces:** <the `[[inject]]` table, `at`, `kind`, `access` and callback signature>
+- **Mod:** <name, repository or `.hmod`>
+- **Side:** <server, client or both>
+- **Contract wanted:** <listen, cancel, replace a value, collect; what a listener may change>
+```
+
+A hook with a NeoForge counterpart takes its name, side and contract. One without is welcome and names the
+mod mixin or use it replaces. State the vanilla method: the hook fires where vanilla calls it.

@@ -78,8 +78,26 @@ pub(super) fn trait_path(owner: &str) -> String {
             {
                 path.segments.insert(0, syn::parse_quote!(crate));
             }
+            if path.segments.len() == 4
+                && path.segments[0].ident == "crate"
+                && path.segments[1].ident == "host"
+            {
+                let name = path.segments.last().unwrap().clone();
+                *path = syn::parse_quote!(crate::prelude::#name);
+            } else if path.segments.len() == 3
+                && path.segments[0].ident == "crate"
+                && path.segments[1].ident == "parts"
+            {
+                let name = path.segments.last().unwrap().clone();
+                *path = syn::parse_quote!(crate::#name);
+            }
         }
     }
+    let owner = super::IMPORTS
+        .iter()
+        .copied()
+        .find(|candidate| candidate.rsplit("::").next() == Some(owner))
+        .unwrap_or(owner);
     let mut path: syn::Path = syn::parse_str(owner).expect("an owner is a path");
     syn::visit_mut::VisitMut::visit_path_mut(&mut Qualify, &mut path);
     super::ty::written(&path)
@@ -832,11 +850,20 @@ fn borrowed(
             "let {m}{name} = {}::__wire_from_fields({args});",
             d.rust
         ));
-    } else {
+    } else if matches!(d.borrowed, super::ty::BorrowedShape::TupleRecord(_)) {
         read.push_str(&format!(
             "let {m}{name} = {} {{ {} }};",
             d.rust,
             build.join(", ")
+        ));
+    } else {
+        let args = build
+            .iter()
+            .map(|field| field.split_once(": ").unwrap().1)
+            .collect::<Vec<_>>()
+            .join(", ");
+        read.push_str(&format!(
+            "let {m}{name} = crate::__wire_record_{def}({args});"
         ));
     }
     Some((read, name.to_string(), back))
@@ -967,6 +994,9 @@ pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<St
         } else {
             call
         };
+        if m.owner == "Hooks" && m.name == "register" {
+            back.push_str("if let Some(reason) = crate::__private::take_registration_refusal(&p1) { crate::RegistrationRefusalRegistrar::registration_refusal(&mut host, reason); }");
+        }
         writeln!(
             arms,
             "{id} => {{ let receiver = {receiver}; {body} let answer = {answer}; out.put_owned(answer); {back} }}"

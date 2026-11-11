@@ -216,8 +216,9 @@ impl Game<'_> {
         if self.screen == Screen::Options
             && self.ui.options.page() == horizon_client::options_ui::Page::Agent
         {
-            self.ui.options.agent_status = self.agent_status_lines();
-            self.ui.options.agent_recording = self.repro.recording_active();
+            self.ui
+                .options
+                .set_agent_status(self.agent_status_lines(), self.repro.recording_active());
         }
     }
 
@@ -626,6 +627,26 @@ impl Game<'_> {
                 }
                 ok()
             }
+            // The real event, so focus loss reaches all that a window's does (the radial menu
+            // cancels, held keys go).
+            "pad" if words.get(1) == Some(&"focus") => {
+                let focused = match arg(2)? {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("pad focus true|false".into()),
+                };
+                let id = self
+                    .window
+                    .as_ref()
+                    .map_or_else(winit::window::WindowId::dummy, |w| w.id());
+                self.handle_window_event(
+                    event_loop,
+                    id,
+                    winit::event::WindowEvent::Focused(focused),
+                    super::input_trace::InputOrigin::Agent,
+                );
+                ok()
+            }
             "pad" => Ok(Some(self.pad_command(&words)?)),
             "key" => {
                 let key = key_code(arg(1)?).ok_or_else(|| format!("unknown key {}", words[1]))?;
@@ -638,6 +659,8 @@ impl Game<'_> {
                 }
                 if arg(2)? != "up" {
                     self.input_keyboard_used();
+                    // As a window's key press: the radial menu closes, and the key goes on.
+                    self.pad_radial_cancel();
                 }
                 // The command confirmation takes the keys; none go past it.
                 if self.command_prompt.is_some() {
@@ -825,6 +848,10 @@ impl Game<'_> {
                         self.screen_name()
                     )
                     .into());
+                }
+                // As a window's click: the radial menu closes, and the click goes on.
+                if arg(2)? != "up" {
+                    self.pad_radial_cancel();
                 }
                 match arg(2)? {
                     "down" => {
@@ -1102,6 +1129,7 @@ impl Game<'_> {
                     "keybinds" => Page::KeyBinds,
                     "controller" => Page::Controller,
                     "controller-binds" => Page::PadBinds,
+                    "controller-radial" => Page::ControllerRadial,
                     "mouse" => Page::Mouse,
                     "chat" => Page::Chat,
                     "accessibility" => Page::Accessibility,

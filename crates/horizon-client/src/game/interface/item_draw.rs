@@ -29,6 +29,43 @@ struct ItemEntityDraw<'a> {
     entity: bool,
 }
 
+/// The game's painter for the HUD kit's icons (`hud_kit::icon`): items by their models, the
+/// player's face from `face`, their skin's texture.
+pub(super) struct IconPainter<'g, 'a> {
+    pub(super) game: &'g Game<'a>,
+    pub(super) face: Option<&'g str>,
+}
+
+impl horizon_client::hud_kit::icon::IconPainter for IconPainter<'_, '_> {
+    fn item(&self, batch: &mut HudBatch, id: &str, [x, y, size]: [f32; 3]) -> bool {
+        let start = batch.vertices.len();
+        self.game
+            .draw_item_model(batch, &ItemStack::new(id, 1), x, y);
+        let scale = size / horizon_client::hud_kit::icon::ITEM_SIZE;
+        batch.scale_since(start, x, y, scale, scale);
+        batch.vertices.len() > start
+    }
+    fn face(&self, batch: &mut HudBatch, [x, y, size]: [f32; 3]) -> bool {
+        let Some(skin) = self.face else {
+            return false;
+        };
+        let mut draws = Vec::new();
+        // `PlayerFaceExtractor`: the face, then its hat layer.
+        horizon_client::tab_list::face(
+            &mut draws,
+            skin,
+            x as i32,
+            y as i32,
+            size as i32,
+            true,
+            false,
+            u32::MAX,
+        );
+        horizon_client::hud_layout::paint(batch, &self.game.gui.atlas, &draws);
+        true
+    }
+}
+
 /// The game's answers to what the resolver cannot read from the stack.
 pub(super) struct Env<'a, 'g> {
     game: &'a Game<'g>,
@@ -103,6 +140,36 @@ impl ItemEnv for Env<'_, '_> {
             &mut color,
         );
         color as i32
+    }
+    fn item_model_update(
+        &self,
+        kind: &str,
+        config: &horizon_core::nbt::Tag,
+        stack: &StackView,
+        ctx: &horizon_assets::item_model::Context,
+        models: &mut Vec<String>,
+    ) {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelUpdate) {
+            return;
+        }
+        let Ok(snapshot) = stack.try_into_api() else {
+            return;
+        };
+        let Ok(display) = ctx.display.try_into_api();
+        let owner = ctx.owner.and_then(|owner| owner.try_into_api().ok());
+        let level = ctx.level.and_then(|level| level.try_into_api().ok());
+        self.game
+            .native_item_model_update(mod_api::__private::ItemModelUpdateCall {
+                kind,
+                config,
+                stack: &snapshot,
+                bundle_selected: stack.bundle_selected,
+                display,
+                owner: owner.as_ref(),
+                level: level.as_ref(),
+                seed: ctx.seed,
+                models,
+            });
     }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
@@ -1079,6 +1146,119 @@ mod tests {
                 };
             }
         }
+    }
+
+    /// A mod's item model type: a cell that draws `gui` in a screen and `ground` elsewhere, `full`
+    /// or `empty` by the stack, and reports the seed, the owner's type and the level it was told,
+    /// as names the test reads back.
+    struct Cell;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Cell {
+        fn register_item_models(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterItemModelsEvent<'_>,
+        ) {
+            event.models.push("cellmod:cell".into());
+        }
+        fn item_model_update(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemModelUpdateEvent<'_>,
+        ) {
+            if event.kind != "cellmod:cell" {
+                return;
+            }
+            let place = match event.display {
+                mod_api::ItemDisplayContext::Gui => "gui",
+                _ => "ground",
+            };
+            let fill = if event.stack.count() > 1 {
+                "full"
+            } else {
+                "empty"
+            };
+            event.models.push(format!("{place}/{fill}"));
+            event.models.push(format!("seed {}", event.seed));
+            if let Some(owner) = event.owner {
+                event.models.push(format!("owner {}", owner.entity_type));
+            }
+            if let Some(level) = event.level {
+                event.models.push(format!("level {}", level.dimension));
+            }
+        }
+    }
+
+    /// A mod registers its item model type once at start, and the game's resolver gives it what
+    /// `ItemModel.update` reads: the stack, where the item is drawn, its owner and level when it
+    /// has them, and the seed. Another type, or no mod, draws nothing.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mods_item_model_type_answers_with_the_draws_context() {
+        use horizon_assets::item_model::{Context, DisplayContext, LevelState, OwnerState};
+        use mod_api::__private::game::*;
+        let config =
+            horizon_core::json_nbt::json_to_tag(&serde_json::json!({"type": "cellmod:cell"}))
+                .unwrap();
+        let owner = OwnerState {
+            entity_type: "minecraft:zombie".into(),
+            ..OwnerState::default()
+        };
+        let level = LevelState {
+            dimension: "minecraft:the_nether".into(),
+            ..LevelState::default()
+        };
+        let in_screen = Context {
+            display: DisplayContext::Gui,
+            owner: None,
+            level: None,
+            seed: 7,
+        };
+        let on_ground = Context {
+            display: DisplayContext::Ground,
+            owner: Some(&owner),
+            level: Some(&level),
+            seed: 42,
+        };
+        let drawn = |env: &Env<'_, '_>, kind: &str, count: i32, ctx: &Context<'_>| {
+            let mut models = Vec::new();
+            env.item_model_update(
+                kind,
+                &config,
+                &StackView::new("minecraft:stick", count),
+                ctx,
+                &mut models,
+            );
+            models
+        };
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("cellmod", Box::new(Cell))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut types = Vec::new();
+            Game::native_register_item_models(&mod_api::RegistrationContext::new(), &mut types);
+            assert_eq!(types, ["cellmod:cell"]);
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(
+                    drawn(&env, "cellmod:cell", 1, &in_screen),
+                    ["gui/empty", "seed 7"]
+                );
+                assert_eq!(
+                    drawn(&env, "cellmod:cell", 2, &on_ground),
+                    [
+                        "ground/full",
+                        "seed 42",
+                        "owner minecraft:zombie",
+                        "level minecraft:the_nether"
+                    ]
+                );
+                assert!(drawn(&env, "othermod:cell", 2, &on_ground).is_empty());
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                assert!(drawn(&Env { game }, "cellmod:cell", 2, &on_ground).is_empty());
+            });
+        });
     }
 
     /// A mod registers its item tint source once at start.

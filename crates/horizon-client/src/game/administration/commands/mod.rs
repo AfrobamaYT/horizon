@@ -4,6 +4,7 @@ mod admin;
 pub(super) mod compute;
 mod data;
 mod difficulty;
+mod display_names;
 pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
@@ -430,7 +431,7 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
-        let console = self.options.dedicated.is_some()
+        let console = self.is_dedicated_server()
             && self
                 .ui
                 .rules
@@ -465,7 +466,7 @@ impl Game<'_> {
         // MinecraftServer.sendSystemMessage, unless the server is the source.
         let console = self.console_broadcast.is_none()
             && self.lan_acting.is_some()
-            && self.options.dedicated.is_some()
+            && self.is_dedicated_server()
             && self
                 .ui
                 .rules
@@ -816,13 +817,7 @@ impl Game<'_> {
                 let block = Text::translate(&format!("block.{block}"), &[]);
                 Text::translate("entity.minecraft.falling_block_type", &[block])
             }
-            Target::Mob(id) => self.mobs.iter().find(|m| m.id == id).map_or_else(
-                || Text::translate("entity.", &[]),
-                |m| match self.mob_team_of(m) {
-                    Some(team) => team.formatted_name(m.command_name()),
-                    None => m.command_name(),
-                },
-            ),
+            Target::Mob(id) => self.mob_command_name(id),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
                 let custom = super::native_entities::target_id(other)
@@ -1098,8 +1093,10 @@ impl Game<'_> {
         );
         candidates.extend(self.natural_knot_ids().into_iter().map(Target::Knot));
         // `isRemoved` from a mod's call on, though the sweep has not taken it out.
-        if !self.persist.removals.is_empty() {
-            candidates.retain(|t| !self.persist.removals.contains(t));
+        if !self.persist.removals.is_empty() || !self.persist.destroying_vehicles.is_empty() {
+            candidates.retain(|t| {
+                !self.persist.removals.contains(t) && !self.persist.destroying_vehicles.contains(t)
+            });
         }
         candidates
     }
@@ -2588,12 +2585,11 @@ impl Game<'_> {
                     // which its death message tells.
                     let alive = m.alive();
                     if alive {
-                        m.record_damage(
-                            horizon_client::mobs::Damage::of(
-                                horizon_client::mobs::DamageKind::GenericKill,
-                            ),
-                            f32::MAX,
+                        let source = horizon_client::mobs::Damage::of(
+                            horizon_client::mobs::DamageKind::GenericKill,
                         );
+                        m.record_damage(source, f32::MAX);
+                        m.last_damage = Some((source, i64::from(m.age)));
                     }
                     m.health = 0.0;
                     if m.death_time == 0 {
@@ -2633,23 +2629,9 @@ impl Game<'_> {
                 self.item_frames.retain(|f| f.id != id);
             }
             Target::Painting(id) => self.paintings.retain(|p| p.id != id),
-            Target::Boat(id) => {
-                // AbstractBoat.remove: a killed boat drops its lead.
-                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
-                    self.release_vehicle_container(id);
-                    let b = self.boats.remove(i);
-                    // AbstractChestBoat.remove, after the live menu writes
-                    // back its slots.
-                    self.drop_vehicle_contents(b.position.components(), &b.items);
-                    self.boat_removed(&b);
-                }
-            }
-            Target::Cart(id) => {
-                self.release_vehicle_container(id);
-                if let Some(i) = self.carts.iter().position(|c| c.id == id) {
-                    let c = self.carts.remove(i);
-                    // AbstractMinecartContainer.remove.
-                    self.drop_vehicle_contents(c.position.components(), &c.items);
+            Target::Boat(_) | Target::Cart(_) => {
+                if !self.kill_vehicle_object(t) {
+                    return;
                 }
             }
             Target::Other(id) => {
@@ -2748,15 +2730,16 @@ impl Game<'_> {
         }
         let name;
         if kind == "minecraft:ender_dragon" || self.res.mob_types().contains_key(&kind) {
-            self.spawn_mob_spawned(
-                &short,
-                pos,
-                super::creatures::SpawnSite::Finalizing(
-                    horizon_client::mobs::spawn_rules::Reason::Command,
-                ),
-            )
-            .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
-            name = Text::translate(&entity_name_key(&kind), &[]);
+            let id = self
+                .spawn_mob_spawned(
+                    &short,
+                    pos,
+                    super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Command,
+                    ),
+                )
+                .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
+            name = self.target_name(Target::Mob(id));
         } else {
             match short.as_str() {
                 "item" => {
@@ -3825,7 +3808,7 @@ impl Game<'_> {
             self.game_rule_changed(&rule.name, value, actor);
         }
         self.sync_rules();
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             let (value_type, json) = match value {
                 Value::Bool(b) => ("boolean", serde_json::json!(b)),
                 Value::Int(i) => ("integer", serde_json::json!(i)),
@@ -4253,11 +4236,6 @@ impl Game<'_> {
         }
         removed
     }
-    /// `PoiTypes`: the point of interest type of a block state.
-    fn poi_type(&self, state: horizon_world::registry::BlockStateId) -> Option<&'static str> {
-        let s = self.pack.assets.registry.state(state)?;
-        horizon_world::poi::poi_type(s).map(|(kind, _)| kind)
-    }
     /// `LocateCommand.locatePoi`: `PoiManager.findClosestWithType` within
     /// 256 blocks of the source, over the loaded chunks.
     fn cmd_locate_poi(&mut self, ctx: &Context) -> R<i32> {
@@ -4270,9 +4248,9 @@ impl Game<'_> {
         };
         let from = self.source_position().map(|v| v.floor() as i32);
         const RANGE: i32 = 256;
-        let mut cache: std::collections::HashMap<u32, Option<&'static str>> =
+        let mut cache: std::collections::HashMap<u32, Option<&str>> =
             std::collections::HashMap::new();
-        let mut best: Option<(i64, [i32; 3], &'static str)> = None;
+        let mut best: Option<(i64, [i32; 3], &str)> = None;
         let (cx0, cz0) = ((from[0] - RANGE) >> 4, (from[2] - RANGE) >> 4);
         let (cx1, cz1) = ((from[0] + RANGE) >> 4, (from[2] + RANGE) >> 4);
         for cx in cx0..=cx1 {
@@ -4593,7 +4571,7 @@ impl Game<'_> {
             }
         };
         if id == "say" {
-            if self.lan.is_some() && self.options.dedicated.is_some() {
+            if self.lan.is_some() && self.is_dedicated_server() {
                 self.lan_log_event(horizon_client::lan::hub::HostEvent::Chat {
                     line: line.plain(),
                     secure: false,
@@ -6225,126 +6203,8 @@ mod item_damage_range_tests {
 }
 
 #[cfg(test)]
-mod vehicle_kill_tests {
-    use super::*;
-    use crate::game::BlockEntity;
-    use crate::game::{Audio, Options, Progress, Settings, load_resources};
-    use horizon_core::nbt::parse_snbt;
-
-    #[test]
-    #[ignore = "needs prepared resources and scratch homes/cwd"]
-    fn kill_spills_explicit_vehicle_contents_after_menu_writeback() {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
-            Vec::new(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            crate::game::execution_role::ExecutionRole::IntegratedServer,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        let clock = game.world.game_time;
-        let mut differences = Vec::new();
-        for (index, kind) in [
-            "oak_chest_boat",
-            "bamboo_chest_raft",
-            "chest_minecart",
-            "hopper_minecart",
-            "oak_boat",
-        ]
-        .iter()
-        .enumerate()
-        {
-            let uuid = [51, 0, 0, index as i32 + 1];
-            let source = r#"{Pos:[5.25d,200d,4.75d],NoGravity:1b,Items:[{Slot:0b,id:"minecraft:diamond",count:3,components:{"minecraft:custom_data":{h051:1}}},{Slot:1b,id:"minecraft:dirt",count:5},{Slot:2b,id:"minecraft:stick",count:7}]}"#.to_string();
-            let (tag, _) = parse_snbt(&source).unwrap();
-            let boat = kind.contains("boat") || kind.contains("raft");
-            let (id, mut slots) = if boat {
-                game.load_boat(tag, Some(uuid), &format!("minecraft:{kind}"));
-                let b = game.boats.last().unwrap();
-                assert_eq!(b.position, Vec3::new(5.25, 200.0, 4.75));
-                (b.id, b.items.clone())
-            } else {
-                game.load_cart(tag, Some(uuid), &format!("minecraft:{kind}"));
-                let c = game.carts.last().unwrap();
-                (c.id, c.items.clone())
-            };
-            let container = index < 4;
-            assert_eq!(
-                slots.iter().flatten().map(|s| s.count).sum::<u32>(),
-                if container { 15 } else { 0 }
-            );
-            let target = if boat {
-                Target::Boat(id)
-            } else {
-                Target::Cart(id)
-            };
-            assert_eq!(
-                game.command_target_nbt(target).unwrap().get("UUID"),
-                Some(&horizon_core::nbt::Tag::IntArray(uuid.to_vec()))
-            );
-            // The active menu's actual edited slot must win over the older model.
-            let key = (i32::MAX - 15, crate::game::minecarts::CART_KEY_Y, id as i32);
-            if container {
-                slots[0].as_mut().unwrap().count = 4;
-                game.world
-                    .block_entities
-                    .insert(key, BlockEntity::Chest(slots.clone()));
-                game.container = Some(key);
-            }
-            let old_len = game.dropped.len();
-            let actor = format!("00000033-0000-0000-0000-{:012x}", index + 1);
-            assert!(
-                game.run_command(&format!("kill {actor}")),
-                "{kind}: actual command admitted"
-            );
-            assert!(!game.boats.iter().any(|b| b.id == id));
-            assert!(!game.carts.iter().any(|c| c.id == id));
-            assert!(!game.world.block_entities.contains_key(&key));
-            assert_ne!(game.container, Some(key));
-            let dropped = &game.dropped[old_len..];
-            let expected: Vec<_> = slots.into_iter().flatten().collect();
-            if dropped.len() != expected.len()
-                || expected
-                    .iter()
-                    .any(|s| !dropped.iter().any(|d| &d.stack == s))
-            {
-                differences.push(format!(
-                    "{kind}: expected {expected:?}, actual {:?}",
-                    dropped.iter().map(|d| &d.stack).collect::<Vec<_>>()
-                ));
-            }
-        }
-        assert_eq!(game.world.game_time, clock);
-        assert!(
-            differences.is_empty(),
-            "kill must spill authoritative explicit contents: {differences:#?}"
-        );
-    }
-}
+#[path = "vehicle_kill_tests.rs"]
+mod vehicle_kill_tests;
 
 #[cfg(test)]
 mod global_selector_order_tests {
@@ -6505,3 +6365,6 @@ mod global_selector_order_tests {
 #[cfg(test)]
 #[path = "incoming_tests/knot_identity.rs"]
 mod knot_identity_tests;
+
+#[cfg(test)]
+mod mob_display_name_tests;

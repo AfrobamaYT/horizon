@@ -75,7 +75,7 @@ pub(super) struct Parked {
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
-    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
+    dragon: super::native_entity_refs::dragon_parts_table::DragonSlot,
     breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
     rockets: horizon_client::join_seq::JoinList<fireworks::Rocket>,
@@ -150,7 +150,8 @@ impl Game<'_> {
         target: Target,
     ) -> bool {
         if dimension == self.dim.key() {
-            return !self.persist.removals.contains(&target);
+            return !self.persist.removals.contains(&target)
+                && !self.persist.destroying_vehicles.contains(&target);
         }
         let dim = match dimension {
             DimensionKey::OVERWORLD => Dim::Overworld,
@@ -158,10 +159,10 @@ impl Game<'_> {
             DimensionKey::END => Dim::End,
             key => Dim::Extra(key),
         };
-        self.levels
-            .parked
-            .get(&dim)
-            .is_none_or(|parked| !parked.persist.removals.contains(&target))
+        self.levels.parked.get(&dim).is_none_or(|parked| {
+            !parked.persist.removals.contains(&target)
+                && !parked.persist.destroying_vehicles.contains(&target)
+        })
     }
 
     /// Visit exactly the actual physical lifetime slot. Resolution releases the
@@ -407,6 +408,15 @@ impl Levels {
         self.parked.get(&dim).map(|level| &level.border)
     }
 
+    pub(super) fn install_profession_save_snapshots(
+        &self,
+        table: Arc<horizon_client::mobs::villager::ResolvedProfessions>,
+    ) {
+        for level in self.parked.values() {
+            level.save.install_profession_snapshot(table.clone());
+        }
+    }
+
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
     }
@@ -498,6 +508,7 @@ impl Game<'_> {
             &self.level.enabled_features,
             self.server_loot.clone(),
         )?;
+        save.install_profession_snapshot(self.stations().professions.clone());
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());
@@ -770,24 +781,129 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// The entity's memory (its UUID and the compound it was loaded with)
-    /// moves with it from the level not in place to the level in place, so
-    /// it is saved in the other level as it was.
-    pub(super) fn move_entity_memory(&mut self, from: Dim, id: u32) {
+    /// Follow the direct mount of a travelling player through complete source objects.
+    /// A later player in the same travelling stack finds no source root: the first
+    /// arrival already moved it, keeping every id that the guests' mounts name.
+    pub(super) fn parked_vehicle_root(&self, from: Dim, mut id: u32) -> Option<u32> {
+        let p = self.levels.parked.get(&from)?;
+        for _ in 0..=p.mobs.len() + p.persist.off_level.len() + 1 {
+            let mob = p
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .or_else(|| {
+                    p.persist
+                        .off_level
+                        .get(&id)
+                        .and_then(persist::OffLevel::as_mob)
+                })
+                .filter(|m| !m.removed);
+            if let Some(parent) = mob.and_then(|m| m.extra.mount) {
+                id = parent;
+                continue;
+            }
+            let present = mob.is_some()
+                || p.boats.iter().any(|b| b.id == id)
+                || p.carts.iter().any(|c| c.id == id);
+            let removed = p.persist.removals.iter().chain(p.persist.destroying_vehicles.iter()).any(|target| matches!(
+                target, commands::Target::Mob(n) | commands::Target::Boat(n) | commands::Target::Cart(n) if *n == id
+            ));
+            return (present && !removed).then_some(id);
+        }
+        None
+    }
+
+    /// Move the source tree's object memory and take its Mob descendants in
+    /// canonical postorder. The caller owns the extracted root and admits it last.
+    /// Transfer removal preserves lifetimes; residency is decided in the destination.
+    pub(super) fn move_entity_memory(&mut self, from: Dim, root: u32) -> Vec<Mob> {
         let Some(p) = self.levels.parked.get_mut(&from) else {
-            return;
+            return Vec::new();
         };
-        let uuid = p.persist.uuids.remove(&id);
-        let raw = p.persist.raw.remove(&id);
-        let slots = p.persist.passenger_slots.remove(&id);
-        if let Some(u) = uuid {
-            self.persist.uuids.insert(id, u);
+        let mut edges: Vec<_> = p
+            .mobs
+            .iter()
+            .chain(
+                p.persist
+                    .off_level
+                    .values()
+                    .filter_map(persist::OffLevel::as_mob),
+            )
+            .filter(|mob| !mob.removed)
+            .map(|mob| (mob.extra.mount, mob.extra.vehicle_order, mob.id))
+            .collect();
+        edges.sort_by_key(|&(_, order, id)| (order, id));
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (parent, _, id) in edges {
+            if let Some(parent) = parent {
+                children.entry(parent).or_default().push(id);
+            }
         }
-        if let Some(r) = raw {
-            self.persist.raw.insert(id, r);
+        let mut pending = vec![(root, false)];
+        let mut seen = std::collections::HashSet::new();
+        let mut ordered = Vec::new();
+        while let Some((id, done)) = pending.pop() {
+            if done {
+                ordered.push(id);
+            } else if seen.insert(id) {
+                pending.push((id, true));
+                if let Some(riders) = children.get(&id) {
+                    pending.extend(riders.iter().rev().map(|&rider| (rider, false)));
+                }
+            }
         }
-        if let Some(s) = slots {
-            self.persist.passenger_slots.insert(id, s);
+        let mut moved = Vec::new();
+        for id in ordered {
+            p.persist.move_object_to(id, &mut self.persist);
+            if id == root {
+                continue;
+            }
+            if let Some(state) = p.portal_states.remove(&id) {
+                self.portals.entities.insert(id, state);
+            }
+            let mob = if let Some(index) = p.mobs.iter().position(|m| m.id == id) {
+                Some(p.mobs.remove_for_transfer(index))
+            } else {
+                // Boats and carts are only roots, which the caller takes.
+                match p.persist.off_level.remove(&id) {
+                    Some(persist::OffLevel::Mob(mob)) => Some(mob),
+                    _ => None,
+                }
+            };
+            if let Some(mut mob) = mob {
+                mob.join = horizon_client::join_seq::JoinSeq::UNJOINED;
+                moved.push(mob);
+            }
+        }
+        moved
+    }
+
+    /// An already-owned body changes level, never construction identity.
+    /// `PersistentEntitySectionManager.addEntityUuid` decides its residency:
+    /// a body whose UUID an earlier arrival took is retained off-level.
+    pub(super) fn admit_transferred_object(&mut self, mut object: persist::OffLevel) {
+        let id = match &mut object {
+            persist::OffLevel::Mob(mob) => {
+                self.rebind_transferred_entity(mob.id, mob);
+                mob.id
+            }
+            persist::OffLevel::Boat(boat) => {
+                self.rebind_transferred_entity(boat.id, boat);
+                boat.id
+            }
+            persist::OffLevel::Cart(cart) => {
+                self.rebind_transferred_entity(cart.id, cart);
+                cart.id
+            }
+        };
+        if self.uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
+            self.persist.off_level.insert(id, object);
+            return;
+        }
+        match object {
+            persist::OffLevel::Mob(mob) => self.mobs.push(mob),
+            persist::OffLevel::Boat(boat) => self.boats.push(boat),
+            persist::OffLevel::Cart(cart) => self.carts.push(cart),
         }
     }
 
@@ -895,8 +1011,8 @@ impl Game<'_> {
                 running,
                 packets_drained: false,
             };
-            if observe_level {
-                self.native_level_tick_pre(dim.id());
+            if observe_level && let Some(level) = self.level(dim.id()) {
+                self.native_level_tick_pre(level);
             }
             self.update_dedicated_streaming();
             self.update_world();
@@ -920,8 +1036,8 @@ impl Game<'_> {
             if result.is_err() {
                 break;
             }
-            if observe_level {
-                self.native_level_tick_post(dim.id());
+            if observe_level && let Some(level) = self.level(dim.id()) {
+                self.native_level_tick_post(level);
             }
             self.publish_server_debug(dim);
             // An entity that crossed into a level that already ticked this
@@ -1154,14 +1270,21 @@ impl Game<'_> {
             let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
             self.native_chunks_unloaded(&chunks);
             // Its entities' attachments are saved with them; they leave memory too.
-            for uuid in self.persist.uuids.values() {
-                self.entity_attachments.remove(uuid);
+            for id in self.persist.uuids.keys() {
+                self.entity_attachments.remove(id);
             }
             self.enter_level(back)?;
             self.levels.parked.remove(&dim);
             self.native_level_closed(dim);
         }
         Ok(())
+    }
+
+    /// A server's world opened: level.dat is read and no chunk is loaded. The
+    /// mods hear its saved mod list's differences (NeoForge's
+    /// `ModMismatchEvent`), then the level it opens in.
+    pub(super) fn native_world_opened(&mut self, dim: Dim) {
+        self.native_level_opened(dim);
     }
 
     /// The mods hear `dim`'s level open (`LevelEvent.Load`), on a server.
@@ -1264,7 +1387,6 @@ impl Game<'_> {
     /// Memory still belongs to the parked source until the caller moves it.
     pub(super) fn rebind_transferred_entity(
         &mut self,
-        source: super::Dim,
         id: u32,
         entity: &mut impl horizon_mod_runtime::attachments::HasAttachmentLifetime,
     ) {
@@ -1275,12 +1397,7 @@ impl Game<'_> {
         let Some(level) = self.level(self.dim.id()) else {
             return;
         };
-        let Some(map) = self
-            .levels
-            .parked_mut(source)
-            .and_then(|p| p.persist.uuids.get(&id))
-            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
-        else {
+        let Some(map) = self.entity_attachments.get_mut(&id) else {
             return;
         };
         slot.bind(

@@ -507,6 +507,8 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
+ "horizon-mod-point-shape",
+ "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
  "rustc-demangle",
@@ -518,6 +520,7 @@ dependencies = [
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
+ "wasmtime",
  "zip",
 ]
 
@@ -1810,6 +1813,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-dualsense",
  "horizon-friends",
+ "horizon-game-discovery",
  "horizon-hdr",
  "horizon-hooks",
  "horizon-items",
@@ -1850,6 +1854,7 @@ dependencies = [
  "toml",
  "unicode-bidi",
  "ureq",
+ "wat",
  "wgpu",
  "winit",
  "winresource",
@@ -1932,6 +1937,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "tempfile",
  "unicode-bidi",
  "ureq",
  "wgpu",
@@ -2071,8 +2077,21 @@ name = "horizon-game"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-core",
+ "horizon-mod-host",
  "horizon-mod-package",
+ "horizon-protocol",
  "horizon-threads",
+ "serde_json",
+ "tempfile",
+ "winresource",
+]
+
+[[package]]
+name = "horizon-game-discovery"
+version = "0.1.0"
+dependencies = [
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2130,10 +2149,10 @@ dependencies = [
  "bytemuck",
  "glam",
  "horizon-core",
- "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
+ "horizon-mod-vocab",
  "log",
  "serde",
  "serde_json",
@@ -2144,7 +2163,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
- "horizon-mod-package",
+ "horizon-game-discovery",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
@@ -2153,6 +2172,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "syn 2.0.119",
+ "tempfile",
  "toml",
  "wit-parser",
 ]
@@ -2200,6 +2220,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client",
  "horizon-mod-api",
+ "horizon-mod-host",
  "horizon-mod-package",
  "log",
 ]
@@ -2209,6 +2230,11 @@ name = "horizon-mod-host"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-mod-api",
+ "horizon-mod-package",
+ "horizon-mod-wasm",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -2220,6 +2246,10 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "horizon-core",
+ "horizon-mod-api",
+ "horizon-mod-api-macros",
+ "horizon-mod-point-shape",
+ "horizon-mod-vocab",
  "horizon-shader-api",
  "libc",
  "log",
@@ -2257,6 +2287,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn 2.0.119",
 ]
 
@@ -2293,6 +2324,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-vocab"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "horizon-core",
+ "horizon-items",
+ "horizon-mod-api",
+ "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "horizon-mod-runtime",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "horizon-mod-wasm"
 version = "0.1.0"
 dependencies = [
@@ -2306,7 +2354,10 @@ dependencies = [
  "horizon-mod-points",
  "horizon-mod-runtime",
  "log",
+ "rustix 1.1.5",
  "serde_json",
+ "sha2",
+ "tempfile",
  "wasmparser 0.261.0",
  "wasmtime",
  "wat",
@@ -2373,6 +2424,8 @@ version = "0.1.0"
 dependencies = [
  "horizon-core",
  "horizon-hooks",
+ "horizon-mod-api-gen",
+ "horizon-mod-point-shape",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-server-files",
@@ -2393,6 +2446,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "serde",

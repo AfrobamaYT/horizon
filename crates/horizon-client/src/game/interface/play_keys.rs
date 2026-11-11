@@ -63,6 +63,11 @@ impl Game<'_> {
                     self.capture(true);
                 }
                 Screen::Paused | Screen::Inventory => {
+                    // RecipeBookComponent.keyPressed: a narrow window's open
+                    // book takes Escape to close itself, not the screen.
+                    if self.screen == Screen::Inventory && self.recipe_book_escape() {
+                        return Ok(());
+                    }
                     self.close_container();
                     self.pause_focus = None;
                     self.set_screen(Screen::Playing);
@@ -136,6 +141,7 @@ impl Game<'_> {
             {
                 if let Some(tab) = self.creative_screen.search_tab() {
                     select_creative_tab(&mut self.creative_screen, &mut self.inv_clicks, tab);
+                    self.build_screen();
                     self.creative_ignore_text = true;
                 }
             }
@@ -146,7 +152,16 @@ impl Game<'_> {
                 // an active use in the same tick.
                 self.release_use_for_keybind_screen();
             }
-            // key.socialInteractions.
+            // key.socialInteractions (Gui.handleKeybinds): only on a server; in single player
+            // the action bar says so, and the narrator.
+            KeyCode::KeyP if self.screen == Screen::Playing && !self.is_multiplayer_server() => {
+                let message = horizon_client::text::Text::translate(
+                    "multiplayer.socialInteractions.not_available",
+                    &[],
+                );
+                self.titles.set_overlay(message.clone(), false);
+                self.say_system_now(&message);
+            }
             KeyCode::KeyP if self.screen == Screen::Playing => {
                 self.open_social(false);
                 self.release_use_for_keybind_screen();

@@ -253,7 +253,7 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
         HostSide::Server(&mut TestHost),
         &ItemStack::default(),
         None,
-        Hand,
+        Hand::Main,
         &mut duration,
         &mut canceled,
     );
@@ -276,7 +276,7 @@ fn item_finish_can_clear_vanilla_result() {
         &mut TestHost,
         &ItemStack::default(),
         None,
-        Hand,
+        Hand::Main,
         0,
         &mut result,
     );
@@ -573,7 +573,7 @@ fn dispatch_contracts() {
     dispatch_modify_default_components(&Load("defaults"), "item", &mut components);
     assert_eq!(components["order"], serde_json::json!([1, 2]));
     let mut host = TestHost;
-    dispatch_level_tick_pre(&mut host, "overworld");
+    dispatch_level_tick_pre(HostSide::Server(&mut host), LevelRef);
     assert_eq!(*calls.lock().unwrap(), [1, 2]);
     calls.lock().unwrap().clear();
     let mut zoom = None;
@@ -658,7 +658,7 @@ fn dispatch_contracts() {
             stack: &ItemStack::default(),
             pos: [0; 3],
             face: [0; 3],
-            hand: Hand,
+            hand: Hand::Main,
             hit: BlockHit,
             player: 0,
             player_entity_id: 0,
@@ -674,7 +674,7 @@ fn dispatch_contracts() {
             stack: &ItemStack::default(),
             pos: [0; 3],
             face: [0; 3],
-            hand: Hand,
+            hand: Hand::Main,
             hit: BlockHit,
             player: 0,
             player_entity_id: 0,

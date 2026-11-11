@@ -76,14 +76,19 @@ impl Endpoint {
     }
 }
 
-/// Check subscriptions completely before registering any listener in the host's list. Internals
-/// injections never reach here: `load` refuses them, a native-only tier.
+/// Check engine subscriptions completely before registering in the host's list. Mod-point
+/// subscriptions are registered inside their dependency group, not forwarded through the host.
 pub(crate) fn listen(manifest: &Manifest, module: &WasmMod) -> Result<(), Refusal> {
     listen_checked(manifest, module).map_err(Refusal::Runtime)
 }
 
 fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
-    if manifest.inject.is_empty() {
+    let engine: Vec<_> = manifest
+        .inject
+        .iter()
+        .filter(|inject| manifest.mod_point_dependency(&inject.at).is_none())
+        .collect();
+    if engine.is_empty() {
         return Ok(());
     }
     let listed: Vec<(u32, String)> = module
@@ -96,9 +101,8 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             |input| input.take(),
         )
         .ok_or("point subscriptions did not answer")?;
-    let mut declared = manifest
-        .inject
-        .iter()
+    let mut declared = engine
+        .into_iter()
         .map(|inject| (inject.id.as_str(), inject))
         .collect::<std::collections::BTreeMap<_, _>>();
     let mut slots = Vec::new();
@@ -150,10 +154,7 @@ fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, Strin
         return Err(format!("{id}: no API record for place {place}"));
     };
     if inject.access != Access::Api
-        || !matches!(
-            inject.kind,
-            Kind::Head | Kind::ModifyArg | Kind::Replace | Kind::Return
-        )
+        || !matches!(inject.kind, Kind::Head | Kind::Replace | Kind::Return)
         || (inject.kind == Kind::Return) != at_return
         || horizon_mod_point_emit::plain_path(&inject.at)
             != horizon_mod_point_emit::plain_path(target)
@@ -177,16 +178,13 @@ mod tests {
 
     fn inject(kind: Kind, at: &str) -> Inject {
         Inject {
-            local: None,
-            local_type: None,
-            position: None,
             id: "own".into(),
             at: at.into(),
             kind,
             with: "own".into(),
             access: Access::Api,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: None,
             nth: None,
             ctx: None,
