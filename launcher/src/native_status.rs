@@ -433,7 +433,7 @@ mod tests {
             } else {
                 ""
             };
-            let manifest = format!("id='wasm_test'\nname='Wasm test'\nversion='1.0.0'\napi='0.2'\n{rows}[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n", horizon_mod_package::manifest::sha512_of(&module));
+            let manifest = format!("id='wasm_test'\nname='Wasm test'\nversion='1.0.0'\napi='0.2'\ncapabilities=[]\n{rows}[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n", horizon_mod_package::manifest::sha512_of(&module));
             let bytes =
                 horizon_mod_package::Package::write_files(&manifest, &[("mod.wasm", &module)])
                     .unwrap();
@@ -441,7 +441,9 @@ mod tests {
             java::set_enabled(home.path(), "wasm_test", true).unwrap();
             assert_eq!(enabled(home.path()).len(), usize::from(inject));
             if inject {
-                let staged = native_mods::installed_mods(home.path()).unwrap();
+                let staged = native_mods::stage_installed(home.path(), home.path().join("staged"))
+                    .unwrap()
+                    .unwrap();
                 let bundles = native_mods::bundles(&staged).unwrap();
                 assert_eq!(bundles.len(), 1);
                 assert!(bundles[0].manifest.native.is_none());
