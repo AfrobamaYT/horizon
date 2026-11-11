@@ -133,7 +133,9 @@ fn consuming_cancellation_has_one_outer_on_local_and_packet_routes() {
                     assert!(g.guest_use_item_on(12, gi, hit, Hand::Main).is_ok());
                 } else {
                     g.as_guest(12, |g| {
+                        g.forced_hit = Some(hit);
                         g.use_hand(Some(&hit)).unwrap();
+                        g.forced_hit = None;
                     })
                     .unwrap();
                 }
@@ -171,11 +173,17 @@ fn consuming_cancellation_has_one_outer_on_local_and_packet_routes() {
                     assert!(g.guest_use_item_on(12, gi, hit, Hand::Main).is_ok());
                 } else {
                     g.as_guest(12, |g| {
+                        g.forced_hit = Some(hit);
                         g.use_hand(Some(&hit)).unwrap();
+                        g.forced_hit = None;
                     })
                     .unwrap();
                 }
-                assert_ne!(g.world.block(3, 64, 4), initial);
+                assert_ne!(
+                    g.world.block(3, 64, 4),
+                    initial,
+                    "packet={packet}, item={item}"
+                );
                 assert_eq!(counts(), [0, 2, 1], "packet={packet}, item={item}");
             }
         }
@@ -211,7 +219,9 @@ fn consuming_cancellation_has_one_outer_on_local_and_packet_routes() {
                 assert!(g.guest_use_item_on(12, gi, hit, Hand::Main).is_ok());
             } else {
                 g.as_guest(12, |g| {
+                    g.forced_hit = Some(hit);
                     g.use_hand(Some(&hit)).unwrap();
+                    g.forced_hit = None;
                 })
                 .unwrap();
             }
