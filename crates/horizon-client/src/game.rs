@@ -7549,14 +7549,11 @@ impl Game<'_> {
                 });
             }
         }
-        if !claimed && !on_block {
-            if let Some(answer) = self.right_click_item(self.hand, &stack, aimed_at_block) {
-                if matches!(answer, Answer::Success | Answer::SuccessServer) {
-                    self.swing_arm();
-                }
-                return Ok(answer.consumes_action());
-            }
-            self.use_item_in_hand(&stack, &mut claimed);
+        if !claimed
+            && !on_block
+            && let Some(handled) = self.server_item_interaction(&stack, aimed_at_block)
+        {
+            return Ok(handled);
         }
         if claimed {
             self.swing_arm();

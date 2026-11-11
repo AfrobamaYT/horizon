@@ -3471,9 +3471,8 @@ impl Game<'_> {
     }
     /// A player uses `call.stack` with this click's `call.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
-    /// starts. Each click reaches it once. Set `claimed` to take the use: the
-    /// hand swings and the item's own use doesn't run. Server-side, for every
-    /// player of the world; an item on cooldown is never used.
+    /// starts. Both sides return the full interaction result; Pass continues.
+    /// Consume handles without swinging. Cooldown items are skipped.
     pub(in crate::game) fn native_use_item(&mut self, call: mod_api::__private::UseItemCall<'_>) {
         self.fire_use_item(call);
     }
