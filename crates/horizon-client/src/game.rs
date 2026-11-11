@@ -59,7 +59,6 @@ fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOv
         None => horizon_world::loot::PackOverlay::NONE,
     }
 }
-
 include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
 /// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
@@ -3451,6 +3450,9 @@ struct Game<'a> {
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
+    block_entity_tick_key: Option<block_entity_tick_items::Key>,
+    block_entity_tick_items: Option<Box<block_entity_tick_items::Scope>>,
+    wasm_dispatch_failures: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The open world's dimensions past vanilla's three. One per process, as a window
 /// and its server thread name the same dimensions.
@@ -4717,12 +4719,6 @@ impl Game<'_> {
             let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
             Some([-angle.sin() * strength, 0.2, angle.cos() * strength])
         });
-    }
-    /// Item entity `i` leaves the level (`Entity.discard`); mods hear it.
-    pub(super) fn remove_dropped(&mut self, i: usize) -> ItemEntity {
-        let e = self.dropped.remove(i);
-        self.native_entity_left(e.id);
-        e
     }
     /// Experience orb `i` leaves the level (`Entity.discard`); mods hear it.
     pub(super) fn remove_orb(&mut self, i: usize) -> ExperienceOrb {
@@ -11777,7 +11773,7 @@ impl Game<'_> {
         self.streaming = streaming;
         self.world = world;
         self.inventory = inventory;
-        self.save = save;
+        self.save = self.with_profession_save_snapshot(save);
         // MinecraftServer.prepareLevels: the saved tickets come back.
         self.tickets = if self.options.execution_role.is_client() {
             Default::default()
@@ -16529,6 +16525,10 @@ impl<'a> Game<'a> {
             tnts: Default::default(),
             hoppers: HashMap::new(),
             transactions: Vec::new(),
+            block_entity_tick_key: None,
+            block_entity_tick_items: None,
+            wasm_dispatch_failures:
+                horizon_mod_runtime::dispatch_failures::dispatch_failure_counter(),
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),

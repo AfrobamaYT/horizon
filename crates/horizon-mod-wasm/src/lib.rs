@@ -2,6 +2,8 @@
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
+#[cfg(feature = "runtime-fixture")]
+pub mod fixture;
 pub mod link;
 mod module_cache;
 #[cfg(test)]
@@ -884,4 +886,15 @@ mod mixed_install_tests {
             "lib is a native mod; wasm mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
         );
     }
+}
+
+/// Resolve generated boundary operations for hand-written guest integration fixtures.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
+    boundary::import_id(owner, method)
+}
+/// Resolve generated hook operations for hand-written guest integration fixtures.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
+    boundary::export_id(owner, method)
 }

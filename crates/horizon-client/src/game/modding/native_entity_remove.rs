@@ -2,9 +2,10 @@
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.
 //! `Entity.spawnAtLocation` drops an item at one.
-//! Everything `Entity.setRemoved` tells the world happens at the call: the
-//! handle and selectors stop finding the entity, its passengers get off and
-//! mods hear it leave. A mob's list entry is marked at once too; the other
+//! Outside a mod block-entity tick, `Entity.setRemoved` tells the world at the call:
+//! the handle and selectors stop finding it, passengers get off and mods hear it leave.
+//! Dropped-item removal inside that tick is instead staged with its final snapshot;
+//! scoped reads hide it immediately, while the leave notification waits for publication. A mob's list entry is marked at once too; the other
 //! kinds stay in their lists until the level's next sweep of departed
 //! entities, a few times per tick, so a hook that removes one never shifts the
 //! lists the game is walking. A vehicle with a chest spills it at that sweep, as vanilla's `remove` does.
@@ -34,6 +35,9 @@ impl Game<'_> {
             Some(Target::Mob(id)) => {
                 self.remove_mob_now(id, killed);
                 true
+            }
+            Some(Target::Item(id)) if self.block_entity_tick_key.is_some() => {
+                self.stage_tick_item(id, None).unwrap_or(false)
             }
             Some(t) => {
                 // Read before the entity counts as removed: its handle stops resolving.
