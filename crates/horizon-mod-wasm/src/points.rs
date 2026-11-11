@@ -91,6 +91,12 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
     if engine.is_empty() {
         return Ok(());
     }
+    if !mod_points::STAGED {
+        return Err(format!(
+            "{}: {}: this build has no point sites; start the game through the launcher's mod build",
+            manifest.id, engine[0].at
+        ));
+    }
     let listed: Vec<(u32, String)> = module
         .call(
             CallClass::Load,
@@ -110,7 +116,7 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
         let inject = declared
             .remove(id.as_str())
             .ok_or_else(|| format!("undeclared point listener {id}"))?;
-        let point = checked_place(&id, inject, place)?;
+        let point = checked_place(&manifest.id, inject, place)?;
         slots.push((
             point,
             index as u32,
@@ -147,6 +153,16 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
 /// against the game's own point list, not what the module says of itself: the target, the phase,
 /// and, for a `replace`, that its head returns `()` or an API value the listener can produce.
 fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, String> {
+    if !mod_points::STAGED {
+        return Err(format!(
+            "{id}: {}: this build has no point sites; start the game through the launcher's mod build",
+            inject.at
+        ));
+    }
+    checked_staged_place(id, inject, place)
+}
+
+fn checked_staged_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, String> {
     let Some(&(point, target, at_return, replace_refusal)) = mod_points::API_PLACES
         .iter()
         .find(|(point, ..)| *point as u32 == place)
@@ -191,6 +207,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unstaged_game_refuses_named_head_listener() {
+        if mod_points::STAGED {
+            return;
+        }
+        let &(point, target, ..) = mod_points::API_PLACES.first().unwrap();
+        let error = checked_place("my_mod", &inject(Kind::Head, target), point as u32).unwrap_err();
+        assert!(
+            error.contains("my_mod") && error.contains(target) && error.contains("no point sites"),
+            "{error}"
+        );
+    }
+
     /// A module built without the build tool may subscribe a `replace` anywhere: the loader
     /// refuses one at a head whose return it can't produce, by the game's own point list.
     #[test]
@@ -203,22 +232,22 @@ mod tests {
         let &(fallible, target, _, refusal) = heads()
             .find(|(.., refusal)| refusal.is_some_and(|ty| ty.starts_with("Result")))
             .expect("a game point returning Result<(), E> with an API record");
-        let error =
-            checked_place("own", &inject(Kind::Replace, target), fallible as u32).unwrap_err();
+        let error = checked_staged_place("own", &inject(Kind::Replace, target), fallible as u32)
+            .unwrap_err();
         assert!(
             error.contains(target) && error.contains(&format!("`{}`", refusal.unwrap())),
             "{error}"
         );
         // An ordinary head listener there is unaffected.
         assert_eq!(
-            checked_place("own", &inject(Kind::Head, target), fallible as u32),
+            checked_staged_place("own", &inject(Kind::Head, target), fallible as u32),
             Ok(fallible)
         );
         let &(owned, target, ..) = heads()
             .find(|(.., refusal)| refusal.is_none())
             .expect("a game point a replace can own");
         assert_eq!(
-            checked_place("own", &inject(Kind::Replace, target), owned as u32),
+            checked_staged_place("own", &inject(Kind::Replace, target), owned as u32),
             Ok(owned)
         );
     }

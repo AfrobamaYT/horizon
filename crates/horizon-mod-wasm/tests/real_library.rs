@@ -57,6 +57,23 @@ fn real_library_dependency() {
     let refused = load(&std::fs::read(&std).unwrap(), replaced);
     assert!(refused.refused.iter().any(|(_, r)| matches!(r, horizon_mod_wasm::Refusal::LinkedAgainst { dependency } if dependency == "wasm_test_library")));
     let loaded = load(&std::fs::read(std).unwrap(), packages);
+    if !mod_points::STAGED {
+        let refused = loaded
+            .initialize(&infos)
+            .expect_err("unstaged game refuses point listener");
+        let (_, reason) = refused
+            .iter()
+            .find(|(id, _)| id == "wasm_test_dependent")
+            .expect("unstaged game refuses point listener");
+        let message = reason.to_string();
+        assert!(
+            message.contains("wasm_test_dependent")
+                && message.contains("::tick")
+                && message.contains("no point sites"),
+            "{message}"
+        );
+        return;
+    }
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 3);
     loaded.initialize(&infos).unwrap();

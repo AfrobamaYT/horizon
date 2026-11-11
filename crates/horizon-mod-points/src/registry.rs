@@ -4,8 +4,20 @@ use crate::{POINT_COUNT, PointId, SITE_COUNT, SiteId};
 use mod_api::__private::points::{Place, Table};
 use std::sync::atomic::AtomicBool;
 
+/// Registers a listener, refusing game points when this build has no sites.
 #[cfg(not(target_arch = "wasm32"))]
-pub use mod_api::__private::points::register;
+pub fn register(slot: &mod_api::__private::points::SlotListener) -> Result<(), RegisterError> {
+    if !crate::STAGED && std::ptr::eq(slot.place().table(), &TABLE) {
+        return Err(RegisterError::Unstaged {
+            id: slot.id(),
+            target: crate::POINT_TARGETS
+                .get(slot.place().index())
+                .copied()
+                .unwrap_or("call site"),
+        });
+    }
+    mod_api::__private::points::register(slot)
+}
 pub use mod_api::__private::points::{RegisterError, seal, stop};
 
 /// Each place's slot: set once, at the seal, where a mod listens. A point that nothing listens at

@@ -116,6 +116,23 @@ fn real_member() {
     };
     // load checks the layout and calls Hooks::subscribed through the real host boundary.
     let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
+    if !mod_points::STAGED {
+        let refused = loaded
+            .initialize(&[info])
+            .expect_err("unstaged game refuses point listener");
+        let (_, reason) = refused
+            .iter()
+            .find(|(id, _)| id == "wasm_fixture")
+            .expect("unstaged game refuses point listener");
+        let message = reason.to_string();
+        assert!(
+            message.contains("wasm_fixture")
+                && message.contains("::tick")
+                && message.contains("no point sites"),
+            "{message}"
+        );
+        return;
+    }
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
     loaded

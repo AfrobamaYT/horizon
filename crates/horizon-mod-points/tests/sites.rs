@@ -1,7 +1,7 @@
 //! Real sealed-registry dispatch, with the same typed slot the staging macro emits.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
-use mod_points::register;
+use mod_api::__private::points::register;
 use mod_points::{
     __private::{SITES, SlotListener, seal},
     SiteId,
