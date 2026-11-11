@@ -251,7 +251,9 @@ pub trait LevelsBackend {
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None for a stale handle or a parked level: its entity handles
-    /// cannot resolve until the level is in place. On a client (`ClientLevel`),
+    /// cannot resolve until the level is in place, and for a bound that is not
+    /// finite (NaN or infinite). A minimum above its maximum is the same box
+    /// with the two swapped, as vanilla's `AABB`. On a client (`ClientLevel`),
     /// the entities the server tracks to it and the window's own player, with
     /// the same walk; other players are left out, as their handles do not
     /// resolve there (tracked in arismoko/horizon#3033).
