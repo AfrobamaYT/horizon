@@ -5,6 +5,12 @@
 level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
 `None` to keep the game's item.
 
+`BlockPart::light_emission` answers the light a block declaring `dynamic_light: true` emits at a position
+(`IBlockExtension.getLightEmission`), on both sides, with a read-only host: `Some(level)` replaces the state's
+light there (above 15 is clamped), `None` keeps it. It is asked as a chunk holding the block comes in and as an
+edit sets it, and the light engine keeps the answer until the cell's state changes; parts on a block that does not
+declare `dynamic_light` are never asked.
+
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.
 Request a deferred write with `event.request(LandingWrite::SetBlock(state))`, where `state`
 is an API `BlockState`, or `LandingWrite::DestroyBlock { drop }`. The game checks the

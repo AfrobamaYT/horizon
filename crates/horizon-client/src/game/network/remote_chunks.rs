@@ -433,6 +433,7 @@ impl Game<'_> {
         } else {
             self.streaming.insert_remote(&mut self.world, chunk);
         }
+        self.ask_chunk_light_emission((x, z));
         self.world
             .block_entities
             .unload(|k| (k.0 >> 4, k.2 >> 4) == (x, z));
