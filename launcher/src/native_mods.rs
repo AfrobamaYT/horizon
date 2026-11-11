@@ -2563,13 +2563,14 @@ pub fn build_server(
     base: &str,
     folder: &Path,
     output: &Path,
-    profile: Profile,
+    profile: Option<Profile>,
     allow_jar_downloads: bool,
     progress: impl Fn(Step),
     registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<PathBuf, Failed> {
     require_consent()?;
-    logged(|_| {
+    CANCEL.store(false, Ordering::Relaxed);
+    logged(|cache| {
         if output.symlink_metadata().is_ok() {
             return Err(trf(
                 "{path} already exists. Move it away, or build into another folder.",
@@ -2594,6 +2595,13 @@ pub fn build_server(
                 return Err(tr("Export the server outside the launcher's managed folders.").into());
             }
         }
+        let profile = select_build_profile(Profile::default(), profile, || {
+            planning::classify(
+                folder,
+                Some(base),
+                cache.map_err(|error| Failed::Other(error.into()))?,
+            )
+        })?;
         let built = pipeline(
             base,
             folder,
@@ -4026,7 +4034,7 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &output,
-            Profile::Balanced,
+            Some(Profile::Balanced),
             false,
             |_| {},
             |_| false,
@@ -4040,7 +4048,7 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &managed,
-            Profile::Balanced,
+            Some(Profile::Balanced),
             false,
             |_| {},
             |_| false,
@@ -4193,7 +4201,7 @@ mod tests {
             base,
             &folder,
             &output,
-            profile,
+            Some(profile),
             false,
             |_| {},
             |_| false,
@@ -4263,7 +4271,7 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &out.join("server"),
-            Profile::Balanced,
+            Some(Profile::Balanced),
             false,
             |_| {},
             |_| false,
