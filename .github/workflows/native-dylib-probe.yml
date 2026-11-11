@@ -60,6 +60,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python tools/native_probe_ci.py
   linkage:
+    permissions:
+      contents: read
     needs: select
     if: needs.select.outputs.selected == 'true'
     name: linkage ${{ matrix.target }}
@@ -79,6 +81,8 @@ jobs:
         shell: bash
     env:
       CARGO_INCREMENTAL: '0'
+      SDK_OUT: prebuilt
+      PROBE_OUT: target/native-dylib-probe
       PROBE_PYTHON: ${{ matrix.os == 'ubuntu-22.04' && needs.select.outputs.self_hosted == 'true' && 'python3' || 'python' }}
     steps:
       - uses: actions/checkout@v4
@@ -110,18 +114,36 @@ jobs:
         run: bash tools/ci/install_launcher_deps.sh libasound2-dev libudev-dev
       - name: Exact compiler identity
         run: rustc -vV
+      - name: Allocate private persistent linkage workspace
+        if: runner.environment == 'self-hosted'
+        run: |
+          umask 077
+          mkdir -p "${CARGO_TARGET_DIR:?}"
+          scratch=$(mktemp -d "$CARGO_TARGET_DIR/linkage.XXXXXX")
+          {
+            echo "LINKAGE_SCRATCH=$scratch"
+            echo "CARGO_TARGET_DIR=$scratch/cargo"
+            echo "SDK_OUT=$scratch/sdk"
+            echo "PROBE_OUT=$scratch/probe"
+          } >> "$GITHUB_ENV"
       - name: Build the unmodified prebuilt SDK topology
         run: >-
-          "$PROBE_PYTHON" tools/prebuilt_game.py build prebuilt
+          "$PROBE_PYTHON" tools/prebuilt_game.py build "$SDK_OUT"
       - name: Export counts and Windows format limit
         run: >-
-          "$PROBE_PYTHON" tools/prebuilt_game.py exports prebuilt
+          "$PROBE_PYTHON" tools/prebuilt_game.py exports "$SDK_OUT"
       - name: Two mod libraries share the game's exact Rust state
         run: >-
-          "$PROBE_PYTHON" tools/native_dylib_probe.py --sdk prebuilt --output target/native-dylib-probe
+          "$PROBE_PYTHON" tools/native_dylib_probe.py --sdk "$SDK_OUT" --output "$PROBE_OUT"
       - name: Probe command log
         if: failure()
-        run: tail -n 120 target/native-dylib-probe/commands.log
+        run: tail -n 120 "$PROBE_OUT/commands.log"
+      - name: Clean private linkage workspace
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          if [ -n "${LINKAGE_SCRATCH:-}" ]; then
+            rm -rf "$LINKAGE_SCRATCH"
+          fi
 
   main-break:
     needs: [select, linkage]
