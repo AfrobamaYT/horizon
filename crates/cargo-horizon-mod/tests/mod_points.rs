@@ -275,7 +275,6 @@ fn an_addon_patches_a_library_through_its_mod_points() {
                     api_refusal: point.api_refusal.clone(),
                     returns: point.returns.clone(),
                     host: point.host.clone(),
-                    raw_shape: None,
                     return_ty: Some(point.return_ty.clone()),
                     table: Some(table.into()),
                 };

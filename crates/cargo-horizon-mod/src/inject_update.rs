@@ -208,10 +208,9 @@ fn plan(
             .and_then(|a| a.get_mut(index))
             .ok_or("missing inject table")?;
         // Replacing the scalar payload retains its existing comments and spacing.
-        for (key, replacement) in [(
-            "hash",
-            changed.then(|| toml_edit::Value::from(item.hash.as_str())),
-        )] {
+        {
+            let key = "hash";
+            let replacement = changed.then(|| toml_edit::Value::from(item.hash.as_str()));
             if let Some(mut replacement) = replacement {
                 edited = true;
                 if let Some(existing) = table.get(key).and_then(|i| i.as_value()) {
@@ -254,18 +253,36 @@ pub(crate) fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
         crate::bounded::MAX_CATALOG,
     )?)
     .map_err(|e| e.to_string())?;
-    let text = crate::bounded::read(&dir.join(MANIFEST), crate::bounded::MAX_MANIFEST)?;
     for inject in &manifest.inject {
-        let args = Request {
-            at: &inject.at,
-            kind: inject.kind,
-            kind_name: inject.kind.name(),
-            with: &inject.with,
-        };
-        if let Some(library) = super::library(dir, &inject.at, &points.wire)? {
-            append_mod_point(&text, &manifest, &args, &library)?;
+        if let Some(catalog) = super::library(dir, &inject.at, &points.wire)? {
+            let dependency = manifest
+                .mod_point_dependency(&inject.at)
+                .ok_or("undeclared mod point dependency")?;
+            let library = horizon_mod_package::manifest::inject::mod_points::Library {
+                id: dependency,
+                version: "(installed)",
+                catalog: &catalog,
+            };
+            horizon_mod_package::manifest::inject::mod_points::route(
+                &manifest.id,
+                inject,
+                &library,
+            )
+            .map_err(|e| e.to_string())?;
         } else {
-            append(&text, &manifest, &args, &internals, &points)?;
+            let item = target(&internals, inject)
+                .ok_or_else(|| format!("E_INJECT_MISSING: {}", inject.at))?;
+            if inject.hash.as_ref().is_some_and(|hash| hash != &item.hash) {
+                return Err(format!("E_INJECT_CHANGED: {}", inject.at));
+            }
+            let point = points
+                .points
+                .iter()
+                .find(|p| p.target == inject.at)
+                .ok_or_else(|| format!("E_INJECT_MISSING: {}", inject.at))?;
+            if let Some(reason) = &point.api_refusal {
+                return Err(format!("E_INJECT_NO_SLOT: {}: {reason}", inject.at));
+            }
         }
     }
     Ok(())

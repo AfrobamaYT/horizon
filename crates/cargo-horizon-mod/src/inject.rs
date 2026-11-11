@@ -299,3 +299,38 @@ fn append(
     Manifest::parse(&result)?;
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const TEXT: &str = "id='example'\nname='Example'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nmixins='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nhorizon='0123456789012345678901234567890123456789'\n";
+    #[test]
+    fn add_pins_api_point_and_preserves_existing_text() {
+        let manifest = Manifest::parse(TEXT).unwrap();
+        let internals: Vec<ListedInternal> = serde_json::from_str(
+            r#"[{"path":"game::tick","kind":"fn","signature":"fn tick()","hash":"signature"}]"#,
+        )
+        .unwrap();
+        let catalog: Catalog =
+            serde_json::from_str(r#"{"points":[{"target":"game::tick"}]}"#).unwrap();
+        let args: Vec<String> = ["add", "game::tick", "--kind", "head"]
+            .map(String::from)
+            .into();
+        let request = request(&args).unwrap();
+        let result = append(TEXT, &manifest, &request, &internals, &catalog).unwrap();
+        assert!(result.starts_with(TEXT));
+        let parsed = Manifest::parse(&result).unwrap();
+        assert_eq!(parsed.inject[0].hash.as_deref(), Some("signature"));
+        assert_eq!(
+            parsed.inject[0].access,
+            horizon_mod_package::manifest::inject::Access::Api
+        );
+    }
+    #[test]
+    fn call_flags_are_refused() {
+        let args: Vec<String> = ["add", "game::tick", "--kind", "head", "--nth", "0"]
+            .map(String::from)
+            .into();
+        assert!(request(&args).is_err());
+    }
+}
