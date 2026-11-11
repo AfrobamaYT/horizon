@@ -762,10 +762,7 @@ mod tests {
                 "",
                 'a',
                 "t",
-                &format!(
-                    "[[internals]]\npath = \"Game::world\"\nkind = \"field\"\nhash = \"h\"\n{}",
-                    inject("internals")
-                ),
+                "[[internals]]\npath = \"Game::world\"\nkind = \"field\"\nhash = \"h\"\n",
             ),
             package("user", "1.0.0", "deep = \"^1\"", 'b', "t", ""),
             package("typed", "1.0.0", "", 'c', "t", &inject("api")),
