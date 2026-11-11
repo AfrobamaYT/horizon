@@ -5,6 +5,7 @@ use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
 use horizon_mod_package::index::native;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -330,6 +331,8 @@ pub(super) struct Identity {
     #[serde(default)]
     pub(super) registry_lock: Option<String>,
     #[serde(default)]
+    pub(super) registry_patches: Option<toml::Table>,
+    #[serde(default)]
     pub(super) native_links: Option<Vec<super::registry_inventory::NativeLink>>,
     #[serde(default)]
     facade_crates: std::collections::BTreeSet<String>,
@@ -357,7 +360,18 @@ impl Identity {
 pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
     let path = dir.join(IDENTITY);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    #[derive(serde::Deserialize)]
+    struct Format {
+        #[serde(default)]
+        format_version: u32,
+    }
+    let format: Format =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    match format.format_version {
+        5 => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+        0..=4 => Err(trf("SDK format {version} is too old; install a newer SDK (format 5)", &[("version", &format.format_version.to_string())])),
+        version => Err(trf("SDK format {version} is newer than this launcher's supported format 5; update the launcher", &[("version", &version.to_string())])),
+    }
 }
 
 /// Whether the unpacked game in `dir` is the one asked for: built from `revision` for `host` and
@@ -415,6 +429,29 @@ pub(super) fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
         )),
         _ => Err(facade_refused(krate)),
     }
+}
+
+/// Both compiler routes link the same SDK-owned executable template.
+pub(super) fn wrapper_externs(
+    deps: &Path,
+    template: &str,
+) -> Result<BTreeMap<String, PathBuf>, String> {
+    let mut externs = BTreeMap::new();
+    for name in [
+        "horizon_client",
+        "mod_api",
+        "mod_points",
+        "horizon_mod_package",
+    ] {
+        externs.insert(name.to_owned(), library(deps, name)?);
+    }
+    if template.contains("horizon_mod_host::") {
+        externs.insert(
+            "horizon_mod_host".into(),
+            library(deps, "horizon_mod_host")?,
+        );
+    }
+    Ok(externs)
 }
 
 fn facade_refused(krate: &str) -> String {
@@ -524,7 +561,6 @@ pub(super) fn compile(
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let deps = game.join("deps");
     let sdk = identity(game)?;
-    let api_library = library(&deps, "mod_api")?;
     let mut libraries = std::collections::HashMap::new();
     for (package, name) in api::PACKAGES {
         if package != api::INTERNALS_PACKAGE {
@@ -651,23 +687,10 @@ pub(super) fn compile(
     fs::write(&main, main_text).map_err(|e| e.to_string())?;
     let binary = out.join(crate::backend::CLIENT);
     let mut cmd = rustc(rust, game, out, "2024");
-    cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"])
-        .arg("--extern")
-        .arg(format!("horizon_client={}", game_library.display()))
-        .arg("--extern")
-        .arg(format!("mod_api={}", api_library.display()))
-        .arg("--extern")
-        .arg(format!("mod_points={}", libraries["mod_points"].display()))
-        .arg("--extern")
-        .arg(format!(
-            "horizon_mod_package={}",
-            library(&deps, "horizon_mod_package")?.display()
-        ));
-    if template.contains("horizon_mod_host::") {
-        cmd.arg("--extern").arg(format!(
-            "horizon_mod_host={}",
-            library(&deps, "horizon_mod_host")?.display()
-        ));
+    cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"]);
+    for (name, path) in wrapper_externs(&deps, &template)? {
+        cmd.arg("--extern")
+            .arg(format!("{name}={}", path.display()));
     }
     for (name, rlib) in patch.iter().flat_map(|patch| &patch.rlibs) {
         cmd.arg("--extern")
@@ -806,6 +829,7 @@ mod tests {
         let dir = super::super::tests::dir("prebuilt-exact-build");
         let check = |commit: &str, rustc: &str, target: &str, side: &str| {
             let identity = serde_json::json!({
+                "format_version": 5,
                 "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
             });
             fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
