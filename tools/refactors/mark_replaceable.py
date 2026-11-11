@@ -16,7 +16,7 @@ for target in listing.read_text().splitlines():
     manifest = package / 'Cargo.toml'
     text = manifest.read_text()
     if 'horizon-mod-api-macros' not in text:
-        manifest.write_text(text.replace('[dependencies]', '[dependencies]\nhorizon-mod-api-macros = { path = "../horizon-mod-api-macros" }', 1))
+        manifest.write_text(text + '\n[dependencies]\nhorizon-mod-api-macros = { path = "../horizon-mod-api-macros" }\n' if '[dependencies]' not in text else text.replace('[dependencies]', '[dependencies]\nhorizon-mod-api-macros = { path = "../horizon-mod-api-macros" }', 1))
     candidates = []
     for path in (root / 'crates').rglob('*.rs'):
         if '/src/' not in str(path):
