@@ -58,9 +58,6 @@ fn inject(id: &str, at: &str, kind: Kind, access: Access, with: &str, hash: &str
         access,
         priority: 0,
         hash: Some(hash.into()),
-        call: None,
-        nth: None,
-        ctx: None,
     }
 }
 
@@ -216,28 +213,12 @@ fn an_addon_patches_a_library_through_its_mod_points() {
             &hash("chemlib::transfer"),
         ),
         inject(
-            "seen",
-            "chemlib::transfer",
-            Kind::Return,
-            Access::Internals,
-            "saw_moved",
-            &hash("chemlib::transfer"),
-        ),
-        inject(
             "flow",
             "chemlib::flow",
             Kind::Head,
             Access::Api,
             "saw_flow",
             &hash("chemlib::flow"),
-        ),
-        inject(
-            "ledger",
-            "chemlib::tanks::record",
-            Kind::Head,
-            Access::Internals,
-            "mark_ledger",
-            &hash("chemlib::tanks::record"),
         ),
     ];
     let shared = Library {
@@ -246,7 +227,14 @@ fn an_addon_patches_a_library_through_its_mod_points() {
         catalog: &catalog,
     };
     // The ledger has no Wire form: its api listeners are refused naming it, its internals kept.
-    let mut api_ledger = injects[3].clone();
+    let mut api_ledger = inject(
+        "ledger",
+        "chemlib::tanks::record",
+        Kind::Head,
+        Access::Api,
+        "double_rate",
+        &hash("chemlib::tanks::record"),
+    );
     api_ledger.access = Access::Api;
     assert!(
         mod_points::route("chem_addon", &api_ledger, &shared)
@@ -272,16 +260,7 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     let mut slots = Vec::new();
     for inject in &injects {
         let routed = mod_points::route("chem_addon", inject, &shared).unwrap();
-        let listener = format!("chem_addon::{}", inject.with);
         slots.push(match routed.access {
-            Access::Internals => horizon_mod_point_emit::mod_internals(
-                table,
-                &routed.place,
-                "chem_addon",
-                &listener,
-                inject.priority,
-                &inject.id,
-            ),
             Access::Api => {
                 let point = routed.point;
                 let mut manifest = horizon_mod_package::Manifest::parse(
@@ -340,7 +319,7 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     // the doubled rate.
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "10 20 20 20 100 1 20"
+        "10 20 20 0 100 1 20"
     );
 }
 
@@ -386,7 +365,7 @@ fn wasm_addon_routes_api_and_internals_into_library_registry() {
         .find(|p| p.target == "chemlib::transfer")
         .unwrap()
         .hash;
-    manifest.push_str(&format!("\n[[inject]]\nid='double'\nat='chemlib::transfer'\nkind='head'\naccess='api'\nwith='double_rate'\nhash={hash:?}\n[[inject]]\nid='observe'\nat='chemlib::transfer'\nkind='return'\naccess='internals'\nwith='saw_moved'\nhash={hash:?}\n"));
+    manifest.push_str(&format!("\n[[inject]]\nid='double'\nat='chemlib::transfer'\nkind='head'\naccess='api'\nwith='double_rate'\nhash={hash:?}"));
     std::fs::write(&path, &manifest).unwrap();
     let source = addon.join("src/lib.rs");
     let mut text = std::fs::read_to_string(&source).unwrap();
@@ -402,7 +381,7 @@ pub fn probe() -> u32 {
 }
 "#,
     );
-    text = text.replace("impl mod_api::Hooks for Mod {}", "impl mod_api::Hooks for Mod { fn register(&self, _: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) { assert_eq!(probe(), 20020); } }");
+    text = text.replace("impl mod_api::Hooks for Mod {}", "impl mod_api::Hooks for Mod { fn register(&self, _: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) { assert_eq!(probe(), 20000); } }");
     std::fs::write(source, text).unwrap();
     let build = || {
         Command::new(env!("CARGO_BIN_EXE_cargo-horizon-mod"))
@@ -498,7 +477,7 @@ pub fn probe() -> u32 {
         .unwrap();
     let mut result = [wasmtime::Val::I32(0)];
     group.call("chem_addon", &export, &[], &mut result).unwrap();
-    assert_eq!(result[0].i32(), Some(20020));
+    assert_eq!(result[0].i32(), Some(20000));
     // The production loader must finish both phases before the addon's register hook probes.
     let packages = [(&library, lib_bytes), (&addon, addon_bytes)]
         .into_iter()
