@@ -258,7 +258,15 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertLess(verify.index(command), verify.index("- name: Test Rust documentation examples"))
         self.assertNotIn("python3 tools/ci/stage_slots.py", verify)
         step = verify.split("- name: Validate prebuilt source stage and listed slots\n", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'", step)
+        condition = step.split("if:", 1)[1].splitlines()[0].strip()
+        for rust, tooling, expected in (("false", "false", False), ("false", "true", True),
+                                        ("true", "false", True), ("true", "true", True)):
+            with self.subTest(rust=rust, tooling=tooling):
+                expression = condition.replace("needs.changes.outputs.rust_required", repr(rust))
+                expression = expression.replace("needs.changes.outputs.tooling_required", repr(tooling))
+                self.assertEqual(eval(expression.replace("||", "or"), {"__builtins__": {}}), expected)
+        self.assertLess(verify.index("- name: Install Rust toolchain and the runner image's packages"), verify.index(command))
+        self.assertLess(verify.index("uses: actions/setup-python@v5"), verify.index(command))
 
     def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
         # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).
