@@ -13,7 +13,7 @@ fn fixture() -> (Catalog, Manifest) {
         .unwrap(),
         ..Default::default()
     };
-    let manifest = Manifest::parse("id = 'addon'\nname = 'Addon'\nversion = '1.0.0'\napi = '0.2'\n[[inject]]\nid = 'before'\nat = 'game::tick'\nkind = 'head'\nwith = 'before'\nhash = 'pin'\n").unwrap();
+    let manifest = Manifest::parse("id = 'addon'\nname = 'Addon'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = []\n[[inject]]\nid = 'before'\nat = 'game::tick'\nkind = 'head'\nwith = 'before'\nhash = 'pin'\n").unwrap();
     (catalog, manifest)
 }
 

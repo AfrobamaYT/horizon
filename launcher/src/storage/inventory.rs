@@ -123,6 +123,7 @@ impl Entry {
             // builds accept only the current SDK layout.
             let target = [
                 "horizon-prebuilt-v3-",
+                "horizon-prebuilt-v4-",
                 horizon_mod_package::index::native::PREBUILT_ARCHIVE,
             ]
             .into_iter()

@@ -35,6 +35,10 @@ impl Fixture {
             ("crates/horizon-client/src/entry.rs", ""),
             ("crates/horizon-client/src/game.rs", ""),
             ("crates/horizon-mod-api-gen/internals.txt", ""),
+            (
+                "crates/horizon-mod-points/Cargo.toml",
+                "[package]\nname='horizon-mod-points'\n",
+            ),
         ] {
             let path = source.join(file);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
