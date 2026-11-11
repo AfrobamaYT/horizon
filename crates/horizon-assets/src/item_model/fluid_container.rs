@@ -51,17 +51,32 @@ pub struct FluidContainer {
     pub fluid: String,
     /// The cover masks `base` rather than drawing itself (`cover_is_mask`).
     pub cover_is_mask: bool,
+    /// Turn the model upside down for a fluid lighter than air (`flip_gas`). Honoured as
+    /// written: no fluid Horizon has is lighter than air (vanilla's water and lava are not,
+    /// and a mod fluid's look carries no density), so it flips nothing, as in NeoForge.
+    pub flip_gas: bool,
+    /// Draw a light-emitting fluid's front and back at full brightness, unshaded
+    /// (`apply_fluid_luminosity`). Not drawn yet: an item layer carries no light, so lava
+    /// is lit like the rest of the item. A known gap, on by default.
+    pub apply_fluid_luminosity: bool,
+    /// Draw the fluid in the cutout sheet even when its sprite has translucent pixels
+    /// (`force_opaque_fluid`). Not drawn yet: an item layer's translucency comes from its
+    /// sprite, so water stays translucent. A known gap, on by default.
+    pub force_opaque_fluid: bool,
 }
 impl FluidContainer {
-    /// `flip_gas`, `apply_fluid_luminosity` and `force_opaque_fluid` are absent:
-    /// the first needs a fluid type's density, which the host's fluid look does not
-    /// carry, and the latter two need per-layer light and render types, which an
-    /// item layer does not have yet.
+    /// `DynamicFluidContainerModel.Unbaked.CODEC`: `textures` and `fluid` required, and four
+    /// optional booleans with their defaults (`flip_gas` false, `cover_is_mask`,
+    /// `apply_fluid_luminosity` and `force_opaque_fluid` true).
     pub fn decode(m: &Map<String, Value>) -> Result<Self> {
+        let flag = |key: &str, default: bool| get(m, key).map_or(Ok(default), boolean);
         Ok(Self {
             textures: FluidContainerTextures::decode(m)?,
             fluid: ident(required(m, "fluid")?)?,
-            cover_is_mask: get(m, "cover_is_mask").map_or(Ok(true), boolean)?,
+            cover_is_mask: flag("cover_is_mask", true)?,
+            flip_gas: flag("flip_gas", false)?,
+            apply_fluid_luminosity: flag("apply_fluid_luminosity", true)?,
+            force_opaque_fluid: flag("force_opaque_fluid", true)?,
         })
     }
 }

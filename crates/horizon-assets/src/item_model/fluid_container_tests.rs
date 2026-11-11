@@ -116,19 +116,47 @@ fn bad_shapes_error_instead_of_guessing() {
         // fluid is required and is an identifier.
         r#"{"type":"neoforge:fluid_container","textures":{"base":"mod:item/jar"}}"#,
         r#"{"type":"neoforge:fluid_container","fluid":"Minecraft:Water","textures":{"base":"mod:item/jar"}}"#,
-        // cover_is_mask is a boolean.
+        // cover_is_mask and the other three flags are booleans.
         r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water","cover_is_mask":"yes","textures":{"base":"mod:item/jar"}}"#,
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water","flip_gas":1,"textures":{"base":"mod:item/jar"}}"#,
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water","apply_fluid_luminosity":"no","textures":{"base":"mod:item/jar"}}"#,
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water","force_opaque_fluid":[true],"textures":{"base":"mod:item/jar"}}"#,
     ] {
         assert!(node(json).is_err(), "{json}");
     }
-    // `flip_gas` and the other booleans the type does not draw with are accepted.
-    assert!(
-        node(
-            r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water","flip_gas":true,
-                "apply_fluid_luminosity":false,"force_opaque_fluid":false,
-                "textures":{"base":"mod:item/jar"}}"#
-        )
-        .is_ok()
+}
+
+/// The codec's defaults (`DynamicFluidContainerModel$Unbaked`, `optionalFieldOf` at offsets
+/// 45-117): `flip_gas` false, `cover_is_mask`, `apply_fluid_luminosity` and
+/// `force_opaque_fluid` true; each read as written when set.
+#[test]
+fn the_flags_default_as_neoforges_codec_does() {
+    let defaults = container(
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water",
+            "textures":{"base":"mod:item/jar"}}"#,
+    );
+    assert_eq!(
+        (
+            defaults.flip_gas,
+            defaults.cover_is_mask,
+            defaults.apply_fluid_luminosity,
+            defaults.force_opaque_fluid
+        ),
+        (false, true, true, true)
+    );
+    let set = container(
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:water","flip_gas":true,
+            "cover_is_mask":false,"apply_fluid_luminosity":false,"force_opaque_fluid":false,
+            "textures":{"base":"mod:item/jar"}}"#,
+    );
+    assert_eq!(
+        (
+            set.flip_gas,
+            set.cover_is_mask,
+            set.apply_fluid_luminosity,
+            set.force_opaque_fluid
+        ),
+        (true, false, false, false)
     );
 }
 
