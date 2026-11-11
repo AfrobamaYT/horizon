@@ -2183,44 +2183,61 @@ fn pipeline(
         let _ = fs::remove_dir_all(&catalog_dir);
         fs::create_dir_all(&catalog_dir).map_err(|e| e.to_string())?;
         sync(&fresh, &pending)?;
-        let mut pass = cargo(&rust, &pending, "run");
-        pass.args([
-            "--locked",
-            "--release",
-            "-q",
-            "-p",
-            "horizon-mod-api-gen",
-            "--bin",
-            "horizon-stage",
-            "--",
-        ])
-        .arg(&pending)
-        .arg(catalog_dir.join(inject::POINTS))
-        .arg(catalog_dir.join(internals::INTERNALS))
-        .arg(horizon_mod_package::manifest::API)
-        .env("CARGO_TARGET_DIR", real.join("target"));
-        fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
-            let _ = fs::remove_dir_all(pending);
-            let _ = fs::remove_dir_all(catalog);
-            error.to_string()
-        }
-        run(pass, "Marking the game's injection points", |_| {})
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        let catalog = internals::Catalog::read(&catalog_dir)
-            .and_then(|catalog| catalog.with_mods(mods.iter()))
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let mark = |tree: &Path, catalog: &Path| {
+            let mut pass = cargo(&rust, tree, "run");
+            pass.args([
+                "--locked",
+                "--release",
+                "-q",
+                "-p",
+                "horizon-mod-api-gen",
+                "--bin",
+                "horizon-stage",
+                "--",
+            ])
+            .arg(tree)
+            .arg(catalog.join(inject::POINTS))
+            .arg(catalog.join(internals::INTERNALS))
+            .arg(horizon_mod_package::manifest::API)
+            .env("CARGO_TARGET_DIR", real.join("target"));
+            run(pass, "Marking the game's injection points", |_| {})?;
+            internals::Catalog::read(catalog).and_then(|catalog| catalog.with_mods(mods.iter()))
+        };
+        // A mod pins the game as its revision ships it. horizon-mixins reprints each file it
+        // edits and may add fields, so with mixins the pins are checked against the catalog of
+        // the unpatched source; the patched tree's catalog is the one the build uses.
+        let pristine = real.join("stage.pinned");
+        let pinned_catalog = real.join("catalog.pinned");
+        let discard = |error: String| {
+            for dir in [&pending, &catalog_dir, &pristine, &pinned_catalog] {
+                let _ = fs::remove_dir_all(dir);
+            }
+            error
+        };
+        let staged = mark(&pending, &catalog_dir).map_err(discard)?;
+        let pinned = if needs_mixins {
+            let _ = fs::remove_dir_all(&pinned_catalog);
+            fs::create_dir_all(&pinned_catalog).map_err(|e| discard(e.to_string()))?;
+            sync(&source, &pristine).map_err(discard)?;
+            let pinned = mark(&pristine, &pinned_catalog).map_err(discard)?;
+            let _ = fs::remove_dir_all(&pristine);
+            let _ = fs::remove_dir_all(&pinned_catalog);
+            pinned
+        } else {
+            staged
+        };
         mods.iter()
-            .try_for_each(|bundle| catalog.check(&bundle.manifest))
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+            .try_for_each(|bundle| pinned.check(&bundle.manifest))
+            .map_err(|error| discard(error.to_string()))?;
         let _ = fs::remove_dir_all(&fresh);
-        fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(&pending, &fresh).map_err(|error| discard(error.to_string()))?;
         for name in [
             inject::POINTS,
             horizon_mod_package::SDK_CATALOG_FILE,
             internals::INTERNALS,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
-                .map_err(|error| discard(&pending, &catalog_dir, error))?;
+                .map_err(|error| discard(error.to_string()))?;
         }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
