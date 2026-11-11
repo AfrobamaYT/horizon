@@ -204,6 +204,34 @@ class Legs(unittest.TestCase):
             self.assertIsNone(ignored_tests.run("example", [], 1, 2))
         self.assertIn(owned[1], log.getvalue())
 
+    def test_missing_identity_framing_is_safe_and_still_fails(self):
+        name = leg_names()[1][0]
+        cases = [
+            (f"\x1b[0mPRIVATE_PAYLOAD test {name} ... ok\n", "ansi-prefix"),
+            (f"test other ... ok PRIVATE_PAYLOAD test {name} ... ok\n", "interleaved-record"),
+            (f"PRIVATE_PAYLOAD test {name} ...\nok\n", "split-status"),
+            ("test different ... ok PRIVATE_PAYLOAD\n", "absent-intact-identity"),
+        ]
+        for record, framing in cases:
+            with self.subTest(framing=framing):
+                def fake(command, **_):
+                    text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+                    return subprocess.CompletedProcess(command, 0, text)
+                with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertIsNone(ignored_tests.run("example", [], 1, 2))
+                self.assertIn(f"{name}; category=missing-result; framing={framing}", log.getvalue())
+                self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+                self.assertNotIn("\x1b", log.getvalue())
+
+    def test_framing_is_sample_bounded_and_not_printed_for_success(self):
+        name = leg_names()[1][0]
+        detail = ignored_tests.missing_result_framing(f"\x1b[0mtest {name} ... ok\n" * 100, name)
+        self.assertIn("candidate_lines=8", detail)
+        self.assertIn("sampled_matches=8; sample_limit=8", detail)
+        result, log = IgnoredTests().run_output(target(1, f"test {name} ... ok\n", summary(passed=1)))
+        self.assertEqual(result, {name: True})
+        self.assertNotIn("framing=", log)
+
     def test_a_marked_test_is_not_expected_to_report(self):
         owned = leg_names()[1][:2]
         listing = "".join(f"{name}: test\n" for name in owned)
