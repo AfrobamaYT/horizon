@@ -1,102 +1,92 @@
 # Design: a mod's biomes inside the Overworld and Nether
 
-Provisional answer to scope 2 of [#2554](https://github.com/arismoko/horizon/issues/2554): how a mod's biomes can generate among vanilla's in the Overworld and the Nether. This is a proposal, not an implemented API. Scope 1, a mod's own dimension with its own climate points (`BiomeSourceKind::Points`), is separate and does not need this note.
+Scope 2 of [#2554](https://github.com/arismoko/horizon/issues/2554): how a mod's biomes generate among vanilla's in the Overworld and the Nether. The design below was ruled on in [#2554](https://github.com/arismoko/horizon/issues/2554#issuecomment-6803604498) and is being built in stages (see the end). Until the stages land, the parts marked *not built* describe the agreed contract, not shipped behaviour. Scope 1, a mod's own dimension with its own climate points (`BiomeSourceKind::Points`), is separate and does not need this note.
 
-## Decision from the issue
+## Starting points
 
-Ari's answer on #2554 sets two starting points, and this note keeps both:
+Ari's answer on #2554 set two starting points:
 
 - **Regions with weights.** Each mod lays out its biomes in its own region. A hidden extra parameter decides which region owns an area, and vanilla's layout is one region among them. Ordering between mods is settled by the regions, not by competing for the same climate points.
-- **The mix is fixed when the world is created and saved with the world.** The promise is: terrain in an existing world changes only by a recorded, per-world choice.
+- **The mix is fixed when the world is created and saved with the world.** Terrain in an existing world changes only by a recorded, per-world choice.
 
-The same answer says NeoForge has no API for this: its biome modifiers change biomes that already generate and cannot add a biome to a dimension's layout, and the region mechanism is a third-party library. So there is no NeoForge contract to mirror. That statement comes from the issue; this note did not verify it, and it did not read the third-party library's source. Behaviour of that library is therefore not claimed anywhere below.
+The same answer says NeoForge has no API for this: its biome modifiers change biomes that already generate and cannot add a biome to a dimension's layout, and the region mechanism is a third-party library. So there is no NeoForge contract to mirror. This note did not read that library's source and claims nothing about its behaviour.
 
 ## Horizon today
 
 | Fact | Where |
 | --- | --- |
 | A level's biome source is one of fixed, checkerboard, multi-noise by preset, the End, or (scope 1) a mod's own points. | `BiomeSourceKind` in `crates/horizon-mod-vocab/src/world/dimension.rs` |
-| The game writes the level stem's `biome_source` JSON; the generator decodes it when a world is prepared. | `biome_source` in `game/modding/native_dimensions.rs`; `worldgen/biome_source/codec.rs` |
+| The game writes the level stem's `biome_source` JSON; the generator decodes and resolves it once per dimension. | `biome_source` in `game/modding/native_dimensions.rs`; `worldgen/biome_source/codec.rs`, `runtime.rs` |
 | A multi-noise source is a list of `(ParameterPoint, biome)` searched for the nearest point to the six climate values and a zero offset. | `worldgen/climate/index.rs` (`ClimateIndex`, `ClimateSearch`) |
-| The Overworld's and the Nether's lists are named presets, not data a mod can extend. | `BiomeSourceKind::MultiNoise`, `biome_preset` |
-| A chunk stores its biomes, so a chunk that already exists keeps them whatever the source says later. | not checked in code for this note; vanilla stores biomes per chunk section, treat as **unverified here** |
+| The Overworld's and the Nether's lists are named presets read from the prepared data, not data a mod can extend. | `GeneratorData::load`, `MultiNoiseBiomeSource::from_quantized_json` |
+| A chunk stores its biomes per section, so a chunk that already exists keeps them whatever the source says later. A saved biome the game lacks is kept by name once #3132 lands. | `decode_column` / `encode_with` in `crates/horizon-client/src/save.rs` |
+| Terrain shape never reads the biome: density and the router read only climate. Surface rules and `carver_biome` do read it. | `worldgen/density.rs`, `router.rs`, `generator.rs` |
+| Seeded Overworld and Nether preset output is already compared with the Java oracle. | `tools/test_biome_generation_parity.py` |
 
-Not verified for this note: how vanilla's `MultiNoiseBiomeSource` presets are built from parameter lists, whether terrain depends on a chunk's biomes or only on the climate router, and how the existing preset lists are cached.
+## Regions
 
-## Proposal
+**Region.** A region is `(owner mod, region id, weight, points)`, where `points` are the `BiomePoint`s of scope 1. Vanilla's own list is the region `minecraft:vanilla`. A mod declares one at load with `Registrar::declare_biome_region(path, region)`, where the `BiomeRegion` holds the dimension (the Overworld or the Nether), the weight and the points. The id is namespaced to the declaring mod. A malformed or duplicate id, another dimension, a weight outside 1 to 1000, an empty point list or an invalid point refuses, naming the mod. In the mod API the record is `BiomeRegion`. The engine's own `worldgen::biome_chunk::BiomeRegion` is a different type that mods never see; where both meet in one engine file, alias one at the import.
 
-**Region.** A region is `(owner mod, region id, integer weight, points)`, where `points` are the `BiomePoint`s of scope 1. Vanilla's own list is the region `minecraft:vanilla` with a fixed default weight. The declaration is a load-time registrar call, `Registrar::declare_biome_region(path, weight, points)`, namespaced to the declaring mod and refused for a malformed or duplicate id, a weight of 0, or invalid points, as `declare_attribute` is.
+**Weights.** Integers. A mod region's weight is 1 to 1000. Vanilla's region is 10 by default, so a weight of 10 means "as common as vanilla's whole layout". A zero weight and an overflowing total are refused. A mod's declared weight is only the default written into a world's record when the world is created. After that, the record's weights are the ones generation uses, and nothing reads a weight from the mod. Players and server owners can then change them without a format change. A setting that edits them at creation is a separate follow-up.
 
-**Order.** The region list is sorted by owner mod id, then region id, the rule the attribute catalog uses (#2191). The same mods give the same order on every side, so it can be saved and compared.
+**Order.** Regions are sorted by owner mod id, then region id, the same rule the attribute catalog uses. The same mods give the same order on every side, so the list can be saved and compared.
 
-**Choosing a region.** A low-frequency noise of the world seed, sampled per biome cell, picks a region by cumulative weight. The nearest-point search then runs inside that region's own index only. A region never competes with another region's points, which is what makes ordering between mods unnecessary. The noise's exact form, frequency and its random-stream position are open (see questions) and must not disturb any vanilla stream: a world with no regions declared must generate exactly as today.
+## Choosing a region (not built)
 
-**Fixed at creation.** When a world is created the ordered region list (owner mod, region id, weight and full climate points, including biome ids) is written into the world's data, not hashes. A point's numeric payload is 52 bytes plus its biome id and region metadata; there is no per-region total because this proposal sets no point bound. The saved layout wins on load:
+- **Seed stream.** `root.from_hash_of("horizon:biome_region")`, where `root` is the generator's existing `random.fork_positional()`. `from_hash_of` is a pure function of root and name and advances nothing, so no vanilla stream moves.
+- **Jittered cells.** Horizontal space is split into square cells of 128 quarts (512 blocks). Each cell gets one uniform draw from the stream at that cell, which gives a jitter point and a region chosen by cumulative weight. A quart belongs to the nearest jitter point among the 3×3 cells around it. Shares then follow the weights in expectation, and borders are irregular. A thresholded `NormalNoise` would not give the declared shares, because its values are not uniformly distributed.
+- **x and z only.** The owner depends on x and z only, so a column never mixes regions vertically, and `carver_biome` (sampled at y = 0) agrees with the chunk fill.
+- **Search.** The nearest-point search then runs in the chosen region's own `ClimateIndex`. Vanilla's region uses the preset index exactly as today.
+- **Pinned by the record.** `selector_version`, the cell size, the salt and the 3×3 rule are read from the world's saved record, never from constants at generation time. A version 2 can then exist beside version 1, and old worlds keep version 1.
+- **No regions, no change.** With no record, or a record that holds only vanilla, generation takes today's path unchanged. The existing seeded preset oracle proves this for the Overworld and the Nether.
 
-- the same mods installed: use the saved points even if a mod later changes its declaration;
-- a mod added: ignored for that world unless the player opts in;
-- a saved region's mod absent: tell the player which mod and region are missing and require an explicit per-world choice: do not open, or open with a recorded substitution. With substitution, vanilla's layout takes that region's share from then on. Save that decision once with the world, rather than silently substituting on each load. A dedicated server requires the decision in a setting and refuses to start otherwise, explaining the missing mod and region and the required choice.
+**What changes at a border.** Surface material and carvers change at a region border; terrain shape does not, since density reads only climate. A structure whose biome check straddles a border follows vanilla's own check at its sample position.
 
-**Opt-in for an existing world.** A recorded per-world choice, off by default, adopts the installed layout, including new regions or changed points. Without it the full saved points remain authoritative. Already generated chunks are never touched, including after a missing-mod substitution. The border between old and new chunks can show a biome seam. Whether terrain shape can also seam depends on whether terrain reads the biome (open, see questions).
+## The saved record (not built)
 
-**API surface.** One registrar method, one `BiomeRegion` record with `Wire`, and a read of the saved list (`level.biome_regions(host)`) for mods that want to know what the world was created with. No new hook.
+One durable world-level file, `data/horizon/biome_regions.dat`, separate from `data/minecraft/world_gen_settings.dat`:
 
-## Acceptance matrix (proposed, not reported passing)
+```
+{ version: 1,
+  dimensions: { "minecraft:overworld": {
+      selector: { version: 1, cell: 128, salt: "horizon:biome_region", vanilla_weight: 10 },
+      regions: [ { owner: "my_mod", id: "my_mod:highlands", weight: 5,
+                   points: [ { biome: "my_mod:highland", temperature: [min, max], …, offset } ],
+                   substituted: { with: "minecraft:vanilla", missing_mod: "my_mod" } /* only after a choice */ } ] } } }
+```
+
+- **Contents.** Regions are stored in sorted order with their full points, not hashes. A new world writes the record before its first chunk is generated.
+- **Absent record.** Region selection is off and every dimension keeps its existing source, custom dimensions included.
+- **Malformed record.** The open is refused with the reason, and the file is left untouched on disk: no rewrite, no rename, no default record in its place.
+- **Changed mods.** An installed mod whose declared regions differ from the record (points, biomes, or a region added or removed) never changes an existing world silently. The record wins, the difference is reported once by name, and the new layout is taken only through the opt-in below.
+
+## Missing mods and opting in (not built)
+
+- **A saved region's mod is absent.** The world names each missing mod and region and requires a choice: do not open, or open and resolve that region through vanilla's index from then on. The region keeps its slot and weight, so the other regions' borders do not move. The choice is recorded on the region with the missing mod's id.
+- **Client.** The question is asked in the existing pre-load prompt, where the backup questions are.
+- **Dedicated server.** `server.toml` gets `[biome_regions] missing = "refuse" | "vanilla"`, default `"refuse"`. Without the setting the server refuses to start, naming the mod and region.
+- **The mod returns.** The substitution is reversible. When the mod returns, the world says so once and keeps the substitution until the owner opts back in, since the chunks generated in between are vanilla there.
+- **Opt-in.** "Use the installed regions for new chunks" is a recorded per-world choice, off by default, and on a server `adopt_installed = false`. The new layout is written durably before any chunk is generated with it. Chunks that already exist keep their biomes and blocks.
+
+## Acceptance matrix
 
 | Fixture | Expected |
 | --- | --- |
-| No region declared | Biome output of the vanilla presets is identical to today for a fixed seed, at several coordinates. |
-| Two mods, weights 1 and 3, vanilla default | Over a large sample, region ownership follows the weights within a stated tolerance; the same seed gives the same map twice. |
+| No region declared | Overworld and Nether biome output identical to today for fixed seeds (seeded preset oracle), negative coordinates and chunk edges included. |
+| Two mods, weights 1 and 3, vanilla 10 | Over a large sample, region ownership follows the weights within a stated tolerance; the same seed gives the same map twice. |
 | Same mods installed in a different order | Same sorted list, same map. |
-| World created with mod A, mod A removed | Name the missing mod and region; require do-not-open or a recorded per-world vanilla substitution. Dedicated servers refuse without the setting. Existing chunks are never touched. |
-| Mod A changes its climate points | Full saved points win until a recorded per-world opt-in adopts the new layout; existing chunks are never touched. |
+| A structure whose biome check straddles a border | Placement follows vanilla's check at its sample position. |
+| World created with mod A, mod A removed | The missing mod and region are named; do-not-open or a recorded vanilla substitution is required. Dedicated servers refuse without the setting. Existing chunks are never touched. |
+| Mod A returns after a substitution | Reported once; the substitution stays until the owner opts back in. |
+| Mod A changes its climate points or weight | The saved points and weights win until a recorded opt-in; the difference is reported once. |
 | Mod B added to an existing world, no opt-in | No change in any generated or new chunk. |
-| Opt-in on an existing world | New chunks may use B's region; existing chunks unchanged; the list saved afterwards includes B. |
-| A region with invalid points or a duplicate id | Refused at registration, naming the mod; no region installed. |
-
-## Open questions
-
-- What noise picks the region, and how is its seed offset kept from moving any vanilla random stream? Recommendation: a dedicated noise instance seeded from the world seed and a fixed salt, with the same sampling grid as the biome source, verified against the vanilla presets as an oracle.
-- Does terrain shape read the biome, or only the climate router? Recommendation: check before the opt-in border is promised to be seam-free.
-- Should weights be integers with a fixed default for vanilla, or relative to it? Recommendation: integers, vanilla at a fixed default, written down in the API docs.
-- Nether, Overworld and the End: should the End be included? Recommendation: Overworld and Nether first, as the issue asks.
-- Where is the saved list stored (level data or a separate file), and how does it round-trip the full saved points and recorded per-world decisions? Recommendation: decide with the world-save owners before any code.
-
-## Implementation boundaries in Horizon
-
-The generator resolves the preset's biome source from the dimension's generator settings in
-[`generator.rs`](../../../../crates/horizon-world/src/worldgen/generator.rs).
-[`BiomeSourceCatalog`](../../../../crates/horizon-world/src/worldgen/biome_source/codec.rs)
-decodes a named multi-noise preset separately from an inline list. Keep both routes intact:
-the region selector belongs around the resolved Overworld or Nether preset, and only when a
-saved layout enables it. Inline points for custom dimensions keep their existing behavior.
-
-Biome selection can change generated blocks. The generator passes biome samples into surface
-material rules and uses `carver_biome` to select a carver list at each origin. An opt-in can
-therefore produce material and carving seams in newly generated chunks. Do not promise a
-biome-color-only transition.
-
-For the save owners to review: store a versioned, Horizon-namespaced world record separate from
-`data/minecraft/world_gen_settings.dat`. Key the full layout and recorded substitutions by
-dimension. Preserve the exact region order, weights and points on read. Reject malformed data
-and missing biome IDs before constructing a generator. An absent record in an existing world
-means vanilla generation until the player opts in. Persist an accepted change before
-generating chunks with the new layout. Pin the selector algorithm and its constants to the
-record version, since changing either would move regions in existing worlds.
-
-For the generator owners to review: use a dedicated seed stream and sample in quart coordinates.
-Choose the weighted region before querying its climate index. Check the total weight for
-overflow, and retain a substituted region's weight and slot so unaffected regions keep their
-boundaries. Use distinct fixtures for the Overworld and Nether, including negative coordinates
-and chunk boundaries. Compare the unmodified preset against the Java oracle and compare the
-region-enabled path with no saved regions against that same baseline. The existing
-[`test_biome_source_parity.py`](../../../../tools/test_biome_source_parity.py) covers fixed,
-checkerboard and End sources; it does not establish seeded multi-noise preset parity.
+| Opt-in on an existing world | New chunks may use B's region; existing chunks unchanged; the saved list includes B afterwards. |
+| Malformed record | The open is refused with the reason; the file is unchanged on disk. |
+| A region with invalid points, a bad weight or a duplicate id | Refused at registration, naming the mod; no region installed. |
 
 ## Stages
 
-1. Settle the open questions above, with oracle fixtures for the presets.
-2. The registrar, `BiomeRegion` and validation, with unit tests and a wire round trip (no generator change).
-3. Region selection inside the biome source, behind "no region declared means identical output".
-4. Saved list, load comparison and the per-world opt-in.
-5. Docs, an example mod and the acceptance matrix.
+1. Saved biome ids kept when the game lacks them (#3132).
+2. `BiomeRegion`, `declare_biome_region` and validation, with unit tests and a wire round trip. No generator change. **Built.**
+3. Region selection in the biome source (`ResolvedBiomeSource`), behind "no record means today's path", with the oracle, distribution, order and structure fixtures.
+4. The saved record, world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix.

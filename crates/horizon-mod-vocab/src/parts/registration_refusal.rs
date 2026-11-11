@@ -66,6 +66,7 @@ impl PartRegistrar {
             entity_attribute_modifications,
             attributes,
             spawn_placements,
+            biome_regions,
             controllers,
             arm_poses,
             structure_types,

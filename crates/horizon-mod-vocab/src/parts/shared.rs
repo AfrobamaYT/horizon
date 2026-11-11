@@ -515,6 +515,7 @@ impl PartRegistrar {
             datapack_registries: Vec::new(),
             spawn_placements: Vec::new(),
             biome_modifiers: Vec::new(),
+            biome_regions: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -676,6 +677,11 @@ pub(crate) fn install_registrar(
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
         biome_modifiers: registrar.biome_modifiers,
+        biome_regions: {
+            let mut regions = registrar.biome_regions;
+            regions.sort_by(|a, b| (&a.mod_id, &a.id).cmp(&(&b.mod_id, &b.id)));
+            regions
+        },
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
