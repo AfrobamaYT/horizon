@@ -132,8 +132,11 @@ fn bad_shapes_error_instead_of_guessing() {
     );
 }
 
+/// `DynamicFluidContainerModel.bakeModelForFluid` passes the cover as the mask and the base as
+/// the drawn material (`bakeItemMaskQuads(baker, 0, cover, base, ...)`, offsets 631-639): the
+/// cover picks out the parts of the base drawn again over the fluid.
 #[test]
-fn a_full_container_draws_base_fluid_and_masked_cover() {
+fn a_full_container_draws_base_fluid_and_base_through_the_cover_mask() {
     let drawn = layers(
         r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
             "textures":{"base":"mod:item/flask","fluid":"neoforge:item/mask/bucket_fluid",
@@ -151,7 +154,7 @@ fn a_full_container_draws_base_fluid_and_masked_cover() {
                 "mod:block/gas_still",
                 Some("neoforge:item/mask/bucket_fluid")
             ),
-            sprite("mod:item/flask_cover", Some("mod:item/flask")),
+            sprite("mod:item/flask", Some("mod:item/flask_cover")),
         ]
     );
     assert_eq!(drawn[0].tints, Vec::<i32>::new());
@@ -215,14 +218,31 @@ fn an_unknown_fluid_or_no_mask_draws_no_fluid_layer() {
 
 #[test]
 fn a_cover_is_a_mask_only_over_a_base() {
-    // An overlay cover is drawn without a base...
+    // Without `cover_is_mask` the cover is drawn through itself, with or without a base
+    // (`coverIsMask ? base : cover` at offsets 598-615, the cover still the mask)...
     let drawn = layers(
         r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty","cover_is_mask":false,
             "textures":{"cover":"mod:item/flask_cover"}}"#,
         &Fluids { held: None },
     );
     let contents: Vec<LayerContent> = drawn.iter().map(|l| l.content.clone()).collect();
-    assert_eq!(contents, vec![sprite("mod:item/flask_cover", None)]);
+    assert_eq!(
+        contents,
+        vec![sprite("mod:item/flask_cover", Some("mod:item/flask_cover"))]
+    );
+    let drawn = layers(
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty","cover_is_mask":false,
+            "textures":{"base":"mod:item/flask","cover":"mod:item/flask_cover"}}"#,
+        &Fluids { held: None },
+    );
+    let contents: Vec<LayerContent> = drawn.iter().map(|l| l.content.clone()).collect();
+    assert_eq!(
+        contents,
+        vec![
+            sprite("mod:item/flask", None),
+            sprite("mod:item/flask_cover", Some("mod:item/flask_cover")),
+        ]
+    );
 
     // ... while a mask cover needs the base it masks and is left out without one.
     let drawn = layers(

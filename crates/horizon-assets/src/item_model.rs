@@ -1541,12 +1541,18 @@ impl Resolve<'_> {
                 parent,
             );
         }
-        // A mask of `base` needs a base texture to mask against; an overlay does not.
-        let mask = textures.base.as_deref().filter(|_| container.cover_is_mask);
-        if let Some(cover) = &textures.cover
-            && (!container.cover_is_mask || mask.is_some())
-        {
-            self.sprite_layer(out, cover, mask, Vec::new(), parent);
+        // The cover is always the mask (`bakeItemMaskQuads(baker, 0, cover, drawn, ...)`, offsets
+        // 631-639). With `cover_is_mask` it picks out the parts of `base` drawn again over the
+        // fluid, so it needs a base (offsets 147-164); otherwise the cover draws itself.
+        if let Some(cover) = &textures.cover {
+            let drawn = if container.cover_is_mask {
+                textures.base.as_deref()
+            } else {
+                Some(cover.as_str())
+            };
+            if let Some(drawn) = drawn {
+                self.sprite_layer(out, drawn, Some(cover), Vec::new(), parent);
+            }
         }
     }
     /// One `item/generated` layer, which [`crate::item_bake::bake_sprite_layer`] extrudes.

@@ -21,7 +21,8 @@ pub struct FluidContainerTextures {
     pub base: Option<String>,
     /// The mask the held fluid's still sprite is drawn through.
     pub fluid: Option<String>,
-    /// The container's cover: a mask of `base` or an overlay.
+    /// The cover, always drawn as a mask: through it, `base` is drawn again over the
+    /// fluid (`cover_is_mask`), or else the cover itself.
     pub cover: Option<String>,
 }
 impl FluidContainerTextures {
@@ -48,7 +49,7 @@ pub struct FluidContainer {
     pub textures: FluidContainerTextures,
     /// The fluid an empty container draws; `minecraft:empty` draws no fluid layer.
     pub fluid: String,
-    /// The cover is a mask of `base` rather than an overlay (`cover_is_mask`).
+    /// The cover masks `base` rather than drawing itself (`cover_is_mask`).
     pub cover_is_mask: bool,
 }
 impl FluidContainer {
