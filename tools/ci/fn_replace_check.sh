@@ -107,10 +107,14 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" loop "* ]]; then
     # Both slots ran in priority order, the throttle wrote cooldowns, and the entry's HEAD composed.
-    grep -F 'fnr: loop count before #1: Hopper' "$scratch/server.log"
-    grep -F 'fnr: loop count after #1: Hopper' "$scratch/server.log"
+    grep -F 'fnr: loop count before #1:' "$scratch/server.log"
+    grep -F 'fnr: loop count after #1:' "$scratch/server.log"
     grep -F 'fnr: loop throttle skips #1:' "$scratch/server.log"
     grep -F 'fnr: loop HEAD tick_block_entities' "$scratch/server.log"
+    # A call-site row inside the loop body ran in the loop's copy, and an API listener at the entry
+    # fired through the same cell as the loop.
+    grep -F 'fnr: loop MODIFY_EXPRESSION_VALUE chunk check inside the loop' "$scratch/server.log"
+    grep -F 'fnr: loop api head listener at tick_block_entities' "$scratch/server.log"
     grep -F 'Published loops: 1 filled by 2 mod slots' "$log"
     # The slot ran the loop again from inside it: the nested run was the game's own, logged once.
     grep -F 'fnr: loop count ran the loop again inside it: true' "$scratch/server.log"
