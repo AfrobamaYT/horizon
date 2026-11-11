@@ -59,7 +59,7 @@ change(vocab + 'hooks/notes.rs', lambda s: cut(s, '### Mod messages\n', '### Cha
 # Removed symbols must not remain as live catalog/ledger claims.
 for path in ['docs/paper-ledger.md', 'docs/fabric-ledger.md', 'tools/refactors/api-pr2c/forwarder-renames.tsv']:
     change(path, lambda s: ''.join(line for line in s.splitlines(True)
-        if not any(word in line for word in ['net_from_client', 'native_net_send_to_']))
+        if not any(word in line for word in ['net_from_client', 'native_net_send_to_'])))
 for path in [vocab + 'hooks/player_logged_in.rs', vocab + 'hooks/player_start_tracking.rs',
              vocab + 'hooks/notes.rs', root + 'game/native_hooks/base.rs']:
     change(path, lambda s: re.sub(r'`(?:native_)?net_send_to_player`', '`ServerHost::send_payload_to_player`', s))
