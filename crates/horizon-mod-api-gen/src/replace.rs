@@ -619,7 +619,11 @@ pub(crate) fn marked(root: &Path) -> Result<Vec<(String, String)>, String> {
         if !package.join("Cargo.toml").exists() {
             continue;
         }
-        let name = library_name(&package)?;
+        let name = package
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .replace('-', "_");
         if name == "horizon_client" {
             continue;
         }
