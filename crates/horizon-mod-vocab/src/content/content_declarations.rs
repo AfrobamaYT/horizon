@@ -97,6 +97,19 @@ pub struct BlockShapes {
     pub default: Option<Vec<[f64; 6]>>,
 }
 
+/// Per-state light emission, overriding `BlockProperties::light`.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: declaration drafts mirror the closed content schema.
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct StateLight {
+    /// State property names selecting emission, in tuple order.
+    pub properties: Vec<String>,
+    /// Comma-separated property-value tuples mapped to emission from 0 to 15.
+    pub values: BTreeMap<String, u8>,
+    /// Emission for unmatched states; without it every state must match a tuple.
+    pub default: Option<u8>,
+}
+
 /// Entity category selecting a load-time shape override.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 // exhaustive: entity categories are the closed content schema vocabulary.
@@ -139,6 +152,8 @@ pub struct Block {
     pub template: String,
     /// properties.
     pub properties: BlockProperties,
+    /// Per-state emission, taking precedence over `properties.light`.
+    pub state_light: Option<StateLight>,
     /// shapes.
     pub shapes: Option<BlockShapes>,
     /// collision shapes.
