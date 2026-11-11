@@ -264,10 +264,22 @@ def failure_diagnostics(output):
             prefix = str(Path(__file__).resolve().parents[2]) + os.sep
             if path.startswith(prefix):
                 path = path[len(prefix):]
-                lines = source_lines(path)
-                if lines is None or not 1 <= int(location[2]) <= len(lines) or int(location[3]) < 1:
-                    path = ""
-            if location and path in tracked_rust_paths():
+            # Rust cross-crate source paths can contain lexical ../ segments.
+            # Never resolve an untrusted path against the filesystem, and never
+            # allow a traversal to leave the root, even if it later returns.
+            parts = []
+            for part in path.split("/"):
+                if part == "..":
+                    if not parts:
+                        parts = []
+                        break
+                    parts.pop()
+                elif part not in ("", "."):
+                    parts.append(part)
+            path = "/".join(parts) if not path.startswith("/") else ""
+            lines = source_lines(path) if path in tracked_rust_paths() else None
+            if (location and lines is not None and
+                    1 <= int(location[2]) <= len(lines) and int(location[3]) >= 1):
                 context.append(f"  panicked at {path}:{location[2]}:{location[3]}")
             else:
                 context.append("  panic location withheld (not a bounded tracked Rust location)")

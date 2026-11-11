@@ -54,8 +54,26 @@ class Budgets(unittest.TestCase):
                 self.assertNotIn('  panicked at ', log)
                 self.assertNotIn(str(root), log)
 
+    def test_relative_and_cross_crate_raw_panic_headers(self):
+        path = 'crates/horizon-client/src/title/tests.rs'
+        for raw_path in (path, 'crates/horizon-client-lib/../horizon-client/src/title/tests.rs'):
+            log = self.render(f"test game::x::y ... FAILED\n"
+                              f"thread 'game::x::y' (12345) panicked at {raw_path}:109:5:\n"
+                              "assertion failed: PRIVATE\n")
+            self.assertIn('failed test: game::x::y', log)
+            self.assertIn(f'panicked at {path}:109:5', log)
+            self.assertIn('assertion condition failed; payload withheld', log)
+            self.assertNotIn('PRIVATE', log)
+        log = self.render("test game::x::y ... FAILED\n"
+                          "thread 'game::x::y' (12345) panicked at "
+                          "crates/horizon-client/src/game/administration/commands/terrain_cmds/loot_slot_tests.rs:123:9:\n"
+                          "assertion failed: PRIVATE\n")
+        # Requested example is not a tracked file in this checkout: fail closed.
+        self.assertIn('panic location withheld', log)
+
     def test_payload_filtering_does_not_imply_location_or_identity_loss(self):
-        with patch.object(ci, 'tracked_rust_paths', return_value={'crates/example.rs'}):
+        with patch.object(ci, 'tracked_rust_paths', return_value={'crates/example.rs'}), \
+                patch.object(ci, 'source_lines', return_value=['', '']):
             log = self.render("test safe ... FAILED\n"
                               "thread 'safe' panicked at crates/example.rs:2:3:\n"
                               "called `Option::unwrap()` on a `None` value\n")
