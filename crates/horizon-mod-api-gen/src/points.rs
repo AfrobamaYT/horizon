@@ -1046,6 +1046,12 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
         }
     }
     dependencies(root, packages)?;
+    fs::create_dir_all(root.join("crates/horizon-mod-points")).map_err(|e| e.to_string())?;
+    fs::write(
+        root.join("crates/horizon-mod-points/point-sites-staged"),
+        "staged\n",
+    )
+    .map_err(|e| e.to_string())?;
     Ok(staged)
 }
 
@@ -1194,6 +1200,15 @@ pub(crate) fn records_selected(
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
+    let targets: Vec<_> = points
+        .iter()
+        .flat_map(|p| {
+            let variants = parse(&p.api[1]);
+            let ids: syn::ItemEnum =
+                syn::parse2(quote!(enum Places { #variants })).expect("point variants");
+            std::iter::repeat_n(p.target.clone(), ids.variants.len())
+        })
+        .collect();
     let mut api_places = proc_macro2::TokenStream::new();
     let mut layout = 0xcbf29ce484222325u64;
     for point in points {
@@ -1267,6 +1282,9 @@ pub(crate) fn records_selected(
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
     quote! {
         #(#records)*
+        /// Target names for native load diagnostics.
+        #[doc(hidden)]
+        pub const POINT_TARGETS: &[&str] = &[#(#targets),*];
         /// The generated point export table and record layout, checked separately from the API layout.
         #[doc(hidden)]
         pub const POINT_LAYOUT: u64 = #layout;
@@ -1919,6 +1937,11 @@ name = 'horizon-mod-api-gen'
                 files: 6
             }
         );
+        let generated = root.join("staged-generated");
+        std::fs::create_dir_all(&generated).unwrap();
+        crate::build::generate_points_inner(&root, &generated).unwrap();
+        let code = std::fs::read_to_string(generated.join("points_generated.rs")).unwrap();
+        assert!(code.contains("pub const STAGED : bool = true"));
         let game = std::fs::read_to_string(root.join("crates/horizon-client/src/game.rs")).unwrap();
         let parsed = syn::parse_file(&game).unwrap();
         for name in ["tick", "slot"] {

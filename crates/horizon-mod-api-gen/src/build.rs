@@ -245,6 +245,12 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
     let code =
         super::points::records_selected(&super::points::game_points(root)?, selected.as_ref())
             + &super::sites::ids(root).map_err(|e| e.to_string())?;
+    let marker = root.join("crates/horizon-mod-points/point-sites-staged");
+    crate::rerun_if_changed(&marker.display());
+    let code = format!(
+        "/// Whether this game contains staged point sites.\npub const STAGED: bool = {};\n{code}",
+        marker.is_file()
+    );
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
     let mut code = String::new();

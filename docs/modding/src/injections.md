@@ -406,3 +406,5 @@ Copy this, and fill every field:
 
 A hook with a NeoForge counterpart takes its name, side and contract. One without is welcome and names the
 mod mixin or use it replaces. State the vanilla method: the hook fires where vanilla calls it.
+
+API points need the patchable (staged) build used by the launcher’s mod build; the plain game refuses them by mod and target name.
