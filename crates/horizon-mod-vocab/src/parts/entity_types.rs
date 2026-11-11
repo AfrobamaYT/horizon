@@ -16,15 +16,6 @@ pub mod limits {
     pub const MAX_NESTING: u32 = 32;
     /// The deepest chain of passengers a general entity tree may carry.
     pub const MAX_PASSENGER_DEPTH: u32 = 16;
-    /// The largest finite positive dimension (width or height, in blocks) a
-    /// declared type may name.
-    pub const MAX_DIMENSION: f64 = 64.0;
-    /// The most chunks of tracking distance a declared type may name.
-    pub const MAX_TRACKING_CHUNKS: u8 = 32;
-    /// The update interval a declared type may name, in ticks, inclusive.
-    pub const UPDATE_INTERVAL_MIN: u16 = 1;
-    /// See [`UPDATE_INTERVAL_MIN`].
-    pub const UPDATE_INTERVAL_MAX: u16 = 1200;
 }
 
 /// A general entity type's spawn category (#792's design supplies category at
@@ -62,21 +53,19 @@ pub struct GeneralEntityTypeDeclaration {
     pub id: String,
     /// The type's spawn category.
     pub category: GeneralEntityCategory,
-    /// The type's finite positive width in blocks, at most
-    /// [`limits::MAX_DIMENSION`].
+    /// The type's finite width in blocks, as supplied to the vanilla builder.
     pub width: f64,
-    /// The type's finite positive height in blocks, at most
-    /// [`limits::MAX_DIMENSION`].
+    /// The type's finite height in blocks, as supplied to the vanilla builder.
     pub height: f64,
     /// Whether instances of the type persist.
     pub save_policy: GeneralSavePolicy,
     /// Whether the type may be summoned by name.
     pub summonable: bool,
-    /// The tracking distance in chunks, at most [`limits::MAX_TRACKING_CHUNKS`].
-    pub tracking_chunks: u8,
-    /// The tracking update interval in ticks, inside
-    /// [`limits::UPDATE_INTERVAL_MIN`]`..=`[`limits::UPDATE_INTERVAL_MAX`].
-    pub update_interval: u16,
+    /// Tracking distance in chunks, stored directly like vanilla's signed integer.
+    pub tracking_chunks: i32,
+    /// Update interval in ticks, stored directly like vanilla's signed integer.
+    /// `i32::MAX` is vanilla's no-update-interval value.
+    pub update_interval: i32,
     /// The payload schema version instances of the type carry.
     pub payload_version: u16,
     /// The ids of loaded mods this type requires, every one of which must be
@@ -102,12 +91,8 @@ pub enum GeneralEntityRegistrationError {
     InvalidId,
     /// Another declaration already covers the type.
     Duplicate,
-    /// A dimension is NaN, infinite, zero or negative.
+    /// A dimension is NaN or infinite.
     NotFinite,
-    /// A dimension exceeds [`limits::MAX_DIMENSION`], the tracking distance
-    /// exceeds [`limits::MAX_TRACKING_CHUNKS`], or the update interval is
-    /// outside its bounds.
-    InvalidBounds,
     /// A required feature names no loaded mod.
     UnknownDependency,
 }
@@ -123,16 +108,15 @@ pub trait GeneralTypesRegistrar {
     /// Declare a general entity type of the mod's own (vanilla's
     /// `EntityType` builder, NeoForge's `RegisterEvent`): `path` in the mod's
     /// namespace (`robot` of `mymod` is `mymod:robot`), its category, its
-    /// finite positive `width` and `height` in blocks, its save and summon
-    /// policy, its bounded tracking distance and update interval, its payload
+    /// finite `width` and `height` in blocks, its save and summon
+    /// policy, its signed integer tracking distance and update interval, its payload
     /// schema version and the loaded mods it requires.
     ///
     /// An id outside the mod's manifest-owned namespaces, a malformed id, a
-    /// duplicate of this mod's or another's, a NaN or non-positive dimension,
-    /// a bound the design's limits refuse, a required feature naming no
+    /// duplicate of this mod's or another's, a non-finite dimension, a required feature naming no
     /// loaded mod, or a declaration after the registry froze (the
     /// registration phase has ended) refuses, naming the mod, without
-    /// panicking. Bad or unbounded input is always refused, never clamped.
+    /// panicking. Invalid input is refused, never clamped.
     fn declare_general_entity(
         &mut self,
         path: &str,
@@ -141,8 +125,8 @@ pub trait GeneralTypesRegistrar {
         height: f64,
         save_policy: GeneralSavePolicy,
         summonable: bool,
-        tracking_chunks: u8,
-        update_interval: u16,
+        tracking_chunks: i32,
+        update_interval: i32,
         payload_version: u16,
         required_features: &[&str],
     ) -> Result<(), GeneralEntityRegistrationError>;
@@ -157,8 +141,8 @@ impl GeneralTypesRegistrar for PartRegistrar {
         height: f64,
         save_policy: GeneralSavePolicy,
         summonable: bool,
-        tracking_chunks: u8,
-        update_interval: u16,
+        tracking_chunks: i32,
+        update_interval: i32,
         payload_version: u16,
         required_features: &[&str],
     ) -> Result<(), GeneralEntityRegistrationError> {
@@ -194,16 +178,8 @@ impl GeneralTypesRegistrar for PartRegistrar {
             {
                 return Err(Error::Duplicate);
             }
-            if ![width, height].into_iter().all(f64::is_finite) || width <= 0.0 || height <= 0.0 {
+            if ![width, height].into_iter().all(f64::is_finite) {
                 return Err(Error::NotFinite);
-            }
-            if width > limits::MAX_DIMENSION
-                || height > limits::MAX_DIMENSION
-                || tracking_chunks > limits::MAX_TRACKING_CHUNKS
-                || !(limits::UPDATE_INTERVAL_MIN..=limits::UPDATE_INTERVAL_MAX)
-                    .contains(&update_interval)
-            {
-                return Err(Error::InvalidBounds);
             }
             for feature in required_features {
                 if crate::LoadedMods::new().get(feature).is_none() {
@@ -254,8 +230,8 @@ mod tests {
         path: &str,
         width: f64,
         height: f64,
-        tracking_chunks: u8,
-        update_interval: u16,
+        tracking_chunks: i32,
+        update_interval: i32,
         required: &[&str],
     ) -> Result<(), Error> {
         registrar.declare_general_entity(
@@ -274,7 +250,7 @@ mod tests {
 
     /// The registration's checks: an id outside the mod's namespace (a
     /// vanilla type's included), a duplicate, non-finite or non-positive
-    /// dimensions, bounds the design's limits refuse and a required feature
+    /// dimensions and a required feature
     /// naming no loaded mod all refuse, naming the mod; the good declaration
     /// stands beside them.
     #[test]
@@ -299,7 +275,7 @@ mod tests {
             declare(&mut registrar, "robot", 0.5, 1.0, 4, 2, &[]),
             Err(Error::Duplicate)
         );
-        // NaN, infinite, zero and negative dimensions.
+        // Non-finite dimensions.
         assert_eq!(
             declare(&mut registrar, "wide", f64::NAN, 1.0, 8, 3, &[]),
             Err(Error::NotFinite)
@@ -307,35 +283,6 @@ mod tests {
         assert_eq!(
             declare(&mut registrar, "wide", f64::INFINITY, 1.0, 8, 3, &[]),
             Err(Error::NotFinite)
-        );
-        assert_eq!(
-            declare(&mut registrar, "flat", 0.0, 1.0, 8, 3, &[]),
-            Err(Error::NotFinite)
-        );
-        assert_eq!(
-            declare(&mut registrar, "dark", -0.1, 1.0, 8, 3, &[]),
-            Err(Error::NotFinite)
-        );
-        // The design's bounds: dimensions, tracking distance, interval.
-        assert_eq!(
-            declare(&mut registrar, "titan", 64.001, 1.0, 8, 3, &[]),
-            Err(Error::InvalidBounds)
-        );
-        assert_eq!(
-            declare(&mut registrar, "tower", 1.0, 65.0, 8, 3, &[]),
-            Err(Error::InvalidBounds)
-        );
-        assert_eq!(
-            declare(&mut registrar, "far", 1.0, 1.0, 33, 3, &[]),
-            Err(Error::InvalidBounds)
-        );
-        assert_eq!(
-            declare(&mut registrar, "slow", 1.0, 1.0, 8, 0, &[]),
-            Err(Error::InvalidBounds)
-        );
-        assert_eq!(
-            declare(&mut registrar, "slower", 1.0, 1.0, 8, 1201, &[]),
-            Err(Error::InvalidBounds)
         );
         // A required feature naming no loaded mod.
         assert_eq!(
@@ -345,7 +292,47 @@ mod tests {
         // Every refusal was reported, and the good declaration stands.
         assert_eq!(registrar.general_entity_types.len(), 1);
         assert_eq!(registrar.general_entity_types[0].id, "mymod:robot");
-        assert_eq!(registrar.refused.len(), 14);
+        assert_eq!(registrar.refused.len(), 7);
+    }
+
+    #[test]
+    fn vanilla_ranges_and_no_update_interval_are_accepted() {
+        let (_phase, mut registrar) = registrar();
+        declare(
+            &mut registrar,
+            "robot",
+            f64::from(f32::MAX),
+            f64::from(f32::MAX),
+            i32::MAX,
+            i32::MAX,
+            &[],
+        )
+        .unwrap();
+        declare(&mut registrar, "signed", 0.0, -1.0, i32::MIN, i32::MIN, &[]).unwrap();
+        assert_eq!(registrar.general_entity_types.len(), 2);
+        assert!(registrar.refused.is_empty());
+    }
+
+    #[test]
+    fn client_only_package_refuses_entity_types() {
+        use crate::world::phase::{PackageInfo, PackageKind, with_test_package_inventory};
+        let packages = vec![PackageInfo::new(
+            "amod".to_owned(),
+            "1".to_owned(),
+            PackageKind::Code,
+            crate::Side::Client,
+            vec!["shared".to_owned()],
+            vec![],
+        )];
+        let _scope = PhaseOwner::scope(ModPhase::Registration);
+        with_test_package_inventory(packages, || {
+            let mut registrar = PartRegistrar::new("amod");
+            assert_eq!(
+                declare(&mut registrar, "shared:x", 0.8, 1.9, 8, 3, &[]),
+                Err(Error::WrongSide)
+            );
+            assert!(registrar.general_entity_types.is_empty());
+        });
     }
 
     /// The registry is frozen outside the registration phase: a declaration
@@ -391,9 +378,7 @@ mod tests {
     /// the unreachable.
     #[test]
     pub(crate) fn general_entity_types_two_mods_one_key_refuse_the_second() {
-        use crate::world::phase::{
-            PackageInfo, PackageKind, with_test_package_inventory,
-        };
+        use crate::world::phase::{PackageInfo, PackageKind, with_test_package_inventory};
         let packages = vec![
             PackageInfo::new(
                 "amod".to_owned(),

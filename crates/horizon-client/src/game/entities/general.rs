@@ -220,7 +220,7 @@ fn check_record(
 )]
 pub struct GeneralTypeCatalog {
     entries: Vec<mod_api::__private::GeneralEntityTypeDeclaration>,
-    by_key: FxHashMap<String, u16>,
+    by_key: FxHashMap<String, usize>,
 }
 
 impl GeneralTypeCatalog {
@@ -234,7 +234,7 @@ impl GeneralTypeCatalog {
         sorted.sort_by(|left, right| (&left.mod_id, &left.id).cmp(&(&right.mod_id, &right.id)));
         let mut by_key = FxHashMap::with_capacity_and_hasher(sorted.len(), Default::default());
         for (slot, declaration) in sorted.iter().enumerate() {
-            let slot = slot as u16;
+            // Enumeration already yields the catalog index without narrowing.
             if by_key.insert(declaration.id.clone(), slot).is_some() {
                 return Err(format!(
                     "duplicate general entity type {} (declared by {})",
@@ -253,18 +253,18 @@ impl GeneralTypeCatalog {
         reason = "stage 3's load path and the row's construction are the first non-test users"
     )]
     /// The slot a type key resolved to, if the registry holds it.
-    pub fn slot(&self, type_key: &str) -> Option<u16> {
+    pub fn slot(&self, type_key: &str) -> Option<usize> {
         self.by_key.get(type_key).copied()
     }
 
     /// The type key a slot belongs to.
-    pub fn key(&self, slot: u16) -> &str {
-        &self.entries[usize::from(slot)].id
+    pub fn key(&self, slot: usize) -> &str {
+        &self.entries[slot].id
     }
 
     /// The type's declared width and height, for the row's bounds.
-    pub fn dimensions(&self, slot: u16) -> (f64, f64) {
-        let entry = &self.entries[usize::from(slot)];
+    pub fn dimensions(&self, slot: usize) -> (f64, f64) {
+        let entry = &self.entries[slot];
         (entry.width, entry.height)
     }
 }
@@ -304,7 +304,7 @@ pub struct GeneralRow {
     /// The row's join identity: its admission into the resident table.
     pub join: JoinSeq,
     /// The frozen registry's slot for the row's type.
-    pub type_slot: u16,
+    pub type_slot: usize,
     /// The position in blocks.
     pub position: Vec3,
     /// Where the row stood when the last tick began.
@@ -446,15 +446,13 @@ mod tests {
     #[test]
     fn payload_bound_refuses_one_byte_over() {
         let mut over = record([1, 2, 3, 4], "mymod:robot");
-        over.envelope.payload_bytes = vec![0; limits::PAYLOAD_LIMIT + 1];
+        over.envelope.payload_bytes = vec![0; 65_537];
         assert_eq!(
             check_general_record(&over, known("mymod:robot")),
-            Err(GeneralRecordError::PayloadTooLarge {
-                size: limits::PAYLOAD_LIMIT + 1
-            })
+            Err(GeneralRecordError::PayloadTooLarge { size: 65_537 })
         );
         let mut at = record([5, 6, 7, 8], "mymod:robot");
-        at.envelope.payload_bytes = vec![0; limits::PAYLOAD_LIMIT];
+        at.envelope.payload_bytes = vec![0; 65_536];
         assert_eq!(
             check_general_record(&at, known("mymod:robot")),
             Ok(GeneralRecordCheck::Ready)
@@ -480,6 +478,41 @@ mod tests {
                 depth: limits::MAX_PASSENGER_DEPTH + 1
             })
         );
+    }
+
+    #[test]
+    fn literal_depth_boundary_and_hostile_chain() {
+        for depth in [16, 4096] {
+            let mut root = record([1, 2, 3, 4], "mymod:robot");
+            let mut node = &mut root;
+            for index in 0..depth {
+                node.passengers
+                    .push(record([index as i32 + 1, 0, 0, 0], "mymod:robot"));
+                node = node.passengers.last_mut().unwrap();
+            }
+            let expected = if depth == 16 {
+                Ok(GeneralRecordCheck::Ready)
+            } else {
+                Err(GeneralRecordError::PassengerDepthTooDeep { depth: 17 })
+            };
+            assert_eq!(check_general_record(&root, known("mymod:robot")), expected);
+            // Tear down iteratively too: recursive Vec drop is not the validator.
+            while let Some(child) = root.passengers.pop() {
+                root = child;
+            }
+        }
+    }
+
+    #[test]
+    fn non_finite_rotation_refuses() {
+        for bad in [f32::NAN, f32::INFINITY] {
+            let mut record = record([1, 2, 3, 4], "mymod:robot");
+            record.rotation[0] = bad;
+            assert_eq!(
+                check_general_record(&record, known("mymod:robot")),
+                Err(GeneralRecordError::NotFinite)
+            );
+        }
     }
 
     /// A passenger carrying its own ancestor's UUID is a cycle, refused
@@ -550,12 +583,10 @@ mod tests {
         );
         // But a structural fault refuses even for the unknown type.
         let mut over = record([13, 14, 15, 16], "gone:robot");
-        over.envelope.payload_bytes = vec![0; limits::PAYLOAD_LIMIT + 1];
+        over.envelope.payload_bytes = vec![0; 65_537];
         assert_eq!(
             check_general_record(&over, known("mymod:robot")),
-            Err(GeneralRecordError::PayloadTooLarge {
-                size: limits::PAYLOAD_LIMIT + 1
-            })
+            Err(GeneralRecordError::PayloadTooLarge { size: 65_537 })
         );
     }
 
@@ -598,6 +629,17 @@ mod tests {
             Err(refusal) => assert!(refusal.contains("duplicate general entity type amod:same")),
             Ok(_) => panic!("a duplicate type key froze"),
         }
+    }
+
+    #[test]
+    fn catalog_slots_do_not_wrap_at_u16_boundary() {
+        let declarations: Vec<_> = (0..65_537)
+            .map(|index| declaration("amod", &format!("amod:type_{index:05}")))
+            .collect();
+        let catalog = GeneralTypeCatalog::freeze(&declarations).unwrap();
+        assert_eq!(catalog.slot("amod:type_65535"), Some(65_535));
+        assert_eq!(catalog.slot("amod:type_65536"), Some(65_536));
+        assert_eq!(catalog.key(65_536), "amod:type_65536");
     }
 
     /// A general row pushed to its list binds residency the way
@@ -658,7 +700,7 @@ mod tests {
     #[test]
     fn refused_record_does_not_poison_the_next_one() {
         let mut over = record([1, 2, 3, 4], "mymod:robot");
-        over.envelope.payload_bytes = vec![0; limits::PAYLOAD_LIMIT + 1];
+        over.envelope.payload_bytes = vec![0; 65_537];
         assert!(check_general_record(&over, known("mymod:robot")).is_err());
         let good = record([5, 6, 7, 8], "mymod:robot");
         assert_eq!(
