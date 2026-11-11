@@ -56,6 +56,26 @@ class GitChangedPathsTests(unittest.TestCase):
         self.git("add", ".")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base")
 
+    def test_self_check_header_identifies_commit_and_dirty_state(self):
+        self.write("tracked.txt", "base\n")
+        self.write(".gitignore", "ignored-output/\n")
+        self.commit()
+        head = self.git("rev-parse", "HEAD").strip()
+        def header():
+            return pr_ready.block(args(), "HEAD", head, [], {}, [], "skip-release", 0).splitlines()[0]
+        self.assertIn(f"commit `{head}`", header())
+        self.assertIn("host `", header())
+        self.assertNotIn(" dirty", header())
+        self.write("ignored-output/log.txt", "ignored\n")
+        self.assertNotIn(" dirty", header())
+        self.write("untracked.txt", "new\n")
+        self.assertIn(f"commit `{head}` dirty", header())
+        (self.root / "untracked.txt").unlink()
+        self.write("tracked.txt", "edited\n")
+        self.assertIn(" dirty", header())
+        self.git("add", "tracked.txt")
+        self.assertIn(" dirty", header())
+
     def test_unicode_paths_select_checks_and_keep_line_counts(self):
         tracked = "crates/horizon-core/src/caf\u00e9 edit.rs"
         untracked = "crates/horizon-core/src/\u65b0 file.rs"
@@ -97,6 +117,7 @@ class PrReadyTests(unittest.TestCase):
     def test_data_backed_summary_with_and_without_prepared_data(self):
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(pr_ready, "ROOT", Path(directory) / "checkout/repo"), \
+                mock.patch.object(pr_ready, "git", side_effect=lambda *args: "a" * 40 if args[0] == "rev-parse" else ""), \
                 mock.patch.dict(os.environ):
             os.environ.pop("HORIZON_TEST_RESOURCES", None)
             step = pr_ready.Step("content root tests", summary=pr_ready.tests_passed)

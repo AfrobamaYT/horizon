@@ -585,11 +585,14 @@ MARK = {"pass": "✅", "fail": "❌", "skip": "➖", "list": "➖", "warn": "⚠
 
 def block(args, base, merge_base, changed, counts, steps, label, elapsed):
     where = socket.gethostname().split(".")[0] if args.host == "local" else args.host
+    head = git("rev-parse", "HEAD").strip()
+    dirty = bool(git("status", "--porcelain=v1", "--untracked-files=all"))
     flags = "".join(f" --{flag}" for flag in ("quick",) if getattr(args, flag)) + \
         ("" if args.host == "local" else f" --host {args.host}") + ("" if base == "origin/main" else f" --base {base}")
     added, removed = (sum(count[i] for count in counts.values()) for i in (0, 1))
     warnings = scope_warnings(changed)
-    lines = [f"**pr_ready** (`tools/pr_ready.py{flags}` on {where}, against {base} at {merge_base[:9]}, "
+    lines = [f"**pr_ready** (`tools/pr_ready.py{flags}`, commit `{head}`{' dirty' if dirty else ''}, "
+             f"host `{where}`, against {base} at {merge_base[:9]}, "
              f"{duration(elapsed)})", "", "| Check | Result |", "| --- | --- |",
              f"| Scope | {'⚠️' if warnings else '✅'} {len(changed)} files, +{added} −{removed}"
              + "".join(f"; {warning}" for warning in warnings) + " |"]
