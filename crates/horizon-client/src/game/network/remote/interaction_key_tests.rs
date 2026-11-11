@@ -105,7 +105,7 @@ fn interaction_key_literal_matrix_preserves_actions_and_swing_independently() {
                     }
                     assert_eq!(
                         game.remote.as_ref().unwrap().sequence - before,
-                        actions + u32::from(hand == Hand::Off),
+                        actions + i32::from(hand == Hand::Off),
                         "{key:?} {hand:?} {attempt:?} cancel={cancel} swing={swing}"
                     );
                     let sent = packets.lock().unwrap();
