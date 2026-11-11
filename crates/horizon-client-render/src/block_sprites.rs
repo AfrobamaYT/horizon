@@ -56,6 +56,19 @@ pub fn parse_state(registry: &BlockRegistry, text: &str) -> Option<BlockStateId>
     registry.resolve(&state).ok()
 }
 
+/// What a fluid block (`minecraft:water`, a bubble column, lava) shows on every side instead of a model:
+/// its still texture, its tint source (water's is the biome's, `MeshTables::water_tint`, at tint index 0)
+/// and whether it is translucent. None for any other block.
+pub fn fluid_faces(block: &str) -> Option<(&'static str, Option<TintSource>, bool)> {
+    match block {
+        "minecraft:water" | "minecraft:bubble_column" => {
+            Some(("block/water_still", Some(TintSource::Water), true))
+        }
+        "minecraft:lava" => Some(("block/lava_still", None, false)),
+        _ => None,
+    }
+}
+
 /// Each sprite layer's texture name, as `native_draw_cube` and `native_draw_quad` take it: vanilla's
 /// without its namespace (`block/stone`), a mod's with it (`mymod:block/gear`).
 pub fn texture_names(
@@ -130,13 +143,7 @@ impl<'a> Lookup<'a> {
             .registry
             .state(state)
             .map_or("", |s| s.name.as_str());
-        let fluid = match block {
-            "minecraft:water" | "minecraft:bubble_column" => {
-                Some(("block/water_still", Some(TintSource::Water), true))
-            }
-            "minecraft:lava" => Some(("block/lava_still", None, false)),
-            _ => None,
-        };
+        let fluid = fluid_faces(block);
         if let Some((texture, tint, translucent)) = fluid {
             let sprite = self.texture(texture);
             if let Some(sprite) = sprite {
@@ -390,7 +397,10 @@ mod tests {
         let leaf = &leaves.sides[Direction::Up as usize][0];
         assert!(leaf.sprite.cutout);
         assert_eq!(leaf.tint, Some(TintSource::Foliage));
-        assert_eq!((leaf.texture.as_str(), leaf.tint_index), ("block/oak_leaves", 0));
+        assert_eq!(
+            (leaf.texture.as_str(), leaf.tint_index),
+            ("block/oak_leaves", 0)
+        );
         assert!(matches!(
             lookup.block("spruce_leaves").unwrap().sides[0][0].tint,
             Some(TintSource::Fixed(0x61_9961))

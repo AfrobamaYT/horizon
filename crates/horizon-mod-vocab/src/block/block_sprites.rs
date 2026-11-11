@@ -48,8 +48,15 @@ impl FaceSprite {
     /// as its sprite. The texture runs as it does on the material's own side, turned and mirrored as its
     /// model turns it (`uv`: a log on its side, glazed terracotta), and is cut where the box covers the
     /// side, so copycats side by side line up as the material's blocks would. The corners go
-    /// counterclockwise seen from outside the box.
-    pub fn quad_on(&self, side: Direction, from: [f32; 3], to: [f32; 3]) -> ([[f32; 3]; 4], [f32; 4]) {
+    /// counterclockwise seen from outside the box. None when the texture doesn't run along the
+    /// side's axes (an element turned by 22.5 degrees about the side's normal): no UV rectangle
+    /// draws it, so draw it otherwise than with `quad`.
+    pub fn quad_on(
+        &self,
+        side: Direction,
+        from: [f32; 3],
+        to: [f32; 3],
+    ) -> Option<([[f32; 3]; 4], [f32; 4])> {
         let (a, b) = match side {
             Direction::Down | Direction::Up => (0, 2),
             Direction::North | Direction::South => (0, 1),
@@ -86,15 +93,18 @@ impl FaceSprite {
         let uv = ab.map(|[pa, pb]| [u0 + pa * du_u + pb * dv_u, v0 + pa * du_v + pb * dv_v]);
         // `quad` gives its corners the rectangle's (u0, v0), (u0, v1), (u1, v1) and (u1, v0) in turn: start
         // at a corner whose next one keeps its u, and the rectangle's order carries any turn or mirror.
-        let k = (0..4)
-            .find(|&i| (uv[i][0] - uv[(i + 1) % 4][0]).abs() < 1e-4)
-            .unwrap_or(0);
+        // The first edge keeps u and the next keeps v; a texture that runs across the side's axes has
+        // no such corner.
+        let same = |p: f32, q: f32| (p - q).abs() < 1e-4;
+        let k = (0..4).find(|&i| {
+            same(uv[i][0], uv[(i + 1) % 4][0]) && same(uv[(i + 1) % 4][1], uv[(i + 2) % 4][1])
+        })?;
         let order = [k, k + 1, k + 2, k + 3].map(|i| i % 4);
         let (first, opposite) = (uv[k], uv[(k + 2) % 4]);
-        (
+        Some((
             order.map(|i| point(ab[i])),
             [first[0], first[1], opposite[0], opposite[1]].map(|t| t * 16.0),
-        )
+        ))
     }
 }
 

@@ -724,13 +724,15 @@ impl Game<'_> {
     /// the template) leave out: where they are and their block's state, for
     /// `mod_block_entity_geometry`. From the per-chunk list of
     /// `BlockEntities::mods_near`, not a scan of every block entity.
-    /// The client's animation clock at `partial`, in ticks: the ticks its level has
-    /// run (`texture_ticks`, `TextureManager.tick`'s count) and the partial tick.
+    /// The client's animation clock, in ticks: the ticks its level has run
+    /// (`texture_ticks`, `TextureManager.tick`'s count) and the level's partial
+    /// tick (`Clock::fraction`, held while frozen), never the camera's, which
+    /// runs on in a frozen level and would turn parts back as it wraps.
     /// Pausing and `/tick freeze` hold it and `SetTime` never sets it back, so a
     /// `spin` part turns smoothly whatever the server's clock does; each client
     /// counts from its own start.
-    pub(super) fn animation_time(&self, partial: f32) -> f64 {
-        self.texture_ticks as f64 + f64::from(partial)
+    pub(super) fn animation_time(&self) -> f64 {
+        self.texture_ticks as f64 + self.clock.fraction()
     }
     pub(super) fn untemplated_mod_block_entities(&self, camera: DVec3) -> Vec<([i32; 3], u32)> {
         self.world
@@ -773,7 +775,7 @@ impl Game<'_> {
         let mut draw = BlockEntityDraw {
             partial,
             game_time: self.world.game_time,
-            animation: self.animation_time(partial),
+            animation: self.animation_time(),
             light: 0,
             block: [0; 3],
             poses: Vec::new(),

@@ -13535,7 +13535,7 @@ impl Game<'_> {
                 horizon_client::block_entity_render::diffuse_lights(self.dim == Dim::Nether),
                 std::mem::take(out),
             )
-            .animated(self.animation_time(partial));
+            .animated(self.animation_time());
             let mut canceled = false;
             self.native_render_arm(
                 self.own_uuid(),

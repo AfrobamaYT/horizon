@@ -38,7 +38,9 @@ impl Game<'_> {
     /// For a client mod drawing a block's faces itself (a copycat drawing its material's, from
     /// `block_sprites`): the 0xRRGGBB colour a face of `state` with tint index `tint_index` is
     /// multiplied by at `pos`, as the chunk mesher tints it there (`MeshTables::block_tints`:
-    /// `BlockColors`, biome blend included). None for an untinted face. This client's copy of the
+    /// `BlockColors`, biome blend included). None for an untinted face. A fluid's face
+    /// (`block_sprites::fluid_faces`: water at tint index 0) takes the water colour the fluid
+    /// mesher gives it (`MeshTables::water_tint`, the packs' water colormap included). This client's copy of the
     /// world: the chunks around `pos` it has, as break particles read them (`particle_sprite`).
     pub(super) fn block_tint_color(
         &self,
@@ -55,6 +57,24 @@ impl Game<'_> {
                     .map(|c| &**c)
             })
         });
+        let block = self
+            .pack
+            .context
+            .assets
+            .registry
+            .state(state)
+            .map_or("", |s| s.name.as_str());
+        if let Some((_, tint, _)) = horizon_client::block_sprites::fluid_faces(block) {
+            return (tint.is_some() && tint_index == 0).then(|| {
+                self.pack.context.tables.water_tint(
+                    pos,
+                    &region,
+                    world_biomes!(self),
+                    self.streaming.biome_zoom,
+                    self.streaming.biome_blend,
+                )
+            });
+        }
         let tints = self.pack.context.tables.block_tints(
             state,
             pos,
@@ -272,7 +292,9 @@ mod quad_on_tests {
             let face = face(uv);
             for side in Direction::ALL {
                 for (from, to) in boxes {
-                    let (corners, [u0, v0, u1, v1]) = face.quad_on(side, from, to);
+                    let (corners, [u0, v0, u1, v1]) = face
+                        .quad_on(side, from, to)
+                        .expect("a turn of 90 degrees or a mirror fits a rectangle");
                     let given = [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
                     for (corner, given) in corners.iter().zip(given) {
                         let [a, b] = side_point(side, *corner);
@@ -297,16 +319,27 @@ mod quad_on_tests {
             }
         }
         // The half box's north face is cut at half height: its corners lie on z = 0, y up to 0.5.
-        let (corners, _) = face(upright).quad_on(Direction::North, [0.0; 3], [1.0, 0.5, 1.0]);
+        let (corners, _) = face(upright)
+            .quad_on(Direction::North, [0.0; 3], [1.0, 0.5, 1.0])
+            .unwrap();
         assert!(corners.iter().all(|c| c[2] == 0.0 && c[1] <= 0.5));
+        // A texture turned 22.5 degrees on the side, or sheared, fits no UV rectangle: no answer
+        // rather than wrong UVs.
+        let (s, c) = 22.5f32.to_radians().sin_cos();
+        let slanted = [0.5 - 0.5 * c + 0.5 * s, 0.5 - 0.5 * s - 0.5 * c, c, s, -s, c];
+        let sheared = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0];
+        for uv in [slanted, sheared] {
+            assert_eq!(face(uv).quad_on(Direction::North, [0.0; 3], [1.0; 3]), None, "{uv:?}");
+        }
     }
 }
 
 /// `block_tint_color`, the colour a copycat multiplies its material's tinted faces by.
 #[cfg(test)]
 mod block_tint_color_tests {
-    /// A grass block's tinted face takes a colour where it stands; stone has no tint, and
-    /// an untinted face (-1) none either.
+    /// A grass block's tinted face takes a colour where it stands, and so does water's face
+    /// (tint index 0, as `block_sprites` reports it); stone has no tint, and an untinted
+    /// face (-1) none either.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_tinted_face_takes_its_colour_where_it_stands() {
@@ -314,10 +347,15 @@ mod block_tint_color_tests {
             let registry = game.pack.context.assets.registry;
             let grass = registry.default_state("minecraft:grass_block").unwrap();
             let stone = registry.default_state("minecraft:stone").unwrap();
+            let water = registry.default_state("minecraft:water").unwrap();
             let color = game.block_tint_color(grass, 0, [0, 64, 0]);
             assert!(color.is_some_and(|c| c <= 0xFF_FFFF), "{color:?}");
             assert_eq!(game.block_tint_color(grass, -1, [0, 64, 0]), None);
             assert_eq!(game.block_tint_color(stone, 0, [0, 64, 0]), None);
+            // Water has no model tint: its faces take the fluid's water colour.
+            let water_color = game.block_tint_color(water, 0, [0, 64, 0]);
+            assert!(water_color.is_some_and(|c| c <= 0xFF_FFFF), "{water_color:?}");
+            assert_eq!(game.block_tint_color(water, 1, [0, 64, 0]), None);
         });
     }
 }

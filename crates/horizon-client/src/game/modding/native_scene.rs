@@ -169,7 +169,7 @@ impl Game<'_> {
                     diffuse_lights(false),
                     Vec::new(),
                 )
-                .animated(self.animation_time(self.clock.fraction() as f32));
+                .animated(self.animation_time());
                 self.native_block_entity_submit(block.pos, name, block.state, &entity, &mut draw);
                 // Its text's new glyphs upload with this screen's batch.
                 batch.patches.append(&mut self.text_patches.borrow_mut());
