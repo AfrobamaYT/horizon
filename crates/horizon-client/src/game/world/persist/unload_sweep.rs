@@ -153,7 +153,7 @@ impl Game<'_> {
         // A general row leaves with its chunk, its riders with it: a rider's
         // record saved inside its root's, a rider goes when its root's chunk
         // goes and stays while the root stays, whatever its own position.
-        let gone_general_roots: HashSet<u32> = self
+        let mut gone_general_roots: HashSet<u32> = self
             .resident_entities
             .general
             .rows
@@ -161,6 +161,20 @@ impl Game<'_> {
             .filter(|row| row.mount.is_none() && gone(row.position))
             .map(|row| row.id)
             .collect();
+        loop {
+            let before = gone_general_roots.len();
+            for row in &self.resident_entities.general.rows {
+                if row
+                    .mount
+                    .is_some_and(|mount| gone_general_roots.contains(&mount))
+                {
+                    gone_general_roots.insert(row.id);
+                }
+            }
+            if gone_general_roots.len() == before {
+                break;
+            }
+        }
         self.resident_entities.general.rows.retain(|row| {
             let keep = match row.mount {
                 None => !gone(row.position),

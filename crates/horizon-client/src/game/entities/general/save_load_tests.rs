@@ -246,7 +246,8 @@ fn general_row_unloads_with_its_chunk_and_reloads_once() {
     use std::num::NonZeroU32;
     with_types(|game| {
         game.reset_entity_residency();
-        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"rider", Vec::new());
+        let grandchild = record_tag("mymod:robot", [8, 8, 8, 8], b"grandchild", Vec::new());
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"rider", vec![grandchild]);
         let root = record_tag("mymod:robot", [1, 2, 3, 4], b"root", vec![rider]);
         game.load_listed("mymod:robot", None, None, root).unwrap();
         let rows = &game.resident_entities.general.rows;
@@ -279,7 +280,9 @@ fn general_row_unloads_with_its_chunk_and_reloads_once() {
         game.load_listed("mymod:robot", None, None, records.remove(0))
             .unwrap();
         let rows = &game.resident_entities.general.rows;
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[2].uuid, [8, 8, 8, 8]);
+        assert_eq!(rows[2].mount, Some(rows[1].id));
         assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
         assert_eq!(rows[1].uuid, [9, 9, 9, 9]);
         assert_eq!(rows[1].mount, Some(rows[0].id));
