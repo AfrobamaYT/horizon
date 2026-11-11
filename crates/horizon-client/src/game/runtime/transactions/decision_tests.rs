@@ -393,7 +393,7 @@ fn reentrant_same_menu_admission_busy_zero_inner_tokens() {
 fn token(host: &mut Harness, menu: &Menu, plan: Plan) -> Decision {
     let savepoint = host.open_action(menu.id);
     let inner = menu.inner.borrow();
-    Decision(Some(Proposed {
+    Decision(Proposed {
         identity: host.identity,
         savepoint,
         target: menu.clone(),
@@ -402,20 +402,19 @@ fn token(host: &mut Harness, menu: &Menu, plan: Plan) -> Decision {
             menu: inner.state.clone(),
         },
         plan: plan.freeze(&inner.state).expect("fixture plan"),
-    }))
+    })
 }
 
+// A second apply of the same decision does not compile: `apply` takes it by
+// value. One apply writes once and publishes once.
 #[test]
-fn duplicate_apply_invalid_input_zero_additional_mutations() {
+fn single_apply_writes_once_publishes_once() {
     let (mut host, menu) = fixture();
-    let mut token = token(&mut host, &menu, menu.read(placement));
-    assert_eq!(apply(&mut host, &mut token, Reply::Allow), Outcome::Applied);
+    let decision = token(&mut host, &menu, menu.read(placement));
     let epoch = menu.inner.borrow().epoch;
-    assert_eq!(
-        apply(&mut host, &mut token, Reply::Allow),
-        Outcome::InvalidInput(InvalidReason::Consumed)
-    );
-    assert_eq!(menu.inner.borrow().epoch, epoch);
+    assert_eq!(apply(&mut host, decision, Reply::Allow), Outcome::Applied);
+    // Placement is two writes (cursor, slot), each advancing the epoch once.
+    assert_eq!(menu.inner.borrow().epoch.0, epoch.0 + 2);
     assert_eq!(host.applies, 1);
     host.close(true);
     host.close(true);
@@ -423,7 +422,7 @@ fn duplicate_apply_invalid_input_zero_additional_mutations() {
 }
 
 #[test]
-fn every_terminal_outcome_consumes_token() {
+fn every_refused_outcome_consumes_token_without_writes() {
     for reply in [
         Reply::Cancel,
         Reply::Failed,
@@ -431,13 +430,11 @@ fn every_terminal_outcome_consumes_token() {
         Reply::Allow,
     ] {
         let (mut host, menu) = fixture();
-        let mut decision = token(&mut host, &menu, menu.read(placement));
+        let decision = token(&mut host, &menu, menu.read(placement));
         menu.edit(&mut host, |s| s.cursor = stack("minecraft:stone", 4));
-        assert_ne!(apply(&mut host, &mut decision, reply), Outcome::Applied);
-        assert_eq!(
-            apply(&mut host, &mut decision, Reply::Allow),
-            Outcome::InvalidInput(InvalidReason::Consumed)
-        );
+        let epoch = menu.inner.borrow().epoch;
+        assert_ne!(apply(&mut host, decision, reply), Outcome::Applied);
+        assert_eq!(menu.inner.borrow().epoch, epoch);
         host.close(false);
         assert_eq!(menu.read(Clone::clone), state());
         host.no_success();
@@ -745,12 +742,12 @@ fn same_value_write_and_rolled_back_child_still_invalidate_epoch() {
 #[test]
 fn token_from_another_session_invalid_input_zero_mutations() {
     let (mut first, menu) = fixture();
-    let mut decision = token(&mut first, &menu, menu.read(placement));
+    let decision = token(&mut first, &menu, menu.read(placement));
     let mut other = Harness::new();
     other.open_action(menu.id);
     let epoch = menu.inner.borrow().epoch;
     assert_eq!(
-        apply(&mut other, &mut decision, Reply::Allow),
+        apply(&mut other, decision, Reply::Allow),
         Outcome::InvalidInput(InvalidReason::ForeignSavepoint)
     );
     assert_eq!(menu.inner.borrow().epoch, epoch);
@@ -923,5 +920,37 @@ fn every_refused_action_publishes_zero_listener_packets_drops_and_costs_at_root(
         host.no_success();
         host.close(true);
         assert_eq!(host.published, []);
+    }
+}
+
+// Abandoned decisions: the token is dropped without apply, once by the refusal
+// before dispatch and once by a listener unwind. Either way the savepoint is
+// closed (frame popped, which drops its save-gate lease), the menu is free and
+// restored, and nothing is applied or published.
+#[test]
+fn abandoned_token_closes_savepoint_and_publishes_nothing() {
+    for unwind in [false, true] {
+        let (mut host, menu) = fixture();
+        if !unwind {
+            host.before_fire = Some(|host| host.identity.side = Side::Client);
+        }
+        let outcome = host.place(&menu, |host| {
+            menu.edit(host, |s| s.slots[2] = stack("minecraft:dirt", 2));
+            host.defer(dropped());
+            panic!("listener trap with a live decision");
+        });
+        if unwind {
+            assert_eq!(outcome, Outcome::ListenerFailed);
+            assert_eq!(host.dispatches, 1);
+        } else {
+            assert_eq!(outcome, Outcome::Stale(StaleReason::Side));
+            assert_eq!(host.dispatches, 0);
+        }
+        assert_eq!(host.frames.len(), 1);
+        assert!(host.frames[0].action.is_none());
+        assert!(!host.menu_busy(menu.id));
+        assert_eq!(menu.read(Clone::clone), state());
+        host.close(true);
+        host.no_success();
     }
 }

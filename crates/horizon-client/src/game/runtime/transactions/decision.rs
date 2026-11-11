@@ -176,9 +176,11 @@ struct Proposed {
     plan: FrozenPlan,
 }
 
-/// Opaque, deliberately non-Clone. `take` consumes the decision at *every*
-/// terminal outcome. The empty shell diagnoses erroneous duplicate application.
-pub(in crate::game) struct Decision(Option<Proposed>);
+/// Opaque, deliberately non-Clone and non-Copy. Single use is a by-value
+/// property: `apply` takes the decision, so every terminal outcome consumes
+/// it and a second application does not compile. A decision dropped without
+/// `apply` publishes nothing; the action guard closes its savepoint.
+pub(in crate::game) struct Decision(Proposed);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::game) enum StaleReason {
@@ -193,7 +195,6 @@ pub(in crate::game) enum StaleReason {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::game) enum InvalidReason {
-    Consumed,
     ForeignSavepoint,
     ForeignSession,
     Slot,
@@ -349,12 +350,10 @@ fn write_to(state: &mut MenuState, write: &Mutation) -> Result<(), InvalidReason
     Ok(())
 }
 
-/// Consumes before checking anything, including cancellation and malformed
-/// output. Validation immediately precedes the first write to the live overlay.
-fn apply<H: ActionHost>(host: &mut H, token: &mut Decision, reply: Reply) -> Outcome {
-    let Some(proposed) = token.0.take() else {
-        return Outcome::InvalidInput(InvalidReason::Consumed);
-    };
+/// Takes the decision by value, so cancellation and malformed output consume
+/// it too. Validation immediately precedes the first write to the live overlay.
+fn apply<H: ActionHost>(host: &mut H, token: Decision, reply: Reply) -> Outcome {
+    let Decision(proposed) = token;
     match reply {
         Reply::Cancel => return Outcome::Canceled,
         Reply::Failed => return Outcome::ListenerFailed,
@@ -436,26 +435,25 @@ pub(in crate::game) fn run<H: ActionHost>(
             Ok(plan) => plan,
             Err(reason) => return Outcome::InvalidInput(reason),
         };
-        let mut token = Decision(Some(Proposed {
+        let token = Decision(Proposed {
             identity,
             savepoint,
             target: menu.clone(),
             reads,
             plan,
-        }));
+        });
         guard.host.decided();
-        if token.0.as_ref().unwrap().plan.steps.is_empty() {
-            token.0.take();
+        // Returning before apply drops the decision unused.
+        if token.0.plan.steps.is_empty() {
             return Outcome::Canceled;
         }
-        // First validation happens before dispatch. Consume even this refusal.
-        if let Err(outcome) = token.0.as_ref().unwrap().validate(guard.host) {
-            token.0.take();
+        // First validation happens before dispatch.
+        if let Err(outcome) = token.0.validate(guard.host) {
             return outcome;
         }
         guard.host.dispatched();
         let reply = fire(guard.host);
-        apply(guard.host, &mut token, reply)
+        apply(guard.host, token, reply)
     }))
     .unwrap_or(Outcome::ListenerFailed);
     guard

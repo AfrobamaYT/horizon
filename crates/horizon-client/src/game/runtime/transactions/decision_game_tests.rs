@@ -237,3 +237,36 @@ fn only_root_commit_publishes_real_listener_and_plan_drops_in_order() {
         assert!(host.game.transactions.is_empty());
     });
 }
+
+// A decision abandoned by a listener unwind: the action savepoint closes, its
+// save-gate lease is released (saving is admitted again), and the deferred
+// drop is never published, even when the root commits. Like the others here,
+// run serially (--test-threads=1): the save gate is process-wide.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn abandoned_token_releases_real_save_gate_and_publishes_nothing() {
+    with_game(|game| {
+        let identity = identity(game);
+        let menu = Menu::new(tests::state());
+        let drops = game.dropped.len();
+        assert!(Game::admit_entity_save().is_ok());
+        let root = game.transaction_open();
+        let mut host = GameHost { game, identity };
+        assert_eq!(
+            run(&mut host, &menu, tests::placement, |host| {
+                assert!(Game::admit_entity_save().is_err());
+                host.game
+                    .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
+                panic!("listener trap with a live decision");
+            }),
+            Ok(Outcome::ListenerFailed)
+        );
+        assert!(Game::admit_entity_save().is_ok());
+        assert!(!host.menu_busy(menu.id));
+        assert_eq!(host.game.transactions.len(), 1);
+        assert_eq!(menu.read(Clone::clone), tests::state());
+        host.game.transaction_close(&root, true);
+        assert_eq!(host.game.dropped.len(), drops);
+        assert!(host.game.transactions.is_empty());
+    });
+}
