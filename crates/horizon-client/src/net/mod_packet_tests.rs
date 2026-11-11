@@ -102,8 +102,11 @@ fn generic_submission_cannot_bypass_registered_or_engine_channel_authority() {
             "horizon:recipe_book_settings",
         ] {
             // Registration protection takes precedence over fallback byte limits.
+            let result = session.prepare_mod_packet(plugin(channel, &vec![0; 1 << 20]));
             assert!(
-                matches!(session.prepare_mod_packet(plugin(channel, &vec![0; 1 << 20])), Err(SendPacketError::ProtectedPayload { id }) if id.0 == channel)
+                matches!(&result, Err(SendPacketError::ProtectedPayload { id }) if id.0 == channel),
+                "channel {channel}: {:?}",
+                result.err()
             );
         }
     });
