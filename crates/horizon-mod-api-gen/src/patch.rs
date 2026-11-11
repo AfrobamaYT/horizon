@@ -868,6 +868,10 @@ mod census {
                     "refused: generic over types".to_owned()
                 } else {
                     match replaceable(&found, &source.local_macros) {
+                        Ok(()) if referenced_call(&found.function.block) => {
+                            "copied, but upstream refuses call-site kinds: `&` over a call"
+                                .to_owned()
+                        }
                         Ok(()) => "copied".to_owned(),
                         Err(why) => format!("refused: {}", why.split(':').next().unwrap_or(&why)),
                     }
@@ -876,6 +880,35 @@ mod census {
             }
         }
         println!("game-module functions: {total}");
+        fn referenced_call(block: &syn::Block) -> bool {
+            // horizon-mixins' rule: a call beneath `&` outside macro arguments refuses every
+            // call-site kind on the function.
+            struct Find(bool);
+            impl<'ast> Visit<'ast> for Find {
+                fn visit_expr(&mut self, e: &'ast syn::Expr) {
+                    if let syn::Expr::Reference(r) = e {
+                        struct Call(bool);
+                        impl<'ast> Visit<'ast> for Call {
+                            fn visit_expr(&mut self, e: &'ast syn::Expr) {
+                                if matches!(e, syn::Expr::Call(_) | syn::Expr::MethodCall(_)) {
+                                    self.0 = true;
+                                }
+                                syn::visit::visit_expr(self, e);
+                            }
+                            fn visit_macro(&mut self, _: &'ast syn::Macro) {}
+                        }
+                        let mut c = Call(false);
+                        c.visit_expr(&r.expr);
+                        self.0 |= c.0;
+                    }
+                    syn::visit::visit_expr(self, e);
+                }
+                fn visit_macro(&mut self, _: &'ast syn::Macro) {}
+            }
+            let mut f = Find(false);
+            f.visit_block(block);
+            f.0
+        }
         for (why, n) in counts {
             println!("  {why}: {n} ({:.1}%)", 100.0 * n as f64 / total as f64);
         }
