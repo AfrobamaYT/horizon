@@ -20,8 +20,8 @@ impl Game<'_> {
         passenger: EntityRef,
     ) -> Option<[f64; 3]> {
         let at = if let Some(rider) = rider {
-            if let Some(index) = self.boats.iter().position(|boat| boat.id == vehicle_id) {
-                Some(self.boat_dismount_target(index, f64::from(rider.width()), rider.yaw))
+            if let Some(boat) = self.boats.iter().find(|boat| boat.id == vehicle_id) {
+                Some(self.boat_dismount_target(boat, f64::from(rider.width()), rider.yaw))
             } else if let Some(mount) = vehicle {
                 Some(
                     self.horse_dismount_mobs(mount, rider)

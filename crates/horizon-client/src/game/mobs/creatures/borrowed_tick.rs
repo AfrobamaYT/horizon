@@ -760,9 +760,8 @@ impl Game<'_> {
             self.persist
                 .off_level
                 .values()
-                .map(|object| match object {
-                    crate::game::persist::OffLevel::Mob(m) => seen(m, uuid),
-                })
+                .filter_map(crate::game::persist::OffLevel::as_mob)
+                .map(|m| seen(m, uuid))
                 .collect()
         }
     }

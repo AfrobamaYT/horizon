@@ -574,6 +574,7 @@ impl Loading {
                 Event::DebugEntriesChanged => {}
                 Event::Changed => {
                     self.save_menu_settings();
+                    self.settings.keys.sync_action_bindings();
                     self.apply_menu_settings();
                 }
                 Event::SliderDrag => {

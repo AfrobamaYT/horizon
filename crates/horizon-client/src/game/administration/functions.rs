@@ -82,7 +82,7 @@ impl PreparedFunctionCall {
 /// enabled ids from `datapacks.json` (`PackRepository.reload`).
 pub(super) struct PackStack {
     pub builtin: Option<DataPack>,
-    content: DataPack,
+    pub(super) content: DataPack,
     pub packs: Vec<Arc<DataPack>>,
     pub enabled: Vec<String>,
 }
@@ -127,21 +127,6 @@ pub(super) fn content_overlay(stack: &PackStack) -> Vec<(String, Vec<Vec<u8>>)> 
         return Vec::new();
     }
     DataStore::load(&packs).files.into_iter().collect()
-}
-
-/// The entry files of the mods' datapack registries (`registries`: the `(namespace, path)` of
-/// each declared key) in the content root and the world's enabled packs, lowest first, as
-/// `content_overlay` orders them.
-pub(super) fn registry_overlay(
-    stack: &PackStack,
-    registries: &[(&str, &str)],
-) -> Vec<(String, Vec<Vec<u8>>)> {
-    let packs: Vec<&DataPack> = std::iter::once(&stack.content)
-        .chain(stack.enabled_packs())
-        .collect();
-    datapack::registry_files(&packs, registries)
-        .into_iter()
-        .collect()
 }
 
 /// The files the content tables load from: the world's enabled packs'

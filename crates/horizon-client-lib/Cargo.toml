@@ -218,6 +218,10 @@ name = "custom_component_wire"
 path = "../horizon-client/tests/custom_component_wire.rs"
 
 [[test]]
+name = "datapack_join"
+path = "../horizon-client/tests/datapack_join.rs"
+
+[[test]]
 name = "forced_chunks"
 path = "../horizon-client/tests/forced_chunks.rs"
 

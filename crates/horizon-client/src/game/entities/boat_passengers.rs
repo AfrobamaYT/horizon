@@ -620,8 +620,8 @@ impl Game<'_> {
                     f64::from(m.height()),
                     y,
                 )
-            } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
-                self.boat_dismount_target(i, f64::from(m.width()), m.yaw)
+            } else if let Some(boat) = self.boats.iter().find(|b| b.id == id) {
+                self.boat_dismount_target(boat, f64::from(m.width()), m.yaw)
             } else {
                 self.removed_vehicle_dismount_point(
                     m.position,

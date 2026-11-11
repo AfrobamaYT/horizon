@@ -782,9 +782,10 @@ impl Game<'_> {
                 .iter()
                 .find(|m| m.id == id)
                 .or_else(|| {
-                    p.persist.off_level.get(&id).map(|object| match object {
-                        persist::OffLevel::Mob(mob) => mob,
-                    })
+                    p.persist
+                        .off_level
+                        .get(&id)
+                        .and_then(persist::OffLevel::as_mob)
                 })
                 .filter(|m| !m.removed);
             if let Some(parent) = mob.and_then(|m| m.extra.mount) {
@@ -812,9 +813,12 @@ impl Game<'_> {
         let mut edges: Vec<_> = p
             .mobs
             .iter()
-            .chain(p.persist.off_level.values().map(|object| match object {
-                persist::OffLevel::Mob(mob) => mob,
-            }))
+            .chain(
+                p.persist
+                    .off_level
+                    .values()
+                    .filter_map(persist::OffLevel::as_mob),
+            )
             .filter(|mob| !mob.removed)
             .map(|mob| (mob.extra.mount, mob.extra.vehicle_order, mob.id))
             .collect();
@@ -850,9 +854,11 @@ impl Game<'_> {
             let mob = if let Some(index) = p.mobs.iter().position(|m| m.id == id) {
                 Some(p.mobs.remove_for_transfer(index))
             } else {
-                p.persist.off_level.remove(&id).map(|object| match object {
-                    persist::OffLevel::Mob(mob) => mob,
-                })
+                // Boats and carts are only roots, which the caller takes.
+                match p.persist.off_level.remove(&id) {
+                    Some(persist::OffLevel::Mob(mob)) => Some(mob),
+                    _ => None,
+                }
             };
             if let Some(mut mob) = mob {
                 mob.join = horizon_client::join_seq::JoinSeq::UNJOINED;
@@ -863,15 +869,31 @@ impl Game<'_> {
     }
 
     /// An already-owned body changes level, never construction identity.
-    pub(super) fn admit_transferred_mob(&mut self, mut mob: Mob) {
-        let id = mob.id;
-        self.rebind_transferred_entity(id, &mut mob);
-        if self.mob_uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
-            self.persist
-                .off_level
-                .insert(id, persist::OffLevel::Mob(mob));
-        } else {
-            self.mobs.push(mob);
+    /// `PersistentEntitySectionManager.addEntityUuid` decides its residency:
+    /// a body whose UUID an earlier arrival took is retained off-level.
+    pub(super) fn admit_transferred_object(&mut self, mut object: persist::OffLevel) {
+        let id = match &mut object {
+            persist::OffLevel::Mob(mob) => {
+                self.rebind_transferred_entity(mob.id, mob);
+                mob.id
+            }
+            persist::OffLevel::Boat(boat) => {
+                self.rebind_transferred_entity(boat.id, boat);
+                boat.id
+            }
+            persist::OffLevel::Cart(cart) => {
+                self.rebind_transferred_entity(cart.id, cart);
+                cart.id
+            }
+        };
+        if self.uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
+            self.persist.off_level.insert(id, object);
+            return;
+        }
+        match object {
+            persist::OffLevel::Mob(mob) => self.mobs.push(mob),
+            persist::OffLevel::Boat(boat) => self.boats.push(boat),
+            persist::OffLevel::Cart(cart) => self.carts.push(cart),
         }
     }
 

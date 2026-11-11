@@ -1944,7 +1944,7 @@ impl Game<'_> {
             ));
         }
         let (width, yaw) = (f64::from(mob.width()), mob.yaw);
-        if let Some(b) = self.boats.iter().position(|b| b.id == v) {
+        if let Some(b) = self.boat_object(v) {
             return Some(self.boat_dismount_target(b, width, yaw));
         }
         self.horse_dismount_point(v, rider)

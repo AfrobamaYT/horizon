@@ -59,9 +59,9 @@ impl Game<'_> {
 
     /// The type of the vehicle with entity id `id`.
     fn native_vehicle_kind(&self, id: u32) -> String {
-        if let Some(b) = self.boats.iter().find(|b| b.id == id) {
+        if let Some(b) = self.boat_object(id) {
             b.entity_type()
-        } else if let Some(c) = self.carts.iter().find(|c| c.id == id) {
+        } else if let Some(c) = self.cart_object(id) {
             c.kind.id().into()
         } else if let Some(vehicle) = self.persist.removed_vehicles.get(&id) {
             vehicle.kind()

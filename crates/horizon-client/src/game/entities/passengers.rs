@@ -92,9 +92,13 @@ impl Game<'_> {
         if !self.persist.off_level.is_empty() || !self.persist.removed_vehicles.is_empty() {
             self.sync_retained_riders();
             self.position_riders();
-            if !self.persist.removed_vehicles.is_empty() || self.persist.off_level.values().any(
-                |object| matches!(object, crate::game::persist::OffLevel::Mob(mob) if mob.removed),
-            ) {
+            if !self.persist.removed_vehicles.is_empty()
+                || self
+                    .persist
+                    .off_level
+                    .values()
+                    .any(crate::game::persist::OffLevel::is_removed)
+            {
                 // Keep a removed vehicle only while cancellation leaves actual
                 // references to it; completed dismounts release its ownership.
                 self.prune_entity_memory();
@@ -165,8 +169,8 @@ impl Game<'_> {
                 }
                 let valid = !m.removed
                     && (self.mob_object(v).is_some_and(|m| !m.removed)
-                        || self.boats.iter().any(|b| b.id == v)
-                        || self.carts.iter().any(|c| c.id == v)
+                        || self.boat_object(v).is_some()
+                        || self.cart_object(v).is_some()
                         || self.cushions.iter().any(|c| c.id == v)
                         || self.tnts.iter().any(|t| t.id == v && v != 0)
                         || self.seat(v).is_some());

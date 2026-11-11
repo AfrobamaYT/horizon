@@ -772,7 +772,7 @@ removal, then every `MODIFY` modifier, in mod order within each. NeoForge's own 
 `MODIFY` is for the single values (climate, colours) that a mod's own modifier type changes, so Horizon's is its own
 type, `horizon:modify_biome`, which sets any of `temperature`, `downfall`, `has_precipitation`, `temperature_modifier`
 (`none` or `frozen`) and `effects` colours (`sky_color`, `fog_color`, `water_color`, `water_fog_color`,
-`foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
+`foliage_color`, `dry_foliage_color`, `grass_color`), with vanilla's biome JSON names, on its `biomes`:
 
 ```json
 {
@@ -789,6 +789,43 @@ sky, fog and water fog colours as its `minecraft:visual/...` attributes, where 2
 type, a colour out of range, an unknown colour name or a `temperature_modifier` other than `none` or `frozen` skips that
 modifier with a warning naming the mod and file. `BEFORE_EVERYTHING` and `AFTER_EVERYTHING` have no modifier type
 here, so the API names no phase for them.
+
+A `null` for `foliage_color`, `dry_foliage_color` or `grass_color` removes that override from the biome's `effects`, so the
+colormap tints it again; removing one the biome lacks changes nothing. The other colours are required or are attributes,
+so a `null` there skips the modifier with a warning. The removal form is inferred from the title of NeoForge's change
+"Add ability to remove color overrides in BiomeSpecialEffectsBuilder" (neoforged/NeoForge#3528, `26.3.0.19-beta`), whose
+field list is not public; it is not confirmed against NeoForge's code. In code, `foliage_color`, `dry_foliage_color` and
+`grass_color` are `Option<BiomeColourChange>` (`Set { rgb }` or `Remove`).
+
+A modifier also sets the biome's ambient and music attributes, in an `attributes` object with the vanilla keys and
+values of a biome file (`warped_forest.json` has all of them). Each key present replaces the biome's whole value;
+the keys it leaves out stay:
+
+```json
+{
+  "type": "horizon:modify_biome",
+  "biomes": "minecraft:plains",
+  "attributes": {
+    "minecraft:visual/ambient_particles": [{ "particle": { "type": "minecraft:ash" }, "probability": 0.25 }],
+    "minecraft:audio/ambient_sounds": {
+      "loop": "minecraft:ambient.warped_forest.loop",
+      "additions": { "sound": "minecraft:ambient.warped_forest.additions", "tick_chance": 0.0111 },
+      "mood": { "sound": "minecraft:ambient.warped_forest.mood", "tick_delay": 6000, "block_search_extent": 8, "offset": 2.0 }
+    },
+    "minecraft:audio/background_music": { "default": { "sound": "zinc:music.dunes", "min_delay": 12000, "max_delay": 24000 } },
+    "minecraft:audio/music_volume": 0.5
+  }
+}
+```
+
+The particle list may also be written `{ "argument": [...] }`. A particle or sound is a namespaced id and a chance or
+volume is 0 to 1; the mood needs its sound, `tick_delay`, `block_search_extent` and `offset`; `additions` is one
+object or a list; a music entry (`default`, `creative` or `underwater`) needs a sound and independently nonnegative `min_delay` and
+`max_delay`. Any other attribute, or a value that is not valid, skips the modifier with a warning naming the mod,
+file and attribute. A client plays these from the biome data the server sends. In code, `ModifyBiome` has
+`ambient_particles`, `ambient_loop`, `ambient_additions`, `ambient_mood`, `background_music` and `music_volume`; the
+three ambient sound fields together make the one `ambient_sounds` value, and a value out of range refuses the mods at
+startup.
 
 **When they apply.** Modifiers are applied while the world's worldgen data is loaded, before any chunk is generated: the content build writes the modified biomes into the content root, and when a world opens, `horizon_client::vanillagen::biome_modifiers_over_packs` applies them again over the world's data packs (`shared_data_with` for the generator, `packed_biomes` for the game's biome table), so a pack that replaces a vanilla biome keeps the mods' changes and a pack's own biome a tag selects gets them. Modifiers a mod declares in code (`Registrar::declare_biome_modifier`) register before any world opens and are read at the same moment. The generator's data is loaded once per bundle and set of packs and shared by the world's dimensions, so a modifier never applies halfway through a world. The dedicated server is the same game run headless (`horizon-client --dedicated`, [server.md](../../../server.md)), so it takes this path too; `horizon-server` only supervises it.
 
@@ -833,6 +870,15 @@ content mods ("content mods not loaded: ..." in the log). Feature tags are vanil
 doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
 it too.
 
+**A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
+The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
+never move. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
+it from that data, and plays its colours, ambient particles, ambient sounds and music from it; a client with the same
+mod already has it. Its network id is its place in the registry sorted by path, then namespace, as in vanilla.
+Saved worlds name a column's biomes, not their ids: a world saved before the mod existed holds only vanilla names and
+loads unchanged; a world saved with the mod and opened without it reads the mod's biomes as plains, and the next save
+writes plains. A mod biome appears in the world only where a dimension's biome source or a worldgen file uses it.
+
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,
 `min_depth`) is tried before its pool's other elements at each jigsaw that reaches that pool (as target or fallback)
@@ -860,3 +906,5 @@ Seats follow passenger order; extra passengers use the last point. Offsets scale
 the entity and rotate with its yaw.
 
 Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.
+
+Ambient additions accept any finite `tick_chance`, without clamping to the unit interval. Music delays need not be ordered.
