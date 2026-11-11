@@ -670,7 +670,20 @@ impl Game<'_> {
         if namespace == "minecraft" {
             return true;
         }
-        if mod_namespace_loaded(namespace) {
+        // A declared root can have been handed back because a rider's mod
+        // is absent. Apply namespace ownership to the unresolved tree types,
+        // not to the already-resolved root.
+        fn missing_types_owned(record: &GeneralEntityRecord) -> bool {
+            let key = &record.envelope.type_key;
+            (general_type_catalog().slot(key).is_some()
+                || key
+                    .split_once(':')
+                    .is_some_and(|(ns, _)| ns != "minecraft" && !mod_namespace_loaded(ns)))
+                && record.passengers.iter().all(missing_types_owned)
+        }
+        let missing_tree = general_type_catalog().slot(kind).is_some()
+            && record_from_compound(tag).is_ok_and(|record| missing_types_owned(&record));
+        if mod_namespace_loaded(namespace) && !missing_tree {
             log::warn!(
                 "Horizon: {kind} names no type of loaded mod {namespace}; skipping its record"
             );

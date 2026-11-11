@@ -224,8 +224,9 @@ fn unknown_rider_type_hands_the_tree_back() {
         let handed = root.clone();
         assert_eq!(
             game.load_listed("mymod:robot", None, None, root),
-            Err(handed)
+            Err(handed.clone())
         );
+        assert!(game.general_quarantine_admits(&handed, "mymod:robot", Vec3::new(0.0, 0.0, 0.0)));
         assert!(game.resident_entities.general.rows.is_empty());
     });
 }
