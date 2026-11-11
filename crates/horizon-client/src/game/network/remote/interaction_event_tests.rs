@@ -58,6 +58,10 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    /// Cancel `right_click_block` with this answer.
+    click_answer: Option<Answer>,
+    /// How many `right_click_block` events fired.
+    clicks: usize,
 }
 
 #[derive(Clone, Default)]
@@ -83,7 +87,12 @@ impl Hooks for Observer {
         }
     }
     fn right_click_block(&self, _: HostSide<'_>, event: &mut RightClickBlockEvent<'_>) -> Flow {
-        let state = self.0.lock().unwrap();
+        let mut state = self.0.lock().unwrap();
+        state.clicks += 1;
+        if let Some(answer) = state.click_answer {
+            *event.cancellation_result = answer;
+            return Flow::Cancel;
+        }
         *event.use_block = state.use_block;
         *event.use_item = state.use_item;
         Flow::Continue
@@ -571,6 +580,56 @@ fn canceled_item_results_keep_the_stack_wrappers_side_effects() {
                 }
             });
         }
+    });
+}
+
+/// A spectator's click fires `right_click_block` on the client like anyone's, and a cancel
+/// answers in place of the server's menu turn: SUCCESS swings and ends the click, FAIL ends it,
+/// PASS goes on to the other hand.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectator_fires_right_click_block_on_the_client_and_its_cancel_answers() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            // Nobody answers: the event fired, and the spectator's click ends there, no swing.
+            *observer.0.lock().unwrap() = Controls::default();
+            let swings = game.swings_started;
+            assert!(game.remote_use_item_on(Hand::Main));
+            assert_eq!(observer.0.lock().unwrap().clicks, 1);
+            assert_eq!(game.swings_started, swings);
+            for (answer, ends, swings_by) in [
+                (Answer::Success, true, 1),
+                (Answer::Consume, true, 0),
+                (Answer::Fail, true, 0),
+                (Answer::Pass, false, 0),
+            ] {
+                *observer.0.lock().unwrap() = Controls {
+                    click_answer: Some(answer),
+                    ..Controls::default()
+                };
+                let swings = game.swings_started;
+                assert_eq!(game.remote_use_item_on(Hand::Main), ends, "{answer:?}");
+                assert_eq!(game.swings_started - swings, swings_by, "{answer:?}");
+                assert_eq!(observer.0.lock().unwrap().clicks, 1, "{answer:?}");
+            }
+        });
     });
 }
 
