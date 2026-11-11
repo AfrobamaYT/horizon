@@ -43,7 +43,7 @@ jobs:
       - id: select
         env:
           PROBE_SELECT: '1'
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: python tools/native_probe_ci.py
   linkage:
     needs: select

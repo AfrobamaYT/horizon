@@ -68,5 +68,37 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("base...head", report)
 
 
+class RecoveryTests(unittest.TestCase):
+    def test_coalesced_sdk_push_then_readme_still_selects(self):
+        root = Path(__file__).resolve().parents[1]
+        # A was last green; B changed SDK and is replaced in the queue by C.
+        changes = {"A": ["crates/horizon-client/src/game.rs", "crates/horizon-client/README.md"],
+                   "B": ["crates/horizon-client/README.md"]}
+        self.assertFalse(ci.selected(changes["B"], ci.sdk_roots(root)))
+        self.assertTrue(ci.select_interval(root, {"head_sha": "A"}, changes.__getitem__))
+        self.assertTrue(ci.select_interval(root, None, lambda _: self.fail("must not diff unknown baseline")))
+
+    def test_history_ceiling_is_not_first_run(self):
+        current = dict(id=20, run_number=20, repository="fork/repo")
+        self.assertIsNone(ci.find_green(lambda _: {"total_count": 0, "workflow_runs": []}, None, current))
+        with self.assertRaisesRegex(RuntimeError, "baseline unavailable"):
+            ci.find_green(lambda _: {"total_count": 1001, "workflow_runs": []}, None, current)
+
+    def test_known_range_survives_compare_or_pr_failure(self):
+        green = dict(head_sha="A", html_url="green-url")
+        for fail_compare in (True, False):
+            output = []
+            def pages(path, key=None):
+                # Range must already be durable before the first request.
+                self.assertIn("A...C", output[0])
+                self.assertIn("green-url", output[0])
+                if fail_compare or path.startswith("commits/"):
+                    raise OSError("network unavailable")
+                return [{"sha": "B"}]
+            ci.write_failure("fork/repo", "C", green, pages, output.append)
+            self.assertIn("lookup failed", output[-1])
+            self.assertNotIn("No successful", "\n".join(output))
+
+
 if __name__ == "__main__":
     unittest.main()

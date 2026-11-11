@@ -82,13 +82,44 @@ def summary(repo, head, green, commits, prs):
     return "\n".join(lines)
 
 
+def find_green(api, pages, current):
+    # Filtered Actions run queries expose only the first 1,000 matches.
+    for page in range(1, 11):
+        data = api(f"actions/workflows/{WORKFLOW}/runs?branch=main&event=push&status=success&per_page=100&page={page}")
+        runs = data["workflow_runs"]
+        candidate = baseline(runs, current)
+        while candidate:
+            jobs = pages(f"actions/runs/{candidate['id']}/jobs", "jobs")
+            if len([j for j in jobs if j["name"].startswith("linkage ") and j["conclusion"] == "success"]) == 2:
+                return candidate
+            runs.remove(candidate)
+            candidate = baseline(runs, current)
+        if data["total_count"] <= page * 100:
+            return None
+    raise RuntimeError("Actions history exceeds the 1,000-run API ceiling; baseline unavailable, not proven absent")
+
+
+def select_interval(root, green, diff):
+    # Coalesced pending runs must include every change since the last actual proof,
+    # not merely event.before..HEAD. Unknown/first baseline always needs a proof.
+    return green is None or selected(diff(green["head_sha"]), sdk_roots(root))
+
+
+def write_failure(repo, head, green, pages, emit):
+    # Persist the known range before any optional attribution network calls.
+    initial = summary(repo, head, green, [], lambda _: [])
+    emit("\n".join(initial.splitlines()[:4]) if green else initial)
+    if green is None:
+        return
+    try:
+        commits = pages(f"compare/{green['head_sha']}...{head}", "commits")
+        emit(summary(repo, head, green, commits, lambda sha: pages(f"commits/{sha}/pulls")))
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        emit(f"PR attribution lookup failed ({type(error).__name__}); inspect the known compare range above.")
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
-    if os.environ.get("PROBE_SELECT"):
-        paths = subprocess.check_output(["git", "diff", "--name-only", os.environ["BEFORE"], "HEAD"], text=True).splitlines()
-        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-            out.write(f"selected={str(selected(paths, sdk_roots(root))).lower()}\n")
-        return
     repo = os.environ["GITHUB_REPOSITORY"]
     def api(path):
         request = urllib.request.Request(f"https://api.github.com/repos/{repo}/{path}",
@@ -105,23 +136,26 @@ def main():
             if len(items) < 100:
                 return result
         raise RuntimeError("GitHub pagination limit reached; refusing incomplete attribution")
-    current = api(f"actions/runs/{os.environ['GITHUB_RUN_ID']}")
-    current["repository"] = repo
-    runs = pages(f"actions/workflows/{WORKFLOW}/runs?branch=main&event=push&status=success", "workflow_runs")
-    # A path-filtered no-op is not a green linkage proof.
-    green = baseline(runs, current)
-    while green:
-        jobs = pages(f"actions/runs/{green['id']}/jobs", "jobs")
-        proofs = [j for j in jobs if j["name"].startswith("linkage ") and j["conclusion"] == "success"]
-        if len(proofs) == 2:
-            break
-        runs.remove(green)
-        green = baseline(runs, current)
-    commits = pages(f"compare/{green['head_sha']}...{current['head_sha']}", "commits") if green else []
-    report = summary(repo, current["head_sha"], green, commits,
-                     lambda sha: pages(f"commits/{sha}/pulls"))
-    with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
-        out.write(report + "\n")
+    def emit(report):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+            out.write(report + "\n")
+    try:
+        current = api(f"actions/runs/{os.environ['GITHUB_RUN_ID']}")
+        current["repository"] = repo
+        green = find_green(api, pages, current)
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        emit(f"Baseline history unavailable ({type(error).__name__}); no absence of a prior green is claimed. Inspect workflow history manually.")
+        if not os.environ.get("PROBE_SELECT"):
+            raise
+        green = None
+    if os.environ.get("PROBE_SELECT"):
+        def diff(base):
+            return subprocess.check_output(["git", "diff", "--name-only", base, "HEAD"], text=True).splitlines()
+        chosen = select_interval(root, green, diff)
+        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+            out.write(f"selected={str(chosen).lower()}\n")
+        return
+    write_failure(repo, current["head_sha"], green, pages, emit)
 
 
 if __name__ == "__main__":
