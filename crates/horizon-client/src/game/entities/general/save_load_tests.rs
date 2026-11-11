@@ -470,8 +470,10 @@ fn general_tree_travels_to_another_dimension_with_its_riders() {
     use std::num::NonZeroU32;
     with_types(|game| {
         game.reset_entity_residency();
-        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
-        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        let grandchild = record_tag("mymod:robot", [8, 8, 8, 8], b"", Vec::new());
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", vec![grandchild]);
+        let sibling = record_tag("mymod:robot", [7, 7, 7, 7], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider, sibling]);
         game.load_listed("mymod:robot", None, None, root).unwrap();
         let rows = &game.resident_entities.general.rows;
         let (old_root, old_rider, old_join) = (rows[0].id, rows[1].id, rows[0].join);
@@ -497,7 +499,11 @@ fn general_tree_travels_to_another_dimension_with_its_riders() {
         // The destination holds the same tree, freshly admitted.
         game.enter_level(crate::game::Dim::Nether).unwrap();
         let rows = &game.resident_entities.general.rows;
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[2].uuid, [8, 8, 8, 8]);
+        assert_eq!(rows[2].mount, Some(rows[1].id));
+        assert_eq!(rows[3].uuid, [7, 7, 7, 7]);
+        assert_eq!(rows[3].mount, Some(rows[0].id));
         assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
         assert_eq!(rows[1].uuid, [9, 9, 9, 9]);
         assert_eq!(rows[1].mount, Some(rows[0].id));
@@ -527,8 +533,10 @@ fn refused_dimension_transfer_returns_the_whole_tree() {
         )
         .unwrap();
         game.enter_level(crate::game::Dim::Overworld).unwrap();
-        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
-        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        let grandchild = record_tag("mymod:robot", [8, 8, 8, 8], b"", Vec::new());
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", vec![grandchild]);
+        let sibling = record_tag("mymod:robot", [7, 7, 7, 7], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider, sibling]);
         game.load_listed("mymod:robot", None, None, root).unwrap();
         let before: Vec<_> = game
             .resident_entities

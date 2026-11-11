@@ -768,6 +768,7 @@ impl Game<'_> {
             ));
         }
         // Extract: highest index first, each row with the place it left.
+        tree.sort_unstable();
         let mut extracted: Vec<(usize, GeneralRow)> = Vec::new();
         for &index in tree.iter().rev() {
             extracted.push((index, self.resident_entities.general.rows.remove(index)));
