@@ -1,11 +1,5 @@
-//! Slot tables for injection points: the game's (in `mod_points`) and each mod crate's own (#2339),
-//! one registry for all of them. A table is its slots, one `AtomicBool` per place, set once at the
-//! seal where a mod listens. Registering a listener records its table, so the one [`seal`] after
-//! the mods load sets every table that has listeners; a table nobody listens at is never touched,
-//! and each of its points costs one load of a slot that stays `false`.
-//!
-//! Sealing orders each place's listeners: a `replace` last, then priority descending, then
-//! registration order (the mods register in dependency order), then inject id within a mod.
+//! The engine API point registry, shared by native and wasm listeners.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -201,19 +195,19 @@ struct OpenTable {
     slots: Vec<(usize, Slot)>,
 }
 
-/// Every table's registrations while mods load, and stops that came before the seal.
+/// Engine point registrations while mods load, and stops that came before the seal.
 struct Open {
-    tables: Vec<OpenTable>,
+    table: Option<OpenTable>,
     stopped: Vec<String>,
     /// Set once [`seal`] has run: registering is refused from then on, and stops go to the
-    /// sealed tables in `tables`.
+    /// sealed engine table.
     sealed: bool,
 }
 
 /// Registering, stopping and sealing all hold this lock, so a registration either lands in the
 /// sealed lists or is refused, and a stop before the seal still holds after it.
 static OPEN: Mutex<Open> = Mutex::new(Open {
-    tables: Vec::new(),
+    table: None,
     stopped: Vec::new(),
     sealed: false,
 });
@@ -347,21 +341,14 @@ pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     if open.sealed {
         return Err(RegisterError::Sealed);
     }
-    let table = match open
-        .tables
-        .iter()
-        .position(|open| std::ptr::eq(open.table, slot.place.table))
-    {
-        Some(index) => &mut open.tables[index],
-        None => {
-            open.tables.push(OpenTable {
-                table: slot.place.table,
-                listeners: Vec::new(),
-                slots: Vec::new(),
-            });
-            open.tables.last_mut().expect("just pushed")
-        }
-    };
+    let table = open.table.get_or_insert_with(|| OpenTable {
+        table: slot.place.table,
+        listeners: Vec::new(),
+        slots: Vec::new(),
+    });
+    if !std::ptr::eq(table.table, slot.place.table) {
+        return Err(RegisterError::Unsupported);
+    }
     let place = slot.place.index;
     if slot.replace
         && let Some((_, first)) = table
@@ -398,7 +385,7 @@ pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     Ok(())
 }
 
-/// Stops mod `id`'s listeners in every table: none of them runs again, whether the tables are
+/// Stops mod `id`'s engine listeners: none of them runs again, whether the slots are
 /// sealed yet or not. A trap that stops a wasm group and the game giving up on a native mod both
 /// end here.
 pub fn stop(id: &str) {
@@ -407,7 +394,7 @@ pub fn stop(id: &str) {
         open.stopped.push(id.to_owned());
         return;
     }
-    for table in &open.tables {
+    for table in open.table.iter() {
         let Some(sealed) = table.table.sealed.get() else {
             continue;
         };
@@ -417,7 +404,7 @@ pub fn stop(id: &str) {
     }
 }
 
-/// Seals every table, so no listener registers after it, and sets each slot a mod listens at. The
+/// Seals the engine table, refusing later registrations, and sets listened slots. The
 /// game calls it once, after the mods load.
 pub fn seal() {
     let mut open = lock();
@@ -426,7 +413,7 @@ pub fn seal() {
     }
     open.sealed = true;
     let stopped = std::mem::take(&mut open.stopped);
-    for table in &mut open.tables {
+    for table in open.table.iter_mut() {
         let (listeners, slots) = (
             std::mem::take(&mut table.listeners),
             std::mem::take(&mut table.slots),
@@ -436,7 +423,7 @@ pub fn seal() {
 }
 
 /// Adapts a replacement listener to a point's ordinary typed listener without registry values.
-// hidden: generated mod-point adapters share replacement semantics without exposing registry types.
+// hidden: generated engine point adapters share replacement semantics.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! replacement_listener {
