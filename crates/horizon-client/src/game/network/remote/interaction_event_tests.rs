@@ -1389,3 +1389,68 @@ fn item_use_overlap_matrix_on_the_server() {
         });
     });
 }
+
+/// Item.useOn without item behavior or a BLOCK_TRANSFORMER is PASS, and
+/// MultiPlayerGameMode.performUseItemOn returns it without a swing. An unknown
+/// item must keep that inert fallback even when RightClickBlock forces use.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn resource_gated_unknown_held_item_forced_use_predicts_pass_without_a_swing() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "unknown_forced_use",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        for client in [true, false] {
+            with_interaction_game(client, |game| {
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(0, 64, 0, stone).unwrap();
+                game.forced_hit = Some(hit());
+                // Keep the API key resolvable so RightClickBlock really runs,
+                // but remove its gameplay data to exercise the unknown-item
+                // fallback. The suffix also catches premature spawn-egg prediction.
+                let stack = ItemStack::new("minecraft:pig_spawn_egg", 2);
+                assert!(mod_api::__private::item_key(&stack.item).is_some());
+                let mut items = game.items().clone();
+                assert!(items.items.remove(&stack.item).is_some());
+                game.server_items = Some(Arc::new(items));
+                assert!(game.items().get(&stack.item).is_none());
+                game.inventory[game.selected] = Some(stack.clone());
+                game.offhand = None;
+                *observer.0.lock().unwrap() = Controls {
+                    use_block: TriState::False,
+                    use_item: TriState::True,
+                    first_answer: Some(Answer::Pass),
+                    item_on_answer: Some(Answer::Success),
+                    ..Controls::default()
+                };
+                let swings = game.swings_started;
+                // Literal vanilla fallback expectations, independently applied
+                // to client prediction and authoritative server use (not one
+                // result compared with the other).
+                assert!(!use_block(game, client), "client={client}: PASS");
+                assert_eq!(game.swings_started - swings, 0, "client={client}");
+                assert_eq!(game.held(), Some(&stack));
+                assert_eq!(game.world.block(0, 64, 0), stone);
+                assert!(game.using.is_none());
+                let state = observer.0.lock().unwrap();
+                assert_eq!(state.clicks, 1, "the forcing listener must have run");
+                assert!(
+                    !state.steps.iter().any(|step| matches!(
+                        step,
+                        Step::Phase(UsePhase::ItemAfterBlock, _)
+                    )),
+                    "unknown items cannot reach the forced item's success listener"
+                );
+            });
+        }
+    });
+}

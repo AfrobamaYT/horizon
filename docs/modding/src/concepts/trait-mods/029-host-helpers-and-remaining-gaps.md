@@ -67,6 +67,12 @@ shears, honeycomb and block-transforming items can legitimately fire
 the predicate evaluators are `DefaultBlockInteractionTrigger`,
 `ItemUsedOnLocationTrigger`, and `AnyBlockInteractionTrigger`.
 
+Resource-gated regressions in `block_use_completion_tests` observe the real criterion emissions
+and their complete stacks in order on the local server and guest packet routes, and exercise a
+filled map's banner marker toggling without duplicate item criteria. The resource-gated unknown-item
+case in `remote::interaction_event_tests` checks independent PASS/no-swing expectations for forced-use
+prediction and server use; forcing use does not invent behavior for an unregistered held item.
+
 `Ok(())` means the player was reached, even if no criterion matched. Failures are
 `NotServer` for a remote client, `PlayerUnavailable` for a stale, offline or
 displaced handle, `UnloadedChunk` for a position outside loaded chunks, and
