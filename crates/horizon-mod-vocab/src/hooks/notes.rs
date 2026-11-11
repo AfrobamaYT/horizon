@@ -1773,9 +1773,11 @@ still go on each event or registrar.
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
   its faces baked as a model's are, each a `CubeFace::new(sprite)`, `.with_uv(uv)` for UVs of its own), `native_draw_block` (a block
   state's model, as `submitBlockModel`: a moving part is often a block of the mod's own) and `native_draw_text`
-  (`BlockEntityDrawContext::text(text, at, rgb)`: a line of the game's font, as a sign's, in font pixels with y down as
-  `Font.drawInBatch` lays it out under the pose, opaque `0xRRGGBB`, in the frame's light; `set_light` to full bright for
-  a glowing display such as a nixie tube; `text_width` measures it to centre it). Sprites are the atlas's:
+  (`BlockEntityDrawContext::text(text, at, rgb, glowing, outline)`: a component in the game's font, as a sign's line or a
+  text display's, in font pixels with y down as `Font.drawInBatch` lays it out under the pose, with its styles (bold, italic,
+  underline, strikethrough, obfuscated, fonts, `§` codes), opaque `0xRRGGBB`, in the frame's light or full bright when
+  `glowing` (a nixie tube), ringed with `outline` when given; `text_width` measures it, styles included, to centre it).
+  Parts drawn after `spin` turn on the client's animation clock (`animation_time`) and are lit where they turn to. Sprites are the atlas's:
   `<ns>:block/...` and `block/...`, and a content mod's `assets/<ns>/textures/entity/` as `<ns>:entity/...`. Culling uses the bounds
   `native_block_entity_render_bounding_box` gives (NeoForge's `getRenderBoundingBox`): the block with a block of margin
   unless the mod widens them, or never culled when a bound is infinite. Both run every frame for every one in view: keep
