@@ -36,6 +36,13 @@ const SWAP_TICKS: f32 = 30.0;
 /// Widest GUI at which the book sits next to the menu (`widthTooNarrow`).
 const NARROW: f32 = 379.0;
 
+/// `RecipeBookComponent.isOffsetNextToMainGUI`: false in a window narrower than
+/// `NARROW`, where the open book covers the menu. Escape closes only the book
+/// there (`keyPressed`), not the container.
+pub(super) fn escape_closes_book(width: f32, open: bool) -> bool {
+    open && width < NARROW
+}
+
 /// A ghost recipe slot: the items it cycles through.
 struct Ghost {
     slot: usize,
@@ -1231,6 +1238,22 @@ impl Game<'_> {
         self.send_book_settings(book_type);
         self.recipe_ui.overlay = None;
     }
+    /// `RecipeBookComponent.keyPressed`: Escape closes the book, not the
+    /// screen, while it covers a narrow menu; a wide window's Escape reaches
+    /// the container.
+    pub(super) fn recipe_book_escape(&mut self) -> bool {
+        let Some(book_type) = self.active_book() else {
+            return false;
+        };
+        let Some(batch) = self.batch_for_size() else {
+            return false;
+        };
+        if !escape_closes_book(batch.width, self.book_open(book_type)) {
+            return false;
+        }
+        self.close_narrow_book(book_type, &batch);
+        true
+    }
     /// `RecipeBookComponent.tryPlaceRecipe`: false when the click is refused.
     fn try_place(&mut self, entry_index: usize, use_max: bool) -> bool {
         let Some(book_type) = self.active_book() else {
@@ -2171,5 +2194,18 @@ mod request_generation_tests {
             checks.asked.map(|(tag, id, _)| (tag, id)),
             Some((retry, 42))
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `RecipeBookComponent.keyPressed`: Escape closes a narrow window's open
+    /// book (`!isOffsetNextToMainGUI`), not the container; a wide window's
+    /// book leaves Escape to the container.
+    #[test]
+    fn escape_closes_only_a_narrow_books_menu() {
+        assert!(super::escape_closes_book(super::NARROW - 1.0, true));
+        assert!(!super::escape_closes_book(super::NARROW, true));
+        assert!(!super::escape_closes_book(super::NARROW - 1.0, false));
     }
 }
