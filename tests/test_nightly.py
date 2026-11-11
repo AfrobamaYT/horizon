@@ -285,3 +285,29 @@ class SdkPairTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     nightly.build_set(nightly.Ref("main", "a" * 40, T), [], [], "2026-11-11", True, False)
                 push.assert_not_called()
+
+    def test_automatic_selection_reads_inventory_once_for_all_candidates(self):
+        def choose(*, parity, eligible):
+            self.assertTrue(parity)
+            self.assertFalse(eligible("b" * 40))
+            self.assertTrue(eligible("a" * 40))
+            return "a" * 40
+        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": ""}), \
+                mock.patch.object(nightly, "ready_sdk_shas", return_value={"a" * 40}) as inventory, \
+                mock.patch.object(nightly.train, "green_main_head", side_effect=choose), \
+                mock.patch.object(nightly, "is_ancestor", return_value=True), \
+                mock.patch.object(nightly, "git", side_effect=["a" * 40, NOW]):
+            self.assertEqual(nightly.green_base("arismoko/horizon", "").sha, "a" * 40)
+            inventory.assert_called_once_with()
+
+    def test_publication_checks_fresh_inventory_and_leaves_upstream_unchanged(self):
+        with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "arismoko/horizon"}), \
+                mock.patch.object(nightly, "ready_sdk_shas", side_effect=[{"a" * 40}, set()]) as inventory:
+            nightly.require_sdk("a" * 40)
+            with self.assertRaisesRegex(SystemExit, "publication refused"):
+                nightly.require_sdk("a" * 40)
+            self.assertEqual(inventory.call_count, 2)
+        with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "horizon-rust/horizon"}), \
+                mock.patch.object(nightly, "sdk_ready") as sdk:
+            nightly.require_sdk("a" * 40)
+            sdk.assert_not_called()

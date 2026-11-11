@@ -225,18 +225,29 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
           + "".join(f" + #{e['number']}" for e in kept))
 
 
-def sdk_ready(sha: str) -> bool:
-    """Only published, exact-SHA v4 pairs; API failures fail closed, not as missing releases."""
-    tag = f"prebuilt-{sha}"
+def ready_sdk_shas() -> set[str]:
+    """Snapshot complete published v4 pairs; API failures fail closed."""
     releases = train.gh_json("api", "--paginate", "--slurp",
                              f"repos/arismoko/horizon/releases?per_page=100")
     required = {"SHA256SUMS"} | {
         f"horizon-prebuilt-v4-{target}.tar.gz" for target in (
             "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server",
             "x86_64-pc-windows-gnu", "aarch64-apple-darwin")}
-    return any(not release["draft"] and release["tag_name"] == tag
-               and required <= {asset["name"] for asset in release["assets"]}
-               for page in releases for release in page)
+    return {release["tag_name"].removeprefix("prebuilt-")
+            for page in releases for release in page
+            if not release["draft"] and re.fullmatch(r"prebuilt-[0-9a-f]{40}", release["tag_name"])
+            and required <= {asset["name"] for asset in release["assets"]}}
+
+
+def sdk_ready(sha: str) -> bool:
+    """A fresh check, never cached across selection and publication."""
+    return sha in ready_sdk_shas()
+
+
+def require_sdk(sha: str) -> None:
+    """Refuse before rotating/publishing Nightly if its SDK disappeared."""
+    if os.environ.get("GITHUB_REPOSITORY") == "arismoko/horizon" and not sdk_ready(sha):
+        raise SystemExit(f"Nightly publication refused: {sha} has no complete published v4 SDK pair")
 
 
 def green_base(repo: str, issue: str) -> Ref:
@@ -244,8 +255,13 @@ def green_base(repo: str, issue: str) -> Ref:
     (dyna-checks on the fork, checks plus parity-main upstream), never an untested fallback."""
     explicit = os.environ.get("NIGHTLY_BASE", "").strip()
     fork = repo == "arismoko/horizon"
-    sha = explicit or (train.green_main_head(parity=True, eligible=sdk_ready) if fork
-                       else train.green_main_head(parity=True))
+    if explicit:
+        sha = explicit
+    elif fork:
+        ready = ready_sdk_shas()
+        sha = train.green_main_head(parity=True, eligible=ready.__contains__)
+    else:
+        sha = train.green_main_head(parity=True)
     if not sha:
         checks = "dyna-checks and has a complete published v4 SDK" if fork else "checks and parity-main"
         stop(repo, issue, f"the build stopped: no recent commit of main passed {checks}, so "
@@ -380,6 +396,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("pick").add_argument("--force", action="store_true")
     sub.add_parser("rotate")
+    sub.add_parser("require-sdk").add_argument("sha")
     sub.add_parser("prune").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-builds").add_argument("--days", type=int, default=7)
     keep = sub.add_parser("keep-source")
@@ -388,6 +405,8 @@ def main() -> None:
     args = ap.parse_args()
     if args.cmd == "pick":
         pick(args.force)
+    elif args.cmd == "require-sdk":
+        require_sdk(args.sha)
     elif args.cmd == "rotate":
         rotate()
     elif args.cmd == "prune-builds":
