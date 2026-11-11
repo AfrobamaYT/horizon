@@ -457,6 +457,15 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String>
         }
         count += 1;
     }
+    for bundle in crate::native_status::wasm_points(home) {
+        let dir = out.join(&bundle.manifest.id);
+        for (name, bytes) in &bundle.files {
+            let to = dir.join(name);
+            fs::create_dir_all(to.parent().unwrap_or(&dir)).map_err(|e| e.to_string())?;
+            fs::write(&to, bytes).map_err(|e| e.to_string())?;
+        }
+        count += 1;
+    }
     if count == 0 {
         return Err(format!(
             "No native mod is turned on in {}: install one from the Mods page first.",
@@ -1563,12 +1572,17 @@ fn pipeline(
         .iter()
         .map(|b| (b.manifest.id.clone(), source_digest(b)))
         .collect();
-    let mods: Vec<Bundle> = found
+    let requested: Vec<Bundle> = found
         .into_iter()
         .map(|b| Bundle {
             dir: incoming.join(&b.manifest.id),
             ..b
         })
+        .collect();
+    let mods: Vec<Bundle> = requested
+        .iter()
+        .filter(|b| b.manifest.native.is_some())
+        .cloned()
         .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
@@ -1576,7 +1590,7 @@ fn pipeline(
         .collect();
     // The cache identifies every requested input, including a mod left out after a failure:
     // replacing its files must retry it rather than reuse a build that excluded the old copy.
-    let requested = mods.clone();
+
     let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
         .iter()
         .zip(&declared)
@@ -1588,7 +1602,7 @@ fn pipeline(
         .zip(declared)
         .filter(|(b, _)| !left_out.iter().any(|l| l.id == b.manifest.id))
         .unzip();
-    if mods.is_empty() {
+    if mods.is_empty() && requested.iter().all(|b| b.manifest.wasm.is_none()) {
         return Err(Failed::Nothing);
     }
     let inputs: Vec<_> = mods
@@ -1730,7 +1744,7 @@ fn pipeline(
             "target": target.name(),
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
-            "mods": mods.iter().map(|m| {
+            "mods": requested.iter().filter(|m| !left_out.iter().any(|l| l.id == m.manifest.id)).map(|m| {
                 let pinned = catalog.pinned(&m.manifest);
                 serde_json::json!({
                     "id": m.manifest.id,

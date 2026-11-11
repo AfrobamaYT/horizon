@@ -150,6 +150,4 @@ pub fn tick(host: HostSide<'_>, _args: &mut TickArgs) {
             .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
     }
 }
-#[cfg(target_arch = "wasm32")]
-include!(concat!(env!("OUT_DIR"), "/guest_injects.rs"));
 // ANCHOR_END: mod
