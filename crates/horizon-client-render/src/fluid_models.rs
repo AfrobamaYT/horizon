@@ -50,13 +50,13 @@ impl FluidData {
     /// Resolves every fluid's item appearance (see [`item_appearance`]). A mod's world fluid
     /// draws its world model's still sprite with its fixed tint made opaque, or water's item
     /// colour when it takes the biome's. Vanilla's fluids come from the world renderer's own
-    /// table and win over a look of the same id; `FluidStateModelSet.bake` maps a fluid and
-    /// its flowing form to one model.
+    /// table and win over a look of the same id. `FluidStateModelSet.bake` maps a fluid and
+    /// its flowing form to one model, so both ids answer alike, a mod's as vanilla's.
     fn reindex(&mut self) {
         let mut items: HashMap<String, FluidAppearance> = self
             .looks
             .iter()
-            .map(|look| {
+            .flat_map(|look| {
                 // The load's `resolved` already warned about bad sprite ids.
                 let model = resolve_look(look, &self.registered, false);
                 let tint = match model.tint {
@@ -67,7 +67,10 @@ impl FluidData {
                     still: model.still,
                     tint,
                 };
-                (look.id.clone(), appearance)
+                [
+                    (look.flowing_id(), appearance.clone()),
+                    (look.id.clone(), appearance),
+                ]
             })
             .collect();
         for (fluid, block) in [
@@ -400,6 +403,21 @@ mod tests {
             Some(-12618012),
             "vanilla's stay through every reload"
         );
+    }
+
+    /// A container that declares a mod fluid's flowing form draws what its source draws:
+    /// `FluidStateModelSet.bake` maps both ids to one model. The game's `ItemEnv` passes the
+    /// declared id straight to [`item_appearance`], so the index answers for both.
+    #[test]
+    fn a_mod_fluids_flowing_form_draws_its_source_appearance() {
+        let mut data = FluidData::new();
+        data.set_looks(&[look("a:oil", Some("a:block/oil"), Some(0x11_2233))]);
+        let oil = Some(FluidAppearance {
+            still: "a:block/oil".into(),
+            tint: 0xFF11_2233_u32 as i32,
+        });
+        assert_eq!(data.items.get("a:flowing_oil").cloned(), oil);
+        assert_eq!(data.items.get("a:oil").cloned(), oil);
     }
 
     /// `BucketResourceHandler` for the items whose class is exactly `BucketItem`: the water
