@@ -94,6 +94,20 @@ class GitChangedPathsTests(unittest.TestCase):
 
 
 class PrReadyTests(unittest.TestCase):
+    def test_data_backed_summary_with_and_without_prepared_data(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(pr_ready, "ROOT", Path(directory)):
+            step = pr_ready.Step("content root tests", summary=pr_ready.tests_passed)
+            step.output = "test result: ok. 3 passed; 0 failed; 0 ignored"
+            step.status = "pass"
+            step.detail = pr_ready.tests_passed(step.output)
+            def render():
+                return pr_ready.block(args(), "origin/main", "abcdef123", [], {}, [step], "skip-release", 0)
+            self.assertIn("data-backed tests not run: no prepared data here", render())
+            (Path(directory) / ".local/horizon-client").mkdir(parents=True)
+            self.assertIn("data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): 3 passed", render())
+            step.status, step.detail = "skip", "content root untouched"
+            self.assertIn("data-backed tests not run: content root untouched", render())
+
     def test_windows_runner_gives_a_leading_variable_to_the_environment(self):
         step = pr_ready.Step(
             "dispatch tests tests",
