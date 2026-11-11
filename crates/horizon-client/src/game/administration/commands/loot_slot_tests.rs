@@ -104,3 +104,81 @@ fn loot_replace_furnace_fuel_refuses_non_fuel() {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn item_commands_bypass_block_acceptance() {
+    with_game(|game| {
+        for slot in [1, 2] {
+            assert!(game.run_command("setblock 4 200 4 furnace"));
+            assert!(game.run_command(&format!(
+                "item replace block 4 200 4 container.{slot} with minecraft:diamond 2"
+            )));
+            assert_eq!(
+                game.slot_get(&Slot::Block([4, 200, 4], slot))
+                    .map(|s| (s.item.to_string(), s.count)),
+                Some(("minecraft:diamond".into(), 2))
+            );
+            assert!(game.run_command(&format!(
+                r#"item modify block 4 200 4 container.{slot} {{"function":"minecraft:set_count","count":3}}"#
+            )));
+            assert_eq!(
+                game.slot_get(&Slot::Block([4, 200, 4], slot))
+                    .map(|s| (s.item.to_string(), s.count)),
+                Some(("minecraft:diamond".into(), 3))
+            );
+        }
+        for modify in [false, true] {
+            assert!(game.run_command("setblock 4 200 4 jukebox"));
+            assert!(game.run_command(
+                "item replace block 4 200 4 container.0 with minecraft:music_disc_cat"
+            ));
+            let command = if modify {
+                r#"item modify block 4 200 4 container.0 {"function":"minecraft:set_count","count":0}"#
+            } else {
+                "item replace block 4 200 4 container.0 with minecraft:air"
+            };
+            assert!(game.run_command(command));
+            assert!(game.slot_get(&Slot::Block([4, 200, 4], 0)).is_none());
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn empty_loot_preserves_restricted_slots_but_clears_chest() {
+    with_game(|game| {
+        for (block, slot, item) in [
+            ("furnace", 1, "coal"),
+            ("furnace", 2, "iron_ingot"),
+            ("brewing_stand", 0, "potion"),
+            ("chiseled_bookshelf", 0, "book"),
+            ("crafter{disabled_slots:[I;0]}", 0, "diamond"),
+            ("chest", 0, "diamond"),
+        ] {
+            assert!(game.run_command(&format!("setblock 4 200 4 {block} replace")));
+            assert!(game.run_command(&format!(
+                "item replace block 4 200 4 container.{slot} with minecraft:{item}"
+            )));
+            assert!(game.run_command(&format!(
+                r#"loot replace block 4 200 4 container.{slot} 1 loot {{"pools":[]}}"#
+            )));
+            let actual = game
+                .slot_get(&Slot::Block([4, 200, 4], slot))
+                .map(|s| (s.item.to_string(), s.count));
+            let expected = if block == "chest" {
+                None
+            } else {
+                Some((format!("minecraft:{item}"), 1))
+            };
+            assert_eq!(actual, expected, "{block} slot {slot}");
+        }
+        assert!(game.run_command("setblock 4 200 4 chest replace"));
+        assert!(game.run_command(r#"loot replace block 4 200 4 container.0 1 loot {"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]}"#));
+        assert_eq!(
+            game.slot_get(&Slot::Block([4, 200, 4], 0))
+                .map(|s| (s.item.to_string(), s.count)),
+            Some(("minecraft:diamond".into(), 1))
+        );
+    });
+}
