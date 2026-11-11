@@ -3926,11 +3926,21 @@ pub(crate) mod tests {
         });
     }
 
-    /// A menu over the game's data (`.local/horizon-client`); skipped without it.
+    /// The game's prepared data: `HORIZON_TEST_RESOURCES`, else
+    /// `.local/horizon-client` in the checkout.
+    pub(crate) fn resource_root() -> std::path::PathBuf {
+        std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            })
+    }
+
+    /// A menu over the game's data (`resource_root`); skipped without it.
     pub(crate) fn with_menu(kind: Kind, test: impl FnOnce(&Env, &mut Menu)) {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
+        let root = resource_root();
         if !root.join("items.json").exists() {
             return;
         }
@@ -4257,9 +4267,7 @@ pub(crate) mod tests {
                 let to = menu.quick_move_landing(env, 30);
                 assert_eq!(to, if added { vec![0] } else { vec![3] });
                 let apple = stack("apple", 1).unwrap();
-                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../.local/horizon-client")
-                    .join(horizon_core::VANILLA_VERSION);
+                let root = resource_root();
                 let defaults = horizon_world::item_defaults::read(&root).unwrap();
                 let stations = crate::stations::StationData::load(
                     &root,
@@ -5977,4 +5985,6 @@ pub(crate) mod tests {
         }
         assert_eq!(seen, [potion.clone(), potion]);
     }
+    #[path = "../dfa_tests.rs"]
+    mod dfa;
 }
