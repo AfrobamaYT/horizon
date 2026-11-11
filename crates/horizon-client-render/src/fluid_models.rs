@@ -233,6 +233,11 @@ pub fn item_appearance(fluid: &str) -> Option<FluidAppearance> {
     data().items.get(fluid).cloned()
 }
 
+/// Whether an item holding `fluid` has a look to draw it with: [`item_appearance`] answers it.
+pub fn draws_in_item(fluid: &str) -> bool {
+    data().items.contains_key(fluid)
+}
+
 /// The fluid a vanilla bucket holds: NeoForge registers `BucketResourceHandler` for every item
 /// whose class is exactly `BucketItem` (`CapabilityHooks.registerFallbackVanillaProviders`), and
 /// its `getResourceFrom` answers `BucketItem.content`. The empty bucket's content is
