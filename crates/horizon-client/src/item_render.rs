@@ -24,7 +24,7 @@ use crate::{
 use glam::{Mat3, Mat4, Vec3};
 use horizon_assets::{
     animation::AnimationMetadata,
-    item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model},
+    item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model, bake_sprite_layer},
     item_model::{
         ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels, LayerContent,
         LevelState, OwnerState, SpecialModel, StackView,
@@ -851,12 +851,23 @@ impl ItemRenderer {
     }
     /// `ModelBakery` item baking, cached per model.
     pub fn bake(&self, model: &str) -> Arc<BakedItemModel> {
+        self.baked_with(model, || {
+            bake_item_model(&self.library, &self.sprites, model)
+        })
+    }
+    /// A layer baked from something other than a model id, such as an extruded sprite,
+    /// cached under `key` (which no model id can equal: identifiers hold no NUL).
+    fn baked_with(
+        &self,
+        key: &str,
+        bake: impl FnOnce() -> std::result::Result<BakedItemModel, horizon_assets::DecodeError>,
+    ) -> Arc<BakedItemModel> {
         if let Ok(cache) = self.baked.lock()
-            && let Some(hit) = cache.get(model)
+            && let Some(hit) = cache.get(key)
         {
             return hit.clone();
         }
-        let baked = bake_item_model(&self.library, &self.sprites, model)
+        let baked = bake()
             .or_else(|_| bake_item_model(&self.library, &self.sprites, MISSING_MODEL))
             .map(Arc::new)
             .unwrap_or_else(|_| {
@@ -871,7 +882,7 @@ impl ItemRenderer {
                 })
             });
         if let Ok(mut cache) = self.baked.lock() {
-            cache.insert(model.to_owned(), baked.clone());
+            cache.insert(key.to_owned(), baked.clone());
         }
         baked
     }
@@ -950,6 +961,19 @@ impl ItemRenderer {
                             });
                         (LayerGeometry::Quads(baked.clone()), baked, extents)
                     }
+                    LayerContent::Sprite { sprite, mask } => {
+                        let key = sprite_layer_key(&sprite, mask.as_deref());
+                        let baked = self.baked_with(&key, || {
+                            bake_sprite_layer(
+                                &self.library,
+                                &self.sprites,
+                                &sprite,
+                                mask.as_deref(),
+                            )
+                        });
+                        let extents = self.quad_extents(&key, &baked);
+                        (LayerGeometry::Quads(baked.clone()), baked, extents)
+                    }
                     LayerContent::Missing => {
                         let baked = self.bake(MISSING_MODEL);
                         let extents = self.quad_extents(MISSING_MODEL, &baked);
@@ -1019,6 +1043,10 @@ impl ItemRenderer {
     pub(crate) fn part(&self, key: &str) -> Option<&ModelPart> {
         self.parts.get(key)
     }
+}
+/// A cache key for an extruded sprite layer: `\0` keeps it out of model ids' space.
+fn sprite_layer_key(sprite: &str, mask: Option<&str>) -> String {
+    format!("\0{sprite}\0{}", mask.unwrap_or_default())
 }
 /// `CuboidItemModelWrapper.computeExtents`: the distinct quad corners.
 fn corners(baked: &BakedItemModel) -> Vec<Vec3> {

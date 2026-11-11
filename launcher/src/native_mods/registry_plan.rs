@@ -6,7 +6,6 @@ pub(super) struct Plan {
     pub game: RegistryLock,
     pub mods: RegistryLock,
     pub allowed: RegistryLock,
-    fetch_roots: RegistryLock,
     owned: Vec<(String, String, RegistryLock)>,
     roots: std::collections::BTreeSet<String>,
 }
@@ -45,23 +44,12 @@ impl Plan {
             mods.extend(&pins)?;
             owned.push((bundle.manifest.id.clone(), project.package.clone(), pins));
         }
-        let mut fetch_roots = RegistryLock::default();
-        for (identity, record) in &mods.packages {
-            if wanted.iter().any(|request| {
-                request.name == identity.name && request.requirement.matches(&identity.version)
-            }) {
-                fetch_roots
-                    .packages
-                    .insert(identity.clone(), record.clone());
-            }
-        }
         let mut allowed = game.clone();
         allowed.extend(&mods)?;
         Ok(Self {
             game,
             mods,
             allowed,
-            fetch_roots,
             owned,
             roots,
         })
@@ -134,30 +122,33 @@ impl Plan {
         }
     }
 
-    pub fn fetch(
-        &self,
-        rust: &crate::rust_toolchain::Toolchain,
-        directory: &Path,
-    ) -> Result<(), String> {
-        self.fetch_with_patches(rust, directory, &toml::Table::new())
-    }
-
     pub fn fetch_with_patches(
         &self,
         rust: &crate::rust_toolchain::Toolchain,
         directory: &Path,
         patches: &toml::Table,
     ) -> Result<(), String> {
-        self.mods.fetch_workspace(&self.fetch_roots, directory)?;
+        // Resolve the validated mod workspace with its actual aliases, features
+        // and defaults, rather than reconstructing package-only fetch roots.
         apply_patches(directory, patches)?;
-        let mut index = super::cargo(rust, directory, "update");
+        self.resolve_and_fetch(directory, |subcommand| {
+            super::cargo(rust, directory, subcommand)
+        })
+    }
+
+    fn resolve_and_fetch(
+        &self,
+        directory: &Path,
+        mut cargo: impl FnMut(&str) -> std::process::Command,
+    ) -> Result<(), String> {
+        let mut index = cargo("update");
         index.arg("--workspace");
         super::run(index, "Checking the pinned registry index", |_| {})
             .map_err(|error| self.explain_resolution(error))?;
         let pins = RegistryLock::parse(&super::read_lock(directory)?)?;
-        self.allowed
-            .check_resolution(&pins, &RegistryLock::default())?;
-        let mut fetch = super::cargo(rust, directory, "fetch");
+        self.check_mods(&pins)?;
+        self.allowed.check_partial_resolution(&pins, &self.game)?;
+        let mut fetch = cargo("fetch");
         fetch.arg("--locked");
         super::run(fetch, "Downloading the mods' pinned crates", |_| {})
     }
@@ -349,38 +340,255 @@ mod tests {
     }
 
     #[test]
-    fn fetch_roots_exclude_unrelated_game_union_records() {
+    fn cargo_optional_game_edges_may_shrink_but_not_grow_or_move() {
         let dir = tempfile::tempdir().unwrap();
-        super::super::tests::write_bundle(dir.path(), "example", "");
-        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname='example'\nversion='1.0.0'\n[dependencies]\nhorizon-mod-api='0.1'\nused='1'\n").unwrap();
-        let mut lock = "version=4\n".to_owned();
-        for name in ["used", "unrelated-allocator"] {
-            lock.push_str(&format!("[[package]]\nname='{name}'\nversion='1.0.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\n", "a".repeat(64)));
+        let root = dir.path();
+        for name in ["bumpalo", "allocator-api2", "unexpected"] {
+            let crate_dir = root.join("vendor").join(name);
+            std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+            let extra = if name == "bumpalo" {
+                "[dependencies]\nallocator-api2={version='1',optional=true}\nunexpected={version='1',optional=true}\n"
+            } else {
+                ""
+            };
+            std::fs::write(
+                crate_dir.join("Cargo.toml"),
+                format!("[package]\nname='{name}'\nversion='1.0.0'\n{extra}"),
+            )
+            .unwrap();
+            std::fs::write(crate_dir.join("src/lib.rs"), "").unwrap();
+            std::fs::write(
+                crate_dir.join(".cargo-checksum.json"),
+                format!(r#"{{"package":"{}","files":{{}}}}"#, "a".repeat(64)),
+            )
+            .unwrap();
         }
-        std::fs::write(dir.path().join("Cargo.lock"), &lock).unwrap();
-        let bundle = super::super::bundle_in(dir.path()).unwrap().unwrap();
+        std::fs::create_dir_all(root.join(".cargo")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        std::fs::write(
+            root.join(".cargo/config.toml"),
+            "[source.crates-io]\nreplace-with='fixture'\n[source.fixture]\ndirectory='vendor'\n",
+        )
+        .unwrap();
+        let resolve = |features: &str| {
+            std::fs::write(root.join("Cargo.toml"), format!("[package]\nname='fixture'\nversion='1.0.0'\n[workspace]\n[dependencies]\nbumpalo={{version='1',default-features=false,features=[{features}]}}\n")).unwrap();
+            let output = std::process::Command::new("cargo")
+                .args(["generate-lockfile", "--offline"])
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            std::fs::read_to_string(root.join("Cargo.lock")).unwrap()
+        };
+        let game = resolve("'allocator-api2'");
+        let plan = Plan::read(&game, &[], &[]).unwrap();
+        let narrower = resolve("");
+        let narrower = RegistryLock::parse(&narrower).unwrap();
+        plan.allowed
+            .check_partial_resolution(&narrower, &plan.game)
+            .unwrap();
+        // Without game ownership a mod's declared graph remains exact.
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&narrower, &RegistryLock::default())
+            .unwrap_err()
+            .contains("bumpalo"));
+        let added = resolve("'unexpected'");
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&RegistryLock::parse(&added).unwrap(), &plan.game)
+            .unwrap_err()
+            .contains("bumpalo"));
+        let moved = game.replace(
+            "name = \"bumpalo\"\nversion = \"1.0.0\"",
+            "name = \"bumpalo\"\nversion = \"1.0.1\"",
+        );
+        assert_ne!(moved, game);
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&RegistryLock::parse(&moved).unwrap(), &plan.game)
+            .unwrap_err()
+            .contains("bumpalo"));
+    }
+
+    #[test]
+    fn fetch_retains_actual_feature_closure_and_excludes_unreachable_pins() {
+        const ACTOR: &str = "HORIZON_REGISTRY_FETCH_TEST_ACTOR";
+        if std::env::var_os(ACTOR).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "native_mods::registry_plan::tests::fetch_retains_actual_feature_closure_and_excludes_unreachable_pins", "--nocapture"])
+                .env(ACTOR, "1")
+                .env("HORIZON_LAUNCHER_HOME", home.path())
+                .output().unwrap();
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stdout}\n{stderr}");
+            assert!(
+                stdout.contains("test result: ok. 1 passed;"),
+                "exact-name child did not run one test:\n{stdout}\n{stderr}"
+            );
+            return;
+        }
+        assert!(
+            !super::super::log_path().exists(),
+            "the isolated actor must start with a fresh home"
+        );
+        // Production build entries call logged()/clear_log(); native-lock also
+        // creates root() before resolution. This direct unit call bypasses them.
+        super::super::clear_log().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for name in ["feature-parent", "feature-only"] {
+            let folder = root.join("vendor").join(name);
+            std::fs::create_dir_all(folder.join("src")).unwrap();
+            let extra = if name == "feature-parent" {
+                "[dependencies]\nfeature-only={version='1',optional=true}\n[features]\ndefault=['feature-only']\n"
+            } else {
+                ""
+            };
+            std::fs::write(
+                folder.join("Cargo.toml"),
+                format!("[package]\nname='{name}'\nversion='1.0.0'\n{extra}"),
+            )
+            .unwrap();
+            std::fs::write(folder.join("src/lib.rs"), "").unwrap();
+            std::fs::write(
+                folder.join(".cargo-checksum.json"),
+                format!(r#"{{"package":"{}","files":{{}}}}"#, "a".repeat(64)),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir_all(root.join(".cargo")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        std::fs::write(
+            root.join(".cargo/config.toml"),
+            "[source.crates-io]\nreplace-with='fixture'\n[source.fixture]\ndirectory='vendor'\n",
+        )
+        .unwrap();
+        // Alias, explicit feature and default-feature semantics are left intact.
+        let manifest = "[package]\nname='fixture'\nversion='1.0.0'\n[workspace]\n[dependencies]\nalias={package='feature-parent',version='1',default-features=false,features=['feature-only']}\n";
+        std::fs::write(root.join("Cargo.toml"), manifest).unwrap();
+        let cargo = |subcommand: &str| {
+            let mut command = std::process::Command::new("cargo");
+            command
+                .arg(subcommand)
+                .arg("--offline")
+                .current_dir(root)
+                .env("CARGO_HOME", root.join("cold-cargo-home"));
+            command
+        };
+        let generated = cargo("generate-lockfile").output().unwrap();
+        assert!(
+            generated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        let game = format!("{}\n[[package]]\nname='outside-closure'\nversion='1.0.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{}'\n", std::fs::read_to_string(root.join("Cargo.lock")).unwrap(), "b".repeat(64));
+        std::fs::write(root.join("Cargo.lock"), &game).unwrap();
+        let plan = Plan::read(&game, &[], &[]).unwrap();
+        plan.resolve_and_fetch(root, cargo).unwrap();
+        let lock = RegistryLock::parse(&std::fs::read_to_string(root.join("Cargo.lock")).unwrap())
+            .unwrap();
+        assert!(lock.packages.keys().any(|id| id.name == "feature-only"));
+        assert!(!lock.packages.keys().any(|id| id.name == "outside-closure"));
+        // No source for outside-closure exists: eagerly fetching the union would fail.
+        assert!(!root.join("vendor/outside-closure").exists());
+        assert_eq!(
+            std::fs::read_to_string(root.join("Cargo.toml")).unwrap(),
+            manifest
+        );
+        let metadata = cargo("metadata")
+            .args(["--locked", "--format-version", "1"])
+            .output()
+            .unwrap();
+        assert!(
+            metadata.status.success(),
+            "{}",
+            String::from_utf8_lossy(&metadata.stderr)
+        );
+        assert!(!root.join("target").exists());
+        // The source route must create a cold workspace and replace an old
+        // package-only fetch workspace rather than trusting its stale features.
+        let input = root.join("source-input");
+        super::super::tests::write_bundle(&input, "source", "");
+        std::fs::write(
+            input.join("Cargo.toml"),
+            manifest.replace("[workspace]\n", ""),
+        )
+        .unwrap();
+        std::fs::write(input.join("Cargo.lock"), &game).unwrap();
+        std::fs::write(input.join("build.rs"), "panic!(\"must not execute\");").unwrap();
+        let bundle = super::super::bundle_in(&input).unwrap().unwrap();
+        std::fs::write(
+            input.join("Cargo.toml"),
+            format!(
+                "{}\nhorizon-mod-api={{git={:?},rev={:?}}}\n",
+                manifest.replace("[workspace]\n", ""),
+                horizon_addresses::NATIVE_MOD_SDK_SOURCE,
+                bundle.native().horizon
+            ),
+        )
+        .unwrap();
         let projects = [Project::read(&bundle).unwrap()];
         let wanted = [Wanted {
-            mod_id: "example".into(),
-            name: "used".into(),
+            mod_id: "source".into(),
+            name: "feature-parent".into(),
             version: "1".into(),
             requirement: semver::VersionReq::parse("1").unwrap(),
         }];
-        let plan = Plan::read(&lock, &projects, &wanted).unwrap();
-        let fetch = dir.path().join("fetch");
-        plan.mods
-            .fetch_workspace(&plan.fetch_roots, &fetch)
+        let source_plan = Plan::read(&game, &projects, &wanted).unwrap();
+        for stale in [false, true] {
+            let fetch = root.join(if stale { "stale-fetch" } else { "cold-fetch" });
+            if stale {
+                std::fs::create_dir_all(&fetch).unwrap();
+                std::fs::write(
+                    fetch.join("Cargo.toml"),
+                    "[dependencies]\noutside-closure='1'\n",
+                )
+                .unwrap();
+                std::fs::write(fetch.join("stale-marker"), "old synthetic workspace").unwrap();
+            }
+            super::super::registry_generate::stage_fetch(
+                &projects,
+                &[vec![]],
+                &fetch,
+                &source_plan.mods,
+            )
             .unwrap();
-        let manifest: toml::Table = std::fs::read_to_string(fetch.join("Cargo.toml"))
-            .unwrap()
-            .parse()
-            .unwrap();
-        let deps = manifest["dependencies"].as_table().unwrap();
-        assert_eq!(deps.len(), 1);
-        assert_eq!(
-            deps.values().next().unwrap()["package"].as_str(),
-            Some("used")
-        );
+            assert!(!fetch.join("stale-marker").exists());
+            assert!(!fetch.join("mods/source/build.rs").exists());
+            let command = |subcommand: &str| {
+                let mut command = std::process::Command::new("cargo");
+                command
+                    .arg(subcommand)
+                    .arg("--offline")
+                    .arg("--config")
+                    .arg(root.join(".cargo/config.toml"))
+                    .current_dir(&fetch)
+                    .env("CARGO_HOME", fetch.join("cold-cargo-home"));
+                command
+            };
+            source_plan.resolve_and_fetch(&fetch, command).unwrap();
+            let lock = std::fs::read_to_string(fetch.join("Cargo.lock")).unwrap();
+            assert!(lock.contains("feature-only"));
+            assert!(!lock.contains("outside-closure"));
+            let metadata = command("metadata")
+                .args(["--locked", "--format-version", "1"])
+                .output()
+                .unwrap();
+            assert!(
+                metadata.status.success(),
+                "{}",
+                String::from_utf8_lossy(&metadata.stderr)
+            );
+        }
     }
 
     #[test]
