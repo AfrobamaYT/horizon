@@ -51,8 +51,20 @@ impl Game<'_> {
             self.resident_entities
                 .table
                 .borrow_mut()
-                .entity_lookup(&self.dim.key(), id, |at| self
-                    .locate_resident_attachment_owner(at)),
+                .entity_lookup(&self.dim.key(), id, |at| {
+                    use horizon_client::join_seq::residency::Kind;
+                    match at.owner.kind {
+                        Kind::Hook | Kind::Player => self
+                            .locate_specialized_resident_owner(at)
+                            .map(|mut source| {
+                                // Hooks were counted by physical presence, regardless of pending
+                                // removals. Players were not, but must still validate their row.
+                                source.value.1 = at.owner.kind == Kind::Hook;
+                                source
+                            }),
+                        _ => self.locate_resident_attachment_owner(at),
+                    }
+                }),
             EntityLookup::Found {
                 value: (_, true),
                 ..
@@ -736,6 +748,117 @@ mod attachment_membership_tests {
             found |= entity.id() == id && !entity.is_removed();
         });
         found || game.entity_ids_off_walk().any(|e| e == id) || game.level_dragon_part(id).is_some()
+    }
+    fn assert_membership(game: &mut Game<'_>, id: u32) {
+        assert_eq!(
+            game.attachment_entity_exists(id),
+            old_membership(game, id),
+            "id {id}"
+        );
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attachment_off_walk_membership_matches_old_walk() {
+        with_game(|game| {
+            game.reset_entity_residency();
+            macro_rules! summon {
+                ($name:literal, $($field:ident).+) => {{
+                    game.summon_with_nbt(concat!("minecraft:", $name), [0.5, 70.0, 0.5], "{}").unwrap();
+                    game.lan_assign_ids();
+                    let id = game$(.$field)+.last().unwrap().id;
+                    assert_membership(game, id);
+                }};
+            }
+            summon!("pig", mobs);
+            summon!("item_frame", item_frames);
+            summon!("painting", paintings);
+            summon!("marker", others);
+            summon!("leash_knot", others);
+            summon!("area_effect_cloud", breath_clouds);
+            summon!("end_crystal", crystals);
+            summon!("cushion", cushions);
+            game.add_fangs([0.5, 70.0, 0.5], 0.0, 0, 0);
+            let id = game.fangs.list[0].id;
+            assert_membership(game, id);
+            game.add_ominous_item_spawner(
+                horizon_client::items::ItemStack::new("minecraft:stone", 1),
+                [0.5, 70.0, 0.5],
+                60,
+            );
+            let id = game.ominous_spawners[0].id;
+            assert_membership(game, id);
+            let fence = [0, 70, 0];
+            game.tie_knot(fence);
+            let mob = game.mobs[0].id;
+            assert!(game.set_leash(
+                Target::Mob(mob),
+                horizon_client::mobs::leash::Holder::Knot(fence),
+                None
+            ));
+            let id = game.resident_entities.knots[0].id;
+            assert_membership(game, id);
+            // Also cover a player-tied natural knot, besides the explicitly summoned knot.
+            let natural_fence = [3, 70, 3];
+            assert!(game.set_leash(
+                Target::Mob(mob),
+                horizon_client::mobs::leash::Holder::Player,
+                None
+            ));
+            assert!(game.use_knot(natural_fence, false));
+            let id = game.knot_ids[&natural_fence];
+            assert_membership(game, id);
+            let mut player =
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            player.entity_id = 880;
+            game.player = Some(player);
+            game.bind_local_player_residency();
+            let player_id = game.player.as_ref().unwrap().entity_id as u32;
+            assert_membership(game, player_id);
+            assert!(!old_membership(game, player_id));
+            game.install_fishing_hook(crate::game::fishing::Hook::remote(
+                900,
+                Vec3::ZERO,
+                [1, 2, 3, 4],
+            ));
+            assert_membership(game, 900);
+            assert!(
+                game.attachment_slot(mod_api::Holder::Entity(900), AttachmentAccess::Existing)
+                    .is_ok()
+            );
+            game.persist.removals.push(Target::Hook(900));
+            assert_membership(game, 900);
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attachment_guest_hook_membership_matches_old_walk() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            for id in [12, 13] {
+                assert_membership(game, id);
+                assert!(
+                    !old_membership(game, id),
+                    "players are not entity attachment holders"
+                );
+            }
+            game.as_guest(12, |game| {
+                game.install_fishing_hook(crate::game::fishing::Hook::remote(
+                    901,
+                    Vec3::ZERO,
+                    [5, 6, 7, 8],
+                ));
+                assert_membership(game, 901);
+                assert!(
+                    game.attachment_slot(mod_api::Holder::Entity(901), AttachmentAccess::Existing)
+                        .is_ok()
+                );
+            })
+            .unwrap();
+            assert_membership(game, 901);
+            assert!(
+                game.attachment_slot(mod_api::Holder::Entity(901), AttachmentAccess::Existing)
+                    .is_ok()
+            );
+        });
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
