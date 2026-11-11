@@ -215,6 +215,10 @@ impl Game<'_> {
             if self.world.block(pos.x, pos.y, pos.z) == air {
                 return Err(TransferError::UnsupportedBlock([pos.x, pos.y, pos.z]));
             }
+            // Saved-only entities have no carrier payload adapter yet.
+            if super::spill::saved_entity(&self.world, [pos.x, pos.y, pos.z]).is_some() {
+                return Err(TransferError::UnsupportedBlock([pos.x, pos.y, pos.z]));
+            }
             // The passive-or-supported rule runs before anything is
             // lifted: a block entity this slice does not carry (ticking
             // machines, world-dependent ones) refuses in preflight, with
@@ -361,9 +365,9 @@ impl Game<'_> {
             generation,
             0,
             RigidTransform::identity_at(horizon_core::geometry::Vec3::new(
-                cells[0].x as f64,
-                cells[0].y as f64,
-                cells[0].z as f64,
+                pivot[0] as f64,
+                pivot[1] as f64,
+                pivot[2] as f64,
             ))
             .map_err(|_| TransferError::Io("the identity placement refused".into()))?,
             carrier_cells,
@@ -405,8 +409,11 @@ impl Game<'_> {
         store
             .write_carrier(uuid, generation, &carrier_bytes)
             .map_err(|e| TransferError::Store(e.to_string()))?;
-        let read_back = std::fs::read(store.carrier_path(uuid, generation))
-            .map_err(|e| TransferError::Store(e.to_string()))?;
+        let read_back = crate::carrier_store::read_bounded(
+            &store.carrier_path(uuid, generation),
+            codec::MAX_INPUT_BYTES,
+        )
+        .map_err(|e| TransferError::Store(e.to_string()))?;
         if read_back != carrier_bytes {
             return Err(TransferError::Store(
                 "the published carrier did not read back identically".into(),
@@ -525,8 +532,11 @@ impl Game<'_> {
                 "the journal does not list this carrier".into(),
             ));
         }
-        let carrier_bytes = std::fs::read(store.carrier_path(uuid, generation))
-            .map_err(|e| TransferError::CarrierUnreadable(e.to_string()))?;
+        let carrier_bytes = crate::carrier_store::read_bounded(
+            &store.carrier_path(uuid, generation),
+            codec::MAX_INPUT_BYTES,
+        )
+        .map_err(|e| TransferError::CarrierUnreadable(e.to_string()))?;
         let carrier = codec::decode(&carrier_bytes)
             .map_err(|e| TransferError::CarrierUnreadable(e.to_string()))?;
 

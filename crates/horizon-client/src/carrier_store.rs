@@ -335,7 +335,8 @@ impl Store {
     /// highest generation the journal remembers for it — index entry or
     /// tombstone — computed with checked arithmetic; a carrier whose
     /// remembered generation is `u32::MAX` refuses rather than
-    /// wrapping. A UUID the journal has never seen starts at one.
+    /// wrapping. The durable operation counter is also a lower bound,
+    /// so deleting tombstones cannot revive an old generation.
     pub fn next_generation(&self, uuid: u128) -> Result<u32, StoreIoError> {
         let remembered = self
             .journal
@@ -346,11 +347,13 @@ impl Store {
             .map(|(_, generation)| *generation)
             .max();
         match remembered {
-            None => Ok(1),
+            None => u32::try_from(self.journal.next_op_id)
+                .map_err(|_| StoreIoError("carrier generation limit reached".into())),
             Some(u32::MAX) => Err(StoreIoError(format!(
                 "carrier {uuid:032x} reached the generation limit"
             ))),
-            Some(last) => Ok(last + 1),
+            Some(last) => u32::try_from(self.journal.next_op_id.max(u64::from(last) + 1))
+                .map_err(|_| StoreIoError("carrier generation limit reached".into())),
         }
     }
 
@@ -375,7 +378,10 @@ impl Store {
         // - a disassembly consumes the carrier its handle names, so the
         //   UUID and generation must be exactly the index's — a stale
         //   handle refuses.
-        let listed = self.journal.lists(uuid, generation);
+        let listed = match kind {
+            OpKind::Assemble => self.journal.carriers.iter().any(|(held, _)| *held == uuid),
+            OpKind::Disassemble => self.journal.lists(uuid, generation),
+        };
         match (kind, listed) {
             (OpKind::Assemble, true) => {
                 return Err(StoreIoError(format!(
@@ -461,8 +467,8 @@ impl Store {
 
     /// Retention for a just-finished operation, called from the live
     /// transfer path right after `commit`: the disassembly's tombstone
-    /// clears once its carrier file is gone from disk, so a long
-    /// session of transfers never grows the journal toward its bound.
+    /// clears only if its carrier file was already absent at open.
+    /// File absence in this session is not proof of durable deletion.
     /// This is the per-operation counterpart of [`Self::cleanup`], not a
     /// replacement: world open still runs the full cleanup for files
     /// left by crashed sessions.
@@ -470,10 +476,11 @@ impl Store {
         let tombstones = self.journal.tombstones.clone();
         let mut changed = false;
         for (uuid, generation) in tombstones {
-            if !self
-                .data
-                .join(format!("horizon_carrier_{uuid:032x}-{generation}.nbt"))
-                .exists()
+            if self.tombstones_absent_at_open.contains(&(uuid, generation))
+                && !self
+                    .data
+                    .join(format!("horizon_carrier_{uuid:032x}-{generation}.nbt"))
+                    .exists()
             {
                 self.journal.tombstones.retain(|t| *t != (uuid, generation));
                 changed = true;
@@ -809,7 +816,7 @@ pub fn recover(
         return Ok(Recovered::default());
     };
     let op_path = store.operation_path(op.op_id);
-    let bytes = fs::read(&op_path).map_err(|error| match error.kind() {
+    let bytes = read_bounded(&op_path, MAX_OP_COMPRESSED).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => RecoveryRefused::MissingOperation,
         _ => RecoveryRefused::OperationUnreadable(error.to_string()),
     })?;
@@ -854,11 +861,13 @@ pub fn recover(
     // writer did, before prepared.
     if operation.kind == OpKind::Assemble {
         let path = store.carrier_path(operation.uuid, operation.generation);
-        let bytes = fs::read(&path).map_err(|error| {
-            RecoveryRefused::OperationUnreadable(format!(
-                "the prepared assembly's carrier file does not read: {error}"
-            ))
-        })?;
+        let bytes = read_bounded(&path, horizon_world::carrier::codec::MAX_INPUT_BYTES).map_err(
+            |error| {
+                RecoveryRefused::OperationUnreadable(format!(
+                    "the prepared assembly's carrier file does not read: {error}"
+                ))
+            },
+        )?;
         let carrier = horizon_world::carrier::codec::decode(&bytes).map_err(|e| {
             RecoveryRefused::OperationUnreadable(format!(
                 "the prepared assembly's carrier does not decode: {e}"
@@ -877,7 +886,15 @@ pub fn recover(
         for cell in &operation.cells {
             let local = [cell.local[0], cell.local[1], cell.local[2]];
             let Some(carried) = carrier.cells().iter().find(|c| {
-                [c.pos().x(), c.pos().y(), c.pos().z()] == local && c.name() == cell.before.name
+                [c.pos().x(), c.pos().y(), c.pos().z()] == local
+                    && c.name() == cell.before.name
+                    && c.properties().len() == cell.before.properties.len()
+                    && c.properties().iter().all(|(key, value)| {
+                        cell.before
+                            .properties
+                            .iter()
+                            .any(|(k, v)| key.as_ref() == k && value.as_ref() == v)
+                    })
             }) else {
                 return Err(RecoveryRefused::CargoDisagreement { what: "cell state" });
             };
@@ -1980,4 +1997,20 @@ fn leak_key(key: &str) -> &'static str {
         "entity" => "entity is not an NBT tag",
         _ => "unexpected field",
     }
+}
+
+/// Read a disk boundary with one sentinel byte, never allocating the whole file.
+pub fn read_bounded(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "carrier input exceeds its byte limit",
+        ));
+    }
+    Ok(bytes)
 }
