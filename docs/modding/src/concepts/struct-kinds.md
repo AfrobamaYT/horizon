@@ -14,7 +14,7 @@ and its vocabulary crate that forms the mod-authoring surface is exactly one of 
    the required fields and leaves the rest at their defaults, and no `Default` that would invent one.
 2. **A type a mod only receives** (event payloads, snapshots, contexts such as `HurtSource`, `Victim` or `Hit`):
    `#[non_exhaustive]`. A mod reads its fields but can't build it or match it without `..`. The game builds it
-   through its mirror in `__private::built` and `From`.
+   through its crate's private built mirror and `From`.
 
 The two can't overlap: `#[non_exhaustive]` forbids struct literals outside the crate.
 
@@ -30,7 +30,7 @@ The ceiling is a regression budget, not proof that every newly added struct has 
 
 This source scanner cannot expand `macro_rules!` or build scripts, can count fixed-name declarations
 inside unused macro templates, and does not follow `pub use` reachability. Mirrors are excluded only
-at `__private::built` paths. Engine socket records are also excluded only when they carry both
+at the crate's private built-mirror paths. Engine socket records are also excluded only when they carry both
 `#[doc(hidden)]` and the explicit `// hidden: platform-owned instrumentation plumbing, not a mod authoring surface.`
 marker, inside the closed engine socket file set in the tool. Neither a hidden attribute alone,
 that marker alone, nor both annotations outside those socket files exclude a mod-facing struct.

@@ -449,8 +449,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `on_item_use_first` Part.
 - **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
   `PlayerInteractEvent.RightClickItem`, on both sides, before `Item.use` and its Part after target
-  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). On the client,
-  every canceled result except `Success` continues to the other hand without a predicted swing.
+  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). `Success`,
+  `SuccessServer` and `Consume` end the client's hand loop. Only `Success` predicts a swing.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_pre(dimension, piston,
   direction, extending, push, destroy, canceled)`** and **`native_piston_post(dimension, piston, direction, extending, push, destroy)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved (`native_piston_pre`, NeoForge's `PistonEvent.Pre`; `native_piston_post`, `PistonEvent.Post`, hears the move done).
@@ -969,7 +969,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   a stale handle or a client.
 - `level.block_shape(host, state, pos, kind)` reads a supplied state's block-local outline or collision boxes with an empty context, without changing the world's state; pass `level.block_state(host, pos)` for the stored state.
   `None` for a client, unknown state, stale handle or closed level; parked levels can be read.
-- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
+- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the active server level or the client's displayed level (other client players are omitted; arismoko/horizon#3033); see its method documentation for the kinds and tick-time visibility not yet covered.
 - `level.pop_resource(host, pos, stack)` drops a stack as a broken block does (`Block.popResource`), `spawn_item(host, x, y, z,
   stack, pickup_delay)` and `spawn_item_with_motion` spawn a plain item entity and give its handle, with the pickup delay
   vanilla's `ItemEntity.setPickupDelay` sets at construction (10 a block's drop, 40 a player's throw, 32767 never), and
@@ -1773,9 +1773,9 @@ still go on each event or registrar.
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
   its faces baked as a model's are, each a `CubeFace::new(sprite)`, `.with_uv(uv)` for UVs of its own), `native_draw_block` (a block
   state's model, as `submitBlockModel`: a moving part is often a block of the mod's own) and `native_draw_text`
-  (`BlockEntityDrawContext::text(text, at, rgb)`: a line of the game's font, as a sign's, in font pixels with y down as
-  `Font.drawInBatch` lays it out under the pose, opaque `0xRRGGBB`, in the frame's light; `set_light` to full bright for
-  a glowing display such as a nixie tube; `text_width` measures it to centre it). Sprites are the atlas's:
+  (`BlockEntityDrawContext::text(text, at, rgb, glowing, outline)`: a component in the game's font, as a sign's line or a
+  text display's, in font pixels with y down as `Font.drawInBatch` lays it out under the pose, with its styles   (bold, italic, underline, strikethrough, obfuscated, fonts, `§` codes), opaque `0xRRGGBB`, in the frame's light or full bright when
+  `glowing` (a nixie tube), ringed with `outline` when given; `text_width` measures it, styles included, to centre it).   Parts drawn after `spin` turn on the client's animation clock (`animation_time`) and are lit where they turn to. Sprites are the atlas's:
   `<ns>:block/...` and `block/...`, and a content mod's `assets/<ns>/textures/entity/` as `<ns>:entity/...`. Culling uses the bounds
   `native_block_entity_render_bounding_box` gives (NeoForge's `getRenderBoundingBox`): the block with a block of margin
   unless the mod widens them, or never culled when a bound is infinite. Both run every frame for every one in view: keep
@@ -1856,7 +1856,7 @@ still go on each event or registrar.
   every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
   something happened (an explosion's centre and age for a cloud drawn in a post pass).
 
-- Menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([making a content mod](../how-to/content-mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`.
+- Menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([making a content mod](../how-to/content-mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`. Server collect hooks `recipe_sources` and `menu_links` name lent ingredient and linked-slot containers; see the menu-types guide for ordering, caps, skips, write-back and the no-listener tick path.
 
 - `native_block_highlight(pos, state, partial, canceled)` runs before building the eligible targeted block's selection outline, after hidden-HUD and game-mode restrictions. Set `canceled` to suppress only that outline; default behavior is unchanged otherwise. Position is block coordinates and state is the current block state ID. No entity outlines are affected.
 
@@ -2853,8 +2853,8 @@ registration path.
   `Item.use` and the item's `use_item` Part on both sides, after the same hand's target interaction falls through.
   `event.click` (`ItemClick`) contains the dimension, player's feet block position, player,
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
-  (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
-  canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
+  (default `Pass`). `Success`, `SuccessServer` and `Consume` end the client's hand loop. `Success`
+  predicts a swing, `SuccessServer` swings on the server, and `Consume` has no swing. A block
   success, block FAIL, or entity success prevents item fallback; the server fires this on the separate UseItem packet
   rather than on UseItemOn.
 

@@ -81,6 +81,7 @@ pub mod mesher;
 pub mod minimap;
 pub mod mipmap;
 pub mod mod_animations;
+pub mod mod_block_state_models;
 pub mod mod_browser;
 pub mod mod_chunk_tickets;
 pub mod mod_list;
