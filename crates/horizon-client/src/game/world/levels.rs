@@ -447,6 +447,23 @@ impl Levels {
             .map(|(_, level)| level)
     }
 
+    /// Whether a parked level's general rows hold any of these UUIDs (#792's
+    /// dimension-transfer check: a destination may not already hold a row
+    /// of the travelling tree's UUIDs).
+    pub(in crate::game) fn parked_general_holds_any_uuid(
+        &self,
+        dim: Dim,
+        uuids: &std::collections::HashSet<[i32; 4]>,
+    ) -> bool {
+        self.parked.get(&dim).is_some_and(|parked| {
+            parked
+                .general
+                .rows
+                .iter()
+                .any(|row| uuids.contains(&row.uuid))
+        })
+    }
+
     /// The entities of a parked level, counted as `Game::entity_count` counts the one in place.
     pub(super) fn parked_entity_count(&self, dim: Dim) -> Option<usize> {
         let l = self.parked.get(&dim)?;
@@ -705,6 +722,7 @@ impl Game<'_> {
         swap(&mut self.mobs, &mut p.mobs);
         swap(&mut self.knot_ids, &mut p.knot_ids);
         swap(&mut self.resident_entities.knots, &mut p.knots);
+        swap(&mut self.resident_entities.general, &mut p.general);
         swap(&mut self.creatures.projectiles, &mut p.projectiles);
         swap(&mut self.dropped, &mut p.dropped);
         swap(&mut self.orbs, &mut p.orbs);

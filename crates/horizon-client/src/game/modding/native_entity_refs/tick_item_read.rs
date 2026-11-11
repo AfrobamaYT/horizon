@@ -49,6 +49,9 @@ mod general_handle_tests {
             velocity: Vec3::ZERO,
             rotation: [0.0, 0.0],
             fall_distance: fall,
+            payload_version: 1,
+            payload_bytes: Vec::new(),
+            mount: None,
             attachment_lifetime: Default::default(),
         }
     }
