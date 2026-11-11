@@ -671,6 +671,43 @@ mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook no
 Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
 data, and client prediction of its clicks.
 
+##### Lending ingredients and linking containers
+
+For a mod crafting menu, a server `recipe_sources` listener can lend the chest
+beside its machine to recipe-book placement and transfer checks:
+
+```rust,ignore
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for Machine {
+    fn recipe_sources(
+        &self,
+        _host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RecipeSourcesEvent<'_>,
+    ) {
+        if event.menu == "machine:crafting" {
+            let [x, y, z] = event.pos;
+            event.sources.push([x + 1, y, z]);
+        }
+    }
+}
+```
+
+`player` is the requesting player's UUID; their state is not swapped in. The
+engine uses the player's inventory first, then answered containers in mod/push
+order. It silently skips the open machine itself, duplicate positions (first
+wins), missing or non-lendable containers, and anything after 64 accepted
+containers. Chest-like block entities (including barrels, shulkers, hoppers,
+dispensers and droppers) and mod containers' declared slots can lend. No answer
+keeps vanilla placement. The engine owns ingredient removal, container
+write-back and `container_changed` notifications, not the listener.
+
+`menu_links` has the same input fields and an append-only `links` output for menu
+types declaring linked slots. It refreshes the named containers' displayed items
+in the same server tick. `recipe_sources` is asked per player action, never per
+tick; `menu_links` is asked per open linked mod menu each tick, only when a mod
+subscribes. With no listener its tick path does no work or allocation. Both hooks
+are public server collect hooks with identical native and wasm behavior.
+
 #### Namespaces and limits
 
 The fence: files go in the mod's own namespaces (`assets/<id>/`,
