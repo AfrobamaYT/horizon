@@ -8830,7 +8830,7 @@ impl Game<'_> {
             {
                 canceled = self
                     .use_item_on_block(&hit, hand, Some(stack), mod_api::UsePhase::ItemBeforeBlock)
-                    .filter(|answer| answer.consumes_action() || *answer == Answer::Fail);
+                    .filter(|answer| *answer != Answer::Pass);
             }
             // Player.isSecondaryUseActive with something in either hand
             // keeps the block from reacting by default; an explicit block

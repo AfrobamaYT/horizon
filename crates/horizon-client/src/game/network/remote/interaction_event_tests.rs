@@ -1009,6 +1009,7 @@ fn before_block_cancellation_pass_continues_but_fail_and_consuming_results_stop(
                 for (answer, reaches_block, swings) in [
                     (Answer::Pass, true, 1),
                     (Answer::Fail, false, 0),
+                    (Answer::TryWithEmptyHand, false, 0),
                     (Answer::Success, false, 1),
                     (Answer::SuccessServer, false, u32::from(!client)),
                     (Answer::Consume, false, 0),
@@ -1022,7 +1023,7 @@ fn before_block_cancellation_pass_continues_but_fail_and_consuming_results_stop(
                         ..Controls::default()
                     };
                     let before = game.swings_started;
-                    assert!(use_block(game, client), "{side:?}: {answer:?}");
+                    assert_eq!(use_block(game, client), answer != Answer::TryWithEmptyHand, "{side:?}: {answer:?}");
                     assert_eq!(game.swings_started - before, swings);
                     assert_eq!(game.world.block(0, 64, 0) != lever, reaches_block);
                     let mut expected = vec![Step::Phase(UsePhase::ItemBeforeBlock, side)];

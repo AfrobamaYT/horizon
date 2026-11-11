@@ -73,7 +73,7 @@ Return `Flow::Cancel` to skip the selected phase's Part and vanilla behaviour,
 using `*event.cancellation_result` (initially `TryWithEmptyHand`) as its result.
 
 Canceling `ItemBeforeBlock` skips the item's `on_item_use_first` Part. `Pass`
-continues to the block phase; only `Fail` or a consuming result (`Success`,
+continues to the block phase; any non-`Pass` result ends the block interaction. Consuming results (`Success`,
 `SuccessServer`, `Consume`) ends this hand's block interaction. Cancellation
 alone does not suppress the later phases. A block-phase `TryWithEmptyHand`
 can still run the block's empty-hand behaviour on the main hand.
