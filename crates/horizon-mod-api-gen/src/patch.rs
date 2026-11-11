@@ -766,3 +766,118 @@ mod spike {
         }
     }
 }
+
+#[cfg(test)]
+mod census {
+    use super::*;
+
+    /// Every function of the game module, by whether the copy route takes it and, if not, the
+    /// refusal it gets. `cargo test -p horizon-mod-api-gen --lib census -- --ignored --nocapture`
+    #[test]
+    #[ignore = "measurement: prints the census"]
+    fn refusal_census() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut source = Source::new(&root).unwrap();
+        let modules: Vec<String> = source.files.keys().cloned().collect();
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut total = 0;
+        let mut note = |why: String| *counts.entry(why).or_default() += 1;
+        for module in modules
+            .iter()
+            .filter(|m| m.starts_with("horizon_client::game"))
+        {
+            let items = source.module(module).unwrap().items.clone();
+            let mut functions: Vec<Found> = Vec::new();
+            fn walk(items: &[Item], module: &str, out: &mut Vec<Found>, traits: &mut usize) {
+                for item in items {
+                    match item {
+                        Item::Fn(f) => out.push(Found {
+                            module: module.into(),
+                            owner: None,
+                            function: syn::ImplItemFn {
+                                attrs: f.attrs.clone(),
+                                vis: f.vis.clone(),
+                                defaultness: None,
+                                sig: f.sig.clone(),
+                                block: (*f.block).clone(),
+                            },
+                        }),
+                        Item::Impl(block) if block.trait_.is_some() => {
+                            *traits += block
+                                .items
+                                .iter()
+                                .filter(|i| matches!(i, ImplItem::Fn(_)))
+                                .count();
+                        }
+                        Item::Impl(block) => {
+                            for member in &block.items {
+                                if let ImplItem::Fn(f) = member {
+                                    out.push(Found {
+                                        module: module.into(),
+                                        owner: Some(block.clone()),
+                                        function: f.clone(),
+                                    });
+                                }
+                            }
+                        }
+                        Item::Mod(inline) if inline.content.is_some() => {
+                            let test = inline
+                                .attrs
+                                .iter()
+                                .any(|a| a.to_token_stream().to_string().contains("test"));
+                            if !test {
+                                walk(&inline.content.as_ref().unwrap().1, module, out, traits);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let mut traits = 0;
+            walk(&items, module, &mut functions, &mut traits);
+            total += traits;
+            for _ in 0..traits {
+                note("refused: trait method (not a point)".into());
+            }
+            for found in functions {
+                let attrs = &found.function.attrs;
+                if attrs.iter().any(|a| {
+                    a.path().is_ident("test")
+                        || (a.path().is_ident("cfg")
+                            && a.to_token_stream().to_string().contains("test"))
+                }) {
+                    continue;
+                }
+                total += 1;
+                let sig = &found.function.sig;
+                let why = if sig.ident.to_string().starts_with("native_") {
+                    "refused: hook function (`native_*`)".to_owned()
+                } else if attrs
+                    .iter()
+                    .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+                    || found
+                        .owner
+                        .as_ref()
+                        .is_some_and(|b| b.attrs.iter().any(|a| a.path().is_ident("cfg")))
+                {
+                    "refused: compiled only under a cfg".to_owned()
+                } else if !point_shape::eligible(attrs, sig) {
+                    "refused: const/async/unsafe/self by value/impl Trait or ! /inline(always)"
+                        .to_owned()
+                } else if !point_shape::raw_able(sig, found.owner.as_ref().map(|b| &b.generics)) {
+                    "refused: generic over types".to_owned()
+                } else {
+                    match replaceable(&found, &source.local_macros) {
+                        Ok(()) => "copied".to_owned(),
+                        Err(why) => format!("refused: {}", why.split(':').next().unwrap_or(&why)),
+                    }
+                };
+                note(why);
+            }
+        }
+        println!("game-module functions: {total}");
+        for (why, n) in counts {
+            println!("  {why}: {n} ({:.1}%)", 100.0 * n as f64 / total as f64);
+        }
+    }
+}
