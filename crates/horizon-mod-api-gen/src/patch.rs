@@ -20,8 +20,9 @@ pub struct Patched {
     pub target: String,
     /// The copy's id for horizon-mixins, in the patch crate.
     pub id: String,
-    /// The expression that builds the copy's installation result, from the patch crate's root.
-    pub install: String,
+    /// The expression that builds the copy's installation result, from the patch crate's root;
+    /// none for a published loop's generic function, which has no cell: its entry's copy calls it.
+    pub install: Option<String>,
 }
 
 /// The patch crate's library source and the copies in it.
@@ -59,11 +60,35 @@ pub struct Bridge {
     pub member: Option<String>,
 }
 
+/// A published loop with mods' slots (`[[native.loop]]`): its entry's copy runs the loop with them.
+#[derive(Debug, Clone)]
+pub struct LoopSlots {
+    pub published: crate::loops::PublishedLoop,
+    /// The slots, in the order they are asked: `(priority, mod id)`.
+    pub slots: Vec<LoopSlot>,
+}
+
+/// One mod's slot in a published loop: its helper's items, compiled in the loop's module like a
+/// mixin helper, and the slot type they define.
+#[derive(Debug, Clone)]
+pub struct LoopSlot {
+    /// The mod's `[mod] id`.
+    pub mod_id: String,
+    /// The row's id.
+    pub id: String,
+    /// The helper's text.
+    pub helper: String,
+    /// The slot type the helper defines.
+    pub with: String,
+}
+
 /// What a mod set adds to the patch crate beside its copies.
 #[derive(Debug, Clone, Default)]
 pub struct Extras {
     pub modules: Vec<SupportModule>,
     pub bridges: Vec<Bridge>,
+    /// The loops whose entries are among the targets, with their slots.
+    pub loops: Vec<LoopSlots>,
     /// The identifiers the rows' helpers and bindings use: a lower crate's mirror keeps a module's
     /// `use` only if a copied body or one of these names it.
     pub idents: BTreeSet<String>,
@@ -448,7 +473,7 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
 }
 
 /// Whether `function` can be copied and installed through its function's replacement slot.
-fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
+fn replaceable(found: &Found, source: &mut Source, loop_generic: bool) -> Result<(), String> {
     // A crate-local macro defined in a module on the function's path moves with the copy (the
     // mirror repeats it); one defined elsewhere would not resolve.
     let on_path: BTreeSet<String> = source
@@ -460,17 +485,24 @@ fn replaceable(found: &Found, source: &mut Source) -> Result<(), String> {
         source.local_macros.difference(&on_path).cloned().collect();
     let local_macros = &local_macros;
     let sig = &found.function.sig;
-    if !crate::replace::eligible(&found.function.attrs, sig) {
+    // A published loop's function is generic over its slot alone: each mod build copies it once,
+    // for the one slot type its entry's copy calls it with. Its other rules are a function's.
+    let mut unslotted = sig.clone();
+    if loop_generic {
+        unslotted.generics = syn::Generics::default();
+    }
+    if !crate::replace::eligible(&found.function.attrs, &unslotted) {
         return Err("it is not replaceable: `const`, `async`, `unsafe`, \
              `self` by value, `impl Trait` or `!` in its signature, `#[inline(always)]`, or \
              compiled only under a `cfg`"
             .into());
     }
-    if !(crate::replace::lifetimes_only(&sig.generics)
-        && found
-            .owner
-            .as_ref()
-            .is_none_or(|b| crate::replace::lifetimes_only(&b.generics)))
+    if !loop_generic
+        && !(crate::replace::lifetimes_only(&sig.generics)
+            && found
+                .owner
+                .as_ref()
+                .is_none_or(|b| crate::replace::lifetimes_only(&b.generics)))
     {
         return Err("it is generic over types or takes `impl Trait`: one copy can't stand for every instance".into());
     }
@@ -654,8 +686,24 @@ pub fn generate(
     let mut trees: BTreeMap<String, Tree> = BTreeMap::new();
     let mut patched = Vec::new();
     let unique: BTreeSet<&String> = targets.iter().collect();
+    // The loops whose generic function a row targets: their entries' copies call the copy.
+    let generic_copied: BTreeSet<&str> = extras
+        .loops
+        .iter()
+        .filter(|l| unique.contains(&l.published.generic_target()))
+        .map(|l| l.published.name.as_str())
+        .collect();
     for target in unique {
-        match crate::replace::refusal(root, target) {
+        let loop_generic = extras
+            .loops
+            .iter()
+            .any(|l| l.published.generic_target() == *target);
+        let refusal = if loop_generic {
+            Ok(None)
+        } else {
+            crate::replace::refusal(root, target)
+        };
+        match refusal {
             Ok(None) => {}
             Ok(Some(why)) => {
                 refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
@@ -673,7 +721,7 @@ pub fn generate(
                 continue;
             }
         };
-        if let Err(why) = replaceable(&found, &mut source) {
+        if let Err(why) = replaceable(&found, &mut source, loop_generic) {
             refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
             continue;
         }
@@ -686,7 +734,35 @@ pub fn generate(
         }
         let attrs = kept(&found.function.attrs);
         let mut sig = found.function.sig.clone();
-        let block = &found.function.block;
+        // A loop's function is copied for the one slot type its entry's copy runs it with:
+        // horizon-mixins patches only non-generic functions.
+        if let Some(slots) = extras
+            .loops
+            .iter()
+            .find(|l| loop_generic && l.published.generic_target() == *target)
+        {
+            fill_slot(&mut sig, slots);
+        }
+        let entry_of = extras.loops.iter().find(|l| l.published.entry == *target);
+        let loop_block = match entry_of
+            .map(|slots| {
+                loop_entry(
+                    slots,
+                    generic_copied.contains(slots.published.name.as_str()),
+                )
+            })
+            .transpose()
+        {
+            Ok(entry) => entry.map(|(items, block)| {
+                node.copies.push(items);
+                block
+            }),
+            Err(refusal) => {
+                refusals.push(refuse(target, "E_LOOP_HELPER", refusal));
+                continue;
+            }
+        };
+        let block = loop_block.as_ref().unwrap_or(&found.function.block);
         let install = format_ident!("__fnr_install_{}", name);
         let constructor = format_ident!("__fnr_{}", name);
         let module_path = found.module.split("::").skip(1).collect::<Vec<_>>();
@@ -764,11 +840,19 @@ pub fn generate(
                 }
                 syn::visit_mut::VisitMut::visit_type_mut(&mut Elide, &mut elided);
                 let trait_args: Vec<_> = generics.lifetimes().map(|_| quote!('_)).collect();
-                let trait_ref = if trait_args.is_empty() {
-                    quote!(#trait_name)
-                } else {
-                    quote!(#trait_name<#(#trait_args),*>)
-                };
+                let installer = (!loop_generic).then(|| {
+                    let trait_ref = if trait_args.is_empty() {
+                        quote!(#trait_name)
+                    } else {
+                        quote!(#trait_name<#(#trait_args),*>)
+                    };
+                    quote! {
+                        #[doc(hidden)]
+                        pub fn #install() -> bool {
+                            <#elided>::#constructor(<#elided as #trait_ref>::#method)
+                        }
+                    }
+                });
                 let id_type = plain_spaces(&elided.to_token_stream().to_string());
                 let id_trait = plain_spaces(&{
                     let generics_args: Vec<_> =
@@ -791,10 +875,7 @@ pub fn generate(
                             #sig #block
                         }
 
-                        #[doc(hidden)]
-                        pub fn #install() -> bool {
-                            <#elided>::#constructor(<#elided as #trait_ref>::#method)
-                        }
+                        #installer
                     },
                     format!(
                         "{patch_name}::{}::<{id_type} as {id_trait}>::{method}",
@@ -808,7 +889,8 @@ pub fn generate(
         patched.push(Patched {
             target: target.clone(),
             id,
-            install: format!("{patch_name}::{}::{install}()", module_path.join("::")),
+            install: (!loop_generic)
+                .then(|| format!("{patch_name}::{}::{install}()", module_path.join("::"))),
         });
     }
     for module in &extras.modules {
@@ -885,6 +967,132 @@ pub fn generate(
         ));
     }
     Ok(PatchCrate { libs, patched })
+}
+
+/// The loop function's signature `sig` with its slot type parameter replaced by the slots `slots`
+/// fills it with (`()` with none).
+fn fill_slot(sig: &mut syn::Signature, slots: &LoopSlots) {
+    let Some(param) = sig.generics.type_params().next().map(|p| p.ident.clone()) else {
+        return;
+    };
+    sig.generics.params = sig
+        .generics
+        .params
+        .iter()
+        .filter(|p| !matches!(p, syn::GenericParam::Type(_)))
+        .cloned()
+        .collect();
+    let filled: syn::Type = if slots.slots.is_empty() {
+        syn::parse_quote!(())
+    } else {
+        let ty = format_ident!("__FnrLoopSlots_{}", loop_tag(&slots.published.name));
+        syn::parse_quote!(#ty)
+    };
+    struct Fill(syn::Ident, syn::Type);
+    impl syn::visit_mut::VisitMut for Fill {
+        fn visit_type_mut(&mut self, ty: &mut syn::Type) {
+            if matches!(ty, syn::Type::Path(p) if p.qself.is_none() && p.path.is_ident(&self.0)) {
+                *ty = self.1.clone();
+            } else {
+                syn::visit_mut::visit_type_mut(self, ty);
+            }
+        }
+    }
+    syn::visit_mut::VisitMut::visit_signature_mut(&mut Fill(param, filled), sig);
+}
+
+/// A published loop's name as an identifier part (`block_entities_tick`).
+fn loop_tag(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// A loop entry's copy: each slot's helper as a module beside it, marked with its mod for the crash
+/// report, and its body, which runs the loop with the slots in this game's state for it
+/// (`Game::run_published_loop`). Refused when a helper is not Rust items.
+fn loop_entry(
+    slots: &LoopSlots,
+    generic_copied: bool,
+) -> Result<(proc_macro2::TokenStream, syn::Block), String> {
+    let published = &slots.published;
+    let tag = loop_tag(&published.name);
+    let hook = format!("loop {}", published.name);
+    let loops = quote!(::horizon_client::game::published_loops);
+    let mut items = Vec::new();
+    let mut nested = quote!(());
+    for (index, slot) in slots.slots.iter().enumerate().rev() {
+        let helper = syn::parse_file(&slot.helper)
+            .map_err(|e| format!("{}:{}: its helper: {e}", slot.mod_id, slot.id))?
+            .items;
+        let module = format_ident!("__fnr_loop_{}_{}", index, tag);
+        let marker = format_ident!("__FnrLoopMod_{}_{}", index, tag);
+        let with = syn::parse_str::<syn::Ident>(&slot.with)
+            .map_err(|e| format!("{}:{}: with: {e}", slot.mod_id, slot.id))?;
+        let id = &slot.mod_id;
+        let part = format!("{}::{}", slot.mod_id, slot.with);
+        items.push(quote! {
+            /// A `[[native.loop]]` helper, compiled where the loop's code is.
+            #[doc(hidden)]
+            #[allow(non_snake_case)]
+            pub mod #module {
+                use super::*;
+                #(#helper)*
+            }
+            #[doc(hidden)]
+            #[allow(non_camel_case_types)]
+            pub struct #marker;
+            impl #loops::LoopMod for #marker {
+                const CALL: ::mod_api::content::crash::ModCall = ::mod_api::content::crash::ModCall {
+                    id: #id,
+                    hook: #hook,
+                    part: Some(#part),
+                };
+            }
+        });
+        nested = quote!((#loops::Attributed<#marker, #module::#with>, #nested));
+    }
+    let slots_ty = format_ident!("__FnrLoopSlots_{}", tag);
+    items.push(quote! {
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        pub type #slots_ty = #nested;
+    });
+    let name = &published.name;
+    let generic = format_ident!("{}", published.generic);
+    // With rows on the loop's function, its patched copy (a method of its helper trait, beside this
+    // one, for these slots) runs the loop; the game's own otherwise, and always for the run without
+    // the slots (nested, or after a panic), which the copy's slot type can't take.
+    let call = |game: proc_macro2::TokenStream, slot: proc_macro2::TokenStream| {
+        if generic_copied {
+            // The entry's owner type: the segment before its name.
+            let owner = published
+                .entry
+                .rsplit("::")
+                .nth(1)
+                .map(plain)
+                .unwrap_or_default();
+            let helper = format_ident!("__Fnr_{}_{}", owner, published.generic);
+            quote!(#helper::#generic(#game, #slot))
+        } else {
+            quote!(#game.#generic(#slot))
+        }
+    };
+    let block = if slots.slots.is_empty() {
+        let run = call(quote!(self), quote!(&mut ()));
+        syn::parse_quote!({ #run })
+    } else {
+        let filled = call(quote!(game), quote!(slots));
+        let vanilla = quote!(game.#generic(&mut ()));
+        syn::parse_quote!({
+            self.run_published_loop(
+                #name,
+                |game, slots: &mut #slots_ty| #filled,
+                |game| #vanilla,
+            )
+        })
+    };
+    Ok((quote!(#(#items)*), block))
 }
 
 /// Every copy's tokens in `tree` and its children.
@@ -1337,9 +1545,9 @@ mod tests {
                 .ends_with(&format!("::__fnr_{}", target.rsplit("::").next().unwrap()))
         );
         assert!(
-            patched.install.contains("__fnr_install_"),
+            patched.install.as_ref().unwrap().contains("__fnr_install_"),
             "{}",
-            patched.install
+            patched.install.as_deref().unwrap_or_default()
         );
     }
 
@@ -1535,6 +1743,7 @@ mod tests {
                 member: Some("ticks_until_autosave".into()),
             }],
             idents: BTreeSet::new(),
+            loops: Vec::new(),
         };
         let crate_ = generate(
             &root(),
@@ -1573,6 +1782,7 @@ mod tests {
                     ..extras.bridges[0].clone()
                 }],
                 idents: BTreeSet::new(),
+                loops: Vec::new(),
             },
         )
         .unwrap_err();
@@ -1580,6 +1790,111 @@ mod tests {
         assert_eq!(
             codes,
             ["E_MIXIN_MODULE_DESTINATION", "E_MIXIN_BRIDGE_TARGET"]
+        );
+    }
+
+    #[test]
+    fn a_filled_loops_entry_runs_the_loop_with_the_mods_slots_in_order() {
+        let published = crate::loops::collect(&root())
+            .unwrap()
+            .into_iter()
+            .find(|l| l.name == "block_entities.tick")
+            .expect("the game publishes block_entities.tick");
+        let slot = |mod_id: &str, with: &str| LoopSlot {
+            mod_id: mod_id.into(),
+            id: "row".into(),
+            helper: format!(
+                "#[derive(Default)] pub struct {with}; impl BlockEntityTickSlot for {with} {{}}"
+            ),
+            with: with.into(),
+        };
+        let extras = Extras {
+            loops: vec![LoopSlots {
+                published: published.clone(),
+                slots: vec![slot("first", "Count"), slot("second", "Skip")],
+            }],
+            ..Extras::default()
+        };
+        let crate_ = generate(
+            &root(),
+            "horizon_patch",
+            std::slice::from_ref(&published.entry),
+            &extras,
+        )
+        .unwrap();
+        assert_eq!(crate_.patched.len(), 1);
+        let lib = crate_.libs[0].1.replace(char::is_whitespace, "");
+        // First by priority outside, then the next, then the empty slot.
+        assert!(
+            lib.contains("pubtype__FnrLoopSlots_block_entities_tick=(::horizon_client::game::published_loops::Attributed<__FnrLoopMod_0_block_entities_tick,__fnr_loop_0_block_entities_tick::Count,>,(::horizon_client::game::published_loops::Attributed<__FnrLoopMod_1_block_entities_tick,__fnr_loop_1_block_entities_tick::Skip,>,(),),);"),
+            "{}",
+            crate_.libs[0].1
+        );
+        assert!(lib.contains("pubmod__fnr_loop_1_block_entities_tick{usesuper::*;#[derive(Default)]pubstructSkip;implBlockEntityTickSlotforSkip{}}"), "{}", crate_.libs[0].1);
+        assert!(
+            lib.contains(
+                "id:\"second\",hook:\"loopblock_entities.tick\",part:Some(\"second::Skip\")"
+            ),
+            "{}",
+            crate_.libs[0].1
+        );
+        assert!(
+            lib.contains("self.run_published_loop(\"block_entities.tick\","),
+            "{}",
+            crate_.libs[0].1
+        );
+        assert!(
+            lib.contains("|game|game.tick_block_entities_with(&mut())"),
+            "{}",
+            crate_.libs[0].1
+        );
+        // A row on the loop's function: it is copied once, with no cell of its own, and the entry's
+        // copy calls the copy.
+        let generic = published.generic_target();
+        let both = generate(
+            &root(),
+            "horizon_patch",
+            &[published.entry.clone(), generic.clone()],
+            &extras,
+        )
+        .unwrap();
+        let installs: Vec<_> = both
+            .patched
+            .iter()
+            .map(|p| (p.target.as_str(), p.install.is_some()))
+            .collect();
+        assert_eq!(
+            installs,
+            [(published.entry.as_str(), true), (generic.as_str(), false)]
+        );
+        let lib = both.libs[0].1.replace(char::is_whitespace, "");
+        assert!(lib.contains("pubtrait__Fnr_Game_tick_block_entities_with{fntick_block_entities_with(&mutself,__a1:&mut__FnrLoopSlots_block_entities_tick,)->Result<()>;"), "{}", both.libs[0].1);
+        assert!(lib.contains("|game,slots:&mut__FnrLoopSlots_block_entities_tick|{__Fnr_Game_tick_block_entities_with::tick_block_entities_with(game,slots,)}") || lib.contains("|game,slots:&mut__FnrLoopSlots_block_entities_tick|__Fnr_Game_tick_block_entities_with::tick_block_entities_with(game,slots,),"), "{}", both.libs[0].1);
+        assert!(
+            lib.contains("|game|game.tick_block_entities_with(&mut()),"),
+            "{}",
+            both.libs[0].1
+        );
+        assert!(
+            !lib.contains("__fnr_install_Game_tick_block_entities_with"),
+            "{}",
+            both.libs[0].1
+        );
+        // A helper that is not Rust is refused by name.
+        let mut broken = extras.clone();
+        broken.loops[0].slots[1].helper = "fn (".into();
+        let refused = generate(
+            &root(),
+            "horizon_patch",
+            std::slice::from_ref(&published.entry),
+            &broken,
+        )
+        .unwrap_err();
+        assert_eq!(refused[0].code, "E_LOOP_HELPER");
+        assert!(
+            refused[0].why.starts_with("second:row: its helper:"),
+            "{}",
+            refused[0].why
         );
     }
 }
@@ -1605,7 +1920,10 @@ mod spike {
                     std::fs::write(out.join(name).join("src/lib.rs"), lib).unwrap();
                 }
                 for patched in crate_.patched {
-                    println!("{} => {} | {}", patched.target, patched.id, patched.install);
+                    println!(
+                        "{} => {} | {:?}",
+                        patched.target, patched.id, patched.install
+                    );
                 }
             }
             Err(refusals) => refusals.iter().for_each(|r| println!("REFUSED {r}")),
@@ -1724,7 +2042,7 @@ mod census {
                 {
                     "refused: generic over types".to_owned()
                 } else {
-                    if replaceable(&found, &mut source).is_ok() {
+                    if replaceable(&found, &mut source, false).is_ok() {
                         let owner = found.owner.as_ref().map(|b| {
                             format!("{}::", plain(&b.self_ty.to_token_stream().to_string()))
                         });
@@ -1740,7 +2058,7 @@ mod census {
                         sites[1] += s.beneath;
                         sites[2] += s.borrowing;
                     }
-                    match replaceable(&found, &mut source) {
+                    match replaceable(&found, &mut source, false) {
                         Ok(()) if referenced_call(&found.function.block) => {
                             "copied, but upstream refuses call-site kinds: `&` over a call"
                                 .to_owned()

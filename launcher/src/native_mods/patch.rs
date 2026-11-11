@@ -132,7 +132,7 @@ pub(super) fn build(
     sdk: &Identity,
     rustc: impl Fn(&str) -> std::process::Command,
 ) -> Result<Option<Patch>, String> {
-    let Some(prepared) = prepare(rust, out, projects, sdk)? else {
+    let Some(prepared) = prepare(rust, game, out, projects, sdk)? else {
         return Ok(None);
     };
     // The patched crates, against the prebuilt game and the mods.
@@ -215,10 +215,112 @@ impl Prepared<'_> {
     }
 }
 
+/// The published loops `bundles`' `[[native.loop]]` rows fill, with their slots in the order they
+/// are asked, from the game's `loops.json`. A row naming no published loop, and a mixin that
+/// replaces or redirects a filled loop's entry (anything but `HEAD` and `RETURN`, which compose
+/// around the loop), are refused by name.
+fn loop_slots(game: &Path, bundles: &[&Bundle]) -> Result<Vec<api_gen::patch::LoopSlots>, String> {
+    use horizon_mod_package::manifest::mixin::Kind;
+    let rows: Vec<(&Bundle, &horizon_mod_package::manifest::loops::Loop)> = bundles
+        .iter()
+        .flat_map(|bundle| bundle.native().r#loop.iter().map(move |row| (*bundle, row)))
+        .collect();
+    let path = game.join(api_gen::loops::FILE);
+    // A game built before published loops has no list, and so no loop a row can name.
+    let published: Vec<api_gen::loops::PublishedLoop> = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+        Err(_) => Vec::new(),
+    };
+    let mut refusals = Vec::new();
+    // A loop with a mixin on its function is copied with it, slots or none.
+    let mut filled: Vec<api_gen::patch::LoopSlots> = published
+        .iter()
+        .filter(|l| {
+            let generic = l.generic_target();
+            bundles
+                .iter()
+                .any(|b| b.native().mixin.iter().any(|m| m.target == generic))
+        })
+        .map(|l| api_gen::patch::LoopSlots {
+            published: l.clone(),
+            slots: Vec::new(),
+        })
+        .collect();
+    let mut ordered = rows;
+    ordered.sort_by(|(a, ra), (b, rb)| {
+        (ra.priority, &a.manifest.id, &ra.id).cmp(&(rb.priority, &b.manifest.id, &rb.id))
+    });
+    for (bundle, row) in ordered {
+        let id = &bundle.manifest.id;
+        let Some(found) = published.iter().find(|l| l.name == row.name) else {
+            let known: Vec<&str> = published.iter().map(|l| l.name.as_str()).collect();
+            refusals.push(format!(
+                "E_LOOP_UNKNOWN: {id}:{}: the game publishes no loop `{}`; its loops: {}",
+                row.id,
+                row.name,
+                if known.is_empty() {
+                    "none".to_owned()
+                } else {
+                    known.join(", ")
+                }
+            ));
+            continue;
+        };
+        let path = bundle.dir.join(&row.helper);
+        let helper = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let slot = api_gen::patch::LoopSlot {
+            mod_id: id.clone(),
+            id: row.id.clone(),
+            helper,
+            with: row.with.clone(),
+        };
+        match filled.iter_mut().find(|l| l.published.name == found.name) {
+            Some(slots) => slots.slots.push(slot),
+            None => filled.push(api_gen::patch::LoopSlots {
+                published: found.clone(),
+                slots: vec![slot],
+            }),
+        }
+    }
+    for bundle in bundles {
+        for mixin in &bundle.native().mixin {
+            let Some(slots) = filled.iter().find(|l| {
+                !l.slots.is_empty()
+                    && (l.published.entry == mixin.target
+                        || (l.published.generic_target() == mixin.target
+                            && mixin.kind == Kind::Overwrite))
+            }) else {
+                continue;
+            };
+            if mixin.kind == Kind::Overwrite
+                || !matches!(mixin.kind, Kind::Head | Kind::Return)
+                    && slots.published.entry == mixin.target
+            {
+                let fillers: Vec<&str> = slots.slots.iter().map(|s| s.mod_id.as_str()).collect();
+                refusals.push(format!(
+                    "E_LOOP_ENTRY_REPLACED: {}:{}: the {} mixin on {} would replace or bypass the published loop `{}`, filled by {}; only HEAD and RETURN mixins compose with it",
+                    bundle.manifest.id,
+                    mixin.id,
+                    mixin.kind.name(),
+                    mixin.target,
+                    slots.published.name,
+                    fillers.join(", ")
+                ));
+            }
+        }
+    }
+    if refusals.is_empty() {
+        Ok(filled)
+    } else {
+        Err(refusals.join("\n"))
+    }
+}
+
 /// Copies, generates and transforms the patch crates for `projects` into `out`, without
-/// compiling them; `None` when no mod has a mixin, module or bridge.
+/// compiling them; `None` when no mod has a mixin, module, bridge or loop.
 pub(super) fn prepare<'a>(
     rust: &Toolchain,
+    game: &Path,
     out: &Path,
     projects: &[api::Project<'a>],
     sdk: &Identity,
@@ -229,7 +331,10 @@ pub(super) fn prepare<'a>(
         .filter(|bundle| {
             bundle.needs_mixins()
                 || bundle.manifest.native.as_ref().is_some_and(|n| {
-                    !n.state.is_empty() || !n.bridge.is_empty() || !n.module.is_empty()
+                    !n.state.is_empty()
+                        || !n.bridge.is_empty()
+                        || !n.module.is_empty()
+                        || !n.r#loop.is_empty()
                 })
         })
         .collect();
@@ -240,16 +345,31 @@ pub(super) fn prepare<'a>(
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
-    // Built once per pin and patch, before the clock: the timing is the mixin build's own.
-    let tool = super::mixins_patch::tool(rust, &|_| {})?;
-    let source = super::source(sdk.commit())?;
-    let started = std::time::Instant::now();
-    let targets: Vec<String> = bundles
+    let loops = loop_slots(game, &bundles)?;
+    let rows: Vec<String> = bundles
         .iter()
         .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))
         .collect();
+    // Built once per pin and patch, before the clock: the timing is the mixin build's own.
+    let tool = if rows.is_empty() {
+        None
+    } else {
+        Some(super::mixins_patch::tool(rust, &|_| {})?)
+    };
+    let source = super::source(sdk.commit())?;
+    let started = std::time::Instant::now();
+    // A filled loop's entry, or one whose loop function has rows, is copied like a mixin's target,
+    // with the loop's body.
+    let targets: Vec<String> = rows
+        .iter()
+        .cloned()
+        .chain(loops.iter().map(|l| l.published.entry.clone()))
+        .collect();
+    let loop_count = loops.iter().filter(|l| !l.slots.is_empty()).count();
+    let slot_count = loops.iter().map(|l| l.slots.len()).sum::<usize>();
     // The generator refuses targets the staged game cannot replace.
-    let extras = extras(&bundles)?;
+    let mut extras = extras(&bundles)?;
+    extras.loops = loops;
     let generated = api_gen::patch::generate(&source, CRATE, &targets, &extras);
     let refusals: Vec<String> = match &generated {
         Ok(_) => Vec::new(),
@@ -346,29 +466,38 @@ pub(super) fn prepare<'a>(
     }
     let copied = started.elapsed();
     // With no rows (only modules or bridges), the crate compiles as generated.
-    let patched = if targets.is_empty() {
-        workspace.clone()
-    } else {
+    let patched = if let Some(tool) = &tool {
         let patched = out.join("patch-applied");
         super::run(
-            super::apply(rust, &tool, &workspace, &mods, &patched),
+            super::apply(rust, tool, &workspace, &mods, &patched),
             "Applying the mixins to their functions",
             |_| {},
         )?;
         patched
+    } else {
+        workspace.clone()
     };
     let applied = started.elapsed();
+    if loop_count > 0 {
+        super::append_log(&trf(
+            "Published loops: {loops} filled by {slots} mod slots",
+            &[
+                ("loops", &loop_count.to_string()),
+                ("slots", &slot_count.to_string()),
+            ],
+        ))?;
+    }
     Ok(Some(Prepared {
         dir: patched,
         names: names.iter().map(|name| name.to_string()).collect(),
         installs: generated
             .patched
             .iter()
-            .map(|p| format!("({:?}, {})", p.target, p.install))
+            .filter_map(|p| Some(format!("({:?}, {})", p.target, p.install.as_ref()?)))
             .collect(),
         bundles,
         count: generated.patched.len(),
-        rows: targets.len(),
+        rows: rows.len(),
         started,
         copied,
         applied,

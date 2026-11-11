@@ -1375,7 +1375,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     &base,
                     &folder,
                     &output,
-                    profile.unwrap_or_default(),
+                    profile,
                     allow_jar_downloads,
                     steps,
                     registry_consent,

@@ -2,7 +2,7 @@
 # Function replacement end to end (fn-replace): two native mods' `[[native.mixin]]` rows built by the
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
-#   [FNR_MODS="alpha beta"] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
+#   [FNR_MODS="alpha beta"] [FNR_MOD_ROOT=DIR] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
 # SDK is a folder from `tools/prebuilt_game.py build --server` at this checkout's HEAD. With
 # RESOURCES (a prepared `horizon-client/26.3` folder), the server starts, takes `/tick` commands
 # and stops; every mixin helper prints a line starting `fnr:`.
@@ -56,7 +56,7 @@ printf '{"base": "ci", "horizon": "%s", "target": "%s"}\n' "$revision" "$side" >
 mods=$scratch/mods/fnr
 mkdir -p "$mods"
 for mod in ${FNR_MODS:-alpha beta}; do
-  cp -r "$root/tools/ci/fn-replace-check/$mod" "$mods/fnr_$mod"
+  cp -r "${FNR_MOD_ROOT:-$root/tools/ci/fn-replace-check}/$mod" "$mods/fnr_$mod"
   sed -i "s/^horizon = \"HEAD\"$/horizon = \"$revision\"/; s/^mixins = \"MIXINS\"$/mixins = \"$mixins\"/" "$mods/fnr_$mod/horizon-mod.toml"
   sed -i "s/rev = \"HEAD\"/rev = \"$revision\"/" "$mods/fnr_$mod/Cargo.toml"
 done
@@ -72,7 +72,12 @@ started=$(date +%s.%N)
 output_args=()
 if [ "$side" = server ]; then output_args=(--server-output "$scratch/engine"); fi
 env "${env_vars[@]}" "$launcher" native-build "$mods" "${output_args[@]}" --version native-ci --profile optimized \
-  --trust-native-code
+  --trust-native-code > "$scratch/native-build.out" 2> "$scratch/native-build.err" || built=$?
+cat "$scratch/native-build.out"
+cat "$scratch/native-build.err" >&2
+test -z "${built:-}" || exit "$built"
+# The launcher's plan for this build, an instance's or a server folder's export alike: the prebuilt game.
+grep -F 'Prebuilt game: only the mods compile' "$scratch/native-build.err"
 if [ "$side" = client ]; then
   binary=$(find "$data/versions" -type f -name horizon-client | head -1)
   test -n "$binary"
@@ -81,6 +86,11 @@ if [ "$side" = client ]; then
 fi
 echo "native build: $(python3 -c "print(round($(date +%s.%N) - $started, 1))") s"
 test -x "$scratch/engine/horizon-engine" || test -x "$scratch/engine/horizon-engine.exe"
+if [ "$side" = server ]; then
+  # The server folder's export: the launcher says where the engine is, and installs no instance build.
+  grep -F "Built the server engine: $scratch/engine/horizon-engine" "$scratch/native-build.out"
+  test -z "$(find "$data/versions" -type f -name 'horizon-client*' ! -path "$version/*")"
+fi
 log=$data/native/build.log
 grep -F 'Function replacement:' "$log"
 # The prebuilt route, and no game source compiled.
@@ -92,12 +102,38 @@ if [ -n "$resources" ]; then
   run=$scratch/run
   mkdir -p "$run"
   echo eula=true > "$run/eula.txt"
-  (sleep 30; echo "tick rate 40"; sleep 3; echo "tick rate 13"; sleep 3; echo "tick query"; sleep 3; echo "stop"; sleep 20) |
+  # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them.
+  hoppers=
+  if [[ " ${FNR_MODS:-alpha beta} " == *" loop"* ]]; then
+    hoppers='forceload add 0 0
+fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft:stone",count:64}]}'
+  fi
+  (sleep 30; echo "$hoppers"; sleep 5; echo "tick rate 40"; sleep 3; echo "tick rate 13"; sleep 3; echo "tick query"; sleep 3; echo "stop"; sleep 20) |
     (cd "$run" && env "${env_vars[@]}" timeout 180 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" \
       --dedicated --nogui) > "$scratch/server.log" 2>&1 || true
   grep -F 'fnr:' "$scratch/server.log"
   if [[ " ${FNR_MODS:-alpha beta} " == *" alpha "* ]]; then
     grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" loop "* ]]; then
+    # Both slots ran in priority order, the throttle wrote cooldowns, and the entry's HEAD composed.
+    grep -F 'fnr: loop count before #1:' "$scratch/server.log"
+    grep -F 'fnr: loop count after #1:' "$scratch/server.log"
+    grep -F 'fnr: loop throttle skips #1:' "$scratch/server.log"
+    grep -F 'fnr: loop HEAD tick_block_entities' "$scratch/server.log"
+    # A call-site row inside the loop body ran in the loop's copy, and an API listener at the entry
+    # fired through the same cell as the loop.
+    grep -F 'fnr: loop MODIFY_EXPRESSION_VALUE chunk check inside the loop' "$scratch/server.log"
+    grep -F 'fnr: loop api head listener at tick_block_entities' "$scratch/server.log"
+    grep -F 'Published loops: 1 filled by 2 mod slots' "$log"
+    # The slot ran the loop again from inside it: the nested run was the game's own, logged once.
+    grep -F 'fnr: loop count ran the loop again inside it: true' "$scratch/server.log"
+    test "$(grep -cF 'Published loop block_entities.tick: it was entered again while it ran' "$scratch/server.log")" = 1
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" loop_panic "* ]]; then
+    # The slot's panic is the server's crash, and its report names the mod and the loop.
+    grep -F 'in native mod fnr_loop_panic, hook loop block_entities.tick, part fnr_loop_panic::Tenth' "$run"/crash-reports/*.txt
+    grep -F 'Saving chunks for level' "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"

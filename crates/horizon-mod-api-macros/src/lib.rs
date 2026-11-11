@@ -344,6 +344,38 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()
 }
 
+/// `#[horizon_loop(name = "…", side = "server" | "client")]` on a published loop's entry function
+/// (`[[native.loop]]`): a marker the staging pass lists in the prebuilt game's `loops.json`,
+/// generating no code. The entry's body is one call of its generic loop function with the empty
+/// slot, `self.<loop>(&mut ())`; a mod build installs a copy of the entry that calls it with the
+/// mods' slots instead.
+#[proc_macro_attribute]
+pub fn horizon_loop(attribute: TokenStream, input: TokenStream) -> TokenStream {
+    let parser =
+        syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated;
+    let pairs = parse_macro_input!(attribute with parser);
+    let value = |key: &str| {
+        pairs.iter().find_map(|pair| match &pair.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(text),
+                ..
+            }) if pair.path.is_ident(key) => Some(text.value()),
+            _ => None,
+        })
+    };
+    let named = value("name").is_some_and(|name| !name.is_empty());
+    let sided = value("side").is_some_and(|side| side == "server" || side == "client");
+    if !named || !sided || pairs.len() != 2 {
+        return syn::Error::new_spanned(
+            proc_macro2::TokenStream::from(input),
+            "write #[horizon_loop(name = \"…\", side = \"server\" | \"client\")]",
+        )
+        .to_compile_error()
+        .into();
+    }
+    input
+}
+
 /// Derive subscriptions for internal test fixtures that construct their own mods.
 #[doc(hidden)]
 #[proc_macro_attribute]

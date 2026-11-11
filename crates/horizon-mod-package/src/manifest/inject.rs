@@ -77,7 +77,7 @@ impl<'de> Deserialize<'de> for Kind {
                 &name,
                 "`[[native.mixin]]` kind `MODIFY_CONSTANT` or `MODIFY_EXPRESSION_VALUE`",
             ),
-            "field" => source_level(&name, "`[[native.state]]`"),
+            "field" => source_level(&name, "an attachment for per-object mod data"),
             other => format!(
                 "unknown kind `{other}`, expected one of {}",
                 Self::ALL.map(Self::name).join(", ")

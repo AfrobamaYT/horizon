@@ -1224,6 +1224,9 @@ impl Game<'_> {
     /// hub sends the tick's slot changes, so a tab the player picked or a
     /// chest placed or broken shows in the same tick.
     pub(super) fn lan_menu_links_tick(&mut self) {
+        if !mod_api::__private::listened(mod_api::HookId::MenuLinks) {
+            return;
+        }
         let Some(count) = self.lan.as_ref().map(|host| host.hub.guests.len()) else {
             return;
         };
@@ -1986,6 +1989,7 @@ mod recipe_check_tests {
                 mod_type: Some(station),
                 craft: None,
                 links: Vec::new(),
+                asks_still_valid: false,
             });
             game.lan.as_mut().unwrap().hub.guests.push(guest);
             sent(&rx);
@@ -2054,3 +2058,7 @@ mod recipe_check_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "lan_crafting/lending_tests.rs"]
+mod lending_tests;

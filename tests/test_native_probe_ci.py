@@ -2,6 +2,7 @@ import importlib.util
 import tempfile
 import subprocess
 import unittest
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -105,14 +106,20 @@ class RecoveryTests(unittest.TestCase):
             self.assertNotIn("No successful", "\n".join(output))
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/ci/vendor/pyyaml-6.0.3.zip"))
+import yaml
+
+
 class InputBoundaryTests(unittest.TestCase):
     def test_packaging_inputs_reach_both_selection_layers(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github/workflows/native-dylib-probe.yml").read_text()
-        push_filter = workflow.split("permissions:", 1)[0]
-        for path in ("packaging/windows/exe.rs", "packaging/executable_link.rs"):
+        workflow = yaml.load((root / ".github/workflows/native-dylib-probe.yml").read_text(), Loader=yaml.BaseLoader)
+        push_filter = workflow["on"]["push"]["paths"]
+        for path in ("packaging/windows/exe.rs", "packaging/executable_link.rs",
+                     "tools/ci/dyna_ci_deps.sh", "tools/ci/apt_retry.sh",
+                     "tools/ci/dyna_ci_runner.sh", "tools/ci/install_launcher_deps.sh"):
             with self.subTest(path=path):
-                self.assertIn("- '" + path + "'", push_filter)
+                self.assertIn(path, push_filter)
                 self.assertTrue(ci.selected([path], ci.sdk_roots(root)))
 
     def test_rename_to_docs_preserves_deleted_sdk_source(self):

@@ -60,6 +60,11 @@ fn stage_with_catalog(
         std::fs::write(&destination, catalog)
             .map_err(|e| format!("{}: {e}", destination.display()))?;
     }
+    // Listed before any pass rewrites the source: the markers are the source's.
+    write(
+        &points_json.with_file_name(crate::loops::FILE),
+        &crate::loops::collect(root)?,
+    )?;
     let mut internals = match mode {
         Mode::Build => internals::widen(root)?,
         Mode::Discovery => internals::discover(root)?,

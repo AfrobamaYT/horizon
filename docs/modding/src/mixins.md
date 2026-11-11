@@ -26,6 +26,24 @@ The pinned commit needs a published SDK (`E_NATIVE_NO_RELEASE`) for a supported 
 (`E_NATIVE_HOST`). A mod's own build script is `E_NATIVE_BUILD_SCRIPT`; ship generated source
 instead. Custom mod or SDK feature selections are `E_NATIVE_FEATURES`; use the SDK's feature set.
 
+## Refusals
+
+A build that cannot apply a row stops and names the mod, the row and the reason. Nothing falls back to another route.
+
+| Code | When |
+| --- | --- |
+| `E_MIXIN_TARGET_MISSING` | `target` names no function of the pinned game. |
+| `E_MIXIN_TARGET_AMBIGUOUS` | `target` matches more than one function. |
+| `E_MIXIN_NOT_REPLACEABLE` | The function takes no replacement: it is generic over types or consts, sits in a generic impl, takes `impl Trait`, is `const`, `async` or `unsafe`, takes `self` by value, is `#[inline(always)]`, or is a function below the game crate that the game's list of replaceable functions leaves out. The reason is named. |
+| `E_MIXIN_SOURCE` | The pinned source of the target cannot be read or copied. |
+| `E_MIXIN_INVALID` | A row's field is malformed; the field is named. |
+| `E_OVERWRITE_CONFLICT` | Two mods `OVERWRITE` one function (from the mixin tool). |
+| `E_MIXIN_STATE_LAYOUT` | `[[native.state]]`: use attachments. |
+| `E_MIXIN_BRIDGE_TARGET`, `E_MIXIN_MODULE_DESTINATION`, `E_MIXIN_MODULE_SOURCE` | A `[[native.bridge]]` or `[[native.module]]` row names something the patch library cannot build. |
+| `E_MIXINS_PATCH` | The carried patch does not apply to the pinned mixin tool. |
+
+An `[[inject]]` listener and a mixin may share a function: the API head listeners run first, then the patched copy, then the API return listeners. A [published loop](loops.md) is filled with `[[native.loop]]`.
+
 Prefer a hook request when the behaviour should also work on wasm. A native mixin is trusted code, not a sandbox.
 
 ## Pinned tool documentation
