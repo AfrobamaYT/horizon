@@ -27,9 +27,24 @@ class WireEnumDiscoveryTests(unittest.TestCase):
             "impl ::mod_api::wire::Wire for Flag where (): Sized",
             "impl Wire for Flag",
         ]:
-            with self.subTest(header=header):
-                with self.assertRaisesRegex(ValueError, "unsupported.*Flag"):
-                    MODULE.discover(f"enum Flag {{ A }} #[automatically_derived] {header} {{}}")
+            declaration = "enum Flag<const N: usize> { A }" if "const N" in header else "enum Flag { A }"
+            for attributes in [
+                "#[automatically_derived] #[allow(unused)]",
+                "#[allow(unused)] #[automatically_derived]",
+            ]:
+                with self.subTest(header=header, attributes=attributes):
+                    with self.assertRaisesRegex(ValueError, "unsupported.*Flag"):
+                        MODULE.discover(f"{declaration} {attributes} {header} {{}}")
+
+    def test_supported_derive_with_both_attribute_orders(self):
+        for attributes in [
+            "#[automatically_derived] #[allow(unused)]",
+            "#[allow(unused)] #[automatically_derived]",
+        ]:
+            self.assertEqual(MODULE.discover(f'''
+                enum Plain {{ A, B }}
+                {attributes} impl ::mod_api::wire::Wire for Plain {{}}
+            '''), {"Plain"})
 
     def test_manual_codecs_do_not_enter_derive_inventory(self):
         self.assertEqual(MODULE.discover('''
