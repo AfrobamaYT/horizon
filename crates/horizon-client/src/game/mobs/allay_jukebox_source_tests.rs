@@ -29,6 +29,7 @@ fn game() -> Game<'static> {
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
+    options.dedicated = Some(Vec::new());
     options.execution_role = execution_role::ExecutionRole::IntegratedServer;
     let res: &'static _ = Box::leak(Box::new(loaded.resources));
     let mut game = Game::new(
@@ -51,6 +52,10 @@ fn game() -> Game<'static> {
     game.block_ticks
         .add_empty_chunk(ChunkPos::new(0, 0))
         .unwrap();
+    crate::game::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+        &mut game,
+        ChunkPos::new(0, 0),
+    );
     for command in [
         "tick freeze",
         "forceload add 0 0",
