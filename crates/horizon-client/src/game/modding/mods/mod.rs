@@ -480,7 +480,7 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
 /// types (`native_register_item_models`), so item definitions' nodes of them draw what the mod
 /// answers; and animation targets and interpolations (`native_register_json_animation_types`), so
 /// animation files may name them.
-/// (`native_register_model_loaders`), so models naming one get the mod's quads; and block-state
+/// Block-state
 /// definition types (`native_register_block_state_models`), so blockstate files naming one get
 /// the models the mod picks.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
