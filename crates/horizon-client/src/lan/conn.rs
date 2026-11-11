@@ -298,6 +298,42 @@ enum To {
     Pool(Arc<io_pool::Outbox>, Arc<KeepAliveWatch>),
 }
 impl PlayerSender {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub(crate) fn payload_diagnostic_observer(&self) -> Box<dyn Fn() -> String + Send + Sync> {
+        let pending = Arc::downgrade(&self.pending);
+        let held = Arc::downgrade(&self.held);
+        let (outbox, kind) = match &self.to {
+            To::Pool(outbox, _) => (Some(Arc::downgrade(outbox)), "pool"),
+            To::Disabled => (None, "disabled"),
+            To::Channel(_) => (None, "test channel"),
+        };
+        Box::new(move || {
+            let pending = pending.upgrade().map(|p| p.load(Ordering::Acquire));
+            let window = pending.map(|p| io_pool::MAX_PENDING.saturating_sub(p));
+            let held = match held.upgrade() {
+                Some(held) => match held.try_lock() {
+                    Ok(h) => format!(
+                        "items={} bytes={}",
+                        h.len(),
+                        h.iter().map(Vec::len).sum::<usize>()
+                    ),
+                    Err(_) => "busy/poisoned".into(),
+                },
+                None => "owner dropped".into(),
+            };
+            let outbox = match &outbox {
+                Some(outbox) => outbox
+                    .upgrade()
+                    .map(|o| o.diagnostics())
+                    .unwrap_or_else(|| "outbox owner dropped".into()),
+                None => kind.into(),
+            };
+            format!(
+                "server window={window:?} capacity={} pending_charge={pending:?} (None=owner dropped) held={held} {outbox}",
+                io_pool::MAX_PENDING
+            )
+        })
+    }
     /// The immutable codec snapshot and live epochs for this connection.
     pub fn payload_transport(&self) -> &Arc<Transport> {
         &self.payload_transport

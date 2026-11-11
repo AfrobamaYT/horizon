@@ -101,12 +101,40 @@ impl Drop for Queued {
 
 /// One player's packets on their way to its network thread.
 pub(super) struct Outbox {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    // write attempts, nonzero write successes, bytes written, WouldBlock,
+    // nonempty buffers fully drained, remaining output bytes,
+    // successful body-framing calls since drain, lifetime body-framing calls.
+    // Body-framing calls are frames for raw payloads, not necessarily adapters.
+    probe: [AtomicUsize; 8],
     queue: Mutex<Queue>,
     /// The bytes queued and not framed yet (`PlayerSender::pending`).
     pending: Arc<AtomicUsize>,
     worker: Arc<Worker>,
 }
 impl Outbox {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub(super) fn diagnostics(&self) -> String {
+        match self.queue.try_lock() {
+            Ok(q) => format!(
+                "outbox queued_items={} queued_body_bytes={} closed={} end={:?} listed={} write_attempts={} write_ok_calls={} written_bytes={} would_block={} drained_nonempty_buffers={} output_remaining_bytes={} body_frame_ok_since_drain={} body_frame_ok_total={}",
+                q.bodies.len(),
+                q.bodies.iter().map(|b| b.body.len()).sum::<usize>(),
+                matches!(q.at, At::Closed),
+                q.end,
+                q.listed,
+                self.probe[0].load(Ordering::Relaxed),
+                self.probe[1].load(Ordering::Relaxed),
+                self.probe[2].load(Ordering::Relaxed),
+                self.probe[3].load(Ordering::Relaxed),
+                self.probe[4].load(Ordering::Relaxed),
+                self.probe[5].load(Ordering::Relaxed),
+                self.probe[6].load(Ordering::Relaxed),
+                self.probe[7].load(Ordering::Relaxed)
+            ),
+            Err(_) => "outbox busy/poisoned".into(),
+        }
+    }
     /// An outbox on the least busy network thread, started the first time.
     pub(super) fn new(pending: Arc<AtomicUsize>) -> Result<Arc<Self>, String> {
         let workers = &pool()?.workers;
@@ -115,6 +143,8 @@ impl Outbox {
             .min_by_key(|w| w.load.load(Ordering::Relaxed))
             .expect("a pool has a thread");
         Ok(Arc::new(Self {
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            probe: std::array::from_fn(|_| AtomicUsize::new(0)),
             queue: Mutex::default(),
             pending,
             worker: worker.clone(),
@@ -575,6 +605,12 @@ impl Conn {
                 self.end(now, e.to_string());
                 return false;
             }
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            {
+                self.outbox.probe[6].fetch_add(1, Ordering::Relaxed);
+                self.outbox.probe[7].fetch_add(1, Ordering::Relaxed);
+                self.outbox.probe[5].store(self.out.len() - self.written, Ordering::Relaxed);
+            }
         }
         true
     }
@@ -642,7 +678,11 @@ impl Conn {
         if self.close_at.is_some_and(|at| at <= now) {
             return false;
         }
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        let had_output = self.written < self.out.len();
         while self.written < self.out.len() {
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            self.outbox.probe[0].fetch_add(1, Ordering::Relaxed);
             match self.io.write(&self.out[self.written..]) {
                 Ok(0) => {
                     self.end(now, "Disconnected");
@@ -650,9 +690,18 @@ impl Conn {
                 }
                 Ok(n) => {
                     self.written += n;
+                    #[cfg(any(test, feature = "test-payload-probe"))]
+                    {
+                        self.outbox.probe[1].fetch_add(1, Ordering::Relaxed);
+                        self.outbox.probe[2].fetch_add(n, Ordering::Relaxed);
+                        self.outbox.probe[5]
+                            .store(self.out.len() - self.written, Ordering::Relaxed);
+                    }
                     self.stalled = None;
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    #[cfg(any(test, feature = "test-payload-probe"))]
+                    self.outbox.probe[3].fetch_add(1, Ordering::Relaxed);
                     self.stalled.get_or_insert(now);
                     return true;
                 }
@@ -662,6 +711,13 @@ impl Conn {
                     return false;
                 }
             }
+        }
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        {
+            if had_output {
+                self.outbox.probe[4].fetch_add(1, Ordering::Relaxed);
+            }
+            self.outbox.probe[6].store(0, Ordering::Relaxed);
         }
         self.out.clear();
         self.written = 0;

@@ -24,6 +24,30 @@ enum Target {
     Server(PlayerSender),
     Configuration(ConfigSender),
 }
+/// Retains no endpoint, sender, producer, writer, transport or payload lease.
+#[cfg(any(test, feature = "test-payload-probe"))]
+pub(super) struct Observation {
+    transport: std::sync::Weak<Transport>,
+    side: Side,
+    diagnostics: Box<dyn Fn() -> String + Send + Sync>,
+}
+#[cfg(any(test, feature = "test-payload-probe"))]
+impl Observation {
+    pub(super) fn same_target(&self, endpoint: &Endpoint) -> bool {
+        self.transport.ptr_eq(&Arc::downgrade(endpoint.transport())) && self.side == endpoint.side()
+    }
+    pub(super) fn diagnostics(&self) -> String {
+        let connection = match self.transport.upgrade() {
+            Some(transport) => transport
+                .connection
+                .as_ref()
+                .map(|c| c.diagnostics())
+                .unwrap_or_else(|| "no connection".into()),
+            None => "transport owner dropped".into(),
+        };
+        format!("{:?}: {connection}; {}", self.side, (self.diagnostics)())
+    }
+}
 pub enum Prepared {
     Client(PreparedPayload),
     Server(crate::lan::conn::PreparedPayload),
@@ -69,6 +93,37 @@ impl Endpoint {
             Target::Configuration(sender) => sender.payload_transport(),
         }
     }
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub(super) fn observation(&self) -> Observation {
+        let diagnostics: Box<dyn Fn() -> String + Send + Sync> = match &self.0 {
+            Target::Client { writer, .. } => {
+                let writer = Arc::downgrade(writer);
+                Box::new(move || {
+                    let Some(writer) = writer.upgrade() else {
+                        return "writer handle owner dropped".into();
+                    };
+                    let snapshot = match writer.try_lock() {
+                        Ok(w) => {
+                            let current = w.clone();
+                            drop(w);
+                            current
+                                .map(|w| w.diagnostics())
+                                .unwrap_or_else(|| "writer absent".into())
+                        }
+                        Err(_) => "writer handle busy/poisoned".into(),
+                    };
+                    snapshot
+                })
+            }
+            Target::Server(sender) => sender.payload_diagnostic_observer(),
+            Target::Configuration(_) => Box::new(|| "configuration sender not observed".into()),
+        };
+        Observation {
+            transport: Arc::downgrade(self.transport()),
+            side: self.side(),
+            diagnostics,
+        }
+    }
     /// Peer authority is checked before bytes are copied. Publication belongs to the root.
     pub fn prepare(
         &self,
@@ -76,6 +131,8 @@ impl Endpoint {
         id: &PayloadId,
         bytes: PayloadBytes,
     ) -> Result<Prepared, PayloadSendError> {
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        super::staging_probe::capture(&id.0, self);
         if !epoch.active() {
             return Err(PayloadSendError::StaleEpoch);
         }

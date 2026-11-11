@@ -28,6 +28,10 @@ enum WriteJob {
 #[derive(Clone)]
 pub(crate) struct QueuedWriter(Arc<Inner>);
 pub(crate) struct Inner {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    // attempts, successful send returns, active input bytes, active calls.
+    // ConnWriter::send_contents returns after write_all; it does not flush.
+    probe: Arc<[std::sync::atomic::AtomicUsize; 4]>,
     sender: Mutex<Option<Sender<WriteJob>>>,
     worker: Mutex<Option<JoinHandle<ConnWriter>>>,
     framing: Framing,
@@ -85,6 +89,24 @@ impl PreparedPacket {
     }
 }
 impl QueuedWriter {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub(crate) fn diagnostics(&self) -> String {
+        let stats = match self.sender.try_lock() {
+            Ok(sender) => sender.as_ref().map(|s| s.stats()),
+            Err(_) => return "writer sender busy/poisoned".into(),
+        };
+        let window = stats.map(|s| CAPACITY.saturating_sub(s.reserved_bytes));
+        format!(
+            "writer window={window:?} capacity={CAPACITY} alive={} terminal={} retired={} stats={stats:?} send_attempts={} send_ok={} active_send_input_bytes={} active_sends={} flush_count=unavailable(no flush call)",
+            self.alive.load(Ordering::Acquire),
+            self.terminal.load(Ordering::Acquire),
+            self.retired.load(Ordering::Acquire),
+            self.probe[0].load(Ordering::Relaxed),
+            self.probe[1].load(Ordering::Relaxed),
+            self.probe[2].load(Ordering::Relaxed),
+            self.probe[3].load(Ordering::Relaxed)
+        )
+    }
     /// Queue the ACK and change incarnation under the generic-publication gate.
     /// Raw publication uses its separate epoch gate; this never acquires it.
     pub(crate) fn transition_protocol(&self, protocol: Phase, ack: &[u8]) -> Result<()> {
@@ -138,16 +160,41 @@ impl QueuedWriter {
         let version = writer.server_version();
         let secure_chat = Box::new(writer.legacy_secure_chat_observer());
         let (sender, receiver) = byte_channel::channel(CAPACITY).expect("nonzero writer capacity");
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        let probe = Arc::new(std::array::from_fn::<_, 4, _>(|_| {
+            std::sync::atomic::AtomicUsize::new(0)
+        }));
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        let writing = probe.clone();
         let running = alive.clone();
         let worker = std::thread::Builder::new()
             .name("horizon-net-write".into())
             .spawn(move || {
                 while let Ok(job) = receiver.recv() {
                     let disconnect = matches!(&job, WriteJob::Disconnect(_));
+                    #[cfg(any(test, feature = "test-payload-probe"))]
+                    {
+                        let bytes = match &job {
+                            WriteJob::Packet(b)
+                            | WriteJob::Contents(b)
+                            | WriteJob::Disconnect(b) => b.len(),
+                        };
+                        writing[0].fetch_add(1, Ordering::Relaxed);
+                        writing[2].store(bytes, Ordering::Relaxed);
+                        writing[3].store(1, Ordering::Relaxed);
+                    }
                     let result = match job {
                         WriteJob::Packet(body) | WriteJob::Disconnect(body) => writer.send(&body),
                         WriteJob::Contents(contents) => writer.send_contents(&contents),
                     };
+                    #[cfg(any(test, feature = "test-payload-probe"))]
+                    {
+                        if result.is_ok() {
+                            writing[1].fetch_add(1, Ordering::Relaxed);
+                        }
+                        writing[2].store(0, Ordering::Relaxed);
+                        writing[3].store(0, Ordering::Relaxed);
+                    }
                     if result.is_err() || disconnect {
                         running.store(false, Ordering::Release);
                         writer.shutdown();
@@ -158,6 +205,8 @@ impl QueuedWriter {
             })
             .map_err(|error| Error::new(format!("cannot start client writer: {error}")))?;
         Ok(Self(Arc::new(Inner {
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            probe,
             sender: Mutex::new(Some(sender)),
             worker: Mutex::new(Some(worker)),
             retired: AtomicBool::new(false),

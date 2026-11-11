@@ -179,6 +179,7 @@ fn compiled_guest_runs_in_actual_game_roots() {
                         channel: "raw_probe:receipt",
                         expected: Arc::new(bytes.clone()),
                         hits: wire_hits.clone(),
+                        observed: None,
                     },
                     |_| {},
                 );

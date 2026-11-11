@@ -111,6 +111,32 @@ pub struct Connection {
     _ingress_receiver: byte_channel::Receiver<()>,
 }
 impl Connection {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub(super) fn diagnostics(&self) -> String {
+        // Channel stats uses its existing short internal mutex; do not hold
+        // connection or epoch locks while taking that snapshot.
+        let ingress = self.ingress.stats();
+        let window = INGRESS_BUDGET.saturating_sub(ingress.reserved_bytes);
+        match self.current.try_lock() {
+            Ok(c) => {
+                let epoch = c.epoch.as_ref().map(|e| {
+                    let pending = e.pending.try_lock().ok().map(|p| *p);
+                    format!(
+                        "phase={:?} active={} pending_main={pending:?}",
+                        e.phase,
+                        e.active()
+                    )
+                });
+                format!(
+                    "closed={} epoch={epoch:?} ingress_window={window} ingress_capacity={INGRESS_BUDGET} ingress={ingress:?}",
+                    c.closed
+                )
+            }
+            Err(_) => format!(
+                "connection busy/poisoned ingress_window={window} ingress_capacity={INGRESS_BUDGET} ingress={ingress:?}"
+            ),
+        }
+    }
     pub fn new(local: Arc<Local>, side: Side) -> Arc<Self> {
         let (ingress, receiver) = byte_channel::channel(INGRESS_BUDGET).unwrap();
         Arc::new(Self {
