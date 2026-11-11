@@ -2223,7 +2223,10 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-host",
  "horizon-mod-package",
+ "horizon-mod-wasm",
  "log",
+ "tempfile",
+ "wat",
 ]
 
 [[package]]

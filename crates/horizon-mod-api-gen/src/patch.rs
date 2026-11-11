@@ -1022,36 +1022,13 @@ fn loop_entry(
     let mut items = Vec::new();
     let mut nested = quote!(());
     for (index, slot) in slots.slots.iter().enumerate().rev() {
-        let mut helper = syn::parse_file(&slot.helper)
+        let helper = syn::parse_file(&slot.helper)
             .map_err(|e| format!("{}:{}: its helper: {e}", slot.mod_id, slot.id))?
             .items;
         let module = format_ident!("__fnr_loop_{}_{}", index, tag);
         let marker = format_ident!("__FnrLoopMod_{}_{}", index, tag);
         let with = syn::parse_str::<syn::Ident>(&slot.with)
             .map_err(|e| format!("{}:{}: with: {e}", slot.mod_id, slot.id))?;
-        // A slot that defines `after` says so in the slot trait's `HAS_AFTER`, so the loop's copy
-        // enters the mod after an entry only for a slot that has something to run there.
-        let slot_trait = published.slot.rsplit("::").next().unwrap_or_default();
-        for item in &mut helper {
-            let syn::Item::Impl(block) = item else {
-                continue;
-            };
-            let of_slot = block.trait_.as_ref().is_some_and(|(_, path, _)| {
-                path.segments.last().is_some_and(|s| s.ident == slot_trait)
-            }) && matches!(&*block.self_ty, syn::Type::Path(p) if p.qself.is_none() && p.path.is_ident(&with));
-            let member = |name: &str| {
-                block.items.iter().any(|member| match member {
-                    syn::ImplItem::Fn(f) => f.sig.ident == name,
-                    syn::ImplItem::Const(c) => c.ident == name,
-                    _ => false,
-                })
-            };
-            if of_slot && member("after") && !member("HAS_AFTER") {
-                block.items.push(syn::parse_quote!(
-                    const HAS_AFTER: bool = true;
-                ));
-            }
-        }
         let id = &slot.mod_id;
         let part = format!("{}::{}", slot.mod_id, slot.with);
         items.push(quote! {
@@ -1823,17 +1800,11 @@ mod tests {
             .into_iter()
             .find(|l| l.name == "block_entities.tick")
             .expect("the game publishes block_entities.tick");
-        // The first slot defines `after`, the second only `before`.
         let slot = |mod_id: &str, with: &str| LoopSlot {
             mod_id: mod_id.into(),
             id: "row".into(),
             helper: format!(
-                "#[derive(Default)] pub struct {with}; impl BlockEntityTickSlot for {with} {{{}}}",
-                if with == "Count" {
-                    "fn after(&mut self, _: &mut BlockEntityTick<'_, '_>) {}"
-                } else {
-                    ""
-                }
+                "#[derive(Default)] pub struct {with}; impl BlockEntityTickSlot for {with} {{}}"
             ),
             with: with.into(),
         };
@@ -1860,9 +1831,6 @@ mod tests {
             crate_.libs[0].1
         );
         assert!(lib.contains("pubmod__fnr_loop_1_block_entities_tick{usesuper::*;#[derive(Default)]pubstructSkip;implBlockEntityTickSlotforSkip{}}"), "{}", crate_.libs[0].1);
-        // Only the slot that defines `after` announces it, so only it is entered after an entry.
-        assert_eq!(lib.matches("constHAS_AFTER:bool=true;").count(), 1);
-        assert!(lib.contains("implBlockEntityTickSlotforCount{fnafter(&mutself,_:&mutBlockEntityTick<'_,'_>){}constHAS_AFTER:bool=true;}"), "{}", crate_.libs[0].1);
         assert!(
             lib.contains(
                 "id:\"second\",hook:\"loopblock_entities.tick\",part:Some(\"second::Skip\")"
@@ -1909,6 +1877,14 @@ mod tests {
         );
         assert!(
             !lib.contains("__fnr_install_Game_tick_block_entities_with"),
+            "{}",
+            both.libs[0].1
+        );
+        // The copy holds the loop itself, not a call to it: a call-site row inside the loop (the
+        // check mod's selector) finds its one call there.
+        assert_eq!(
+            lib.matches("ticking(pos.0,pos.2)").count(),
+            1,
             "{}",
             both.libs[0].1
         );

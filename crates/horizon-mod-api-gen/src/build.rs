@@ -307,11 +307,12 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
     let stamp = root.join(".horizon-source-staged");
     crate::rerun_if_changed(&stamp.display());
     let staged = stamp.is_file() || cfg!(feature = "listener-fixture");
-    let code =
-        super::points::records_selected(&super::points::game_points(root)?, selected.as_ref())
-            + &format!(
-                "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {staged};\n"
-            );
+    let code = super::points::records_selected(
+        &super::points::game_points(root)?,
+        selected.as_ref(),
+    ) + &format!(
+        "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {staged};\n"
+    );
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
     let mut code = String::new();

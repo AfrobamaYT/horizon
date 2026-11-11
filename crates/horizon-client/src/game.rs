@@ -3680,20 +3680,6 @@ fn view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
     let (y, p) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
     [-y.sin() * p.cos(), -p.sin(), y.cos() * p.cos()]
 }
-/// `LivingEntity.canGlideUsing`: for each worn piece (head, chest, legs,
-/// feet), whether it is a glider (its own component, or one the server
-/// patched onto the stack) in the slot its `equippable` names, and will not
-/// break with its next point of wear (`ItemStack.nextDamageWillBreak`).
-fn gliding_pieces(items: &Items, armor: &[Option<ItemStack>; 4]) -> [bool; 4] {
-    const SLOTS: [&str; 4] = ["head", "chest", "legs", "feet"];
-    // `canGlideUsing`: the stack's own `glider` and `equippable` (its
-    // components, a server's patch), else its item's.
-    std::array::from_fn(|i| {
-        armor[i]
-            .as_ref()
-            .is_some_and(|s| horizon_client::item_sync::can_glide_using(s, SLOTS[i], items))
-    })
-}
 /// `Level.canHaveWeather`: sky light, no ceiling, and not the End (the one
 /// level the rule names by id).
 fn level_can_have_weather(sky_light: bool, has_ceiling: bool, is_end: bool) -> bool {
@@ -17803,6 +17789,7 @@ pub(crate) fn closest_space_nudge(
 
 #[cfg(test)]
 use inventory_input::drop_whole_stack;
+use prediction::gliding_pieces;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};

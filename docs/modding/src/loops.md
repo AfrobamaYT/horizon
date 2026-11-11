@@ -65,7 +65,7 @@ The game's own loop (no mod) has no `before`, so it does not make that second ch
 
 ## Several mods, state, panics
 
-- Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue` wins and later mods are not asked for that entity. `after` runs for every mod that defines it; a slot that defines only `before` costs nothing after the tick.
+- Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue` wins and later mods are not asked for that entity. `after` runs for every mod.
 - The slot value is created with `Default` on the loop's first run, once per `Game`, and kept across ticks. Key per-dimension state on the game's dimension.
 - A run started from inside a slot (the slot calls something that ticks block entities) is the game's own loop, without slots. It is a whole pass: every entity ticks again, and the work after the loop runs again. The enclosing pass's working state (its item and mob caches, the spawners it has ticked) is set aside during the nested pass and restored after it, so the enclosing pass carries on as before.
 - A panic in a slot's `before`, `after` or `Default` unwinds out of the tick like any game panic: the server writes its crash report and saves the world. The report names the mod and the loop: `in native mod <id>, hook loop block_entities.tick, part <id>::<Type>`. That `Game` does not run the slots again, and the slots already made are dropped, each one attributed to its own mod.

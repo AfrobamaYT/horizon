@@ -252,6 +252,15 @@ refused. On Windows, persistent caching is disabled until owner, DACL and inheri
 can be verified for the cache folder and opened entries. Modules compile from wasm instead,
 with one warning explaining the fallback. The player's account is the trust boundary.
 
+At startup, the game removes regular `.cwasm` files from other engine configurations or
+Wasmtime versions, along with malformed and old-format cache names. It never follows symlinks
+for cleanup. Current-engine entries have a 1 GiB startup budget: when their combined size
+exceeds it, entries are removed oldest first by modification time until within the budget.
+Current entries are not removed just because they are old. Entries written during this launch
+are retained until a later startup. The proposed budget allows 30 copies of the largest
+measured compiled module (34,039,320 bytes) plus headroom; the 30-module allowance awaits
+maintainer confirmation and does not represent a measured pack.
+
 A failed check logs the reason once per launch. Unavailable, corrupt or incompatible entries
 fall back to compiling the wasm. Writes replace entries atomically without changing files that
 running modules have mapped. Deleting the cache is always safe: the next launch rebuilds it.

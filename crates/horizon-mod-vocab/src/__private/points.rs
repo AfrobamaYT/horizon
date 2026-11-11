@@ -17,15 +17,37 @@ pub fn cold<R>(path: impl FnOnce() -> R) -> R {
 pub struct Table {
     points: &'static [AtomicBool],
     sealed: OnceLock<Sealed>,
+    /// Each place's target function, when this build compiled no sites for the places: a
+    /// listener there would never run, so [`register`] refuses it by this name.
+    unsited: Option<&'static [&'static str]>,
 }
 
 impl Table {
-    /// A table over its API point slots.
+    /// A table over its API point slots, whose sites are compiled into this build.
     pub const fn new(points: &'static [AtomicBool]) -> Self {
         Self {
             points,
             sealed: OnceLock::new(),
+            unsited: None,
         }
+    }
+
+    /// A table whose places have no site in this build: `targets` names each place's function,
+    /// and [`register`] refuses every listener.
+    pub const fn without_sites(
+        points: &'static [AtomicBool],
+        targets: &'static [&'static str],
+    ) -> Self {
+        Self {
+            points,
+            sealed: OnceLock::new(),
+            unsited: Some(targets),
+        }
+    }
+
+    /// Whether this build compiled the places' sites, so a listener registered here can run.
+    pub fn has_sites(&self) -> bool {
+        self.unsited.is_none()
     }
 
     /// Runs the API functions and forwarding endpoints at point `place`, each under its owner's
@@ -230,6 +252,13 @@ pub enum RegisterError {
         /// Target function.
         target: &'static str,
     },
+    /// The place is outside its table.
+    NoPlace {
+        /// Owning mod.
+        id: &'static str,
+        /// The place's index.
+        index: usize,
+    },
     /// The guest table requires a typed API listener.
     Unsupported,
     /// A second `replace` listener at a place that already has one: two overwrites can't both win,
@@ -249,6 +278,9 @@ impl std::fmt::Display for RegisterError {
                 f,
                 "{id}: {target}: this build has no point sites; start the game through the launcher's mod build"
             ),
+            Self::NoPlace { id, index } => {
+                write!(f, "{id}: place {index} is outside its point table")
+            }
             Self::Sealed => f.write_str("the game's points were already set"),
             Self::Unsupported => f.write_str("the guest table requires a typed API listener"),
             Self::Replaced { first, second } => write!(
@@ -346,8 +378,27 @@ impl SlotListener {
 }
 
 /// Registers a function or checked endpoint in its place's table, in the same order for native
-/// and wasm owners.
+/// and wasm owners. The one boundary every listener passes: a table whose places have no site in
+/// this build refuses here, naming the mod and the target, so no listener registers and never runs.
 pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
+    // A place is built from any table and index: one outside its table is refused, not indexed.
+    let table = slot.place.table;
+    let outside = RegisterError::NoPlace {
+        id: slot.id,
+        index: slot.place.index,
+    };
+    if slot.place.index >= table.points.len() {
+        return Err(outside);
+    }
+    if let Some(targets) = table.unsited {
+        let Some(target) = targets.get(slot.place.index) else {
+            return Err(outside);
+        };
+        return Err(RegisterError::Unstaged {
+            id: slot.id,
+            target,
+        });
+    }
     let mut open = lock();
     if open.sealed {
         return Err(RegisterError::Sealed);

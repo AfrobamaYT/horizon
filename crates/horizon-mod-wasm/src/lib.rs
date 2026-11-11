@@ -886,11 +886,7 @@ mod mixed_install_tests {
         assert!(why.contains("layouts.json is malformed"), "{why}");
     }
     fn refusal(hash: &str) -> String {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("wasm-mixed-{}-{nonce}", std::process::id()));
+        let root = tempfile::tempdir().unwrap().keep();
         let addon = root.join("addon");
         let library = root.join("lib");
         std::fs::create_dir_all(&addon).unwrap();
@@ -971,4 +967,12 @@ pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
 #[cfg(feature = "listener-fixture")]
 pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
     boundary::export_id(owner, method)
+}
+
+/// The private compiler cache key under the production engine configuration, for executable
+/// smoke tests of the hidden compiler entry.
+#[cfg(feature = "runtime-fixture")]
+pub fn compile_child_key(bytes: &[u8]) -> Result<String, String> {
+    let engine = runtime::engine().map_err(|error| error.to_string())?;
+    Ok(module_cache::ModuleCache::key(&engine, bytes))
 }

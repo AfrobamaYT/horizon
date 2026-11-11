@@ -1,6 +1,7 @@
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
-#![cfg(feature = "wasm-guest")]
+// It calls the places' dispatch itself, so it needs a build whose table has sites.
+#![cfg(all(feature = "wasm-guest", feature = "listener-fixture"))]
 
 use mod_api::wire::{Reader, Record, Writer};
 use mod_points::{
