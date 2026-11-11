@@ -47,3 +47,18 @@ bindings = [
   { name = "wood", ty = "&str", value = "$arg1" },
   { name = "original", ty = "impl FnOnce(&str, &str) -> String", value = "$operation" },
 ]
+[[native.mixin]]
+id = "native_server_started"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::base::Game<'_>::native_server_started"
+helper = "src/mixins/server_started.rs"
+bindings = [{ name = "dedicated", ty = "bool", value = "dedicated" }]
+
+# Farmer's Delight's sign-editor shape: a call directly beneath `&`, which the pinned tool refuses
+# for every call-site kind and the carried narrowing admits for a hook that wraps the value.
+
+[[native.mixin]]
+id = "trait_block_state"
+kind = "HEAD"
+target = "horizon_client::game::<GameLevel<'_> as LevelAccess>::block_state"
+helper = "src/mixins/trait.rs"

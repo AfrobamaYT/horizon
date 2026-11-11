@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Function replacement end to end (fn-replace): two native mods' `[[mixin]]` rows built by the
+# Function replacement end to end (fn-replace): two native mods' `[[native.mixin]]` rows built by the
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
 #   [FNR_MODS="alpha beta"] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
@@ -11,6 +11,9 @@ launcher=$(realpath "$1")
 sdk=$(realpath "$2")
 scratch=$3
 resources=${4:-}
+if [ -n "$resources" ]; then resources=$(realpath "$resources"); fi
+side=${FNR_SIDE:-server}
+case "$side" in server|client) ;; *) echo "FNR_SIDE must be server or client" >&2; exit 2;; esac
 root=$(git rev-parse --show-toplevel)
 # The game revision is the SDK's: its source is what a patched function is copied out of.
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
@@ -18,7 +21,7 @@ mixins=$(sed -n 's/^pub const MIXINS_REV: &str = "\(.*\)";$/\1/p' "$root/crates/
 archive=$(sed -n 's/^pub const PREBUILT_ARCHIVE: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
 
 # FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
-if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run"; else rm -rf "$scratch"; fi
+if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run" "$scratch/launcher/native/server-builds" "$scratch/launcher/versions"/native-*; else rm -rf "$scratch"; fi
 mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
 scratch=$(realpath "$scratch")
 data=$scratch/launcher
@@ -34,7 +37,9 @@ printf '%s' "$revision" > "$source/.horizon-revision"
 # The prebuilt game, where the launcher keeps a downloaded one.
 host=$(rustc -vV | sed -n 's/^host: //p')
 mkdir -p "$data/native/prebuilt"
-cp -a "$sdk" "$data/native/prebuilt/$revision-$archive$host-server"
+sdk_suffix=
+if [ "$side" = server ]; then sdk_suffix=-server; fi
+cp -a "$sdk" "$data/native/prebuilt/$revision-$archive$host$sdk_suffix"
 
 base=$data/versions/ci
 mkdir -p "$base/.local/horizon-client/26.3"
@@ -46,7 +51,7 @@ touch "$version/.installed"
 # On Windows the launcher picks the build target from the installed game's PE machine; any x64
 # executable stands in for it, and the launcher itself is one.
 case $launcher in *.exe) cp "$launcher" "$version/horizon-client.exe" ;; esac
-printf '{"base": "ci", "horizon": "%s", "target": "server"}\n' "$revision" > "$version/native-mods.json"
+printf '{"base": "ci", "horizon": "%s", "target": "%s"}\n' "$revision" "$side" > "$version/native-mods.json"
 
 mods=$scratch/mods/fnr
 mkdir -p "$mods"
@@ -64,8 +69,16 @@ env_vars=(HORIZON_HOME="$scratch/home" HORIZON_LAUNCHER_HOME="$data" XDG_DATA_HO
   HORIZON_LAUNCHER_TRASH="$scratch/trash" HORIZON_LAUNCHER_CLIPBOARD="$scratch/clipboard"
   HORIZON_LAUNCHER_DESKTOP="$scratch/desktop")
 started=$(date +%s.%N)
-env "${env_vars[@]}" "$launcher" native-build "$mods" --server-output "$scratch/engine" --version native-ci --profile optimized \
+output_args=()
+if [ "$side" = server ]; then output_args=(--server-output "$scratch/engine"); fi
+env "${env_vars[@]}" "$launcher" native-build "$mods" "${output_args[@]}" --version native-ci --profile optimized \
   --trust-native-code
+if [ "$side" = client ]; then
+  binary=$(find "$data/versions" -type f -name horizon-client | head -1)
+  test -n "$binary"
+  cp -a "$(dirname "$binary")" "$scratch/engine"
+  cp "$scratch/engine/horizon-client" "$scratch/engine/horizon-engine"
+fi
 echo "native build: $(python3 -c "print(round($(date +%s.%N) - $started, 1))") s"
 test -x "$scratch/engine/horizon-engine" || test -x "$scratch/engine/horizon-engine.exe"
 log=$data/native/build.log
@@ -83,5 +96,10 @@ if [ -n "$resources" ]; then
     (cd "$run" && env "${env_vars[@]}" timeout 180 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" \
       --dedicated --nogui) > "$scratch/server.log" 2>&1 || true
   grep -F 'fnr:' "$scratch/server.log"
-  grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+  if [[ " ${FNR_MODS:-alpha beta} " == *" alpha "* ]]; then
+    grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
+    grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
+  fi
 fi
