@@ -373,7 +373,10 @@ impl PlayerSender {
                 },
                 None => PayloadSendError::EncodeFailed(e.to_string()),
             })?;
-        let cost = io_pool::charge(&bytes);
+        // Bookkeeping for PreparedPayload and the transaction's deferred journal record,
+        // including geometric journal growth (records are at most 256 bytes). This is
+        // retained-memory accounting, not a packet count or application-body cap.
+        let cost = io_pool::charge(&bytes).saturating_add(512);
         if !self.reserve(cost) {
             return Err(PayloadSendError::Backpressure);
         }
@@ -2586,6 +2589,28 @@ mod outgoing_budget_tests {
             ),
             wire: None,
         }
+    }
+    #[test]
+    fn empty_prepared_journal_records_are_bounded_and_fully_refunded() {
+        let s = sender(Framing::Memory);
+        let id = PayloadId("test:raw".into());
+        let cost = io_pool::charge(&Vec::new()) + 512;
+        let mut permits = Vec::new();
+        for _ in 0..io_pool::MAX_PENDING / cost {
+            permits.push(s.prepare_payload(Vec::new(), &id).unwrap());
+        }
+        assert_eq!(s.pending.load(Ordering::Relaxed), permits.len() * cost);
+        assert!(s.pending.load(Ordering::Relaxed) <= io_pool::MAX_PENDING);
+        assert!(matches!(
+            s.prepare_payload(Vec::new(), &id),
+            Err(PayloadSendError::Backpressure)
+        ));
+        drop(permits.pop());
+        assert_eq!(s.pending.load(Ordering::Relaxed), permits.len() * cost);
+        let replacement = s.prepare_payload(Vec::new(), &id).unwrap();
+        drop(replacement);
+        drop(permits);
+        assert_eq!(s.pending.load(Ordering::Relaxed), 0);
     }
     #[test]
     fn prepared_reservations_refund_and_share_capacity() {
