@@ -89,10 +89,13 @@ impl Game<'_> {
         after_name: Vec<(horizon_client::text::Text, u32)>,
     ) {
         let mut lines = self.stack_tooltip_lines(stack, false, creative);
-        if lines.is_empty() {
+        if lines.is_empty()
+            && !horizon_client::item_tooltip::tooltip_display(stack).name_visible(creative)
+        {
             return;
         }
-        lines.splice(1..1, after_name);
+        let after_name_index = lines.len().min(1);
+        lines.splice(after_name_index..after_name_index, after_name);
         let mut component = None;
         self.native_tooltip_component(stack, &mut component);
         let images: Vec<TooltipImage> = tooltip_component_size(component)

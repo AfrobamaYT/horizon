@@ -290,3 +290,63 @@ fn bundle_listener_inserts_before_name() {
 fn bundle_pre_observes_gather_reordered_list() {
     boundary(false);
 }
+
+struct ClearLines(std::sync::Arc<std::sync::atomic::AtomicBool>);
+#[mod_api::__subscriptions]
+impl Hooks for ClearLines {
+    fn item_tooltip(&self, _: &dyn ClientHost, event: &mut mod_api::ItemTooltipEvent<'_>) {
+        event.lines.clear();
+    }
+
+    fn render_tooltip_pre(
+        &self,
+        _: &dyn ClientHost,
+        event: &mut mod_api::RenderTooltipPreEvent<'_>,
+    ) -> mod_api::Flow {
+        assert!(matches!(
+            event.elements,
+            [TooltipElement::Image(TooltipImage {
+                source: mod_api::TooltipImageSource::Bundle(_),
+                size: [96.0, 45.0],
+            })]
+        ));
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        mod_api::Flow::Continue
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bundle_cleared_lines_still_draws_image_at_content_top() {
+    let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mods: Mods = vec![ModEntry::new(
+        "clear-lines",
+        Box::new(ClearLines(observed.clone())),
+    )]
+    .into();
+    run_mods(mods, |game| {
+        let mut batch = HudBatch::scratch([320, 240]);
+        game.draw_stack_tooltip_with(&mut batch, &bundle(), false, 10.0, 20.0, vec![]);
+        // Positioner: cursor y 20 - 12 = content top 8. No name or gap above the image.
+        grid(game, &batch, 8.0, true);
+        assert!(observed.load(std::sync::atomic::Ordering::Relaxed));
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bundle_hidden_tooltip_still_draws_nothing() {
+    run(None, |game| {
+        let mut stack = bundle();
+        stack.data_mut().set_other(
+            "minecraft:tooltip_display",
+            Some(horizon_core::nbt::Tag::compound([(
+                "hide_tooltip",
+                horizon_core::nbt::Tag::Byte(1),
+            )])),
+        );
+        // Also pins that the supplied after-name text cannot revive a hidden tooltip.
+        let batch = draw(game, &stack);
+        assert!(batch.vertices.is_empty());
+    });
+}
