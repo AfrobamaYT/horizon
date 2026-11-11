@@ -353,6 +353,21 @@ pub trait LevelsBackend {
     /// `native_level_height`. Does not load chunks.
     #[access(WorldOnly)]
     fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+    /// Side: server.
+    /// Whether entities can tick at this block position, using the server's current
+    /// ticket and loaded-neighbourhood decision. False for unloaded or out-of-bounds
+    /// positions. None for stale handles, a client or a level not currently in place.
+    /// Does not load chunks; may refresh the engine's resident-chunk cache.
+    #[access(WorldOnly)]
+    fn level_entity_ticking(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+    /// Side: server.
+    /// Whether scheduled blocks, block events and block entities can tick here,
+    /// using the server's ticket decision and waiting for pending entities to load.
+    /// False for unloaded or out-of-bounds positions. None for stale handles, a
+    /// client or a level not currently in place. Does not load chunks.
+    #[access(WorldOnly)]
+    fn level_should_tick_blocks_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+
     /// Side: both.
     /// The level's game time (`Level.getGameTime`). On clients this is the
     /// synchronized time advanced by the local level tick. API 381.

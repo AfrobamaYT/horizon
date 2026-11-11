@@ -1995,3 +1995,6 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
         Some(false)
     );
 }
+
+#[path = "wire_loopback/level_ticking.rs"]
+mod level_ticking;
