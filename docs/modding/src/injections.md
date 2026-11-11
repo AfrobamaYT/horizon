@@ -598,7 +598,7 @@ Use those aliases for the callback. The generated main adapts each kind to one w
 | `wrap_call` | Receiver, mutable arguments and mutable `original` continuation; returns the result |
 | `wrap_if` | Receiver and shared arguments; returns whether to call the original; unit output only |
 
-Native source `internals` calls also admit immutable borrowed arguments, such as `&str`.
+Native `internals` calls on both listed and source routes admit immutable borrowed arguments, such as `&str`.
 Their generated `Args<'a>` record borrows the original values for the call; no implicit
 owned-string conversion occurs. The listener is higher-ranked over that lifetime, so safe
 callbacks cannot retain the record or its references beyond the call, or mutate the referent
@@ -612,14 +612,14 @@ can read the world's public fields and call its shared-reference methods using R
 normal field projection, including public nested values, even without naming every type.
 Naming `MobWorld` itself requires its internals facade export. It cannot obtain exclusive
 access or extend either lifetime. Copy arrays of scalar values, such as `[i32; 3]`, can
-accompany these references in source records.
+accompany these references in either route's records.
 `modify_value` still receives only the receiver and owned result, not the argument record.
-Mutable borrowed arguments remain refused, as do borrowed arguments on API/listed routes;
+Mutable borrowed arguments remain refused, as do borrowed arguments on API routes;
 this does not enable API source adapters or wasm call sites.
 
-### Owned arguments on native source calls
+### Owned arguments on native calls
 
-A native source `internals` call can also move owned arguments, such as the `ItemStack`
+A native `internals` call on either route can also move owned arguments, such as the `ItemStack`
 in `Game::dispense_item`, into its record. Argument expressions run once in their original
 order. No stack is implicitly cloned. A record with any owned non-Copy field selects the
 **single-use** listener contract; named value types are conservatively treated as owned,
@@ -655,7 +655,11 @@ and copies shared references; dropping the record does not drop their referents.
 `internals` callbacks are trusted code, not a sandbox: a callback may explicitly take an
 owned value through replacement or by owning Args, and may call `mem::forget`. The engine
 promises no hidden copies or leaks; it cannot prohibit these explicit mod-side transfers.
-Mutable-reference arguments, listed/prebuilt owned records and API/wasm routes remain refused.
+Mutable-reference arguments and API/wasm routes remain refused.
+A reviewed call row compiles the same typed record into the prebuilt game. Attaching a
+listener to that listed site does not rebuild the game, and uses the same listener source
+and lifetime rules as source routing. A stale listed declaration is refused by name;
+it never falls back to a source build.
 Owned shapes containing further borrows remain refused; direct immutable-reference fields
 can accompany owned fields.
 

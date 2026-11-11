@@ -371,9 +371,7 @@ pub fn rewrite(
                     types,
                     output,
                     once,
-                } = resolve(
-                    expr, enclosing, found.sig, &lexical, entries, &rule, private,
-                )?;
+                } = resolve(expr, enclosing, found.sig, &lexical, entries, &rule)?;
                 let name = name(declaration, ordinal);
                 let record = format_ident!("__{name}Args");
                 let listener = format_ident!("__{name}Listener");
@@ -474,7 +472,7 @@ pub fn rewrite(
                         pub struct #record #lifetime { #(pub #fields: #types,)* }
                         pub type #receiver_alias<'g, 'r> = #alias_type;
                         pub type #output_alias = #output;
-                        /// A call-scoped, single-use forwarding capability for this source call.
+                        /// A call-scoped, single-use forwarding capability for this native call.
                         pub struct #original_type<'g, 'a, 'next> {
                             next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output,
                             scope: ::std::marker::PhantomData<(&'g (), &'a ())>,

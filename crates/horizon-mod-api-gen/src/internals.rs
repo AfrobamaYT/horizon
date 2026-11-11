@@ -1848,10 +1848,8 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
         let lexical = crate::sites::analysis::Scope::scan(&sig, None);
         for call in ["imported(1)", "Alias::make(1)", "Self::make(1)"] {
             let expr = syn::parse_str(call).unwrap();
-            crate::sites::resolve::resolve(
-                &expr, enclosing, &sig, &lexical, &entries, &rule, false,
-            )
-            .unwrap();
+            crate::sites::resolve::resolve(&expr, enclosing, &sig, &lexical, &entries, &rule)
+                .unwrap();
         }
         let old_hash = enclosing.hash.clone();
         fixture.put(
