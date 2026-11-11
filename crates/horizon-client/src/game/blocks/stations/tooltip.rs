@@ -162,16 +162,14 @@ impl Game<'_> {
         origin: [f32; 2],
         size: [f32; 2],
     ) {
-        let (mod_api::TooltipImageSource::ItemPart(stack)
-        | mod_api::TooltipImageSource::Bundle(stack)) = &image.source;
-        let Ok(stack) = crate::game::api_values::stack_value(stack) else {
-            return;
-        };
         match &image.source {
-            mod_api::TooltipImageSource::ItemPart(_) => {
-                self.native_tooltip_component_draw(&stack, batch, origin, size);
+            mod_api::TooltipImageSource::ItemPart(stack) => {
+                self.draw_tooltip_item_part(batch, stack, origin, size);
             }
-            mod_api::TooltipImageSource::Bundle(_) => {
+            mod_api::TooltipImageSource::Bundle(stack) => {
+                let Ok(stack) = crate::game::api_values::stack_value(stack) else {
+                    return;
+                };
                 if let Some(layout) = horizon_client::item_tooltip::bundle_tooltip(
                     self.items(),
                     &stack,
@@ -185,6 +183,19 @@ impl Game<'_> {
             }
         }
     }
+    fn draw_tooltip_item_part(
+        &mut self,
+        batch: &mut HudBatch,
+        stack: &mod_api::ItemStack,
+        origin: [f32; 2],
+        size: [f32; 2],
+    ) {
+        let Ok(stack) = crate::game::api_values::stack_value(stack) else {
+            return;
+        };
+        self.native_tooltip_component_draw(&stack, batch, origin, size);
+    }
+
     /// `RenderTooltipEvent.GatherComponents` for an item's tooltip: the
     /// lines and the images the item's part answered go to
     /// `render_tooltip_gather_components` as one list. A mod's `max_width`
