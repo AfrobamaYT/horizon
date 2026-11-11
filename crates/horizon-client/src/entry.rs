@@ -61,7 +61,7 @@ pub fn main_with(
     // Platform instrumentation must precede registration and the first mod guard.
     if let Err(error) = mod_api::__private::initialize() {
         eprintln!("Horizon: refusing startup because mod instrumentation is unavailable: {error}");
-        return;
+        std::process::exit(game::exit_code::ERROR);
     }
     let Startup {
         launch,
