@@ -224,6 +224,43 @@ impl Game<'_> {
             *self.held_mut() = result.filter(|s| s.count > 0);
         }
     }
+    /// `LivingEntityUseItemEvent.Finish` on a server's client, whose
+    /// `completeUsingItem` (`handleEntityEvent(9)`) ran for `stack` in `slot`.
+    /// `ItemStack.finishUsingItem` runs first, as on the client: the use
+    /// cooldown, then the hand holds `finish_result`. A mod's result is put in
+    /// the slot; the server's inventory update replaces either.
+    pub(super) fn remote_use_item_finished(
+        &mut self,
+        slot: usize,
+        stack: &ItemStack,
+        info: &ItemInfo,
+    ) {
+        self.apply_use_cooldown(stack);
+        let mut result = self.finish_result(stack, info);
+        let hand = hand_of(Some((slot, 0))).unwrap_or(self.hand);
+        self.native_living_entity_use_item_finish(stack, None, hand, 0, &mut result);
+        *self.stack_in_mut(slot) = result.filter(|s| s.count > 0);
+    }
+    /// What `Item.finishUsingItem` leaves in the hand on a server's client: a
+    /// stack that is not a consumable stays as it is (a spyglass); a
+    /// consumable loses one (`ItemStack.consume`), and once that empties the
+    /// hand, its `use_remainder` takes the hand
+    /// (`UseRemainder.convertIntoRemainder`). Neither in creative mode. A
+    /// remainder of a stack that is not emptied goes to the inventory on the
+    /// server and arrives with its inventory update.
+    pub(super) fn finish_result(&self, stack: &ItemStack, info: &ItemInfo) -> Option<ItemStack> {
+        if self.creative || stack.consumable(Some(info)).is_none() {
+            return Some(stack.clone());
+        }
+        let mut left = stack.clone();
+        left.count = left.count.saturating_sub(1);
+        if left.count > 0 {
+            return Some(left);
+        }
+        info.use_remainder
+            .as_deref()
+            .map(|remainder| ItemStack::new(remainder, 1))
+    }
     /// `LivingEntityUseItemEvent.Tick` for `stack` in use `ticks` so far, as
     /// `updatingUsingItem` starts: a mod may change the ticks left, which
     /// moves the end. False when it ran the use out (`tick_ran_out`): the
