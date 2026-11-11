@@ -123,7 +123,7 @@ impl TryIntoEngine<()> for mod_api::Block {
             open_sound: self.open_sound.clone(),
             close_sound: self.close_sound.clone(),
             block_item: self.block_item.clone(),
-            components: component_patch(&self.components)?,
+            components: component_patch("block", &self.id, &self.components)?,
             connects_to: self.connects_to.clone(),
             thickness: self.thickness,
             wood_type: self.wood_type.clone(),
@@ -148,7 +148,7 @@ impl TryIntoEngine<()> for mod_api::Item {
                 mod_api::Rarity::Rare => engine::Rarity::Rare,
                 mod_api::Rarity::Epic => engine::Rarity::Epic,
             }),
-            components: component_patch(&self.components)?,
+            components: component_patch("item", &self.id, &self.components)?,
             crafting_remainder: self.crafting_remainder.clone(),
             block: self.block.clone(),
             arm_pose: self
@@ -160,13 +160,26 @@ impl TryIntoEngine<()> for mod_api::Item {
 }
 
 fn component_patch(
+    kind: &str,
+    owner: &str,
     patch: &[(String, Option<mod_api::Tag>)],
 ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut result = std::collections::BTreeMap::new();
     for (id, value) in patch {
-        if !seen.insert(id) {
-            return Err(format!("duplicate component id {id}"));
+        if id.starts_with('!') {
+            return Err(format!(
+                "{kind} {owner}: component id {id} starts with the removal prefix !"
+            ));
+        }
+        // `lore` and `minecraft:lore` name the same component; the check only, the id is kept as written.
+        let logical = if id.contains(':') {
+            id.clone()
+        } else {
+            format!("minecraft:{id}")
+        };
+        if !seen.insert(logical) {
+            return Err(format!("{kind} {owner}: duplicate component id {id}"));
         }
         let (key, value) = match value {
             Some(value) => (
@@ -197,13 +210,40 @@ mod tests {
             block.components = patch.clone();
             let mut item = Item::new("test:item", "minecraft:stick");
             item.components = patch;
-            for error in [
+            assert_eq!(
                 block.try_into_engine(&()).unwrap_err(),
+                "block test:block: duplicate component id minecraft:lore"
+            );
+            assert_eq!(
                 item.try_into_engine(&()).unwrap_err(),
-            ] {
-                assert_eq!(error, "duplicate component id minecraft:lore");
-            }
+                "item test:item: duplicate component id minecraft:lore"
+            );
         }
+    }
+
+    #[test]
+    fn bare_and_prefixed_component_ids_refuse_blocks_and_items() {
+        let mut block = Block::new("test:block", "minecraft:stone");
+        block.components = vec![
+            ("lore".into(), Some(Tag::List(vec![]))),
+            ("minecraft:lore".into(), None),
+        ];
+        assert_eq!(
+            block.try_into_engine(&()).unwrap_err(),
+            "block test:block: duplicate component id minecraft:lore"
+        );
+        let mut item = Item::new("test:item", "minecraft:stick");
+        item.components = vec![
+            (
+                "!minecraft:lore".into(),
+                Some(Tag::Compound(BTreeMap::new())),
+            ),
+            ("minecraft:lore".into(), None),
+        ];
+        assert_eq!(
+            item.try_into_engine(&()).unwrap_err(),
+            "item test:item: component id !minecraft:lore starts with the removal prefix !"
+        );
     }
 
     #[test]
