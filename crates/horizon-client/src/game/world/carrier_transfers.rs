@@ -115,6 +115,21 @@ impl std::fmt::Display for TransferError {
     }
 }
 
+/// Whether a carrier transfer fence holds any cell a piston move
+/// would push or destroy: the whole move refuses (`GameLevel`'s
+/// `allow_piston_move` seeds its cancellation with this, so a held
+/// cell also skips the piston hooks).
+pub(in crate::game) fn piston_fenced(
+    fences: &horizon_client_render::carrier_fences::Fences,
+    push: &[BlockPos],
+    destroy: &[BlockPos],
+) -> bool {
+    push.iter().chain(destroy.iter()).any(|pos| {
+        let [x, y, z] = [pos.x, pos.y, pos.z];
+        fences.locks_cell(&[x, y, z])
+    })
+}
+
 /// Whether a block entity is passive cargo this slice carries: a
 /// container or a sign, banner, skull or bell — pure data, no ticker.
 /// Ticking machines (furnaces, brewing stands, spawners, sculk,
@@ -820,13 +835,32 @@ impl Game<'_> {
         }
         Ok(())
     }
+    /// The world's carrier state at open (`Game::load_world_state`):
+    /// the store's first-use gate reads the data folder's existence
+    /// now — a folder created later this session (by the first save)
+    /// does not pass for an old one — and a transfer that never
+    /// finished recovers before the first tick and any player. A
+    /// refusal fails the open, and no save runs after it.
+    pub(in crate::game) fn carrier_world_opened(&mut self) -> crate::Result<()> {
+        self.world.carrier_data_existed_at_open = self.world_root.join("data").is_dir();
+        self.carrier_recover_all_levels()
+    }
+
+    /// `Game::break_block` behind the carrier fence: a cell held
+    /// between prepared and committed refuses before the break runs.
+    pub(in crate::game) fn carrier_break_block(&mut self, pos: [i32; 3]) -> crate::Result<()> {
+        if self.world.carrier_fences.locks_cell(&pos) {
+            return Err("a carrier transfer holds this cell".into());
+        }
+        self.player_break_block(pos).map(|_| ())
+    }
+
     /// Recovers the world's carrier store at open, before any chunk
     /// ticks and before any player joins: the level in place first, then
     /// every parked level through the same enter/return route the
     /// autosave uses. A refusal fails the world's load with a clear
     /// message — and nothing saves after it: the open itself aborts,
     /// while the store stays exactly as recovery found it.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn carrier_recover_all_levels(&mut self) -> crate::Result<()> {
         // No pending operation: no level is touched at all.
         let dimension = match crate::carrier_store::Store::open(&self.world_root) {

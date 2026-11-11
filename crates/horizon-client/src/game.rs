@@ -1364,15 +1364,8 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        // A carrier transfer fence holds any pushed or destroyed cell:
-        // the whole move refuses (crate::game::carrier_transfers).
-        for pos in push.iter().chain(destroy.iter()) {
-            if self.world.carrier_fences.locks_cell(&[pos.x, pos.y, pos.z]) {
-                return false;
-            }
-        }
-        let mut canceled = false;
-        if self.native_authoritative {
+        let mut canceled = carrier_transfers::piston_fenced(&self.world.carrier_fences, push, destroy);
+        if !canceled && self.native_authoritative {
             let step = direction.normal();
             self.native_piston_pre(mod_api::__private::PistonPreCall {
                 dimension: self.dimension,
@@ -6908,12 +6901,7 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
-        // A carrier transfer fence holds this cell between prepared and
-        // committed: breaking refuses (crate::game::carrier_transfers).
-        if self.world.carrier_fences.locks_cell(&pos) {
-            return Err("a carrier transfer holds this cell".into());
-        }
-        self.player_break_block(pos).map(|_| ())
+        self.carrier_break_block(pos)
     }
     /// `ServerPlayerGameMode.destroyBlock`: whether the block was removed.
     /// A break inside another (a mod breaking more blocks from its
@@ -11760,10 +11748,6 @@ impl Game<'_> {
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
-        // The carrier store's first-use gate reads the data folder's
-        // existence here, at open — a folder created later this session
-        // (by the first save) does not pass for an old one.
-        self.world.carrier_data_existed_at_open = save_root.join("data").is_dir();
         // The root moves before the prepared level is installed. Until then a
         // final save must not run: the lock below only marks tag tables.
         self.world_adopted = false;
@@ -11934,10 +11918,7 @@ impl Game<'_> {
         self.apply_settings();
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
-        self.load_world_state();
-        // Carrier recovery before the first tick and any player: a
-        // refusal fails the open, and no save runs after it.
-        self.carrier_recover_all_levels()?;
+        self.load_world_state()?;
         // The level the world opens in, before any of its chunks.
         self.native_level_opened(dim);
         self.open_saved_portal_levels()
