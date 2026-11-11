@@ -61,8 +61,6 @@ fn uncancel_shutdown(args: &mut mod_points::GameServerLifecycleRememberShutdownA
 
 #[test]
 fn a_replace_owns_the_function_and_only_one_may() {
-    // This test calls the places' dispatch itself; a plain build has no sites for them.
-    mod_points::__private::TABLE.fire_from_fixture();
     register(&mod_points::replace!(
         mod_points::listeners::game_server_lifecycle_remember_shutdown,
         cancel,

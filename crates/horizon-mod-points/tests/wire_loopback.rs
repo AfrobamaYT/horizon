@@ -1,6 +1,7 @@
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
-#![cfg(feature = "wasm-guest")]
+// It calls the places' dispatch itself, so it needs a build whose table has sites.
+#![cfg(all(feature = "wasm-guest", feature = "listener-fixture"))]
 
 use mod_api::wire::{Reader, Record, Writer};
 use mod_points::{
@@ -110,8 +111,6 @@ static LOOPBACK_TOP_RETURN: Loopback = Loopback(3);
 
 #[test]
 fn head_and_return_share_the_hook_arena_and_native_listener_list() {
-    // This test calls the places' dispatch itself; a plain build has no sites for them.
-    mod_points::__private::TABLE.fire_from_fixture();
     mod_points::guest::register(&mod_points::listeners::tick("guest", 0, "head", head)).unwrap();
     mod_points::guest::register(&mod_points::listeners::tick_return(
         "guest", 0, "return", tail,

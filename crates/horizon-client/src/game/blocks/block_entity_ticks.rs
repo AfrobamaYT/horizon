@@ -169,6 +169,35 @@ impl<N: LoopMod, T: BlockEntityTickSlot> BlockEntityTickSlot for Attributed<N, T
     }
 }
 
+/// A pass's working state: the item and mob caches and the spawners ticked so far.
+type PassScratch = (
+    Option<crate::game::machines::ItemColumns>,
+    Option<crate::game::potent_sulfur::PassMobs>,
+    Vec<Pos>,
+    Vec<Pos>,
+);
+/// Puts the enclosing pass's scratch back when the pass inside it ends, however it ends:
+/// a slot may catch a nested pass's panic and let the enclosing pass go on.
+struct Enclosing<'g, 'a> {
+    game: &'g mut Game<'a>,
+    scratch: Option<PassScratch>,
+}
+impl Drop for Enclosing<'_, '_> {
+    fn drop(&mut self) {
+        // A pass that ended early left its own; a pass in progress is known by them.
+        self.game.item_columns = None;
+        self.game.pass_mobs = None;
+        if let Some(scratch) = self.scratch.take() {
+            (
+                self.game.item_columns,
+                self.game.pass_mobs,
+                self.game.spawner_tick_positions,
+                self.game.trial_spawner_tick_positions,
+            ) = scratch;
+        }
+    }
+}
+
 impl Game<'_> {
     /// The published loop `block_entities.tick` (`published_loops.rs`): with no
     /// `[[native.loop]]` mod its slot is `()`, and a mod build installs its own copy of this
@@ -188,33 +217,6 @@ impl Game<'_> {
         &mut self,
         slot: &mut S,
     ) -> Result<()> {
-        type PassScratch = (
-            Option<crate::game::machines::ItemColumns>,
-            Option<crate::game::potent_sulfur::PassMobs>,
-            Vec<Pos>,
-            Vec<Pos>,
-        );
-        /// Puts the enclosing pass's scratch back when the pass inside it ends, however it ends:
-        /// a slot may catch a nested pass's panic and let the enclosing pass go on.
-        struct Enclosing<'g, 'a> {
-            game: &'g mut Game<'a>,
-            scratch: Option<PassScratch>,
-        }
-        impl Drop for Enclosing<'_, '_> {
-            fn drop(&mut self) {
-                // A pass that ended early left its own; a pass in progress is known by them.
-                self.game.item_columns = None;
-                self.game.pass_mobs = None;
-                if let Some(scratch) = self.scratch.take() {
-                    (
-                        self.game.item_columns,
-                        self.game.pass_mobs,
-                        self.game.spawner_tick_positions,
-                        self.game.trial_spawner_tick_positions,
-                    ) = scratch;
-                }
-            }
-        }
         // Only a pass in progress holds item columns: every pass drops them as it ends.
         let scratch = self.item_columns.is_some().then(|| {
             (
