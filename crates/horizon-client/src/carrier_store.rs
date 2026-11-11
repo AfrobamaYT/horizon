@@ -369,6 +369,30 @@ impl Store {
     /// Records the operation as in progress and publishes the next slot.
     /// Called after the operation file is durable, before the world
     /// changes.
+    /// Refuse before publishing files or saving chunks. A full journal with a
+    /// pending operation is reachable only from the unfixed, unshipped version;
+    /// recovery of that state is outside this admission contract.
+    pub fn check_admission(
+        &self,
+        kind: OpKind,
+        uuid: u128,
+        generation: u32,
+    ) -> Result<(), StoreIoError> {
+        let full = match kind {
+            OpKind::Assemble => self.journal.carriers.len() >= self.capacity,
+            OpKind::Disassemble => {
+                self.journal.tombstones.len() >= MAX_TOMBSTONES
+                    && !self.journal.tombstones.contains(&(uuid, generation))
+            }
+        };
+        if full {
+            return Err(StoreIoError(
+                "CarrierCapacityReopenNeeded: carrier store capacity reached; reopen needed".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn begin(
         &mut self,
         kind: OpKind,
@@ -376,6 +400,7 @@ impl Store {
         generation: u32,
         dimension: &str,
     ) -> Result<u64, StoreIoError> {
+        self.check_admission(kind, uuid, generation)?;
         // One operation at a time: a nested begin leaves the open one
         // untouched and refuses.
         if self.journal.in_progress.is_some() {

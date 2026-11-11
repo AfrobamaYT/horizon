@@ -390,6 +390,9 @@ impl Game<'_> {
         // The affected chunks reach the disk, acknowledged, before the
         // obligation: under #2488 saves refuse, so this must precede the
         // lease. Replay will find its pre-image here.
+        store
+            .check_admission(OpKind::Assemble, uuid, generation)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
         self.save_affected(cells)
             .map_err(|e| TransferError::Io(e.to_string()))?;
 
@@ -651,6 +654,9 @@ impl Game<'_> {
         let encoded = crate::carrier_store::encode_operation(&operation)
             .map_err(|_| TransferError::Envelope)?;
 
+        store
+            .check_admission(OpKind::Disassemble, uuid, generation)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
         self.save_affected(&cells)
             .map_err(|e| TransferError::Io(e.to_string()))?;
         self.revalidate_destinations(&operation_cells)?;
@@ -1273,6 +1279,42 @@ mod tests {
                 files <= 2,
                 "the store must stay bounded at the two slots, found {files} files"
             );
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn capacity_refusal_leaves_world_untouched() {
+        let root = transfer_root("admission");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.carrier_data_existed_at_open = true;
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.carrier_fences.capacity_override = Some(0);
+            game.world.set(4, 64, 4, chest).unwrap();
+            let error = game
+                .carrier_assemble(7, &[BlockPos::new(4, 64, 4)])
+                .unwrap_err();
+            assert!(error.to_string().contains("CarrierCapacityReopenNeeded"));
+            assert_eq!(game.world.block(4, 64, 4), chest);
+            assert!(!game.world.carrier_fences.locks_cell(&[4, 64, 4]));
+            let crate::carrier_store::Opened::Live(store) =
+                Store::open_with_capacity(&root, 0).unwrap()
+            else {
+                panic!("must open")
+            };
+            assert!(store.journal().in_progress.is_none());
+            assert!(store.journal().carriers.is_empty());
+            assert!(!root.join("dimensions/minecraft/overworld/region").exists());
         });
         let _ = std::fs::remove_dir_all(&root);
     }
