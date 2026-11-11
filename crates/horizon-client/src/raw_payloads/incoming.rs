@@ -42,6 +42,20 @@ impl std::fmt::Display for Failure {
     }
 }
 impl Incoming {
+    /// Owned transport buffers and reference storage, excluding this inline record.
+    /// Work is conservatively charged its associated input per queued reference;
+    /// arbitrary module-owned captures belong to the module, not a traversable packet.
+    pub fn owned_heap_bytes(&self) -> usize {
+        let body = match &self.body {
+            Body::Payload(bytes) => bytes.0.capacity(),
+            Body::Work(_) => self.lease.owned_bytes,
+        };
+        self.id
+            .0
+            .capacity()
+            .saturating_add(body)
+            .saturating_add(std::mem::size_of::<IngressLease>() + 2 * std::mem::size_of::<usize>())
+    }
     pub fn new(
         transport: &Transport,
         phase: Phase,

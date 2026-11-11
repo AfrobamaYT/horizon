@@ -1946,6 +1946,7 @@ impl io_pool::Session for PlayConn {
                                             .events
                                             .send(NetEvent::RawPayload(Box::new(
                                                 crate::raw_payloads::Delivery {
+                                                    conn: Some(self.conn),
                                                     endpoint: endpoint.clone(),
                                                     incoming,
                                                 },

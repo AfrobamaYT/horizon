@@ -9,7 +9,6 @@ use mod_api::{PayloadBytes, PayloadFrameStage, PayloadId, PayloadSendError, Text
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
-    mpsc::Sender,
 };
 
 #[derive(Clone)]
@@ -20,7 +19,7 @@ enum Target {
         writer: Arc<Mutex<Option<QueuedWriter>>>,
         configuring: Arc<AtomicBool>,
         transport: Arc<Transport>,
-        events: Sender<Event>,
+        events: crate::net::ingress::Producer<Event>,
     },
     Server(PlayerSender),
     Configuration(ConfigSender),
@@ -42,7 +41,7 @@ impl Endpoint {
         writer: Arc<Mutex<Option<QueuedWriter>>>,
         configuring: Arc<AtomicBool>,
         transport: Arc<Transport>,
-        events: Sender<Event>,
+        events: crate::net::ingress::Producer<Event>,
     ) -> Self {
         Self(Target::Client {
             writer,

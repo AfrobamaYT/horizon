@@ -7,7 +7,7 @@ use horizon_protocol::{
     connection::Connection, packets::configuration as cfg, payload_negotiation::Phase,
 };
 use mod_api::{PayloadId, PayloadSendError};
-use std::sync::{Arc, mpsc::Sender};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ConfigSender {
@@ -44,14 +44,14 @@ impl ConfigSender {
 pub(super) struct ConfigIo<'a> {
     connection: &'a mut Connection,
     pub sender: Option<ConfigSender>,
-    events: Sender<super::NetEvent>,
+    events: crate::net::ingress::Producer<super::NetEvent>,
     handed_off: bool,
 }
 impl<'a> ConfigIo<'a> {
     pub fn new(
         connection: &'a mut Connection,
         transport: Arc<Transport>,
-        events: Sender<super::NetEvent>,
+        events: crate::net::ingress::Producer<super::NetEvent>,
     ) -> horizon_protocol::Result<Self> {
         let sender = if transport.local.manifest.entries().is_empty() {
             None
@@ -91,6 +91,7 @@ impl<'a> ConfigIo<'a> {
                     self.events
                         .send(super::NetEvent::RawPayload(Box::new(
                             crate::raw_payloads::Delivery {
+                                conn: None,
                                 endpoint: endpoint.clone(),
                                 incoming,
                             },

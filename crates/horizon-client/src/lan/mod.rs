@@ -57,7 +57,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering},
-        mpsc::{Receiver, Sender, channel},
+        mpsc::{Receiver, channel},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -95,6 +95,55 @@ pub struct Joined {
     /// The login used up an expectation of a proxy's (`player-expect`) when it
     /// started (`arrivals`).
     pub expected: bool,
+}
+pub(crate) fn event_channel() -> (
+    crate::net::ingress::Producer<NetEvent>,
+    crate::net::ingress::Consumer<NetEvent>,
+) {
+    crate::net::ingress::channel(96 << 20, NetEvent::ingress_charge)
+        .expect("positive incoming byte budget")
+}
+impl NetEvent {
+    fn ingress_charge(&self) -> usize {
+        use horizon_protocol::retained::OwnedHeap;
+        use std::mem::size_of;
+        let owned = match self {
+            Self::RawPayload(delivery) => size_of::<crate::raw_payloads::Delivery>()
+                .saturating_add(delivery.incoming.owned_heap_bytes()),
+            Self::Joined(joined) => {
+                let Joined {
+                    conn: _,
+                    uuid: _,
+                    name,
+                    properties,
+                    info,
+                    brand,
+                    sender: _,
+                    latency: _,
+                    address: _,
+                    expected: _,
+                } = joined.as_ref();
+                // sender/latency are shared physical provider state, not this record.
+                size_of::<Joined>()
+                    .saturating_add(name.capacity())
+                    .saturating_add(properties.owned_heap_bytes())
+                    .saturating_add(info.owned_heap_bytes())
+                    .saturating_add(brand.capacity())
+            }
+            Self::Packet(_, packet, _) => {
+                size_of::<play::Serverbound>().saturating_add(packet.as_ref().owned_heap_bytes())
+            }
+            Self::Left(_, reason) => reason.capacity(),
+            Self::Duplicate(_) => 0,
+        };
+        // Source snapshot, guest inbox, derived HostEvent batch and credit marker,
+        // with spare-capacity allowance. No wire-length proxy for owned buffers.
+        owned.saturating_add(
+            8 * (size_of::<Self>()
+                + size_of::<hub::HostEvent>()
+                + size_of::<crate::net::ingress::ReceiveLease<Self>>()),
+        )
+    }
 }
 /// What a [`PlayerSender`] made for a test's channel gives it.
 pub enum Out {
@@ -386,7 +435,7 @@ pub struct Shared {
     payload_local: Arc<crate::raw_payloads::Local>,
     /// What the next login is sent; `PlayerList.reloadResources` swaps it.
     sync: Mutex<Arc<data::SyncData>>,
-    pub events: Sender<NetEvent>,
+    pub events: crate::net::ingress::Producer<NetEvent>,
     pub config: NetConfig,
     motd: Mutex<String>,
     max_players: AtomicUsize,
@@ -627,7 +676,7 @@ pub fn base64(data: &[u8]) -> String {
 /// A running LAN server.
 pub struct Lan {
     pub shared: Arc<Shared>,
-    events: Receiver<NetEvent>,
+    events: crate::net::ingress::Consumer<NetEvent>,
     pub port: u16,
     listener: Option<JoinHandle<()>>,
     /// Stops the accept loop alone: local connections stay.
@@ -647,7 +696,7 @@ impl Lan {
     }
     /// ServerConnectionListener.startTcpServerListener with a configuration.
     pub fn start_with(sync: Arc<data::SyncData>, config: NetConfig) -> io::Result<Self> {
-        let (tx, events) = channel();
+        let (tx, events) = event_channel();
         let (listen, port, announce) = (config.listen, config.port, config.announce);
         let hide_online_players = config.hide_online_players;
         let enable_status = config.enable_status;
@@ -769,8 +818,8 @@ impl Lan {
         Ok(client)
     }
     /// Everything the connection threads reported since the last call.
-    pub fn poll(&self) -> Vec<NetEvent> {
-        self.events.try_iter().collect()
+    pub fn poll(&self) -> Vec<crate::net::ingress::OwnedReceipt<NetEvent>> {
+        self.events.take_turn()
     }
     pub fn stop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);

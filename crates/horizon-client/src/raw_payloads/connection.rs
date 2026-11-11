@@ -88,7 +88,18 @@ struct Current {
 /// preserves its reservation; dropping it refunds capacity, independent of epochs.
 pub struct IngressLease {
     _permit: byte_channel::Permit<()>,
+    pub(super) owned_bytes: usize,
 }
+// Four slots cover Vec's initial growth and later geometric staging. Provider
+// queue storage is separately charged by the typed ingress channel. This charge
+// covers both main routes and network-staged work, including boxed identities.
+const INGRESS_RECORD_OVERHEAD: usize = 4
+    * (std::mem::size_of::<crate::lan::NetEvent>()
+        + std::mem::size_of::<crate::lan::hub::HostEvent>()
+        + std::mem::size_of::<crate::net::Event>()
+        + std::mem::size_of::<super::Incoming>())
+    + std::mem::size_of::<super::Delivery>()
+    + 128;
 const INGRESS_BUDGET: usize = 16 << 20;
 
 /// Allocate only for a nonempty local installation; unmodded connections need no dispatch state.
@@ -115,7 +126,7 @@ impl Connection {
         })
     }
     /// Retain bytes across arbitrary ingress staging queues and phase changes.
-    /// The 1024-byte allowance covers envelope/staging and geometric queue storage;
+    /// The layout-derived allowance covers envelope and geometric actor staging;
     /// this is resource pressure, not a protocol body or record-count limit.
     pub fn reserve_ingress(&self, owned_bytes: usize) -> Result<IngressLease, PayloadSendError> {
         let current = self.current.lock().unwrap();
@@ -123,11 +134,14 @@ impl Connection {
             return Err(PayloadSendError::Disconnected);
         }
         let charge = owned_bytes
-            .checked_add(1024)
+            .checked_add(INGRESS_RECORD_OVERHEAD)
             .ok_or(PayloadSendError::Backpressure)?;
         self.ingress
             .reserve(charge)
-            .map(|permit| IngressLease { _permit: permit })
+            .map(|permit| IngressLease {
+                _permit: permit,
+                owned_bytes,
+            })
             .map_err(|e| match e {
                 byte_channel::ReserveError::Full => PayloadSendError::Backpressure,
                 byte_channel::ReserveError::Disconnected => PayloadSendError::Disconnected,

@@ -12,6 +12,9 @@ pub use executor::dispatch;
 /// Physical server ingress identity, moved unchanged from I/O through Hub to main.
 /// Boxed only on mod-bearing paths so ordinary event unions do not grow.
 pub struct Delivery {
+    /// Exact physical play connection for inbox ordering, never a UUID rebind.
+    /// Configuration has no admitted guest and uses None.
+    pub conn: Option<u32>,
     pub endpoint: Endpoint,
     pub incoming: Incoming,
 }
@@ -223,22 +226,14 @@ pub struct Peer {
 impl Peer {
     fn owned_snapshot_bytes(&self) -> usize {
         // These immutable maps are constructed only by insertion in freeze: no
-        // erasure/tombstones. Rust 1.99 hashbrown has at least half of its buckets
-        // usable, at most 16 mirrored control bytes, and group alignment <= 16.
-        // Conservatively charge twice the public capacity, not an exact census.
+        // erasure/tombstones. Reuse the audited conservative fresh table model.
         // Callback objects and Local are shared installation state, not owned here.
         let mut bytes = std::mem::size_of::<Self>() + 2 * std::mem::size_of::<usize>();
         for map in &self.phases {
-            if map.capacity() != 0 {
-                let buckets = map.capacity().saturating_mul(2);
-                bytes = bytes
-                    .saturating_add(buckets.saturating_mul(
-                        std::mem::size_of::<(String, Option<PayloadReceiver>)>() + 1,
-                    ))
-                    .saturating_add(
-                        std::mem::align_of::<(String, Option<PayloadReceiver>)>().max(16) + 16,
-                    );
-            }
+            bytes = bytes.saturating_add(horizon_protocol::retained::fresh_hash_table_bytes::<(
+                String,
+                Option<PayloadReceiver>,
+            )>(map.capacity()));
             for key in map.keys() {
                 bytes = bytes.saturating_add(key.capacity());
             }
