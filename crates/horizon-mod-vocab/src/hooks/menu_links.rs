@@ -6,6 +6,9 @@ pub trait Hooks {
     /// refreshes their linked slots in the same tick. Asked each server tick only for open
     /// mod menu types declaring links, and dispatched only to subscribers. With no
     /// subscribers the linked-container tick does no work and allocates nothing.
+    /// Silently skips `pos`, duplicate positions, missing or non-lendable containers,
+    /// and positions after 64 accepted containers (`MAX_MENU_LINKS`). First accepted
+    /// occurrence wins, preserving answer order.
     /// Native and wasm listeners append positions with identical copy-out semantics.
     #[hook(
         side = "server",

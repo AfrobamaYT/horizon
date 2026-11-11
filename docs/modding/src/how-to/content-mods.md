@@ -702,7 +702,9 @@ keeps vanilla placement. The engine owns ingredient removal, container
 write-back and `container_changed` notifications, not the listener.
 
 `menu_links` has the same input fields and an append-only `links` output for menu
-types declaring linked slots. It refreshes the named containers' displayed items
+types declaring linked slots. It silently skips `pos`, duplicate positions, missing
+or non-lendable containers, and positions after 64 accepted containers
+(`MAX_MENU_LINKS`), preserving first-accepted answer order. It refreshes the named containers' displayed items
 in the same server tick. `recipe_sources` is asked per player action, never per
 tick; `menu_links` is asked per open linked mod menu each tick, only when a mod
 subscribes. With no listener its tick path does no work or allocation. Both hooks
