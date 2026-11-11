@@ -617,8 +617,11 @@ impl Game<'_> {
     /// `stillValid` of the guest's open container: its blocks are still there
     /// and in reach, or its vehicle exists and is in reach. True with none open.
     pub(super) fn container_menu_valid(&self, g: &horizon_client::lan::guest::Guest) -> bool {
+        let Some(host) = self.lan.as_ref() else {
+            return true;
+        };
         g.menu.as_ref().is_none_or(|m| {
-            !(m.slots.valid(&self.world) && !m.slots.still_valid(&self.world, g, m.pos))
+            !(m.slots.valid(&self.world) && !m.still_valid(&host.hub.loop_context, &self.world, g))
                 && !m.pos.is_some_and(|k| {
                     k.1 == crate::game::minecarts::CART_KEY_Y
                         && !self.chest_vehicle_still_valid(k.2, g)
