@@ -1,17 +1,15 @@
 //! Typed mod payloads (arismoko/horizon#813), stage 1: the transport's
 //! capacities, the direction-typed tokens and the object-safe send services.
-//! Nothing registers a payload yet, so a mod cannot hold a token; the codec,
+//! Nothing registers a payload yet; tokens are untrusted claims until admitted. The codec,
 //! registration, negotiation and delivery are the later stages. See
 //! `docs/modding/src/concepts/typed-payloads.md`.
 use std::marker::PhantomData;
 
-/// The most bytes of a complete typed envelope a client sends a server, in
-/// configuration and in play: vanilla 26.3's
-/// `ServerboundCustomPayloadPacket.MAX_PAYLOAD_SIZE`.
+/// Vanilla's serverbound discard-fallback body limit, in both phases.
+/// Registered payloads are limited by their codec and packet framing, not this value.
 pub const SERVERBOUND_PAYLOAD_CAPACITY: usize = 32_767;
-/// The most bytes of a complete typed envelope a server sends a client, in
-/// configuration and in play: vanilla 26.3's
-/// `ClientboundCustomPayloadPacket.MAX_PAYLOAD_SIZE`.
+/// Vanilla's clientbound discard-fallback body limit, in both phases.
+/// Registered payloads are limited by their codec and packet framing, not this value.
 pub const CLIENTBOUND_PAYLOAD_CAPACITY: usize = 1_048_576;
 
 /// Which way a payload travels.
@@ -22,30 +20,6 @@ pub enum PayloadDirection {
     ToServer,
     /// From a server to one client.
     ToClient,
-}
-
-impl PayloadDirection {
-    /// The most bytes a complete envelope may hold this way, its nested
-    /// values and the envelope's own overhead included.
-    pub const fn capacity(self) -> usize {
-        match self {
-            Self::ToServer => SERVERBOUND_PAYLOAD_CAPACITY,
-            Self::ToClient => CLIENTBOUND_PAYLOAD_CAPACITY,
-        }
-    }
-
-    /// Whether a complete envelope of `size` bytes fits this way. The same
-    /// answer in configuration and in play; nothing is sent on a refusal.
-    pub const fn admit_envelope(self, size: usize) -> Result<(), PayloadSendError> {
-        let limit = self.capacity();
-        if size > limit {
-            return Err(PayloadSendError::PayloadTooLarge {
-                size: size as u64,
-                limit: limit as u64,
-            });
-        }
-        Ok(())
-    }
 }
 
 /// The protocol phase a connection is in.
@@ -98,11 +72,11 @@ pub enum PeerPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]
 pub enum PayloadSendError {
-    /// The complete envelope is past its direction's capacity.
+    /// The encoded payload exceeds its codec or frame limit.
     PayloadTooLarge {
         /// Bytes of the complete envelope.
         size: u64,
-        /// The direction's capacity.
+        /// The codec or frame limit.
         limit: u64,
     },
     /// The peer did not negotiate this optional payload.
@@ -128,7 +102,7 @@ pub enum PayloadSendError {
 /// freezes; it names the declaration's slot, its phases, its direction and
 /// the load session that issued it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
-// exhaustive: its fields are private, so mods cannot build or destructure it
+// exhaustive: private representation; Wire decoding is untrusted and admission checks the table.
 pub struct PayloadToken {
     slot: u32,
     load_session: u64,
@@ -138,7 +112,7 @@ pub struct PayloadToken {
 
 impl PayloadToken {
     /// Issues the token of the declaration in `slot`.
-    // hidden: a game-side helper, not part of the mod surface
+    // hidden: creates a claim, not authority; admission checks the frozen table
     #[doc(hidden)]
     pub const fn issue(
         slot: u32,
@@ -166,14 +140,19 @@ impl PayloadToken {
 
     /// The declaration's slot, when this token may send `direction`-ward on
     /// a connection in `phase` of the load session `load_session`. A send
-    /// service checks this before anything else, so a forged or stale token
+    /// service supplies its engine-owned frozen declaration table, indexed by slot,
+    /// and checks exact token metadata before anything else. A forged or stale token
     /// reaches no codec and no handler.
-    pub const fn admit(
+    pub fn admit(
         self,
         direction: PayloadDirection,
         load_session: u64,
         phase: ConnectionPhase,
+        declarations: &[PayloadToken],
     ) -> Result<u32, PayloadSendError> {
+        if declarations.get(self.slot as usize) != Some(&self) {
+            return Err(PayloadSendError::StaleToken);
+        }
         if self.load_session != load_session {
             return Err(PayloadSendError::StaleToken);
         }
@@ -261,7 +240,8 @@ typed_token!(ToClient, ToClient);
 /// operation.
 pub trait ServerboundPayloads {
     /// Queues `body`, the encoded value of `token`'s payload, for the
-    /// server. Ok means accepted for sending, not delivered.
+    /// server. Ok means accepted for sending, not delivered. Implementations must
+    /// call `PayloadToken::admit` with their own frozen declaration table first.
     fn send_erased(&mut self, token: PayloadToken, body: &[u8]) -> Result<(), PayloadSendError>;
 }
 
@@ -270,7 +250,8 @@ pub trait ServerboundPayloads {
 /// one erased operation.
 pub trait ClientboundPayloads {
     /// Queues `body`, the encoded value of `token`'s payload, for `player`'s
-    /// client. Ok means accepted for sending, not delivered.
+    /// client. Ok means accepted for sending, not delivered. Implementations must
+    /// call `PayloadToken::admit` with their own frozen declaration table first.
     fn send_erased(
         &mut self,
         player: u128,
@@ -289,21 +270,7 @@ mod tests {
     const SESSION: u64 = 41;
 
     fn token(phase: PayloadPhase, direction: PayloadDirection) -> PayloadToken {
-        PayloadToken::issue(9, SESSION, phase, direction)
-    }
-
-    #[test]
-    fn an_envelope_fits_up_to_vanillas_capacity_each_way() {
-        let too_large = |size, limit| Err(PayloadSendError::PayloadTooLarge { size, limit });
-        let to_server = PayloadDirection::ToServer;
-        assert_eq!(to_server.admit_envelope(32_767), Ok(()));
-        assert_eq!(to_server.admit_envelope(32_768), too_large(32_768, 32_767));
-        let to_client = PayloadDirection::ToClient;
-        assert_eq!(to_client.admit_envelope(1_048_576), Ok(()));
-        assert_eq!(
-            to_client.admit_envelope(1_048_577),
-            too_large(1_048_577, 1_048_576)
-        );
+        PayloadToken::issue(0, SESSION, phase, direction)
     }
 
     #[test]
@@ -311,30 +278,54 @@ mod tests {
         use ConnectionPhase::{Configuration, Play};
         use PayloadDirection::{ToClient, ToServer};
         let play = token(PayloadPhase::Play, ToServer);
-        assert_eq!(play.admit(ToServer, SESSION, Play), Ok(9));
+        assert_eq!(play.admit(ToServer, SESSION, Play, &[play]), Ok(0));
         assert_eq!(
-            play.admit(ToClient, SESSION, Play),
+            play.admit(ToClient, SESSION, Play, &[play]),
             Err(PayloadSendError::WrongDirection)
         );
         assert_eq!(
-            play.admit(ToServer, SESSION, Configuration),
+            play.admit(ToServer, SESSION, Configuration, &[play]),
             Err(PayloadSendError::WrongPhase {
                 phase: Configuration
             })
         );
         // A token of another load session is refused whatever else matches.
         assert_eq!(
-            play.admit(ToServer, SESSION + 1, Play),
+            play.admit(ToServer, SESSION + 1, Play, &[play]),
             Err(PayloadSendError::StaleToken)
         );
         let common = token(PayloadPhase::Common, ToClient);
-        assert_eq!(common.admit(ToClient, SESSION, Configuration), Ok(9));
-        assert_eq!(common.admit(ToClient, SESSION, Play), Ok(9));
+        assert_eq!(
+            common.admit(ToClient, SESSION, Configuration, &[common]),
+            Ok(0)
+        );
+        assert_eq!(common.admit(ToClient, SESSION, Play, &[common]), Ok(0));
         let configuration = token(PayloadPhase::Configuration, ToClient);
         assert_eq!(
-            configuration.admit(ToClient, SESSION, Play),
+            configuration.admit(ToClient, SESSION, Play, &[configuration]),
             Err(PayloadSendError::WrongPhase { phase: Play })
         );
+    }
+
+    #[test]
+    fn forged_wire_metadata_never_admits() {
+        let real = token(PayloadPhase::Play, PayloadDirection::ToServer);
+        for forged in [
+            PayloadToken { slot: 1, ..real },
+            PayloadToken {
+                phase: PayloadPhase::Common,
+                ..real
+            },
+            PayloadToken {
+                direction: PayloadDirection::ToClient,
+                ..real
+            },
+        ] {
+            assert_eq!(
+                forged.admit(forged.direction, SESSION, ConnectionPhase::Play, &[real]),
+                Err(PayloadSendError::StaleToken)
+            );
+        }
     }
 
     #[test]
