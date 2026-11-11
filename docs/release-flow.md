@@ -424,9 +424,13 @@ Do not assume a dated Nightly is gone just because its date is outside the usual
 stalled Nightly cleanup must not turn a still-downloadable game into an unpaired game.
 
 Keep every exact-SHA SDK referenced by R, and the **10 newest unreferenced exact-SHA SDK releases**, ordered by
-release `created_at` descending, then release ID descending as a deterministic tie-breaker. Delete only the
+publication time (`published_at`) descending, then release ID descending as a deterministic tie-breaker.
+For drafts without `published_at`, use draft `created_at` as the provisional ordering timestamp;
+publication replaces that timestamp. Never use a published release's `created_at` for publication order:
+GitHub derives it from the target commit's date. Delete only the
 remaining unreferenced SDK releases. Count incomplete and draft SDK releases toward those 10 too: neither is
 an excuse to delete a referenced release. There is no age exemption or accumulating grace-period queue.
+The reserve covers SDKs published since the last Nightly pick that no Nightly references yet.
 Never delete unrelated tags, release families, permanent source tags or build branches in this operation.
 
 After a successful complete sweep the SDK release count is at most `distinct protected SHAs + 10` (assuming
@@ -456,16 +460,26 @@ reference-registration contract and would defeat this bound. Do not delete a pla
    pin is missing, ambiguous or inconsistent aborts the sweep, rather than guessing that it is obsolete.
 4. Build a deduplicated protected set and a reverse map of SHA to all roots for the review summary. Discover
    SDK candidates only by the exact `prebuilt-[0-9a-f]{40}` release tag-name pattern. Resolve each candidate's tag
-   and require it to agree with the SHA in its name; malformed SDK-family names or mismatches abort the sweep
+   and require it to agree with the SHA in its name. An unreferenced draft whose exact-SHA tag is absent
+   (for example, a failed upload) still counts toward the reserve and is eligible for release-only deletion
+   outside it; do not invent or delete a tag for that draft. A referenced draft or missing tag still fails
+   closed. Other malformed SDK-family names or mismatches abort the sweep
    for manual review. For every protected SHA require the corresponding SDK to exist and be complete under
    the publication contract above. A missing pair is an availability incident: delete nothing and report it;
    pruning neither rebuilds it nor silently removes its Nightly.
 5. Finish all discovery and validation before the first destructive request. Any missing page, truncated or
-   malformed response, permission/rate-limit/network error, unresolved tag or incomplete asset listing means
+   malformed response, permission/rate-limit/network error, unresolved tag (except the unreferenced SDK draft
+   exception above) or incomplete asset listing means
    **zero deletions**, a failed run and an actionable summary. An empty result is accepted only after successful
    exhaustive queries and tag reconciliation; a 404 or an API exception is not an empty history.
 
 ### Publication/deletion exclusion
+
+Retention defaults to dry-run: it issues zero release or tag mutations and reports the protected roots,
+reserve and proposed deletions. Review a complete dry-run summary before enabling pruning. Mutation
+requires an explicit `--apply` switch; neither a schedule nor a saved plan implicitly enables it.
+On apply, acquire the shared lock and repeat complete discovery and validation to compute a fresh plan,
+not replay the earlier dry-run inventory. Keep the lock through deletion.
 
 Before enabling pruning, replace the independent workflow concurrency groups with one repository-wide,
 non-cancelling group, `nightly-sdk-publication`, used by the **entire** real Nightly workflow, SDK workflow and
