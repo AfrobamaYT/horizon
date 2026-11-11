@@ -168,15 +168,18 @@ impl Game<'_> {
                     Mat4::IDENTITY,
                     diffuse_lights(false),
                     Vec::new(),
-                );
+                )
+                .animated(self.animation_time(self.clock.fraction() as f32));
                 self.native_block_entity_submit(block.pos, name, block.state, &entity, &mut draw);
+                // Its text's new glyphs upload with this screen's batch.
+                batch.patches.append(&mut self.text_patches.borrow_mut());
+                let time = draw.animation();
                 let (drawn, spins) = draw.into_turning();
                 let mut placed: Vec<Vertex> = Vec::with_capacity(drawn.len());
                 place_turning(
                     &drawn,
                     &spins,
-                    self.world.game_time,
-                    self.clock.fraction() as f32,
+                    time,
                     at,
                     &mut placed,
                 );

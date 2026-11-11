@@ -2,9 +2,8 @@
 //! textures (resource packs included) in its own pass: with `WorldDrawn::block_sprites`, the arrays themselves.
 use super::Game;
 use horizon_client::block_sprites::{BlockSprites, Lookup, SpriteRef};
-use horizon_core::geometry::Direction;
 use horizon_world::registry::BlockStateId;
-use mod_api::{AtlasRegion, BlockFaceTexture, Identifier};
+use mod_api::{AtlasRegion, Identifier};
 
 #[allow(dead_code)]
 impl Game<'_> {
@@ -36,30 +35,36 @@ impl Game<'_> {
             .map(|texture| lookup.texture(texture))
             .collect()
     }
-    /// For a client mod drawing a block entity: the texture block state `state`'s model shows on its `side`
-    /// (`block/oak_planks`: vanilla's without their namespace, a mod's with it), by the name `native_draw_cube` and
-    /// `native_draw_quad` take, and that face's
-    /// tint index (-1 for none): a copycat block drawing a box of its material's textures with `native_draw_cube`,
-    /// kept with `BlockEntityDraw::keep`. The face culled against that side comes first, else the first facing it;
-    /// None when the model has no face that way or isn't baked. API @API:block_face_sprite@.
-    pub(super) fn block_face_sprite(
+    /// For a client mod drawing a block's faces itself (a copycat drawing its material's, from
+    /// `block_sprites`): the 0xRRGGBB colour a face of `state` with tint index `tint_index` is
+    /// multiplied by at `pos`, as the chunk mesher tints it there (`MeshTables::block_tints`:
+    /// `BlockColors`, biome blend included). None for an untinted face. This client's copy of the
+    /// world: the chunks around `pos` it has, as break particles read them (`particle_sprite`).
+    pub(super) fn block_tint_color(
         &self,
         state: BlockStateId,
-        side: Direction,
-    ) -> Option<BlockFaceTexture> {
-        let wanted = horizon_assets::model::Direction::ALL[side as usize];
-        let models = self
-            .pack
-            .render
-            .model_catalog
-            .collect_seeded(state, 42)
-            .ok()?;
-        let faces = || models.iter().flat_map(|(_, model)| &model.faces);
-        let face = faces()
-            .find(|f| f.quad.cull == Some(wanted))
-            .or_else(|| faces().find(|f| f.quad.facing == wanted))?;
-        let name = self.pack.layer_names.get(&face.layer)?.clone();
-        Some(mod_api::BlockFaceTexture::new(name, face.quad.tint_index))
+        tint_index: i32,
+        pos: [i32; 3],
+    ) -> Option<u32> {
+        let (cx, cz) = (pos[0] >> 4, pos[2] >> 4);
+        let region: [[Option<&horizon_client::chunk::Chunk>; 3]; 3] = std::array::from_fn(|dz| {
+            std::array::from_fn(|dx| {
+                self.world
+                    .chunks
+                    .get(&(cx + dx as i32 - 1, cz + dz as i32 - 1))
+                    .map(|c| &**c)
+            })
+        });
+        let tints = self.pack.context.tables.block_tints(
+            state,
+            pos,
+            &region,
+            world_biomes!(self),
+            self.streaming.biome_zoom,
+            self.streaming.biome_blend,
+            self.streaming.nether_shading,
+        );
+        tints(tint_index)
     }
     /// For a client mod: changes each time the resources load (a resource pack turned on or off can move every
     /// sprite): ask `block_sprites` again then. API 380.
@@ -83,7 +88,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or(u32::MAX, |r| r.sprite_split());
-        Lookup::new(&self.pack.context, split)
+        Lookup::new(&self.pack.context, split, &self.pack.layer_names)
     }
 }
 
@@ -216,6 +221,103 @@ mod texture_atlas_stitched_tests {
                     "looked up again in the new atlas"
                 );
             });
+        });
+    }
+}
+
+/// `FaceSprite::quad_on`, the copycat side of `block_sprites`.
+#[cfg(test)]
+mod quad_on_tests {
+    use horizon_core::geometry::Direction;
+
+    fn face(uv: [f32; 6]) -> mod_api::FaceSprite {
+        mod_api::FaceSprite {
+            sprite: mod_api::SpriteRef {
+                array: 0,
+                layer: 0,
+                animated: false,
+                cutout: false,
+            },
+            texture: "block/oak_log".into(),
+            rect: [0.0, 0.0, 1.0, 1.0],
+            inset: 0.0,
+            uv,
+            tint: None,
+            tint_index: -1,
+            translucent: false,
+        }
+    }
+
+    /// The point (a, b) of `side`, in its two axes, as `FaceSprite::uv` counts them.
+    fn side_point(side: Direction, p: [f32; 3]) -> [f32; 2] {
+        match side {
+            Direction::Down | Direction::Up => [p[0], p[2]],
+            Direction::North | Direction::South => [p[0], p[1]],
+            Direction::West | Direction::East => [p[2], p[1]],
+        }
+    }
+
+    /// Whatever the face's turn or mirror, the UV `quad` gives each corner (the rectangle's
+    /// (u0, v0), (u0, v1), (u1, v1), (u1, v0) in turn) is the one the material's own side shows
+    /// at that point, and the corners wind counterclockwise seen from outside.
+    #[test]
+    fn a_copycat_face_shows_its_material_turned_as_the_model_turns_it() {
+        let upright = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        // u = b, v = 1 - a: a quarter turn (a log on its side).
+        let turned = [0.0, 1.0, 0.0, -1.0, 1.0, 0.0];
+        // u = 1 - a, v = b: mirrored.
+        let mirrored = [1.0, 0.0, -1.0, 0.0, 0.0, 1.0];
+        let boxes = [([0.0; 3], [1.0; 3]), ([0.0, 0.0, 0.0], [1.0, 0.5, 1.0])];
+        for uv in [upright, turned, mirrored] {
+            let face = face(uv);
+            for side in Direction::ALL {
+                for (from, to) in boxes {
+                    let (corners, [u0, v0, u1, v1]) = face.quad_on(side, from, to);
+                    let given = [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
+                    for (corner, given) in corners.iter().zip(given) {
+                        let [a, b] = side_point(side, *corner);
+                        let want = [
+                            (uv[0] + a * uv[2] + b * uv[4]) * 16.0,
+                            (uv[1] + a * uv[3] + b * uv[5]) * 16.0,
+                        ];
+                        assert!(
+                            (want[0] - given[0]).abs() < 1e-4 && (want[1] - given[1]).abs() < 1e-4,
+                            "{side:?} {uv:?} {from:?}..{to:?}: {corner:?} shows {given:?}, not {want:?}"
+                        );
+                    }
+                    let [p0, p1, p2, _] = corners;
+                    let e = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                    let f = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                    let n = side.normal().map(|v| v as f32);
+                    let out = (e[1] * f[2] - e[2] * f[1]) * n[0]
+                        + (e[2] * f[0] - e[0] * f[2]) * n[1]
+                        + (e[0] * f[1] - e[1] * f[0]) * n[2];
+                    assert!(out > 0.0, "{side:?} {uv:?}: the face looks inward");
+                }
+            }
+        }
+        // The half box's north face is cut at half height: its corners lie on z = 0, y up to 0.5.
+        let (corners, _) = face(upright).quad_on(Direction::North, [0.0; 3], [1.0, 0.5, 1.0]);
+        assert!(corners.iter().all(|c| c[2] == 0.0 && c[1] <= 0.5));
+    }
+}
+
+/// `block_tint_color`, the colour a copycat multiplies its material's tinted faces by.
+#[cfg(test)]
+mod block_tint_color_tests {
+    /// A grass block's tinted face takes a colour where it stands; stone has no tint, and
+    /// an untinted face (-1) none either.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_tinted_face_takes_its_colour_where_it_stands() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let registry = game.pack.context.assets.registry;
+            let grass = registry.default_state("minecraft:grass_block").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let color = game.block_tint_color(grass, 0, [0, 64, 0]);
+            assert!(color.is_some_and(|c| c <= 0xFF_FFFF), "{color:?}");
+            assert_eq!(game.block_tint_color(grass, -1, [0, 64, 0]), None);
+            assert_eq!(game.block_tint_color(stone, 0, [0, 64, 0]), None);
         });
     }
 }
