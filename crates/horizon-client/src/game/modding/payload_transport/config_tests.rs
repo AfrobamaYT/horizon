@@ -390,9 +390,19 @@ fn controlled_peer(port: u16, expected: &[u8], game: &super::super::Game<'_>, ne
     let mut replies = 0;
     loop {
         let (id, body) = c.recv().unwrap();
+        // Inspect the socket bytes BEFORE any registered CustomPayload decoder.
+        if id == horizon_protocol::ids::configuration::clientbound::CUSTOM_PAYLOAD {
+            use horizon_protocol::buf::{Codec, Ident, Reader};
+            let mut reader = Reader::new(&body);
+            if Ident::read(&mut reader).unwrap() == CHANNEL {
+                assert!(
+                    reader.rest() == expected,
+                    "TCP configuration body must be exact application bytes, without an inner envelope"
+                );
+            }
+        }
         match cfg::Clientbound::decode(id, &body).unwrap() {
             cfg::Clientbound::CustomPayload(p) if p.channel == CHANNEL => {
-                super::tests::assert_bare_body(&body, CHANNEL, expected);
                 assert_eq!(p.data, expected);
                 replies += 1;
                 assert_eq!(replies, 1);

@@ -161,9 +161,20 @@ fn published_tcp_attributes_players_and_orders_actions() {
                             "raw reply deadline: peer {peer}, slot {slot}"
                         );
                         let (id, body) = c.recv().unwrap();
+                        // Only the vanilla Identifier is decoded before the body oracle.
+                        if id == horizon_protocol::ids::play::clientbound::CUSTOM_PAYLOAD {
+                            use horizon_protocol::buf::{Codec, Ident, Reader};
+                            let mut reader = Reader::new(&body);
+                            if Ident::read(&mut reader).unwrap() == CHANNEL {
+                                assert_eq!(
+                                    reader.rest(),
+                                    &[peer as u8, slot],
+                                    "TCP reply must not contain an envelope inside the declared channel"
+                                );
+                            }
+                        }
                         match play::Clientbound::decode(id, &body).unwrap() {
                             play::Clientbound::CustomPayload(p) if p.channel == CHANNEL => {
-                                super::tests::assert_bare_body(&body, CHANNEL, &[peer as u8, slot]);
                                 assert_eq!(p.data, vec![peer as u8, slot]);
                                 break;
                             }
