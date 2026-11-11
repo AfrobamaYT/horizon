@@ -286,3 +286,137 @@ fn general_row_unloads_with_its_chunk_and_reloads_once() {
         assert_ne!(rows[1].id, old_rider);
     });
 }
+
+/// The missing-mod quarantine: a record of a namespace no loaded mod owns
+/// keeps the existing unknown-kind path — held as loaded (`persist.raw`),
+/// never ticked, written back from that store — byte for byte.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn quarantine_preserves_a_missing_mods_record_byte_for_byte() {
+    with_types(|game| {
+        game.others.clear();
+        let tag = record_tag("gone:robot", [7, 7, 7, 7], b"opaque", Vec::new());
+        let loaded = tag.clone();
+        game.spawn_loaded_entity((0, 0), tag, None);
+        assert_eq!(game.others.len(), 1);
+        assert_eq!(game.others[0].kind, "gone:robot");
+        // What leaves the chunk is the very compound that arrived.
+        let mut chunks = game.entity_chunks(&HashSet::from([(0, 0)]), false);
+        let (_, mut records) = chunks.remove(0);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records.remove(0), loaded);
+    });
+}
+
+/// A loaded mod's namespace with an unknown type skips with a warning:
+/// nothing is published, quarantined or kept for it.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn loaded_mods_unknown_type_skips() {
+    // The package inventory is what owns a namespace: "mymod" is a loaded
+    // package here, while no type of it was ever declared.
+    mod_api::__private::with_test_packages(&["mymod"], || {
+        // No fixture declaration: the type is unknown precisely because no
+        // loaded mod declared it.
+        with_game(|game| {
+            game.others.clear();
+            game.spawn_loaded_entity(
+                (0, 0),
+                record_tag("mymod:mystery", [7, 7, 7, 7], b"", Vec::new()),
+                None,
+            );
+            assert!(game.others.is_empty());
+            let chunks = game.entity_chunks(&HashSet::from([(0, 0)]), false);
+            assert!(chunks.iter().all(|(_, records)| records.is_empty()));
+        });
+    });
+}
+
+/// An unknown `minecraft:` kind keeps its existing path unchanged —
+/// preserved whatever its size, outside the quarantine bounds.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn unknown_minecraft_kind_keeps_its_existing_path() {
+    with_types(|game| {
+        game.others.clear();
+        let mut oversized = record_tag("minecraft:mystery", [7, 7, 7, 7], b"", Vec::new());
+        if let Tag::Compound(map) = &mut oversized {
+            map.insert(
+                "Extra".into(),
+                Tag::ByteArray(vec![0; limits::QUARANTINE_RECORD_LIMIT as usize + 1]),
+            );
+        }
+        game.spawn_loaded_entity((0, 0), oversized, None);
+        assert_eq!(game.others.len(), 1);
+        assert_eq!(game.others[0].kind, "minecraft:mystery");
+    });
+}
+
+/// The quarantine record bound: a missing-mod record one byte over
+/// [`limits::QUARANTINE_RECORD_LIMIT`] skips; one inside it is kept.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn quarantine_record_limit_skips_one_byte_over() {
+    with_types(|game| {
+        game.others.clear();
+        let sized = |extra: u64| {
+            let mut tag = record_tag("gone:robot", [7, 7, 7, 7], b"", Vec::new());
+            if let Tag::Compound(map) = &mut tag {
+                map.insert("Extra".into(), Tag::ByteArray(vec![0; extra as usize]));
+            }
+            tag
+        };
+        // Size the record to exactly the bound, then one byte past it.
+        let base = nbt_size(&sized(0));
+        let fill = limits::QUARANTINE_RECORD_LIMIT - base;
+        assert!(fill > 1, "the base record must sit below the bound");
+        game.spawn_loaded_entity((0, 0), sized(fill), None);
+        assert_eq!(game.others.len(), 1, "a record at the bound is kept");
+        game.spawn_loaded_entity((0, 0), sized(fill + 1), None);
+        assert_eq!(game.others.len(), 1, "one byte over skips");
+    });
+}
+
+/// The quarantine chunk bound: the
+/// [`limits::QUARANTINE_CHUNK_LIMIT`]'th record of one chunk is kept, the
+/// next skips.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn quarantine_chunk_limit_skips_past_256() {
+    with_types(|game| {
+        game.others.clear();
+        let at = |slot: usize| [slot as i32, 0, 0, 0];
+        let tag = |slot: usize| record_tag("gone:robot", at(slot), b"", Vec::new());
+        // Fill the chunk to one below the bound through the gate itself.
+        for slot in 0..limits::QUARANTINE_CHUNK_LIMIT - 1 {
+            game.spawn_loaded_entity((0, 0), tag(slot), None);
+        }
+        assert_eq!(game.others.len(), limits::QUARANTINE_CHUNK_LIMIT - 1);
+        game.spawn_loaded_entity((0, 0), tag(250), None);
+        assert_eq!(
+            game.others.len(),
+            limits::QUARANTINE_CHUNK_LIMIT,
+            "the bound's own record is kept"
+        );
+        game.spawn_loaded_entity((0, 0), tag(251), None);
+        assert_eq!(
+            game.others.len(),
+            limits::QUARANTINE_CHUNK_LIMIT,
+            "the next record skips"
+        );
+        // A record of another chunk still quarantines.
+        let mut elsewhere = tag(252);
+        if let Tag::Compound(map) = &mut elsewhere {
+            map.insert(
+                format::POSITION.into(),
+                Tag::List(
+                    [1024.5f64, 64.0, 0.5]
+                        .map(|v| Tag::Double(v.to_bits()))
+                        .to_vec(),
+                ),
+            );
+        }
+        game.spawn_loaded_entity((64, 0), elsewhere, None);
+        assert_eq!(game.others.len(), limits::QUARANTINE_CHUNK_LIMIT + 1);
+    });
+}

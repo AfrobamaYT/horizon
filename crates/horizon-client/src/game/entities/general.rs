@@ -674,6 +674,64 @@ impl Game<'_> {
         }
     }
 
+    /// The unknown-kind gate of the load pass (`spawn_loaded_entity`): may
+    /// this record of a kind no listed family claims go to `load_other`,
+    /// the existing preserve-byte-for-byte path? An unknown `minecraft:`
+    /// kind and a bare vanilla name keep that existing path unchanged. A
+    /// namespaced kind of a loaded mod that never declared the type is
+    /// skipped with a warning (its own mod would own the record, and a
+    /// table that is not its own must not keep it). A kind of a namespace
+    /// no loaded mod owns — a missing mod's record — is preserved, within
+    /// the quarantine bounds: a record over
+    /// [`limits::QUARANTINE_RECORD_LIMIT`], or a chunk already holding
+    /// [`limits::QUARANTINE_CHUNK_LIMIT`] of them, is skipped with a
+    /// warning instead. What passes is preserved exactly as loaded: the
+    /// unknown-kind path holds the compound untouched (`persist.raw`),
+    /// never ticks it (an `OtherEntity` has no tick) and writes it back
+    /// from that store.
+    pub(in crate::game) fn general_quarantine_admits(
+        &self,
+        tag: &Tag,
+        kind: &str,
+        at: Vec3,
+    ) -> bool {
+        let Some((namespace, _)) = kind.split_once(':') else {
+            return true;
+        };
+        if namespace == "minecraft" {
+            return true;
+        }
+        if mod_namespace_loaded(namespace) {
+            log::warn!(
+                "Horizon: {kind} names no type of loaded mod {namespace}; skipping its record"
+            );
+            return false;
+        }
+        let size = nbt_size(tag);
+        if size > limits::QUARANTINE_RECORD_LIMIT {
+            log::warn!(
+                "Horizon: quarantined general entity record of {size} bytes exceeds {}; skipping it",
+                limits::QUARANTINE_RECORD_LIMIT
+            );
+            return false;
+        }
+        let chunk = chunk_of(at);
+        let quarantined_here = self
+            .others
+            .iter()
+            .filter(|other| quarantined_kind(&other.kind) && chunk_of(other.position) == chunk)
+            .count();
+        if quarantined_here >= limits::QUARANTINE_CHUNK_LIMIT {
+            log::warn!(
+                "Horizon: chunk {:?} already holds {} quarantined general entity records; skipping the next",
+                chunk,
+                limits::QUARANTINE_CHUNK_LIMIT
+            );
+            return false;
+        }
+        true
+    }
+
     /// Load one saved general entity tree whose root kind the frozen
     /// registry holds: tag → record → every check, then the whole tree
     /// publishes through the same join boundary a fresh spawn takes. A
@@ -774,6 +832,21 @@ impl Game<'_> {
             self.insert_general_record(rider.clone(), rider_tag, Some(id), None);
         }
     }
+}
+
+/// Whether a namespace belongs to a loaded package: its own id or one of
+/// its manifest's namespaces (`owns_namespace`, read from the engine side).
+fn mod_namespace_loaded(namespace: &str) -> bool {
+    mod_api::__private::loaded_mods().iter().any(|package| {
+        package.id() == namespace || package.namespaces().any(|owned| owned == namespace)
+    })
+}
+
+/// Whether a kind is a namespaced non-`minecraft` one — the shape a
+/// quarantined (missing-mod) record's kind has.
+fn quarantined_kind(kind: &str) -> bool {
+    kind.split_once(':')
+        .is_some_and(|(namespace, _)| namespace != "minecraft")
 }
 
 /// Whether any UUID of the record tree names a live entity of the level
