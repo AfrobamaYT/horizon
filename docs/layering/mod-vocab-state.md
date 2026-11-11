@@ -19,14 +19,23 @@ Registration callbacks are consulted only while the API-owned activity counter i
 Every production static/TLS declaration, including declarations behind the `testing` feature, is
 listed below. Unconditional unit-test items and explicitly test-only module files are excluded.
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
-exception, or a lint suppression outside that file. Ownership reasons are reviewed permissions,
+exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
+include boundaries are refused. Every listed generated OUT_DIR input is token-checked before write by
+`horizon-mod-api-gen`: no unlisted static declarations (including macro metavariables), unsafe,
+unsafe lint suppression, or further includes. The generated immutable ABI hash is checked against
+this same inventory by exact name and type; nested state is refused. Lifetimes and string literals are not declarations. The trusted
+Wire derive supplies codecs, not state; the crate's unsafe lint applies to its expansion as well.
+Ownership reasons are reviewed permissions,
 not generated from newly discovered declarations. The table is generated from those permissions.
 
-All source paths below are relative to `crates/horizon-mod-vocab/src`.
+Source paths below are relative to `crates/horizon-mod-vocab/src`; `@generated/` identifies an
+OUT_DIR file checked by the generator before writing it.
 
 | File and item | Type | Ownership | Reason |
 | --- | --- | --- | --- |
+| `@generated/wire_generated.rs::WIRE_LAYOUT` | `::std::sync::LazyLock<u64>` | immutable ABI layout fingerprint | Hash of the build-fixed Wire layouts; the generator validates its sole declaration and type before writing output. |
 | `__private/points.rs::OPEN` | `Mutex<Open>` | dispatch table | Temporary points exception pending #2697: open injection-listener routing and seal state remain in the unchanged points module. |
+| `block/fluid_capability.rs::BUCKET_IDS` | `std::sync::LazyLock<[crate::Identifier;3]>` | immutable lookup cache | Three vanilla bucket identifiers resolved once; no live registration or world state. |
 | `client/arm_pose.rs::TEST_POSES` | `std::cell::Cell<Option<&'static[PoseInfo]>>` | Parts lookup table | Thread-local test lookup of installed Parts metadata by engine-issued slot. |
 | `client/client_reload.rs::first::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |
 | `client/client_reload.rs::last::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |

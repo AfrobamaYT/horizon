@@ -143,5 +143,15 @@
     "type": "std::cell::Cell<Option<&'static[ControllerInfo]>>",
     "category": "Parts lookup table",
     "reason": "Thread-local test lookup of installed Parts metadata by engine-issued slot."
+  },
+  "block/fluid_capability.rs::BUCKET_IDS": {
+    "type": "std::sync::LazyLock<[crate::Identifier;3]>",
+    "category": "immutable lookup cache",
+    "reason": "Three vanilla bucket identifiers resolved once; no live registration or world state."
+  },
+  "@generated/wire_generated.rs::WIRE_LAYOUT": {
+    "type": "::std::sync::LazyLock<u64>",
+    "category": "immutable ABI layout fingerprint",
+    "reason": "Hash of the build-fixed Wire layouts; the generator validates its sole declaration and type before writing output."
   }
 }

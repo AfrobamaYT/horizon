@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "crates/horizon-mod-vocab/src"
 INVENTORY = ROOT / "tools/layering/mod_vocab_state.json"
 DOCUMENT = ROOT / "docs/layering/mod-vocab-state.md"
-STATE = re.compile(r"(?<![\w'])static\s+(?:(?:mut|ref)\s+)?(?P<name>[A-Za-z_]\w*)\s*:(?!:)\s*(?P<type>[^=;]+)=")
+STATE = re.compile(r"(?<![\w'])static\s+(?:(?:mut|ref)\s+)?(?P<name>[A-Za-z_]\w*)\s*:(?!:)\s*(?P<type>[^=]+?)=")
 TEST = re.compile(r"#\[\s*(?:test\s*|cfg\s*\(\s*test\s*\)\s*)\]")
 
 
@@ -80,6 +80,44 @@ def unsafe_violations(files: dict[str, str]) -> list[str]:
     return errors
 
 
+def expansion_violations(files: dict[str, str]) -> list[str]:
+    """Refuse state-producing macro definitions and unchecked include boundaries.
+
+    Listed OUT_DIR inputs pass the generator's token-level vocabulary validator
+    before every write (build/vocab_boundary.rs), including unsafe/suppressions.
+    """
+    generated = {
+        'mod_api_generated_host.rs', 'mod_api_generated.rs', 'mod_api_exports_root.rs',
+        'wire_generated.rs', 'parts_modules.rs', 'mod_api_host_areas.rs',
+        'capability_providers_generated.rs', 'mod_api_exports_private_reload.rs',
+        'mod_api_exports_private_built.rs', 'mod_api_exports_private_game.rs',
+        'mod_api_exports_private.rs',
+    }
+    errors = []
+    for path, source in files.items():
+        code = blank(source)
+        tests = [(m.start(), item_end(code, m.end())[0]) for m in TEST.finditer(code)]
+        declared = [(m.start(), m.end()) for m in STATE.finditer(code)]
+        for token in re.finditer(r"(?<!')\bstatic\b", code):
+            if not any(start <= token.start() < end for start, end in declared + tests):
+                errors.append(f'{path}: unsupported static syntax or macro argument requires an explicit declaration')
+        for macro in re.finditer(r'\bmacro_rules\s*!', code):
+            end = item_end(code, macro.start())[0]
+            body = code[macro.start():end]
+            if re.search(r"(?<!')\bstatic\b", body):
+                errors.append(f'{path}: state-declaring macro definitions are not permitted')
+        for include in re.finditer(r'\binclude\s*!', code):
+            if any(start <= include.start() < end for start, end in tests):
+                continue
+            end = item_end(code, include.start())[0]
+            call = source[include.start():end]
+            name = re.fullmatch(
+                r'include!\s*\(\s*concat!\s*\(\s*env!\("OUT_DIR"\)\s*,\s*"/([^"\n]+)"\s*\)\s*\)\s*;?', call)
+            if name is None or name[1] not in generated:
+                errors.append(f'{path}: include boundary is not a validated vocabulary generator output')
+    return errors
+
+
 def violations(files: dict[str, str], allowed: dict[str, dict]) -> list[str]:
     errors = []
     seen = set()
@@ -97,7 +135,7 @@ def violations(files: dict[str, str], allowed: dict[str, dict]) -> list[str]:
                 errors.append(f"{path}:{line}: unlisted process state {name}: {kind}")
             elif kind != entry['type']:
                 errors.append(f"{path}:{line}: {name} changed type: {entry['type']} -> {kind}")
-    for key in sorted(allowed.keys() - seen):
+    for key in sorted({key for key in allowed if not key.startswith('@generated/')} - seen):
         errors.append(f"stale state inventory entry: {key}")
     return errors
 
@@ -124,10 +162,17 @@ Registration callbacks are consulted only while the API-owned activity counter i
 Every production static/TLS declaration, including declarations behind the `testing` feature, is
 listed below. Unconditional unit-test items and explicitly test-only module files are excluded.
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
-exception, or a lint suppression outside that file. Ownership reasons are reviewed permissions,
+exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
+include boundaries are refused. Every listed generated OUT_DIR input is token-checked before write by
+`horizon-mod-api-gen`: no unlisted static declarations (including macro metavariables), unsafe,
+unsafe lint suppression, or further includes. The generated immutable ABI hash is checked against
+this same inventory by exact name and type; nested state is refused. Lifetimes and string literals are not declarations. The trusted
+Wire derive supplies codecs, not state; the crate's unsafe lint applies to its expansion as well.
+Ownership reasons are reviewed permissions,
 not generated from newly discovered declarations. The table is generated from those permissions.
 
-All source paths below are relative to `crates/horizon-mod-vocab/src`.
+Source paths below are relative to `crates/horizon-mod-vocab/src`; `@generated/` identifies an
+OUT_DIR file checked by the generator before writing it.
 
 | File and item | Type | Ownership | Reason |
 | --- | --- | --- | --- |
@@ -148,7 +193,7 @@ def main() -> int:
         if not entry.get('reason') or not entry.get('category'):
             parser.error(f"{name} needs an ownership category and reason")
     files = {p.relative_to(args.source).as_posix(): p.read_text() for p in args.source.rglob('*.rs')}
-    errors = violations(files, allowed) + unsafe_violations(files)
+    errors = violations(files, allowed) + unsafe_violations(files) + expansion_violations(files)
     expected_doc = inventory_document(allowed)
     if args.write_doc:
         DOCUMENT.write_text(expected_doc)

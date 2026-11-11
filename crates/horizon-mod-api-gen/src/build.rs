@@ -2,6 +2,17 @@
 use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
+mod vocab_boundary;
+
+fn write_vocab_output(
+    out_dir: &Path,
+    name: &str,
+    code: &str,
+    inventory: &vocab_boundary::Inventory,
+) -> Result<(), String> {
+    vocab_boundary::validate(name, code, inventory).map_err(|e| format!("{name}: {e}"))?;
+    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())
+}
 
 /// Preserve output timestamps when generation produces identical bytes.
 pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
@@ -20,6 +31,13 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
     track(root, !matches!(&target, Target::Vocab))?;
+    let inventory = if matches!(target, Target::Vocab) {
+        let path = root.join("tools/layering/mod_vocab_state.json");
+        crate::rerun_if_changed(&path.display());
+        vocab_boundary::inventory(root)?
+    } else {
+        vocab_boundary::Inventory::new()
+    };
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
@@ -45,13 +63,14 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 .map_err(|e| e.to_string())?;
             }
             if matches!(target, Target::Vocab) {
-                write_if_changed(
-                    out_dir.join(super::parts::OUTPUT),
-                    super::parts::source(root)?,
-                )
-                .map_err(|e| e.to_string())?;
+                write_vocab_output(
+                    out_dir,
+                    super::parts::OUTPUT,
+                    &super::parts::source(root)?,
+                    &inventory,
+                )?;
                 for (name, code) in super::exports::sources(root)? {
-                    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                    write_vocab_output(out_dir, &name, &code, &inventory)?;
                 }
             }
             let hooks = generated.hooks;
@@ -92,7 +111,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         }
     };
     for (name, code) in outputs {
-        write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        if matches!(target, Target::Vocab) {
+            write_vocab_output(out_dir, name, &code, &inventory)?;
+        } else {
+            write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        }
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())

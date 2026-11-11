@@ -5,10 +5,29 @@ import unittest
 from unittest import mock
 
 with mock.patch.object(sys, 'path', [*sys.path, str(Path(__file__).resolve().parents[1] / 'tools')]):
-    from check_mod_vocabulary_state import declarations, violations, unsafe_violations
+    from check_mod_vocabulary_state import declarations, violations, unsafe_violations, expansion_violations
 
 
 class VocabularyStateGate(unittest.TestCase):
+    def test_macro_metavariable_cannot_hide_a_new_static(self):
+        mutant = 'macro_rules! slot { ($n:ident) => { static $n: AtomicBool = AtomicBool::new(false); }; } slot!(EXTRA);'
+        self.assertTrue(expansion_violations({'macro.rs': mutant}))
+
+    def test_macro_keyword_argument_cannot_hide_a_new_static(self):
+        mutant = 'macro_rules! slot { ($kind:ident) => { $kind HIDDEN: AtomicBool = AtomicBool::new(false); }; } slot!(static);'
+        self.assertTrue(expansion_violations({'macro.rs': mutant}))
+
+    def test_array_static_is_inventoried_despite_its_type_semicolon(self):
+        source = 'static CACHE: LazyLock<[Identifier; 3]> = make();'
+        self.assertEqual(declarations(source), [('CACHE', 'LazyLock<[Identifier;3]>', 1)])
+        self.assertTrue(violations({'array.rs': source}, {}))
+
+    def test_unchecked_include_cannot_hide_generated_state_or_unsafe(self):
+        for source in ('include!("extra.rs");', 'include!(concat!(env!("OUT_DIR"), "/unchecked.rs"));'):
+            with self.subTest(source=source):
+                self.assertTrue(expansion_violations({'lib.rs': source}))
+        self.assertEqual(expansion_violations({'lib.rs': 'include!(concat!(env!("OUT_DIR"), "/wire_generated.rs"));'}), [])
+
     def test_added_atomic_mutant_is_rejected(self):
         owner = 'thread_local! { static CURRENT_CRASH_OWNER: Cell<CrashOwner> = todo!(); }'
         allowed = {'content/crash.rs::CURRENT_CRASH_OWNER': {'type': 'Cell<CrashOwner>'}}
