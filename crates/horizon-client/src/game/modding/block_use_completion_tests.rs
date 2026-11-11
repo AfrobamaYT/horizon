@@ -1,15 +1,18 @@
 use super::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
 
 thread_local! {
+    static CAPTURE: Cell<bool> = const { Cell::new(false) };
     static SEEN: RefCell<Vec<(String, Option<ItemStack>)>> = const { RefCell::new(Vec::new()) };
 }
 pub(super) fn record(name: &str, stack: Option<&ItemStack>) {
-    SEEN.with_borrow_mut(|seen| seen.push((name.to_owned(), stack.cloned())));
+    if CAPTURE.get() {
+        SEEN.with_borrow_mut(|seen| seen.push((name.to_owned(), stack.cloned())));
+    }
 }
 fn counts() -> [usize; 3] {
     SEEN.with_borrow(|seen| {
@@ -25,6 +28,15 @@ fn counts() -> [usize; 3] {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn consuming_cancellation_has_one_outer_on_local_and_packet_routes() {
+    CAPTURE.set(true);
+    struct Recording;
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            CAPTURE.set(false);
+            SEEN.with_borrow_mut(Vec::clear);
+        }
+    }
+    let _recording = Recording;
     struct Listener(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Listener {
