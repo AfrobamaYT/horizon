@@ -102,7 +102,7 @@ impl Endpoint {
                     let Some(writer) = writer.upgrade() else {
                         return "writer handle owner dropped".into();
                     };
-                    let snapshot = match writer.try_lock() {
+                    match writer.try_lock() {
                         Ok(w) => {
                             let current = w.clone();
                             drop(w);
@@ -111,8 +111,7 @@ impl Endpoint {
                                 .unwrap_or_else(|| "writer absent".into())
                         }
                         Err(_) => "writer handle busy/poisoned".into(),
-                    };
-                    snapshot
+                    }
                 })
             }
             Target::Server(sender) => sender.payload_diagnostic_observer(),
