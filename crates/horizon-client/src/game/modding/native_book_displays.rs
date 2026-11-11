@@ -2,7 +2,7 @@
 use super::*;
 use horizon_client::recipe_book::{DisplayResources, ModBookIndex};
 
-struct Resources<'a, 'w>(&'a Game<'w>);
+pub(super) struct Resources<'a, 'w>(pub(super) &'a Game<'w>);
 impl DisplayResources for Resources<'_, '_> {
     fn book(&self, key: &mod_api::item::recipe_book::RecipeBookTypeKey) -> bool {
         key.is_registered()

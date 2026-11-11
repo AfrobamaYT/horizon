@@ -96,7 +96,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
-        self.apply_screen(screen, owner);
+        self.apply_screen_with_mod_book(screen, owner);
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
