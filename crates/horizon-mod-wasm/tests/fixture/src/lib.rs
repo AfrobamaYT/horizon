@@ -6,6 +6,7 @@ static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
 pub mod datapack;
+pub mod interaction;
 pub mod matrix;
 pub mod projectile_owner;
 pub mod replace;
@@ -21,6 +22,22 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn right_click_block(
+        &self,
+        host: mod_api::HostSide<'_>,
+        event: &mut mod_api::RightClickBlockEvent<'_>,
+    ) -> mod_api::Flow {
+        interaction::right_click_block(host, event)
+    }
+
+    fn use_item_on_block(
+        &self,
+        host: mod_api::HostSide<'_>,
+        event: &mut mod_api::UseItemOnBlockEvent<'_>,
+    ) -> mod_api::Flow {
+        interaction::use_item_on_block(host, event)
+    }
+
     fn entity_tick_listened(
         &self,
         _: &mut dyn mod_api::ServerHost,
@@ -71,6 +88,7 @@ impl Hooks for Mod {
     }
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
+        interaction::register(registrar);
         registrar
             .declare_datapack_registry(
                 "spell",
