@@ -7,9 +7,10 @@ level, position, block state and `include_data`, true when a creative player pic
 
 `BlockPart::light_emission` answers the light a block declaring `dynamic_light: true` emits at a position
 (`IBlockExtension.getLightEmission`), on both sides, with a read-only host: `Some(level)` replaces the state's
-light there (above 15 is clamped), `None` keeps it. It is asked as a chunk holding the block comes in and as an
-edit sets it, and the light engine keeps the answer until the cell's state changes; parts on a block that does not
-declare `dynamic_light` are never asked.
+light there (above 15 is clamped), `None` keeps it. It is asked as a chunk holding the block comes in, as an
+edit sets it and at `LevelRef::check_light(host, pos)`, which a part whose answer reads more than the state calls
+when that changes; the light engine keeps the answer until the cell's state changes and never asks on its own.
+Parts on a block that does not declare `dynamic_light` are never asked.
 
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.
 Request a deferred write with `event.request(LandingWrite::SetBlock(state))`, where `state`
