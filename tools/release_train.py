@@ -532,7 +532,7 @@ def gate_jobs_passed(run_id, required):
             and all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs))
 
 
-def green_main_head(parity=False):
+def green_main_head(parity=False, eligible=None):
     """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
@@ -549,6 +549,8 @@ def green_main_head(parity=False):
                 if entry["head_branch"] != "main" or entry["event"] != "push" or sha in seen:
                     continue
                 seen.add(sha)
+                if eligible is not None and not eligible(sha):
+                    continue
                 if not gate_jobs_passed(entry["id"], {"lint", "verify", "launcher", "pool-watch"}):
                     continue
                 fixtures = gh_json("api", "--paginate", "--slurp",

@@ -369,10 +369,15 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertIn("filter=latest", path)
             return [{"jobs": jobs[ident][:2]}, {"jobs": jobs[ident][2:]}]
         with mock.patch.object(train, "REPO", "arismoko/horizon"), \
-                mock.patch.object(train, "gh_json", side_effect=api):
+                mock.patch.object(train, "gh_json", side_effect=api) as requests:
             self.assertEqual(train.green_main_head(parity=True), "good")
             fixture_sha["new"] = "new"
             self.assertEqual(train.green_main_head(), "new", "non-gate failure must not reject a build")
+            requests.reset_mock()
+            self.assertEqual(train.green_main_head(eligible=lambda sha: sha == "good"), "good")
+            paths = [call.args[3] for call in requests.call_args_list]
+            self.assertFalse(any("/runs/3/jobs" in path or "head_sha=new&" in path for path in paths))
+            self.assertTrue(any("/runs/4/jobs" in path for path in paths))
             for status, conclusion in [("queued", None), ("in_progress", "success"),
                                        ("completed", "skipped"), ("completed", "cancelled"),
                                        ("completed", "failure"), ("completed", None),
