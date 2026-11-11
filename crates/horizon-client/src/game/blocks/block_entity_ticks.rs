@@ -115,10 +115,6 @@ impl BlockEntityTick<'_, '_> {
 /// tick does, and one it removes (or replaces) later in the list is passed over when the loop gets
 /// there, as one removed by an earlier tick is. For the visited one, see [`Self::before`].
 pub(crate) trait BlockEntityTickSlot {
-    /// Whether this slot defines [`Self::after`]. A mod build sets it for a slot that does, so the
-    /// loop enters a mod after an entry only when that mod has something to run there.
-    #[allow(dead_code, reason = "read by a mod build's copy of the loop")]
-    const HAS_AFTER: bool = false;
     /// Whether [`Self::before`] may change the visited block entity, so the loop checks it again
     /// after a [`LoopFlow::Continue`]. False only for `()`, the game's own loop, whose `before`
     /// does nothing, so it has no check; a mod's slot always has it.
@@ -147,7 +143,6 @@ impl BlockEntityTickSlot for () {
 
 /// Two slots in order: `A` first, and `B` only while `A` answers [`LoopFlow::Continue`].
 impl<A: BlockEntityTickSlot, B: BlockEntityTickSlot> BlockEntityTickSlot for (A, B) {
-    const HAS_AFTER: bool = A::HAS_AFTER || B::HAS_AFTER;
     const RECHECK: bool = A::RECHECK || B::RECHECK;
     #[inline(always)]
     fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
@@ -164,16 +159,13 @@ impl<A: BlockEntityTickSlot, B: BlockEntityTickSlot> BlockEntityTickSlot for (A,
 }
 
 impl<N: LoopMod, T: BlockEntityTickSlot> BlockEntityTickSlot for Attributed<N, T> {
-    const HAS_AFTER: bool = T::HAS_AFTER;
     #[inline(always)]
     fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
         self.call(|slot| slot.before(tick))
     }
     #[inline(always)]
     fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
-        if T::HAS_AFTER {
-            self.call(|slot| slot.after(tick));
-        }
+        self.call(|slot| slot.after(tick));
     }
 }
 
@@ -196,8 +188,35 @@ impl Game<'_> {
         &mut self,
         slot: &mut S,
     ) -> Result<()> {
+        type PassScratch = (
+            Option<crate::game::machines::ItemColumns>,
+            Option<crate::game::potent_sulfur::PassMobs>,
+            Vec<Pos>,
+            Vec<Pos>,
+        );
+        /// Puts the enclosing pass's scratch back when the pass inside it ends, however it ends:
+        /// a slot may catch a nested pass's panic and let the enclosing pass go on.
+        struct Enclosing<'g, 'a> {
+            game: &'g mut Game<'a>,
+            scratch: Option<PassScratch>,
+        }
+        impl Drop for Enclosing<'_, '_> {
+            fn drop(&mut self) {
+                // A pass that ended early left its own; a pass in progress is known by them.
+                self.game.item_columns = None;
+                self.game.pass_mobs = None;
+                if let Some(scratch) = self.scratch.take() {
+                    (
+                        self.game.item_columns,
+                        self.game.pass_mobs,
+                        self.game.spawner_tick_positions,
+                        self.game.trial_spawner_tick_positions,
+                    ) = scratch;
+                }
+            }
+        }
         // Only a pass in progress holds item columns: every pass drops them as it ends.
-        let enclosing = self.item_columns.is_some().then(|| {
+        let scratch = self.item_columns.is_some().then(|| {
             (
                 self.item_columns.take(),
                 self.pass_mobs.take(),
@@ -205,20 +224,12 @@ impl Game<'_> {
                 std::mem::take(&mut self.trial_spawner_tick_positions),
             )
         });
-        let pass = self.block_entity_pass(slot);
-        if pass.is_err() {
-            self.item_columns = None;
-            self.pass_mobs = None;
+        Enclosing {
+            game: self,
+            scratch,
         }
-        if let Some(enclosing) = enclosing {
-            (
-                self.item_columns,
-                self.pass_mobs,
-                self.spawner_tick_positions,
-                self.trial_spawner_tick_positions,
-            ) = enclosing;
-        }
-        pass
+        .game
+        .block_entity_pass(slot)
     }
     /// One pass of `tick_block_entities_with`.
     fn block_entity_pass<S: BlockEntityTickSlot>(&mut self, slot: &mut S) -> Result<()> {
@@ -1096,22 +1107,9 @@ mod slot_guard_tests {
         before: Vec<Option<ModCall>>,
         after: Vec<Option<ModCall>>,
     }
-    /// A slot whose `after` the build did not announce: only `before` is entered.
-    #[derive(Default)]
-    struct BeforeOnly(Probe);
-    impl BlockEntityTickSlot for BeforeOnly {
-        fn before(&mut self, _: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
-            self.0.before.push(current_native_call());
-            LoopFlow::Continue
-        }
-        fn after(&mut self, _: &mut BlockEntityTick<'_, '_>) {
-            self.0.after.push(current_native_call());
-        }
-    }
     #[derive(Default)]
     struct Both(Probe);
     impl BlockEntityTickSlot for Both {
-        const HAS_AFTER: bool = true;
         fn before(&mut self, _: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
             self.0.before.push(current_native_call());
             LoopFlow::Continue
@@ -1121,11 +1119,10 @@ mod slot_guard_tests {
         }
     }
 
-    /// One visited entity enters a mod once for a slot without `after`, and twice, each time
-    /// named, for a slot with one; a pair has an `after` when either side does.
+    /// Each call of a slot, before and after an entry, runs inside its mod's guard.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_slot_without_after_is_entered_once_per_entity() {
+    fn a_slot_is_entered_as_its_mod_before_and_after_an_entry() {
         let mut game_resources = None;
         let mut game = server_game(&mut game_resources);
         let mut tick = BlockEntityTick {
@@ -1133,21 +1130,13 @@ mod slot_guard_tests {
             pos: (8, 64, 8),
             kind: TickedKind::Hopper,
         };
-        let mut slots = <(Attributed<Row, BeforeOnly>, (Attributed<Row, Both>, ()))>::make();
+        let mut slots = <(Attributed<Row, Both>, ())>::make();
         assert_eq!(slots.before(&mut tick), LoopFlow::Continue);
         slots.after(&mut tick);
         let seen = slots.0.call(|slot| std::mem::take(&mut slot.0));
         assert_eq!(seen.before, [Some(Row::CALL)]);
-        assert_eq!(seen.after, []);
-        let seen = slots.1.0.call(|slot| std::mem::take(&mut slot.0));
-        assert_eq!(seen.before, [Some(Row::CALL)]);
         assert_eq!(seen.after, [Some(Row::CALL)]);
         assert_eq!(current_native_call(), None);
-        const {
-            assert!(!<Attributed<Row, BeforeOnly> as BlockEntityTickSlot>::HAS_AFTER);
-            assert!(<(Attributed<Row, BeforeOnly>, (Attributed<Row, Both>, ())) as BlockEntityTickSlot>::HAS_AFTER);
-            assert!(!<() as BlockEntityTickSlot>::HAS_AFTER);
-        }
     }
 }
 
@@ -1184,7 +1173,6 @@ mod slot_mutation_tests {
         }
     }
     impl BlockEntityTickSlot for Mutate {
-        const HAS_AFTER: bool = true;
         fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
             self.before.push(tick.pos);
             if let Some(act) = self.act.take() {
@@ -1330,6 +1318,53 @@ mod slot_mutation_tests {
                 );
                 assert!(game.dropped.is_empty());
                 assert_eq!(game.spawner_tick_positions, [B]);
+                assert!(game.item_columns.is_none());
+            },
+        );
+    }
+
+    /// A slot that catches a nested pass's panic and goes on: the enclosing pass still has its own
+    /// scratch, so the spawner it ticked is listed once and its later hopper takes an item.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_caught_nested_panic_leaves_the_enclosing_pass_its_scratch() {
+        struct Boom;
+        impl BlockEntityTickSlot for Boom {
+            fn before(&mut self, _: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+                panic!("the nested pass's slot");
+            }
+        }
+        struct Catch;
+        impl BlockEntityTickSlot for Catch {
+            fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+                if tick.pos == C {
+                    assert_eq!(tick.game.spawner_tick_positions, [A]);
+                    let nested = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        tick.game.tick_block_entities_with(&mut Boom)
+                    }));
+                    assert!(nested.is_err());
+                    assert_eq!(tick.game.spawner_tick_positions, [A]);
+                    assert!(tick.game.item_columns.is_some(), "the outer pass's columns");
+                    assert!(tick.game.pass_mobs.is_some(), "the outer pass's mobs");
+                    stone_above(tick.game, C);
+                }
+                LoopFlow::Continue
+            }
+        }
+        with_blocks(
+            &[
+                (A, "minecraft:spawner"),
+                (B, "minecraft:hopper"),
+                (C, "minecraft:hopper"),
+            ],
+            |game| {
+                game.tick_block_entities_with(&mut Catch).unwrap();
+                assert_eq!(
+                    hopper_count(game, C),
+                    1,
+                    "the outer pass's hopper took the item"
+                );
+                assert_eq!(game.spawner_tick_positions, [A]);
                 assert!(game.item_columns.is_none());
             },
         );
