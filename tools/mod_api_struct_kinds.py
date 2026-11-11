@@ -27,6 +27,36 @@ from tools.check_mod_api_wire import code_tokens  # noqa: E402
 CRATES = ('horizon-mod-api', 'horizon-mod-vocab')
 
 
+def _tokens(source):
+    # Preserve offsets while making arrows indivisible for angle-depth scans.
+    pairs = list(code_tokens(source))
+    out = []
+    for token, offset in pairs:
+        if token == '>' and out and out[-1][0] == '-':
+            out[-1] = ('->', out[-1][1])
+        else:
+            out.append((token, offset))
+    return out
+
+
+def _modules(ts):
+    """Inline lexical module at each token (other brace groups do not add scope)."""
+    scopes = {}
+    for i in range(len(ts) - 2):
+        if ts[i] == 'mod' and ts[i + 2] == '{':
+            scopes[i + 2] = ts[i + 1]
+    stack, module, result = [], (), []
+    for i, token in enumerate(ts):
+        result.append(module)
+        if token == '{':
+            stack.append(module)
+            if i in scopes:
+                module += (scopes[i],)
+        elif token == '}' and stack:
+            module = stack.pop()
+    return result
+
+
 def _skip_group(ts, i, open_, close):
     """Index just past the group opened at `i`."""
     depth = 0
@@ -81,17 +111,13 @@ def _fields_public(body):
 
 def structs(source):
     """(name, line, non_exhaustive, derives_default, literal) per public struct."""
-    pairs = code_tokens(source)
+    pairs = _tokens(source)
     ts = [v for v, _ in pairs]
-    # A `mod built { .. }` holds the game's own literal-built mirrors, reached
-    # only through `__private::built`: not part of what mods build.
-    mirrors = set()
-    for i in range(len(ts) - 2):
-        if ts[i] == 'mod' and ts[i + 1] == 'built' and ts[i + 2] == '{':
-            mirrors.update(range(i, _skip_group(ts, i + 2, '{', '}')))
+    modules = _modules(ts)
     out = []
     for i in range(len(ts) - 2):
-        if ts[i] != 'pub' or ts[i + 1] != 'struct' or i in mirrors:
+        if ts[i] != 'pub' or ts[i + 1] != 'struct' or ('__private', 'built') == modules[i][:2] or any(
+                modules[i][k:k + 2] == ('__private', 'built') for k in range(len(modules[i]) - 1)):
             continue
         name = ts[i + 2]
         if not re.match(r'^[A-Za-z_]\w*$', name):
@@ -105,8 +131,12 @@ def structs(source):
         j = i + 3
         if j < len(ts) and ts[j] == '<':
             j = _skip_group(ts, j, '<', '>')
-        while j < len(ts) and ts[j] not in ('{', ';', '('):
-            j += 1  # a where clause
+        if j < len(ts) and ts[j] == 'where':
+            while j < len(ts) and ts[j] not in ('{', ';'):
+                if ts[j] == '(':
+                    j = _skip_group(ts, j, '(', ')')
+                else:
+                    j += 1
         literal = False
         if j < len(ts) and ts[j] == '{':
             end = _skip_group(ts, j, '{', '}')
@@ -116,10 +146,11 @@ def structs(source):
     return out
 
 
-def defaults_and_constructors(source):
+def defaults_and_constructors(source, file=""):
     """Names with a hand-written `Default` impl, and names with a constructor
     (a `pub fn` without a `self` receiver that returns `Self` or the type)."""
-    ts = [v for v, _ in code_tokens(source)]
+    ts = [v for v, _ in _tokens(source)]
+    modules = _modules(ts)
     defaults, constructors = set(), set()
     for i, t in enumerate(ts):
         if t != 'impl':
@@ -134,11 +165,15 @@ def defaults_and_constructors(source):
         if 'for' in head:
             trait, target = head[:head.index('for')], head[head.index('for') + 1:]
             if trait and trait[-1] == 'Default' and target:
-                defaults.add(target[0])
+                path = target[:target.index('<')] if '<' in target else target
+                defaults.add((file, modules[i] + tuple(t for t in path if t != ':' )))
             continue
         if not head:
             continue
-        name = head[0]
+        path = head[:head.index('<')] if '<' in head else head
+        path = tuple(t for t in path if t != ':')
+        name = path[-1]
+        key = (file, modules[i] + path)
         end = _skip_group(ts, j, '{', '}')
         body = ts[j + 1:end - 1]
         for k in range(len(body) - 1):
@@ -150,14 +185,16 @@ def defaults_and_constructors(source):
                     continue
                 ret = []
                 m = params_end
-                if m < len(body) and body[m] == '-':
-                    m += 2
+                if m < len(body) and body[m] == '->':
+                    m += 1
                     while m < len(body) and body[m] not in ('{', 'where', ';'):
                         ret.append(body[m])
                         m += 1
-                if ret[:1] in (['Self'], [name]) or ret[:3] in (
-                        ['Option', '<', 'Self'], ['Result', '<', 'Self']):
-                    constructors.add(name)
+                for value in (['Self'], [name]):
+                    if (ret == value or ret == ['Option', '<'] + value + ['>']
+                            or (ret[:2] == ['Result', '<'] and ret[2:3] == value
+                                and ret[3:4] == [','] and ret[-1:] == ['>'])):
+                        constructors.add(key)
     return defaults, constructors
 
 
@@ -165,7 +202,7 @@ def sources(root=ROOT):
     found = {}
     for crate in CRATES:
         for path in sorted((root / 'crates' / crate / 'src').rglob('*.rs')):
-            if path.name == '__private.rs' or path.name.endswith('_tests.rs'):
+            if path.name.endswith('_tests.rs'):
                 continue
             if crate == 'horizon-mod-vocab' and path.parent.name == 'src' and path.name == 'built.rs':
                 continue  # the `__private::built` mirrors, as `mod built` blocks are
@@ -177,14 +214,18 @@ def census(root=ROOT):
     """Counts by kind, and the "neither" structs as `path:line: Name`."""
     files = sources(root)
     defaults, constructors = set(), set()
-    for source in files.values():
-        d, c = defaults_and_constructors(source)
+    for path, source in files.items():
+        d, c = defaults_and_constructors(source, path)
         defaults |= d
         constructors |= c
     counts = {'public': 0, 'non_exhaustive': 0, 'literal': 0, 'default': 0,
               'constructor': 0, 'neither': 0}
     neither = []
     for path, source in files.items():
+        pairs = _tokens(source)
+        modules = _modules([v for v, _ in pairs])
+        module_by_line = {source.count("\n", 0, offset) + 1: modules[i]
+                          for i, (v, offset) in enumerate(pairs) if v == "pub"}
         for name, line, non_exhaustive, derives_default, literal in structs(source):
             counts['public'] += 1
             if non_exhaustive:
@@ -193,9 +234,10 @@ def census(root=ROOT):
             if not literal:
                 continue
             counts['literal'] += 1
-            if derives_default or name in defaults:
+            key = (path, module_by_line[line] + (name,))
+            if derives_default or key in defaults:
                 counts['default'] += 1
-            elif name in constructors:
+            elif key in constructors:
                 counts['constructor'] += 1
             else:
                 counts['neither'] += 1

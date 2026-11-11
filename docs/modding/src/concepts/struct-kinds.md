@@ -24,9 +24,13 @@ The two can't overlap: `#[non_exhaustive]` forbids struct literals outside the c
 with a literal (named fields, all `pub`, not `#[non_exhaustive]`), but they have no `Default` and no constructor.
 `python tools/mod_api_struct_kinds.py --summary` prints the counts.
 
-`tests/test_mod_api_struct_kinds.py` fails when that number rises above `NEITHER_LIMIT`, so a new public struct
-must take one of the kinds. It also fails when the number falls without the limit following it: the batches that
-classify the existing structs lower `NEITHER_LIMIT` as they go, and it never goes back up.
+`tests/test_mod_api_struct_kinds.py` checks a downward-only ceiling, not equality. Parallel
+classification batches need not edit the ceiling; a decrease is accepted without a shared-line change.
+The ceiling is a regression budget, not proof that every newly added struct has a kind.
+
+This source scanner cannot expand `macro_rules!` or build scripts, can count fixed-name declarations
+inside unused macro templates, and does not follow `pub use` reachability. Mirrors are excluded only
+at `__private::built` paths.
 
 The batches go by module. Kind 2 is applied mechanically; which fields of a kind 1 type are required is decided by
 hand. Each batch updates the samples and this book in the same PR, with no aliases or shims.
