@@ -1448,6 +1448,18 @@ fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pas
         pass.lower(root, path)
             .map_err(|e| format!("{origin}: {path}: {e}"))?;
     }
+    // A canonical lower-crate callee needs a typed catalog entry, not an extra
+    // function point. Lexical selectors remain resolved from their enclosing scope.
+    for declaration in &slots.calls {
+        if let Some((krate, _)) = declaration.selector.split_once("::")
+            && krate != "horizon_client"
+            && crate::points::crate_root(root, krate).is_ok()
+        {
+            pass.lower(root, &declaration.selector).map_err(|error| {
+                format!("{}: {}: {error}", declaration.origin, declaration.selector)
+            })?;
+        }
+    }
     pass.shapes(root)?;
     if discovery {
         let crates: BTreeSet<_> = pass
@@ -1527,6 +1539,35 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn listed_callee_is_catalogued_without_creating_a_function_point() {
+        let fixture = Fixture::new("fn run(s: &str) -> usize { lower::size(s) }");
+        fixture.lower();
+        fixture.put(
+            "crates/lower/src/lib.rs",
+            "fn size(s: &str) -> usize { s.len() }",
+        );
+        fixture.put(
+            "crates/horizon-mod-api-gen/slots/port.txt",
+            "horizon_client::game::run | lower::size | 0 |\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        assert!(entries.iter().any(|entry| entry.path == "lower::size"));
+        let declarations = crate::sites::slots(&fixture.0.join(crate::sites::DIRECTORY)).unwrap();
+        assert!(declarations.functions.is_empty());
+        let (_, sites) = crate::sites::rewrite::rewrite(
+            &fixture.game(),
+            "horizon_client::game",
+            &entries,
+            &declarations.calls,
+            false,
+        )
+        .unwrap();
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].call, "lower::size");
+        assert_eq!(sites[0].args[0].1, "& 'a str");
     }
 
     #[test]
@@ -1929,10 +1970,8 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
         let lexical = crate::sites::analysis::Scope::scan(&sig, None);
         for call in ["imported(1)", "Alias::make(1)", "Self::make(1)"] {
             let expr = syn::parse_str(call).unwrap();
-            crate::sites::resolve::resolve(
-                &expr, enclosing, &sig, &lexical, &entries, &rule, false,
-            )
-            .unwrap();
+            crate::sites::resolve::resolve(&expr, enclosing, &sig, &lexical, &entries, &rule)
+                .unwrap();
         }
         let old_hash = enclosing.hash.clone();
         fixture.put(
