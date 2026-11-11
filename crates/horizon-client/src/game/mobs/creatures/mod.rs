@@ -3208,7 +3208,7 @@ impl Game<'_> {
                         // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
                         let mut at = arrow.position;
                         at.y -= f64::from(0.15f32) - 0.1;
-                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                        self.launch_angled_rocket(at, &ammo, arrow.owner, |_| arrow.velocity);
                     } else {
                         Self::arrow_from_ammo(&ammo, &mut arrow);
                         self.launch_mob_projectile(arrow);
@@ -8383,10 +8383,8 @@ impl Game<'_> {
             let (modded, hidden) = match who {
                 _ if layers_only => (false, mod_api::HiddenParts::default()),
                 Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
-                None => (
-                    !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
-                    mod_api::HiddenParts::default(),
-                ),
+                None if is_player => (false, mod_api::HiddenParts::default()),
+                None => self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
             };
             if modded {
                 if let Some(rgb) = outline {
@@ -8444,6 +8442,7 @@ impl Game<'_> {
                     &lookup,
                     packed,
                     self.res.mob_data(),
+                    hidden,
                     listened.then_some(&mut parts),
                     out,
                     &mut skin,

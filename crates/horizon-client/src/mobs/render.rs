@@ -1544,7 +1544,7 @@ pub fn render_with_hidden(
 }
 /// `render` with the model's ordinary draws posed on the GPU when the mob
 /// allows it (`super::skin`): the same picture, no vertices on the CPU.
-/// `parts` as for [`render_with_hidden`].
+/// `hidden` and `parts` as for [`render_with_hidden`].
 #[allow(clippy::too_many_arguments)]
 pub fn render_skinned(
     m: &Mob,
@@ -1553,6 +1553,7 @@ pub fn render_skinned(
     atlas: Atlas,
     light: u32,
     data: &MobData,
+    hidden: mod_api::HiddenParts,
     parts: Option<&mut Option<mod_api::PosedParts>>,
     out: &mut Vec<Vertex>,
     skin: &mut super::skin::Skin,
@@ -1566,7 +1567,7 @@ pub fn render_skinned(
             light,
             data,
             &[],
-            Default::default(),
+            hidden,
             parts,
             out,
         );
@@ -1581,7 +1582,7 @@ pub fn render_skinned(
         data,
         &[],
         true,
-        Default::default(),
+        hidden,
         parts,
         out,
         Some(skin),
@@ -1999,6 +2000,63 @@ fn posed_parts(poses: &Poses) -> Option<mod_api::PosedParts> {
         Some((poses.pose_of(name)?, !poses.is_hidden_named(name)))
     })
 }
+// Validate names against this frame's model before mutating its body poses.
+// Return the borrowed name so a repeated refusal never allocates an error string.
+fn hide_parts<'a>(poses: &mut Poses, hidden: &'a mod_api::HiddenParts) -> Result<(), &'a str> {
+    for name in hidden.names() {
+        if poses.pose_of(name).is_none() {
+            return Err(name);
+        }
+    }
+    for name in hidden.names() {
+        poses.visible(name, false);
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct HiddenPartReports {
+    names: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    count: usize,
+}
+
+impl HiddenPartReports {
+    // Mods can change their eight hidden names between frames. Never evict an entry (which
+    // would report it again); after this process-wide budget, suppress new diagnostics too.
+    const LIMIT: usize = 4096;
+
+    fn first(&mut self, kind: &str, name: &str) -> bool {
+        if self.count >= Self::LIMIT
+            || self
+                .names
+                .get(kind)
+                .is_some_and(|names| names.contains(name))
+        {
+            return false;
+        }
+        self.names
+            .entry(kind.to_owned())
+            .or_default()
+            .insert(name.to_owned());
+        self.count += 1;
+        true
+    }
+}
+
+fn report_unknown_hidden_part(kind: &str, name: &str) {
+    // Shared by every renderer, including mirror views and different render threads.
+    static REPORTS: std::sync::Mutex<Option<HiddenPartReports>> = std::sync::Mutex::new(None);
+    let mut reports = REPORTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if reports
+        .get_or_insert_with(HiddenPartReports::default)
+        .first(kind, name)
+    {
+        eprintln!("mob {kind}: unknown hidden part {name}");
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_visible(
     m: &Mob,
@@ -2131,15 +2189,16 @@ fn render_visible(
     if !posable {
         skin = None;
     }
-    // The parts a mod's `player_submit` hid this frame: the body draws without them, the armour and
-    // the other layers below with every part.
+    // The parts a mod's `player_submit` or `mob_submit` hid this frame: the body draws without them,
+    // the armour and the other layers below with every part.
     let mut hidden_poses = Poses::pooled();
     let body_poses: &Poses = if hidden.is_empty() {
         &poses
     } else {
         hidden_poses.copy_from(&poses);
-        for part in hidden.iter() {
-            hidden_poses.visible(part.model_name(), false);
+        if let Err(name) = hide_parts(&mut hidden_poses, &hidden) {
+            report_unknown_hidden_part(&m.kind.id, name);
+            return;
         }
         &hidden_poses
     };
@@ -2759,6 +2818,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unknown_hidden_parts_report_once_per_kind_and_name() {
+        let mut reports = HiddenPartReports::default();
+        assert!(reports.first("minecraft:cow", "nose"));
+        for _ in 0..10 {
+            assert!(!reports.first("minecraft:cow", "nose"));
+        }
+        assert!(reports.first("minecraft:pig", "nose"));
+        assert!(reports.first("minecraft:cow", "hat_rim"));
+        assert!(!reports.first("minecraft:pig", "nose"));
+        assert!(!reports.first("minecraft:cow", "hat_rim"));
+        assert_eq!(reports.count, 3);
+
+        for i in 3..HiddenPartReports::LIMIT {
+            assert!(reports.first("minecraft:cow", &format!("part_{i}")));
+        }
+        assert!(!reports.first("minecraft:cow", "over_budget"));
+        assert!(!reports.first("minecraft:sheep", "nose"));
+        assert!(!reports.first("minecraft:cow", "nose"));
+        assert_eq!(reports.count, HiddenPartReports::LIMIT);
+        assert_eq!(reports.names.len(), 2);
+    }
+
+    #[test]
     fn profession_texture_preserves_nested_namespaces() {
         assert_eq!(
             villager_client::profession_texture("entity/villager", "minecraft:farmer"),
@@ -2929,6 +3011,7 @@ mod tests {
             &atlas,
             0xf0f0,
             &data,
+            Default::default(),
             Some(&mut skinned),
             &mut Vec::new(),
             &mut skin,
@@ -2969,6 +3052,140 @@ mod tests {
         let (cow_drawn, cow_parts) = draw(&cow, true);
         assert!(!cow_drawn.is_empty(), "the cow draws");
         assert!(cow_parts.is_none(), "a cow is no humanoid");
+
+        // `mob_submit` hides a part of any model by its name, on the CPU and on the GPU
+        // (#2957): a leg's one face goes; an unknown name is refused.
+        let mut leg = mod_api::HiddenParts::default();
+        leg.hide_named("right_hind_leg").unwrap();
+        let mut absent = mod_api::HiddenParts::default();
+        absent.hide_named("nose").unwrap();
+        let cpu = |mob: &Mob, hidden| {
+            let mut out = Vec::new();
+            render_with_hidden(
+                mob,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                &[],
+                hidden,
+                None,
+                &mut out,
+            );
+            out.len()
+        };
+        let whole = cpu(&cow, Default::default());
+        assert_eq!(
+            cpu(&cow, leg),
+            whole - 4,
+            "the leg's face leaves the CPU draw"
+        );
+        let mut poses = Poses::pooled();
+        let name = hide_parts(&mut poses, &absent).unwrap_err();
+        assert_eq!(name, "nose");
+        assert_eq!(cpu(&cow, absent), 0, "unknown names refuse the draw");
+        let gpu = |mob: &Mob, hidden| {
+            let mut models = super::super::skin::SkinModels::default();
+            let mut frame = crate::gfx::entity_skin::SkinFrame::default();
+            let mut skin = super::super::skin::Skin::new(&mut models, &mut frame);
+            render_skinned(
+                mob,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                hidden,
+                None,
+                &mut Vec::new(),
+                &mut skin,
+            );
+            frame.jobs.iter().map(|job| job.count).sum::<u32>()
+        };
+        let whole = gpu(&cow, Default::default());
+        assert!(whole > 0, "the cow takes the GPU path");
+        assert_eq!(
+            gpu(&cow, leg),
+            whole - 4,
+            "the leg's face leaves the GPU draw"
+        );
+        // Villager hat_rim is a child of hat; overlays and armour retain the full tree.
+        let mut hat = cube(0.0);
+        hat["children"] = serde_json::json!({"hat_rim": cube(0.0)});
+        let mut head = cube(0.0);
+        head["children"] = serde_json::json!({"hat": hat, "nose": cube(0.0)});
+        let tree = serde_json::json!({"children": {"head": head, "body": cube(0.0)}});
+        let mut kind = (*cow.kind).clone();
+        kind.id = "minecraft:villager".into();
+        kind.species = Species::Villager;
+        kind.anim = super::super::Anim::Villager;
+        kind.model = std::sync::Arc::new(Part::parse("root", &tree));
+        let villager = Mob::new(
+            3,
+            std::sync::Arc::new(kind),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let mut hidden = mod_api::HiddenParts::default();
+        hidden.hide_named("hat_rim").unwrap();
+        hidden.hide_named("nose").unwrap();
+        assert_eq!(
+            cpu(&villager, hidden),
+            cpu(&villager, Default::default()) - 8
+        );
+        assert_eq!(
+            gpu(&villager, hidden),
+            gpu(&villager, Default::default()) - 8
+        );
+        let armour = [(
+            &*villager.kind.model,
+            [0.0, 0.0, 1.0, 1.0],
+            0xf0f0,
+            0,
+            false,
+        )];
+        for gpu_path in [false, true] {
+            let draw_armoured = |hidden, extra: &[(&Part, [f32; 4], u32, u32, bool)]| {
+                let mut out = Vec::new();
+                let mut models = super::super::skin::SkinModels::default();
+                let mut frame = crate::gfx::entity_skin::SkinFrame::default();
+                let mut skin = super::super::skin::Skin::new(&mut models, &mut frame);
+                render_visible(
+                    &villager,
+                    0.5,
+                    glam::Mat4::IDENTITY,
+                    &atlas,
+                    0xf0f0,
+                    &data,
+                    extra,
+                    true,
+                    hidden,
+                    None,
+                    &mut out,
+                    gpu_path.then_some(&mut skin),
+                );
+                out.len() as u32 + frame.jobs.iter().map(|job| job.count).sum::<u32>()
+            };
+            let bare = draw_armoured(Default::default(), &[]);
+            let armoured = draw_armoured(Default::default(), &armour);
+            assert!(armoured > bare);
+            assert_eq!(
+                draw_armoured(hidden, &armour),
+                armoured - 8,
+                "armour and villager layers retain every part on CPU and GPU"
+            );
+        }
+        let mut parent = mod_api::HiddenParts::default();
+        parent.hide_named("hat").unwrap();
+        assert_eq!(
+            cpu(&villager, parent),
+            cpu(&villager, Default::default()) - 8
+        );
+        assert_eq!(
+            gpu(&villager, parent),
+            gpu(&villager, Default::default()) - 8
+        );
     }
 
     /// A part `player_submit` hid leaves the body, after Skin Customization, while the armour
