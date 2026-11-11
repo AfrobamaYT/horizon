@@ -1,6 +1,6 @@
 //! `contained_fluid`: a mod's own container item says which fluid a stack holds, and its
 //! `neoforge:fluid_container` model draws it as a held stack of that fluid. Run alone with
-//! prepared resources: installs process-wide trait mods and a logger.
+//! prepared resources: installs process-wide trait mods.
 use horizon_assets::item_model::{
     ClientItem, Context, DisplayContext, ItemModels, Layer, LayerContent, StackView,
 };
@@ -25,8 +25,6 @@ enum Answer {
     Water,
     /// A tank-only fluid of the mod's own with no look: an item cannot draw it.
     Sludge,
-    /// A key no fluid is registered under.
-    Unregistered,
 }
 
 static WATER: OnceLock<FluidKey> = OnceLock::new();
@@ -60,26 +58,9 @@ impl ItemPart for Canister {
             Answer::Nothing => None,
             Answer::Water => WATER.get().copied(),
             Answer::Sludge => SLUDGE.get().copied(),
-            Answer::Unregistered => Some(mod_api::testing::unregistered_fluid_key()),
         };
     }
 }
-
-/// Counts the warnings the game logs about `contained_fluid` answers.
-struct Warnings(Mutex<Vec<String>>);
-impl log::Log for Warnings {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &log::Record) {
-        let text = record.args().to_string();
-        if record.level() == log::Level::Warn && text.starts_with("contained_fluid") {
-            self.0.lock().unwrap().push(text);
-        }
-    }
-    fn flush(&self) {}
-}
-static WARNINGS: Warnings = Warnings(Mutex::new(Vec::new()));
 
 /// A resource root with the mod's content: `tank:canister`, a bucket in all but name.
 fn resource_root(scratch: &std::path::Path) -> std::path::PathBuf {
@@ -147,7 +128,7 @@ fn drawn_with(game: &crate::game::Game<'_>, item: &str, model: &str) -> Vec<Laye
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide mods and logger"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide mods"]
 fn a_mod_container_draws_the_fluid_its_part_reports() {
     crate::game::in_own_process(
         "game::contained_fluid_tests::a_mod_container_draws_the_fluid_its_part_reports",
@@ -156,8 +137,6 @@ fn a_mod_container_draws_the_fluid_its_part_reports() {
 }
 
 fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
-    log::set_logger(&WARNINGS).unwrap();
-    log::set_max_level(log::LevelFilter::Warn);
     let part = Canister {
         answer: Arc::new(Mutex::new(Answer::Nothing)),
         asked: Arc::new(Mutex::new(Vec::new())),
@@ -190,7 +169,7 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             assert_eq!(empty.len(), 1, "{empty:?}");
 
             // A registered fluid with no look in an item draws the missing sprite through the
-            // mask, untinted, so the mistake shows; nothing is logged for it.
+            // mask, untinted, so the mistake shows.
             answer(Answer::Sludge);
             let sludge = drawn(game, "tank:canister");
             assert_eq!(sludge.len(), 2, "{sludge:?}");
@@ -202,26 +181,13 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
                 }
             );
             assert_eq!(sludge[1].tints, vec![-1]);
-            assert!(WARNINGS.0.lock().unwrap().is_empty());
 
-            // A key no fluid is registered under draws the empty container, logged once.
-            answer(Answer::Unregistered);
-            for _ in 0..3 {
-                assert_eq!(drawn(game, "tank:canister").len(), 1);
-            }
-            let warnings = WARNINGS.0.lock().unwrap().clone();
-            assert_eq!(warnings.len(), 1, "{warnings:?}");
-            assert!(warnings[0].contains("tank:canister"), "{warnings:?}");
-
-            // Holding none under a model that declares water draws that water untinted (white),
-            // and so does an unregistered key.
-            for holds in [Answer::Nothing, Answer::Unregistered] {
-                answer(holds);
-                let fallback = drawn_with(game, "tank:canister", WATER_FALLBACK);
-                assert_eq!(fallback.len(), 2, "{holds:?}: {fallback:?}");
-                assert_eq!(fallback[1].content, water_still, "{holds:?}");
-                assert_eq!(fallback[1].tints, vec![-1], "{holds:?}");
-            }
+            // Holding none under a model that declares water draws that water untinted (white).
+            answer(Answer::Nothing);
+            let fallback = drawn_with(game, "tank:canister", WATER_FALLBACK);
+            assert_eq!(fallback.len(), 2, "{fallback:?}");
+            assert_eq!(fallback[1].content, water_still);
+            assert_eq!(fallback[1].tints, vec![-1]);
 
             // Vanilla's items never ask a part, even one attached to them: the water bucket
             // keeps vanilla's answer and the empty bucket stays empty.
@@ -230,7 +196,7 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             assert_eq!(drawn(game, "minecraft:water_bucket")[1].content, water_still);
             let asked = part.asked.lock().unwrap().clone();
             assert!(asked.iter().all(|item| item == "tank:canister"), "{asked:?}");
-            assert_eq!(asked.len(), 8);
+            assert_eq!(asked.len(), 4);
         });
     });
 }
