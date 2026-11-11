@@ -196,6 +196,21 @@ mod tests {
     use crate::locks::Release;
 
     #[test]
+    #[ignore = "fixture writer subprocess only"]
+    fn write_missing_registration_actor() {
+        if let Some(destination) = std::env::var_os("HORIZON_MISSING_LEASE_COPY") {
+            let destination = std::path::PathBuf::from(destination);
+            std::fs::copy(std::env::current_exe().unwrap(), &destination).unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(destination)
+                .unwrap()
+                .sync_all()
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn missing_registration_is_displayed_and_information_does_not_register() {
         const ACTOR: &str = "HORIZON_MISSING_LEASE_ACTOR";
         if let Some(mode) = std::env::var_os(ACTOR) {
@@ -216,7 +231,20 @@ mod tests {
         std::fs::create_dir(&home).unwrap();
         drop(Registry::with_release(&data, Release::Close).unwrap());
         let executable = install.join(format!("actor{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        // Isolate the writable image from unrelated test threads' fork/exec windows.
+        // CLOEXEC alone only closes inherited writable descriptors at exec, not fork.
+        assert!(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "holder::game_entry::tests::write_missing_registration_actor",
+                    "--ignored",
+                ])
+                .env("HORIZON_MISSING_LEASE_COPY", &executable)
+                .status()
+                .unwrap()
+                .success()
+        );
         let run = |mode| {
             Command::new(&executable)
                 .args([

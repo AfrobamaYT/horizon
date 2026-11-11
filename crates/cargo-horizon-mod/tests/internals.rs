@@ -327,8 +327,27 @@ fn unreadable_new_catalog_does_not_move_either_pin_or_hashes() {
 
 #[cfg(unix)]
 #[test]
-fn internals_sync_invokes_the_launcher_and_never_edits_on_failure() {
+#[ignore = "fixture writer subprocess only"]
+fn write_launcher_actor() {
     use std::os::unix::fs::PermissionsExt;
+    if let Some(destination) = std::env::var_os("HORIZON_TEST_LAUNCHER_WRITER") {
+        use std::io::Write;
+        let mut file = fs::File::create(&destination).unwrap();
+        file.write_all(
+            std::env::var("HORIZON_TEST_LAUNCHER_SCRIPT")
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        fs::set_permissions(destination, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn internals_sync_invokes_the_launcher_and_never_edits_on_failure() {
     let project = Project::new(
         "sync-command",
         "internals = [{ path = 'Unused', hash = 'old' }]\n",
@@ -342,15 +361,29 @@ fn internals_sync_invokes_the_launcher_and_never_edits_on_failure() {
             .output()
             .unwrap()
     };
-    fs::write(&launcher, "#!/bin/sh\nexit 1\n").unwrap();
-    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+    // A separate, exact-test writer cannot leak writable fds into other tests'
+    // fork children. CLOEXEC would only close those descriptors at exec.
+    let write_launcher = |script: &str| {
+        assert!(
+            Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "write_launcher_actor", "--ignored",])
+                .env("HORIZON_TEST_LAUNCHER_WRITER", &launcher)
+                .env("HORIZON_TEST_LAUNCHER_SCRIPT", script)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    write_launcher("#!/bin/sh\nexit 1\n");
     let before = project.text();
     assert!(!invoke().status.success());
     assert_eq!(project.text(), before);
-    fs::write(&launcher, r#"#!/bin/sh
+    write_launcher(
+        r#"#!/bin/sh
 [ "$1" = native-build ] && [ "$2" = --sync-internals ] && [ "$3" = --trust-native-code ] && [ "$4" = "$PWD" ] || exit 2
 printf '%s\n' '[{"path":"Used","kind":"struct","signature":"struct Used","hash":"compiler"}]'
-"#).unwrap();
+"#,
+    );
     let report = success(&invoke());
     assert!(report.contains("added: Used (struct)"));
     assert!(report.contains("removed: Unused"));
@@ -359,7 +392,7 @@ printf '%s\n' '[{"path":"Used","kind":"struct","signature":"struct Used","hash":
     assert_eq!(manifest.internals[0].hash.as_deref(), Some("compiler"));
     assert!(project.text().contains("# native settings"));
     let before = project.text();
-    fs::write(&launcher, "#!/bin/sh\nprintf 'not JSON'\n").unwrap();
+    write_launcher("#!/bin/sh\nprintf 'not JSON'\n");
     assert!(!invoke().status.success());
     assert_eq!(project.text(), before);
 }
