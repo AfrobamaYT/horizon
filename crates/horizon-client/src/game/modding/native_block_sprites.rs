@@ -326,10 +326,21 @@ mod quad_on_tests {
         // A texture turned 22.5 degrees on the side, or sheared, fits no UV rectangle: no answer
         // rather than wrong UVs.
         let (s, c) = 22.5f32.to_radians().sin_cos();
-        let slanted = [0.5 - 0.5 * c + 0.5 * s, 0.5 - 0.5 * s - 0.5 * c, c, s, -s, c];
+        let slanted = [
+            0.5 - 0.5 * c + 0.5 * s,
+            0.5 - 0.5 * s - 0.5 * c,
+            c,
+            s,
+            -s,
+            c,
+        ];
         let sheared = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0];
         for uv in [slanted, sheared] {
-            assert_eq!(face(uv).quad_on(Direction::North, [0.0; 3], [1.0; 3]), None, "{uv:?}");
+            assert_eq!(
+                face(uv).quad_on(Direction::North, [0.0; 3], [1.0; 3]),
+                None,
+                "{uv:?}"
+            );
         }
     }
 }
@@ -348,14 +359,116 @@ mod block_tint_color_tests {
             let grass = registry.default_state("minecraft:grass_block").unwrap();
             let stone = registry.default_state("minecraft:stone").unwrap();
             let water = registry.default_state("minecraft:water").unwrap();
-            let color = game.block_tint_color(grass, 0, [0, 64, 0]);
-            assert!(color.is_some_and(|c| c <= 0xFF_FFFF), "{color:?}");
-            assert_eq!(game.block_tint_color(grass, -1, [0, 64, 0]), None);
-            assert_eq!(game.block_tint_color(stone, 0, [0, 64, 0]), None);
-            // Water has no model tint: its faces take the fluid's water colour.
-            let water_color = game.block_tint_color(water, 0, [0, 64, 0]);
-            assert!(water_color.is_some_and(|c| c <= 0xFF_FFFF), "{water_color:?}");
-            assert_eq!(game.block_tint_color(water, 1, [0, 64, 0]), None);
+            use horizon_assets::resource_source::{ResourceRoot, ResourceSource};
+            use std::sync::Arc;
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.local")
+                .join(format!(
+                    "tint-fixture-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+            let write = |path: &str, bytes: &[u8]| {
+                let path = root.join(path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, bytes).unwrap();
+            };
+            let png = |rgb: Vec<u8>| {
+                let mut bytes = Vec::new();
+                let mut encoder = png::Encoder::new(&mut bytes, 256, 256);
+                encoder.set_color(png::ColorType::Rgb);
+                encoder.set_depth(png::BitDepth::Eight);
+                let mut writer = encoder.write_header().unwrap();
+                writer.write_image_data(&rgb).unwrap();
+                writer.finish().unwrap();
+                bytes
+            };
+            // Synthetic pixels only. Vanilla clamps t and r, then samples at
+            // x = trunc(255 * (1 - t)), y = trunc(255 * (1 - r*t)).
+            // (1,1) -> (0,0); (0.5,0.5) -> (127,191), index 49023.
+            // Neither biome has a grass override/modifier. Uniform chunks make
+            // the BiomeColors blend equal to that one pixel, independent of zoom.
+            let mut pixels = vec![0; 256 * 256 * 3];
+            pixels[..3].copy_from_slice(&[0x12, 0x34, 0x56]);
+            pixels[49023 * 3..49023 * 3 + 3].copy_from_slice(&[0xAB, 0xCD, 0xEF]);
+            let image = png(pixels);
+            for name in ["grass", "foliage", "dry_foliage"] {
+                write(
+                    &format!("assets/minecraft/textures/colormap/{name}.png"),
+                    &image,
+                );
+            }
+            write(
+                "data/minecraft/worldgen/biome/plains.json",
+                br#"{"temperature":1.0,"downfall":1.0}"#,
+            );
+            write(
+                "data/minecraft/worldgen/biome/cool.json",
+                br#"{"temperature":0.5,"downfall":0.5}"#,
+            );
+            // A separate, constant water map: every sample and every blend is
+            // 0x2468AC, never either grass pixel or a biome's default water colour.
+            write(
+                "assets/test/polytone/colormaps/water.png",
+                &png([0x24, 0x68, 0xAC].repeat(256 * 256)),
+            );
+            write(
+                "assets/test/polytone/colors.json",
+                br#"{"biome_colors":{"water":"test:water"}}"#,
+            );
+            let biomes = Arc::new(
+                horizon_client::biome::Biomes::load(&ResourceRoot::directory(root.clone()))
+                    .unwrap(),
+            );
+            let source = ResourceSource::directory(root.clone());
+            let old = &game.pack.context;
+            let tables = horizon_client::mesher::MeshTables::new(
+                &old.assets,
+                &old.render,
+                game.res.facts(),
+                horizon_client::models::load_visibility(&game.options.resources, registry).unwrap(),
+                None,
+            )
+            .unwrap()
+            .with_polytone_colormaps(&source, registry);
+            game.pack.context = Arc::new(horizon_client::streaming::WorkerContext {
+                assets: old.assets.clone(),
+                render: old.render.clone(),
+                tables: Arc::new(tables),
+                biomes: biomes.clone(),
+                light: old.light.clone(),
+                hidden_states: old.hidden_states.clone(),
+            });
+            game.world_biomes = Some(biomes.clone());
+            game.streaming.biome_blend = 0;
+            game.world.chunks.clear();
+            for (cx, name) in [(0, "minecraft:plains"), (4, "minecraft:cool")] {
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        let mut chunk = horizon_client::chunk::Chunk::empty(cx + dx, dz);
+                        for y in 0..96 {
+                            for z in 0..4 {
+                                for x in 0..4 {
+                                    chunk.set_biome_cell(x, y, z, biomes.id(name));
+                                }
+                            }
+                        }
+                        game.world.chunks.insert((cx + dx, dz), Arc::new(chunk));
+                    }
+                }
+            }
+            assert_eq!(game.block_tint_color(grass, 0, [8, 64, 8]), Some(0x123456));
+            assert_eq!(game.block_tint_color(grass, 0, [72, 64, 8]), Some(0xABCDEF));
+            for pos in [[8, 64, 8], [72, 64, 8]] {
+                assert_eq!(game.block_tint_color(water, 0, pos), Some(0x2468AC));
+                assert_eq!(game.block_tint_color(grass, -1, pos), None);
+                let untinted = game.block_tint_color(stone, 0, pos);
+                assert_eq!(untinted, None);
+                assert_eq!(untinted.unwrap_or(0xFFFFFF), 0xFFFFFF);
+                assert_eq!(game.block_tint_color(water, 1, pos), None);
+            }
+            std::fs::remove_dir_all(root).unwrap();
         });
     }
 }
