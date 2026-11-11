@@ -933,9 +933,9 @@ fn rewrite(
                 Some(block) => {
                     let (generics, _, clause) = block.generics.split_for_impl();
                     let ty = &block.self_ty;
-                    quote!(#[doc(hidden)] #[allow(clippy::all)] pub fn #arm #generics () #clause { <#ty>::#armer() })
+                    quote!(#[allow(clippy::all)] pub(crate) fn #arm #generics () #clause { <#ty>::#armer() })
                 }
-                None => quote!(#[doc(hidden)] #[allow(clippy::all)] pub fn #arm() { #armer() }),
+                None => quote!(#[allow(clippy::all)] pub(crate) fn #arm() { #armer() }),
             };
             let end = at(function.end);
             edits.push((end, end, format!(" {call}")));

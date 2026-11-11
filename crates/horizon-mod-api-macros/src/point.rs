@@ -484,9 +484,8 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     let arm = quote! {
         /// Installs this point's dispatcher as the function's entry while a mod listens at its
         /// head or return. Called once, after the points are sealed.
-        #[doc(hidden)]
         #[allow(dead_code, clippy::all)]
-        pub fn #armer() {
+        fn #armer() {
             if #(#places)||* {
                 crate::__REPLACE[#slot].store(
                     #dispatcher_path as *mut (),
