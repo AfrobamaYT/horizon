@@ -5,12 +5,97 @@
 //!
 //! An item's fluid layer (`neoforge:fluid_container`) reads the same data: [`item_appearance`]
 //! gives a fluid's still sprite and item tint, and [`held_fluid`] the fluid a vanilla bucket holds.
+//! Items are drawn every frame, so their answers are resolved once per load, by the same two
+//! calls that store the looks and models ([`FluidData`]).
 use horizon_assets::item_model::FluidAppearance;
 use horizon_mod_package::content::{FluidLook, FluidModel, namespaced_id};
-use std::sync::RwLock;
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
 
-static LOOKS: RwLock<Vec<FluidLook>> = RwLock::new(Vec::new());
-static REGISTERED: RwLock<Vec<FluidModel>> = RwLock::new(Vec::new());
+static DATA: LazyLock<RwLock<FluidData>> = LazyLock::new(|| RwLock::new(FluidData::new()));
+
+/// The world fluids' looks, the models mods register, and what every fluid draws as an item,
+/// resolved from both. Only [`FluidData::set_looks`] and [`FluidData::set_registered`] change
+/// it, the two steps of every resource load, and each rebuilds `items`: the index is never
+/// older than the data it was built from, and needs no invalidation of its own.
+struct FluidData {
+    looks: Vec<FluidLook>,
+    registered: Vec<FluidModel>,
+    /// [`item_appearance`]'s answers by fluid id, vanilla's included.
+    items: HashMap<String, FluidAppearance>,
+}
+
+impl FluidData {
+    fn new() -> Self {
+        let mut data = Self {
+            looks: Vec::new(),
+            registered: Vec::new(),
+            items: HashMap::new(),
+        };
+        data.reindex();
+        data
+    }
+    fn set_looks<'a>(&mut self, looks: impl IntoIterator<Item = &'a FluidLook>) {
+        self.looks = looks
+            .into_iter()
+            .filter(|look| look.world.is_some())
+            .cloned()
+            .collect();
+        self.reindex();
+    }
+    fn set_registered(&mut self, models: Vec<FluidModel>) {
+        self.registered = models;
+        self.reindex();
+    }
+    /// Resolves every fluid's item appearance (see [`item_appearance`]). A mod's world fluid
+    /// draws its world model's still sprite with its fixed tint made opaque, or water's item
+    /// colour when it takes the biome's. Vanilla's fluids come from the world renderer's own
+    /// table and win over a look of the same id; `FluidStateModelSet.bake` maps a fluid and
+    /// its flowing form to one model.
+    fn reindex(&mut self) {
+        let mut items: HashMap<String, FluidAppearance> = self
+            .looks
+            .iter()
+            .map(|look| {
+                // The load's `resolved` already warned about bad sprite ids.
+                let model = resolve_look(look, &self.registered, false);
+                let tint = match model.tint {
+                    FluidTint::Fixed(rgb) => (0xFF00_0000 | rgb) as i32,
+                    FluidTint::Biome => WATER_ITEM_TINT,
+                };
+                let appearance = FluidAppearance {
+                    still: model.still,
+                    tint,
+                };
+                (look.id.clone(), appearance)
+            })
+            .collect();
+        for (fluid, block) in [
+            ("minecraft:water", "minecraft:water"),
+            ("minecraft:flowing_water", "minecraft:water"),
+            ("minecraft:lava", "minecraft:lava"),
+            ("minecraft:flowing_lava", "minecraft:lava"),
+        ] {
+            if let Some((still, tint, _)) = crate::block_sprites::fluid_faces(block) {
+                let appearance = FluidAppearance {
+                    still: format!("minecraft:{still}"),
+                    // Lava's model has no tint source: `FluidContentsTint` answers -1.
+                    tint: if matches!(tint, Some(crate::mesher::TintSource::Water)) {
+                        WATER_ITEM_TINT
+                    } else {
+                        -1
+                    },
+                };
+                items.insert(fluid.to_owned(), appearance);
+            }
+        }
+        self.items = items;
+    }
+}
+
+fn data() -> std::sync::RwLockReadGuard<'static, FluidData> {
+    DATA.read().unwrap_or_else(|e| e.into_inner())
+}
 
 /// The colour a mod fluid's sprites are multiplied by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,24 +119,22 @@ pub struct ResolvedFluidModel {
 
 /// Remembers the world fluids' looks; every resource load calls this before it reads them.
 pub fn set_world_looks<'a>(looks: impl IntoIterator<Item = &'a FluidLook>) {
-    *LOOKS.write().unwrap_or_else(|e| e.into_inner()) = looks
-        .into_iter()
-        .filter(|look| look.world.is_some())
-        .cloned()
-        .collect();
+    DATA.write()
+        .unwrap_or_else(|e| e.into_inner())
+        .set_looks(looks);
 }
 
 /// Replaces the models recollected before each resource bake, including reloads.
 pub fn register(models: Vec<FluidModel>) {
-    *REGISTERED.write().unwrap_or_else(|e| e.into_inner()) = models;
+    DATA.write()
+        .unwrap_or_else(|e| e.into_inner())
+        .set_registered(models);
 }
 
 /// Every world fluid's model.
 pub fn resolved() -> Vec<ResolvedFluidModel> {
-    resolve(
-        &LOOKS.read().unwrap_or_else(|e| e.into_inner()),
-        &REGISTERED.read().unwrap_or_else(|e| e.into_inner()),
-    )
+    let data = data();
+    resolve(&data.looks, &data.registered)
 }
 
 fn resolve(looks: &[FluidLook], registered: &[FluidModel]) -> Vec<ResolvedFluidModel> {
@@ -115,51 +198,16 @@ pub const WATER_ITEM_TINT: i32 = 0xFF3F_76E4_u32 as i32;
 /// sprite (`DynamicFluidContainerModel.bakeModelForFluid`) and its tint as `FluidContentsTint`
 /// gives it (`fluidTintSource().colorAsStack(stack)`, white with no tint source).
 ///
-/// Vanilla's fluids come from the world renderer's own table ([`crate::block_sprites::fluid_faces`]);
-/// `FluidStateModelSet.bake` maps a fluid and its flowing form to one model. A mod's world
-/// fluid draws its world model's still sprite with its fixed tint, or water's when it takes the
-/// biome's. `None` for `minecraft:empty` and every fluid no model knows; NeoForge would draw the
-/// missing model's sprite there (`FluidStateModelSet.get`'s `missingModel`), Horizon draws no
-/// fluid layer.
+/// Vanilla's fluids come from the world renderer's own table ([`crate::block_sprites::fluid_faces`]),
+/// a mod's world fluid from its world model (see [`FluidData::reindex`]). `None` for
+/// `minecraft:empty` and every fluid no model knows; NeoForge would draw the missing model's
+/// sprite there (`FluidStateModelSet.get`'s `missingModel`), Horizon draws no fluid layer.
+///
+/// One read lock and one hash lookup: the answers are resolved when the looks or models load.
+/// A resource pack that replaces a sprite's texture keeps its name, so the answer stays right
+/// and the bake reads the new pixels from the atlas.
 pub fn item_appearance(fluid: &str) -> Option<FluidAppearance> {
-    item_appearance_in(
-        fluid,
-        &LOOKS.read().unwrap_or_else(|e| e.into_inner()),
-        &REGISTERED.read().unwrap_or_else(|e| e.into_inner()),
-    )
-}
-
-fn item_appearance_in(
-    fluid: &str,
-    looks: &[FluidLook],
-    registered: &[FluidModel],
-) -> Option<FluidAppearance> {
-    let vanilla = match fluid {
-        "minecraft:water" | "minecraft:flowing_water" => Some("minecraft:water"),
-        "minecraft:lava" | "minecraft:flowing_lava" => Some("minecraft:lava"),
-        _ => None,
-    };
-    if let Some(block) = vanilla {
-        let (still, tint, _) = crate::block_sprites::fluid_faces(block)?;
-        return Some(FluidAppearance {
-            still: format!("minecraft:{still}"),
-            // Lava's model has no tint source: `FluidContentsTint` answers -1.
-            tint: if matches!(tint, Some(crate::mesher::TintSource::Water)) {
-                WATER_ITEM_TINT
-            } else {
-                -1
-            },
-        });
-    }
-    let look = looks.iter().find(|look| look.id == fluid)?;
-    let model = resolve_look(look, registered, false);
-    Some(FluidAppearance {
-        still: model.still,
-        tint: match model.tint {
-            FluidTint::Fixed(rgb) => (0xFF00_0000 | rgb) as i32,
-            FluidTint::Biome => WATER_ITEM_TINT,
-        },
-    })
+    data().items.get(fluid).cloned()
 }
 
 /// The fluid a vanilla bucket holds: NeoForge registers `BucketResourceHandler` for every item
@@ -258,7 +306,8 @@ mod tests {
     /// source's model; the empty fluid and unknown fluids have none.
     #[test]
     fn vanilla_fluids_draw_their_still_sprite_with_their_item_tint() {
-        let appearance = |fluid| item_appearance_in(fluid, &[], &[]);
+        let data = FluidData::new();
+        let appearance = |fluid| data.items.get(fluid).cloned();
         let water = FluidAppearance {
             still: "minecraft:block/water_still".into(),
             tint: -12618012,
@@ -289,23 +338,67 @@ mod tests {
             look("a:oil", Some("a:block/oil"), Some(0x8011_2233)),
             look("a:plain", None, None),
         ];
-        let registered = [FluidModel {
+        let mut data = FluidData::new();
+        data.set_looks(&looks);
+        data.set_registered(vec![FluidModel {
             still: Some("a:block/oil_still".into()),
             ..model("a:oil")
-        }];
+        }]);
+        let appearance = |fluid| data.items.get(fluid).cloned();
         assert_eq!(
-            item_appearance_in("a:oil", &looks, &registered),
+            appearance("a:oil"),
             Some(FluidAppearance {
                 still: "a:block/oil_still".into(),
                 tint: 0xFF11_2233_u32 as i32,
             })
         );
         assert_eq!(
-            item_appearance_in("a:plain", &looks, &registered),
+            appearance("a:plain"),
             Some(FluidAppearance {
                 still: "minecraft:block/water_still".into(),
                 tint: -12618012,
             })
+        );
+    }
+
+    /// The item index follows both steps of a resource load: a reload that changes a look,
+    /// a client mod's model naming another sprite (`register_fluid_models`, recollected
+    /// before each bake), and a reload that drops the fluid each change what the item draws.
+    #[test]
+    fn a_reload_changes_what_an_items_fluid_draws() {
+        let mut data = FluidData::new();
+        let appearance = |data: &FluidData| data.items.get("a:oil").cloned();
+        assert_eq!(appearance(&data), None, "not loaded yet");
+        data.set_looks(&[look("a:oil", Some("a:block/oil"), Some(0x11_2233))]);
+        assert_eq!(
+            appearance(&data),
+            Some(FluidAppearance {
+                still: "a:block/oil".into(),
+                tint: 0xFF11_2233_u32 as i32,
+            })
+        );
+        data.set_looks(&[look("a:oil", Some("a:block/tar"), None)]);
+        assert_eq!(
+            appearance(&data),
+            Some(FluidAppearance {
+                still: "a:block/tar".into(),
+                tint: -1,
+            })
+        );
+        data.set_registered(vec![FluidModel {
+            still: Some("a:block/tar_still".into()),
+            ..model("a:oil")
+        }]);
+        assert_eq!(
+            appearance(&data).map(|a| a.still),
+            Some("a:block/tar_still".into())
+        );
+        data.set_looks(&[]);
+        assert_eq!(appearance(&data), None);
+        assert_eq!(
+            data.items.get("minecraft:water").map(|a| a.tint),
+            Some(-12618012),
+            "vanilla's stay through every reload"
         );
     }
 

@@ -164,6 +164,40 @@ fn a_full_container_draws_base_fluid_and_base_through_the_cover_mask() {
     assert!(drawn.iter().all(|l| l.foil == FoilType::None));
 }
 
+/// [`Fluids`], counting how often the resolver asks how a fluid draws.
+struct CountedFluids {
+    fluids: Fluids,
+    lookups: std::cell::Cell<usize>,
+}
+impl ItemEnv for CountedFluids {
+    fn stack_fluid(&self, stack: &StackView) -> Option<String> {
+        self.fluids.stack_fluid(stack)
+    }
+    fn fluid_appearance(&self, fluid: &str) -> Option<FluidAppearance> {
+        self.lookups.set(self.lookups.get() + 1);
+        self.fluids.fluid_appearance(fluid)
+    }
+}
+
+/// A stack's held fluid is also the one drawn, so one lookup gives both the sprite and the
+/// tint: a held bucket asks once per draw, not once for each.
+#[test]
+fn a_held_fluid_is_looked_up_once_per_draw() {
+    let env = CountedFluids {
+        fluids: Fluids {
+            held: Some("mod:gas"),
+        },
+        lookups: std::cell::Cell::new(0),
+    };
+    let drawn = layers(
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
+            "textures":{"base":"mod:item/flask","fluid":"neoforge:item/mask/bucket_fluid"}}"#,
+        &env,
+    );
+    assert_eq!(drawn[1].tints, vec![GAS_TINT]);
+    assert_eq!(env.lookups.get(), 1);
+}
+
 #[test]
 fn an_empty_container_draws_its_declared_fluid_or_none() {
     let empty = r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",

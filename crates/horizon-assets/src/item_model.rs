@@ -1535,11 +1535,9 @@ impl Resolve<'_> {
         {
             // `FluidContentsTint` colours the layer from the fluid the stack holds, not the one
             // drawn: a stack holding none gets the empty fluid's model, which has no tint source,
-            // so -1, even while the declared fluid is drawn.
-            let tint = held
-                .as_deref()
-                .and_then(|held| self.env.fluid_appearance(held))
-                .map_or(-1, |held| held.tint);
+            // so -1, even while the declared fluid is drawn. A stack that holds one draws that
+            // same fluid, so its tint is the appearance already looked up.
+            let tint = if held.is_some() { appearance.tint } else { -1 };
             self.sprite_layer(out, &appearance.still, Some(mask), vec![tint], parent);
         }
         // The cover is always the mask (`bakeItemMaskQuads(baker, 0, cover, drawn, ...)`, offsets
