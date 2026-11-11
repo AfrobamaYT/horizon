@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 6 | 21 | 33 | 0 |
-| `IBlockStateExtension` | 57 | 5 | 20 | 32 | 0 |
+| `IBlockExtension` | 60 | 7 | 21 | 32 | 0 |
+| `IBlockStateExtension` | 57 | 6 | 20 | 31 | 0 |
 | `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -115,7 +115,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `getBubbleColumnDirection(state)` | Missing | — | Bubble-column rules are engine-owned. |
 | `shouldHideAdjacentFluidFace(state, direction, fluid)` | Missing | — | Fluid-face culling is engine-owned. |
 | `getBounceRestitution(level, pos, state, entity)` | Partial | `BlockPart::bounce_on` (`hooks/block_landing.rs`) | Edits the entity's movement after it bounced; the restitution factor is not exposed. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `getRelocability(level, pos, state)` | Missing | — | No relocation query (pistons, structure blocks). |
+| `getRelocability(level, pos, state)` | Covered | `BlockPart::relocability` (`hooks/relocability.rs`) | Asked on both sides at the last step of `PistonBaseBlock.isPushable`, for a block past its push reaction. `Some(true)` moves the block with its mod block entity, which keeps its saved data and attachments ([#3184](https://github.com/arismoko/horizon/issues/3184)); a vanilla block entity never moves. Only pistons ask: the clone command and structure templates copy blocks without asking. |
 | `canBeConnectedTo(state, direction, neighborBlock)` | Partial | `BlockPart::connects_to` (`hooks/connects_to.rs`) | Asks the connecting fence, wall, bars or pane (your block), not the block being connected to: a modded target cannot answer for a vanilla fence, and only those shapes ask at all. |
 | `getModelData(state, level, pos)` | Missing | — | No `ModelData`; block-entity drawing takes a `block_entity_submit` part with its own model path. |
 
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 5 covered, 20 partial, 32 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 6 covered, 20 partial, 31 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -302,7 +302,8 @@ their rows have landed or become partial since and should be narrowed when they 
   reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds` (state-based, without a
   position or direction); `canSustainPlant` is `can_sustain_plant` (the soil) before `may_place_on` (the
   plant); `canHarvestBlock` is `can_harvest_block` before `player_harvest_check`; `isLadder` is `is_ladder`;
-  `getToolModifiedState` is partly `block_tool_modification`.
+  `getRelocability` is `relocability`, asked by pistons; `getToolModifiedState` is partly
+  `block_tool_modification`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
   has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
