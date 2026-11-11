@@ -469,11 +469,15 @@ impl Loading {
     /// The startup menu's Browse mods, as `Game::drive_mod_browser`.
     fn drive_menu_mod_browser(&mut self) {
         let menu = &mut self.menu;
-        if menu.mod_jobs.poll(
+        let (installed, changed) = menu.mod_jobs.poll(
             &mut menu.options.mod_browser,
             &mut self.settings.mods,
             false,
-        ) {
+        );
+        if changed {
+            menu.options.layout_changed();
+        }
+        if installed {
             self.settings.save(&Game::options_path());
         }
     }
