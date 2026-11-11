@@ -2077,6 +2077,23 @@ impl io_pool::Session for PlayConn {
                                 );
                                 return Verdict::Go;
                             }
+                            Ok(crate::raw_payloads::Classified::Raw(deliveries)) => {
+                                for incoming in deliveries {
+                                    let endpoint = crate::raw_payloads::Endpoint::server(
+                                        self.payload_sender.clone(),
+                                    );
+                                    crate::raw_payloads::dispatch(
+                                        incoming,
+                                        endpoint.clone(),
+                                        crate::raw_payloads::MainQueue::Server {
+                                            events: self.shared.events.clone(),
+                                            endpoint,
+                                            conn: Some(self.conn),
+                                        },
+                                    );
+                                }
+                                return Verdict::Go;
+                            }
                             Ok(crate::raw_payloads::Classified::Other(payload)) => {
                                 play::Serverbound::CustomPayload(payload)
                             }
