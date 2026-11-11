@@ -5,6 +5,7 @@
 //! chunks that tick blocks. Sculk, brewing stands and pistons tick in their
 //! own passes.
 use super::Game;
+use crate::game::published_loops::{Attributed, LoopFlow, LoopMod};
 use horizon_client::{
     Result,
     block_entities::{Pos, Ticking},
@@ -14,60 +15,93 @@ use horizon_client::{
 };
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
-use mod_api::loops::LoopFlow;
-use mod_api::loops::block_entity_tick::{BlockEntityTickSlot, BlockEntityTickView, TickedKind};
 
-/// The block entity `tick_block_entities` is visiting, as a slot sees it.
-struct Ticked<'g, 'a> {
-    game: &'g mut Game<'a>,
-    pos: Pos,
-    kind: TickedKind,
+/// What `block_entities.tick` is visiting: the dispatch's own kinds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TickedKind {
+    Hopper,
+    Crafter,
+    Jukebox,
+    Beacon,
+    CreakingHeart,
+    Spawner,
+    TrialSpawner,
+    Vault,
+    Beehive,
+    Furnace,
+    BrewingStand,
+    DaylightDetector,
+    EndGateway,
+    Campfire,
+    Mod,
+    PotentSulfur,
 }
 
-impl BlockEntityTickView for Ticked<'_, '_> {
-    #[inline]
-    fn pos(&self) -> [i32; 3] {
-        [self.pos.0, self.pos.1, self.pos.2]
+/// The block entity `block_entities.tick` is visiting, as a slot gets it: the loop's own state,
+/// lent under the loop's `&mut self` for one call. Pinned to this build like a mixin's target.
+#[allow(dead_code, reason = "read by `[[native.loop]]` helpers, compiled in a mod build")]
+pub(crate) struct BlockEntityTick<'g, 'a> {
+    /// The game the loop runs on: the level being ticked, `hoppers`, everything the loop has.
+    pub(crate) game: &'g mut Game<'a>,
+    /// The block entity's position.
+    pub(crate) pos: Pos,
+    pub(crate) kind: TickedKind,
+}
+
+#[allow(dead_code, reason = "read by `[[native.loop]]` helpers, compiled in a mod build")]
+impl BlockEntityTick<'_, '_> {
+    /// The visited block entity.
+    pub(crate) fn block_entity(&mut self) -> Option<&mut BlockEntity> {
+        self.game.world.block_entities.get_mut(&self.pos)
     }
-    #[inline]
-    fn state(&self) -> mod_api::BlockStateId {
-        mod_api::BlockStateId(self.game.world.block(self.pos.0, self.pos.1, self.pos.2).0)
+}
+
+/// A `[[native.loop]]` slot of `block_entities.tick`: `before` runs after vanilla's visit filters,
+/// just before the block entity ticks; `after` just after a tick that happened.
+pub(crate) trait BlockEntityTickSlot {
+    #[inline(always)]
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        let _ = tick;
+        LoopFlow::Continue
     }
-    #[inline]
-    fn kind(&self) -> TickedKind {
-        self.kind
+    #[inline(always)]
+    fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+        let _ = tick;
     }
-    #[inline]
-    fn dimension(&self) -> mod_api::DimensionKey {
-        self.game.dim.key()
-    }
-    #[inline]
-    fn game_time(&self) -> i64 {
-        self.game.world.game_time
-    }
-    #[inline]
-    fn hopper_cooldown(&self) -> Option<i32> {
-        (self.kind == TickedKind::Hopper).then(|| {
-            self.game
-                .hoppers
-                .get(&self.pos)
-                .copied()
-                .unwrap_or_default()
-                .cooldown
-        })
-    }
-    #[inline]
-    fn set_hopper_cooldown(&mut self, ticks: i32) -> bool {
-        if self.kind != TickedKind::Hopper {
-            return false;
+}
+
+/// No mod: the game's own loop.
+impl BlockEntityTickSlot for () {}
+
+/// Two slots in order: `A` first, and `B` only while `A` answers [`LoopFlow::Continue`].
+impl<A: BlockEntityTickSlot, B: BlockEntityTickSlot> BlockEntityTickSlot for (A, B) {
+    #[inline(always)]
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        match self.0.before(tick) {
+            LoopFlow::Continue => self.1.before(tick),
+            answer => answer,
         }
-        self.game.hoppers.entry(self.pos).or_default().cooldown = ticks;
-        true
+    }
+    #[inline(always)]
+    fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+        self.0.after(tick);
+        self.1.after(tick);
+    }
+}
+
+impl<N: LoopMod, T: BlockEntityTickSlot> BlockEntityTickSlot for Attributed<N, T> {
+    #[inline(always)]
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        self.call(|slot| slot.before(tick))
+    }
+    #[inline(always)]
+    fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+        self.call(|slot| slot.after(tick));
     }
 }
 
 impl Game<'_> {
-    /// The published loop `block_entities.tick` (`mod_api::loops::block_entity_tick`): with no
+    /// The published loop `block_entities.tick` (`published_loops.rs`): with no
     /// `[[native.loop]]` mod its slot is `()`, and a mod build installs its own copy of this
     /// function, with the mods' slots, through its replacement cell.
     #[horizon_mod_api_macros::horizon_loop(name = "block_entities.tick", side = "server")]
@@ -76,7 +110,10 @@ impl Game<'_> {
     }
     /// `tick_block_entities` with `slot` asked before and after each block entity's tick. Generic
     /// over the slot only, so it has no replacement cell of its own: a mod build compiles it.
-    pub fn tick_block_entities_with<S: BlockEntityTickSlot>(&mut self, slot: &mut S) -> Result<()> {
+    pub(crate) fn tick_block_entities_with<S: BlockEntityTickSlot>(
+        &mut self,
+        slot: &mut S,
+    ) -> Result<()> {
         self.tick_mount_menu();
         self.tick_craft_table();
         self.tick_container_reach();
@@ -146,7 +183,7 @@ impl Game<'_> {
                 Some(BlockEntity::PotentSulfur(_)) => TickedKind::PotentSulfur,
                 _ => continue,
             };
-            match slot.before(&mut Ticked {
+            match slot.before(&mut BlockEntityTick {
                 game: self,
                 pos,
                 kind,
@@ -185,10 +222,8 @@ impl Game<'_> {
                         self.client_tick_potent_sulfur(pos);
                     }
                 }
-                // `TickedKind` is the API's, open to new kinds; this loop makes only those above.
-                _ => {}
             }
-            slot.after(&mut Ticked {
+            slot.after(&mut BlockEntityTick {
                 game: self,
                 pos,
                 kind,

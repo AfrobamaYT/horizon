@@ -221,7 +221,6 @@ impl Prepared<'_> {
 /// around the loop), are refused by name.
 fn loop_slots(
     game: &Path,
-    projects: &[api::Project<'_>],
     bundles: &[&Bundle],
 ) -> Result<Vec<api_gen::patch::LoopSlots>, String> {
     use horizon_mod_package::manifest::mixin::Kind;
@@ -260,17 +259,13 @@ fn loop_slots(
             ));
             continue;
         };
-        let project = projects
-            .iter()
-            .find(|project| project.bundle.manifest.id == *id)
-            .expect("a bundle is a project");
+        let path = bundle.dir.join(&row.helper);
+        let helper = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let slot = api_gen::patch::LoopSlot {
             mod_id: id.clone(),
-            ty: format!(
-                "{}::{}",
-                project.crate_name(),
-                row.with_path().expect("a checked manifest")
-            ),
+            id: row.id.clone(),
+            helper,
+            with: row.with.clone(),
         };
         match filled.iter_mut().find(|l| l.published.name == found.name) {
             Some(slots) => slots.slots.push(slot),
@@ -335,7 +330,7 @@ pub(super) fn prepare<'a>(
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
-    let loops = loop_slots(game, projects, &bundles)?;
+    let loops = loop_slots(game, &bundles)?;
     let rows: Vec<String> = bundles
         .iter()
         .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))

@@ -1,11 +1,61 @@
-//! The state of the `[[native.loop]]` slots this game runs (`mod_api::loops`): one cell per
-//! published loop, owned by the `Game`, so a single-player process's client and server games never
-//! share one. The game never names a mod type: a mod build's copy of the loop's entry calls
-//! [`Game::run_published_loop`] with its slots' type, and the state lives here between runs.
+//! Published loops (`[[native.loop]]`): hot loops the game owns, with a slot a native mod's helper
+//! fills. Like every `[[native.*]]` table this is game code by another route, pinned to the exact
+//! build: a loop's slot trait and cursor live beside the loop (`block_entity_ticks.rs` for
+//! `block_entities.tick`) and lend the slot the loop's own state, and nothing here is `mod_api`.
+//!
+//! A loop is written once as a function generic over its slot; its entry, marked
+//! `#[horizon_loop]`, calls it with `()`, which compiles to the game's own loop. A mod build compiles
+//! one copy of the entry that runs the loop with the installed slots, nested by `(priority, mod
+//! id)` (`(A, (B, ()))`: the first answer that is not [`LoopFlow::Continue`] wins), and installs it
+//! through the entry's replacement cell. Their state is one value per `Game` (this file), so a
+//! single-player process's client and server games never share one.
+#![allow(dead_code, reason = "a mod build's copy of a loop entry uses what the game's own loop does not")]
 use super::Game;
 use horizon_client::Result;
 use std::any::Any;
+use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+
+/// What a slot answers for the entry the loop is about to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoopFlow {
+    /// Run the entry, and ask the next mod's slot first.
+    Continue,
+    /// Leave this entry out of this run of the loop.
+    Skip,
+    /// End this run of the loop here; what the game does after the loop still runs.
+    Stop,
+}
+
+/// One mod's row in a published loop, for the crash report: a mod build names each slot with one.
+pub(crate) trait LoopMod {
+    /// The call a panic inside this mod's slot is reported as.
+    const CALL: mod_api::content::crash::ModCall;
+}
+
+/// A mod's slot `T`, each of whose calls is marked as inside the mod `N` names.
+pub(crate) struct Attributed<N, T> {
+    slot: T,
+    mod_row: PhantomData<fn() -> N>,
+}
+
+impl<N, T: Default> Default for Attributed<N, T> {
+    fn default() -> Self {
+        Self {
+            slot: T::default(),
+            mod_row: PhantomData,
+        }
+    }
+}
+
+impl<N: LoopMod, T> Attributed<N, T> {
+    /// Runs `call` on the slot, marked as inside the mod.
+    #[inline(always)]
+    pub(crate) fn call<R>(&mut self, call: impl FnOnce(&mut T) -> R) -> R {
+        let _inside = mod_api::content::crash::enter_native_mod(N::CALL);
+        call(&mut self.slot)
+    }
+}
 
 /// One published loop's slot state.
 enum Cell {
@@ -79,8 +129,7 @@ impl Game<'_> {
     /// `vanilla` (the loop with no slots) while the state is out for an enclosing run or a slot
     /// has panicked. A panic in `run` drops the state, marks the loop poisoned and goes on
     /// unwinding to the crash path, which names the mod.
-    #[allow(dead_code, reason = "only a mod build's copy of a loop entry calls it")]
-    pub fn run_published_loop<T: Default + 'static>(
+    pub(crate) fn run_published_loop<T: Default + 'static>(
         &mut self,
         name: &'static str,
         run: impl FnOnce(&mut Self, &mut T) -> Result<()>,

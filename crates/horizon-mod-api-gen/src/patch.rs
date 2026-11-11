@@ -67,13 +67,18 @@ pub struct LoopSlots {
     pub slots: Vec<LoopSlot>,
 }
 
-/// One mod's slot in a published loop.
+/// One mod's slot in a published loop: its helper's items, compiled in the loop's module like a
+/// mixin helper, and the slot type they define.
 #[derive(Debug, Clone)]
 pub struct LoopSlot {
     /// The mod's `[mod] id`.
     pub mod_id: String,
-    /// The slot type's path from the patch crate's root: `<mod crate>::<type>`.
-    pub ty: String,
+    /// The row's id.
+    pub id: String,
+    /// The helper's text.
+    pub helper: String,
+    /// The slot type the helper defines.
+    pub with: String,
 }
 
 /// What a mod set adds to the patch crate beside its copies.
@@ -706,11 +711,16 @@ pub fn generate(
         let attrs = kept(&found.function.attrs);
         let mut sig = found.function.sig.clone();
         let entry_of = extras.loops.iter().find(|l| l.published.entry == *target);
-        let loop_block = entry_of.map(|slots| {
-            let (items, block) = loop_entry(slots);
-            node.copies.push(items);
-            block
-        });
+        let loop_block = match entry_of.map(loop_entry).transpose() {
+            Ok(entry) => entry.map(|(items, block)| {
+                node.copies.push(items);
+                block
+            }),
+            Err(refusal) => {
+                refusals.push(refuse(target, "E_LOOP_HELPER", refusal));
+                continue;
+            }
+        };
         let block = loop_block.as_ref().unwrap_or(&found.function.block);
         let install = format_ident!("__fnr_install_{}", name);
         let constructor = format_ident!("__fnr_{}", name);
@@ -912,10 +922,10 @@ pub fn generate(
     Ok(PatchCrate { libs, patched })
 }
 
-/// A loop entry's copy: the mods' slot types beside it, and its body, which runs the loop with them
-/// in this game's state for it (`Game::run_published_loop`). Each slot's calls are marked as inside
-/// its mod for the crash report.
-fn loop_entry(slots: &LoopSlots) -> (proc_macro2::TokenStream, syn::Block) {
+/// A loop entry's copy: each slot's helper as a module beside it, marked with its mod for the crash
+/// report, and its body, which runs the loop with the slots in this game's state for it
+/// (`Game::run_published_loop`). Refused when a helper is not Rust items.
+fn loop_entry(slots: &LoopSlots) -> Result<(proc_macro2::TokenStream, syn::Block), String> {
     let published = &slots.published;
     let tag: String = published
         .name
@@ -923,18 +933,31 @@ fn loop_entry(slots: &LoopSlots) -> (proc_macro2::TokenStream, syn::Block) {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
     let hook = format!("loop {}", published.name);
+    let loops = quote!(::horizon_client::game::published_loops);
     let mut items = Vec::new();
     let mut nested = quote!(());
     for (index, slot) in slots.slots.iter().enumerate().rev() {
-        let marker = format_ident!("__FnrLoop_{}_{}", tag, index);
+        let helper = syn::parse_file(&slot.helper)
+            .map_err(|e| format!("{}:{}: its helper: {e}", slot.mod_id, slot.id))?
+            .items;
+        let module = format_ident!("__fnr_loop_{}_{}", index, tag);
+        let marker = format_ident!("__FnrLoopMod_{}_{}", index, tag);
+        let with = syn::parse_str::<syn::Ident>(&slot.with)
+            .map_err(|e| format!("{}:{}: with: {e}", slot.mod_id, slot.id))?;
         let id = &slot.mod_id;
-        let part = &slot.ty;
-        let ty: syn::Path = syn::parse_str(&format!("::{}", slot.ty)).expect("a checked type path");
+        let part = format!("{}::{}", slot.mod_id, slot.with);
         items.push(quote! {
+            /// A `[[native.loop]]` helper, compiled where the loop's code is.
+            #[doc(hidden)]
+            #[allow(non_snake_case)]
+            pub mod #module {
+                use super::*;
+                #(#helper)*
+            }
             #[doc(hidden)]
             #[allow(non_camel_case_types)]
             pub struct #marker;
-            impl ::mod_api::loops::LoopMod for #marker {
+            impl #loops::LoopMod for #marker {
                 const CALL: ::mod_api::content::crash::ModCall = ::mod_api::content::crash::ModCall {
                     id: #id,
                     hook: #hook,
@@ -942,7 +965,7 @@ fn loop_entry(slots: &LoopSlots) -> (proc_macro2::TokenStream, syn::Block) {
                 };
             }
         });
-        nested = quote!((::mod_api::loops::Attributed<#marker, #ty>, #nested));
+        nested = quote!((#loops::Attributed<#marker, #module::#with>, #nested));
     }
     let slots_ty = format_ident!("__FnrLoopSlots_{}", tag);
     items.push(quote! {
@@ -959,7 +982,7 @@ fn loop_entry(slots: &LoopSlots) -> (proc_macro2::TokenStream, syn::Block) {
             |game| game.#generic(&mut ()),
         )
     });
-    (quote!(#(#items)*), block)
+    Ok((quote!(#(#items)*), block))
 }
 
 /// Every copy's tokens in `tree` and its children.
@@ -1667,19 +1690,18 @@ mod tests {
             .into_iter()
             .find(|l| l.name == "block_entities.tick")
             .expect("the game publishes block_entities.tick");
+        let slot = |mod_id: &str, with: &str| LoopSlot {
+            mod_id: mod_id.into(),
+            id: "row".into(),
+            helper: format!(
+                "#[derive(Default)] pub struct {with}; impl BlockEntityTickSlot for {with} {{}}"
+            ),
+            with: with.into(),
+        };
         let extras = Extras {
             loops: vec![LoopSlots {
                 published: published.clone(),
-                slots: vec![
-                    LoopSlot {
-                        mod_id: "first".into(),
-                        ty: "first_mod::Count".into(),
-                    },
-                    LoopSlot {
-                        mod_id: "second".into(),
-                        ty: "second_mod::slots::Skip".into(),
-                    },
-                ],
+                slots: vec![slot("first", "Count"), slot("second", "Skip")],
             }],
             ..Extras::default()
         };
@@ -1694,12 +1716,18 @@ mod tests {
         let lib = crate_.libs[0].1.replace(char::is_whitespace, "");
         // First by priority outside, then the next, then the empty slot.
         assert!(
-            lib.contains("pubtype__FnrLoopSlots_block_entities_tick=(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_0,::first_mod::Count,>,(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_1,::second_mod::slots::Skip,>,(),),);")
-                || lib.contains("pubtype__FnrLoopSlots_block_entities_tick=(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_0,::first_mod::Count>,(::mod_api::loops::Attributed<__FnrLoop_block_entities_tick_1,::second_mod::slots::Skip>,()),);"),
+            lib.contains("pubtype__FnrLoopSlots_block_entities_tick=(::horizon_client::game::published_loops::Attributed<__FnrLoopMod_0_block_entities_tick,__fnr_loop_0_block_entities_tick::Count,>,(::horizon_client::game::published_loops::Attributed<__FnrLoopMod_1_block_entities_tick,__fnr_loop_1_block_entities_tick::Skip,>,(),),);"),
             "{}",
             crate_.libs[0].1
         );
-        assert!(lib.contains("id:\"second\",hook:\"loopblock_entities.tick\",part:Some(\"second_mod::slots::Skip\")"), "{}", crate_.libs[0].1);
+        assert!(lib.contains("pubmod__fnr_loop_1_block_entities_tick{usesuper::*;#[derive(Default)]pubstructSkip;implBlockEntityTickSlotforSkip{}}"), "{}", crate_.libs[0].1);
+        assert!(
+            lib.contains(
+                "id:\"second\",hook:\"loopblock_entities.tick\",part:Some(\"second::Skip\")"
+            ),
+            "{}",
+            crate_.libs[0].1
+        );
         assert!(
             lib.contains("self.run_published_loop(\"block_entities.tick\","),
             "{}",
@@ -1709,6 +1737,22 @@ mod tests {
             lib.contains("|game|game.tick_block_entities_with(&mut())"),
             "{}",
             crate_.libs[0].1
+        );
+        // A helper that is not Rust is refused by name.
+        let mut broken = extras.clone();
+        broken.loops[0].slots[1].helper = "fn (".into();
+        let refused = generate(
+            &root(),
+            "horizon_patch",
+            std::slice::from_ref(&published.entry),
+            &broken,
+        )
+        .unwrap_err();
+        assert_eq!(refused[0].code, "E_LOOP_HELPER");
+        assert!(
+            refused[0].why.starts_with("second:row: its helper:"),
+            "{}",
+            refused[0].why
         );
     }
 }

@@ -15,4 +15,5 @@ mixins = "MIXINS"
 [[native.loop]]
 id = "tenth"
 loop = "block_entities.tick"
-with = "crate::Tenth"
+helper = "src/loops/tenth.rs"
+with = "Tenth"

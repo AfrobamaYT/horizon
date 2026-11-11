@@ -1,7 +1,7 @@
 id = "fnr_loop"
 name = "Function replacement check: loop"
 version = "0.1.0"
-description = "fn-replace: two slots in the published loop block_entities.tick, and a HEAD mixin on its entry"
+description = "fn-replace: two slots in the published loop block_entities.tick, a nested run of the loop, and a HEAD mixin on its entry"
 authors = []
 api = "0.2"
 side = "both"
@@ -12,18 +12,21 @@ game = "26.3"
 horizon = "HEAD"
 mixins = "MIXINS"
 
-# Asked second: hoppers cooling down wait one tick less and skip their tick.
+# Asked second: hoppers cooling down lose one tick of their real cooldown and skip their tick.
 [[native.loop]]
 id = "throttle"
 loop = "block_entities.tick"
-with = "crate::Throttle"
+helper = "src/loops/throttle.rs"
+with = "Throttle"
 priority = 20
 
-# Asked first: counts what the loop visits and always answers Continue.
+# Asked first: counts what the loop visits, runs the loop again from inside it once, and always
+# answers Continue.
 [[native.loop]]
 id = "count"
 loop = "block_entities.tick"
-with = "crate::Count"
+helper = "src/loops/count.rs"
+with = "Count"
 priority = 10
 
 # A HEAD mixin on the loop's entry composes around the loop's copy.

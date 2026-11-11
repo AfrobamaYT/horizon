@@ -16,13 +16,15 @@ mixins = "MIXINS"
 [[native.loop]]
 id = "unknown"
 loop = "mobs.tick"
-with = "crate::Slot"
+helper = "src/loops/slot.rs"
+with = "Slot"
 
 # A filled loop...
 [[native.loop]]
 id = "filled"
 loop = "block_entities.tick"
-with = "crate::Slot"
+helper = "src/loops/slot.rs"
+with = "Slot"
 
 # ...whose entry an OVERWRITE would replace: E_LOOP_ENTRY_REPLACED.
 [[native.mixin]]
