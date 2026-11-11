@@ -89,7 +89,7 @@ pub enum Event {
     /// The server runs mods' quiet commands (`horizon_protocol::quiet`).
     QuietCommands,
     /// The server carries mod messages (`horizon_protocol::mod_net`).
-    ModNet,
+    CustomBooks,
     /// The server samples far terrain for this client (`lod_net`).
     FarTerrain(crate::lod_net::Offer),
     /// ClientConfigurationPacketListenerImpl.handleEnabledFeatures.
@@ -160,7 +160,7 @@ impl Event {
                 s.capacity()
             }
             Self::QuietCommands
-            | Self::ModNet
+            | Self::CustomBooks
             | Self::Reconfiguring
             | Self::ClearDialog
             | Self::PackPop(_) => 0,
@@ -1569,7 +1569,7 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &ingress::Producer<Event>) 
     } else if payload.channel == horizon_protocol::quiet::CHANNEL {
         let _ = send.send(Event::QuietCommands);
     } else if payload.channel == horizon_protocol::mod_net::CHANNEL {
-        let _ = send.send(Event::ModNet);
+        let _ = send.send(Event::CustomBooks);
     } else if payload.channel == crate::lod_net::CHANNEL
         && let Some(offer) = crate::lod_net::Offer::decode(&payload.data)
     {

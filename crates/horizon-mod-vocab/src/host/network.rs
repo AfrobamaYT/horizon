@@ -1,22 +1,6 @@
 //! Host method declarations; access defaults and game forwarders are generated.
 #![allow(unused_variables)]
 use crate::*;
-/// The server host's methods of the `network` area, implemented by the game and reached through [`ServerHost`].
-#[horizon_mod_api_macros::host_area]
-pub trait NetworkServerHost {
-    /// Side: server.
-    /// Sends `data` on `channel` (`mod_id:name`, at most 30 000 bytes, at
-    /// most 32 a player a tick) to `player`'s client, at the tick's end, from
-    /// any server hook. Ok means accepted: a player who left or isn't on a
-    /// Horizon client doesn't get it.
-    #[access(WorldOnly)]
-    fn net_send_to_player(
-        &mut self,
-        player: u128,
-        channel: &str,
-        data: &[u8],
-    ) -> Result<(), String>;
-}
 /// The client host's methods of the `network` area, implemented by the game and reached through [`crate::ClientHost`].
 #[horizon_mod_api_macros::host_area]
 pub trait NetworkClientHost {
@@ -26,13 +10,6 @@ pub trait NetworkClientHost {
     /// player in a world or while another screen is open.
     #[access(WorldOnly)]
     fn open_chat(&mut self, text: &str) -> Result<(), String>;
-    /// Side: client.
-    /// The client half: sends `data` on `channel` to the server (the same
-    /// caps, 32 a tick). An error when the server doesn't carry mod messages
-    /// (a vanilla server), and until the player has joined: a server says it
-    /// carries them during configuration, before it can take one.
-    #[access(WorldOnly)]
-    fn net_send_to_server(&mut self, channel: &str, data: &[u8]) -> Result<(), String>;
     /// Side: client.
     /// Adds `line` to this client's chat HUD and history (vanilla's
     /// `ChatComponent.addClientSystemMessage`): it shows here only, so

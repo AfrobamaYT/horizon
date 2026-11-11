@@ -535,7 +535,7 @@ pub(super) struct Remote {
     /// The server announced it runs mods' quiet commands.
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
-    pub mod_net: bool,
+    pub custom_books: bool,
     /// The synced attachments the server sent, by holder.
     pub attachments: HashMap<Holder, ResidentAttachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
@@ -1169,7 +1169,7 @@ impl Game<'_> {
             recipe_transfer: false,
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
-            mod_net: false,
+            custom_books: false,
             logged_out: false,
             attachments: HashMap::new(),
             far_terrain: None,
@@ -1409,7 +1409,7 @@ impl Game<'_> {
             recipe_transfer: false,
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
-            mod_net: false,
+            custom_books: false,
             attachments: HashMap::new(),
             far_terrain: None,
             builtin,
@@ -2388,9 +2388,9 @@ impl Game<'_> {
                         remote.quiet_commands = true;
                     }
                 }
-                Event::ModNet => {
+                Event::CustomBooks => {
                     if let Some(remote) = &mut self.remote {
-                        remote.mod_net = true;
+                        remote.custom_books = true;
                     }
                 }
                 Event::FarTerrain(offer) => {
@@ -2411,7 +2411,7 @@ impl Game<'_> {
                     if let Some(remote) = &mut self.remote {
                         remote.far_terrain = None;
                         remote.quiet_commands = false;
-                        remote.mod_net = false;
+                        remote.custom_books = false;
                     }
                     self.clear_lod();
                     if let Some(remote) = &self.remote {

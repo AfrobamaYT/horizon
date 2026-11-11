@@ -391,7 +391,6 @@ Decisions follow the documented moment, side, information and result; only Cover
 | `modify_default_components` | **Gap:** none | No cited Paper event modifies per-item default component maps at data-load/registry-freeze time. No key. |
 | `moisture_change` | **Covered:** [`MoistureChangeEvent`][paper-MoistureChangeEvent] | The cancellable soil-moisture change is the same server-side before-change moment; the block's current state and `getNewState()` give from/to, and cancelling keeps the old moisture. Key added. |
 | `neighbor_changed` | **Gap:** none | The hook is the per-block `neighborChanged` delivery; the dossier's player/world/equipment candidates are unrelated, and its own note says `NeighborNotifyEvent` is a different broadcast. No key. |
-| `net_from_client` | **Gap:** none | No cited event carries a player's custom channel payload at the hook's tick-delayed receive point; the listed entity/block events are unrelated. No key. |
 
 [paper-EntityKnockbackEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityKnockbackEvent.html
 [paper-LootGenerateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/LootGenerateEvent.html

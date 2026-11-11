@@ -939,7 +939,6 @@ impl Game<'_> {
         self.native_players_leaving();
         // IntegratedServer.stopServer: teardownPublishedState.
         self.stop_serving();
-        self.flush_native_net();
         // PlayerList.removeAll: the owner and every guest leave the game.
         if !crashed {
             self.award_leave_game_to_all();

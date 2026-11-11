@@ -70,7 +70,7 @@ fn entering_inventory_requests_catalogue_for_preinstalled_bound_screen() {
             let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
             game.connect_local(pipe, "Bound").unwrap();
             let remote = game.remote.as_mut().unwrap();
-            remote.mod_net = true;
+            remote.custom_books = true;
             remote.joined = true;
             remote.menu.set(Some((1, "bound:menu".into())));
             game.screen = Screen::Playing;
@@ -127,7 +127,7 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
             game.connect_local(pipe, "Geometry").unwrap();
             let remote = game.remote.as_mut().unwrap();
-            remote.mod_net = true;
+            remote.custom_books = true;
             remote.joined = true;
             remote.menu.set(Some((1, "geometry:menu".into())));
             game.settings.gui_scale = 1;
