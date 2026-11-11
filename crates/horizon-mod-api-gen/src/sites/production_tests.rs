@@ -92,7 +92,28 @@ fn production_listed_records() {
             &crate::crossing::Rule::new(&entries),
         )
         .unwrap();
-        proof.push(serde_json::json!({"site": metadata[0], "raw": raw, "enclosing": enclosing}));
+        struct Caller<'a> {
+            name: &'a str,
+            expression: Option<String>,
+        }
+        impl<'ast> syn::visit::Visit<'ast> for Caller<'_> {
+            fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+                if matches!(&*node.cond, syn::Expr::MethodCall(load) if load.method == "load" && matches!(&*load.receiver, syn::Expr::Index(_)))
+                    && node.cond.to_token_stream().to_string().contains(self.name)
+                {
+                    assert!(self.expression.is_none());
+                    self.expression = Some(node.to_token_stream().to_string());
+                } else {
+                    syn::visit::visit_expr_if(self, node);
+                }
+            }
+        }
+        let mut caller = Caller {
+            name,
+            expression: None,
+        };
+        syn::visit::Visit::visit_file(&mut caller, &syn::parse_file(&listed).unwrap());
+        proof.push(serde_json::json!({"site": metadata[0], "raw": raw, "enclosing": enclosing, "caller": caller.expression.unwrap()}));
     }
     // The launcher layer consumes these production-generated records, never hand-kept metadata.
     if let Some(path) = std::env::var_os("HORIZON_LISTED_PROOF_OUT") {
