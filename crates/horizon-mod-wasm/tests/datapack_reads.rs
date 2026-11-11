@@ -128,7 +128,7 @@ fn real_wasm_datapack_reads_preserve_values_and_ordering() {
     );
     mod_api::testing::with_mods(loaded.mods.into(), || {
         mod_api::__private::mark_game_thread();
-        mod_api::dispatch_server_stopped(&mut world, true);
+        mod_api::dispatch_server_started(&mut world, true);
         assert!(
             world.2.get(),
             "all assertions in the guest must finish; calls: {:?}",

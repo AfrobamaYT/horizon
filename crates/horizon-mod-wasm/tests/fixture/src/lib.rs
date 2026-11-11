@@ -47,10 +47,13 @@ impl Hooks for Mod {
     }
 
     #[listener(priority = 37)]
-    fn server_stopped(
+    fn server_stopped(&self, _: &mut dyn mod_api::ServerHost, _: &mut mod_api::ServerStoppedEvent) {
+    }
+
+    fn server_started(
         &self,
         host: &mut dyn mod_api::ServerHost,
-        _: &mut mod_api::ServerStoppedEvent,
+        _: &mut mod_api::ServerStartedEvent,
     ) {
         if host.is_loaded("datapack_fixture") {
             datapack::read(host);
