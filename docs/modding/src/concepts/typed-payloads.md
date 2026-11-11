@@ -32,6 +32,26 @@ Both native input and wasm input are untrusted. Generated bounded primitives enf
 
 Run mod codecs and handlers on the logical receiving main thread, with bounded byte queues from network I/O. Preserve per-connection receive order across payload types and ordinary gameplay actions at the same ingress queue; do not promise ordering across connections. Handler sends become visible after successful root transaction commit; nested commit merges and abort emits zero packets. Queue acceptance is not delivery acknowledgement. Replies run at the next receiving dispatch turn, including integrated play, preventing recursive callback delivery. Configuration completion waits for required sync acknowledgement. Propose 32 messages per peer per tick, with byte and connection queue budgets large enough to admit a complete maximum-size legal envelope plus queue bookkeeping; a byte scheduling budget must allow one such message to make progress; reject local sends with Backpressure, disconnect flooding remote senders. No silent truncation or unbounded retry.
 
+## Stage 2: the value codec
+
+`crates/horizon-mod-vocab/src/content/payload_codec.rs` holds the pure codec half of stage 2, exported from `mod_api`. It is the part that touches neither registration nor delivery, so it stands apart from the raw transport of [#2882](https://github.com/arismoko/horizon/issues/2882). Nothing calls it yet: the typed handler adapter that decodes a received body, and the typed send helper that encodes one, arrive with registration.
+
+| Item | Contract |
+| --- | --- |
+| `PayloadCodec` | The trait a payload's value type implements: `encode(&self, &mut PayloadWriter)` and `decode(&mut PayloadReader) -> Result<Self, PayloadDecodeError>`. Both see only the buffer, never a `Host`. Implemented for `bool`, `u8`, `i8`, `i16`, `u16`, `i32`, `i64`, `f32`, `f64`, `VarInt`, `VarLong`, `String`, `Vec<T>`, `Option<T>` and `Box<T>` |
+| Encoding | Vanilla's network encoding, so a ported payload keeps its exact bytes: big-endian numbers, VarInt and VarLong, a VarInt byte length before a string or byte array, a VarInt count before a list, one boolean byte before an optional value |
+| `decode_payload::<T>(body)` | The whole body as one `T`; a byte left over is `Trailing { bytes }` |
+| `encode_payload(&value, limit)` | The body, or `PayloadEncodeError`; the byte limit is the caller's (the transport's frame bound), checked before the buffer grows |
+| `PAYLOAD_MAX_DEPTH` | 64. Each list, each present option and each `nested` level counts one; level 65 is `TooDeep` |
+| `PAYLOAD_MAX_STRING_BYTES`, `PAYLOAD_MAX_LIST_ENTRIES` | 4096 each, the defaults of `String` and `Vec<T>`. A schema with another bound calls `str_within(limit)`, `bytes(limit)` or `list(limit, read)` itself, so these are not a transport ceiling |
+| `PAYLOAD_DECODE_BUDGET` | 8,388,608 bytes of allocation for one value. A list is charged `count * size_of::<T>()` before it is reserved, an owned string its length, so a small body cannot ask for a large allocation |
+| `PayloadDecodeError` | `UnexpectedEnd`, `VarIntTooLong`, `NegativeLength`, `LengthOverLimit`, `Utf8`, `TooDeep`, `InvalidDiscriminant`, `NonFinite`, `BudgetExhausted`, `Trailing`, `InvalidValue`; has a Wire form |
+| `PayloadEncodeError` | `TooLarge`, `LengthOverLimit`, `TooDeep`, `NonFinite`; has a Wire form. An encoder refuses what the peer's decoder would refuse |
+
+A length is read as a signed VarInt and checked for sign and bound before anything is reserved or copied; strings and byte arrays are borrowed from the body. A boolean other than 0 or 1 is refused (vanilla reads any non-zero byte as true). `finite_f32` and `finite_f64` are how a schema declares a finite float. No decode path indexes, and none panics on any input.
+
+Two things this stage does not do. The bounded field kinds of [#811](https://github.com/arismoko/horizon/issues/811) (`DatapackFieldKind`) are not merged with this reader: they describe JSON entries the game decodes, are named for datapacks, and their issue is in flight; a shared name for the two belongs to whoever lands second. And the budget counts what the reader's own primitives allocate, not what a hand-written codec allocates beside them; native code has to obey the contract, as the section above says.
+
 ## Routes to replace
 
 Verified owners at this note's base; paths are repository-relative. These are current code owners, not claims that typed delivery exists.
