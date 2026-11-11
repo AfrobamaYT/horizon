@@ -1995,3 +1995,6 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
         Some(false)
     );
 }
+
+#[path = "wire_loopback/chunk_queries.rs"]
+mod chunk_queries;
