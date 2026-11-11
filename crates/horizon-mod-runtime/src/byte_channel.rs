@@ -3,7 +3,8 @@
 //! Charge each value's owned heap allocations (for a `Vec`, its capacity, not length).
 //! The channel adds inline value and queue-node storage to that charge. Allocator
 //! metadata is not included, but both allocated bytes and node count are bounded.
-//! Values held by callers before sending or after receiving are outside the budget.
+//! Values held before sending or after ordinary receiving are outside the budget.
+//! Owned receiving transfers the original charge to a lease retained by the consumer.
 use std::collections::LinkedList;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 /// A consistent snapshot of queue pressure, including its lifetime high-water mark.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stats {
-    // Includes unpublished permits as well as queued values.
+    // Includes unpublished permits, queued values and owned receive leases.
     pub reserved_bytes: usize,
     pub peak_reserved_bytes: usize,
     /// Published values only; unpublished permits are not receiver-visible.
@@ -45,8 +46,34 @@ pub struct Permit<T> {
     charge: usize,
 }
 
+/// A dequeued value whose original charge stays reserved until its lease drops.
+/// Unlike unpublished permits, held receipts survive either endpoint closing.
+pub struct OwnedReceipt<T> {
+    value: T,
+    lease: ReceiveLease<T>,
+}
+impl<T> OwnedReceipt<T> {
+    /// Transfer the value and credit independently without any refund/re-reserve gap.
+    pub fn into_parts(self) -> (T, ReceiveLease<T>) {
+        (self.value, self.lease)
+    }
+}
+/// Opaque retained receive credit. Drop refunds even after endpoint closure.
+pub struct ReceiveLease<T> {
+    shared: Arc<Shared<T>>,
+    charge: usize,
+}
+impl<T> Drop for ReceiveLease<T> {
+    fn drop(&mut self) {
+        let mut state = self.shared.lock();
+        state.held_bytes -= self.charge;
+        state.stats.reserved_bytes -= self.charge;
+    }
+}
+
 struct State<T> {
     pending_bytes: usize,
+    held_bytes: usize,
     queue: LinkedList<(T, usize)>,
     stats: Stats,
     senders: usize,
@@ -83,6 +110,7 @@ pub fn channel<T>(capacity: usize) -> Result<(Sender<T>, Receiver<T>), InvalidCa
         capacity,
         state: Mutex::new(State {
             pending_bytes: 0,
+            held_bytes: 0,
             queue: LinkedList::new(),
             stats: Stats {
                 reserved_bytes: 0,
@@ -188,6 +216,42 @@ impl<T> Receiver<T> {
         state.stats.queued_items -= 1;
         Some(value)
     }
+    fn pop_owned(&self, state: &mut State<T>) -> Option<OwnedReceipt<T>> {
+        let (value, charge) = state.queue.pop_front()?;
+        state.stats.queued_items -= 1;
+        state.held_bytes += charge;
+        Some(OwnedReceipt {
+            value,
+            lease: ReceiveLease {
+                shared: self.0.clone(),
+                charge,
+            },
+        })
+    }
+    /// Dequeue without refunding reserved bytes. Published count decreases immediately;
+    /// the returned receipt owns credit until dropped or transferred with `into_parts`.
+    pub fn try_recv_owned(&self) -> Result<OwnedReceipt<T>, TryRecvError> {
+        let mut state = self.0.lock();
+        self.pop_owned(&mut state).ok_or(if state.senders == 0 {
+            TryRecvError::Disconnected
+        } else {
+            TryRecvError::Empty
+        })
+    }
+    /// Blocking owned receive. Last-sender drop still permits draining published values;
+    /// held receipts remain charged independently of producer/receiver lifetime.
+    pub fn recv_owned(&self) -> Result<OwnedReceipt<T>, RecvError> {
+        let mut state = self.0.lock();
+        loop {
+            if let Some(receipt) = self.pop_owned(&mut state) {
+                return Ok(receipt);
+            }
+            if state.senders == 0 {
+                return Err(RecvError);
+            }
+            state = self.0.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+    }
     pub fn stats(&self) -> Stats {
         self.0.lock().stats
     }
@@ -239,7 +303,7 @@ impl<T> Drop for Receiver<T> {
             let mut state = self.0.lock();
             state.receiver_alive = false;
             state.pending_bytes = 0;
-            state.stats.reserved_bytes = 0;
+            state.stats.reserved_bytes = state.held_bytes;
             state.stats.queued_items = 0;
             std::mem::take(&mut state.queue)
         };
@@ -252,6 +316,81 @@ impl<T> Drop for Receiver<T> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn owned_dequeue_keeps_credit_until_lease_drop() {
+        let charge = message_overhead::<Vec<u8>>() + 100;
+        let (tx, rx) = channel::<Vec<u8>>(charge).unwrap();
+        tx.try_send(Vec::with_capacity(100), 100).unwrap();
+        let receipt = rx.try_recv_owned().unwrap();
+        assert_eq!(rx.stats().queued_items, 0);
+        assert_eq!(rx.stats().reserved_bytes, charge);
+        assert!(matches!(tx.reserve(0), Err(ReserveError::Full)));
+        let (value, lease) = receipt.into_parts();
+        assert_eq!(value.capacity(), 100);
+        drop(value);
+        assert_eq!(tx.stats().reserved_bytes, charge);
+        drop(lease);
+        assert_eq!(tx.stats().reserved_bytes, 0);
+        tx.try_send(Vec::new(), 0).unwrap();
+        drop(rx.recv_owned().unwrap());
+        assert_eq!(tx.stats().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn owned_receipts_survive_both_endpoint_closures() {
+        let (tx, rx) = channel::<()>(1024).unwrap();
+        tx.try_send((), 0).unwrap();
+        let receipt = rx.recv_owned().unwrap();
+        let pending = tx.reserve(10).unwrap();
+        tx.try_send((), 0).unwrap();
+        drop(rx);
+        assert_eq!(tx.stats().reserved_bytes, message_overhead::<()>());
+        drop(pending);
+        let shared = tx.0.clone();
+        drop(tx);
+        assert_eq!(shared.lock().stats.reserved_bytes, message_overhead::<()>());
+        drop(receipt);
+        assert_eq!(shared.lock().stats.reserved_bytes, 0);
+
+        let (tx, rx) = channel::<()>(1024).unwrap();
+        tx.try_send((), 0).unwrap();
+        drop(tx);
+        let receipt = rx.recv_owned().unwrap();
+        assert!(matches!(
+            rx.try_recv_owned(),
+            Err(TryRecvError::Disconnected)
+        ));
+        assert_eq!(rx.stats().reserved_bytes, message_overhead::<()>());
+        drop(receipt);
+        assert_eq!(rx.stats().reserved_bytes, 0);
+    }
+
+    #[test]
+    fn frozen_published_count_excludes_receipts_and_concurrent_replies() {
+        let (tx, rx) = channel::<u32>(4096).unwrap();
+        tx.try_send(1, 0).unwrap();
+        tx.try_send(2, 0).unwrap();
+        let turn = rx.stats().queued_items;
+        let (ready, go) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            for _ in 0..turn {
+                go.recv().unwrap();
+                tx.try_send(99, 0).unwrap();
+            }
+        });
+        let mut held = Vec::new();
+        for _ in 0..turn {
+            held.push(rx.recv_owned().unwrap());
+            ready.send(()).unwrap();
+        }
+        worker.join().unwrap();
+        assert_eq!(held.len(), 2);
+        assert_eq!(rx.stats().queued_items, 2);
+        assert_eq!(rx.stats().reserved_bytes, 4 * message_overhead::<u32>());
+        drop(held);
+        assert_eq!(rx.stats().reserved_bytes, 2 * message_overhead::<u32>());
+    }
 
     #[test]
     fn pending_publication_and_abort_share_budget() {
