@@ -593,7 +593,9 @@ impl Game<'_> {
     ) -> Option<GeneralEntityRecord> {
         let rows = &self.resident_entities.general.rows;
         let row = rows.iter().find(|row| row.id == id)?;
-        if !visited.insert(row.id) {
+        if general_type_catalog().save_policy(row.type_slot) == mod_api::GeneralSavePolicy::NoSave
+            || !visited.insert(row.id)
+        {
             return None;
         }
         let mut record = GeneralEntityRecord {

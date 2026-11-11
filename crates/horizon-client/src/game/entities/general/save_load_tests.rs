@@ -560,3 +560,34 @@ fn refused_dimension_transfer_returns_the_whole_tree() {
         assert_eq!(before, after, "the tree returns exactly as it stood");
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn no_save_rider_is_omitted_from_saved_tree() {
+    with_types(|game| {
+        let rider = record_tag("mymod:ghost", [9, 9, 9, 9], b"rider", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"payload", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
+        assert_eq!(rows[1].mount, Some(rows[0].id));
+        assert_eq!(rows[0].payload_bytes, b"payload");
+        assert_eq!(rows[0].payload_version, 3);
+        assert!(rows[0].join.is_joined() && rows[1].join.is_joined());
+        assert_eq!(game.persist.uuids.get(&rows[0].id), Some(&[1, 2, 3, 4]));
+        assert_eq!(game.persist.uuids.get(&rows[1].id), Some(&[9, 9, 9, 9]));
+        // One record per root, the rider inside it, the payload as loaded.
+        let saved = saved_chunk(game, (0, 0));
+        assert_eq!(saved.len(), 1);
+        assert!(saved[0].get(format::PASSENGERS).is_none());
+        assert_eq!(
+            saved[0].get(format::PAYLOAD),
+            Some(&Tag::ByteArray(b"payload".to_vec()))
+        );
+        assert_eq!(
+            saved[0].get(format::UUID),
+            Some(&Tag::IntArray(vec![1, 2, 3, 4]))
+        );
+    });
+}
