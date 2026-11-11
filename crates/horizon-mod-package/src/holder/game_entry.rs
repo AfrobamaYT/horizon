@@ -233,17 +233,23 @@ mod tests {
         let executable = install.join(format!("actor{}", std::env::consts::EXE_SUFFIX));
         // Isolate the writable image from unrelated test threads' fork/exec windows.
         // CLOEXEC alone only closes inherited writable descriptors at exec, not fork.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "holder::game_entry::tests::write_missing_registration_actor",
+                "--ignored",
+            ])
+            .env("HORIZON_MISSING_LEASE_COPY", &executable)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
         assert!(
-            Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "holder::game_entry::tests::write_missing_registration_actor",
-                    "--ignored",
-                ])
-                .env("HORIZON_MISSING_LEASE_COPY", &executable)
-                .status()
+            String::from_utf8(output.stdout)
                 .unwrap()
-                .success()
+                .lines()
+                .any(|line| {
+                    line.starts_with("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; ")
+                })
         );
         let run = |mode| {
             Command::new(&executable)

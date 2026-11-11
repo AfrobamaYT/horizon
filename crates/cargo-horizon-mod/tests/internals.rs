@@ -364,14 +364,20 @@ fn internals_sync_invokes_the_launcher_and_never_edits_on_failure() {
     // A separate, exact-test writer cannot leak writable fds into other tests'
     // fork children. CLOEXEC would only close those descriptors at exec.
     let write_launcher = |script: &str| {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "write_launcher_actor", "--ignored"])
+            .env("HORIZON_TEST_LAUNCHER_WRITER", &launcher)
+            .env("HORIZON_TEST_LAUNCHER_SCRIPT", script)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
         assert!(
-            Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "write_launcher_actor", "--ignored",])
-                .env("HORIZON_TEST_LAUNCHER_WRITER", &launcher)
-                .env("HORIZON_TEST_LAUNCHER_SCRIPT", script)
-                .status()
+            String::from_utf8(output.stdout)
                 .unwrap()
-                .success()
+                .lines()
+                .any(|line| {
+                    line.starts_with("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; ")
+                })
         );
     };
     write_launcher("#!/bin/sh\nexit 1\n");
