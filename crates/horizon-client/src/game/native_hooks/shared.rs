@@ -1,7 +1,7 @@
-#[path = "shared/item_fallthrough.rs"]
-mod item_fallthrough;
 #[path = "shared/book_screen.rs"]
 mod book_screen;
+#[path = "shared/item_fallthrough.rs"]
+mod item_fallthrough;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
