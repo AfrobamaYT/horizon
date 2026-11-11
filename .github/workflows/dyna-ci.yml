@@ -429,14 +429,8 @@ jobs:
       - name: Test Rust core and voxel kernel correctness
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --lib --bins --tests
-      # Separate timings make rebuilds between Cargo invocations visible without changing the test selection.
-      # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
-      # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
-      # recompiling the workspace with a different dependency graph.
-      - name: Test ignored mod content roots
-        if: needs.changes.outputs.rust_required != 'false'
-        run: |
-          cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
+      # Prepared-data content-root tests stay in the existing client-lib data leg.
+      # Running them again here without the data only rebuilds targets before they return early.
       # One genuine pinned export also validates source staging and listed slots.
       # Outside tests/ discovery: the later offline suite must not stage it again.
       # Keep this before doc tests so their failures cannot hide stale slots.
