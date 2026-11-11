@@ -46,8 +46,17 @@ This is an explicit std-layout dependency, not an exact reading of tree capacity
 `audit_retained_std.py` checks this layout contract in the installed `rust-src`.
 Toolchain upgrades must run this audit and re-examine changed invariants; this
 repository's general CI follows stable rather than freezing std's private layout.
-No safe public std API exposes a B-tree allocation census, so none is claimed.
-Tests exercise insertion/removal histories and retained empty roots instead.
+No safe public std API exposes a B-tree allocation census. The isolated
+`retained_census` integration-test binary instead installs horizon-threads'
+existing `CensusAllocator` and uses a unique heap tag to observe requested live
+allocation-layout bytes. The test invokes the unconditional tag API directly, so
+its dev dependency does not enable `alloc-census` across production consumers.
+The tag is scoped only around value construction; census result allocations and
+the test harness are outside it. Each case checks all tagged bytes disappear on
+drop. Populated and nested NBT compounds, spare child capacities, insertion/removal
+churn and a retained empty root must all fit under the charge. This validates the
+conservative bound against observed requested layouts, not allocator metadata,
+allocator rounding or an exact node-by-node census.
 There are no HashMap/HashSet fields in the decoded packet representations; the
 custom-payload codec registry uses these but is not retained by a packet and is
 not part of this traversal.
