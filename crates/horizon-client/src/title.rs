@@ -26,8 +26,8 @@ mod experiments;
 mod flat;
 mod missing_biome_regions;
 mod onboarding;
-mod splash;
 pub mod preset_editors;
+mod splash;
 #[cfg(test)]
 mod tests;
 pub mod world_management;
@@ -3413,7 +3413,8 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 Action::None
             }
             (Mode::MissingBiomeRegions { world, .. }, Some(96)) => {
-                self.open_with_vanilla_regions(world.clone())
+                let world = world.clone();
+                self.open_with_vanilla_regions(world)
             }
             (
                 Mode::OptimizeConfirm {
