@@ -198,7 +198,6 @@ mod tests {
             at: at.into(),
             kind,
             with: "own".into(),
-            access: Access::Api,
             priority: 0,
             hash: Some("pin".into()),
         }

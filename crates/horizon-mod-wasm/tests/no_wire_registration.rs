@@ -14,7 +14,6 @@ id = "no_wire"
 at = "listener_fixture::no_wire"
 kind = "head"
 with = "no_wire"
-access = "api"
 hash = "fixture"
 "#;
     let manifest = horizon_mod_package::Manifest::parse(&format!("{source}\n{target}")).unwrap();

@@ -10,7 +10,6 @@ id = "count"
 at = "horizon_client::game::Game<'_>::tick"
 kind = "head"
 with = "count"
-access = "api"
 priority = 0
 ```
 
