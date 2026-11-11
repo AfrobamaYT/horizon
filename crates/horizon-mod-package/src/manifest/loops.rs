@@ -34,7 +34,7 @@ fn default_priority() -> i32 {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoopError {
     /// `E_LOOP_WASM`: a wasm mod declared a loop row; a loop slot is game code, native only.
-    Wasm { id: String },
+    Wasm { id: String, target: String },
     /// `E_LOOP_INVALID`: an empty `loop`, a `helper` that is not a Rust file under `src/`, or a
     /// `with` that is not an identifier.
     Invalid {
@@ -47,9 +47,9 @@ pub enum LoopError {
 impl fmt::Display for LoopError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Wasm { id } => write!(
+            Self::Wasm { id, target } => write!(
                 f,
-                "E_LOOP_WASM: {id}: [[native.loop]] compiles game code; only native mods can fill a loop"
+                "E_LOOP_WASM: {id}: {target}: [[native.loop]] compiles game code; only native mods can fill a loop"
             ),
             Self::Invalid { id, field, fix } => {
                 write!(f, "E_LOOP_INVALID: {id}: invalid {field}; {fix}")
@@ -126,7 +126,9 @@ mod tests {
         );
         let error = Manifest::parse(&format!("{HEADER}{wasm}{}{ROW}", native())).unwrap_err();
         assert!(
-            error.contains("E_LOOP_WASM: sample:slow: [[native.loop]] compiles game code"),
+            error.contains(
+                "E_LOOP_WASM: sample:slow: block_entities.tick: [[native.loop]] compiles game code"
+            ),
             "{error}"
         );
     }

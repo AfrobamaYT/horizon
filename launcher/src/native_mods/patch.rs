@@ -42,6 +42,36 @@ fn table_refusals(bundle: &Bundle) -> Vec<String> {
         .collect()
 }
 
+fn install_expression(target: &str, mods: &[&str], install: &str) -> String {
+    format!("({target:?}, &{mods:?}, {install})")
+}
+
+/// Preserve every requester at the launcher boundary; the generator only knows targets.
+fn target_refusal(
+    refused: &api_gen::patch::Refusal,
+    requests: &[(String, String, String)],
+) -> String {
+    let owners = requests
+        .iter()
+        .filter(|(_, _, target)| target == &refused.target)
+        .map(|(id, row, _)| format!("{id}:{row}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if owners.is_empty() {
+        // Module and bridge ids already include their owning mod.
+        return refused.to_string();
+    }
+    trf(
+        "{code}: {owners}: {target}: {why}",
+        &[
+            ("code", refused.code),
+            ("owners", &owners),
+            ("target", &refused.target),
+            ("why", &refused.why),
+        ],
+    )
+}
+
 /// The support modules and bridges `bundles` add to the patch crate.
 fn extras(bundles: &[&Bundle]) -> Result<api_gen::patch::Extras, String> {
     let mut extras = api_gen::patch::Extras::default();
@@ -346,6 +376,18 @@ pub(super) fn prepare<'a>(
         return Err(refusals.join("\n"));
     }
     let loops = loop_slots(game, &bundles)?;
+    let requests: Vec<(String, String, String)> = bundles
+        .iter()
+        .flat_map(|bundle| {
+            bundle.native().mixin.iter().map(|row| {
+                (
+                    bundle.manifest.id.clone(),
+                    row.id.clone(),
+                    row.target.clone(),
+                )
+            })
+        })
+        .collect();
     let rows: Vec<String> = bundles
         .iter()
         .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))
@@ -373,7 +415,10 @@ pub(super) fn prepare<'a>(
     let generated = api_gen::patch::generate(&source, CRATE, &targets, &extras);
     let refusals: Vec<String> = match &generated {
         Ok(_) => Vec::new(),
-        Err(refused) => refused.iter().map(ToString::to_string).collect(),
+        Err(refused) => refused
+            .iter()
+            .map(|r| target_refusal(r, &requests))
+            .collect(),
     };
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
@@ -493,7 +538,22 @@ pub(super) fn prepare<'a>(
         installs: generated
             .patched
             .iter()
-            .filter_map(|p| Some(format!("({:?}, {})", p.target, p.install.as_ref()?)))
+            .filter_map(|p| {
+                let mut mods = requests
+                    .iter()
+                    .filter(|(_, _, target)| target == &p.target)
+                    .map(|(id, _, _)| id.as_str())
+                    .collect::<Vec<_>>();
+                // Published loop copies carry their slot owners too.
+                for l in &extras.loops {
+                    if l.published.entry == p.target {
+                        mods.extend(l.slots.iter().map(|slot| slot.mod_id.as_str()));
+                    }
+                }
+                mods.sort_unstable();
+                mods.dedup();
+                Some(install_expression(&p.target, &mods, p.install.as_ref()?))
+            })
             .collect(),
         bundles,
         count: generated.patched.len(),
@@ -502,4 +562,38 @@ pub(super) fn prepare<'a>(
         copied,
         applied,
     }))
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    #[test]
+    fn generated_install_passes_owners_and_result_to_startup_gate() {
+        assert_eq!(
+            super::install_expression("game::tick", &["first", "second"], "patch::install()"),
+            r#"("game::tick", &["first", "second"], patch::install())"#
+        );
+        let template = include_str!("../../../crates/horizon-client/src/native_main.rs.template");
+        assert!(
+            template.find("entry::installed").unwrap()
+                < template.find("mod_api::ModEntry> =").unwrap()
+        );
+    }
+
+    #[test]
+    fn target_refusal_names_every_requesting_row() {
+        let refused = super::api_gen::patch::Refusal {
+            code: "E_MIXIN_NOT_REPLACEABLE",
+            target: "game::tick".into(),
+            why: "no slot".into(),
+        };
+        let requests = vec![
+            ("first".into(), "before".into(), "game::tick".into()),
+            ("second".into(), "after".into(), "game::tick".into()),
+            ("other".into(), "row".into(), "game::other".into()),
+        ];
+        assert_eq!(
+            super::target_refusal(&refused, &requests),
+            "E_MIXIN_NOT_REPLACEABLE: first:before, second:after: game::tick: no slot"
+        );
+    }
 }

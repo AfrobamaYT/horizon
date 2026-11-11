@@ -863,6 +863,7 @@ pub(crate) fn records_selected(
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
     let mut api_places = proc_macro2::TokenStream::new();
+    let mut api_refusals = proc_macro2::TokenStream::new();
     let mut layout = 0xcbf29ce484222325u64;
     for point in points {
         for byte in format!(
@@ -873,7 +874,9 @@ pub(crate) fn records_selected(
         {
             layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
         }
-        if point.api_refusal.is_some() {
+        if let Some(reason) = &point.api_refusal {
+            let target = &point.target;
+            api_refusals.extend(quote! { (#target, #reason), });
             continue;
         }
         let record = quote::format_ident!("{}", point.record);
@@ -941,6 +944,10 @@ pub(crate) fn records_selected(
         /// API places as (place, target function, return phase, the return type a `replace` there
         /// can't produce), for manifest validation: a head whose return is neither `()` nor an
         /// API value refuses a replacement when a module loads.
+        #[doc(hidden)]
+        /// Targets whose arguments cannot cross the API/Wire boundary, with the named type.
+        #[doc(hidden)]
+        pub const API_REFUSALS: &[(&str, &str)] = &[#api_refusals];
         #[doc(hidden)]
         pub const API_PLACES: &[(PointId, &str, bool, Option<&str>)] = &[#api_places];
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]

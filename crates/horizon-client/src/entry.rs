@@ -48,14 +48,23 @@ pub fn prepare() -> Startup {
 /// A native function slot, checked against its place's exact type before erasure.
 pub use mod_points::__private::SlotListener as NativeSlot;
 
-/// Reports a mixin build's patched functions (function replacement) that were not installed,
-/// before the mods load. Each entry is a target function and what its installer answered: the
-/// launcher writes one copy per function, so a refused install is a build defect, and the
-/// function then runs as the game wrote it.
-pub fn installed(patched: &[(&str, bool)]) {
-    for (target, _) in patched.iter().filter(|(_, installed)| !installed) {
-        eprintln!("Horizon: {target}: a patched copy was already installed; this one was not");
+/// Refuse startup if any merged copy could not be installed, before loading any mod.
+/// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
+/// start is how we ensure none of a refused mod's rows run.
+pub fn installed(patched: &[(&str, &[&str], bool)]) {
+    let refusals = installation_refusals(patched);
+    for line in &refusals {
+        eprintln!("{line}");
     }
+    if !refusals.is_empty() {
+        std::process::exit(game::exit_code::ERROR);
+    }
+}
+
+fn installation_refusals(patched: &[(&str, &[&str], bool)]) -> Vec<String> {
+    patched.iter().filter(|(_, _, installed)| !installed).map(|(target, mods, _)| {
+        format!("Horizon: {}: {target}: a patched copy was already installed; the game was not started", mods.join(", "))
+    }).collect()
 }
 
 /// The places listeners register at, named by the generated `main`.
@@ -425,5 +434,22 @@ fn raise_open_file_limit() {
                 Err(e) => log::warn!("Open file limit stays at {:?}: {e}", limit.current),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod installation_tests {
+    #[test]
+    fn refused_install_names_all_mods_and_only_failed_targets() {
+        assert_eq!(
+            super::installation_refusals(&[
+                ("game::tick", &["first", "second"], false),
+                ("game::other", &["third"], true)
+            ]),
+            vec![
+                "Horizon: first, second: game::tick: a patched copy was already installed; the game was not started"
+            ]
+        );
+        assert!(super::installation_refusals(&[]).is_empty());
     }
 }

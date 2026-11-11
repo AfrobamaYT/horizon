@@ -276,8 +276,10 @@ fn registrations(
         let points: Vec<horizon_mod_point_emit::Point> =
             serde_json::from_value(json["points"].clone())
                 .map_err(|e| format!("{}: {e}", path.display()))?;
-        let expressions = horizon_mod_point_emit::api(&parsed, &points, "crate::")?;
-        let names = horizon_mod_point_emit::places(&parsed, &points)?;
+        let expressions = horizon_mod_point_emit::api(&parsed, &points, "crate::")
+            .map_err(|e| format!("{}:{e}", parsed.id))?;
+        let names = horizon_mod_point_emit::places(&parsed, &points)
+            .map_err(|e| format!("{}:{e}", parsed.id))?;
         let registrations = expressions
             .iter()
             .map(|e| {
@@ -292,7 +294,9 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
-pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> { group::build(root, catalog, additional) }
+pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> {
+    group::build(root, catalog, additional)
+}
 
 fn member_export(name: &str) -> bool {
     !matches!(name, "__horizon_mod_hooks" | "__dso_handle" | "__tls_base")
@@ -618,5 +622,21 @@ mod export_tests {
         let upstream = "_RNvMs2_NtNtCscdi4KFDYmTw_7mod_api5parts14block_entitiesDNtB7_9RegistrarEL_17block_entity_type";
         assert!(!group_export(upstream, "wasm_test_observer"));
         assert!(group_export("horizon_hook", "wasm_test_observer"));
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    #[test]
+    fn wasm_registration_refusal_names_mod_target_and_type() {
+        let dir = std::env::temp_dir().join(format!("horizon-wire-refusal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let catalog = dir.join("points.json");
+        std::fs::write(&catalog, r#"{"points":[{"target":"game::tick","name":"tick","at_return":true,"api_refusal":"argument 1 `value` (`&RegistrationData`) has no API type yet"}]}"#).unwrap();
+        let manifest = "id = 'addon'\nname = 'Addon'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[[inject]]\nid = 'before'\nat = 'game::tick'\nkind = 'head'\nwith = 'before'\nhash = 'pin'\n".parse().unwrap();
+        assert_eq!(
+            super::registrations(&manifest, Some(&catalog)).unwrap_err(),
+            "addon:before: no API listener at game::tick: argument 1 `value` (`&RegistrationData`) has no API type yet"
+        );
     }
 }
