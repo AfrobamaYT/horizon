@@ -1,6 +1,6 @@
 //! `menu_still_valid` through a real `MenuPart` on a server's guest: the
-//! per-tick close and the click check ask it, vanilla menus and chest vehicles
-//! never do, and respawn and disconnect close a menu it keeps open.
+//! per-tick close and the click check ask it, vanilla menus (even with a part
+//! attached) and chest vehicles never do, and respawn and disconnect close a menu it keeps open.
 
 use horizon_client::{
     chunk::Chunk,
@@ -17,6 +17,8 @@ use std::sync::{
 /// What the part answers, and how often it was asked.
 static KEEP: AtomicBool = AtomicBool::new(true);
 static ASKED: AtomicUsize = AtomicUsize::new(0);
+/// How often the part on the vanilla chest menu was asked: never, whatever it would answer.
+static VANILLA_ASKED: AtomicUsize = AtomicUsize::new(0);
 
 struct Shell;
 #[mod_api::horizon_part]
@@ -31,11 +33,25 @@ impl MenuPart for Shell {
         event.valid = KEEP.load(Ordering::Relaxed);
     }
 }
+/// A part on a vanilla menu type, which would keep any chest open if asked.
+struct VanillaChest;
+#[mod_api::horizon_part]
+impl MenuPart for VanillaChest {
+    fn menu_still_valid(
+        &self,
+        _: &dyn mod_api::LoopContext,
+        event: &mut MenuStillValidEvent<'_>,
+    ) {
+        VANILLA_ASKED.fetch_add(1, Ordering::Relaxed);
+        event.valid = true;
+    }
+}
 struct Mod;
 #[mod_api::__subscriptions]
 impl Hooks for Mod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         r.menu_part("test:shell", Shell);
+        r.menu_part("minecraft:generic_9x3", VanillaChest);
     }
 }
 
@@ -62,18 +78,24 @@ fn a_mod_menu_part_decides_whether_its_menu_stays_open() {
             // 20 blocks from the guest: past reach + 4, so vanilla closes it.
             let far = (eye[0] as i32, eye[1] as i32, eye[2] as i32 + 20);
             let beside = (far.0 + 1, far.1, far.2);
-            for k in [far, beside] {
+            // 3 blocks away: in reach.
+            let near = (eye[0] as i32, eye[1] as i32, eye[2] as i32 + 3);
+            for k in [far, beside, near] {
                 game.world
                     .block_entities
                     .insert(k, BlockEntity::Chest(vec![None; 27]));
             }
             let open = |game: &mut crate::game::Game<'_>, slots: Slots, modded: bool| {
+                let pos = match slots {
+                    Slots::Block(k) | Slots::Double(k, _) => k,
+                    _ => far,
+                };
                 let host = game.lan.as_mut().unwrap();
                 host.hub.open_container(
                     12,
                     "minecraft:generic_9x3",
                     horizon_core::nbt::Tag::String("test".into()),
-                    far,
+                    pos,
                     slots,
                     vec![None; 27],
                     None,
@@ -112,11 +134,21 @@ fn a_mod_menu_part_decides_whether_its_menu_stays_open() {
             };
             let asked = || ASKED.load(Ordering::Relaxed);
 
-            // A vanilla chest out of reach closes on the tick; no part is asked.
+            // A vanilla chest keeps vanilla's answer although a part is attached to
+            // its menu type: open in reach, closed out of it, and that part never asked.
+            assert!(mod_api::__private::menu_listens(
+                mod_api::HookId::MenuStillValid,
+                "minecraft:generic_9x3"
+            ));
+            open(game, Slots::Block(near), false);
+            game.lan_containers_tick();
+            assert!(is_open(game));
+            game.guest_close_all(12);
             open(game, Slots::Block(far), false);
             game.lan_containers_tick();
             assert!(!is_open(game));
             assert_eq!(asked(), 0);
+            assert_eq!(VANILLA_ASKED.load(Ordering::Relaxed), 0);
 
             // The mod's part keeps its far menu open through ticks and clicks.
             KEEP.store(true, Ordering::Relaxed);

@@ -4918,7 +4918,11 @@ pub(crate) mod tests {
                         *valid = context.setting("rules_mod", "stack").is_some();
                     }
                 },
-                menu_still_valid_listens: |menu| menu == "test:rules",
+                // A part answers on the vanilla chest menu too: the game must
+                // still never ask it, because it is not a mod menu type.
+                menu_still_valid_listens: |menu| {
+                    matches!(menu, "test:rules" | "minecraft:generic_9x3")
+                },
                 item_stacked_on_other: |context, _, canceled| {
                     *canceled = context.setting("rules_mod", "stack").is_some();
                 },
@@ -5267,7 +5271,11 @@ pub(crate) mod tests {
         let asked = || STILL_VALID_ASKED.load(std::sync::atomic::Ordering::Relaxed);
         // The guest's eyes are at (0, 65.62, 0), its reach 4.5 plus 4: a chest 3
         // blocks away stays open, one 20 blocks away closes, and a vanilla menu
-        // type asks no part either way.
+        // type asks no part either way, though one answers for it.
+        assert!(crate::lan::menu::asks_still_valid(
+            Some(mod_type),
+            "minecraft:generic_9x3"
+        ));
         let (near, far) = ((0, 64, 3), (0, 64, 20));
         assert!(still_valid(
             &after,
