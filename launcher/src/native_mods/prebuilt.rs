@@ -32,6 +32,8 @@ pub enum SourceReason {
     Features { mod_id: String },
     /// No prebuilt game for this computer.
     Host,
+    /// This release has an older SDK whose registry patch ownership is incomplete.
+    IncompatibleSdk { archive: String },
     /// The prebuilt game's release couldn't be downloaded.
     Download { why: String },
     /// No prebuilt game was released for this revision and target.
@@ -48,6 +50,10 @@ impl std::fmt::Display for SourceReason {
             Self::Features { mod_id } => trf(
                 "{mod} uses Cargo features, so the game builds from source",
                 &[("mod", mod_id)],
+            ),
+            Self::IncompatibleSdk { archive } => trf(
+                "SDK {archive} lacks game registry patches; install a matched SDK v5 release",
+                &[("archive", archive)],
             ),
             Self::Host => {
                 tr("no prebuilt game for this computer, so the game builds from source").into()
@@ -67,7 +73,7 @@ impl std::fmt::Display for SourceReason {
 
 impl SourceReason {
     pub(super) fn forces_source(&self) -> bool {
-        !matches!(self, Self::Download { .. })
+        !matches!(self, Self::Download { .. } | Self::IncompatibleSdk { .. })
     }
 }
 
@@ -278,6 +284,12 @@ fn release_sum(revision: &str, name: &str) -> Result<String, SourceReason> {
     sums.into_reader()
         .read_to_string(&mut text)
         .map_err(|error| download(error.to_string()))?;
+    if expected_sum(&text, name).is_none() {
+        let old = name.replace("prebuilt-v5-", "prebuilt-v4-");
+        if expected_sum(&text, &old).is_some() {
+            return Err(SourceReason::IncompatibleSdk { archive: old });
+        }
+    }
     expected_sum(&text, name).ok_or_else(missing)
 }
 
@@ -379,6 +391,8 @@ pub(super) struct Identity {
     #[serde(default)]
     pub(super) registry_lock: Option<String>,
     #[serde(default)]
+    pub(super) registry_patches: Option<toml::Table>,
+    #[serde(default)]
     pub(super) native_links: Option<Vec<super::registry_inventory::NativeLink>>,
     #[serde(default)]
     facade_crates: std::collections::BTreeSet<String>,
@@ -406,7 +420,18 @@ impl Identity {
 pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
     let path = dir.join(IDENTITY);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    #[derive(serde::Deserialize)]
+    struct Format {
+        #[serde(default)]
+        format_version: u32,
+    }
+    let format: Format =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    match format.format_version {
+        5 => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+        0..=4 => Err(trf("SDK format {version} is too old; install a newer SDK (format 5)", &[("version", &format.format_version.to_string())])),
+        version => Err(trf("SDK format {version} is newer than this launcher's supported format 5; update the launcher", &[("version", &version.to_string())])),
+    }
 }
 
 /// Whether the unpacked game in `dir` is the one asked for: built from `revision` for `host` and
@@ -783,6 +808,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sdk_identity_refuses_old_and_unknown_newer_formats_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        for version in [0, 4, 6] {
+            let text = serde_json::json!({"format_version":version});
+            std::fs::write(dir.path().join(IDENTITY), text.to_string()).unwrap();
+            let error = identity(dir.path()).err().unwrap();
+            assert!(error.contains(&format!("SDK format {version}")), "{error}");
+            assert!(
+                error.contains(if version < 5 {
+                    "install a newer SDK"
+                } else {
+                    "update the launcher"
+                }),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn older_sdk_layout_is_a_named_refusal_not_source_permission() {
+        let reason = SourceReason::IncompatibleSdk {
+            archive: "horizon-prebuilt-v4-fixture.tar.gz".into(),
+        };
+        assert!(!reason.forces_source());
+        let error = or_source(Err(reason)).unwrap_err();
+        assert!(
+            error.contains("horizon-prebuilt-v4-fixture.tar.gz"),
+            "{error}"
+        );
+        assert!(error.contains("SDK v5"), "{error}");
+    }
+
+    #[test]
     fn facades_refuse_build_only_crates_and_ambiguous_runtime_metadata() {
         let deps = super::super::tests::dir("prebuilt-facade-eligibility");
         for name in [
@@ -794,7 +852,7 @@ mod tests {
             fs::write(deps.join(name), b"").unwrap();
         }
         let mut sdk: Identity = serde_json::from_value(serde_json::json!({
-            "commit": "test", "rustc": "test", "target": "test", "side": "client",
+            "format_version": 5, "commit": "test", "rustc": "test", "target": "test", "side": "client",
             "link_args": [], "facade_crates": ["horizon_core"],
         }))
         .unwrap();
@@ -1000,7 +1058,7 @@ mod tests {
         let dir = super::super::tests::dir("prebuilt-exact-build");
         let check = |commit: &str, rustc: &str, target: &str, side: &str| {
             let identity = serde_json::json!({
-                "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
+                "format_version": 5, "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
             });
             fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
             check_identity(&dir, "abc123", "x86_64-pc-windows-gnu", Target::Client)
@@ -1089,10 +1147,10 @@ mod tests {
         let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
         assert_eq!(
             name,
-            "horizon-prebuilt-v4-x86_64-unknown-linux-gnu-server.tar.gz"
+            "horizon-prebuilt-v5-x86_64-unknown-linux-gnu-server.tar.gz"
         );
         let listing =
-            format!("AB12  horizon-prebuilt-v4-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
+            format!("AB12  horizon-prebuilt-v5-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }

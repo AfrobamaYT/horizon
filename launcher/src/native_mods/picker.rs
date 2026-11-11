@@ -64,7 +64,10 @@ impl SourceReason {
         Some(match self {
             Self::BuildScript { .. } => tr("Has a build script").to_string(),
             Self::Features { .. } => tr("Uses Cargo features").to_string(),
-            Self::Host | Self::NoRelease { .. } | Self::Download { .. } => return None,
+            Self::Host
+            | Self::NoRelease { .. }
+            | Self::Download { .. }
+            | Self::IncompatibleSdk { .. } => return None,
         })
     }
 }

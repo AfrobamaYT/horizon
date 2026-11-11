@@ -15,6 +15,13 @@ currently stores only the remainder item id, not a template's count or component
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
 
+`level.entities_in(host, min, max)` also works on the client's displayed level: tracked
+entities and the window's own non-spectator player are returned as readable handles.
+Other players are omitted (arismoko/horizon#3033);
+a level the client does not show, or a read before login, returns `None`.
+Every entity list is walked once per call, O(entities) regardless of the box;
+each overlapping mob resolves through a mob-list scan, O(K*N) for K overlaps and N mobs.
+
 For engine contributors, every area method declares its load access once with `#[access(...)]`.
 `Metadata` admits registry facts during setup and reload; `WorldOnly`, `ClientSetup` and
 `PublishedResources` retain their phase-specific contracts. The area's `host_area` attribute
@@ -56,6 +63,8 @@ and before block/item effects). Neither helper fires `any_block_use`: the engine
 alone fires it once per consuming block-use packet, including a consuming
 right-click or before-block cancellation. A mod may explicitly fire the inner
 criterion when handling such a cancellation without duplicating the outer one.
+A consuming item phase fires `item_used_on_block` first with the pre-block copy,
+including a forced empty-hand consume, then the engine fires `any_block_use` once.
 The outer criterion sees the hand after the use; a replacement stack is visible,
 unlike vanilla's original object. Single player uses the same integrated-server
 packet path as LAN. PASS and FAIL do not fire the outer criterion. Items such as
