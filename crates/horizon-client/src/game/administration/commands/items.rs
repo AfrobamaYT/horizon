@@ -452,6 +452,16 @@ impl Game<'_> {
         let Slot::Block(p, i) = s else {
             return true;
         };
+        // Clearing a jukebox's SlotAccess does not insert a non-disc item.
+        if stack.is_none()
+            && *i == 0
+            && matches!(
+                self.world.block_entities.get(&(p[0], p[1], p[2])),
+                Some(BlockEntity::Jukebox(_))
+            )
+        {
+            return true;
+        }
         let air = ItemStack {
             item: "minecraft:air".into(),
             count: 0,
