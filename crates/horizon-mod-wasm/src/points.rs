@@ -83,11 +83,7 @@ pub(crate) fn listen(manifest: &Manifest, module: &WasmMod) -> Result<(), Refusa
 }
 
 fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
-    let engine: Vec<_> = manifest
-        .inject
-        .iter()
-        .filter(|inject| manifest.mod_point_dependency(&inject.at).is_none())
-        .collect();
+    let engine: Vec<_> = manifest.inject.iter().collect();
     if engine.is_empty() {
         return Ok(());
     }
