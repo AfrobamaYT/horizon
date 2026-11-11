@@ -335,7 +335,14 @@ fn adopting_takes_installed_regions_and_keeps_saved_weights() {
         (nether.regions[0].id.as_str(), nether.regions[0].weight),
         ("zeta:dunes", 2)
     );
-    assert_eq!(adopted.differences(&everyone, &now), Differences::default());
+    // Adoption preserves the owner's weight 40, so the mod's default weight 3 still differs.
+    assert_eq!(
+        adopted.differences(&everyone, &now),
+        Differences {
+            changed: vec!["alpha:marsh".into()],
+            ..Differences::default()
+        }
+    );
 }
 
 #[test]

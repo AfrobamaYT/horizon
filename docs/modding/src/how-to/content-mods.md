@@ -667,8 +667,9 @@ container's faces and `inputs`, so leave result slots out of `inputs`. The data 
 mod's own screen (`native_screen`); without one it closes again. Clients join a server only with the same mods' menu
 types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Its
 clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
-mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook notes](../reference/hook-notes.md#menu-slot-rules)).
-Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
+mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook notes](../reference/hook-notes.md#menu-slot-rules))
+and how far away the menu stays open with `native_menu_still_valid` ([hook notes](../reference/hook-notes.md#keeping-a-block-menu-open)).
+Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing, opening with extra
 data, and client prediction of its clicks.
 
 ##### Lending ingredients and linking containers
