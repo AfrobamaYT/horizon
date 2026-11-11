@@ -39,4 +39,16 @@ source = re.sub(
     lambda match: match[1] + "\n" + match["indent"] + "payloads: crate::raw_payloads::Transport::empty()," + match[3],
     source,
 )
+source = re.sub(
+    r"(\bSession\s*\{\s*\n(?P<indent>\s*)events,)(?!\n\s*payload_events:)",
+    lambda match: match[1] + "\n" + match["indent"] + "payload_events: channel().0,",
+    source,
+)
+source = source.replace("&Mutex<Option<QueuedWriter>>", "&Arc<Mutex<Option<QueuedWriter>>>")
+source = source.replace("configuring: &AtomicBool", "configuring: &Arc<AtomicBool>")
+source = source.replace("payloads: &crate::raw_payloads::Transport", "payloads: &Arc<crate::raw_payloads::Transport>")
+source = source.replace("&Mutex::new(Some(QueuedWriter::new(writer).unwrap()))", "&Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())))")
+for value in ("true", "false"):
+    source = source.replace(f"&AtomicBool::new({value})", f"&Arc::new(AtomicBool::new({value}))")
+source = source.replace("let writer = Mutex::new(Some(QueuedWriter::new(writer).unwrap()));", "let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));")
 path.write_text(source)
