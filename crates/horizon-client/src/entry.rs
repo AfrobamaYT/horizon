@@ -226,6 +226,10 @@ pub(crate) fn install_client_hooks() {
     game::api_values::install_stack_hooks();
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: game::api_values::menu_slot_rules,
+        menu_still_valid: game::api_values::menu_still_valid,
+        menu_still_valid_listens: |menu| {
+            mod_api::__private::menu_listens(mod_api::HookId::MenuStillValid, menu)
+        },
         item_stacked_on_other: |context, event, canceled| {
             game::api_values::stacked_on_other(context, event, canceled);
         },
