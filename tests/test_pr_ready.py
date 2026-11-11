@@ -506,6 +506,30 @@ class PrReadyTests(unittest.TestCase):
                 self.assertEqual(pr_ready.affected_here({"README.md"}), [])
                 self.assertEqual(pr_ready.affected_here({"Cargo.lock"}), ["food", "datafix"])
 
+    def test_actual_sources_place_food_probe_and_select_reached_source(self):
+        # Parse the checkout's actual manifest, probe and reached implementation,
+        # not another synthetic Rust program. A narrow root avoids rebuilding the
+        # whole-workspace graph whose cost this test-only change removes.
+        parity = pr_ready.parity
+        probe = "crates/horizon-world/examples/probe/food_fixture.rs"
+        source = "crates/horizon-world/src/food.rs"
+        dependencies = {
+            "crates/horizon-world/examples/probe/main.rs", probe,
+            "crates/horizon-world/src/lib.rs", source,
+        }
+        artifacts = [("example", "probe", None, ["-p", "horizon-world"])]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in dependencies | {"crates/horizon-world/Cargo.toml"}:
+                destination = root / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(pr_ready.ROOT / path, destination)
+            graph = parity.parity_reach.SourceGraph(root, parity.rust_code)
+            entries = graph.entries(artifacts, dependencies)
+            self.assertIn(probe, entries or (), "the actual probe must be placed, not fallback-selected")
+            self.assertIn(source, graph.reachable(entries, dependencies),
+                          "the actual food probe must reach its food implementation")
+
     def test_harnesses_are_listed_when_they_cannot_run(self):
         changed = {"crates/horizon-world/src/food.rs"}
         with mock.patch.object(pr_ready, "affected_here", return_value=["food", "light"]):
