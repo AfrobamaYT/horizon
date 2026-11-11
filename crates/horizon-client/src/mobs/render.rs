@@ -1577,7 +1577,7 @@ pub fn render_with_hidden(
 }
 /// `render` with the model's ordinary draws posed on the GPU when the mob
 /// allows it (`super::skin`): the same picture, no vertices on the CPU.
-/// `parts` as for [`render_with_hidden`].
+/// `hidden` and `parts` as for [`render_with_hidden`].
 #[allow(clippy::too_many_arguments)]
 pub fn render_skinned(
     m: &Mob,
@@ -1586,23 +1586,13 @@ pub fn render_skinned(
     atlas: Atlas,
     light: u32,
     data: &MobData,
+    hidden: mod_api::HiddenParts,
     parts: Option<&mut Option<mod_api::PosedParts>>,
     out: &mut Vec<Vertex>,
     skin: &mut super::skin::Skin,
 ) {
     if m.is_invisible() {
-        render_with_hidden(
-            m,
-            alpha,
-            camera,
-            atlas,
-            light,
-            data,
-            &[],
-            Default::default(),
-            parts,
-            out,
-        );
+        render_with_hidden(m, alpha, camera, atlas, light, data, &[], hidden, parts, out);
         return;
     }
     render_visible(
@@ -1614,7 +1604,7 @@ pub fn render_skinned(
         data,
         &[],
         true,
-        Default::default(),
+        hidden,
         parts,
         out,
         Some(skin),
@@ -2164,15 +2154,15 @@ fn render_visible(
     if !posable {
         skin = None;
     }
-    // The parts a mod's `player_submit` hid this frame: the body draws without them, the armour and
-    // the other layers below with every part.
+    // The parts a mod's `player_submit` or `mob_submit` hid this frame: the body draws without them,
+    // the armour and the other layers below with every part.
     let mut hidden_poses = Poses::pooled();
     let body_poses: &Poses = if hidden.is_empty() {
         &poses
     } else {
         hidden_poses.copy_from(&poses);
-        for part in hidden.iter() {
-            hidden_poses.visible(part.model_name(), false);
+        for name in hidden.names() {
+            hidden_poses.visible(name, false);
         }
         &hidden_poses
     };
@@ -2959,6 +2949,7 @@ mod tests {
             &atlas,
             0xf0f0,
             &data,
+            Default::default(),
             Some(&mut skinned),
             &mut Vec::new(),
             &mut skin,
@@ -2999,6 +2990,44 @@ mod tests {
         let (cow_drawn, cow_parts) = draw(&cow, true);
         assert!(!cow_drawn.is_empty(), "the cow draws");
         assert!(cow_parts.is_none(), "a cow is no humanoid");
+
+        // `mob_submit` hides a part of any model by its name, on the CPU and on the GPU
+        // (#2957): a leg's one face goes, a name the cow lacks hides nothing.
+        let mut leg = mod_api::HiddenParts::default();
+        leg.hide_named("right_hind_leg").unwrap();
+        let mut absent = mod_api::HiddenParts::default();
+        absent.hide_named("nose").unwrap();
+        let cpu = |hidden| {
+            let mut out = Vec::new();
+            render_with_hidden(
+                &cow, 0.5, glam::DVec3::ZERO, &atlas, 0xf0f0, &data, &[], hidden, None, &mut out,
+            );
+            out.len()
+        };
+        let whole = cpu(Default::default());
+        assert_eq!(cpu(leg), whole - 4, "the leg's face leaves the CPU draw");
+        assert_eq!(cpu(absent), whole, "a part the model lacks");
+        let gpu = |hidden| {
+            let mut models = super::super::skin::SkinModels::default();
+            let mut frame = crate::gfx::entity_skin::SkinFrame::default();
+            let mut skin = super::super::skin::Skin::new(&mut models, &mut frame);
+            render_skinned(
+                &cow,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                hidden,
+                None,
+                &mut Vec::new(),
+                &mut skin,
+            );
+            frame.jobs.iter().map(|job| job.count).sum::<u32>()
+        };
+        let whole = gpu(Default::default());
+        assert!(whole > 0, "the cow takes the GPU path");
+        assert_eq!(gpu(leg), whole - 4, "the leg's face leaves the GPU draw");
     }
 
     /// A part `player_submit` hid leaves the body, after Skin Customization, while the armour

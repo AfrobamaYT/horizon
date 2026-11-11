@@ -1248,13 +1248,17 @@ impl Game<'_> {
     /// players; a mob your server half spawned (`native_spawn_mob`) is told
     /// apart by its id, sent with mod messages, or by its custom name.
     /// A mob is drawn afresh each frame: `draw.keep()` does nothing here.
+    /// `hidden.hide_named(name)` leaves only the part of that name out of the
+    /// vanilla model this frame (a villager's `nose`): its children go with
+    /// it, while its armour, held items and other layers keep every part.
     pub(in crate::game) fn native_mob_submit(
         &self,
         mob: &MobRender<'_>,
         draw: &mut BlockEntityDraw,
+        hidden: &mut HiddenParts,
         drawn: &mut bool,
     ) {
-        self.fire_mob_submit(mob, draw, drawn);
+        self.fire_mob_submit(mob, draw, hidden, drawn);
     }
     /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
     /// mod that hooks either hooks this one too and sets `listened` (HEAD,
@@ -1270,7 +1274,7 @@ impl Game<'_> {
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before. `hidden.hide(part)` leaves only that part out of
+    /// flames and glowing outline draw as before. `hidden.hide(part)` (or `hidden.hide_named(name)`) leaves only that part out of
     /// the vanilla model this frame (after Skin Customization; its children go with it, its
     /// armour, held items and other layers, the cape among them, keep theirs).
     pub(in crate::game) fn native_player_submit(

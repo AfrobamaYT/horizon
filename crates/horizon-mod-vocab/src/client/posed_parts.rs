@@ -70,37 +70,79 @@ impl HumanoidPart {
     }
 }
 
-/// The humanoid parts a mod hid from the vanilla player model this frame (`player_submit`): a
-/// set over [`HumanoidPart::ALL`], nothing allocated. A hidden part takes its children with it
-/// (the hat goes with the head); the cape is a layer of its own and stays.
+/// How many parts [`HiddenParts`] holds.
+pub const MAX_HIDDEN_PARTS: usize = 8;
+/// The longest part name [`HiddenParts`] takes, in bytes.
+pub const MAX_PART_NAME: usize = 24;
+
+/// The parts a mod hid from a vanilla model this frame (`player_submit`, `mob_submit`), by their
+/// names in the model (`head`, `nose`, `right_front_leg`): at most [`MAX_HIDDEN_PARTS`] names of
+/// at most [`MAX_PART_NAME`] bytes, nothing allocated. A hidden part takes its children with it
+/// (the hat goes with the head); a name the model lacks hides nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]
 pub struct HiddenParts {
-    /// One bit per part, at its index in [`HumanoidPart::ALL`].
-    pub bits: u16,
+    names: [[u8; MAX_PART_NAME]; MAX_HIDDEN_PARTS],
+    lens: [u8; MAX_HIDDEN_PARTS],
+    count: u8,
+}
+
+/// Why [`HiddenParts::hide_named`] took no name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HideError {
+    /// [`MAX_HIDDEN_PARTS`] names are hidden already.
+    Full,
+    /// The name is empty or longer than [`MAX_PART_NAME`] bytes.
+    BadName,
 }
 
 impl HiddenParts {
-    /// Leaves `part` out of the vanilla model this frame.
+    /// Leaves the humanoid `part` out of the vanilla model this frame.
     pub fn hide(&mut self, part: HumanoidPart) {
-        self.bits |= 1 << part as u16;
+        self.hide_named(part.model_name())
+            .expect("a humanoid part's name fits and the twelve of them fit");
     }
 
-    /// Whether `part` is hidden.
-    pub fn contains(self, part: HumanoidPart) -> bool {
-        self.bits & (1 << part as u16) != 0
+    /// Leaves the part named `name` out of the vanilla model this frame; hiding a name twice
+    /// keeps one.
+    pub fn hide_named(&mut self, name: &str) -> Result<(), HideError> {
+        if name.is_empty() || name.len() > MAX_PART_NAME {
+            return Err(HideError::BadName);
+        }
+        if self.contains_named(name) {
+            return Ok(());
+        }
+        let slot = usize::from(self.count);
+        if slot == MAX_HIDDEN_PARTS {
+            return Err(HideError::Full);
+        }
+        self.names[slot][..name.len()].copy_from_slice(name.as_bytes());
+        self.lens[slot] = name.len() as u8;
+        self.count += 1;
+        Ok(())
+    }
+
+    /// Whether the humanoid `part` is hidden.
+    pub fn contains(&self, part: HumanoidPart) -> bool {
+        self.contains_named(part.model_name())
+    }
+
+    /// Whether the part named `name` is hidden.
+    pub fn contains_named(&self, name: &str) -> bool {
+        self.names().any(|n| n == name)
     }
 
     /// No part is hidden.
-    pub fn is_empty(self) -> bool {
-        self.bits == 0
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
     }
 
-    /// The hidden parts, in [`HumanoidPart::ALL`]'s order.
-    pub fn iter(self) -> impl Iterator<Item = HumanoidPart> {
-        HumanoidPart::ALL
-            .into_iter()
-            .filter(move |part| self.contains(*part))
+    /// The hidden parts' names, in the order they were hidden.
+    pub fn names(&self) -> impl Iterator<Item = &str> + '_ {
+        let count = usize::from(self.count).min(MAX_HIDDEN_PARTS);
+        (0..count).filter_map(move |i| {
+            std::str::from_utf8(&self.names[i][..usize::from(self.lens[i])]).ok()
+        })
     }
 }
 
@@ -200,5 +242,24 @@ mod tests {
         let names: Vec<_> = HumanoidPart::ALL.iter().map(|p| p.model_name()).collect();
         assert_eq!(names.len(), 12);
         assert!(names.contains(&"left_pants") && names.contains(&"hat"));
+    }
+
+    #[test]
+    fn hidden_parts_hold_names_of_any_model_up_to_their_capacity() {
+        let mut hidden = HiddenParts::default();
+        assert!(hidden.is_empty());
+        hidden.hide(HumanoidPart::Head);
+        assert_eq!(hidden.hide_named("nose"), Ok(()));
+        assert_eq!(hidden.hide_named("nose"), Ok(()));
+        assert!(hidden.contains(HumanoidPart::Head) && hidden.contains_named("head"));
+        assert!(!hidden.contains(HumanoidPart::Hat) && !hidden.contains_named("nos"));
+        assert_eq!(hidden.names().collect::<Vec<_>>(), ["head", "nose"]);
+        assert_eq!(hidden.hide_named(""), Err(HideError::BadName));
+        assert_eq!(hidden.hide_named(&"x".repeat(MAX_PART_NAME + 1)), Err(HideError::BadName));
+        for i in 0..MAX_HIDDEN_PARTS - 2 {
+            assert_eq!(hidden.hide_named(&format!("part_{i}")), Ok(()));
+        }
+        assert_eq!(hidden.hide_named("one_more"), Err(HideError::Full));
+        assert_eq!(hidden.names().count(), MAX_HIDDEN_PARTS);
     }
 }

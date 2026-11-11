@@ -8500,10 +8500,8 @@ impl Game<'_> {
             let (modded, hidden) = match who {
                 _ if layers_only => (false, mod_api::HiddenParts::default()),
                 Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
-                None => (
-                    !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
-                    mod_api::HiddenParts::default(),
-                ),
+                None if is_player => (false, mod_api::HiddenParts::default()),
+                None => self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
             };
             if modded {
                 if let Some(rgb) = outline {
@@ -8561,6 +8559,7 @@ impl Game<'_> {
                     &lookup,
                     packed,
                     self.res.mob_data(),
+                    hidden,
                     listened.then_some(&mut parts),
                     out,
                     &mut skin,
