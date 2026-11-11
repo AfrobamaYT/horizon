@@ -294,35 +294,34 @@ mod tests {
 
     #[test]
     fn configuration_feature_advertisements_have_empty_body_codecs() {
-        for channel in ["horizon:quiet_commands"] {
-            let mut payload = CustomPayload {
-                channel: channel.into(),
-                data: vec![],
-            };
-            assert!(
-                configuration::Clientbound::CustomPayload(payload.clone())
-                    .try_encode()
-                    .is_ok()
-            );
-            payload.data.push(1);
-            assert!(
-                configuration::Clientbound::CustomPayload(payload)
-                    .try_encode()
-                    .unwrap_err()
-                    .0
-                    .contains("must be empty")
-            );
-            let mut body = Writer::new();
-            body.string(channel);
-            body.bytes(&vec![0; 1_048_577]);
-            let error = configuration::Clientbound::decode(
-                ids::configuration::clientbound::CUSTOM_PAYLOAD,
-                &body.data,
-            )
-            .unwrap_err();
-            assert!(error.0.contains("must be empty"));
-            assert!(error.payload_limit().is_none());
-        }
+        let channel = "horizon:quiet_commands";
+        let mut payload = CustomPayload {
+            channel: channel.into(),
+            data: vec![],
+        };
+        assert!(
+            configuration::Clientbound::CustomPayload(payload.clone())
+                .try_encode()
+                .is_ok()
+        );
+        payload.data.push(1);
+        assert!(
+            configuration::Clientbound::CustomPayload(payload)
+                .try_encode()
+                .unwrap_err()
+                .0
+                .contains("must be empty")
+        );
+        let mut body = Writer::new();
+        body.string(channel);
+        body.bytes(&vec![0; 1_048_577]);
+        let error = configuration::Clientbound::decode(
+            ids::configuration::clientbound::CUSTOM_PAYLOAD,
+            &body.data,
+        )
+        .unwrap_err();
+        assert!(error.0.contains("must be empty"));
+        assert!(error.payload_limit().is_none());
     }
 
     #[test]
