@@ -233,32 +233,33 @@ impl Game<'_> {
     }
     /// One pass of `tick_block_entities_with`.
     fn block_entity_pass<S: BlockEntityTickSlot>(&mut self, slot: &mut S) -> Result<()> {
-        self.tick_mount_menu();
-        self.tick_craft_table();
-        self.tick_container_reach();
-        self.load_entity_types();
-        self.ensure_stateful_entity_table();
-        if !self.world.block_entities.has_states() {
-            let states = self.ticking_states();
-            self.world.block_entities.set_states(states);
-            let containers = self.native_containers();
-            self.world.block_entities.set_mod_containers(containers);
-            let fluids = self.native_fluid_tables();
-            self.world.block_entities.set_mod_fluids(fluids);
-            let energy = self.native_energy_tables();
-            self.world.block_entities.set_mod_energy(energy);
+        let this = self;
+        this.tick_mount_menu();
+        this.tick_craft_table();
+        this.tick_container_reach();
+        this.load_entity_types();
+        this.ensure_stateful_entity_table();
+        if !this.world.block_entities.has_states() {
+            let states = this.ticking_states();
+            this.world.block_entities.set_states(states);
+            let containers = this.native_containers();
+            this.world.block_entities.set_mod_containers(containers);
+            let fluids = this.native_fluid_tables();
+            this.world.block_entities.set_mod_fluids(fluids);
+            let energy = this.native_energy_tables();
+            this.world.block_entities.set_mod_energy(energy);
         }
         // Only lingering cooldowns are dropped; a hopper that ticks checks
         // its own block. Once a second is soon enough for the rest.
-        if self.world.game_time % 20 == 0 {
-            self.forget_gone_hoppers();
+        if this.world.game_time % 20 == 0 {
+            this.forget_gone_hoppers();
         }
-        let ticking = self.block_ticking_area();
-        self.spawner_tick_positions.clear();
-        self.trial_spawner_tick_positions.clear();
-        self.item_columns = Some(Default::default());
-        self.pass_mobs = Some(Default::default());
-        let tickers = self.world.block_entity_tickers();
+        let ticking = this.block_ticking_area();
+        this.spawner_tick_positions.clear();
+        this.trial_spawner_tick_positions.clear();
+        this.item_columns = Some(Default::default());
+        this.pass_mobs = Some(Default::default());
+        let tickers = this.world.block_entity_tickers();
         let mut last_chunk = (i32::MIN, i32::MIN);
         let mut last_chunk_ticking = false;
         for ticker in tickers.iter().copied() {
@@ -275,17 +276,17 @@ impl Game<'_> {
                 continue;
             }
             // Ticks before this one can remove it (`TickingBlockEntity.isRemoved`).
-            if self.world.block_entities.is_asleep(&pos)
-                || !self.world.block_entities.is_live(ticker)
-                || !self.border.contains(f64::from(pos.0), f64::from(pos.2))
+            if this.world.block_entities.is_asleep(&pos)
+                || !this.world.block_entities.is_live(ticker)
+                || !this.border.contains(f64::from(pos.0), f64::from(pos.2))
             {
                 continue;
             }
-            let Some(kind) = self.world.block_entities.get(&pos).and_then(TickedKind::of) else {
+            let Some(kind) = this.world.block_entities.get(&pos).and_then(TickedKind::of) else {
                 continue;
             };
             match slot.before(&mut BlockEntityTick {
-                game: self,
+                game: this,
                 pos,
                 kind,
             }) {
@@ -295,72 +296,72 @@ impl Game<'_> {
             }
             // `before` had the game: the entity it was asked about may be gone or another kind.
             if S::RECHECK
-                && (!self.world.block_entities.is_live(ticker)
-                    || self.world.block_entities.get(&pos).and_then(TickedKind::of) != Some(kind))
+                && (!this.world.block_entities.is_live(ticker)
+                    || this.world.block_entities.get(&pos).and_then(TickedKind::of) != Some(kind))
             {
                 continue;
             }
             match kind {
-                TickedKind::Hopper => self.tick_hopper(pos),
-                TickedKind::Crafter => self.tick_crafter(pos),
-                TickedKind::Jukebox => self.tick_jukebox(pos),
-                TickedKind::Beacon => self.tick_beacon_at(pos),
-                TickedKind::CreakingHeart => self.tick_creaking_heart(pos)?,
+                TickedKind::Hopper => this.tick_hopper(pos),
+                TickedKind::Crafter => this.tick_crafter(pos),
+                TickedKind::Jukebox => this.tick_jukebox(pos),
+                TickedKind::Beacon => this.tick_beacon_at(pos),
+                TickedKind::CreakingHeart => this.tick_creaking_heart(pos)?,
                 TickedKind::Spawner => {
-                    self.tick_spawner(pos)?;
-                    self.spawner_tick_positions.push(pos);
+                    this.tick_spawner(pos)?;
+                    this.spawner_tick_positions.push(pos);
                 }
                 TickedKind::TrialSpawner => {
-                    self.tick_trial_spawner(pos)?;
-                    self.trial_spawner_tick_positions.push(pos);
+                    this.tick_trial_spawner(pos)?;
+                    this.trial_spawner_tick_positions.push(pos);
                 }
-                TickedKind::Vault => self.tick_vault(pos)?,
-                TickedKind::Beehive => self.tick_beehive(pos),
-                TickedKind::Furnace => self.tick_furnace(pos)?,
-                TickedKind::BrewingStand => self.tick_brewing_stand(pos)?,
-                TickedKind::DaylightDetector => self.tick_daylight_detector(pos),
-                TickedKind::EndGateway => self.tick_end_gateway(pos),
-                TickedKind::Campfire => self.tick_campfire(pos)?,
-                TickedKind::Mod => self.tick_mod_block_entity(pos),
+                TickedKind::Vault => this.tick_vault(pos)?,
+                TickedKind::Beehive => this.tick_beehive(pos),
+                TickedKind::Furnace => this.tick_furnace(pos)?,
+                TickedKind::BrewingStand => this.tick_brewing_stand(pos)?,
+                TickedKind::DaylightDetector => this.tick_daylight_detector(pos),
+                TickedKind::EndGateway => this.tick_end_gateway(pos),
+                TickedKind::Campfire => this.tick_campfire(pos)?,
+                TickedKind::Mod => this.tick_mod_block_entity(pos),
                 TickedKind::PotentSulfur => {
-                    self.tick_potent_sulfur(pos)?;
+                    this.tick_potent_sulfur(pos)?;
                     // A window that simulates the world itself is its own
                     // client; a server's clients tick it on their own.
-                    if self.options.execution_role.is_client() {
-                        self.client_tick_potent_sulfur(pos);
+                    if this.options.execution_role.is_client() {
+                        this.client_tick_potent_sulfur(pos);
                     }
                 }
             }
             slot.after(&mut BlockEntityTick {
-                game: self,
+                game: this,
                 pos,
                 kind,
             });
         }
         // Items move between passes: the columns hold for this one only.
-        self.item_columns = None;
-        self.pass_mobs = None;
-        self.update_song_volumes();
-        self.scan_for_hearts();
+        this.item_columns = None;
+        this.pass_mobs = None;
+        this.update_song_volumes();
+        this.scan_for_hearts();
         // The client ticks (particles, sounds, the turning mob) are for a
         // window; a dedicated or integrated server has none.
-        if self.options.dedicated.is_none() {
-            let spawners = std::mem::take(&mut self.spawner_tick_positions);
-            self.client_tick_spawners(&spawners);
-            self.spawner_tick_positions = spawners;
-            let trial_spawners = std::mem::take(&mut self.trial_spawner_tick_positions);
+        if this.options.dedicated.is_none() {
+            let spawners = std::mem::take(&mut this.spawner_tick_positions);
+            this.client_tick_spawners(&spawners);
+            this.spawner_tick_positions = spawners;
+            let trial_spawners = std::mem::take(&mut this.trial_spawner_tick_positions);
             for key in trial_spawners.iter().copied() {
-                self.client_tick_trial_spawner(key);
+                this.client_tick_trial_spawner(key);
             }
-            self.trial_spawner_tick_positions = trial_spawners;
+            this.trial_spawner_tick_positions = trial_spawners;
         }
         // `ShulkerBoxBlockEntity.tick`: the lids of the boxes this level
         // animates. Their grown collision shape reaches the collision queries
         // through `World::shulkers`, and an opening lid pushes what it runs
         // into (`moveCollidedEntities`), as a moving piston does.
-        let pushes = self.tick_shulkers();
-        self.sync_shulkers();
-        self.push_shulker_entities(pushes);
+        let pushes = this.tick_shulkers();
+        this.sync_shulkers();
+        this.push_shulker_entities(pushes);
         Ok(())
     }
     /// `ShulkerBoxBlockEntity.tick` for the boxes in block-ticking chunks, in
