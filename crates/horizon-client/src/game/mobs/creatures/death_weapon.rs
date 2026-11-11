@@ -8,13 +8,7 @@ pub(in crate::game) struct AcceptedWeapon {
 }
 impl AcceptedWeapon {
     fn belongs_to(&self, damage: Option<(Damage, i64)>) -> bool {
-        damage.is_some_and(|(source, at)| {
-            at == self.source.1
-                && source.kind == self.source.0.kind
-                && source.attacker == self.source.0.attacker
-                && source.from == self.source.0.from
-                && source.attacker_species == self.source.0.attacker_species
-        })
+        damage == Some(self.source)
     }
 }
 
@@ -50,6 +44,8 @@ impl Game<'_> {
                 .iter_mut()
                 .find(|mob| mob.id == id)
                 .map_or((false, None), |mob| {
+                    let before = mod_api::__private::listened(mod_api::HookId::LootDrops)
+                        .then_some(mob.last_damage);
                     let hurt = mob.damage_projectile(
                         crate::game::entity::damage_level_of!(self, scoped),
                         amount,
@@ -57,7 +53,9 @@ impl Game<'_> {
                         aim,
                         [projectile.velocity.x, projectile.velocity.z],
                     );
-                    (hurt, hurt.then_some(mob.last_damage).flatten())
+                    // An immune or wholly blocked hit returns true without committing a source.
+                    let changed = before.is_some_and(|before| before != mob.last_damage);
+                    (hurt, changed.then_some(mob.last_damage).flatten())
                 });
         if let Some(accepted) = accepted {
             let stack = projectile.arrow.as_ref().and_then(|arrow| {

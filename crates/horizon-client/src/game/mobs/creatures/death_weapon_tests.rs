@@ -179,6 +179,7 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
                     .set_main_hand_stack(Some(ItemStack::new("minecraft:stick", 1)));
                 // Commit through the same accepted-damage path as real projectile impacts.
                 victim.health = 20.0;
+                victim.last_damage = None;
                 game.mobs.push(victim);
                 assert!(game.damage_projectile_with_weapon(&shot, 70, 100.0, damage, None));
                 victim = game.mobs.iter().find(|mob| mob.id == 70).unwrap().clone();

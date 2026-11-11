@@ -62,6 +62,41 @@ fn hit(game: &mut Game<'_>, shot: &Projectile, amount: f32) -> bool {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn death_weapon_immune_crossbow_cannot_replace_accepted_crossbow() {
+    if isolated() {
+        return;
+    }
+    let mut expected = ItemStack::new("minecraft:crossbow", 1);
+    expected.enchant("minecraft:piercing", 1);
+    fixture(Some(expected), |game| {
+        let mut target = victim(game);
+        target.kind = game
+            .res
+            .mob_types()
+            .get("minecraft:sulfur_cube")
+            .unwrap()
+            .clone();
+        game.mobs.push(target);
+        let mut first = ItemStack::new("minecraft:crossbow", 1);
+        first.enchant("minecraft:piercing", 1);
+        assert!(hit(game, &arrow(Some(first)), 1.0));
+        let target = game.mobs.iter_mut().find(|m| m.id == 70).unwrap();
+        let committed = target.last_damage.unwrap();
+        target.extra.set_body(Some("minecraft:stone".into()));
+        assert!(hit(
+            game,
+            &arrow(Some(ItemStack::new("minecraft:bow", 1))),
+            2.0
+        ));
+        let mut dead = game.mobs.iter().find(|m| m.id == 70).unwrap().clone();
+        assert_eq!(dead.last_damage.unwrap().1, committed.1);
+        dead.health = 0.0;
+        game.mob_died(&dead);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn death_weapon_refused_crossbow_cannot_replace_accepted_longbow() {
     if isolated() {
         return;
@@ -108,6 +143,7 @@ fn death_weapon_dispenser_arrow_without_recorded_weapon_is_none() {
             .find(|mob| mob.id == 70)
             .unwrap()
             .invulnerable = 0;
+        game.mobs.iter_mut().find(|mob| mob.id == 70).unwrap().age += 1;
         assert!(hit(game, &arrow(None), 100.0));
         let dead = game.mobs.iter().find(|mob| mob.id == 70).unwrap().clone();
         game.mob_died(&dead);

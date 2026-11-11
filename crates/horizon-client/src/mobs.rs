@@ -1045,7 +1045,7 @@ pub struct Aim {
     pub feet: [f64; 3],
 }
 /// A damage source: its type, the attacking entity and where it came from.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Damage {
     pub kind: DamageKind,
     pub attacker: Option<Who>,
