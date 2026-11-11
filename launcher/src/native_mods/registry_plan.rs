@@ -155,8 +155,7 @@ impl Plan {
         super::run(index, "Checking the pinned registry index", |_| {})
             .map_err(|error| self.explain_resolution(error))?;
         let pins = RegistryLock::parse(&super::read_lock(directory)?)?;
-        self.allowed
-            .check_resolution(&pins, &RegistryLock::default())?;
+        self.allowed.check_partial_resolution(&pins, &self.game)?;
         let mut fetch = super::cargo(rust, directory, "fetch");
         fetch.arg("--locked");
         super::run(fetch, "Downloading the mods' pinned crates", |_| {})
@@ -346,6 +345,83 @@ mod tests {
             .is_err());
         println!("ORIGINAL MOD LOCK:\n{mod_lock}\nSDK PATCHED RESOLUTION:\n{text}\nOLD CHECK REFUSAL: {before}\nAUTHORIZED CHECK: accepted");
         assert!(!root.join("target").exists());
+    }
+
+    #[test]
+    fn cargo_optional_game_edges_may_shrink_but_not_grow_or_move() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for name in ["bumpalo", "allocator-api2", "unexpected"] {
+            let crate_dir = root.join("vendor").join(name);
+            std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+            let extra = if name == "bumpalo" {
+                "[dependencies]\nallocator-api2={version='1',optional=true}\nunexpected={version='1',optional=true}\n"
+            } else {
+                ""
+            };
+            std::fs::write(
+                crate_dir.join("Cargo.toml"),
+                format!("[package]\nname='{name}'\nversion='1.0.0'\n{extra}"),
+            )
+            .unwrap();
+            std::fs::write(crate_dir.join("src/lib.rs"), "").unwrap();
+            std::fs::write(
+                crate_dir.join(".cargo-checksum.json"),
+                format!(r#"{{"package":"{}","files":{{}}}}"#, "a".repeat(64)),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir_all(root.join(".cargo")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        std::fs::write(
+            root.join(".cargo/config.toml"),
+            "[source.crates-io]\nreplace-with='fixture'\n[source.fixture]\ndirectory='vendor'\n",
+        )
+        .unwrap();
+        let resolve = |features: &str| {
+            std::fs::write(root.join("Cargo.toml"), format!("[package]\nname='fixture'\nversion='1.0.0'\n[workspace]\n[dependencies]\nbumpalo={{version='1',default-features=false,features=[{features}]}}\n")).unwrap();
+            let output = std::process::Command::new("cargo")
+                .args(["generate-lockfile", "--offline"])
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            std::fs::read_to_string(root.join("Cargo.lock")).unwrap()
+        };
+        let game = resolve("'allocator-api2'");
+        let plan = Plan::read(&game, &[], &[]).unwrap();
+        let narrower = resolve("");
+        let narrower = RegistryLock::parse(&narrower).unwrap();
+        plan.allowed
+            .check_partial_resolution(&narrower, &plan.game)
+            .unwrap();
+        // Without game ownership a mod's declared graph remains exact.
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&narrower, &RegistryLock::default())
+            .unwrap_err()
+            .contains("bumpalo"));
+        let added = resolve("'unexpected'");
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&RegistryLock::parse(&added).unwrap(), &plan.game)
+            .unwrap_err()
+            .contains("bumpalo"));
+        let moved = game.replace(
+            "name = \"bumpalo\"\nversion = \"1.0.0\"",
+            "name = \"bumpalo\"\nversion = \"1.0.1\"",
+        );
+        assert_ne!(moved, game);
+        assert!(plan
+            .allowed
+            .check_partial_resolution(&RegistryLock::parse(&moved).unwrap(), &plan.game)
+            .unwrap_err()
+            .contains("bumpalo"));
     }
 
     #[test]

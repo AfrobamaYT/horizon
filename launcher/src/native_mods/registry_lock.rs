@@ -269,8 +269,22 @@ impl RegistryLock {
     /// Compare resolved identities and checksums, and normalize Cargo's optional dependency
     /// qualifiers before comparing edges. Adding a second version qualifies existing edges.
     pub fn check_resolution(&self, resolved: &Self, game: &Self) -> Result<(), String> {
-        // A reachable game-owned package must keep its identity and edges, including
-        // source-less registry patches. Unreachable engine crates need not be staged.
+        self.check_resolved(resolved, game, true)
+    }
+
+    /// A mod-only workspace may omit game packages and their inactive optional edges.
+    pub fn check_partial_resolution(&self, resolved: &Self, game: &Self) -> Result<(), String> {
+        self.check_resolved(resolved, game, false)
+    }
+
+    fn check_resolved(
+        &self,
+        resolved: &Self,
+        game: &Self,
+        require_game: bool,
+    ) -> Result<(), String> {
+        // The prebuilt game retains its features. A narrower Cargo workspace may
+        // drop game-owned edges, but must never add edges or change identities.
         for (id, record) in resolved.packages.iter().chain(resolved.local.iter()) {
             let owners: Vec<_> = self
                 .packages
@@ -281,10 +295,14 @@ impl RegistryLock {
             if owners.is_empty() {
                 continue;
             }
-            if !owners
-                .iter()
-                .any(|(old, pin)| *old == id && pin.edges == record.edges)
-            {
+            if !owners.iter().any(|(old, pin)| {
+                *old == id
+                    && if let Some(owner) = game.packages.get(id).or_else(|| game.local.get(id)) {
+                        record.edges.is_subset(&owner.edges)
+                    } else {
+                        pin.edges == record.edges
+                    }
+            }) {
                 let labels = |edges: &std::collections::BTreeSet<Identity>| {
                     edges
                         .iter()
@@ -316,6 +334,9 @@ impl RegistryLock {
                 ));
             }
         }
+        if !require_game {
+            return Ok(());
+        }
         for id in game.packages.keys().chain(game.local.keys()) {
             let Some(record) = resolved.packages.get(id).or_else(|| resolved.local.get(id)) else {
                 let versions = resolved
@@ -335,7 +356,7 @@ impl RegistryLock {
                 .get(id)
                 .or_else(|| game.local.get(id))
                 .expect("game identity");
-            if original.edges != record.edges {
+            if !record.edges.is_subset(&original.edges) {
                 let labels = |edges: &std::collections::BTreeSet<Identity>| {
                     edges
                         .iter()
