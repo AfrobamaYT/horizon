@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 const POS: [i32; 3] = [0, 64, 0];
 #[derive(Default)]
 struct Seen {
+    invalid_sound: AtomicBool,
+    invalid_stat: AtomicBool,
     fail_preparation: AtomicBool,
     decide: AtomicUsize,
     actor: AtomicUsize,
@@ -35,10 +37,22 @@ impl mod_api::Interaction for Syrup {
                 )
                 .unwrap(),
             ),
-            sound: Some(mod_api::Identifier::parse("minecraft:item.bottle.empty").unwrap()),
+            sound: Some(
+                mod_api::Identifier::parse(if self.seen.invalid_sound.load(Ordering::SeqCst) {
+                    "test:unknown_sound"
+                } else {
+                    "minecraft:item.bottle.empty"
+                })
+                .unwrap(),
+            ),
             fluid_event: Some(mod_api::Identifier::parse("minecraft:fluid_place").unwrap()),
             statistics: vec![
-                mod_api::Identifier::parse("minecraft:use_cauldron").unwrap(),
+                mod_api::Identifier::parse(if self.seen.invalid_stat.load(Ordering::SeqCst) {
+                    "test:unknown_stat"
+                } else {
+                    "minecraft:use_cauldron"
+                })
+                .unwrap(),
                 mod_api::Identifier::parse("minecraft:used").unwrap(),
             ],
         })
@@ -644,5 +658,25 @@ fn cauldron_world_close_discards_callbacks_before_failed_preparation() {
             "minecraft:bucket"
         );
         assert_eq!(seen.decide.load(Ordering::SeqCst), 0);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn cauldron_unknown_effect_keys_refuse_before_fire() {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_unknown_effect_keys_refuse_before_fire",
+        "HORIZON_CAULDRON_CASE",
+        &["sound", "stat"],
+    ) {
+        return;
+    }
+    fixture(false, false, false, |game, seen| {
+        let sound = std::env::var("HORIZON_CAULDRON_CASE").unwrap() == "sound";
+        seen.invalid_sound.store(sound, Ordering::SeqCst);
+        seen.invalid_stat.store(!sound, Ordering::SeqCst);
+        assert!(game.use_on_cauldron(POS).unwrap());
+        unchanged(game, seen);
+        assert_eq!(seen.fire.load(Ordering::SeqCst), 0);
     });
 }
