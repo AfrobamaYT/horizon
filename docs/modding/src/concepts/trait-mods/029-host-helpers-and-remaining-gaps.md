@@ -82,3 +82,17 @@ The following catalog hooks are not in the trait:
   and `tags_updated`.
 
 The client `render_tooltip_texture` hook (NeoForge's `RenderTooltipEvent.Texture`) picks a tooltip box's look. Setting `texture` to a tooltip style `<namespace>:<name>` draws the GUI sprites `<namespace>:tooltip/<name>_background` and `_frame` from the resource packs, nine-sliced by their `gui.scaling` metadata or stretched without it, as vanilla draws an item's `tooltip_style`; the atlas a resource reload restitches is the one drawn. Left `None`, the box keeps Horizon's solid fills, whose background and top and bottom border gradient colours it changes as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered.
+
+### Tooltip component geometry
+
+`render_tooltip_gather_components` preserves the mixed text/image list, including
+an image inserted immediately after the name. Wrapping splits text in place.
+The text pass visits the entire list before the image pass starts; both passes
+advance through the same component heights, with 2 extra pixels after the first
+component of an item tooltip. Each image callback receives the box's left edge
+and its own running top, but the **whole content box size**, not `TooltipImage.size`.
+That field is the component measurement used to reserve space. The box width is
+the widest component; its height is the sum of heights, minus 2 normally, with no
+subtraction for item tooltips containing multiple components. Text components
+measure 10 pixels high. Factory registration and selectable fonts are separate
+capabilities, not provided by this geometry contract.
