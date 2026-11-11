@@ -10,6 +10,9 @@ The transport contract is detailed in [Registered raw custom payload transport](
 Register during `Hooks::register`, in dependency order. `payload_handlers().registrar("1")`
 returns a `PayloadRegistrar` view. Versions are exact, nonblank strings, not semver ranges.
 Main-thread handling and required peer support are the defaults.
+For a complete declaration value, `PayloadDeclaration::new` takes the channel,
+version, protocol, direction, optional flag, and handler thread explicitly;
+registration still owns channel and version validation.
 
 ```rust,ignore
 use mod_api::{IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar};

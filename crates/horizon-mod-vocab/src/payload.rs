@@ -72,6 +72,28 @@ pub struct PayloadDeclaration {
     pub thread: HandlerThread,
 }
 
+impl PayloadDeclaration {
+    /// Constructs a complete declaration with explicit compatibility and scheduling choices.
+    /// The registration boundary validates the channel and exact, nonblank version.
+    pub fn new(
+        id: PayloadId,
+        version: String,
+        protocol: PayloadProtocol,
+        direction: PayloadDirection,
+        optional: bool,
+        thread: HandlerThread,
+    ) -> Self {
+        Self {
+            id,
+            version,
+            protocol,
+            direction,
+            optional,
+            thread,
+        }
+    }
+}
+
 /// Queued locally, not a delivery acknowledgement. Disconnect invalidates pending work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 // exhaustive: local queue acceptance is the only success state, never a remote acknowledgement.
