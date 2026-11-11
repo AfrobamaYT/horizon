@@ -492,9 +492,10 @@ struct Conn {
     close_at: Option<Instant>,
 }
 impl Conn {
-    /// Pipe readiness, dispatched from the worker's inbox.read notifications.
+    /// Pipe readiness covers incoming data and capacity returned by peer reads.
     fn memory_ready(&mut self, now: Instant) {
         self.read(now);
+        self.serve(now);
     }
 
     fn register(
