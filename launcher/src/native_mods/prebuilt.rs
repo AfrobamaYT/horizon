@@ -27,7 +27,6 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceReason {
     /// A mod has a checked private source point, legacy helper, or module changing game code.
-    Mixins { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
@@ -43,7 +42,6 @@ pub enum SourceReason {
 impl std::fmt::Display for SourceReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            Self::Mixins { mod_id } => trf("{mod}: mixins compile game code", &[("mod", mod_id)]),
             Self::BuildScript { mod_id } => trf(
                 "{mod} has a build script, so the game builds from source",
                 &[("mod", mod_id)],
@@ -121,9 +119,6 @@ pub(super) fn slot_routes(
 pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason> {
     {
         let mod_id = || project.bundle.manifest.id.clone();
-        if project.bundle.needs_mixins() {
-            return Some(SourceReason::Mixins { mod_id: mod_id() });
-        }
         let cargo = &project.cargo;
         let package = cargo.get("package");
         let has_script = package.and_then(|p| p.get("build")).is_some()
@@ -388,6 +383,25 @@ pub(super) struct Identity {
     pub(super) native_links: Option<Vec<super::registry_inventory::NativeLink>>,
     #[serde(default)]
     facade_crates: std::collections::BTreeSet<String>,
+    /// The game crate's features the SDK was built with: a patched function copied out of its
+    /// source is compiled under the same `cfg`s.
+    #[serde(default)]
+    game_features: Vec<String>,
+}
+
+impl Identity {
+    /// The commit the SDK was built from: the source a patched function is copied out of.
+    pub(super) fn commit(&self) -> &str {
+        &self.commit
+    }
+
+    pub(super) fn facade_crates(&self) -> impl Iterator<Item = &str> {
+        self.facade_crates.iter().map(String::as_str)
+    }
+
+    pub(super) fn game_features(&self) -> &[String] {
+        &self.game_features
+    }
 }
 
 pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
@@ -569,6 +583,7 @@ pub(super) fn compile(
     let game_library = library(&deps, "horizon_client")?;
     let mut facades = std::collections::HashMap::new();
     let mut rlibs: std::collections::HashMap<&str, PathBuf> = std::collections::HashMap::new();
+    let mut crate_names: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
     for &index in &resolution.order {
         let project = &projects[index];
         let id = project.bundle.manifest.id.as_str();
@@ -658,7 +673,19 @@ pub(super) fn compile(
         cmd.arg("--out-dir").arg(out).arg(&source);
         super::run(cmd, &format!("Compiling {id}"), |_| {})?;
         rlibs.insert(id, out.join(format!("lib{krate}.rlib")));
+        crate_names.insert(id, krate);
     }
+    // `[[mixin]]` rows: their functions copied, patched and compiled beside the mods.
+    let patch = super::patch::build(
+        rust,
+        game,
+        out,
+        projects,
+        &rlibs,
+        &crate_names,
+        &sdk,
+        |edition| rustc(rust, game, out, edition),
+    )?;
     let template = api::template(&game.join(TEMPLATE))?;
     let manifests: Vec<_> = resolution
         .order
@@ -666,7 +693,16 @@ pub(super) fn compile(
         .map(|&i| &projects[i].bundle.manifest)
         .collect();
     let main = out.join("main.rs");
-    fs::write(&main, api::main_rs(&template, &manifests, &catalog)).map_err(|e| e.to_string())?;
+    let mut main_text = api::main_rs(&template, &manifests, &catalog);
+    if let Some(patch) = &patch {
+        let installs: String = patch
+            .installs
+            .iter()
+            .map(|install| format!("        {install},\n"))
+            .collect();
+        main_text = main_text.replace("/* MOD_REDIRECTS */", installs.trim_end());
+    }
+    fs::write(&main, main_text).map_err(|e| e.to_string())?;
     let binary = out.join(crate::backend::CLIENT);
     let mut cmd = rustc(rust, game, out, "2024");
     cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"])
@@ -686,6 +722,10 @@ pub(super) fn compile(
             "horizon_mod_host={}",
             library(&deps, "horizon_mod_host")?.display()
         ));
+    }
+    if let Some(patch) = &patch {
+        cmd.arg("--extern")
+            .arg(format!("{}={}", super::patch::CRATE, patch.rlib.display()));
     }
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();

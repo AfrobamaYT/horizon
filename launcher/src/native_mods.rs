@@ -46,6 +46,7 @@ pub use internals_sync::{pinned_catalog_with_modules, DiscoveryCatalog};
 mod isolate;
 mod mod_points;
 mod package;
+mod patch;
 mod picker;
 mod prebuilt;
 mod sites;

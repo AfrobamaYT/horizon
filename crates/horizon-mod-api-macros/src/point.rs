@@ -106,6 +106,101 @@ fn copy_out(arg: &Arg, input: usize, point: &str) -> TokenStream {
     }
 }
 
+/// Elided lifetimes of a method's return borrow from its receiver: `'s` names it.
+struct ElideTo(syn::Lifetime);
+
+impl syn::visit_mut::VisitMut for ElideTo {
+    fn visit_type_reference_mut(&mut self, reference: &mut syn::TypeReference) {
+        if reference.lifetime.is_none() {
+            reference.lifetime = Some(self.0.clone());
+        }
+        syn::visit_mut::visit_type_reference_mut(self, reference);
+    }
+    fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
+        if lifetime.ident == "_" {
+            *lifetime = self.0.clone();
+        }
+    }
+    // A function pointer or trait object in the return elides on its own.
+    fn visit_type_bare_fn_mut(&mut self, _: &mut syn::TypeBareFn) {}
+    fn visit_type_trait_object_mut(&mut self, _: &mut syn::TypeTraitObject) {}
+}
+
+/// The function-pointer type a replacement of `sig`'s body has (function replacement for
+/// `[[mixin]]`): the receiver as its first parameter, the function's own lifetimes bound for
+/// any call, and a return that borrows from the receiver as the method's elision says.
+fn redirect_type(sig: &syn::Signature, receiver: Receiver) -> TokenStream {
+    // The function's own lifetimes are renamed: the type is also written inside its body, where
+    // they are already in scope and a `for<>` binder may not shadow them.
+    struct Rename(Vec<(syn::Ident, syn::Lifetime)>);
+    impl syn::visit_mut::VisitMut for Rename {
+        fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
+            if let Some((_, fresh)) = self.0.iter().find(|(name, _)| *name == lifetime.ident) {
+                *lifetime = fresh.clone();
+            }
+        }
+    }
+    let mut rename = Rename(
+        sig.generics
+            .lifetimes()
+            .enumerate()
+            .map(|(index, param)| {
+                (
+                    param.lifetime.ident.clone(),
+                    syn::Lifetime::new(&format!("'__fnr_l{index}"), proc_macro2::Span::call_site()),
+                )
+            })
+            .collect(),
+    );
+    let mut lifetimes: Vec<syn::Lifetime> =
+        rename.0.iter().map(|(_, fresh)| fresh.clone()).collect();
+    let mut output = sig.output.clone();
+    syn::visit_mut::VisitMut::visit_return_type_mut(&mut rename, &mut output);
+    let first = match (receiver, sig.receiver()) {
+        (Receiver::None, _) | (_, None) => quote!(),
+        (receiver, Some(written)) => {
+            let named = written.reference.as_ref().and_then(|(_, lifetime)| {
+                lifetime.clone().map(|mut lifetime| {
+                    syn::visit_mut::VisitMut::visit_lifetime_mut(&mut rename, &mut lifetime);
+                    lifetime
+                })
+            });
+            let lifetime = named.unwrap_or_else(|| {
+                let fresh = syn::Lifetime::new("'__fnr_s", proc_macro2::Span::call_site());
+                lifetimes.push(fresh.clone());
+                fresh
+            });
+            syn::visit_mut::VisitMut::visit_return_type_mut(
+                &mut ElideTo(lifetime.clone()),
+                &mut output,
+            );
+            if receiver == Receiver::Mut {
+                quote!(&#lifetime mut Self,)
+            } else {
+                quote!(&#lifetime Self,)
+            }
+        }
+    };
+    let types: Vec<syn::Type> = sig
+        .inputs
+        .iter()
+        .filter_map(|input| match input {
+            syn::FnArg::Typed(typed) => {
+                let mut ty = (*typed.ty).clone();
+                syn::visit_mut::VisitMut::visit_type_mut(&mut rename, &mut ty);
+                Some(ty)
+            }
+            syn::FnArg::Receiver(_) => None,
+        })
+        .collect();
+    let bound = if lifetimes.is_empty() {
+        quote!()
+    } else {
+        quote!(for<#(#lifetimes),*>)
+    };
+    quote!(#bound fn(#first #(#types),*) #output)
+}
+
 /// `#[point]` on a function: see the attribute's documentation in the crate root.
 pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     if let Some(inline) = function.attrs.iter().find(|attr| {
@@ -126,6 +221,9 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     };
     let name = shape.name.clone();
     let table = shape.table.clone();
+    // A game point with a raw form takes a replacement body: `[[mixin]]`'s function replacement.
+    // A mod crate's own points (#2339) take no mixins.
+    let redirect = shape.raw && table.is_ident("mod_points");
     // The body moves to an inlined inner function, so the return listeners run however it
     // returns; the outer function takes each parameter by a plain, mutable name.
     let inner = syn::Ident::new(
@@ -511,9 +609,53 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         .map(|(_, input)| local(*input))
         .collect();
     let cancel_local = cancels.then(|| quote!(let mut __cancel = false;));
+    let fnty = redirect_type(&function.sig, shape.receiver);
+    let redirect_local =
+        redirect.then(|| quote!(let mut __fnr_to: *const () = ::std::ptr::null();));
+    let redirect_load = redirect
+        .then(|| quote!(__fnr_to = #table::__private::redirect(#table::PointId::#head_variant);));
+    let recv_arg = match shape.receiver {
+        Receiver::None => quote!(),
+        Receiver::Shared => quote!(self,),
+        Receiver::Mut => quote!(&mut *self,),
+    };
+    let body_call = if redirect {
+        quote! {
+            if __fnr_to.is_null() {
+                #callee #turbofish(#(#call),*)
+            } else {
+                // SAFETY: the point's `__fnr_` constructor installed a function of this type.
+                let __fnr_body = unsafe { ::std::mem::transmute::<*const (), #fnty>(__fnr_to) };
+                __fnr_body(#recv_arg #(#call),*)
+            }
+        }
+    } else {
+        quote!(#callee #turbofish(#(#call),*))
+    };
+    let installer = redirect.then(|| {
+        let constructor = format_ident!(
+            "__fnr_{}",
+            function.sig.ident.to_string().trim_start_matches("r#")
+        );
+        let variant = shape.variant();
+        quote! {
+            #[doc(hidden)]
+            #[inline]
+            pub fn #constructor(replacement: #fnty) -> #table::__private::Redirect {
+                // SAFETY: the point casts it back to this same type before calling it.
+                unsafe {
+                    #table::__private::Redirect::new(
+                        #table::PointId::#variant.place(),
+                        replacement as *const (),
+                    )
+                }
+            }
+        }
+    });
     let result_local =
         results.then(|| quote!(let mut __result_slot = ::std::option::Option::None;));
     outer.block = syn::parse_quote!({
+        #redirect_local
         #cancel_local
         #result_local
         #(#shared_locals)*
@@ -522,12 +664,13 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         if #head_listened {
             (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api #head_raw (#(#owned,)*) });
             #stop
+            #redirect_load
         }
         #(#shared_refs)*
         #returned_local
         #back
         #[allow(unused_mut)]
-        let mut __result = #callee #turbofish(#(#call),*);
+        let mut __result = #body_call;
         #returned
         __result
     });
@@ -539,7 +682,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         .attrs
         .retain(|attr| !attr.path().is_ident("doc") && !attr.path().is_ident("inline"));
     function.attrs.push(syn::parse_quote!(#[inline(always)]));
-    quote!(#outer #function)
+    quote!(#outer #function #installer)
 }
 
 /// `body`, run only when every mirror converted; a value the API can't carry skips the listeners

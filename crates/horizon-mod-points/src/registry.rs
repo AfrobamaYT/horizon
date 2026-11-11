@@ -2,7 +2,7 @@
 //! (`mod_api::__private::points`).
 use crate::{POINT_COUNT, PointId, SITE_COUNT, SiteId};
 use mod_api::__private::points::{Place, Table};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicPtr};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use mod_api::__private::points::register;
@@ -13,8 +13,11 @@ pub use mod_api::__private::points::{RegisterError, seal, stop};
 pub static POINTS: [AtomicBool; POINT_COUNT] = [const { AtomicBool::new(false) }; POINT_COUNT];
 /// Call-expression slots, in the same table as the points.
 pub static SITES: [AtomicBool; SITE_COUNT] = [const { AtomicBool::new(false) }; SITE_COUNT];
-/// The game's table: its points, then its call sites.
-pub static TABLE: Table = Table::new(&POINTS, &SITES);
+/// Each point's replacement body, installed by a `[[mixin]]` build (function replacement), or null.
+pub static REDIRECTS: [AtomicPtr<()>; POINT_COUNT] =
+    [const { AtomicPtr::new(std::ptr::null_mut()) }; POINT_COUNT];
+/// The game's table: its points, then its call sites, and the points' replacement bodies.
+pub static TABLE: Table = Table::with_redirects(&POINTS, &SITES, &REDIRECTS);
 
 impl PointId {
     /// This place in the game's table, for a listener's constructor.

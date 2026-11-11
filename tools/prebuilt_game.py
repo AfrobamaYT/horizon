@@ -234,6 +234,12 @@ def build(out: Path, server: bool) -> None:
         "rustflags": rustflags,
         "link_args": link_args,
         "facade_crates": eligible,
+        # The game crate's features: a `[[mixin]]` build compiles functions copied out of its source
+        # under the same cfgs (function replacement).
+        "game_features": sorted(next(
+            node["features"] for node in metadata["resolve"]["nodes"]
+            if node["id"].split("#")[0].endswith("/horizon-client")
+        )),
         "registry_lock": (staged / "Cargo.lock").read_text(),
         "native_links": native_links(metadata, "horizon-mod-host"),
         "files": files,

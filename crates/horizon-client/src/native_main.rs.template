@@ -16,6 +16,9 @@ const _: () = assert!(
 );
 fn main() {
     let startup = horizon_client::entry::prepare();
+    horizon_client::entry::install_redirects(&[
+/* MOD_REDIRECTS */
+    ]);
     std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
     std::hint::black_box(&GAME_IDENTITY);
     let mods: Vec<mod_api::ModEntry> = native_mods! {

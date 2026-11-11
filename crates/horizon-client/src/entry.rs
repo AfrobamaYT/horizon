@@ -48,6 +48,22 @@ pub fn prepare() -> Startup {
 /// A native function slot, checked against its place's exact type before erasure.
 pub use mod_points::__private::SlotListener as NativeSlot;
 
+/// A `[[mixin]]` build's replacement of one game function's body, from the function's own
+/// `__fnr_<name>` constructor.
+pub use mod_points::__private::Redirect;
+
+/// Installs a `[[mixin]]` build's patched functions (function replacement), before the mods load:
+/// each point then runs its patched copy in place of its body, between its head and return
+/// listeners. The launcher writes one copy per function, so a second install of a function is a
+/// build defect: it is reported and the first copy stays.
+pub fn install_redirects(redirects: &[Redirect]) {
+    for redirect in redirects {
+        if let Err(error) = redirect.install() {
+            eprintln!("Horizon: a patched function was not installed: {error}");
+        }
+    }
+}
+
 /// The places raw listeners register at, named by the generated `main`.
 #[doc(hidden)]
 pub use mod_points::PointId;

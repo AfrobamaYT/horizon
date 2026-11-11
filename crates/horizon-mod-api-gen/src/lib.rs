@@ -642,6 +642,7 @@ pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
 pub mod notes;
+pub mod patch;
 pub mod points;
 pub mod sites;
 pub mod staging;

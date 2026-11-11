@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Function replacement end to end (fn-replace): two native mods' `[[mixin]]` rows built by the
+# launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
+# dedicated server.
+#   tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
+# SDK is a folder from `tools/prebuilt_game.py build --server` at this checkout's HEAD. With
+# RESOURCES (a prepared `horizon-client/26.3` folder), the server starts, takes `/tick` commands
+# and stops; every mixin helper prints a line starting `fnr:`.
+set -euo pipefail
+launcher=$(realpath "$1")
+sdk=$(realpath "$2")
+scratch=$3
+resources=${4:-}
+root=$(git rev-parse --show-toplevel)
+revision=$(git -C "$root" rev-parse HEAD)
+mixins=$(sed -n 's/^pub const MIXINS_REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
+test "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$sdk/horizon-prebuilt.json")" = "$revision"
+
+rm -rf "$scratch"
+mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
+scratch=$(realpath "$scratch")
+data=$scratch/launcher
+
+# The pinned source a patched function is copied out of, from this checkout.
+source=$data/native/source/$revision
+mkdir -p "$source"
+git -C "$root" archive HEAD | tar -x -C "$source"
+find "$source" -type l -delete
+printf '%s' "$revision" > "$source/.horizon-revision"
+
+# The prebuilt game, where the launcher keeps a downloaded one.
+host=$(rustc -vV | sed -n 's/^host: //p')
+mkdir -p "$data/native/prebuilt"
+cp -a "$sdk" "$data/native/prebuilt/$revision-horizon-prebuilt-v3-$host-server"
+
+base=$data/versions/ci
+mkdir -p "$base/.local/horizon-client/26.3"
+touch "$base/.installed"
+echo '{}' > "$base/.local/horizon-client/26.3/horizon-resources.json"
+version=$data/versions/native-ci
+mkdir -p "$version"
+touch "$version/.installed"
+printf '{"base": "ci", "horizon": "%s", "target": "server"}\n' "$revision" > "$version/native-mods.json"
+
+mods=$scratch/mods/fnr
+mkdir -p "$mods"
+for mod in alpha beta; do
+  cp -r "$root/tools/ci/fn-replace-check/$mod" "$mods/fnr_$mod"
+  sed -i "s/^horizon = \"HEAD\"$/horizon = \"$revision\"/; s/^mixins = \"MIXINS\"$/mixins = \"$mixins\"/" "$mods/fnr_$mod/horizon-mod.toml"
+  sed -i "s/rev = \"HEAD\"/rev = \"$revision\"/" "$mods/fnr_$mod/Cargo.toml"
+done
+game_hash=$(sha256sum "$sdk"/deps/libhorizon_mod_host.* | cut -d' ' -f1)
+
+env_vars=(HORIZON_HOME="$scratch/home" HORIZON_LAUNCHER_HOME="$data" XDG_DATA_HOME="$scratch/data"
+  XDG_CONFIG_HOME="$scratch/config" HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1
+  HORIZON_LAUNCHER_TRASH="$scratch/trash" HORIZON_LAUNCHER_CLIPBOARD="$scratch/clipboard"
+  HORIZON_LAUNCHER_DESKTOP="$scratch/desktop")
+started=$(date +%s.%N)
+env "${env_vars[@]}" "$launcher" native-build "$mods" --server-output "$scratch/engine" --version native-ci \
+  --trust-native-code
+echo "native build: $(python3 -c "print(round($(date +%s.%N) - $started, 1))") s"
+test -x "$scratch/engine/horizon-engine"
+log=$data/native/build.log
+grep -F 'Function replacement:' "$log"
+# The prebuilt route, and no game source compiled.
+grep -F '"route": "prebuilt"' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
+test ! -d "$data/native/stage/crates/horizon-client" || { echo "the game was staged for a source build"; exit 1; }
+test "$(sha256sum "$sdk"/deps/libhorizon_mod_host.* | cut -d' ' -f1)" = "$game_hash"
+
+if [ -n "$resources" ]; then
+  run=$scratch/run
+  mkdir -p "$run"
+  echo eula=true > "$run/eula.txt"
+  (sleep 30; echo "tick rate 40"; sleep 3; echo "tick rate 13"; sleep 3; echo "tick query"; sleep 3; echo "stop"; sleep 20) |
+    (cd "$run" && env "${env_vars[@]}" timeout 180 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" \
+      --dedicated --nogui) > "$scratch/server.log" 2>&1 || true
+  grep -F 'fnr:' "$scratch/server.log"
+  grep -F 'OVERWRITE by fnr_alpha' "$scratch/server.log"
+fi

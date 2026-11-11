@@ -7,7 +7,7 @@
 //! Sealing orders each place's listeners: API ones before internals ones, a `replace` last among
 //! the API ones, then priority descending, then registration order (the mods register in
 //! dependency order), then inject id within a mod. Call sites keep mod-id tie ordering.
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// Runs a point's listened path out of line: the code that builds its record and calls its
@@ -24,17 +24,60 @@ pub fn cold<R>(path: impl FnOnce() -> R) -> R {
 pub struct Table {
     points: &'static [AtomicBool],
     sites: &'static [AtomicBool],
+    /// Per point, the compiled replacement of its body a `[[mixin]]` installed, or null: the
+    /// game's table has one per point, a mod crate's table none.
+    redirects: &'static [AtomicPtr<()>],
     sealed: OnceLock<Sealed>,
 }
 
 impl Table {
     /// A table over `points` and `sites` (a mod crate's table has no sites).
     pub const fn new(points: &'static [AtomicBool], sites: &'static [AtomicBool]) -> Self {
+        Self::with_redirects(points, sites, &[])
+    }
+
+    /// A table whose points can also take a replacement body ([`Redirect`]), one slot per point.
+    pub const fn with_redirects(
+        points: &'static [AtomicBool],
+        sites: &'static [AtomicBool],
+        redirects: &'static [AtomicPtr<()>],
+    ) -> Self {
         Self {
             points,
             sites,
+            redirects,
             sealed: OnceLock::new(),
         }
+    }
+
+    /// The replacement body installed at point `place`, or null. A point loads it only on its
+    /// listened path: installing one sets the point's head slot.
+    #[inline]
+    pub fn redirect(&self, place: usize) -> *const () {
+        self.redirects
+            .get(place)
+            .map_or(std::ptr::null(), |slot| slot.load(Ordering::Acquire))
+    }
+
+    /// Installs `redirect`'s body in place of its point's, once per point, before the game runs.
+    pub fn install(&self, redirect: &Redirect) -> Result<(), String> {
+        let place = redirect.place.index;
+        let Some(slot) = self.redirects.get(place) else {
+            return Err(format!("point {place} takes no replacement body"));
+        };
+        if slot
+            .compare_exchange(
+                std::ptr::null_mut(),
+                redirect.function as *mut (),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return Err(format!("point {place} already has a replacement body"));
+        }
+        self.points[place].store(true, Ordering::Release);
+        Ok(())
     }
 
     /// Whether an active `replace` listener owns point `place`: the seal puts it last among the
@@ -179,11 +222,57 @@ impl Table {
                 })
                 .collect(),
         });
-        for (slot, list) in self.points.iter().chain(self.sites).zip(&sealed.slots) {
-            slot.store(!list.entries.is_empty(), Ordering::Release);
+        for (index, (slot, list)) in self
+            .points
+            .iter()
+            .chain(self.sites)
+            .zip(&sealed.slots)
+            .enumerate()
+        {
+            slot.store(
+                !list.entries.is_empty() || !self.redirect(index).is_null(),
+                Ordering::Release,
+            );
         }
     }
 }
+
+/// A compiled replacement of one point's body (function replacement for `[[mixin]]`): the point
+/// calls `function` instead of its own body, between its head and return listeners.
+#[derive(Clone, Copy)]
+// no wire: point registry machinery runs in its owning process; nothing crosses.
+// exhaustive: only the point's generated constructor builds it.
+pub struct Redirect {
+    place: Place,
+    function: *const (),
+}
+
+impl Redirect {
+    /// `function` as the body of the point at `place`.
+    ///
+    /// # Safety
+    ///
+    /// `function` has the exact function-pointer type the point at `place` casts it back to: the
+    /// point's generated `__fnr_<name>` constructor checks it with a typed parameter.
+    #[allow(
+        unsafe_code,
+        reason = "The point's typed constructor checks the replacement's signature before erasing it"
+    )]
+    pub const unsafe fn new(place: Place, function: *const ()) -> Self {
+        Self { place, function }
+    }
+
+    /// Installs it in its point's table.
+    pub fn install(&self) -> Result<(), String> {
+        self.place.table.install(self)
+    }
+}
+
+// SAFETY: a function pointer, shared read-only.
+#[allow(unsafe_code, reason = "a function pointer is plain data")]
+unsafe impl Send for Redirect {}
+#[allow(unsafe_code, reason = "a function pointer is plain data")]
+unsafe impl Sync for Redirect {}
 
 /// A place in a table: a point's head or return, or a call site after the table's points.
 #[derive(Clone, Copy)]
