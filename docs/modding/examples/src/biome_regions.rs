@@ -44,7 +44,9 @@ pub struct RegionsMod;
 #[mod_api::horizon_mod]
 impl Hooks for RegionsMod {
     fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
-        // Continentalness and erosion bands are vanilla's: ocean, coast, then inland by erosion.
+        // A deliberately simplified snowy layout, not vanilla's parameter points: the bands follow
+        // vanilla's order (ocean, coast, then inland by erosion), but frozen_ocean reaches into the deep
+        // ocean band (-1.05), inland runs to 1.0, and temperature and humidity are merged into wide ranges.
         let all = (-1.0, 1.0);
         let inland = (-0.11, 1.0);
         let frostlands = BiomeRegion {
