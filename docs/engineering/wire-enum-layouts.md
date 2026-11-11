@@ -1,53 +1,77 @@
-# Fieldless Wire enum layout pins
+# Frozen fieldless Wire enum layout pins
 
-`tools/fixtures/wire_enum_layouts.json` is a generated semantic baseline, not a
-hand-maintained type registry. The initial capture used native default-feature
-`horizon-mod-vocab` at base `5c6c41f19f64c26231e0e49be505c5e2b1439be9`, normal
-opt0, before the fieldless-enum const fold. All 151 discovered enums were called
-through their actual compiled `Wire::layout` implementations. Generated/private
-`HookId` is included. No cloned type supplied these expected hashes.
+The regression is deliberately frozen to the 151 affected derives existing at
+`5c6c41f19f64c26231e0e49be505c5e2b1439be9`. It is not a registry that new enums
+must join. New enums, including a new enum sharing an old leaf name in another
+module, require no central manifest or generated-test edit. Discovery uses
+qualified module identities and checks that every frozen pin still exists.
+Deleting a required pin fails against the separate frozen identity inventory;
+removing/moving an old type also fails discovery or the ordinary Rust test.
 
-The generated ordinary Rust test calls each actual type, with no unsafe code.
-The generator independently discovers unit-variant enums and Wire impls from
-compiler expansion and requires exact identity coverage against the manifest.
-Ambiguous names and unsupported generic/qualified/where-clause impl headers for
-local unit enums fail rather than silently dropping a type. The 151 pins cover
-locally defined fieldless Wire derives, including generated/private enums. They
-do not cover manual codecs, which this derive change cannot affect: the external
-Direction, EquipmentSlot, GameMode, UseAnimation, ConnectionKind and AttachmentWrite
-types, or the local Reduction enum's deliberate compact-u8 codec. Discovery uses
-the compiler's `#[automatically_derived]` marker, not the presence of a const block.
-The checked configuration is native/default features, not inactive target or
-feature branches.
+`tools/fixtures/wire_enum_layouts.json` contains hashes captured from the actual
+pre-fold library at that base, normal native/default-feature opt0.
+`wire_enum_baseline_identities.json` freezes those canonical identities. Neither
+file is extended for future enum additions. The generated ordinary Rust test
+calls each actual old type without unsafe code. Two fixture paths were corrected
+using rustc E0603 suggestions (EditKey and ProvidedBy); the manifest retains their
+canonical identities and correction provenance. This is not an automatic alias
+resolver.
 
-Two generated fixture paths were corrected using rustc E0603 re-export
-suggestions: EditKey and ProvidedBy. This is compiler-guided fixture data, not
-automatic alias resolution in the generator. Each manifest entry retains its
-canonical symbol identity; those two also retain the correction provenance.
+## Reproduce the original capture
 
-Regenerate or check without running the game:
+Use the frozen base BEFORE the fold, with the same compiler for the library and
+diagnostic. The producer is committed as `tools/capture_wire_enum_layouts.py`.
+The following commands are for an explicit developer capture, not CI or the carry
+validation. Keep their artifacts together; do not substitute incompatible rlibs.
+
+```sh
+mkdir -p target/wire-layout-capture
+# The diagnostic flag forces a recorded rustc invocation even with warm outputs.
+env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 CARGO_INCREMENTAL=0 \
+  cargo rustc --locked -p horizon-mod-vocab --lib -vv -- -Ztime-passes \
+  2> target/wire-layout-capture/build.log
+env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked \
+  -p horizon-mod-vocab --lib -- -Zunpretty=expanded \
+  > target/wire-layout-capture/expanded.rs
+python3 tools/capture_wire_enum_layouts.py \
+  --base 5c6c41f19f64c26231e0e49be505c5e2b1439be9 \
+  --build-log target/wire-layout-capture/build.log \
+  --expanded target/wire-layout-capture/expanded.rs \
+  --output target/wire-layout-capture/pins.json \
+  --identities-output target/wire-layout-capture/identities.json
+```
+
+The producer discovers all local affected enums, requires exact raw/demangled
+symbol coverage, links their actual layout functions, and saves the command and
+hash output under `target/wire-layout-capture/`. It generates an unsafe Rust-ABI
+probe only in that private diagnostic directory, never in runtime or golden-test
+source. It invokes rustc directly, not Cargo, using the recorded runtime dependency
+artifacts; proc-macro metadata is not substituted. Inspect generated data before
+copying it into the frozen fixtures. Preserve the two compiler-guided alias
+corrections if regenerating the original capture. Intentional changes to an OLD
+enum's encoding require an independently reviewed contract change, not blind
+replacement of expected values.
+
+## Check after the fold
 
 ```sh
 mkdir -p target/wire-goldens
-RUSTC_BOOTSTRAP=1 cargo rustc --locked -p horizon-mod-vocab --lib -- \
-  -Zunpretty=expanded > target/wire-goldens/expanded.rs
-python3 tools/generate_wire_enum_goldens.py --expanded target/wire-goldens/expanded.rs
-# CI uses --check instead of writing the generated test.
+env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked \
+  -p horizon-mod-vocab --lib -- -Zunpretty=expanded \
+  > target/wire-goldens/expanded.rs
+python3 tools/generate_wire_enum_goldens.py --expanded target/wire-goldens/expanded.rs --check
 cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
 ```
 
-Bootstrap here enables compiler expansion only; it is not a production build
-flag. Output stays in checkout `target/`. CI runs both the exact discovery-set /
-generated-file check and the ordinary Rust golden test in the existing wasm-mods
-job; its path filters include the derive crate and these generator inputs.
+Omit `--check` only to regenerate the ordinary Rust file from the frozen pins.
+CI runs this discovery/generated-file check and the Rust test in the existing
+wasm-mods fixture job. Expansion alone does not emit an rlib: its wrapper must be
+unset because sccache expects that artifact and otherwise fails. Bootstrap enables
+diagnostics only; neither flag changes production compilation.
 
-For intentional enum changes, capture the **before-change** actual layout values
-first; record the source revision/configuration and the complete discovery set.
-New enum hashes must be checked against independent expected encoding/layout
-semantics, not blindly blessed from the changed derive. Update the manifest by
-generated capture, then regenerate the Rust file with the command above and
-review the changed hashes and wire bytes. Never hand-add names to the generated
-Rust registry. Reordering/removing existing variants is an interface change, not
-a reason to casually regenerate expected values. Separate small independent
-golden-byte/hash tests in `wire::tests` guard against matching implementation
-errors in a mechanically captured baseline.
+Coverage is native/default-feature affected derives, not inactive target/feature
+branches or manual codecs. Explicit unchanged manual exclusions: external
+Direction, EquipmentSlot, GameMode, UseAnimation, ConnectionKind, AttachmentWrite;
+and local Reduction's deliberate compact-u8 encoding. Payload enums/structs are
+outside the const-fold change. Small independent golden-byte/hash tests separately
+guard against mechanically captured implementation mistakes.

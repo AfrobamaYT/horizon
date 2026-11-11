@@ -9,7 +9,9 @@ on:
       - 'crates/horizon-mod-*/**'
       - '.github/workflows/wasm-mods.yml'
       - 'tools/generate_wire_enum_goldens.py'
+      - 'tools/capture_wire_enum_layouts.py'
       - 'tools/fixtures/wire_enum_layouts.json'
+      - 'tools/fixtures/wire_enum_baseline_identities.json'
       - 'tests/test_wire_enum_goldens.py'
       - 'Cargo.lock'
   workflow_dispatch:
@@ -79,7 +81,7 @@ jobs:
         run: |
           python3 -m unittest tests.test_wire_enum_goldens
           mkdir -p "$CARGO_TARGET_DIR/wire-goldens"
-          RUSTC_BOOTSTRAP=1 cargo rustc --locked -p horizon-mod-vocab --lib -- \
+          env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked -p horizon-mod-vocab --lib -- \
             -Zunpretty=expanded > "$CARGO_TARGET_DIR/wire-goldens/expanded.rs"
           python3 tools/generate_wire_enum_goldens.py \
             --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check

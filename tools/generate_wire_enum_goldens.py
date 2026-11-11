@@ -17,21 +17,38 @@ GOLDENS = ROOT / "tools/fixtures/wire_enum_layouts.json"
 OUTPUT = ROOT / "crates/horizon-mod-vocab/src/wire/fieldless_enum_goldens.rs"
 
 
-def discover(source):
+def discover(source, required=None):
     """Find unit-variant enums with Wire impls; no dependence on layout body."""
     # rustc retains doc comments in expansion; their punctuation is not syntax.
     source = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/',
                     lambda match: "" if match[0].startswith(("//", "/*")) else match[0], source)
-    tokens = re.findall(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|::|[^\s]', source)
-    headers = re.sub(r'"(?:\\.|[^"\\])*"', '""', source)
+    token_matches = list(re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])\'|[A-Za-z_][A-Za-z_0-9]*|::|[^\s]' , source))
+    tokens = [match[0] for match in token_matches]
+    stack, pairs = [], {}
+    for i, token in enumerate(tokens):
+        if token == "{":
+            stack.append(i)
+        elif token == "}":
+            pairs[stack.pop()] = i
+    modules = [(i + 2, pairs[i + 2], tokens[i + 1])
+               for i in range(len(tokens) - 2)
+               if tokens[i] == "mod" and tokens[i + 2] == "{"]
+
+    def identity(position, name):
+        if name.startswith("crate::"):
+            return name
+        parents = [name for start, end, name in modules
+                   if token_matches[start].start() < position < token_matches[end].end()]
+        return "::".join(["crate", *parents, name])
+    headers = re.sub(r'"(?:\\.|[^"\\])*"', lambda match: ' ' * len(match[0]), source)
     supported = r"impl\s+(?:::)?[\w:]*wire::Wire\s+for\s+(\w+)\s*\{"
     derived_headers = [
-        (match[2], match[3].split("::")[-1])
+        (match[2], identity(match.start(), match[3]))
         for match in re.finditer(
             r"((?:#\[[^\]]*\]\s*)+)(impl\b[^{};]*\bWire\b[^{};]*\bfor\s+([\w:]+)[^{};]*\{)", headers)
         if re.search(r"#\[automatically_derived\]", match[1])
     ]
-    impls = {match[1] for header, _ in derived_headers
+    impls = {path for header, path in derived_headers
              if (match := re.fullmatch(supported, header)) is not None}
     local_units = {}
     for i, token in enumerate(tokens[:-2]):
@@ -70,18 +87,29 @@ def discover(source):
             elif item in ("(", "{") and not discriminant:
                 unit = False
         if unit:
-            local_units[name] = local_units.get(name, 0) + 1
+            path = identity(token_matches[i].start(), name)
+            local_units[path] = local_units.get(path, 0) + 1
     # This deliberately supports the derive's simple owned impl shape only.
     # Refuse unusual headers targeting local unit enums instead of silently
     # dropping them from coverage (including const-generic impl parameters).
     for header, name in derived_headers:
-        if name in local_units and re.fullmatch(supported, header) is None:
+        if name in local_units and (required is None or name in required) and re.fullmatch(supported, header) is None:
             raise ValueError(f"unsupported Wire impl header for local fieldless enum: {name}")
     enums = set(local_units) & impls
     for name in enums:
         if local_units[name] != 1:
             raise ValueError(f"ambiguous enum leaf identity: {name}")
     return enums
+
+
+def validate(manifest, required, source):
+    expected = {entry["canonical_path"] for entry in manifest["enums"]}
+    if len(expected) != len(manifest["enums"]) or expected != set(required):
+        raise ValueError("missing or duplicate frozen baseline pin")
+    actual = discover(source, expected)
+    if not expected <= actual:
+        raise ValueError(f"missing frozen baseline enum: {sorted(expected - actual)}")
+    return expected
 
 
 def render(manifest):
@@ -102,19 +130,15 @@ def main():
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     manifest = json.loads(GOLDENS.read_text())
-    expected = {entry["name"] for entry in manifest["enums"]}
-    if len(expected) != len(manifest["enums"]):
-        raise ValueError("duplicate golden identity")
-    actual = discover(args.expanded.read_text())
-    if actual != expected:
-        raise ValueError(f"discovery mismatch: unpinned={sorted(actual - expected)}, missing={sorted(expected - actual)}")
+    required = json.loads((ROOT / "tools/fixtures/wire_enum_baseline_identities.json").read_text())
+    actual = validate(manifest, required, args.expanded.read_text())
     rendered = render(manifest)
     if args.check:
         if OUTPUT.read_text() != rendered:
             raise ValueError("generated golden tests are stale")
     else:
         OUTPUT.write_text(rendered)
-    print(f"Wire enum goldens: exact coverage of {len(actual)} fieldless enums")
+    print(f"Wire enum goldens: coverage of {len(actual)} frozen-baseline fieldless derives")
 
 
 if __name__ == "__main__":
