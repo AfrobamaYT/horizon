@@ -242,13 +242,10 @@ pub(super) fn compile(
         .map(|&index| &projects[index].bundle.manifest)
         .collect();
     fs::create_dir_all(out.join("src")).map_err(|e| e.to_string())?;
+    let template = api::template(&game.join(prebuilt::TEMPLATE))?;
     fs::write(
         out.join("src/main.rs"),
-        api::main_rs(
-            &api::template(&game.join(prebuilt::TEMPLATE))?,
-            &manifests,
-            &catalog,
-        ),
+        api::main_rs(&template, &manifests, &catalog),
     )
     .map_err(|e| e.to_string())?;
     let mut manifest = toml::toml! { [package] name = "horizon-native-registry-game" version = "0.0.0" edition = "2024" [workspace] resolver = "2" };
@@ -311,15 +308,7 @@ pub(super) fn compile(
     if inventory.added_crates > 0 && !options.consent.is_some_and(|ask| ask(&inventory)) {
         return Err(crate::i18n::tr("Registry dependency compilation was not approved").into());
     }
-    let mut externs = BTreeMap::new();
-    for name in [
-        "horizon_client",
-        "mod_api",
-        "mod_points",
-        "horizon_mod_package",
-    ] {
-        externs.insert(name.to_owned(), prebuilt::library(&deps, name)?);
-    }
+    let externs = prebuilt::wrapper_externs(&deps, &template)?;
     let mut link_args = sdk.link_args;
     if cfg!(target_os = "linux") {
         link_args.push("-Wl,--disable-new-dtags".into());
@@ -444,7 +433,7 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&built.stderr)
         );
-        let engine = game.join("deps/libhorizon_client.rmeta");
+        let engine = game.join("deps/libhorizon_client-fixture.rmeta");
         let engine_source = scratch.path().join("engine.rs");
         fs::write(
             &engine_source,
@@ -518,6 +507,101 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
+        // Render a real SDK-route executable workspace. Its SDK libraries are
+        // binary externs, not Cargo source dependencies, including the host that
+        // the SDK-owned template calls after the layer split.
+        for name in [
+            "mod_api",
+            "mod_points",
+            "horizon_mod_package",
+            "horizon_mod_host",
+        ] {
+            let source = scratch.path().join(format!("{name}.rs"));
+            fs::write(
+                &source,
+                if name == "horizon_mod_host" {
+                    "pub fn main_with() {}"
+                } else {
+                    ""
+                },
+            )
+            .unwrap();
+            let result = Command::new(rust.rustc())
+                .args([
+                    "--crate-name",
+                    name,
+                    "--crate-type",
+                    "rlib",
+                    "--edition",
+                    "2024",
+                    "--emit",
+                    "metadata",
+                    "--target",
+                    rust.host.target,
+                ])
+                .arg(source)
+                .arg("-o")
+                .arg(game.join(format!("deps/lib{name}-fixture.rmeta")))
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        fs::write(game.join(prebuilt::TEMPLATE), "fn main() { horizon_mod_host::main_with(); }\n/* MOD_ENTRIES */\n/* MOD_SLOTS */\n/* BUILT_MODS */\n").unwrap();
+        let template = api::template(&game.join(prebuilt::TEMPLATE)).unwrap();
+        let wrapper = scratch.path().join("wrapper");
+        fs::create_dir_all(wrapper.join("src")).unwrap();
+        fs::write(
+            wrapper.join("Cargo.toml"),
+            "[package]\nname='registry-game'\nversion='0.0.0'\nedition='2024'\n[workspace]\n",
+        )
+        .unwrap();
+        fs::write(
+            wrapper.join("src/main.rs"),
+            api::main_rs(&template, &[], &internals::Catalog::default()),
+        )
+        .unwrap();
+        let bindings = prebuilt::wrapper_externs(&game.join("deps"), &template).unwrap();
+        let mut wrapper_plan = compiler_plan(
+            &rust,
+            &game,
+            BTreeMap::from([(
+                wrapper.clone(),
+                registry_rustc::Bindings {
+                    externs: bindings,
+                    link_args: vec![],
+                },
+            )]),
+        );
+        wrapper_plan.cache_wrapper = None;
+        wrapper_plan.workspace_wrapper = None;
+        let mut wrapper_args = args.clone();
+        wrapper_args[1] = wrapper.join("src/main.rs").into_os_string();
+        wrapper_args[3] = "registry_game".into();
+        wrapper_args[5] = "bin".into();
+        *wrapper_args.last_mut().unwrap() = scratch.path().join("wrapper.rmeta").into_os_string();
+        let (program, arguments) = wrapper_plan
+            .arguments(wrapper_args.clone(), Some(wrapper.clone()))
+            .unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        wrapper_plan
+            .crates
+            .get_mut(&wrapper)
+            .unwrap()
+            .externs
+            .remove("horizon_mod_host");
+        let (program, arguments) = wrapper_plan.arguments(wrapper_args, Some(wrapper)).unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("E0433"));
         // The old registry route supplied deps alone, unlike the direct SDK route.
         plan.search = vec![game.join("deps")];
         let (program, arguments) = plan.arguments(args, Some(facade)).unwrap();
