@@ -99,7 +99,7 @@ impl Game<'_> {
         Some(self.original_player_snapshot(original_player)?.health)
     }
     pub(super) fn original_player_experience(&self, original_player: OriginalPlayerRef) -> Option<mod_api::PlayerExperience> {
-        Some(self.original_player_snapshot(original_player)?.experience.clone())
+        Some(self.original_player_snapshot(original_player)?.experience)
     }
     pub(super) fn original_player_effects(&self, original_player: OriginalPlayerRef) -> Option<Vec<mod_api::ActiveEffect>> {
         Some(self.original_player_snapshot(original_player)?.effects.clone())
