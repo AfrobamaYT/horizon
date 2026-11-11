@@ -777,6 +777,9 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
+        if result.is_err() {
+            horizon_mod_runtime::dispatch_failures::record_dispatch_failure();
+        }
         let first_failure = matches!(result, Err(CallError::Fault(_)))
             && !self.running.poisoned.swap(true, Ordering::Relaxed);
         if let Err(CallError::Refused(error)) = &result {
