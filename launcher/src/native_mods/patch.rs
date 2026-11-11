@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// The patch crate's name: the copies' ids and the executable's `--extern` use it.
 pub(super) const CRATE: &str = "horizon_patch";
 
-/// The compiled patch crates, `(crate name, rlib)`, and the `Redirect` expressions the
+/// The compiled patch crates, `(crate name, rlib)`, and the installation result expressions the
 /// generated `main` installs.
 pub(super) struct Patch {
     pub rlibs: Vec<(String, PathBuf)>,
@@ -132,7 +132,7 @@ pub(super) fn build(
     sdk: &Identity,
     rustc: impl Fn(&str) -> std::process::Command,
 ) -> Result<Option<Patch>, String> {
-    let Some(prepared) = prepare(rust, game, out, projects, sdk)? else {
+    let Some(prepared) = prepare(rust, out, projects, sdk)? else {
         return Ok(None);
     };
     // The patched crates, against the prebuilt game and the mods.
@@ -219,7 +219,6 @@ impl Prepared<'_> {
 /// compiling them; `None` when no mod has a mixin, module or bridge.
 pub(super) fn prepare<'a>(
     rust: &Toolchain,
-    game: &Path,
     out: &Path,
     projects: &[api::Project<'a>],
     sdk: &Identity,
@@ -249,34 +248,13 @@ pub(super) fn prepare<'a>(
         .iter()
         .flat_map(|bundle| bundle.native().mixin.iter().map(|row| row.target.clone()))
         .collect();
-    // The generator's refusals first: they name why a function can't be copied at all (missing,
-    // below the game crate, a body that can't move). Then only a point with a raw form has a
-    // replacement slot in the prebuilt game.
+    // The generator refuses targets the staged game cannot replace.
     let extras = extras(&bundles)?;
     let generated = api_gen::patch::generate(&source, CRATE, &targets, &extras);
-    let mut refusals: Vec<String> = match &generated {
+    let refusals: Vec<String> = match &generated {
         Ok(_) => Vec::new(),
         Err(refused) => refused.iter().map(ToString::to_string).collect(),
     };
-    let catalog = super::internals::Catalog::read(game)?;
-    let points: Vec<String> = catalog
-        .points
-        .iter()
-        .filter(|point| point.raw)
-        .map(|point| super::internals::plain_path(&point.target))
-        .collect();
-    for target in &targets {
-        let copied = match &generated {
-            Ok(_) => true,
-            Err(refused) => !refused.iter().any(|r| r.target == *target),
-        };
-        if copied && !points.contains(&super::internals::plain_path(target)) {
-            refusals.push(format!(
-                "E_MIXIN_NOT_REPLACEABLE: {target}: the prebuilt game has no replacement slot \
-                 there (a hook function, a generic or cfg-gated function, or a trait method)"
-            ));
-        }
-    }
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
@@ -386,7 +364,7 @@ pub(super) fn prepare<'a>(
         installs: generated
             .patched
             .iter()
-            .map(|p| p.install.clone())
+            .map(|p| format!("({:?}, {})", p.target, p.install))
             .collect(),
         bundles,
         count: generated.patched.len(),
