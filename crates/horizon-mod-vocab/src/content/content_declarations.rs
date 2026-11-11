@@ -98,7 +98,7 @@ pub struct BlockShapes {
 }
 
 /// Per-state light emission, overriding `BlockProperties::light`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: declaration drafts mirror the closed content schema.
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct StateLight {
@@ -153,6 +153,7 @@ pub struct Block {
     /// properties.
     pub properties: BlockProperties,
     /// Per-state emission, taking precedence over `properties.light`.
+    /// Defaults to `None`, leaving uniform or template light unchanged.
     pub state_light: Option<StateLight>,
     /// shapes.
     pub shapes: Option<BlockShapes>,

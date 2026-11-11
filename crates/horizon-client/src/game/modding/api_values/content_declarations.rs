@@ -187,6 +187,10 @@ mod tests {
     #[test]
     fn state_light_matches_json_and_preserves_emission() {
         let mut draft = Block::new("test:lamp", "minecraft:stone");
+        draft
+            .state_properties
+            .insert("lit".into(), mod_api::BlockStateProperty::Boolean);
+        draft.properties.light = Some(3);
         draft.state_light = Some(mod_api::StateLight {
             properties: vec!["lit".into()],
             values: BTreeMap::from([("true".into(), 15)]),
