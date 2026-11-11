@@ -720,7 +720,7 @@ impl Game<'_> {
             let pos = menu.pos?;
             Some((
                 pos,
-                !g.spectator() && menu.slots.still_valid(&self.world, g, menu.pos),
+                !g.spectator() && menu.still_valid(&host.hub.loop_context, &self.world, g),
                 g.carried.clone(),
                 g.uuid,
                 g.entity_id,
