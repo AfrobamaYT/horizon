@@ -813,12 +813,8 @@ mod tests {
     }
 
     #[test]
-    fn internals_access_refuses_the_mod_and_its_dependents_but_api_access_loads() {
-        let inject = |access: &str| {
-            format!(
-                "[[inject]]\nid = \"stop\"\nat = \"horizon_client::game::server_lifecycle::remember_shutdown\"\nkind = \"head\"\nwith = \"on_stop\"\naccess = \"{access}\"\nhash = \"h\"\n"
-            )
-        };
+    fn declared_internals_refuse_the_mod_and_its_dependents_but_an_injection_loads() {
+        let inject = "[[inject]]\nid = \"stop\"\nat = \"horizon_client::game::server_lifecycle::remember_shutdown\"\nkind = \"head\"\nwith = \"on_stop\"\nhash = \"h\"\n";
         let packages = vec![
             package(
                 "deep",
@@ -829,7 +825,7 @@ mod tests {
                 "[[internals]]\npath = \"Game::world\"\nkind = \"field\"\nhash = \"h\"\n",
             ),
             package("user", "1.0.0", "deep = \"^1\"", 'b', "t", ""),
-            package("typed", "1.0.0", "", 'c', "t", &inject("api")),
+            package("typed", "1.0.0", "", 'c', "t", inject),
         ];
         let (groups, refused) = groups(&packages);
         assert_eq!(ids(&packages, &groups), [vec!["typed"]]);
