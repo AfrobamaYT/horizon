@@ -96,12 +96,11 @@ a guest trap, stale preconditions or an enclosing abort discards the action.
 Sounds, statistics, events and overflow drops wait for root commit. Uses the
 shared transaction and runtime limits; no cauldron-specific budget.
 
-Client prediction selects the same entry and calls only `decide`, through a
-ClientHost. Success and Consume stop normal item use; custom interactions wait
-for the server's block update for their visuals. The server owns inventories,
-statistics, drops and game events. Prediction relies on the existing mod-ID and
-version handshake plus the current local resource snapshot. Matching binary
-builds and synchronized reload generations aren't established; server correction
-keeps the client right. A changed local snapshot invalidates a decision. Native
-and wasm handlers use the same generated registration and callback route;
+Client prediction selects the same entry, but skips custom handlers entirely:
+it does not call `decide` or predict writes and consumes the local action while
+waiting for the server result. Vanilla handlers continue to predict normally.
+The server owns inventories, statistics, drops and game events. Matching custom
+binary builds and synchronized resource generations are not established by the
+current handshake, so custom prediction is suppressed. Native and wasm handlers
+use the same generated registration and callback route;
 `CauldronFire` defaults to `Refused` when a generated callback cannot run.
