@@ -81,7 +81,7 @@ Paths are relative to the repository root. `hooks/` is `crates/horizon-mod-vocab
 | --- | --- | --- | --- | --- |
 | `item_stacked_on_other` (local pickup) | `client/menu.rs:3396` `Menu::pickup`, fires at `:3418`; event record `client/menu/models.rs:28` | `AbstractContainerMenu.doClick`, PICKUP branch | player uuid and entity id, slot index, backing container and its index, primary button, cursor stack, clicked slot stack, the slot's `may_place`/`may_pickup`/`allow_modification`, live writes through `SlotView` | cancel skips the bundle override, and a cancelled `handled` (the event's cancellation result) also skips the plain pickup; uncancelled, the bundle answer decides and an unhandled click takes the ordinary pickup; `click` returns `Ok(())` either way (`menu.rs:3422`) = **Canceled**/Applied; nothing reaches `InvalidInput` |
 | `item_stacked_on_other` (authoritative) | `client/lan/menu.rs:909` `pickup`, fires at `:955`; slot view `lan/menu.rs:557` | same, server side | same, plus the guest's carried stack and the menu's registry id | same cancel/`handled` split (`lan/menu.rs:959`), then the guest resync (`lan_crafting.rs:380`) |
-| `menu_slot_rules` (local) | `client/menu.rs:1874` `slot_rules` (fires `:1885`); top-up loop `menu.rs:2565` `move_to` (fires `:2592`) | `Slot.mayPlace`, `Slot.getMaxStackSize` (not a pickup-permission hook) | menu registry id, backing slot index, stack id and components and count, the slot's own vanilla answer, the item maximum, container limits (`menu.rs:1897`) | refusal → `may_place` false, `click` returns `Ok(())`, slot unchanged (**Canceled**); clamp to 1..=99 (`menu.rs:637`, `CONTAINER_MAX` at `:428`) is **Applied** |
+| `menu_slot_rules` (local) | `client/menu.rs:1874` `slot_rules` (fires `:1885`); top-up loop `menu.rs:2565` `move_to` (fires `:2592`) | `Slot.mayPlace`, `Slot.getMaxStackSize` (not a pickup-permission hook) | menu registry id, backing slot index, stack id and components and count, the slot's own vanilla answer, the item maximum, container limits (`menu.rs:1897`) | refusal → `may_place` false: the carried stack is not placed, but the click itself can still apply, because a slot stack that matches the carried stack is taken onto the cursor anyway (`pickup_inner`, `menu.rs:3487`); so a placement refusal is **Canceled** only for the placement, not for the whole click, and `click` returns `Ok(())` either way; clamp to 1..=99 (`menu.rs:637`, `CONTAINER_MAX` at `:428`) is **Applied** |
 | `menu_slot_rules` (LAN) | `client/lan/menu.rs:470` `slot_rules` (fires `:493`) | same | same, resolved against the backing container or player inventory (`lan/menu.rs:486`) | placement refusal and bounded capacity answer as above; override applied at `lan/menu.rs:506` |
 | local click, cursor, throw, swap | `client/menu.rs:3204` `click`; `:3396` `pickup`, `:3433` `pickup_inner`, `:3510` `swap`, `:3683` `pickup_all` | `AbstractContainerMenu.clicked` → `doClick` | slot count, cursor, every touched slot stack, input mode and button, quick-craft state | `Err(OUT_OF_BOUNDS)` = `"IndexOutOfBoundsException"` (`menu.rs:659`) → **InvalidInput**; `Ok(())` → **Applied** or **Canceled** |
 | local quick move | `client/menu.rs:2645` `quick_move`; landing set `:1837` `quick_move_landing` | `AbstractContainerMenu.quickMoveStack` (abstract; menus override) and `moveItemStackTo` | source stack, destination ranges and roles, per-destination capacity via `slot_max`, registry id | no error path: no movement returns `None`; successful movement normally returns the original clicked stack (`menu.rs:3180`), with remainder stored back in the source; individual refused destinations are skipped |
@@ -100,9 +100,10 @@ Two structural notes for stage 2:
 
 - The local click path mutates in place (`menu.rs:3204`): there is no point where a decision could be
   validated after listeners and before the write.
-- The LAN coordinators remove the menu from storage before dispatching
-  (`lan_crafting.rs:341`–`:345`, `:996`–`:1002`), so a recursive click finds no menu rather than an
-  admission **Busy**.
+- The LAN coordinators take the menu out of storage before dispatching, with different results for a
+  recursive click. The crafting table (`lan_crafting.rs:996`–`:1002`) finds no menu and stops. The
+  inventory menu (`lan_crafting.rs:341`–`:345`) is rebuilt empty with `unwrap_or_else`, so a
+  recursive inventory click continues on a fresh menu. Neither answers an admission **Busy**.
 
 The Game-only mod-menu click hooks are not additional client-lib targets: `menu_clicked` (`native_hooks/base.rs:3368`, fired at
 `game/modding/native_menus.rs:306`) and `menu_quick_move`
@@ -132,7 +133,8 @@ cargo test -p horizon-client-lib --lib dfa_baseline_ -- --include-ignored
 ```
 
 The sources live under horizon-client, but `client_lib.rs` owns the `menu` module and its unit tests.
-Tests were not compiled or run during this review, as requested.
+The recipe test reads `HORIZON_TEST_RESOURCES`, or `.local/horizon-client/26.3` in the checkout when
+that is unset, and fails rather than passing silently when neither has the prepared data.
 
 ## Vanilla evidence
 
@@ -168,7 +170,7 @@ status; the matching/empty-slot branches were cross-checked with JDK `javap -c -
 | `MerchantContainer.updateSellItem` | Uses the second payment as the first matching candidate when the first is empty (without swapping stored slots); with nothing to pay it clears the result and future experience, otherwise matches an offer against the payments (retrying with them swapped), writes the result and its experience unless the offer is out of stock, and tells the client whether a result exists. | complete |
 | `MerchantResultSlot.onTake` | Check-take achievements first, then for the active offer takes the payment in either order, tells the merchant, awards the trade statistic, writes the shrunken payments back and adds the offer's experience to the villager. | complete |
 | `MerchantMenu.tryMoveItems` | Ignores an out-of-range index, sends each payment stack back to inventory slots 3..39 and gives up if one does not fit, then fills the payment slots from the selected offer's costs once both are empty. | complete |
-| `MerchantMenu.removed` | Calls the base `removed` first, clears the trading player, returns on the client, and on the server for a living connected player drops the two payment stacks. | smali (Java body unavailable) |
+| `MerchantMenu.removed` | Calls the base `removed` first, clears the trading player, returns on the client. On the server, for a dead or disconnected player it drops the two payment stacks; for a living connected player it returns them to the inventory (`placeItemBackInInventory`). | smali (Java body unavailable) |
 | `ServerPlaceRecipe.placeRecipe` | Two overloads. The menu overload first answers `PostPlaceAction.NOTHING` when the grid cannot be cleared and dropping is disallowed; otherwise it gathers inventory/grid contents and calls `tryPlaceRecipe`, returning its `RecipeBookMenu.PostPlaceAction`. The private one takes the recipe and the stacked contents and places after checking the grid stacks can still grow. | both complete |
 | `LivingEntity.onClimbable` | Spectators and gliding entities inside glide-through blocks are refused; a block in the climbable tag, or a usable trapdoor over a ladder, is accepted and its position remembered; otherwise false. | complete |
 
@@ -214,8 +216,9 @@ design note resolve relative to their containing Markdown files.
    LAN `Slots::still_valid` (`client/lan/menu.rs:236`) checks backing storage and reach. Stage 2
    must establish complete action mutation epochs; the read-set column above is the proposed starting set per route.
 2. **Reentrancy and close.** `menu_closed` follows a mod-opened menu close (`native_menus.rs:307`); ordinary container close uses `player_container_close` (`native_menus.rs:269`) and no route
-   has an admission `Busy`. The LAN paths avoid recursion by removing the menu
-   (`lan_crafting.rs:341`, `:996`); the local path clicks in place. Each route's public refusal for
+   has an admission `Busy`. The LAN paths take the menu out of storage, but only the crafting table
+   (`lan_crafting.rs:996`) then stops a recursive click; the inventory path (`:341`) rebuilds an empty
+   menu and continues, and the local path clicks in place. Each route's public refusal for
    `Busy` must be chosen before code: local click has only `Ok(())`/`IndexOutOfBoundsException`,
    LAN has the resync, recipe placement has the transfer result byte.
 3. **Budgets.** There are none today; a quick move walks every destination slot (`menu.rs:2565`) and
