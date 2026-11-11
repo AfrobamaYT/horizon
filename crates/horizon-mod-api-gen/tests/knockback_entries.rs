@@ -19,6 +19,14 @@ fn retained_knockback_entries_apply_hook_edits_cancel_and_delegate_once() {
                 for item in &mut owner.items {
                     if let syn::ImplItem::Fn(function) = item {
                         function.vis = syn::parse_quote!(pub(crate));
+                        // This dependency-free fixture omits the no-op staging marker.
+                        function.attrs.retain(|attr| {
+                            !attr
+                                .path()
+                                .segments
+                                .last()
+                                .is_some_and(|s| s.ident == "replaceable")
+                        });
                     }
                 }
             }
