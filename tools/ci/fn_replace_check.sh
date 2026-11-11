@@ -72,7 +72,12 @@ started=$(date +%s.%N)
 output_args=()
 if [ "$side" = server ]; then output_args=(--server-output "$scratch/engine"); fi
 env "${env_vars[@]}" "$launcher" native-build "$mods" "${output_args[@]}" --version native-ci --profile optimized \
-  --trust-native-code
+  --trust-native-code > "$scratch/native-build.out" 2> "$scratch/native-build.err" || built=$?
+cat "$scratch/native-build.out"
+cat "$scratch/native-build.err" >&2
+test -z "${built:-}" || exit "$built"
+# The launcher's plan for this build, an instance's or a server folder's export alike: the prebuilt game.
+grep -F 'Prebuilt game: only the mods compile' "$scratch/native-build.err"
 if [ "$side" = client ]; then
   binary=$(find "$data/versions" -type f -name horizon-client | head -1)
   test -n "$binary"
@@ -81,6 +86,11 @@ if [ "$side" = client ]; then
 fi
 echo "native build: $(python3 -c "print(round($(date +%s.%N) - $started, 1))") s"
 test -x "$scratch/engine/horizon-engine" || test -x "$scratch/engine/horizon-engine.exe"
+if [ "$side" = server ]; then
+  # The server folder's export: the launcher says where the engine is, and installs no instance build.
+  grep -F "Built the server engine: $scratch/engine/horizon-engine" "$scratch/native-build.out"
+  test -z "$(find "$data/versions" -type f -name 'horizon-client*' ! -path "$version/*")"
+fi
 log=$data/native/build.log
 grep -F 'Function replacement:' "$log"
 # The prebuilt route, and no game source compiled.
