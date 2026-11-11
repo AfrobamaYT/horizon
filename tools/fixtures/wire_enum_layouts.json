@@ -229,7 +229,7 @@
     },
     {
       "name": "EditKey",
-      "path": "crate::client::widgets::text_edit::EditKey",
+      "path": "crate::client::widgets::EditKey",
       "hash": "6c13deff5b2c9a7f"
     },
     {
@@ -539,7 +539,7 @@
     },
     {
       "name": "ProvidedBy",
-      "path": "crate::parts::shared::ProvidedBy",
+      "path": "crate::ProvidedBy",
       "hash": "5d265204eef1d102"
     },
     {

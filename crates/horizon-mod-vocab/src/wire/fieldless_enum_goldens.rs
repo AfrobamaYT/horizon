@@ -231,7 +231,7 @@ fn existing_fieldless_enum_layouts_match_baseline() {
         "DrawError"
     );
     assert_eq!(
-        <crate::client::widgets::text_edit::EditKey as Wire>::layout(&mut vec![]),
+        <crate::client::widgets::EditKey as Wire>::layout(&mut vec![]),
         0x6c13deff5b2c9a7f,
         "EditKey"
     );
@@ -541,7 +541,7 @@ fn existing_fieldless_enum_layouts_match_baseline() {
         "ProgressType"
     );
     assert_eq!(
-        <crate::parts::shared::ProvidedBy as Wire>::layout(&mut vec![]),
+        <crate::ProvidedBy as Wire>::layout(&mut vec![]),
         0x5d265204eef1d102,
         "ProvidedBy"
     );
