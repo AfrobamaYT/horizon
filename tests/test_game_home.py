@@ -94,13 +94,14 @@ class SpawnerTests(unittest.TestCase):
             if path.name in EXEMPT:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            scripts.append((path, frozenset(constants(tree)), uses_game_env(tree), sets_audio_by_hand(tree)))
+            starts_game = bool(SPAWN_MARKERS & set(constants(tree)))
+            scripts.append((path, starts_game, uses_game_env(tree), sets_audio_by_hand(tree)))
         cls.scripts = tuple(scripts)
 
     def test_every_script_that_starts_the_game_uses_game_env(self):
         offenders = []
-        for path, strings, game_env, _ in self.scripts:
-            if SPAWN_MARKERS & strings and not game_env:
+        for path, starts_game, game_env, _ in self.scripts:
+            if starts_game and not game_env:
                 offenders.append(str(path.relative_to(lab.ROOT)))
         self.assertEqual(offenders, [], "these start the game without lab.game_env (HORIZON_HOME falls back to a "
                                         "real player's folder); use it, or list the script in EXEMPT")
