@@ -357,8 +357,8 @@ impl Game<'_> {
             })
             .collect::<Result<Vec<_>, TransferError>>()?;
         // A re-assembly of a UUID the journal remembers takes the next
-        // generation (checked: u32::MAX refuses); a fresh one starts at
-        // one.
+        // generation, bounded by the signed operation format. The durable
+        // operation counter is a lower bound even for a fresh UUID.
         let generation = store
             .next_generation(uuid)
             .map_err(|e| TransferError::Store(e.to_string()))?;
@@ -740,11 +740,9 @@ impl Game<'_> {
         if let Err(error) = std::fs::remove_file(store.carrier_path(uuid, generation)) {
             log::warn!("carrier file removal deferred: {error}");
         }
-        // Retention runs per finished operation, not once per world
-        // open: a session of many transfers never grows the journal
-        // toward its bound. The file is gone from disk, so the
-        // tombstone clears here; a file that lingers keeps its
-        // tombstone until the next open's full cleanup.
+        // Only tombstones eligible at the actual world open may clear.
+        // New deletions retain their witnesses throughout this session;
+        // reaching the finite tombstone bound requires reopening.
         store
             .finish_retention()
             .map_err(|e| TransferError::Store(e.to_string()))?;
@@ -926,8 +924,8 @@ impl Game<'_> {
         recovered.map_err(|e| format!("world load refused: {e}"))?;
         // Production cleanup, as every open runs it: orphans, stale
         // operation files and tombstones of durably deleted carriers
-        // clear here, so finished disassemblies and repeated transfers
-        // never exhaust the journal's bounded capacity.
+        // clear here. New session deletions remain bounded by the journal's
+        // capacity, not by an assumption that unlink is durable.
         self.carrier_cleanup();
         Ok(())
     }
@@ -1222,12 +1220,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// (item 6) Repeated live transfers beyond the journal's carrier
-    /// (item 6, the hole) Repeated live transfers beyond the store's
-    /// index capacity in ONE session, with no manual cleanup and no
-    /// reopen: the per-operation retention in the live path keeps the
-    /// journal bounded. The capacity is 8 (the test override); ten
-    /// cycles would overflow it without the live retention.
+    /// The live index capacity is separate from the retained tombstone
+    /// capacity: ten sequential transfers fit an eight-carrier index,
+    /// but all ten deletion witnesses survive this world session.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn repeated_transfers_beyond_the_index_capacity_stay_bounded() {
@@ -1246,17 +1241,25 @@ mod tests {
                 .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
-            // Ten cycles against a capacity of eight: without the live
-            // path's per-finish retention, the ninth assemble's journal
-            // write refuses ("carrier index exceeds 8").
+            // Eight live index entries are allowed; tombstones have their
+            // own independent section bound.
             game.world.carrier_fences.capacity_override = Some(8);
             for i in 0..10u32 {
                 game.world.set(4, 64, 4, chest).unwrap();
                 game.carrier_assemble(1000 + i as u128, &[BlockPos::new(4, 64, 4)])
                     .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
-                game.carrier_disassemble(1000 + i as u128, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0])
-                    .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
+                game.carrier_disassemble(
+                    1000 + i as u128,
+                    2 * i + 1,
+                    [4, 64, 4],
+                    [1.0, 0.0, 0.0, 0.0],
+                )
+                .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
             }
+            let crate::carrier_store::Opened::Live(store) = Store::open(&root).unwrap() else {
+                panic!("must open");
+            };
+            assert_eq!(store.journal().tombstones.len(), 10);
             // Bounded: no operation files, no carrier files beyond the
             // journal's two slots.
             let mut files = 0;
@@ -1401,10 +1404,11 @@ mod tests {
             reversed.reverse();
             game.carrier_assemble(32, &reversed).unwrap();
             let backward =
-                std::fs::read(root.join(format!("data/horizon_carrier_{:032x}-1.nbt", 32_u128)))
+                std::fs::read(root.join(format!("data/horizon_carrier_{:032x}-2.nbt", 32_u128)))
                     .unwrap();
             let forward_carrier = codec::decode(&forward).unwrap();
             let backward_carrier = codec::decode(&backward).unwrap();
+            assert_eq!(forward_carrier.transform(), backward_carrier.transform());
             assert_eq!(
                 forward_carrier.cells(),
                 backward_carrier.cells(),

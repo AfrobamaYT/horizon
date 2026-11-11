@@ -2883,9 +2883,7 @@ struct Game<'a> {
     dim: Dim,
     world_root: PathBuf,
     carrier_retention_snapshot: Vec<(u128, u32)>,
-    /// The owner's offline-to-account UUID move of this world, when it opened under
-    /// the account (`playerdata::migrate_owner`): entities the world loads still name
-    /// the player by the offline UUID until their chunk is saved again.
+    /// Offline-to-account UUID migration: loaded entities retain the old UUID until saved.
     owner_migration: Option<(u128, u128)>,
     /// The world's data packs' content tables, when it has packs (`None`
     /// keeps `Resources.rest`'s own in use).
