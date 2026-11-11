@@ -250,6 +250,16 @@ class DynaRoutingTests(unittest.TestCase):
                     self.assertIn(f"Shard result: {result}", summary.read_text())
                     summary.unlink()
 
+    def test_positive_stage_export_runs_once_before_docs_outside_offline_discovery(self):
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        command = "python3 tools/ci/test_stage_catalog.py -v"
+        self.assertEqual(verify.count(command), 1)
+        self.assertLess(verify.index(command), verify.index("- name: Test Rust documentation examples"))
+        self.assertNotIn("python3 tools/ci/stage_slots.py", verify)
+        step = verify.split("- name: Validate prebuilt source stage and listed slots\n", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'", step)
+
     def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
         # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).
         from test_ci_runners import jobs
