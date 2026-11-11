@@ -2763,7 +2763,7 @@ registration path.
   results and rules for supported vanilla types, and the original JSON for mod-defined types. `Recipe` does not
   define display pages, per-result chances or fluid input/output slots: a viewer interprets its own machine-recipe
   JSON and draws those details itself. `known_recipes`, `place_recipe` and `transfer_recipe` provide recipe-book
-  integration; they do not create a machine-recipe display record.
+  integration, `transfer_recipe_check` its dry run on the server; they do not create a machine-recipe display record.
   `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
   `DrawContext::text(text, at, argb, shadow)` takes its colour as vanilla's `GuiGraphics` does, `0xAARRGGBB`
   (`0xFFFFFFFF` is opaque white), and draws nothing for a fully transparent one, as vanilla's does.
