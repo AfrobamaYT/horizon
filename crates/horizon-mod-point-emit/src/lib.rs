@@ -1,8 +1,5 @@
 //! One constructor emitter for native and wasm API injection listeners.
-use horizon_mod_package::{
-    Manifest,
-    manifest::inject::Kind,
-};
+use horizon_mod_package::{Manifest, manifest::inject::Kind};
 
 /// The part of a staged `points.json` entry needed to resolve an API listener constructor.
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -96,7 +93,6 @@ fn resolve<'a, 'p>(
     manifest
         .inject
         .iter()
-        
         .map(|entry| {
             if !matches!(entry.kind, Kind::Head | Kind::Replace | Kind::Return) {
                 return Err(format!(
@@ -151,7 +147,10 @@ pub fn replaceable(id: &str, at: &str, point: &Point) -> Result<(), String> {
                 ));
             }
         },
-        _ => point.return_ty.as_ref().map_or("its return type".to_owned(), |ty| format!("`{ty}`")),
+        _ => point
+            .return_ty
+            .as_ref()
+            .map_or("its return type".to_owned(), |ty| format!("`{ty}`")),
     };
     Err(format!(
         "{id}: no replace listener at {at}: a replace returns the function's value, and {ty} \
@@ -279,5 +278,4 @@ hash = "pin"
             "before: no API listener at horizon_client::game::Game<'_>::tick: argument 1 `batch` (`&mutHudBatch`) has no API type yet"
         );
     }
-
 }
