@@ -94,6 +94,38 @@ return `Result<bool, BlockEntityError>`: handle `Err(BlockEntityError::Stale)` b
 or reacquiring the handle. `Ok(false)` means unchanged data or an unsupported operation,
 not a stale identity. Existing item and data-vector methods retain their specialized errors.
 
+## When its chunk unloads
+
+A machine that keeps something outside its saved data (a running job, an open handle, its place in an
+energy or pipe network) lets go of it in `on_chunk_unloaded`, NeoForge's `onChunkUnloaded`: a
+`BlockEntityPart` on the type is told once for each of its block entities in a chunk that unloads, on each
+side that holds a copy, before the copy is dropped.
+
+```rust,ignore
+struct Node;
+#[mod_api::horizon_part]
+impl mod_api::BlockEntityPart for Node {
+    fn on_chunk_unloaded(
+        &self,
+        host: mod_api::HostSide<'_>,
+        event: &mut mod_api::OnChunkUnloadedEvent<'_>,
+    ) {
+        if let mod_api::HostSide::Server(_) = host {
+            // The handle equals the one `host.block_entity` gave while it was loaded.
+            NETWORK.lock().unwrap().remove(&event.block_entity);
+        }
+    }
+}
+// In Hooks::register:
+// registrar.block_entity_part(&node_type, Node)?;
+```
+
+`event.pos` is where it stands and `event.entity` its data as the chunk was saved. The chunk was saved
+before the call, so a change made in it is not kept; on a server the chunk may already have left the
+level, so its handle's reads find nothing there. It is not called when the world closes, nor on a client
+when its whole level goes, and never for a vanilla block entity. The chunk-wide notice is still
+`native_chunk_unload`, told after the chunk's block entities ([hook notes](../reference/hook-notes.md#when-a-block-entitys-chunk-unloads)).
+
 `player.open_menu(host, entity)` also returns `Result<bool, BlockEntityError>`:
 `Ok(true)` means opened, `Ok(false)` means a non-provider, cancelled open or
 unconnected/wrong-level player, and `Err(BlockEntityError::Stale)` means the entity
