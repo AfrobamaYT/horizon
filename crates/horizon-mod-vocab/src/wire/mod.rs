@@ -1150,6 +1150,9 @@ macro_rules! layout_fields {
 pub(crate) use layout_fields;
 
 #[cfg(test)]
+mod fieldless_enum_goldens;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn derive_shapes_roundtrip_with_golden_bytes() {
