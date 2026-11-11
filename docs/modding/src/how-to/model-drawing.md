@@ -117,8 +117,8 @@ it: `hidden.hide(HumanoidPart::Head)`, as a mod drawing its own outer skin layer
 `mob_submit` hides parts of any mob's vanilla model the same way, by their names in the model:
 `hidden.hide_named("nose")` leaves a villager's nose out, as a level of detail for a far crowd
 does. A frame holds at most `MAX_HIDDEN_PARTS` (8) names of at most `MAX_PART_NAME` (24) bytes;
-`hide_named` says `HideError::Full` or `HideError::BadName` past that. A name the model lacks
-hides nothing.
+`hide_named` says `HideError::Full` or `HideError::BadName` past that. An unknown name refuses the draw at first use, reporting the mob type and part name.
+Typed humanoid parts have separate storage, so all twelve always fit alongside the eight names.
 
 - Hiding happens after Skin Customization, for this frame only.
 - A hidden part takes its children with it: the hat goes with the head, a sleeve with its arm.

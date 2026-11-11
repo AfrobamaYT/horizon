@@ -78,13 +78,16 @@ pub const MAX_PART_NAME: usize = 24;
 /// The parts a mod hid from a vanilla model this frame (`player_submit`, `mob_submit`), by their
 /// names in the model (`head`, `nose`, `right_front_leg`): at most [`MAX_HIDDEN_PARTS`] names of
 /// at most [`MAX_PART_NAME`] bytes, nothing allocated. A hidden part takes its children with it
-/// (the hat goes with the head); a name the model lacks hides nothing.
+/// (the hat goes with the head). An unknown name refuses the draw with the mob type and name.
+/// Typed humanoid parts have separate storage and always fit alongside named parts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[wire(via = HiddenPartsWire)]
 #[non_exhaustive]
 pub struct HiddenParts {
     names: [[u8; MAX_PART_NAME]; MAX_HIDDEN_PARTS],
     lens: [u8; MAX_HIDDEN_PARTS],
     count: u8,
+    typed: u16,
 }
 
 /// Why [`HiddenParts::hide_named`] took no name.
@@ -100,8 +103,7 @@ pub enum HideError {
 impl HiddenParts {
     /// Leaves the humanoid `part` out of the vanilla model this frame.
     pub fn hide(&mut self, part: HumanoidPart) {
-        self.hide_named(part.model_name())
-            .expect("a humanoid part's name fits and the twelve of them fit");
+        self.typed |= 1 << (part as u16);
     }
 
     /// Leaves the part named `name` out of the vanilla model this frame; hiding a name twice
@@ -135,14 +137,61 @@ impl HiddenParts {
 
     /// No part is hidden.
     pub fn is_empty(&self) -> bool {
-        self.count == 0
+        self.count == 0 && self.typed == 0
     }
 
     /// The hidden parts' names, in the order they were hidden.
     pub fn names(&self) -> impl Iterator<Item = &str> + '_ {
-        let count = usize::from(self.count).min(MAX_HIDDEN_PARTS);
-        (0..count).filter_map(move |i| {
-            std::str::from_utf8(&self.names[i][..usize::from(self.lens[i])]).ok()
+        (0..usize::from(self.count))
+            .map(move |i| {
+                // Construction and Wire decoding validate the byte lengths and UTF-8 once.
+                std::str::from_utf8(&self.names[i][..usize::from(self.lens[i])]).unwrap()
+            })
+            .chain(
+                HumanoidPart::ALL
+                    .into_iter()
+                    .filter(move |part| self.typed & (1 << (*part as u16)) != 0)
+                    .map(HumanoidPart::model_name),
+            )
+    }
+}
+
+#[derive(horizon_mod_api_macros::Wire)]
+struct HiddenPartsWire {
+    names: [[u8; MAX_PART_NAME]; MAX_HIDDEN_PARTS],
+    lens: [u8; MAX_HIDDEN_PARTS],
+    count: u8,
+    typed: u16,
+}
+impl From<&HiddenParts> for HiddenPartsWire {
+    fn from(v: &HiddenParts) -> Self {
+        Self {
+            names: v.names,
+            lens: v.lens,
+            count: v.count,
+            typed: v.typed,
+        }
+    }
+}
+impl TryFrom<HiddenPartsWire> for HiddenParts {
+    type Error = crate::wire::WireError;
+    fn try_from(v: HiddenPartsWire) -> Result<Self, Self::Error> {
+        use crate::wire::WireError;
+        if usize::from(v.count) > MAX_HIDDEN_PARTS || v.typed >> 12 != 0 {
+            return Err(WireError::Invalid("HiddenParts count or typed bits"));
+        }
+        for i in 0..usize::from(v.count) {
+            let len = usize::from(v.lens[i]);
+            if len == 0 || len > MAX_PART_NAME {
+                return Err(WireError::Length);
+            }
+            std::str::from_utf8(&v.names[i][..len]).map_err(|_| WireError::Utf8)?;
+        }
+        Ok(Self {
+            names: v.names,
+            lens: v.lens,
+            count: v.count,
+            typed: v.typed,
         })
     }
 }
@@ -214,6 +263,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn malformed_hidden_wire_is_refused() {
+        use crate::wire::{Reader, Writer};
+        for (count, len, byte) in [(9, 1, b'a'), (1, 25, b'a'), (1, 1, 255), (1, 0, 0)] {
+            let raw = HiddenPartsWire {
+                names: [[byte; MAX_PART_NAME]; MAX_HIDDEN_PARTS],
+                lens: [len; MAX_HIDDEN_PARTS],
+                count,
+                typed: 0,
+            };
+            let mut w = Writer::new();
+            w.put(&raw);
+            assert!(Reader::new(w.bytes()).take::<HiddenParts>().is_err());
+        }
+    }
+
+    #[test]
     fn a_humanoid_needs_a_head_and_a_body_and_keeps_each_parts_pose() {
         let pose = |x: f32| ([x, 0.0, 0.0, 0.5, 0.0, 0.0, 1.0, 1.0, 1.0], true);
         let parts = PosedParts::new(|part| match part {
@@ -254,16 +319,20 @@ mod tests {
         assert_eq!(hidden.hide_named("nose"), Ok(()));
         assert!(hidden.contains(HumanoidPart::Head) && hidden.contains_named("head"));
         assert!(!hidden.contains(HumanoidPart::Hat) && !hidden.contains_named("nos"));
-        assert_eq!(hidden.names().collect::<Vec<_>>(), ["head", "nose"]);
+        assert_eq!(hidden.names().collect::<Vec<_>>(), ["nose", "head"]);
         assert_eq!(hidden.hide_named(""), Err(HideError::BadName));
         assert_eq!(
             hidden.hide_named(&"x".repeat(MAX_PART_NAME + 1)),
             Err(HideError::BadName)
         );
-        for i in 0..MAX_HIDDEN_PARTS - 2 {
+        for i in 0..MAX_HIDDEN_PARTS - 1 {
             assert_eq!(hidden.hide_named(&format!("part_{i}")), Ok(()));
         }
         assert_eq!(hidden.hide_named("one_more"), Err(HideError::Full));
-        assert_eq!(hidden.names().count(), MAX_HIDDEN_PARTS);
+        assert_eq!(hidden.names().count(), MAX_HIDDEN_PARTS + 1);
+        for part in HumanoidPart::ALL {
+            hidden.hide(part);
+        }
+        assert!(HumanoidPart::ALL.into_iter().all(|p| hidden.contains(p)));
     }
 }
