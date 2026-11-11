@@ -379,9 +379,15 @@ impl Game<'_> {
     pub(in crate::game) fn client_chunk_load(&mut self, _x: i32, _z: i32) {}
 
     /// A resident column was freed, whichever route freed it — the last
-    /// event for it. The dispatch point for the client side of
-    /// `chunk_unload`; event dispatch is added separately.
-    pub(in crate::game) fn client_chunk_unload(&mut self, _x: i32, _z: i32) {}
+    /// event for it, its data still there. The dispatch point for the client
+    /// side of `chunk_unload` (added separately) and of `on_chunk_unloaded`,
+    /// told when the level stays (`level_stays`): one that goes takes its
+    /// chunks with it.
+    pub(in crate::game) fn client_chunk_unload(&mut self, x: i32, z: i32, level_stays: bool) {
+        if level_stays && let Some(level) = self.native_client_level() {
+            self.notify_chunk_block_entities_unloaded(level, (x, z));
+        }
+    }
 }
 
 impl Game<'_> {
