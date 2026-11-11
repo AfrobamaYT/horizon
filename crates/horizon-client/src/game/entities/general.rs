@@ -22,7 +22,6 @@ use horizon_core::geometry::{Aabb, Vec3};
 use horizon_core::nbt::Tag;
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::sync::LazyLock;
 
 /// One general entity as a record: what save writes and load reads. The
 /// engine's live row (`GeneralRow`, stage 3) is built from a validated
@@ -473,10 +472,6 @@ pub(super) fn record_from_tag(tag: &Tag) -> Result<GeneralEntityRecord, GeneralR
 /// once into dense slots. The registry is data — built from the installed
 /// declarations and never hand-kept — and freezes with them: duplicates
 /// across mods refuse at freeze, naming the type.
-#[allow(
-    dead_code,
-    reason = "stage 3's load path and the row's construction are the first non-test users"
-)]
 pub struct GeneralTypeCatalog {
     entries: Vec<mod_api::__private::GeneralEntityTypeDeclaration>,
     by_key: FxHashMap<String, u16>,
@@ -507,10 +502,6 @@ impl GeneralTypeCatalog {
         })
     }
 
-    #[allow(
-        dead_code,
-        reason = "stage 3's load path and the row's construction are the first non-test users"
-    )]
     /// The slot a type key resolved to, if the registry holds it.
     pub fn slot(&self, type_key: &str) -> Option<u16> {
         self.by_key.get(type_key).copied()
@@ -526,24 +517,46 @@ impl GeneralTypeCatalog {
         let entry = &self.entries[usize::from(slot)];
         (entry.width, entry.height)
     }
+
+    /// The type's declared save policy, the writer of a record consults: a
+    /// `noSave` type's rows produce zero persisted records.
+    pub fn save_policy(&self, slot: u16) -> mod_api::GeneralSavePolicy {
+        self.entries[usize::from(slot)].save_policy
+    }
 }
 
-/// The process's frozen registry, built once from the installed
-/// declarations: the types were declared before any world or connection
-/// opened, and the registry never changes after.
+/// The game's frozen registry, built from the installed declarations: the
+/// types were declared before any world or connection opened, and the
+/// installed set never changes after. The cached catalog is keyed on the
+/// declarations' own address, so a process sees one build and a test thread
+/// that swaps its installed parts (`TEST_PARTS`) resolves the new set
+/// instead of the first one it touched.
 pub fn general_type_catalog() -> &'static GeneralTypeCatalog {
-    static CATALOG: LazyLock<GeneralTypeCatalog> = LazyLock::new(|| {
-        GeneralTypeCatalog::freeze(mod_api::__private::general_entity_type_declarations())
-            .unwrap_or_else(|duplicate| {
+    thread_local! {
+        static CACHED: std::cell::RefCell<Option<(usize, &'static GeneralTypeCatalog)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    let declarations = mod_api::__private::general_entity_type_declarations();
+    let at = declarations.as_ptr() as usize;
+    CACHED.with(|cached| {
+        if let Some((frozen_at, catalog)) = *cached.borrow()
+            && frozen_at == at
+        {
+            return catalog;
+        }
+        let catalog = Box::leak(Box::new(
+            GeneralTypeCatalog::freeze(declarations).unwrap_or_else(|duplicate| {
                 // Unreachable: a duplicate key was already refused at
                 // registration — every mod declares through the one
                 // registrar `register_all` runs (`parts/shared.rs`), so the
                 // second mod's `declare_general_entity` sees the first's
                 // key and returns `Duplicate`, never reaching here.
                 unreachable!("duplicate general entity type at freeze: {duplicate}")
-            })
-    });
-    &CATALOG
+            }),
+        ));
+        *cached.borrow_mut() = Some((at, catalog));
+        catalog
+    })
 }
 
 /// The engine's live general rows (#792): identity, join identity, type
@@ -554,10 +567,6 @@ pub fn general_type_catalog() -> &'static GeneralTypeCatalog {
 pub struct GeneralRow {
     /// The row's runtime network id, from the game's one counter.
     pub id: u32,
-    #[allow(
-        dead_code,
-        reason = "stage 3's load path and the row's construction are the first non-test users"
-    )]
     /// The row's UUID; a reload continues the identity, not old handles.
     pub uuid: [i32; 4],
     /// The row's join identity: its admission into the resident table.
@@ -574,6 +583,14 @@ pub struct GeneralRow {
     pub rotation: [f32; 2],
     /// How far the row has fallen; stage 3's load and stage 4's tick own it.
     pub fall_distance: f64,
+    /// The payload's schema version, as the record carried it and the writer
+    /// returns it: no decoder owns it before stage 4.
+    pub payload_version: u16,
+    /// The record's payload bytes, held as loaded and written back unchanged.
+    pub payload_bytes: Vec<u8>,
+    /// The row whose vehicle this one rides (`None` for a root): a rider
+    /// saves inside its root's record, never as its own.
+    pub mount: Option<u32>,
     /// The entity-owned attachment registration lifetime (#796: the sole
     /// Part-data store; there is no parallel entity data map).
     pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
@@ -593,6 +610,180 @@ pub type GeneralRows = JoinList<GeneralRow, true>;
 pub struct GeneralStore {
     /// The level's general rows, in join order.
     pub rows: GeneralRows,
+}
+
+impl Game<'_> {
+    /// One general row as a record: its own state, and its riders' records
+    /// collected from their mount links — a rider is a row like its root and
+    /// saves inside the root's record, never on its own. `visited` keeps a
+    /// degenerate mount graph (not a tree) from recursing into itself.
+    fn general_row_record(
+        &self,
+        id: u32,
+        visited: &mut HashSet<u32>,
+    ) -> Option<GeneralEntityRecord> {
+        let rows = &self.resident_entities.general.rows;
+        let row = rows.iter().find(|row| row.id == id)?;
+        if !visited.insert(row.id) {
+            return None;
+        }
+        let mut record = GeneralEntityRecord {
+            position: [row.position.x, row.position.y, row.position.z],
+            velocity: [row.velocity.x, row.velocity.y, row.velocity.z],
+            rotation: row.rotation,
+            uuid: row.uuid,
+            envelope: GeneralTypeEnvelope {
+                type_key: general_type_catalog().key(row.type_slot).to_owned(),
+                payload_version: row.payload_version,
+                payload_bytes: row.payload_bytes.clone(),
+            },
+            passengers: Vec::new(),
+        };
+        for rider in rows.iter().filter(|row| row.mount == Some(id)) {
+            if let Some(rider_record) = self.general_row_record(rider.id, visited) {
+                record.passengers.push(rider_record);
+            }
+        }
+        Some(record)
+    }
+
+    /// Write each riding row's attachments into its own record inside the
+    /// saved tree (`save_lists!` writes the root's): a rider's identity
+    /// travels with its record, matched by UUID inside `Passengers`.
+    fn write_general_rider_attachments(&self, tag: &mut Tag, root: u32) {
+        let rows = &self.resident_entities.general.rows;
+        let Some(Tag::List(riders)) = tag.get_mut(format::PASSENGERS) else {
+            return;
+        };
+        for rider in riders.iter_mut() {
+            let Some(Tag::IntArray(words)) = rider.get(format::UUID) else {
+                continue;
+            };
+            if words.len() != 4 {
+                continue;
+            }
+            let uuid = [words[0], words[1], words[2], words[3]];
+            let Some(row) = rows
+                .iter()
+                .find(|row| row.uuid == uuid && row.mount == Some(root))
+            else {
+                continue;
+            };
+            crate::game::persist::write_attachments(rider, row.id, &self.entity_attachments);
+            self.write_general_rider_attachments(rider, row.id);
+        }
+    }
+
+    /// Load one saved general entity tree whose root kind the frozen
+    /// registry holds: tag → record → every check, then the whole tree
+    /// publishes through the same join boundary a fresh spawn takes. A
+    /// structurally sound tree of types this load cannot resolve hands the
+    /// tag back (`Err`), so the missing mod's record keeps byte for byte by
+    /// the existing unknown-kind path; every other refusal — a malformed
+    /// envelope, a structural fault, a UUID a live level entity already
+    /// owns — drops the whole tree with a warning and publishes nothing.
+    pub(in crate::game) fn load_general_tree(
+        &mut self,
+        tag: Tag,
+        transferred: Option<TransferredEntityState>,
+    ) -> Result<(), Tag> {
+        let record = match record_from_tag(&tag) {
+            Ok(record) => record,
+            Err(error) => {
+                log::warn!(
+                    "Horizon: refusing general entity record: {}",
+                    error.message()
+                );
+                return Ok(());
+            }
+        };
+        let catalog = general_type_catalog();
+        match check_general_record(&record, |key| catalog.slot(key).is_some()) {
+            Ok(GeneralRecordCheck::Ready) => {}
+            Ok(GeneralRecordCheck::UnknownType) => return Err(tag),
+            Err(error) => {
+                log::warn!(
+                    "Horizon: refusing general entity record: {}",
+                    error.message()
+                );
+                return Ok(());
+            }
+        }
+        // A UUID a live entity of the level already owns refuses the whole
+        // tree (`uuid_admission_refused`, the boundary every loaded kind
+        // shares), before any row of it exists.
+        if general_tree_uuid_admission_refused(self, &record) {
+            log::warn!(
+                "Horizon: refusing general entity record: a live entity owns its uuid {:?}",
+                record.uuid
+            );
+            return Ok(());
+        }
+        self.insert_general_record(record, &tag, None, transferred);
+        Ok(())
+    }
+
+    /// Insert one record as a row (and, recursively, its riders as rows of
+    /// their vehicle): the same join list a fresh spawn pushes into, the
+    /// same remember (`persist.uuids`, the saved attachments) every loaded
+    /// kind takes, and each row's next runtime id from the game's counter.
+    fn insert_general_record(
+        &mut self,
+        record: GeneralEntityRecord,
+        tag: &Tag,
+        mount: Option<u32>,
+        transferred: Option<TransferredEntityState>,
+    ) {
+        let slot = general_type_catalog()
+            .slot(&record.envelope.type_key)
+            .expect("check_general_record resolved every type of the tree");
+        self.next_entity += 1;
+        let id = self.next_entity;
+        // Install before `remember_uuid` (the same ordering a transferred
+        // mob's state takes): the destination is the same logical entity.
+        if let Some(state) = transferred {
+            self.adopt_transferred_entity_state(id, state);
+        }
+        self.remember_uuid(id, Some(record.uuid), tag);
+        let position = Vec3::new(record.position[0], record.position[1], record.position[2]);
+        let mut row = GeneralRow {
+            id,
+            uuid: record.uuid,
+            join: JoinSeq::UNJOINED,
+            type_slot: slot,
+            previous: position,
+            position,
+            velocity: Vec3::new(record.velocity[0], record.velocity[1], record.velocity[2]),
+            rotation: record.rotation,
+            fall_distance: 0.0,
+            payload_version: record.envelope.payload_version,
+            payload_bytes: record.envelope.payload_bytes,
+            mount,
+            attachment_lifetime: Default::default(),
+        };
+        self.bind_saved_entity_attachments(id, &mut row.attachment_lifetime);
+        self.resident_entities.general.rows.push(row);
+        // The riders' tags sit inside `Passengers` in the order the record
+        // tree was built from them, so each rider's own tag (its saved
+        // attachments) is the one at its index.
+        let riders: Vec<(&GeneralEntityRecord, &Tag)> = match tag.get(format::PASSENGERS) {
+            Some(Tag::List(list)) => record.passengers.iter().zip(list.iter()).collect(),
+            _ => Vec::new(),
+        };
+        for (rider, rider_tag) in riders {
+            self.insert_general_record(rider.clone(), rider_tag, Some(id), None);
+        }
+    }
+}
+
+/// Whether any UUID of the record tree names a live entity of the level
+/// (`uuid_admission_refused` over the whole tree, in preorder).
+fn general_tree_uuid_admission_refused(game: &Game<'_>, record: &GeneralEntityRecord) -> bool {
+    fn refused(game: &Game<'_>, record: &GeneralEntityRecord) -> bool {
+        game.uuid_admission_refused(Some(record.uuid))
+            || record.passengers.iter().any(|rider| refused(game, rider))
+    }
+    refused(game, record)
 }
 
 impl Entity for GeneralRow {
@@ -640,25 +831,54 @@ impl Entity for GeneralRow {
         Cow::Owned(general_type_catalog().key(self.type_slot).to_owned())
     }
     fn save_nbt(
-        _game: &mut Game<'_>,
-        _index: usize,
-        _keys: &HashSet<ChunkKey>,
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
-        // Stage 3's save owns the general record; no row is saved here.
-        None
+        let row = &game.resident_entities.general.rows[index];
+        let catalog = general_type_catalog();
+        // `noSave`: instances produce zero persisted records.
+        if catalog.save_policy(row.type_slot) == mod_api::GeneralSavePolicy::NoSave {
+            return None;
+        }
+        // A rider saves inside its root's record, never as its own.
+        if row.mount.is_some() {
+            return None;
+        }
+        let key = chunk_of(row.position);
+        if !keys.contains(&key) {
+            return None;
+        }
+        let record = game.general_row_record(row.id, &mut HashSet::new())?;
+        let mut tag = record.to_tag();
+        game.write_general_rider_attachments(&mut tag, row.id);
+        Some((key, tag))
     }
     fn load_nbt(
-        _game: &mut Game<'_>,
-        _kind: &str,
+        game: &mut Game<'_>,
+        kind: &str,
         _uuid: Option<[i32; 4]>,
         _player_uuid: Option<[i32; 4]>,
         tag: Tag,
-        _transferred: &mut Option<TransferredEntityState>,
+        transferred: &mut Option<TransferredEntityState>,
     ) -> Result<(), Tag> {
-        // Stage 3's load owns the general record; the tag is handed back.
-        Err(tag)
+        // Only a type the frozen registry holds loads here; anything else
+        // hands the compound back for the unknown-kind paths.
+        if general_type_catalog().slot(kind).is_none() {
+            return Err(tag);
+        }
+        game.load_general_tree(tag, transferred.take())
     }
 }
+
+/// The chunk a position lies in, the save walk's own arithmetic.
+fn chunk_of(at: Vec3) -> ChunkKey {
+    ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4)
+}
+
+#[cfg(test)]
+#[path = "general/save_load_tests.rs"]
+mod save_load_tests;
 
 #[cfg(test)]
 mod tests {
@@ -886,6 +1106,9 @@ mod tests {
             velocity: Vec3::ZERO,
             rotation: [0.0, 0.0],
             fall_distance: 0.0,
+            payload_version: 1,
+            payload_bytes: Vec::new(),
+            mount: None,
             attachment_lifetime: Default::default(),
         });
         let mut table = EntityTable::new(journal);
