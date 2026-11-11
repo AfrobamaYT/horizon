@@ -653,7 +653,7 @@ impl Pass {
             annotations: BTreeMap::new(),
         });
         // A loaded staging unit may have widened fields or methods whose signatures
-        // were not catalogued (layout-only traversal). Give its type declarations the
+        // were not catalogued (layout-only traversal). Give its concrete type declarations the
         // same visibility, independently of whether their layouts can cross the ABI.
         // Macro-generated declarations need the equivalent rule on expansion tokens.
         fn declarations(source: &mut Source, tokens: proc_macro2::TokenStream) {
@@ -715,12 +715,6 @@ impl Pass {
                     return;
                 }
                 self.0.public(&item.vis, item.trait_token.span(), "trait");
-            }
-            fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
-                if test_only(&item.attrs) {
-                    return;
-                }
-                self.0.public(&item.vis, item.type_token.span(), "type");
             }
             fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
                 if item.mac.path.is_ident("macro_rules") {
