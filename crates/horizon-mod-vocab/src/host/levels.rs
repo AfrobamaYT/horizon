@@ -254,9 +254,11 @@ pub trait LevelsBackend {
     /// cannot resolve until the level is in place. On a client (`ClientLevel`),
     /// the entities the server tracks to it and the window's own player, with
     /// the same walk; other players are left out, as their handles do not
-    /// resolve there. None there before login and for a level it does not show. The walk
-    /// is in entity-list order followed by players; each overlap requires a
-    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// resolve there (tracked in <https://github.com/arismoko/horizon/issues/3033>).
+    /// None there before login and for a level it does not show. The walk
+    /// is in entity-list order followed by players. Every entity list is walked
+    /// once per call: O(entities) regardless of the box. Each overlapping mob
+    /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents cannot
     /// yet resolve; frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).

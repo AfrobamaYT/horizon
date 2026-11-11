@@ -15,6 +15,13 @@ currently stores only the remainder item id, not a template's count or component
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
 
+`level.entities_in(host, min, max)` also works on the client's displayed level: tracked
+entities and the window's own non-spectator player are returned as readable handles.
+Other players are omitted ([#3033](https://github.com/arismoko/horizon/issues/3033));
+a level the client does not show, or a read before login, returns `None`.
+Every entity list is walked once per call, O(entities) regardless of the box;
+each overlapping mob resolves through a mob-list scan, O(K*N) for K overlaps and N mobs.
+
 For engine contributors, every area method declares its load access once with `#[access(...)]`.
 `Metadata` admits registry facts during setup and reload; `WorldOnly`, `ClientSetup` and
 `PublishedResources` retain their phase-specific contracts. The area's `host_area` attribute
