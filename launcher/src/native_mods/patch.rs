@@ -117,7 +117,15 @@ pub(super) fn build(
         .iter()
         .flat_map(|bundle| bundle.manifest.mixin.iter().map(|row| row.target.clone()))
         .collect();
-    // Only a point with a raw form has a replacement slot in the prebuilt game.
+    // The generator's refusals first: they name why a function can't be copied at all (missing,
+    // below the game crate, a body that can't move). Then only a point with a raw form has a
+    // replacement slot in the prebuilt game.
+    let extras = extras(&bundles)?;
+    let generated = api_gen::patch::generate(&source, CRATE, &targets, &extras);
+    let mut refusals: Vec<String> = match &generated {
+        Ok(_) => Vec::new(),
+        Err(refused) => refused.iter().map(ToString::to_string).collect(),
+    };
     let catalog = super::internals::Catalog::read(game)?;
     let points: Vec<String> = catalog
         .points
@@ -125,29 +133,22 @@ pub(super) fn build(
         .filter(|point| point.raw)
         .map(|point| super::internals::plain_path(&point.target))
         .collect();
-    let mut refusals = Vec::new();
     for target in &targets {
-        if !points.contains(&super::internals::plain_path(target)) {
+        let copied = match &generated {
+            Ok(_) => true,
+            Err(refused) => !refused.iter().any(|r| r.target == *target),
+        };
+        if copied && !points.contains(&super::internals::plain_path(target)) {
             refusals.push(format!(
                 "E_MIXIN_NOT_REPLACEABLE: {target}: the prebuilt game has no replacement slot \
-                 there (not a point with a raw form: a hook function, a generic or cfg-gated \
-                 function, a trait method, or a function below the game crate that no slot list \
-                 names)"
+                 there (a hook function, a generic or cfg-gated function, or a trait method)"
             ));
         }
     }
     if !refusals.is_empty() {
         return Err(refusals.join("\n"));
     }
-    let extras = extras(&bundles)?;
-    let generated =
-        api_gen::patch::generate(&source, CRATE, &targets, &extras).map_err(|refusals| {
-            refusals
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n")
-        })?;
+    let generated = generated.expect("no refusals");
     let ids: HashMap<&str, &str> = generated
         .patched
         .iter()
