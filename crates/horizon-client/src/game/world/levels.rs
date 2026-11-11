@@ -1248,6 +1248,13 @@ impl Game<'_> {
         Ok(())
     }
 
+    /// A server's world opened: level.dat is read and no chunk is loaded. The
+    /// mods hear its saved mod list's differences (NeoForge's
+    /// `ModMismatchEvent`), then the level it opens in.
+    pub(super) fn native_world_opened(&mut self, dim: Dim) {
+        self.native_level_opened(dim);
+    }
+
     /// The mods hear `dim`'s level open (`LevelEvent.Load`), on a server.
     pub(super) fn native_level_opened(&mut self, dim: Dim) {
         if self.remote.is_some()
