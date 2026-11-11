@@ -385,3 +385,28 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod provenance_tests {
+    #[test]
+    fn removed_kind_names_mod_row_and_target() {
+        refused("kind='modify_arg'", "kind `modify_arg` was removed");
+    }
+    #[test]
+    fn removed_access_names_mod_row_and_target() {
+        refused(
+            "kind='head'\naccess='internals'",
+            "access `internals` is unsupported",
+        );
+    }
+    fn refused(fields: &str, reason: &str) {
+        let text = format!(
+            "id='addon'\nname='Addon'\nversion='1.0.0'\napi='0.2'\ncapabilities=[]\n[[inject]]\nid='before'\nat='game::tick'\nwith='before'\n{fields}\n"
+        );
+        let error = super::super::Manifest::parse(&text).unwrap_err();
+        assert!(
+            error.contains("addon:before: game::tick:") && error.contains(reason),
+            "{error}"
+        );
+    }
+}

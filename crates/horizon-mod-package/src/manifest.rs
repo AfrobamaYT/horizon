@@ -261,11 +261,32 @@ impl Manifest {
                         "{}:{}",
                         table.get("id").and_then(toml::Value::as_str).unwrap_or("?"),
                         row.get("id").and_then(toml::Value::as_str).unwrap_or("?")
-                    )
+                    ),
+                    target: row
+                        .get("loop")
+                        .and_then(toml::Value::as_str)
+                        .unwrap_or("?")
+                        .to_owned()
                 }
             ))
         };
         let m: Manifest = toml::from_str(text).map_err(|e| {
+            // Serde knows the rejected field; this owning boundary supplies its provenance.
+            if let Ok(table) = toml::from_str::<toml::Table>(text)
+                && let Some(rows) = table.get("inject").and_then(toml::Value::as_array)
+            {
+                for row in rows {
+                    if let Err(error) = row.clone().try_into::<inject::Inject>() {
+                        let field = |key| row.get(key).and_then(toml::Value::as_str).unwrap_or("?");
+                        let id = table.get("id").and_then(toml::Value::as_str).unwrap_or("?");
+                        return format!(
+                            "{MANIFEST}: {id}:{}: {}: {error}",
+                            field("id"),
+                            field("at")
+                        );
+                    }
+                }
+            }
             let native_alone = toml::from_str::<toml::Table>(text).is_ok_and(|mut table| {
                 table.contains_key("wasm")
                     && table.remove("native").is_some()
