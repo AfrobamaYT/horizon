@@ -11,8 +11,12 @@ fn wasm_selectors_resolve_in_game_and_refuse_before_guest_dispatch() {
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let manifest = Package::read(std::path::Path::new(&path)).unwrap().manifest;
     let info = mod_api::PackageInfo::new(
-        manifest.id.clone(), manifest.version.clone(), mod_api::PackageKind::Code,
-        mod_api::Side::Both, vec![manifest.id.clone()], vec![],
+        manifest.id.clone(),
+        manifest.version.clone(),
+        mod_api::PackageKind::Code,
+        mod_api::Side::Both,
+        vec![manifest.id.clone()],
+        vec![],
     );
     let loaded = load(
         &std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap(),
@@ -29,7 +33,8 @@ fn wasm_selectors_resolve_in_game_and_refuse_before_guest_dispatch() {
             game.register_native_commands();
             let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             for (id, x) in [(101, 12.0), (103, 4.0), (102, 7.0)] {
-                game.mobs.push(Mob::new(id, cow.clone(), Vec3::new(x, 64.0, 5.0), 0.0));
+                game.mobs
+                    .push(Mob::new(id, cow.clone(), Vec3::new(x, 64.0, 5.0), 0.0));
             }
             game.as_guest(12, |game| {
                 for line in [
@@ -39,36 +44,66 @@ fn wasm_selectors_resolve_in_game_and_refuse_before_guest_dispatch() {
                 ] {
                     game.chat_capture = Some(Vec::new());
                     assert!(game.perform_native_command(12, 4, line), "{line}");
-                    assert!(game.chat_capture.take().unwrap().is_empty(),
-                        "{line}: guest must complete its handle/order assertions and return handled");
+                    assert!(
+                        game.chat_capture.take().unwrap().is_empty(),
+                        "{line}: guest must complete its handle/order assertions and return handled"
+                    );
                 }
                 for (line, key) in [
-                    ("wasmheal @a[name=missing]", "argument.entity.notfound.player"),
-                    ("wasmentities @e[type=minecraft:cow,name=missing]", "argument.entity.notfound.entity"),
-                    ("wasmentity @e[type=minecraft:cow,name=missing,limit=1]", "argument.entity.notfound.entity"),
-                    ("wasmentity @e[type=minecraft:cow]", "argument.entity.toomany"),
+                    (
+                        "wasmheal @a[name=missing]",
+                        "argument.entity.notfound.player",
+                    ),
+                    (
+                        "wasmentities @e[type=minecraft:cow,name=missing]",
+                        "argument.entity.notfound.entity",
+                    ),
+                    (
+                        "wasmentity @e[type=minecraft:cow,name=missing,limit=1]",
+                        "argument.entity.notfound.entity",
+                    ),
+                    (
+                        "wasmentity @e[type=minecraft:cow]",
+                        "argument.entity.toomany",
+                    ),
                     ("wasmplayer @a", "argument.player.toomany"),
                 ] {
                     game.chat_capture = Some(Vec::new());
                     assert!(game.perform_native_command(12, 4, line), "{line}");
                     let output = game.chat_capture.take().unwrap();
-                    assert_eq!(output[0].plain(), Text::translate(key, &[]).plain(), "{line}");
+                    assert_eq!(
+                        output[0].plain(),
+                        Text::translate(key, &[]).plain(),
+                        "{line}"
+                    );
                 }
                 let random = game.world.random.state();
-                for line in ["wasmheal @a", "wasmentity @r", "wasmentities @e", "wasmplayer @s"] {
+                for line in [
+                    "wasmheal @a",
+                    "wasmentity @r",
+                    "wasmentities @e",
+                    "wasmplayer @s",
+                ] {
                     game.chat_capture = Some(Vec::new());
                     assert!(game.perform_native_command(12, 0, line), "{line}");
                     let output = game.chat_capture.take().unwrap();
-                    assert_eq!(output[0].plain(), Text::translate("argument.entity.selector.not_allowed", &[]).plain(), "{line}");
+                    assert_eq!(
+                        output[0].plain(),
+                        Text::translate("argument.entity.selector.not_allowed", &[]).plain(),
+                        "{line}"
+                    );
                 }
                 assert_eq!(game.world.random.state(), random);
                 // This guest call asserts its ordinal is exactly four, proving no failed
                 // selection or denied selector entered the wasm listener in between.
                 game.chat_capture = Some(Vec::new());
                 assert!(game.perform_native_command(12, 0, "wasmplayer guest13"));
-                assert!(game.chat_capture.take().unwrap().is_empty(),
-                    "guest call-count assertion and single-player decoding must finish");
-            }).unwrap();
+                assert!(
+                    game.chat_capture.take().unwrap().is_empty(),
+                    "guest call-count assertion and single-player decoding must finish"
+                );
+            })
+            .unwrap();
         });
     });
 }

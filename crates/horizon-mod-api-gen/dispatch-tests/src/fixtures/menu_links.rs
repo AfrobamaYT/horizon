@@ -19,12 +19,20 @@ fn menu_links_append_only_subscribed_mods_in_order_and_quiet_dispatch_does_no_wo
     dispatch_menu_links(&mut TestHost, 42, "fixture:machine", [0, 64, 0], &mut links);
     assert_eq!(links.capacity(), 0);
     ENTERED.with(|entered| assert!(entered.borrow().is_empty()));
-    install(vec![
-        ModEntry::new("first", Box::new(Linker([1, 64, 0]))),
-        ModEntry::new("quiet", Box::new(Quiet)),
-        ModEntry::new("second", Box::new(Linker([-1, 64, 0]))),
-    ].into());
+    install(
+        vec![
+            ModEntry::new("first", Box::new(Linker([1, 64, 0]))),
+            ModEntry::new("quiet", Box::new(Quiet)),
+            ModEntry::new("second", Box::new(Linker([-1, 64, 0]))),
+        ]
+        .into(),
+    );
     dispatch_menu_links(&mut TestHost, 42, "fixture:machine", [0, 64, 0], &mut links);
     assert_eq!(links, [[1, 64, 0], [-1, 64, 0]]);
-    ENTERED.with(|entered| assert_eq!(entered.borrow().as_slice(), [(0, "menu_links"), (2, "menu_links")]));
+    ENTERED.with(|entered| {
+        assert_eq!(
+            entered.borrow().as_slice(),
+            [(0, "menu_links"), (2, "menu_links")]
+        )
+    });
 }

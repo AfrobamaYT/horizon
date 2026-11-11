@@ -2138,7 +2138,9 @@ impl Game<'_> {
         use super::commands::Target;
         match target {
             Target::Player => self.native_acting_player(),
-            Target::Guest(conn) => self.command_guest(conn).and_then(|guest| self.player(guest.uuid)),
+            Target::Guest(conn) => self
+                .command_guest(conn)
+                .and_then(|guest| self.player(guest.uuid)),
             _ => None,
         }
     }
@@ -2151,7 +2153,8 @@ impl Game<'_> {
             return Some(player.entity());
         }
         let id = super::native_entities::target_id(target)?;
-        self.in_target_level(target, |game| game.entity(id)).flatten()
+        self.in_target_level(target, |game| game.entity(id))
+            .flatten()
     }
 
     /// `EntityArgument.getEntity` / `getEntities` / `getPlayer` / `getPlayers`:
@@ -2172,41 +2175,57 @@ impl Game<'_> {
                 Arg::Entity(selector) => {
                     // The parsed node, not its name, determines cardinality: usages may
                     // repeat an argument name or use different kinds on separate branches.
-                    let (single, players) = context.nodes.iter().find_map(|(node, range)| {
-                        if *range != argument.range {
-                            return None;
-                        }
-                        match &self.ui.dispatcher.0.nodes[*node].kind {
-                            horizon_client::command::NodeKind::Argument {
-                                ty: ArgType::Entity { single, players }, ..
-                            } => Some((*single, *players)),
-                            _ => None,
-                        }
-                    }).expect("parsed entity argument has its dispatcher node");
+                    let (single, players) = context
+                        .nodes
+                        .iter()
+                        .find_map(|(node, range)| {
+                            if *range != argument.range {
+                                return None;
+                            }
+                            match &self.ui.dispatcher.0.nodes[*node].kind {
+                                horizon_client::command::NodeKind::Argument {
+                                    ty: ArgType::Entity { single, players },
+                                    ..
+                                } => Some((*single, *players)),
+                                _ => None,
+                            }
+                        })
+                        .expect("parsed entity argument has its dispatcher node");
                     let targets = self.resolve_entity_argument(&selector, players)?;
                     if single && targets.len() > 1 {
-                        return Err(err(if players {
-                            "argument.player.toomany"
-                        } else {
-                            "argument.entity.toomany"
-                        }, &[]));
+                        return Err(err(
+                            if players {
+                                "argument.player.toomany"
+                            } else {
+                                "argument.entity.toomany"
+                            },
+                            &[],
+                        ));
                     }
                     if players {
                         if single {
-                            Value::Player(self.native_command_player_target(targets[0])
-                                .ok_or_else(|| err("argument.entity.notfound.player", &[]))?)
+                            Value::Player(
+                                self.native_command_player_target(targets[0])
+                                    .ok_or_else(|| err("argument.entity.notfound.player", &[]))?,
+                            )
                         } else {
-                            let selected = targets.into_iter()
-                                .map(|target| self.native_command_player_target(target)
-                                    .ok_or_else(|| err("argument.entity.notfound.player", &[])))
+                            let selected = targets
+                                .into_iter()
+                                .map(|target| {
+                                    self.native_command_player_target(target)
+                                        .ok_or_else(|| err("argument.entity.notfound.player", &[]))
+                                })
                                 .collect::<Result<Vec<_>, _>>()?;
                             Value::Players(selected)
                         }
                     } else if single {
-                        Value::Entity(self.native_command_entity_target(targets[0])
-                            .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?)
+                        Value::Entity(
+                            self.native_command_entity_target(targets[0])
+                                .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?,
+                        )
                     } else {
-                        let selected: Vec<_> = targets.into_iter()
+                        let selected: Vec<_> = targets
+                            .into_iter()
                             .filter_map(|target| self.native_command_entity_target(target))
                             .collect();
                         if selected.is_empty() {

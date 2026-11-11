@@ -55,7 +55,8 @@ fn native_selectors_deliver_ordered_handles_once_and_refuse_invalid_selections()
                 let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 // Deliberately neither ID order nor insertion order is distance order.
                 for (id, x) in [(101, 12.0), (103, 4.0), (102, 7.0)] {
-                    game.mobs.push(Mob::new(id, cow.clone(), Vec3::new(x, 64.0, 5.0), 0.0));
+                    game.mobs
+                        .push(Mob::new(id, cow.clone(), Vec3::new(x, 64.0, 5.0), 0.0));
                 }
                 let near = game.entity(103).unwrap();
                 let middle = game.entity(102).unwrap();
@@ -64,8 +65,15 @@ fn native_selectors_deliver_ordered_handles_once_and_refuse_invalid_selections()
                     assert!(game.perform_native_command(12, 4, "heal @a"));
                     {
                         let calls = heard.lock().unwrap();
-                        assert_eq!(calls.len(), 1, "one invocation, not one per selected player");
-                        assert_eq!(calls[0].argument("targets"), Some(&Value::Players(vec![first, second])));
+                        assert_eq!(
+                            calls.len(),
+                            1,
+                            "one invocation, not one per selected player"
+                        );
+                        assert_eq!(
+                            calls[0].argument("targets"),
+                            Some(&Value::Players(vec![first, second]))
+                        );
                     }
                     for line in [
                         "selectone @e[type=minecraft:cow,limit=1,sort=nearest]",
@@ -78,8 +86,14 @@ fn native_selectors_deliver_ordered_handles_once_and_refuse_invalid_selections()
                         let calls = heard.lock().unwrap();
                         assert_eq!(calls.len(), 4);
                         assert_eq!(calls[1].argument("target"), Some(&Value::Entity(near)));
-                        assert_eq!(calls[2].argument("targets"), Some(&Value::Entities(vec![far, middle, near])));
-                        assert_eq!(calls[3].argument("targets"), Some(&Value::Entities(vec![near, middle, far])));
+                        assert_eq!(
+                            calls[2].argument("targets"),
+                            Some(&Value::Entities(vec![far, middle, near]))
+                        );
+                        assert_eq!(
+                            calls[3].argument("targets"),
+                            Some(&Value::Entities(vec![near, middle, far]))
+                        );
                     }
                     // Selector permission is independent of the command's permission (all
                     // these commands are public). Names must still work at level zero.
@@ -88,48 +102,106 @@ fn native_selectors_deliver_ordered_handles_once_and_refuse_invalid_selections()
                         game.chat_capture = Some(Vec::new());
                         assert!(game.perform_native_command(12, 0, line), "{line}");
                         let output = game.chat_capture.take().unwrap();
-                        assert_eq!(output[0].plain(),
-                            Text::translate("argument.entity.selector.not_allowed", &[]).plain(), "{line}");
+                        assert_eq!(
+                            output[0].plain(),
+                            Text::translate("argument.entity.selector.not_allowed", &[]).plain(),
+                            "{line}"
+                        );
                     }
                     assert_eq!(game.world.random.state(), random);
-                    assert_eq!(heard.lock().unwrap().len(), 4, "denied selectors never dispatch");
-                    for line in ["heal guest13", "selectone guest13", "selectall guest13", "selectplayer guest13"] {
+                    assert_eq!(
+                        heard.lock().unwrap().len(),
+                        4,
+                        "denied selectors never dispatch"
+                    );
+                    for line in [
+                        "heal guest13",
+                        "selectone guest13",
+                        "selectall guest13",
+                        "selectplayer guest13",
+                    ] {
                         assert!(game.perform_native_command(12, 0, line), "{line}");
                     }
                     for line in [
-                        "optionalplayers", "optionalentity", "optionalentities",
-                        "optionalplayers @a", "optionalentity @s", "optionalentities @s",
+                        "optionalplayers",
+                        "optionalentity",
+                        "optionalentities",
+                        "optionalplayers @a",
+                        "optionalentity @s",
+                        "optionalentities @s",
                     ] {
                         assert!(game.perform_native_command(12, 4, line), "{line}");
                     }
-                }).unwrap();
+                })
+                .unwrap();
                 {
                     let calls = heard.lock().unwrap();
                     assert_eq!(calls.len(), 14);
-                    assert_eq!(calls[4].argument("targets"), Some(&Value::Players(vec![second])));
-                    assert_eq!(calls[5].argument("target"), Some(&Value::Entity(second.entity())));
-                    assert_eq!(calls[6].argument("targets"), Some(&Value::Entities(vec![second.entity()])));
+                    assert_eq!(
+                        calls[4].argument("targets"),
+                        Some(&Value::Players(vec![second]))
+                    );
+                    assert_eq!(
+                        calls[5].argument("target"),
+                        Some(&Value::Entity(second.entity()))
+                    );
+                    assert_eq!(
+                        calls[6].argument("targets"),
+                        Some(&Value::Entities(vec![second.entity()]))
+                    );
                     assert_eq!(calls[7].argument("target"), Some(&Value::Player(second)));
                     assert!(calls[8..11].iter().all(|call| call.arguments.is_empty()));
-                    assert_eq!(calls[11].argument("targets"), Some(&Value::Players(vec![first, second])));
-                    assert_eq!(calls[12].argument("target"), Some(&Value::Entity(first.entity())));
-                    assert_eq!(calls[13].argument("targets"), Some(&Value::Entities(vec![first.entity()])));
+                    assert_eq!(
+                        calls[11].argument("targets"),
+                        Some(&Value::Players(vec![first, second]))
+                    );
+                    assert_eq!(
+                        calls[12].argument("target"),
+                        Some(&Value::Entity(first.entity()))
+                    );
+                    assert_eq!(
+                        calls[13].argument("targets"),
+                        Some(&Value::Entities(vec![first.entity()]))
+                    );
                 }
                 for (line, key) in [
                     ("heal @a[name=missing]", "argument.entity.notfound.player"),
                     ("selectplayer missing", "argument.entity.notfound.player"),
-                    ("selectall @e[type=minecraft:cow,name=missing]", "argument.entity.notfound.entity"),
-                    ("selectone @e[type=minecraft:cow,name=missing,limit=1]", "argument.entity.notfound.entity"),
+                    (
+                        "selectall @e[type=minecraft:cow,name=missing]",
+                        "argument.entity.notfound.entity",
+                    ),
+                    (
+                        "selectone @e[type=minecraft:cow,name=missing,limit=1]",
+                        "argument.entity.notfound.entity",
+                    ),
                     ("selectplayer @a", "argument.player.toomany"),
-                    ("selectone @e[type=minecraft:cow]", "argument.entity.toomany"),
-                    ("optionalplayers @a[name=missing]", "argument.entity.notfound.player"),
-                    ("optionalentities @e[type=minecraft:cow,name=missing]", "argument.entity.notfound.entity"),
+                    (
+                        "selectone @e[type=minecraft:cow]",
+                        "argument.entity.toomany",
+                    ),
+                    (
+                        "optionalplayers @a[name=missing]",
+                        "argument.entity.notfound.player",
+                    ),
+                    (
+                        "optionalentities @e[type=minecraft:cow,name=missing]",
+                        "argument.entity.notfound.entity",
+                    ),
                 ] {
                     game.chat_capture = Some(Vec::new());
                     assert!(game.perform_native_console_command(line), "{line}");
                     let output = game.chat_capture.take().unwrap();
-                    assert_eq!(output[0].plain(), Text::translate(key, &[]).plain(), "{line}");
-                    assert_eq!(heard.lock().unwrap().len(), 14, "{line} must not reach the listener");
+                    assert_eq!(
+                        output[0].plain(),
+                        Text::translate(key, &[]).plain(),
+                        "{line}"
+                    );
+                    assert_eq!(
+                        heard.lock().unwrap().len(),
+                        14,
+                        "{line} must not reach the listener"
+                    );
                 }
 
                 // Resident mobs remain selector candidates while their native handle
@@ -143,17 +215,28 @@ fn native_selectors_deliver_ordered_handles_once_and_refuse_invalid_selections()
                     game.chat_capture = Some(Vec::new());
                     assert!(game.perform_native_console_command(line));
                     let output = game.chat_capture.take().unwrap();
-                    assert_eq!(output[0].plain(), Text::translate("argument.entity.notfound.entity", &[]).plain());
+                    assert_eq!(
+                        output[0].plain(),
+                        Text::translate("argument.entity.notfound.entity", &[]).plain()
+                    );
                     assert_eq!(heard.lock().unwrap().len(), 14);
                 }
                 // Drop only the unavailable handle, preserving the remaining order.
                 game.as_guest(12, |game| {
-                    assert!(game.perform_native_command(12, 4, "selectall @e[type=minecraft:cow,sort=nearest]"));
-                }).unwrap();
+                    assert!(game.perform_native_command(
+                        12,
+                        4,
+                        "selectall @e[type=minecraft:cow,sort=nearest]"
+                    ));
+                })
+                .unwrap();
                 game.held_out.pop();
                 let calls = heard.lock().unwrap();
                 assert_eq!(calls.len(), 15);
-                assert_eq!(calls[14].argument("targets"), Some(&Value::Entities(vec![middle, far])));
+                assert_eq!(
+                    calls[14].argument("targets"),
+                    Some(&Value::Entities(vec![middle, far]))
+                );
             });
         },
     );
@@ -170,7 +253,12 @@ fn selector_kinds_publish_vanilla_flags_and_share_parser_suggestions() {
     let (tree, _, problems) = command_tree(&commands, |_| false, &HashMap::new());
     assert!(problems.is_empty(), "{problems:?}");
     let mut dispatcher = Dispatcher::new();
-    register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+    register_dispatcher(
+        &mut dispatcher,
+        &tree,
+        "native_mod_command",
+        &HashMap::new(),
+    );
     let mut registries = horizon_client::command::Registries {
         permission: 4,
         players: vec!["Alice".into(), "Bob".into()],
@@ -186,10 +274,15 @@ fn selector_kinds_publish_vanilla_flags_and_share_parser_suggestions() {
         let node = &tree["children"][name]["children"]["target"];
         assert_eq!(node["parser"], "minecraft:entity");
         assert_eq!(node["properties"], json!({"amount": amount, "type": kind}));
-        let root = dispatcher.nodes[0].children.iter().copied().find(|id| {
-            matches!(&dispatcher.nodes[*id].kind,
+        let root = dispatcher.nodes[0]
+            .children
+            .iter()
+            .copied()
+            .find(|id| {
+                matches!(&dispatcher.nodes[*id].kind,
                 horizon_client::command::NodeKind::Literal(literal) if literal == name)
-        }).unwrap();
+            })
+            .unwrap();
         let argument = dispatcher.nodes[root].children[0];
         assert!(matches!(&dispatcher.nodes[argument].kind,
             horizon_client::command::NodeKind::Argument {
@@ -199,19 +292,31 @@ fn selector_kinds_publish_vanilla_flags_and_share_parser_suggestions() {
             let input = format!("{name} {prefix}");
             let parsed = dispatcher.parse(&input, &registries);
             let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
-            assert!(suggestions.iter().any(|suggestion| suggestion.text == expected),
-                "{input}: {suggestions:?}");
+            assert!(
+                suggestions
+                    .iter()
+                    .any(|suggestion| suggestion.text == expected),
+                "{input}: {suggestions:?}"
+            );
         }
         let input = format!("{name} 000");
         let parsed = dispatcher.parse(&input, &registries);
         let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
-        assert_eq!(suggestions.iter().any(|suggestion|
-            suggestion.text == "00000000-0000-0000-0000-000000000007"), !players);
+        assert_eq!(
+            suggestions
+                .iter()
+                .any(|suggestion| suggestion.text == "00000000-0000-0000-0000-000000000007"),
+            !players
+        );
         registries.permission = 0;
         let input = format!("{name} @");
         let parsed = dispatcher.parse(&input, &registries);
         let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
-        assert!(!suggestions.iter().any(|suggestion| suggestion.text.starts_with('@')));
+        assert!(
+            !suggestions
+                .iter()
+                .any(|suggestion| suggestion.text.starts_with('@'))
+        );
         registries.permission = 4;
     }
 }
@@ -224,7 +329,8 @@ fn entity_selection_has_no_additional_count_cap() {
         vec![mod_api::ModEntry::new(
             "selector_uncapped",
             Box::new(SelectorCommands(heard.clone())),
-        )].into(),
+        )]
+        .into(),
         || {
             super::super::native_guest_turn_tests::with_guests(|game| {
                 game.build_registries();
@@ -232,19 +338,32 @@ fn entity_selection_has_no_additional_count_cap() {
                 let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 // Reversed insertion order rules out accidental list/ID ordering.
                 for id in (1000..1300).rev() {
-                    game.mobs.push(Mob::new(id, cow.clone(),
-                        Vec3::new(f64::from(id - 1000) + 4.0, 64.0, 5.0), 0.0));
+                    game.mobs.push(Mob::new(
+                        id,
+                        cow.clone(),
+                        Vec3::new(f64::from(id - 1000) + 4.0, 64.0, 5.0),
+                        0.0,
+                    ));
                 }
                 let epoch = game.player(12).unwrap().entity().epoch();
                 game.as_guest(12, |game| {
-                    assert!(game.perform_native_command(12, 4,
-                        "selectall @e[type=minecraft:cow,sort=nearest]"));
-                }).unwrap();
+                    assert!(game.perform_native_command(
+                        12,
+                        4,
+                        "selectall @e[type=minecraft:cow,sort=nearest]"
+                    ));
+                })
+                .unwrap();
                 let calls = heard.lock().unwrap();
                 assert_eq!(calls.len(), 1);
-                assert_eq!(calls[0].argument("targets"),
-                    Some(&Value::Entities((1000..1300)
-                        .map(|id| mod_api::EntityRef::new(epoch, id)).collect())));
+                assert_eq!(
+                    calls[0].argument("targets"),
+                    Some(&Value::Entities(
+                        (1000..1300)
+                            .map(|id| mod_api::EntityRef::new(epoch, id))
+                            .collect()
+                    ))
+                );
             });
         },
     );
