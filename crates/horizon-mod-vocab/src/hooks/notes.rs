@@ -449,8 +449,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `on_item_use_first` Part.
 - **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
   `PlayerInteractEvent.RightClickItem`, on both sides, before `Item.use` and its Part after target
-  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). On the client,
-  every canceled result except `Success` continues to the other hand without a predicted swing.
+  fallthrough. Canceling answers with `cancellation_result` (default `Pass`). `Success`,
+  `SuccessServer` and `Consume` end the client's hand loop. Only `Success` predicts a swing.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_pre(dimension, piston,
   direction, extending, push, destroy, canceled)`** and **`native_piston_post(dimension, piston, direction, extending, push, destroy)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved (`native_piston_pre`, NeoForge's `PistonEvent.Pre`; `native_piston_post`, `PistonEvent.Post`, hears the move done).
@@ -2853,8 +2853,8 @@ registration path.
   `Item.use` and the item's `use_item` Part on both sides, after the same hand's target interaction falls through.
   `event.click` (`ItemClick`) contains the dimension, player's feet block position, player,
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
-  (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
-  canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
+  (default `Pass`). `Success`, `SuccessServer` and `Consume` end the client's hand loop. `Success`
+  predicts a swing, `SuccessServer` swings on the server, and `Consume` has no swing. A block
   success, block FAIL, or entity success prevents item fallback; the server fires this on the separate UseItem packet
   rather than on UseItemOn.
 
