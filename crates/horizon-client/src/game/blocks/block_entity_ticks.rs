@@ -224,16 +224,12 @@ impl Game<'_> {
                 std::mem::take(&mut self.trial_spawner_tick_positions),
             )
         });
-        Enclosing {
+        // The pass below is written on `this`, the game the guard lends back.
+        let enclosing = Enclosing {
             game: self,
             scratch,
-        }
-        .game
-        .block_entity_pass(slot)
-    }
-    /// One pass of `tick_block_entities_with`.
-    fn block_entity_pass<S: BlockEntityTickSlot>(&mut self, slot: &mut S) -> Result<()> {
-        let this = self;
+        };
+        let this = &mut *enclosing.game;
         this.tick_mount_menu();
         this.tick_craft_table();
         this.tick_container_reach();
