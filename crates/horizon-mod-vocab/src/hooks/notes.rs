@@ -20,22 +20,6 @@ A native server tick hook can call `native_server_block` with its context, a dim
 
 `native_block_changed` observes a committed authoritative server `Level.setBlock` change before block side effects and neighbour updates. It supplies the dimension, position and old and new state IDs. It does not observe chunk loading or direct storage writes that bypass `Level.setBlock`.
 
-### Recipe sources and linked menus
-
-`recipe_sources(player, menu, pos, sources)` collects additional ingredient
-containers for mod crafting menus on recipe-book placement/apply and server
-transfer checks. The player's state is not swapped in. Answers append in mod
-order after the player's inventory; the engine silently skips the menu's own
-position, duplicates, missing/non-lendable containers and containers beyond the
-first 64 accepted. It owns ingredient removal, write-back and `container_changed`.
-No answer preserves vanilla placement. This is action-time work, not tick work.
-
-`menu_links(player, menu, pos, links)` collects linked containers for open mod
-menus declaring linked slots, refreshing their items in the same server tick.
-Only subscribers are dispatched; without any subscribers this tick path returns
-before doing work or allocating. Both are global server collect hooks, with
-identical native/wasm arguments and mutable-output copy-out.
-
 ### Server commands and players
 
 For mods that run where the world is simulated: a dedicated server, a LAN host, single player's server thread
@@ -1872,7 +1856,7 @@ still go on each event or registrar.
   every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
   something happened (an explosion's centre and age for a cloud drawn in a post pass).
 
-- Menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([making a content mod](../how-to/content-mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`.
+- Menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([making a content mod](../how-to/content-mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`. Server collect hooks `recipe_sources` and `menu_links` name lent ingredient and linked-slot containers; see the menu-types guide for ordering, caps, skips, write-back and the no-listener tick path.
 
 - `native_block_highlight(pos, state, partial, canceled)` runs before building the eligible targeted block's selection outline, after hidden-HUD and game-mode restrictions. Set `canceled` to suppress only that outline; default behavior is unchanged otherwise. Position is block coordinates and state is the current block state ID. No entity outlines are affected.
 
