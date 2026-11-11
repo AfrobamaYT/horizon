@@ -3820,7 +3820,7 @@ impl Game<'_> {
     }
     /// `player` (`name`) joined the game (NeoForge's
     /// `PlayerLoggedInEvent`): placed in the world and listed in
-    /// `native_server_players`, so `ServerHost::send_payload_to_player` reaches them.
+    /// `host.players().server_players()`, so `PlayerRef::send_payload` can reach them.
     /// Once a join, with no player's state swapped in. Server-side.
     pub(in crate::game) fn native_player_logged_in(&mut self, player: u128, name: &str) {
         self.fire_player_logged_in(player, name);
@@ -3986,7 +3986,7 @@ impl Game<'_> {
     /// changes. It comes into range, its client's chunks reach it, or it is
     /// put in the level; another player is an entity too, and a player never
     /// tracks their own. A mod sends the player what they need to show it
-    /// (`ServerHost::send_payload_to_player`). The entity is as it was last tick: it
+    /// (`PlayerRef::send_payload`). The entity is as it was last tick: it
     /// may be gone by now. Heard after the tick's players and entities have
     /// moved, in order, with no player's state swapped in. Server-side.
     pub(in crate::game) fn native_player_start_tracking(
