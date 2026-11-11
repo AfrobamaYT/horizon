@@ -53,13 +53,21 @@ def compile_diagnostics(output):
     headings = []
     for line in output.splitlines():
         if re.match(r"^error(?:\[E\d+\])?:", line):
-            # Literals, URLs and assignments may contain credentials or private paths.
-            line = re.sub(r"`[^`]*`|\"[^\"]*\"|'[^']*'|https?://\S+|\S+=\S+", "<redacted>", line)
-            headings.append(line)
+            # Compiler/proc-macro diagnostics can contain resource-derived text even
+            # without quotes. Only fixed reason forms cross this boundary.
+            code = re.match(r"^error(\[E\d+\])?:", line)[1] or ""
+            reason = line.split(":", 1)[1].strip()
+            safe = reason if reason in {
+                "mismatched types", "type annotations needed", "unexpected closing delimiter",
+                "unclosed delimiter", "expected item, found keyword", "aborting due to previous error",
+            } else "custom diagnostic payload withheld"
+            headings.append(f"error{code}: {safe}")
         elif re.match(r"^\s*--> [\w./-]+:\d+:\d+$", line):
             headings.append(line)
     for line in headings[:20]:
         print("  compiler: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
+        if line.strip().startswith("--> "):
+            panic_source(line.strip()[4:], kind="compiler")
     if len(headings) > 20:
         print(f"  compiler diagnostics truncated: {len(headings) - 20} more headings")
     if not headings:
@@ -85,16 +93,16 @@ def source_lines(path):
     return blob.stdout.splitlines() if blob.returncode == 0 else None
 
 
-def panic_source(location):
+def panic_source(location, kind="panic"):
     found = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", location)
     lines = source_lines(found[1]) if found else None
     if lines is None or not 1 <= int(found[2]) <= len(lines):
-        print("  panic source unavailable (not a bounded tracked Rust location)")
+        print(f"  {kind} source unavailable (not a bounded tracked Rust location)")
         return
     line = lines[int(found[2]) - 1]
     # Prefix and escape controls so checked-in text cannot inject workflow commands.
     line = line.encode("unicode_escape").decode("ascii")
-    print("  panic source: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
+    print(f"  {kind} source: " + line[:300] + (" [truncated]" if len(line) > 300 else ""))
 
 
 def has_vulkan():
@@ -201,7 +209,7 @@ def run(package, skip, number=None, count=None):
     diagnostic_count = 0
     for line in process.stdout.splitlines():
         if panic_operands and line.strip():
-            if operand := re.fullmatch(r"\s*(left|right):\s*(-?\d+(?:\.\d+)?|true|false)\s*", line):
+            if operand := re.fullmatch(r"\s*(left|right):\s*(-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|inf)|NaN|true|false)\s*", line):
                 if diagnostic_count < 50:
                     print(f"  assertion {operand[1]}: {operand[2][:80]}")
             elif re.match(r"\s*(?:left|right):", line) and diagnostic_count < 50:
@@ -218,6 +226,10 @@ def run(package, skip, number=None, count=None):
                 ("index out of bounds", "index out of bounds"),
                 ("attempt to", "arithmetic failure"),
             ) if line.strip().startswith(prefix)), "custom panic")
+            if bounds := re.fullmatch(r"index out of bounds: the len is (\d{1,20}) but the index is (\d{1,20})", line.strip()):
+                reason = f"index out of bounds: len={bounds[1]} index={bounds[2]}"
+            elif arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
+                reason = "attempt to " + arithmetic[1]
             if diagnostic_count < 50:
                 print(f"  panic reason: {reason}; payload withheld (resource privacy)")
             panic_reason_pending = False

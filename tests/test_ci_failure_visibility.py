@@ -25,6 +25,23 @@ class Visibility(unittest.TestCase):
         self.assertIn("assertion equality failed", log)
         self.assertNotIn("PRIVATE_RESOURCE", log)
 
+    def test_unquoted_compiler_payloads_are_never_published(self):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            ignored_tests.compile_diagnostics("error: PRIVATE_RESOURCE_CONTENT\n"
+                                              "error[E0308]: PRIVATE_RESOURCE_CONTENT\n"
+                                              "error: mismatched types PRIVATE_RESOURCE_CONTENT\n")
+        self.assertNotIn("PRIVATE_RESOURCE_CONTENT", log.getvalue())
+        self.assertIn("error[E0308]: custom diagnostic payload withheld", log.getvalue())
+
+    def test_standard_panic_details_are_preserved(self):
+        for reason in ("index out of bounds: the len is 3 but the index is 4",
+                       "attempt to divide by zero", "attempt to add with overflow"):
+            output = target(1, "test broken ... FAILED\n"
+                            "thread 'broken' panicked at src/lib.rs:12:3:\n" + reason + "\n",
+                            summary(failed=1))
+            _, log = IgnoredTests().run_output(output, 101)
+            self.assertIn("len=3 index=4" if reason.startswith("index") else reason, log)
+
     def test_source_comes_from_head_not_private_worktree(self):
         with tempfile.TemporaryDirectory() as folder:
             old = os.getcwd()
@@ -61,7 +78,10 @@ class Visibility(unittest.TestCase):
             run.assert_not_called()
 
     def test_numeric_boolean_and_private_operands(self):
-        for left, right, expected in (("96", "93", "assertion left: 96"),
+        for left, right, expected in (("1e-10", "-2.5e+30", "assertion left: 1e-10"),
+                                      ("NaN", "inf", "assertion left: NaN"),
+                                      ("-inf", "0.0", "assertion left: -inf"),
+                                      ("96", "93", "assertion left: 96"),
                                       ("true", "false", "assertion right: false"),
                                       ('"PRIVATE"', '[PRIVATE]', "operand withheld")):
             output = target(1, "test broken ... FAILED\n"
