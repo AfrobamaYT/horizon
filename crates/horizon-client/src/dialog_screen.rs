@@ -553,7 +553,7 @@ mod tests {
             std::fs::write(path, bytes).unwrap();
         }
         let font = Font::load(
-            &root,
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
             &std::collections::HashMap::new(),
             &[],
             (4096, 1024),

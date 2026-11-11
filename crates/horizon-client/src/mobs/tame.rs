@@ -2212,9 +2212,9 @@ mod tests {
     /// `canBeSeenByAnyone`: a dead attacker is not avenged.
     #[test]
     fn a_pet_does_not_avenge_its_owner_on_a_dead_attacker() {
+        use crate::health::TestLevel;
         use crate::mobs::goals::Cx;
         use crate::mobs::world::{test_player, with_test_world};
-        use horizon_core::random::LegacyRandom;
         let mut outcomes = Vec::new();
         if !with_test_world(&[], |w, _| {
             for alive in [true, false] {
@@ -2245,11 +2245,11 @@ mod tests {
                     ..world
                 };
                 wolf.ai.targets.add(1, OwnerHurtBy { timestamp: 0 });
-                let mut lr = LegacyRandom::new(0);
+                let mut lr = TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut lr.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut wolf.ai.targets);

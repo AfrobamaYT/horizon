@@ -743,9 +743,9 @@ mod keep_jumping_tests {
                 m.no_ai = true;
                 m.on_ground = true;
                 m.extra.flag2 = false;
-                let mut lr = LegacyRandom::new(0);
+                let mut lr = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
-                super::super::ai::tick(&mut m, w, &mut lr, &mut events);
+                super::super::ai::tick(&mut m, w, &mut lr.level(), &mut events);
                 result = Some(m.extra.flag2);
                 assert!(result.unwrap(), "{name}: wasOnGround stays false");
             }

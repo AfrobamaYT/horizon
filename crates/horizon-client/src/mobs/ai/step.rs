@@ -137,7 +137,7 @@ mod tests {
                 let stepped = |body: Option<&str>| {
                     let kind = Arc::new(types.types["minecraft:sulfur_cube"].clone());
                     let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-                    m.extra.body = body.map(Into::into);
+                    m.extra.set_body(body.map(Into::into));
                     let state = w.world.block(0, 63, 0);
                     step_sound(&m, w, [0, 63, 0], state)
                 };

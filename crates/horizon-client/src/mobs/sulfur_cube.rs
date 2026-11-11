@@ -672,7 +672,7 @@ mod burning_arrow_tests {
             let mut adult = cube(None);
             from_nbt(
                 &mut adult,
-                &horizon_world::nbt::Tag::Compound(Default::default()),
+                &horizon_core::nbt::Tag::Compound(Default::default()),
             );
             // A split of a size-4 cube: a baby of size 2.
             let mut baby = cube(None);
@@ -691,7 +691,7 @@ mod burning_arrow_tests {
             let mut cub = cube(None);
             cub.extra.age = -1;
             set_size(&mut cub, 1, true);
-            crate::mobs::finalize::set_age(&mut cub, 0);
+            crate::mobs::finalize::set_age(&mut cub, 0, Some(w));
             assert_eq!((cub.extra.size, cub.health), (2, 8.0));
         });
         if !ran {
