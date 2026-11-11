@@ -509,6 +509,16 @@ mod tests {
                     height: 2,
                     frames: vec![vec![false, false, false, true]],
                 }),
+                // Two frames, each with one opaque pixel: the top-left in the first, the
+                // centre in the second. Neither touches the last column.
+                "mod:item/blink" => Some(SpriteMask {
+                    width: 3,
+                    height: 3,
+                    frames: vec![
+                        vec![false, true, true, true, true, true, true, true, true],
+                        vec![true, true, true, true, false, true, true, true, true],
+                    ],
+                }),
                 "mod:item/clear" => Some(SpriteMask {
                     width: 2,
                     height: 2,
@@ -698,6 +708,65 @@ mod tests {
             sides
                 .iter()
                 .all(|q| q.material.sprite == MISSING_SPRITE && q.tint_index == -1)
+        );
+    }
+
+    /// An animated mask's shape is every pixel opaque in any of its frames: NeoForge's
+    /// `bakeItemMaskQuads` sets a pixel's bit for each of `getUniqueFrames` (offsets 91-109),
+    /// and `ItemModelGenerator.bakeSideFaces` collects each frame's edges. Two frames with
+    /// disjoint opaque pixels, the top-left and the centre of a 3x3 mask, give each pixel its
+    /// own 4 sides and its own front and back: 8 + 4 quads.
+    #[test]
+    fn an_animated_mask_draws_the_union_of_its_frames() {
+        let library = library();
+        let masked =
+            bake_sprite_layer(&library, &Sprites, "mod:item/fluid", Some("mod:item/blink"))
+                .unwrap();
+        assert_eq!(masked.quads.len(), 8 + 4);
+        let faces: Vec<&ModelQuad> = masked
+            .quads
+            .iter()
+            .filter(|q| matches!(q.facing, Direction::South | Direction::North))
+            .collect();
+        assert_eq!(faces.len(), 4);
+        // Top-left pixel: x 0..1/3, y 2/3..1; texture 0..16/3 on both axes.
+        assert_face(
+            faces[0],
+            Direction::South,
+            [0.0, 2.0 / 3.0, 8.5 / 16.0],
+            [1.0 / 3.0, 1.0, 8.5 / 16.0],
+            [[0, 0], [0, 5], [5, 5], [5, 0]],
+        );
+        assert_face(
+            faces[1],
+            Direction::North,
+            [0.0, 2.0 / 3.0, 7.5 / 16.0],
+            [1.0 / 3.0, 1.0, 7.5 / 16.0],
+            [[0, 0], [0, 5], [5, 5], [5, 0]],
+        );
+        // Centre pixel: x 1/3..2/3, y 1/3..2/3; texture 16/3..32/3.
+        assert_face(
+            faces[2],
+            Direction::South,
+            [1.0 / 3.0, 1.0 / 3.0, 8.5 / 16.0],
+            [2.0 / 3.0, 2.0 / 3.0, 8.5 / 16.0],
+            [[5, 5], [5, 11], [11, 11], [11, 5]],
+        );
+        assert_face(
+            faces[3],
+            Direction::North,
+            [1.0 / 3.0, 1.0 / 3.0, 7.5 / 16.0],
+            [2.0 / 3.0, 2.0 / 3.0, 7.5 / 16.0],
+            [[5, 5], [5, 11], [11, 11], [11, 5]],
+        );
+        let sides = masked
+            .quads
+            .iter()
+            .filter(|q| !matches!(q.facing, Direction::South | Direction::North));
+        assert!(
+            sides
+                .into_iter()
+                .all(|q| q.material.sprite == "mod:item/blink" && q.tint_index == -1)
         );
     }
 

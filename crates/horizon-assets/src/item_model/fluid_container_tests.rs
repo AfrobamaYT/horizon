@@ -334,6 +334,76 @@ fn an_unknown_fluid_draws_the_missing_sprite_and_no_mask_no_fluid_layer() {
     assert_eq!(contents, vec![sprite("mod:item/flask", None)]);
 }
 
+/// The flask's sprites for a bake: the base is a 2x2 opaque square, the cover a 2x2 mask
+/// whose only opaque pixel is the top-left one.
+struct FlaskSprites;
+impl crate::item_bake::SpriteLookup for FlaskSprites {
+    fn mask(&self, sprite: &str) -> Option<crate::item_bake::SpriteMask> {
+        let frame = match sprite {
+            "mod:item/flask" => vec![false, false, false, false],
+            "mod:item/flask_cover" => vec![false, true, true, true],
+            _ => return None,
+        };
+        Some(crate::item_bake::SpriteMask {
+            width: 2,
+            height: 2,
+            frames: vec![frame],
+        })
+    }
+}
+
+/// The cover route end to end, resolved and then baked. NeoForge bakes it with
+/// `bakeItemMaskQuads(baker, 0, cover, coverIsMask ? base : cover, state)` (offsets 598-639),
+/// whose 5-argument overload bakes the sides from `MaterialInfo.of(mask, ..., -1, ...)`
+/// (offsets 17-50) and the front and back from the drawn material's info with tint index 0.
+/// So with the default `cover_is_mask`: the cover pixel's 4 sides show the cover sprite with
+/// tint -1, and its front and back show the base sprite with tint 0, over the top-left pixel
+/// only (x 0..0.5, y 0.5..1; texture 0..8 on both axes).
+#[test]
+fn the_cover_bakes_its_sides_from_the_cover_and_its_faces_from_the_base() {
+    let drawn = layers(
+        r#"{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
+            "textures":{"base":"mod:item/flask","cover":"mod:item/flask_cover"}}"#,
+        &Fluids { held: None },
+    );
+    assert_eq!(drawn.len(), 2);
+    let LayerContent::Sprite { sprite, mask } = &drawn[1].content else {
+        panic!("not a sprite layer: {:?}", drawn[1].content);
+    };
+    let library = crate::resolve::ModelLibrary::with_item_generator(BTreeMap::new()).unwrap();
+    let baked =
+        crate::item_bake::bake_sprite_layer(&library, &FlaskSprites, sprite, mask.as_deref())
+            .unwrap();
+    assert_eq!(baked.quads.len(), 4 + 2);
+    let mut sides = 0;
+    for quad in &baked.quads {
+        match quad.facing {
+            crate::model::Direction::South | crate::model::Direction::North => {
+                assert_eq!(quad.material.sprite, "mod:item/flask");
+                assert_eq!(quad.tint_index, 0);
+                let (xs, ys): (Vec<f32>, Vec<f32>) =
+                    quad.positions.iter().map(|p| (p[0], p[1])).unzip();
+                let span = |v: &[f32]| {
+                    let min = v.iter().copied().fold(f32::INFINITY, f32::min);
+                    let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    [min, max]
+                };
+                assert_eq!(span(&xs), [0.0, 0.5]);
+                assert_eq!(span(&ys), [0.5, 1.0]);
+                for uv in &quad.uv {
+                    assert!(uv.iter().all(|c| (0.0..=0.5).contains(c)), "{uv:?}");
+                }
+            }
+            _ => {
+                sides += 1;
+                assert_eq!(quad.material.sprite, "mod:item/flask_cover");
+                assert_eq!(quad.tint_index, -1);
+            }
+        }
+    }
+    assert_eq!(sides, 4);
+}
+
 #[test]
 fn a_cover_is_a_mask_only_over_a_base() {
     // Without `cover_is_mask` the cover is drawn through itself, with or without a base
