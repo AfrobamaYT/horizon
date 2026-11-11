@@ -182,14 +182,11 @@ mod tests {
                         target: "chemlib::transfer".into(),
                         hash: "0123456789abcdef".into(),
                         signature: "chemlib::transfer: fn f(rate: u32) -> u32 [u32]".into(),
-                        raw: true,
                         at_return: true,
                         api_refusal: None,
                         returns: "result".into(),
                         host: "none".into(),
                         return_ty: "u32".into(),
-                        listener: Some("crate::__TransferListener".into()),
-                        return_listener: Some("crate::__TransferReturnListener".into()),
                     }],
                 },
             }],
@@ -206,7 +203,7 @@ mod tests {
         catalog.check(&addon).unwrap();
         let main = super::super::api::main_rs("/* MOD_SLOTS */", &[&library, &addon], &catalog);
         assert!(main.contains("        mod_0::__horizon_points::listeners::transfer(\"addon\", 0, \"double\", mod_1::double),\n"), "{main}");
-        assert!(main.contains("        mod_0::__horizon_points::raw::transfer_return(\"addon\", mod_1::seen).ordered(4, \"seen\"),\n"), "{main}");
+        assert!(main.contains("        mod_0::__horizon_points::listeners::transfer_return(\"addon\", 4, \"seen\", mod_1::seen),\n"), "{main}");
         assert!(!main.contains("mod_points::listeners::transfer"), "{main}");
     }
 

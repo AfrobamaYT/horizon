@@ -35,8 +35,6 @@ impl ListedPoint {
             table: None,
         }
     }
-
-
 }
 
 /// The `points.json` the game's build script writes, beside the prebuilt game or in the
@@ -55,4 +53,3 @@ pub(super) fn catalog(path: &Path) -> Result<Catalog, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
-

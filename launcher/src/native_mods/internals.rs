@@ -141,7 +141,11 @@ impl Catalog {
         manifest: &horizon_mod_package::Manifest,
     ) -> horizon_mod_package::Manifest {
         let mut pinned = manifest.clone();
-        for inject in pinned.inject.iter_mut().filter(|inject| inject.hash.is_none()) {
+        for inject in pinned
+            .inject
+            .iter_mut()
+            .filter(|inject| inject.hash.is_none())
+        {
             inject.hash = self.target(&inject.at).map(|item| item.hash.clone());
         }
         for declared in pinned
@@ -162,9 +166,6 @@ impl Catalog {
     }
 
     pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
-        if manifest.native.is_none() {
-            return Ok(());
-        }
         super::slots::check(self, manifest).map_err(Error::Inject)?;
         super::mod_points::routes(self, manifest).map_err(|e| Error::Inject(e.to_string()))?;
         for declared in &manifest.internals {

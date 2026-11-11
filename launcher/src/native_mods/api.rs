@@ -62,15 +62,15 @@ pub(super) fn main_rs(
         .chain(super::mod_points::emitted(catalog, mods))
         .collect::<Vec<_>>();
     let raw = mods
-            .iter()
-            .enumerate()
-            .flat_map(|(i, manifest)| {
-                horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
-                    .expect("API slots checked")
-                    .into_iter()
-                    .map(|expression| format!("        {expression},\n"))
-            })
-            .collect::<String>();
+        .iter()
+        .enumerate()
+        .flat_map(|(i, manifest)| {
+            horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
+                .expect("API slots checked")
+                .into_iter()
+                .map(|expression| format!("        {expression},\n"))
+        })
+        .collect::<String>();
     let markers = [
         ("/* MOD_SLOTS */", &raw),
         ("/* MOD_ENTRIES */", &entries),
@@ -106,8 +106,11 @@ pub(super) const API_PACKAGE: &str = "horizon-mod-api";
 /// The per-mod facade's package, rewritten to its generated crate.
 pub(super) const INTERNALS_PACKAGE: &str = "horizon-internals";
 /// Each game package a mod may depend on, with its library's name.
-pub(super) const PACKAGES: [(&str, &str); 3] =
-    [(API_PACKAGE, "mod_api"), (POINTS_PACKAGE, "mod_points"), (INTERNALS_PACKAGE, "internals")];
+pub(super) const PACKAGES: [(&str, &str); 3] = [
+    (API_PACKAGE, "mod_api"),
+    (POINTS_PACKAGE, "mod_points"),
+    (INTERNALS_PACKAGE, "internals"),
+];
 
 /// A dependency on one of [`PACKAGES`], under `[dependencies]` or a `[target.*]` table.
 struct ApiDependency {

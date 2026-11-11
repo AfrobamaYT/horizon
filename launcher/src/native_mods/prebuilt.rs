@@ -252,6 +252,66 @@ fn cache_dir(revision: &str, name: &str) -> PathBuf {
         .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")))
 }
 
+/// Read checked SDK metadata; the caller owns consent and the native-cache lease.
+pub(super) fn planning_catalog(
+    lease: &crate::native_cache::Cache,
+    revision: &str,
+) -> Result<internals::Catalog, Refusal> {
+    let host = rust_toolchain::host().ok_or(Refusal::Host)?;
+    let name = native::prebuilt_archive(host.target, false);
+    let game = cache_dir(revision, &name);
+    if game.join(IDENTITY).is_file() {
+        if let Ok(catalog) = internals::Catalog::read(&game) {
+            crate::storage::mark_used(&game).map_err(|error| Refusal::Download {
+                why: super::cache_error(error),
+            })?;
+            return Ok(catalog);
+        }
+    }
+    let expected = release_sum(revision, &name)?;
+    let download = |why| Refusal::Download { why };
+    let unit = format!("catalog-{revision}-{}", host.target);
+    let cache = super::root().join("internals-sync").join(&unit);
+    let directory = lease
+        .directory(&["internals-sync", &unit])
+        .map_err(|error| download(super::cache_error(error)))?;
+    crate::storage::mark_used(&cache).map_err(|error| download(super::cache_error(error)))?;
+    catalog_pair(&directory, &cache, &name, &expected, || {
+        crate::backend::get(&format!("{}/{name}", release_url(revision)))
+            .map_err(download)
+            .map(|response| response.into_reader())
+    })
+}
+
+fn catalog_pair<R: Read>(
+    directory: &cap_std::fs::Dir,
+    path: &Path,
+    name: &str,
+    expected: &str,
+    fetch: impl FnOnce() -> Result<R, Refusal>,
+) -> Result<internals::Catalog, Refusal> {
+    let download = |why| Refusal::Download { why };
+    if directory.read_to_string("archive.sha256").ok().as_deref() == Some(expected) {
+        if let Ok(catalog) = internals::Catalog::read(path) {
+            return Ok(catalog);
+        }
+    }
+    let reader = fetch()?;
+    // A failed second rename must never leave an old marker authorizing a mixed pair.
+    match directory.remove_file("archive.sha256") {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(download(error.to_string())),
+    }
+    horizon_mod_package::internals::cache_catalogs(directory, name, reader, expected)
+        .map_err(|error| download(error.to_string()))?;
+    let catalog = internals::Catalog::read(path).map_err(download)?;
+    directory
+        .write("archive.sha256", expected)
+        .map_err(|error| download(error.to_string()))?;
+    Ok(catalog)
+}
+
 /// `name`'s sum in a `sha256sum` listing.
 fn expected_sum(listing: &str, name: &str) -> Option<String> {
     listing.lines().find_map(|line| {
@@ -453,7 +513,8 @@ pub(super) fn compile(
             },
         );
     }
-    let catalog = internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
+    let catalog =
+        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;

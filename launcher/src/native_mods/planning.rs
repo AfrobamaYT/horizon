@@ -15,7 +15,7 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
 pub(super) fn classify(
     folder: &Path,
     base: Option<&str>,
-    _lease: &crate::native_cache::Cache,
+    lease: &crate::native_cache::Cache,
 ) -> Result<Routes, Failed> {
     let found = scan_bundles(folder)?;
     let mut result = Routes::default();
@@ -46,5 +46,28 @@ pub(super) fn classify(
         return Err(mismatch_error(&list).into());
     }
     result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
+    if projects
+        .iter()
+        .any(|p| !p.bundle.manifest.inject.is_empty())
+    {
+        match prebuilt::planning_catalog(lease, &revision) {
+            Ok(catalog) => {
+                let catalog = catalog.with_mods(projects.iter().map(|p| p.bundle))?;
+                for project in &projects {
+                    if let Err(error) = catalog.check(&project.bundle.manifest) {
+                        let (_, route) = result
+                            .mods
+                            .iter_mut()
+                            .find(|(id, _)| id == &project.bundle.manifest.id)
+                            .expect("parsed project has a route");
+                        *route = Route::Invalid {
+                            reason: error.to_string(),
+                        };
+                    }
+                }
+            }
+            Err(reason) => result.unavailable = Some(reason),
+        }
+    }
     Ok(result)
 }
