@@ -2204,8 +2204,8 @@ fn pipeline(
             internals::Catalog::read(catalog).and_then(|catalog| catalog.with_mods(mods.iter()))
         };
         // A mod pins the game as its revision ships it. horizon-mixins reprints each file it
-        // edits and may add fields, so with mixins the pins are checked against the catalog of
-        // the unpatched source; the patched tree's catalog is the one the build uses.
+        // edits and may add fields, which moves fingerprints, so a mixin build's catalog keeps
+        // the unpatched source's fingerprint for every declaration that source has.
         let pristine = real.join("stage.pinned");
         let pinned_catalog = real.join("catalog.pinned");
         let discard = |error: String| {
@@ -2214,20 +2214,21 @@ fn pipeline(
             }
             error
         };
-        let staged = mark(&pending, &catalog_dir).map_err(discard)?;
-        let pinned = if needs_mixins {
+        let mut catalog = mark(&pending, &catalog_dir).map_err(discard)?;
+        if needs_mixins {
             let _ = fs::remove_dir_all(&pinned_catalog);
             fs::create_dir_all(&pinned_catalog).map_err(|e| discard(e.to_string()))?;
             sync(&source, &pristine).map_err(discard)?;
-            let pinned = mark(&pristine, &pinned_catalog).map_err(discard)?;
+            mark(&pristine, &pinned_catalog).map_err(discard)?;
+            internals::keep_pins(&catalog_dir, &pinned_catalog).map_err(discard)?;
             let _ = fs::remove_dir_all(&pristine);
             let _ = fs::remove_dir_all(&pinned_catalog);
-            pinned
-        } else {
-            staged
-        };
+            catalog = internals::Catalog::read(&catalog_dir)
+                .and_then(|catalog| catalog.with_mods(mods.iter()))
+                .map_err(discard)?;
+        }
         mods.iter()
-            .try_for_each(|bundle| pinned.check(&bundle.manifest))
+            .try_for_each(|bundle| catalog.check(&bundle.manifest))
             .map_err(|error| discard(error.to_string()))?;
         let _ = fs::remove_dir_all(&fresh);
         fs::rename(&pending, &fresh).map_err(|error| discard(error.to_string()))?;
