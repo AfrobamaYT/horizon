@@ -62,7 +62,10 @@ impl Animations {
 /// offset from 1). An unknown target or interpolation fails the file, naming it.
 pub fn parse(text: &str) -> Result<AnimationHolder, String> {
     let json: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let length = json["length"].as_f64().ok_or("no numeric `length`")? as f32;
+    let length = finite(&json["length"]).ok_or("no finite `length`")? as f32;
+    if length <= 0.0 {
+        return Err(format!("`length` {length} is not positive"));
+    }
     let looping = match json.get("loop") {
         None => false,
         Some(value) => value.as_bool().ok_or("`loop` is not a boolean")?,
@@ -109,6 +112,12 @@ pub fn parse(text: &str) -> Result<AnimationHolder, String> {
     })
 }
 
+/// A number that stays finite as an `f32`: 1e40 doesn't, it would become infinity.
+fn finite(value: &Value) -> Option<f64> {
+    let value = value.as_f64()?;
+    (value as f32).is_finite().then_some(value)
+}
+
 /// A namespaced id, `minecraft:` when it names none (`Identifier.parse`).
 fn id(value: &Value) -> Option<String> {
     let text = value.as_str()?;
@@ -120,16 +129,14 @@ fn id(value: &Value) -> Option<String> {
 }
 
 fn keyframe_of(keyframe: &Value, target: AnimationTarget) -> Result<Keyframe, String> {
-    let time = keyframe["timestamp"]
-        .as_f64()
-        .ok_or("no numeric `timestamp`")? as f32;
+    let time = finite(&keyframe["timestamp"]).ok_or("no finite `timestamp`")? as f32;
     let values = keyframe["target"]
         .as_array()
         .filter(|values| values.len() == 3)
         .ok_or("`target` is not three numbers")?;
     let mut v = [0.0f64; 3];
     for (slot, value) in v.iter_mut().zip(values) {
-        *slot = value.as_f64().ok_or("`target` is not three numbers")?;
+        *slot = finite(value).ok_or("`target` is not three finite numbers")?;
     }
     let value = match target {
         // KeyframeAnimations.posVec
@@ -224,6 +231,26 @@ mod tests {
             "animations[0].keyframes[0]: unknown interpolation mymod:bounce"
         );
         assert!(parse(r#"{"animations":[]}"#).is_err(), "no length");
+        assert_eq!(
+            parse(r#"{"length":0,"loop":true,"animations":[]}"#).unwrap_err(),
+            "`length` 0 is not positive"
+        );
+        assert_eq!(
+            parse(r#"{"length":1e40,"animations":[]}"#).unwrap_err(),
+            "no finite `length`"
+        );
+        let huge = r#"{"length":1,"animations":[{"bone":"a","target":"minecraft:scale",
+            "keyframes":[{"timestamp":0,"target":[1,1e40,1],"interpolation":"minecraft:linear"}]}]}"#;
+        assert_eq!(
+            parse(huge).unwrap_err(),
+            "animations[0].keyframes[0]: `target` is not three finite numbers"
+        );
+        let late = r#"{"length":1,"animations":[{"bone":"a","target":"minecraft:scale",
+            "keyframes":[{"timestamp":1e40,"target":[1,1,1],"interpolation":"minecraft:linear"}]}]}"#;
+        assert_eq!(
+            parse(late).unwrap_err(),
+            "animations[0].keyframes[0]: no finite `timestamp`"
+        );
         let short = r#"{"length":1,"animations":[{"bone":"a","target":"minecraft:scale",
             "keyframes":[{"timestamp":0,"target":[1,1],"interpolation":"minecraft:linear"}]}]}"#;
         assert!(parse(short).is_err(), "two values");
