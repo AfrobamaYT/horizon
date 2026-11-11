@@ -346,14 +346,30 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
             format!("no crate `{krate}` in the game's source"),
         ));
     }
-    // The longest prefix that is a module; what follows it is the `impl`'s type, if anything.
-    let segments: Vec<&str> = front.split("::").collect();
-    let mut cut = segments.len();
-    while cut > 0 && !source.is_module(&segments[..cut].join("::")) {
-        cut -= 1;
-    }
-    let module = segments[..cut].join("::");
-    let owner = plain(&segments[cut..].join("::"));
+    // A trait method is written `module::<Type as Trait>::name`.
+    let qualified = front
+        .split_once("::<")
+        .and_then(|(module, rest)| Some((module, rest.strip_suffix('>')?.split_once(" as ")?)));
+    let (module, owner, trait_name) = match qualified {
+        Some((module, (ty, tr))) => {
+            let tr = plain(tr);
+            let last = tr.rsplit("::").next().unwrap_or_default().to_owned();
+            (module.to_owned(), plain(ty), Some(last))
+        }
+        None => {
+            // The longest prefix that is a module; what follows it is the `impl`'s type.
+            let segments: Vec<&str> = front.split("::").collect();
+            let mut cut = segments.len();
+            while cut > 0 && !source.is_module(&segments[..cut].join("::")) {
+                cut -= 1;
+            }
+            (
+                segments[..cut].join("::"),
+                plain(&segments[cut..].join("::")),
+                None,
+            )
+        }
+    };
     let items = source
         .module(&module)
         .map_err(|why| ("E_MIXIN_TARGET_MISSING", why))?
@@ -377,7 +393,12 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
             }
             Item::Impl(block)
                 if !owner.is_empty()
-                    && block.trait_.is_none()
+                    && block.trait_.as_ref().map(|(_, path, _)| {
+                        path.segments
+                            .last()
+                            .map(|s| s.ident.to_string())
+                            .unwrap_or_default()
+                    }) == trait_name
                     && plain(&block.self_ty.to_token_stream().to_string()) == owner =>
             {
                 for member in &block.items {
@@ -614,7 +635,7 @@ pub fn generate(
         let install = format_ident!("__fnr_install_{}", name);
         let constructor = format_ident!("__fnr_{}", name);
         let module_path = found.module.split("::").skip(1).collect::<Vec<_>>();
-        let (copy, id) = match &found.owner {
+        let (copy, id, install) = match &found.owner {
             None => {
                 node.own.insert(name.to_string());
                 node.own.insert(install.to_string());
@@ -630,12 +651,39 @@ pub fn generate(
                         }
                     },
                     format!("{patch_name}::{}::{name}", module_path.join("::")),
+                    install,
                 )
             }
             Some(owner) => {
                 let self_ty = &owner.self_ty;
                 let owner_name = plain(&self_ty.to_token_stream().to_string()).replace("::", "_");
-                let trait_name = format_ident!("__Fnr_{}_{}", owner_name, name);
+                // A trait method's copy is renamed in its helper trait: with the game's trait in
+                // scope too, `x.name()` would be ambiguous.
+                let source_trait = owner.trait_.as_ref().map(|(_, path, _)| path.clone());
+                let source_trait_name = source_trait
+                    .as_ref()
+                    .and_then(|path| path.segments.last())
+                    .map(|segment| segment.ident.to_string());
+                let (trait_name, install, method, constructor) = match &source_trait_name {
+                    Some(tr) => (
+                        format_ident!("__Fnr_{}_as_{}_{}", owner_name, tr, name),
+                        format_ident!("__fnr_install_{}_as_{}_{}", owner_name, tr, name),
+                        format_ident!("__fnr_{}", name),
+                        format_ident!("__fnr_as_{}_{}", tr, name),
+                    ),
+                    None => (
+                        format_ident!("__Fnr_{}_{}", owner_name, name),
+                        format_ident!("__fnr_install_{}_{}", owner_name, name),
+                        name.clone(),
+                        constructor.clone(),
+                    ),
+                };
+                sig.ident = method.clone();
+                let mut block = block.clone();
+                if let Some(path) = &source_trait {
+                    qualify_self(&mut block, owner, self_ty, path);
+                    qualify_self_sig(&mut sig, owner, self_ty, path);
+                }
                 node.own.insert(trait_name.to_string());
                 node.own.insert(install.to_string());
                 let generics = &owner.generics;
@@ -690,13 +738,14 @@ pub fn generate(
 
                         #[doc(hidden)]
                         pub fn #install() -> ::horizon_client::entry::Redirect {
-                            <#elided>::#constructor(<#elided as #trait_ref>::#name)
+                            <#elided>::#constructor(<#elided as #trait_ref>::#method)
                         }
                     },
                     format!(
-                        "{patch_name}::{}::<{id_type} as {id_trait}>::{name}",
+                        "{patch_name}::{}::<{id_type} as {id_trait}>::{method}",
                         module_path.join("::")
                     ),
+                    install,
                 )
             }
         };
@@ -787,6 +836,74 @@ pub fn patch_crate(krate: &str, source_crate: &str) -> String {
     }
 }
 
+/// `Self::Item` for an associated type or constant of the trait `path` that `owner` implements,
+/// rewritten `<Type as Trait>::Item`: in the helper trait `Self` has no such item.
+struct QualifySelf {
+    items: BTreeSet<String>,
+    qualified: proc_macro2::TokenStream,
+}
+
+impl QualifySelf {
+    fn new(owner: &syn::ItemImpl, self_ty: &syn::Type, path: &syn::Path) -> Self {
+        let items = owner
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ImplItem::Type(item) => Some(item.ident.to_string()),
+                ImplItem::Const(item) => Some(item.ident.to_string()),
+                _ => None,
+            })
+            .collect();
+        Self {
+            items,
+            qualified: quote!(<#self_ty as #path>),
+        }
+    }
+    fn rewrite(&self, qself: &mut Option<syn::QSelf>, path: &mut syn::Path) {
+        if qself.is_none()
+            && path.segments.len() == 2
+            && path.segments[0].ident == "Self"
+            && self.items.contains(&path.segments[1].ident.to_string())
+        {
+            let item = &path.segments[1];
+            let qualified = &self.qualified;
+            let rewritten: syn::ExprPath =
+                syn::parse2(quote!(#qualified::#item)).expect("a qualified path");
+            *qself = rewritten.qself;
+            *path = rewritten.path;
+        }
+    }
+}
+
+impl syn::visit_mut::VisitMut for QualifySelf {
+    fn visit_expr_path_mut(&mut self, expr: &mut syn::ExprPath) {
+        self.rewrite(&mut expr.qself, &mut expr.path);
+        syn::visit_mut::visit_expr_path_mut(self, expr);
+    }
+    fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {
+        self.rewrite(&mut ty.qself, &mut ty.path);
+        syn::visit_mut::visit_type_path_mut(self, ty);
+    }
+}
+
+fn qualify_self(
+    block: &mut syn::Block,
+    owner: &syn::ItemImpl,
+    self_ty: &syn::Type,
+    path: &syn::Path,
+) {
+    syn::visit_mut::VisitMut::visit_block_mut(&mut QualifySelf::new(owner, self_ty, path), block);
+}
+
+fn qualify_self_sig(
+    sig: &mut syn::Signature,
+    owner: &syn::ItemImpl,
+    self_ty: &syn::Type,
+    path: &syn::Path,
+) {
+    syn::visit_mut::VisitMut::visit_signature_mut(&mut QualifySelf::new(owner, self_ty, path), sig);
+}
+
 /// A path's tokens without spaces, as horizon-mixins writes an id.
 fn plain_spaces(text: &str) -> String {
     text.replace(' ', "")
@@ -874,8 +991,15 @@ fn mirror(
             use crate::__fnr_bridges::*;
         )
     });
+    // The explicit re-exports name every item the module defines; the glob is there only for
+    // items a macro invocation defines, which syn can't see. A glob would also make
+    // horizon-mixins take `format!`/`vec!`/`matches!` as possibly shadowed.
+    let glob = items
+        .iter()
+        .any(|item| matches!(item, Item::Macro(mac) if mac.ident.is_none()))
+        .then(|| quote!(pub use #original::*;));
     Ok(quote! {
-        pub use #original::*;
+        #glob
         #bridge_import
         #(#macros)*
         #(#explicit)*
@@ -1110,6 +1234,61 @@ mod tests {
     }
 
     #[test]
+    fn a_trait_method_moves_into_a_helper_trait_under_its_own_name() {
+        let target = find_trait_method();
+        let crate_ = generate(
+            &root(),
+            "horizon_patch",
+            std::slice::from_ref(&target),
+            &Extras::default(),
+        )
+        .unwrap();
+        let patched = &crate_.patched[0];
+        assert!(patched.id.contains("_as_"), "{}", patched.id);
+        assert!(
+            patched
+                .id
+                .ends_with(&format!("::__fnr_{}", target.rsplit("::").next().unwrap()))
+        );
+        assert!(
+            patched.install.contains("__fnr_install_"),
+            "{}",
+            patched.install
+        );
+    }
+
+    /// The first method of a trait impl in the game module, as `module::<Type as Trait>::name`.
+    fn find_trait_method() -> String {
+        let mut source = Source::new(&root()).unwrap();
+        let modules: Vec<String> = source.files.keys().cloned().collect();
+        for module in modules
+            .iter()
+            .filter(|m| m.starts_with("horizon_client::game::"))
+        {
+            let items = source.module(module).unwrap().items.clone();
+            for item in items {
+                if let Item::Impl(block) = item
+                    && let Some((_, path, _)) = &block.trait_
+                    && block.generics.params.is_empty()
+                    && let syn::Type::Path(ty) = &*block.self_ty
+                    && ty.path.segments.len() == 1
+                    && path.segments.len() == 1
+                    && let Some(ImplItem::Fn(f)) =
+                        block.items.iter().find(|i| matches!(i, ImplItem::Fn(_)))
+                    && f.sig.receiver().is_some_and(|r| r.reference.is_some())
+                    && f.sig.generics.params.is_empty()
+                {
+                    return format!(
+                        "{module}::<{} as {}>::{}",
+                        ty.path.segments[0].ident, path.segments[0].ident, f.sig.ident
+                    );
+                }
+            }
+        }
+        panic!("no trait method");
+    }
+
+    #[test]
     fn a_lower_crate_function_gets_a_patch_crate_of_its_own() {
         let crate_ = generate(
             &root(),
@@ -1126,7 +1305,7 @@ mod tests {
         let lower = &crate_.libs[1].1;
         assert!(lower.contains("pub mod clock"), "{lower}");
         assert!(
-            lower.contains("pub use ::horizon_client_lib::clock::*;"),
+            lower.contains("pub use ::horizon_client_lib::clock::FixedStep;"),
             "{lower}"
         );
         assert!(crate_.patched.iter().any(|p| {
