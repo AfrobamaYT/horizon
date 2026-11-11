@@ -91,7 +91,7 @@ pub enum RandomTicks {
 pub struct BlockShapes {
     /// State property names selecting a shape, in tuple order.
     pub properties: Vec<String>,
-    /// Comma-separated property-value tuples mapped to boxes in block pixels.
+    /// Comma-separated property-value tuples mapped to boxes in block units (one block is 1).
     pub values: BTreeMap<String, Vec<[f64; 6]>>,
     /// Boxes used when no tuple matches.
     pub default: Option<Vec<[f64; 6]>>,
