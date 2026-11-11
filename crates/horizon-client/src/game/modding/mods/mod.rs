@@ -2447,8 +2447,15 @@ mod tests {
                         horizon_client::fluid_models::resolved()[0].still,
                         "reload_fluid:block/oil_1"
                     );
+                    // An item's fluid layer follows the same reload.
+                    let item_still = || {
+                        horizon_client::fluid_models::item_appearance("reload_fluid:oil")
+                            .map(|appearance| appearance.still)
+                    };
+                    assert_eq!(item_still().as_deref(), Some("reload_fluid:block/oil_1"));
                     horizon_client::fluid_models::register(vec![]);
                     horizon_client::fluid_models::set_world_looks([]);
+                    assert_eq!(item_still(), None);
                 });
             },
         );

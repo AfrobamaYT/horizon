@@ -406,7 +406,7 @@ impl ItemPart for Mod {
 impl Hooks for Mod {
     fn living_entity_use_item_finish(
         &self,
-        _: &mut dyn ServerHost,
+        _: HostSide,
         event: &mut LivingEntityUseItemFinishEvent<'_>,
     ) {
         *event.result = None;

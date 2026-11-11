@@ -114,15 +114,6 @@ pub fn start<G>(
     horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
-    let (ids, _loaded_code) = load(&native, &launch);
-    for id in ids {
-        for slot in slots.iter().filter(|slot| slot.id() == id) {
-            if let Err(error) = mod_points::register(slot) {
-                eprintln!("Horizon: {id}: {error}");
-                std::process::exit(game::exit_code::ERROR);
-            }
-        }
-    }
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
     let (home, side, thread) = if launch
@@ -147,6 +138,17 @@ pub fn start<G>(
     );
     // The log's first line names the build, so a bug report that carries the log says which one it was.
     log::info!("Horizon {}", crash::version());
+    // Mod loading emits refusals; both client and dedicated logs must exist first.
+    let (ids, _loaded_code) = load(&native, &launch);
+    for id in ids {
+        for slot in slots.iter().filter(|slot| slot.id() == id) {
+            if let Err(error) = mod_points::register(slot) {
+                log::error!("Horizon: {id}: {error}");
+                logging::flush();
+                std::process::exit(game::exit_code::ERROR);
+            }
+        }
+    }
     crash::install(home.clone(), side);
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {

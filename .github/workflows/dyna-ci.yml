@@ -625,7 +625,7 @@ jobs:
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
+            bash tools/ci/install_launcher_deps.sh libxkbcommon-x11-dev libwayland-dev \
               libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
