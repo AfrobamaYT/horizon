@@ -22,7 +22,7 @@ pub(crate) enum PreparedMain {
     Server(Prepared<NetEvent>),
 }
 /// Keeps failed opaque work alive until after the caller releases its epoch gate.
-/// Boxing occurs only on failed publication, keeping the success path allocation-free.
+/// Boxing occurs only on failed publication, adding no allocation to successful publication.
 pub(crate) enum FailedMain {
     Client(Box<Refused<Event>>),
     Server(Box<Refused<NetEvent>>),

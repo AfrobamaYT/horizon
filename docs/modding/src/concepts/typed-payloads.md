@@ -48,8 +48,8 @@ broadcast event. Dispatch selects the one registered owner.
 Configuration exchanges declarations and freezes the compatible peer intersection.
 Required missing or mismatched declarations refuse admission with the id and
 reason. Optional absence permits admission, but send returns `UnsupportedPeer`
-without a packet. An installation without declarations emits no mod manifest and
-performs no per-tick scan of loaded mods.
+without a packet. When neither peer declares payloads, no mod manifest is exchanged.
+There is no per-tick scan of loaded mods.
 
 Clients send through `ClientHost::send_payload_to_server`; servers use
 `PlayerRef::send_payload`. `IPayloadContext` offers `player`, `reply`, `disconnect`,
