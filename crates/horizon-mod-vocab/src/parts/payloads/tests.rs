@@ -20,7 +20,7 @@ fn registrar_views_preserve_defaults_and_common_occupies_both_protocols() {
         let mut required = event.registrar("1");
         required
             .optional()
-            .versioned("2")
+            .versioned(" 2 ")
             .executes_on(HandlerThread::Network)
             .common_bidirectional(PayloadId("test:both".into()), handler(), Some(handler()));
         required.play_to_server(PayloadId("test:required".into()), handler());
@@ -46,7 +46,7 @@ fn registrar_views_preserve_defaults_and_common_occupies_both_protocols() {
         .filter(|entry| entry.id.0 == "test:both")
     {
         assert!(entry.optional);
-        assert_eq!(entry.version, "2");
+        assert_eq!(entry.version, " 2 ");
         assert_eq!(entry.thread, HandlerThread::Network);
         assert_eq!(entry.direction, PayloadDirection::Bidirectional);
     }

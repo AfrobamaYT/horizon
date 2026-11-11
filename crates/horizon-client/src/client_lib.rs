@@ -125,6 +125,7 @@ pub mod pregen;
 pub mod projectiles;
 pub mod raid;
 pub mod random_tick_sections;
+pub mod raw_payloads;
 pub mod realms;
 pub mod recipe_book;
 pub mod recipe_book_screen;

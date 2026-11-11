@@ -26,12 +26,32 @@ pub struct Payloads {
     phases: [HashMap<String, Registered>; 2],
 }
 
+// no wire: resolved process-local callback and its owning mod's live enable guard.
+/// A receiving callback resolved once while a connection freezes its table.
+#[derive(Clone)]
+pub struct PayloadReceiver {
+    /// The sole registered receiver.
+    pub handler: Arc<dyn IPayloadHandler>,
+    /// Its chosen executor.
+    pub thread: HandlerThread,
+    owner_index: usize,
+}
+
+impl PayloadReceiver {
+    /// Recheck the owner without scanning registrations or resolving the id again.
+    pub fn enabled(&self) -> bool {
+        crate::mod_index_on(self.owner_index)
+    }
+}
+
 impl Payloads {
     /// Iterate normalized single-protocol declarations for negotiation.
     pub fn declarations(&self) -> impl Iterator<Item = &PayloadDeclaration> {
         self.phases
             .iter()
-            .flat_map(|phase| phase.values().map(|entry| &entry.declaration))
+            .flat_map(|phase| phase.values())
+            .filter(|entry| crate::mod_index_on(entry.owner_index))
+            .map(|entry| &entry.declaration)
     }
     /// Resolve the sole receiving owner. A disabled owner or absent callback has
     /// no handler; the connection must report failure, never silently skip it.
@@ -40,7 +60,7 @@ impl Payloads {
         id: &str,
         protocol: PayloadProtocol,
         direction: PayloadDirection,
-    ) -> Option<(Arc<dyn IPayloadHandler>, HandlerThread)> {
+    ) -> Option<PayloadReceiver> {
         let index = match protocol {
             PayloadProtocol::Configuration => 0,
             PayloadProtocol::Play => 1,
@@ -51,14 +71,16 @@ impl Payloads {
             return None;
         }
         match direction {
-            PayloadDirection::ToClient => entry
-                .client
-                .clone()
-                .map(|handler| (handler, entry.client_thread)),
-            PayloadDirection::ToServer => entry
-                .server
-                .clone()
-                .map(|handler| (handler, entry.declaration.thread)),
+            PayloadDirection::ToClient => entry.client.clone().map(|handler| PayloadReceiver {
+                handler,
+                thread: entry.client_thread,
+                owner_index: entry.owner_index,
+            }),
+            PayloadDirection::ToServer => entry.server.clone().map(|handler| PayloadReceiver {
+                handler,
+                thread: entry.declaration.thread,
+                owner_index: entry.owner_index,
+            }),
             PayloadDirection::Bidirectional => None,
         }
     }
@@ -70,7 +92,9 @@ impl Payloads {
             .iter()
             .flat_map(|phase| phase.values())
             .filter(|entry| {
-                entry.declaration.direction != PayloadDirection::ToServer && entry.client.is_none()
+                crate::mod_index_on(entry.owner_index)
+                    && entry.declaration.direction != PayloadDirection::ToServer
+                    && entry.client.is_none()
             })
             .map(|entry| {
                 format!(
@@ -133,8 +157,7 @@ impl PayloadsRegistrar for PartRegistrar {
                 return Err("payload ids must be explicitly namespaced".to_owned());
             }
             declaration.id.0 = self.owned_declaration_id(&declaration.id.0)?;
-            declaration.version = declaration.version.trim().to_owned();
-            if declaration.version.is_empty() {
+            if declaration.version.trim().is_empty() {
                 return Err("payload version must not be blank".to_owned());
             }
             if declaration.direction != PayloadDirection::ToClient && server.is_none() {

@@ -1,7 +1,7 @@
 mod payload;
 pub mod __private {
     pub mod game {
-        pub use crate::parts::{Payloads, installed_payloads};
+        pub use crate::parts::{PayloadReceiver, Payloads, installed_payloads};
     }
 }
 pub use payload::{
