@@ -237,8 +237,10 @@ def build(out: Path, server: bool) -> None:
         # The game crate's features: a `[[mixin]]` build compiles functions copied out of its source
         # under the same cfgs (function replacement).
         "game_features": sorted(next(
-            node["features"] for node in metadata["resolve"]["nodes"]
-            if node["id"].split("#")[0].endswith("/horizon-client")
+            message["features"] for message in artifacts
+            if message["reason"] == "compiler-artifact"
+            and message["package_id"].split("#")[0].endswith("/horizon-client")
+            and "lib" in message["target"]["kind"]
         )),
         "registry_lock": (staged / "Cargo.lock").read_text(),
         "native_links": native_links(metadata, "horizon-mod-host"),
