@@ -442,6 +442,9 @@ mod tests {
             "animations[0].keyframes[0]: `target` is not three finite numbers",
             "a registered target's raw values are checked as the built-in ones are"
         );
+        let still = r#"{"length":0,"loop":true,"animations":[{"bone":"a","target":"animfile:pulse",
+            "keyframes":[{"timestamp":0,"target":[1,1,1],"interpolation":"animfile:step"}]}]}"#;
+        assert_eq!(read(still).unwrap_err(), "`length` 0 is not positive");
     }
 
     /// A target and an interpolation are separate kinds: an id registered only as a target fails

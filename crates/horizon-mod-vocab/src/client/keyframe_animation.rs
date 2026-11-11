@@ -12,7 +12,7 @@ mod tests;
 /// position, rotation or scale (`ModelPart.offsetPos`, `offsetRotation`, `offsetScale`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the three built-in targets and the registered ones
-#[derive(horizon_mod_api_macros::Wire)]
+// no wire: crosses only inside `AnimationHolder`, whose wire form checks each index
 pub enum AnimationTarget {
     /// The part's position, in texels (`minecraft:position`).
     Position,
@@ -28,7 +28,7 @@ pub enum AnimationTarget {
 /// How a channel reaches a keyframe from the one before (`AnimationChannel.Interpolations`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the two built-in interpolations and the registered ones
-#[derive(horizon_mod_api_macros::Wire)]
+// no wire: crosses only inside `AnimationHolder`, whose wire form checks each index
 pub enum Interpolation {
     /// A straight line from the previous keyframe (`minecraft:linear`).
     Linear,
@@ -58,7 +58,7 @@ pub enum JsonAnimationType {
 /// (`post`), and how the channel moves into it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: plain data a parser builds and the sampler reads
-#[derive(horizon_mod_api_macros::Wire)]
+// no wire: crosses only inside `AnimationHolder`, whose wire form checks each index
 pub struct Keyframe {
     /// When, in seconds from the animation's start.
     pub time: f32,
@@ -73,7 +73,7 @@ pub struct Keyframe {
 /// One bone's keyframes for one target (`AnimationChannel`), in time order.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: plain data a parser builds and the sampler reads
-#[derive(horizon_mod_api_macros::Wire)]
+// no wire: crosses only inside `AnimationHolder`, whose wire form checks each index
 pub struct AnimationChannel {
     /// What it moves.
     pub target: AnimationTarget,
@@ -186,29 +186,85 @@ pub struct AnimationHolder {
     pub types: Vec<RegisteredAnimationType>,
 }
 
-/// [`AnimationHolder`] as it crosses the wire: a decoded holder whose `Registered` index doesn't
-/// name a type of its kind in its own `types` is refused, so an index never arrives without its
-/// list.
-#[doc(hidden)]
+/// [`AnimationHolder`] as it crosses the wire, its channels in their own wire forms: decoding
+/// refuses a holder whose `Registered` index doesn't name a type of its kind in its own `types`,
+/// so an index never crosses without its list.
 #[derive(horizon_mod_api_macros::Wire)]
-// exhaustive: the holder's wire form, field for field
-pub struct AnimationHolderWire {
+pub(crate) struct AnimationHolderWire {
     id: Identifier,
     length: f32,
     looping: bool,
-    bones: Vec<(String, Vec<AnimationChannel>)>,
+    bones: Vec<(String, Vec<ChannelWire>)>,
     types: Vec<RegisteredAnimationType>,
+}
+
+/// An [`AnimationChannel`] inside [`AnimationHolderWire`].
+#[derive(horizon_mod_api_macros::Wire)]
+struct ChannelWire {
+    target: TargetWire,
+    keyframes: Vec<KeyframeWire>,
+}
+
+/// A [`Keyframe`] inside [`AnimationHolderWire`].
+#[derive(horizon_mod_api_macros::Wire)]
+struct KeyframeWire {
+    time: f32,
+    pre: [f32; 3],
+    post: [f32; 3],
+    interpolation: InterpolationWire,
+}
+
+/// An [`AnimationTarget`] inside [`AnimationHolderWire`].
+#[derive(horizon_mod_api_macros::Wire)]
+enum TargetWire {
+    Position,
+    Rotation,
+    Scale,
+    Registered(u16),
+}
+
+/// An [`Interpolation`] inside [`AnimationHolderWire`].
+#[derive(horizon_mod_api_macros::Wire)]
+enum InterpolationWire {
+    Linear,
+    CatmullRom,
+    Registered(u16),
 }
 
 impl From<&AnimationHolder> for AnimationHolderWire {
     fn from(holder: &AnimationHolder) -> Self {
-        let holder = holder.clone();
+        let channel = |channel: &AnimationChannel| ChannelWire {
+            target: match channel.target {
+                AnimationTarget::Position => TargetWire::Position,
+                AnimationTarget::Rotation => TargetWire::Rotation,
+                AnimationTarget::Scale => TargetWire::Scale,
+                AnimationTarget::Registered(index) => TargetWire::Registered(index),
+            },
+            keyframes: channel
+                .keyframes
+                .iter()
+                .map(|k| KeyframeWire {
+                    time: k.time,
+                    pre: k.pre,
+                    post: k.post,
+                    interpolation: match k.interpolation {
+                        Interpolation::Linear => InterpolationWire::Linear,
+                        Interpolation::CatmullRom => InterpolationWire::CatmullRom,
+                        Interpolation::Registered(index) => InterpolationWire::Registered(index),
+                    },
+                })
+                .collect(),
+        };
         Self {
-            id: holder.id,
+            id: holder.id.clone(),
             length: holder.length,
             looping: holder.looping,
-            bones: holder.bones,
-            types: holder.types,
+            bones: holder
+                .bones
+                .iter()
+                .map(|(bone, channels)| (bone.clone(), channels.iter().map(channel).collect()))
+                .collect(),
+            types: holder.types.clone(),
         }
     }
 }
@@ -216,11 +272,37 @@ impl From<&AnimationHolder> for AnimationHolderWire {
 impl TryFrom<AnimationHolderWire> for AnimationHolder {
     type Error = AnimationError;
     fn try_from(wire: AnimationHolderWire) -> Result<Self, AnimationError> {
+        let channel = |channel: ChannelWire| AnimationChannel {
+            target: match channel.target {
+                TargetWire::Position => AnimationTarget::Position,
+                TargetWire::Rotation => AnimationTarget::Rotation,
+                TargetWire::Scale => AnimationTarget::Scale,
+                TargetWire::Registered(index) => AnimationTarget::Registered(index),
+            },
+            keyframes: channel
+                .keyframes
+                .into_iter()
+                .map(|k| Keyframe {
+                    time: k.time,
+                    pre: k.pre,
+                    post: k.post,
+                    interpolation: match k.interpolation {
+                        InterpolationWire::Linear => Interpolation::Linear,
+                        InterpolationWire::CatmullRom => Interpolation::CatmullRom,
+                        InterpolationWire::Registered(index) => Interpolation::Registered(index),
+                    },
+                })
+                .collect(),
+        };
         let holder = Self {
             id: wire.id,
             length: wire.length,
             looping: wire.looping,
-            bones: wire.bones,
+            bones: wire
+                .bones
+                .into_iter()
+                .map(|(bone, channels)| (bone, channels.into_iter().map(channel).collect()))
+                .collect(),
             types: wire.types,
         };
         holder.check_indexes()?;
