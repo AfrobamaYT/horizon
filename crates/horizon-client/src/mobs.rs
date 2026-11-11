@@ -4258,22 +4258,6 @@ impl Mob {
         self.attacker_aim = None;
         hurt
     }
-    /// `damage` of a blow dealt by a projectile (`motion`: its horizontal movement) whose owner
-    /// is `aim`.
-    pub fn damage_projectile(
-        &mut self,
-        level: &mut DamageLevel<'_>,
-        amount: f32,
-        source: Damage,
-        aim: Option<Aim>,
-        motion: [f64; 2],
-    ) -> bool {
-        self.projectile_damage_committed = false;
-        self.projectile_motion = Some(motion);
-        let hurt = self.damage_aimed(level, amount, source, aim);
-        self.projectile_motion = None;
-        hurt
-    }
     /// `hurtServer` of `amount` from `source` in `level`.
     pub fn damage(&mut self, level: &mut DamageLevel<'_>, amount: f32, source: Damage) -> bool {
         self.damage_with(level, amount, source, None)
@@ -7824,3 +7808,5 @@ mod hidden_speed_mob_tick_tests {
         }
     }
 }
+
+mod projectile_damage;
