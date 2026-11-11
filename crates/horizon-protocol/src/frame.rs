@@ -39,9 +39,17 @@ pub fn encode(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
     Ok(prefixed(&contents(body, threshold)?))
 }
 
-/// What [`encode`] puts after the length prefix: the same for every
-/// connection with the same threshold.
-pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
+/// Consume an uncompressed body without copying it; compressed framing uses [`contents`].
+pub fn contents_owned(body: Vec<u8>, threshold: Option<usize>) -> Result<Vec<u8>> {
+    if threshold.is_none() {
+        check_body_size(&body, threshold)?;
+        Ok(body)
+    } else {
+        contents(&body, threshold)
+    }
+}
+
+fn check_body_size(body: &[u8], threshold: Option<usize>) -> Result<()> {
     let (stage, limit) = if threshold.is_some() {
         (FrameSize::Uncompressed, MAX_UNCOMPRESSED)
     } else {
@@ -54,6 +62,13 @@ pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
             limit,
         }));
     }
+    Ok(())
+}
+
+/// What [`encode`] puts after the length prefix: the same for every
+/// connection with the same threshold.
+pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
+    check_body_size(body, threshold)?;
     let inner = match threshold {
         None => body.to_vec(),
         Some(t) if body.len() < t => {

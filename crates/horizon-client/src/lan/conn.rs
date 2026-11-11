@@ -12,6 +12,7 @@ use super::{
     forwarding,
     io_pool::{self, Session as _},
 };
+use horizon_mod_api::{PayloadFrameStage, PayloadId, PayloadSendError};
 use horizon_protocol::{
     PROTOCOL_VERSION,
     connection::{ConnWriter, Connection, Counters},
@@ -275,6 +276,7 @@ pub struct PlayerSender {
     /// The bytes of the bodies sent and not framed yet.
     pub pending: Arc<AtomicUsize>,
     held: Arc<Mutex<Vec<Vec<u8>>>>,
+    framing: horizon_protocol::connection::Framing,
     to: To,
     /// The connection's bytes on the wire (after compression and encryption), counted by its
     /// network thread: `horizon-report`'s network use per player. None for a test's channel.
@@ -296,6 +298,7 @@ impl PlayerSender {
             undrained: Arc::default(),
             pending,
             held: Arc::default(),
+            framing: horizon_protocol::connection::Framing::Network(None),
             to: To::Channel(tx),
             wire: None,
         }
@@ -306,6 +309,7 @@ impl PlayerSender {
             undrained: Arc::default(),
             pending: Arc::default(),
             held: Arc::default(),
+            framing: horizon_protocol::connection::Framing::Network(None),
             to: To::Disabled,
             wire: None,
         }
@@ -332,11 +336,61 @@ impl PlayerSender {
     fn held(&self) -> std::sync::MutexGuard<'_, Vec<Vec<u8>>> {
         self.held.lock().unwrap_or_else(PoisonError::into_inner)
     }
+    fn reserve(&self, cost: usize) -> bool {
+        self.pending
+            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| {
+                n.checked_add(cost).filter(|n| *n <= io_pool::MAX_PENDING)
+            })
+            .is_ok()
+    }
+    /// Prepare a whole encoded packet without publishing it. The channel is diagnostic only;
+    /// its wire identifier must already be included in `body`.
+    pub fn prepare_payload(
+        &self,
+        body: Vec<u8>,
+        id: &PayloadId,
+    ) -> Result<PreparedPayload, PayloadSendError> {
+        let To::Pool(outbox, _) = &self.to else {
+            return Err(PayloadSendError::Disconnected);
+        };
+        if !outbox.alive() {
+            return Err(PayloadSendError::Disconnected);
+        }
+        let bytes = self
+            .framing
+            .contents_owned(body)
+            .map_err(|e| match e.frame_limit() {
+                Some(d) => PayloadSendError::FrameTooLarge {
+                    id: id.clone(),
+                    stage: match d.stage {
+                        horizon_protocol::frame::FrameSize::Encoded => PayloadFrameStage::Encoded,
+                        horizon_protocol::frame::FrameSize::Uncompressed => {
+                            PayloadFrameStage::Uncompressed
+                        }
+                    },
+                    size: d.size as u64,
+                    limit: d.limit as u64,
+                },
+                None => PayloadSendError::EncodeFailed(e.to_string()),
+            })?;
+        let cost = io_pool::charge(&bytes);
+        if !self.reserve(cost) {
+            return Err(PayloadSendError::Backpressure);
+        }
+        Ok(PreparedPayload {
+            sender: self.clone(),
+            bytes: Some(bytes),
+            cost,
+        })
+    }
     pub fn send(&self, body: Vec<u8>) {
         if matches!(self.to, To::Disabled) {
             return;
         }
-        self.pending.fetch_add(body.len(), Ordering::Relaxed);
+        if !self.reserve(io_pool::charge(&body)) {
+            self.close();
+            return;
+        }
         if HOLDING.get() {
             self.held().push(body);
         } else {
@@ -360,7 +414,10 @@ impl PlayerSender {
         }
         let mut held = self.held();
         for body in bodies {
-            self.pending.fetch_add(body.len(), Ordering::Relaxed);
+            if !self.reserve(io_pool::charge(&body)) {
+                self.close();
+                return;
+            }
             held.push(body);
         }
     }
@@ -384,9 +441,41 @@ impl PlayerSender {
             To::Channel(tx) => drop(tx.send(Out::Disconnect(reason))),
             To::Pool(outbox, _) => {
                 let body = play::Clientbound::Disconnect(cfg::Disconnect { reason }).encode();
-                self.pending.fetch_add(body.len(), Ordering::Relaxed);
+                if !self.reserve(io_pool::charge(&body)) {
+                    self.close();
+                    return;
+                }
                 outbox.send(vec![body], Some(io_pool::End::Disconnect));
             }
+        }
+    }
+}
+
+/// A transaction-owned packet. Dropping it cancels its retained-byte reservation.
+pub struct PreparedPayload {
+    sender: PlayerSender,
+    bytes: Option<Vec<u8>>,
+    cost: usize,
+}
+impl PreparedPayload {
+    /// Publish exactly the bytes prepared earlier, after the transaction commits.
+    pub fn publish(mut self) -> Result<(), PayloadSendError> {
+        self.sender.flush();
+        let bytes = self.bytes.take().expect("prepared bytes");
+        let To::Pool(outbox, _) = &self.sender.to else {
+            unreachable!()
+        };
+        if outbox.publish(bytes, self.cost) {
+            Ok(())
+        } else {
+            Err(PayloadSendError::Disconnected)
+        }
+    }
+}
+impl Drop for PreparedPayload {
+    fn drop(&mut self) {
+        if self.bytes.is_some() {
+            self.sender.pending.fetch_sub(self.cost, Ordering::Relaxed);
         }
     }
 }
@@ -1484,6 +1573,7 @@ fn play(
         undrained: undrained.clone(),
         pending,
         held: Arc::default(),
+        framing: c.writer.framing(),
         to: To::Pool(outbox.clone(), watch.clone()),
         wire: Some(c.reader.counters.clone()),
     };
@@ -1794,7 +1884,7 @@ pub(super) fn frame_body(
         Some(t) if body.len() >= t.max(SHARED_FRAME_MIN) => {
             writer.frame_into(&SharedFrames::get().contents(body, t)?, out);
         }
-        threshold => writer.frame_into(&horizon_protocol::frame::contents(body, threshold)?, out),
+        _ => writer.frame_into(&writer.contents(body)?, out),
     }
     Ok(())
 }
@@ -2413,7 +2503,10 @@ mod tests {
         drop(holding);
         sender.flush();
         assert_eq!(bodies(&rx), [vec![vec![5]], vec![b"disconnect".to_vec()]]);
-        assert_eq!(sender.pending.load(Ordering::Relaxed), 5);
+        assert_eq!(
+            sender.pending.load(Ordering::Relaxed),
+            5 + 10 * std::mem::size_of::<io_pool::Queued>()
+        );
     }
 
     /// A client that answers no keep-alive is timed out 30 s after the last
@@ -2467,5 +2560,89 @@ mod tests {
         assert_eq!(rate.received(t0 + Duration::from_secs(10)), None);
         assert!(rate.average > 1.5 && rate.average < 2.0, "{}", rate.average);
         assert!(rate.next > t0 + Duration::from_secs(10));
+    }
+}
+
+#[cfg(test)]
+mod outgoing_budget_tests {
+    use super::*;
+    use horizon_protocol::connection::Framing;
+    fn sender(framing: Framing) -> PlayerSender {
+        let pending = Arc::default();
+        let outbox = io_pool::Outbox::new(Arc::clone(&pending)).unwrap();
+        PlayerSender {
+            undrained: Arc::default(),
+            pending,
+            held: Arc::default(),
+            framing,
+            to: To::Pool(
+                outbox,
+                Arc::new(KeepAliveWatch {
+                    start: Instant::now(),
+                    alive: Arc::new(AtomicI64::new(-1)),
+                }),
+            ),
+            wire: None,
+        }
+    }
+    #[test]
+    fn prepared_reservations_refund_and_share_capacity() {
+        let s = sender(Framing::Memory);
+        let id = PayloadId("test:raw".into());
+        let body = Vec::with_capacity(io_pool::MAX_PENDING - 4096);
+        let p = s.prepare_payload(body, &id).unwrap();
+        assert!(s.pending.load(Ordering::Relaxed) > io_pool::MAX_PENDING - 4096);
+        assert!(matches!(
+            s.prepare_payload(vec![0; 8192], &id),
+            Err(PayloadSendError::Backpressure)
+        ));
+        drop(p);
+        assert_eq!(s.pending.load(Ordering::Relaxed), 0);
+        let p = s.prepare_payload(vec![0; 9 << 20], &id).unwrap();
+        s.close();
+        assert!(matches!(p.publish(), Err(PayloadSendError::Disconnected)));
+        assert_eq!(s.pending.load(Ordering::Relaxed), 0);
+    }
+    #[test]
+    fn prepare_does_not_deliver_and_publish_reuses_compressed_contents() {
+        let s = sender(Framing::Network(Some(32)));
+        let id = PayloadId("test:raw".into());
+        let body = vec![42; 10000];
+        let expected = Framing::Network(Some(32)).contents(&body).unwrap();
+        let p = s.prepare_payload(body, &id).unwrap();
+        let To::Pool(outbox, _) = &s.to else {
+            unreachable!()
+        };
+        assert!(outbox.queued_contents().is_empty());
+        assert_eq!(p.bytes.as_ref().unwrap(), &expected);
+        p.publish().unwrap();
+        assert_eq!(outbox.queued_contents(), [expected]);
+        let before = s.pending.load(Ordering::Relaxed);
+        let hold = Holding::start();
+        s.send(Vec::with_capacity(20000));
+        assert_eq!(
+            s.pending.load(Ordering::Relaxed),
+            before + io_pool::charge(&Vec::with_capacity(20000))
+        );
+        drop(hold);
+        s.flush();
+        let reserved = s.prepare_payload(vec![1; 400], &id).unwrap();
+        assert!(s.pending.load(Ordering::Relaxed) > before + 20000);
+        drop(reserved);
+    }
+    #[test]
+    fn network_refuses_before_queueing_and_empty_messages_cost_space() {
+        let s = sender(Framing::Network(None));
+        assert!(matches!(
+            s.prepare_payload(vec![0; 1 << 21], &PayloadId("test:raw".into())),
+            Err(PayloadSendError::FrameTooLarge { .. })
+        ));
+        assert_eq!(s.pending.load(Ordering::Relaxed), 0);
+        let _hold = Holding::start();
+        for _ in 0..(io_pool::MAX_PENDING / io_pool::charge(&Vec::new()) + 10) {
+            s.send(Vec::new());
+        }
+        assert!(s.pending.load(Ordering::Relaxed) <= io_pool::MAX_PENDING);
+        assert!(s.held().len() < io_pool::MAX_PENDING / std::mem::size_of::<Vec<u8>>());
     }
 }

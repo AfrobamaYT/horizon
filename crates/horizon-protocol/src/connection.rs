@@ -537,16 +537,49 @@ impl ConnReader {
         Ok(self.stream.set_read_timeout(timeout)?)
     }
 }
+/// Immutable post-login packet framing for a connection.
+#[derive(Clone, Copy, Debug)]
+pub enum Framing {
+    /// Private local transport, without network packet limits.
+    Memory,
+    /// TCP framing, optionally with threshold compression.
+    Network(Option<usize>),
+}
+impl Framing {
+    /// Prepare contents without an outer length prefix.
+    pub fn contents(self, body: &[u8]) -> Result<Vec<u8>> {
+        match self {
+            Self::Memory => Ok(body.to_vec()),
+            Self::Network(t) => frame::contents(body, t),
+        }
+    }
+    /// Prepare contents, retaining ownership when no compression is needed.
+    pub fn contents_owned(self, body: Vec<u8>) -> Result<Vec<u8>> {
+        match self {
+            Self::Memory => Ok(body),
+            Self::Network(t) => frame::contents_owned(body, t),
+        }
+    }
+}
 impl ConnWriter {
+    /// An independent shutdown handle for this writer.
+    pub fn closer(&self) -> Result<Closer> {
+        Ok(Closer(self.stream.try_clone()?))
+    }
     /// Encode frame contents for this transport. Memory packets bypass network
     /// compression and its size limits; use this before `frame_into` when detached.
     pub fn contents(&self, body: &[u8]) -> Result<Vec<u8>> {
+        self.framing().contents(body)
+    }
+    /// Capture the connection's immutable framing mode after login.
+    pub fn framing(&self) -> Framing {
         if self.memory {
-            Ok(body.to_vec())
+            Framing::Memory
         } else {
-            frame::contents(body, self.threshold)
+            Framing::Network(self.threshold)
         }
     }
+
     /// The server release selected for this connection (local play uses the pinned release).
     pub fn server_version(&self) -> crate::adapter::ServerVersion {
         self.adapter
