@@ -23,21 +23,24 @@ for target in listing.read_text().splitlines():
             continue
         relative = str(path).split('/src/', 1)[1]
         prefix = '/'.join(module)
-        if not (relative == prefix + '.rs' or relative == prefix + '/mod.rs' or relative.startswith(prefix + '/')):
-            continue
         source = path.read_text()
         for match in re.finditer(r'(?m)^([ \t]*)(?:(?:pub(?:\([^)]*\))?|async|unsafe|const)\s+)*fn\s+' + name + r'\b', source):
-            if owner and not re.search(r'impl[^{}]*\b' + owner + r'\b[^{}]*\{[^}]*$', source[:match.start()], re.S):
-                # Methods following another method have closing braces; use the latest impl header.
-                headers = list(re.finditer(r'impl[^{}]*\{', source[:match.start()]))
+            if owner:
+                headers = list(re.finditer(r'(?m)^impl[^{}]*\{', source[:match.start()]))
                 if not headers or not re.search(r'\b' + owner + r'\b', headers[-1].group()):
                     continue
             candidates.append((path, match.start(), match.group(1)))
     # Re-exported client-lib modules live in the client tree; other crates win their own definitions.
+    matching = [c for c in candidates if ('/src/' + '/'.join(module)) in str(c[0])]
+    candidates = matching or candidates
     own = [c for c in candidates if str(c[0]).startswith(str(package) + '/')]
     candidates = own or candidates
+    if len(candidates) > 1:
+        candidates = [c for c in candidates if c[0].read_text()[c[1]:].lstrip().startswith("pub")]
     if len(candidates) != 1:
         raise RuntimeError((target, candidates))
     path, offset, indent = candidates[0]
+    if path.read_text()[:offset].rstrip().endswith("#[horizon_mod_api_macros::replaceable]"):
+        continue
     source = path.read_text()
     path.write_text(source[:offset] + indent + '#[horizon_mod_api_macros::replaceable]\n' + source[offset:])
