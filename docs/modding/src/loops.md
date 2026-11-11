@@ -59,7 +59,7 @@ The game keeps the order, what is visited and where the slot sits. A slot cannot
 
 ## Several mods, state, panics
 
-- Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue` wins and later mods are not asked for that entity. `after` runs for every mod.
+- Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue` wins and later mods are not asked for that entity. `after` runs for every mod that defines it; a slot that defines only `before` costs nothing after the tick.
 - The slot value is created with `Default` once per `Game` and kept across ticks. Key per-dimension state on the game's dimension.
 - A run started from inside a slot (the slot calls something that ticks block entities) is the game's own loop, without slots.
 - A panic in a slot unwinds out of the tick like any game panic: the server writes its crash report and saves the world. The report names the mod and the loop: `in native mod <id>, hook loop block_entities.tick, part <id>::<Type>`. That `Game` does not run the slots again.
