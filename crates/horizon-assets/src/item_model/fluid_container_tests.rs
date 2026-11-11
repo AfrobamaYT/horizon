@@ -188,6 +188,9 @@ fn an_empty_container_draws_its_declared_fluid_or_none() {
             ),
         ]
     );
+    // ... but `FluidContentsTint` reads the stack, which holds nothing: the empty fluid's
+    // model has no tint source, so the declared fluid is drawn white (-1), not in its tint.
+    assert_eq!(drawn[1].tints, vec![-1]);
 }
 
 #[test]

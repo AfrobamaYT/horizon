@@ -1135,13 +1135,14 @@ pub trait ItemEnv {
         -1
     }
     /// The fluid `stack` holds (`FluidUtil.getFirstStackContained`), or `None` when it
-    /// holds none. Horizon has no per-stack fluid contents yet, so a container draws
-    /// only its declared fluid until a host answers this.
+    /// holds none. The game answers for vanilla's buckets; it has no per-stack fluid
+    /// contents beyond them, so any other container draws its declared fluid.
     fn stack_fluid(&self, _stack: &StackView) -> Option<String> {
         None
     }
-    /// What `fluid` draws with in an item: its still sprite and tint. `None` for a
-    /// fluid the host does not know, `minecraft:empty` included.
+    /// What `fluid` draws with in an item: its still sprite and the tint
+    /// `FluidContentsTint` gives a stack holding it. `None` for a fluid the host does not
+    /// know, `minecraft:empty` included.
     fn fluid_appearance(&self, _fluid: &str) -> Option<FluidAppearance> {
         None
     }
@@ -1524,22 +1525,22 @@ impl Resolve<'_> {
     /// fluid's still sprite through the `fluid` mask, then the cover.
     fn fluid_container(&self, out: &mut ResolvedItem, container: &FluidContainer, parent: &Mat4) {
         let textures = &container.textures;
-        let held = self
-            .env
-            .stack_fluid(self.stack)
-            .unwrap_or_else(|| container.fluid.clone());
-        let appearance = self.env.fluid_appearance(&held);
+        // `update`: the fluid the stack holds, else the model's own (offsets 0-29).
+        let held = self.env.stack_fluid(self.stack);
+        let drawn = held.as_deref().unwrap_or(&container.fluid);
         if let Some(base) = &textures.base {
             self.sprite_layer(out, base, None, Vec::new(), parent);
         }
-        if let (Some(mask), Some(appearance)) = (&textures.fluid, appearance) {
-            self.sprite_layer(
-                out,
-                &appearance.still,
-                Some(mask),
-                vec![appearance.tint],
-                parent,
-            );
+        if let (Some(mask), Some(appearance)) = (&textures.fluid, self.env.fluid_appearance(drawn))
+        {
+            // `FluidContentsTint` colours the layer from the fluid the stack holds, not the one
+            // drawn: a stack holding none gets the empty fluid's model, which has no tint source,
+            // so -1, even while the declared fluid is drawn.
+            let tint = held
+                .as_deref()
+                .and_then(|held| self.env.fluid_appearance(held))
+                .map_or(-1, |held| held.tint);
+            self.sprite_layer(out, &appearance.still, Some(mask), vec![tint], parent);
         }
         // The cover is always the mask (`bakeItemMaskQuads(baker, 0, cover, drawn, ...)`, offsets
         // 631-639). With `cover_is_mask` it picks out the parts of `base` drawn again over the

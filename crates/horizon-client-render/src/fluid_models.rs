@@ -2,6 +2,10 @@
 //! (`data/<id>/horizon/fluid/`), completed by what mods register (`register_fluid_models`).
 //! There is no second appearance store: a model only names sprites a look can't, and every
 //! resource load reads this again, so a reload draws the new pack's textures.
+//!
+//! An item's fluid layer (`neoforge:fluid_container`) reads the same data: [`item_appearance`]
+//! gives a fluid's still sprite and item tint, and [`held_fluid`] the fluid a vanilla bucket holds.
+use horizon_assets::item_model::FluidAppearance;
 use horizon_mod_package::content::{FluidLook, FluidModel, namespaced_id};
 use std::sync::RwLock;
 
@@ -61,41 +65,115 @@ fn resolve(looks: &[FluidLook], registered: &[FluidModel]) -> Vec<ResolvedFluidM
     }
     looks
         .iter()
-        .map(|look| {
-            let model = registered.iter().find(|model| model.fluid == look.id);
-            let sprite = |name: Option<&String>| {
-                name.filter(|name| {
-                    let valid = namespaced_id(name);
-                    if !valid {
-                        log::warn!("Horizon: fluid {}: bad sprite id {name:?}", look.id);
-                    }
-                    valid
-                })
-                .cloned()
-            };
-            let overlay = sprite(model.and_then(|model| model.overlay.as_ref()));
-            let flowing = sprite(model.and_then(|model| model.flowing.as_ref()));
-            let still = sprite(model.and_then(|model| model.still.as_ref()))
-                .or_else(|| sprite(look.sprite.as_ref()));
-            let fixed = look.tint.map(|tint| FluidTint::Fixed(tint & 0xFF_FFFF));
-            match still {
-                Some(still) => ResolvedFluidModel {
-                    fluid: look.id.clone(),
-                    flowing: flowing.unwrap_or_else(|| still.clone()),
-                    still,
-                    overlay,
-                    tint: fixed.unwrap_or(FluidTint::Fixed(0xFF_FFFF)),
-                },
-                None => ResolvedFluidModel {
-                    fluid: look.id.clone(),
-                    still: "minecraft:block/water_still".into(),
-                    flowing: flowing.unwrap_or_else(|| "minecraft:block/water_flow".into()),
-                    overlay: overlay.or_else(|| Some("minecraft:block/water_overlay".into())),
-                    tint: fixed.unwrap_or(FluidTint::Biome),
-                },
-            }
-        })
+        .map(|look| resolve_look(look, registered, true))
         .collect()
+}
+
+/// One world fluid's model. `warn` logs a bad sprite id; the resource load does, while an item
+/// drawn every frame does not repeat it.
+fn resolve_look(look: &FluidLook, registered: &[FluidModel], warn: bool) -> ResolvedFluidModel {
+    let model = registered.iter().find(|model| model.fluid == look.id);
+    let sprite = |name: Option<&String>| {
+        name.filter(|name| {
+            let valid = namespaced_id(name);
+            if !valid && warn {
+                log::warn!("Horizon: fluid {}: bad sprite id {name:?}", look.id);
+            }
+            valid
+        })
+        .cloned()
+    };
+    let overlay = sprite(model.and_then(|model| model.overlay.as_ref()));
+    let flowing = sprite(model.and_then(|model| model.flowing.as_ref()));
+    let still = sprite(model.and_then(|model| model.still.as_ref()))
+        .or_else(|| sprite(look.sprite.as_ref()));
+    let fixed = look.tint.map(|tint| FluidTint::Fixed(tint & 0xFF_FFFF));
+    match still {
+        Some(still) => ResolvedFluidModel {
+            fluid: look.id.clone(),
+            flowing: flowing.unwrap_or_else(|| still.clone()),
+            still,
+            overlay,
+            tint: fixed.unwrap_or(FluidTint::Fixed(0xFF_FFFF)),
+        },
+        None => ResolvedFluidModel {
+            fluid: look.id.clone(),
+            still: "minecraft:block/water_still".into(),
+            flowing: flowing.unwrap_or_else(|| "minecraft:block/water_flow".into()),
+            overlay: overlay.or_else(|| Some("minecraft:block/water_overlay".into())),
+            tint: fixed.unwrap_or(FluidTint::Biome),
+        },
+    }
+}
+
+/// Water's colour as an item: NeoForge's `FluidTintSources.water()`, whose `color(FluidState)`
+/// is the constant `-12618012` (`FluidTintSources$3`), the default biome water colour opaque.
+/// `FluidContentsTint` reaches it through `colorAsStack`, so an item's water has no biome.
+pub const WATER_ITEM_TINT: i32 = 0xFF3F_76E4_u32 as i32;
+
+/// What `fluid` draws with as an item's fluid layer: `FluidStateModelSet.get(fluid)`'s still
+/// sprite (`DynamicFluidContainerModel.bakeModelForFluid`) and its tint as `FluidContentsTint`
+/// gives it (`fluidTintSource().colorAsStack(stack)`, white with no tint source).
+///
+/// Vanilla's fluids come from the world renderer's own table ([`crate::block_sprites::fluid_faces`]);
+/// `FluidStateModelSet.bake` maps a fluid and its flowing form to one model. A mod's world
+/// fluid draws its world model's still sprite with its fixed tint, or water's when it takes the
+/// biome's. `None` for `minecraft:empty` and every fluid no model knows; NeoForge would draw the
+/// missing model's sprite there (`FluidStateModelSet.get`'s `missingModel`), Horizon draws no
+/// fluid layer.
+pub fn item_appearance(fluid: &str) -> Option<FluidAppearance> {
+    item_appearance_in(
+        fluid,
+        &LOOKS.read().unwrap_or_else(|e| e.into_inner()),
+        &REGISTERED.read().unwrap_or_else(|e| e.into_inner()),
+    )
+}
+
+fn item_appearance_in(
+    fluid: &str,
+    looks: &[FluidLook],
+    registered: &[FluidModel],
+) -> Option<FluidAppearance> {
+    let vanilla = match fluid {
+        "minecraft:water" | "minecraft:flowing_water" => Some("minecraft:water"),
+        "minecraft:lava" | "minecraft:flowing_lava" => Some("minecraft:lava"),
+        _ => None,
+    };
+    if let Some(block) = vanilla {
+        let (still, tint, _) = crate::block_sprites::fluid_faces(block)?;
+        return Some(FluidAppearance {
+            still: format!("minecraft:{still}"),
+            // Lava's model has no tint source: `FluidContentsTint` answers -1.
+            tint: if matches!(tint, Some(crate::mesher::TintSource::Water)) {
+                WATER_ITEM_TINT
+            } else {
+                -1
+            },
+        });
+    }
+    let look = looks.iter().find(|look| look.id == fluid)?;
+    let model = resolve_look(look, registered, false);
+    Some(FluidAppearance {
+        still: model.still,
+        tint: match model.tint {
+            FluidTint::Fixed(rgb) => (0xFF00_0000 | rgb) as i32,
+            FluidTint::Biome => WATER_ITEM_TINT,
+        },
+    })
+}
+
+/// The fluid a vanilla bucket holds: NeoForge registers `BucketResourceHandler` for every item
+/// whose class is exactly `BucketItem` (`CapabilityHooks.registerFallbackVanillaProviders`), and
+/// its `getResourceFrom` answers `BucketItem.content`. The empty bucket's content is
+/// `Fluids.EMPTY`, which `FluidUtil.getFirstStackContained` reads as holding none. Mob buckets
+/// are subclasses and get no handler; the milk bucket holds NeoForge's milk only when a mod
+/// enables it, which Horizon has no fluid for.
+pub fn held_fluid(item: &str) -> Option<&'static str> {
+    match item {
+        "minecraft:water_bucket" => Some("minecraft:water"),
+        "minecraft:lava_bucket" => Some("minecraft:lava"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +249,79 @@ mod tests {
         assert_eq!(drawn[0].overlay.as_deref(), Some("a:block/oil_overlay"));
         assert_eq!(drawn[0].tint, FluidTint::Fixed(0x11_2233));
         assert_eq!(drawn[1].flowing, "a:block/other", "its model is its own");
+    }
+
+    /// `FluidStateModelSet`'s water and lava models, as `DynamicFluidContainerModel` reads
+    /// them: `block/water_still` with `FluidTintSources.water()`'s item colour (the constant
+    /// `-12618012` in `FluidTintSources$3.color(FluidState)`), and `block/lava_still` with no
+    /// tint source, which `FluidContentsTint` answers with -1. A flowing fluid shares its
+    /// source's model; the empty fluid and unknown fluids have none.
+    #[test]
+    fn vanilla_fluids_draw_their_still_sprite_with_their_item_tint() {
+        let appearance = |fluid| item_appearance_in(fluid, &[], &[]);
+        let water = FluidAppearance {
+            still: "minecraft:block/water_still".into(),
+            tint: -12618012,
+        };
+        assert_eq!(appearance("minecraft:water"), Some(water.clone()));
+        assert_eq!(appearance("minecraft:flowing_water"), Some(water));
+        let lava = FluidAppearance {
+            still: "minecraft:block/lava_still".into(),
+            tint: -1,
+        };
+        assert_eq!(appearance("minecraft:lava"), Some(lava.clone()));
+        assert_eq!(appearance("minecraft:flowing_lava"), Some(lava));
+        assert_eq!(appearance("minecraft:empty"), None);
+        assert_eq!(
+            appearance("minecraft:bubble_column"),
+            None,
+            "a block, not a fluid"
+        );
+        assert_eq!(appearance("a:unknown"), None);
+    }
+
+    /// A mod's world fluid draws in an item what it draws in the world: its model's still
+    /// sprite, its fixed tint made opaque, or water's sprite and item colour when it declares
+    /// neither.
+    #[test]
+    fn a_mod_fluid_draws_its_world_still_sprite_and_tint() {
+        let looks = [
+            look("a:oil", Some("a:block/oil"), Some(0x8011_2233)),
+            look("a:plain", None, None),
+        ];
+        let registered = [FluidModel {
+            still: Some("a:block/oil_still".into()),
+            ..model("a:oil")
+        }];
+        assert_eq!(
+            item_appearance_in("a:oil", &looks, &registered),
+            Some(FluidAppearance {
+                still: "a:block/oil_still".into(),
+                tint: 0xFF11_2233_u32 as i32,
+            })
+        );
+        assert_eq!(
+            item_appearance_in("a:plain", &looks, &registered),
+            Some(FluidAppearance {
+                still: "minecraft:block/water_still".into(),
+                tint: -12618012,
+            })
+        );
+    }
+
+    /// `BucketResourceHandler` for the items whose class is exactly `BucketItem`: the water
+    /// and lava buckets hold their fluid, the empty bucket (`Fluids.EMPTY`) holds none, and a
+    /// mob bucket (a `MobBucketItem`) has no handler at all.
+    #[test]
+    fn vanilla_buckets_hold_their_fluid() {
+        assert_eq!(
+            held_fluid("minecraft:water_bucket"),
+            Some("minecraft:water")
+        );
+        assert_eq!(held_fluid("minecraft:lava_bucket"), Some("minecraft:lava"));
+        assert_eq!(held_fluid("minecraft:bucket"), None);
+        assert_eq!(held_fluid("minecraft:cod_bucket"), None);
+        assert_eq!(held_fluid("minecraft:powder_snow_bucket"), None);
     }
 
     #[test]
