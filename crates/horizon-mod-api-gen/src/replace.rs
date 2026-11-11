@@ -1357,7 +1357,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unlisted_function_below_the_game_crate_is_refused_naming_the_list() {
+    fn an_unmarked_function_below_the_game_crate_is_refused_naming_the_marker() {
         let root = tempfile::tempdir().unwrap();
         fs::create_dir_all(root.path().join("crates/horizon-low/src")).unwrap();
         fs::write(
@@ -1459,7 +1459,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pass_gives_each_crate_one_array_and_refuses_an_unknown_listed_function() {
+    fn the_pass_gives_each_crate_one_array_and_refuses_an_ineligible_marked_function() {
         let root = tempfile::tempdir().unwrap();
         let write = |path: &str, text: &str| {
             let path = root.path().join(path);

@@ -1388,7 +1388,7 @@ pub(crate) fn widen_generated(path: &Path, text: String) -> Result<String, Strin
 
 /// Widen game internals and the declared lower-crate items in a staged source copy.
 /// Fails before writing anything if a declaration in `internals.txt` cannot be resolved.
-/// A listed replaceable lower-crate function is an internal too: its copy names the function's types.
+/// A marked replaceable lower-crate function is an internal too: its copy names the function's types.
 pub fn widen(root: &Path) -> Result<Widened, String> {
     stage(root, false)
 }
@@ -2520,7 +2520,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
-    fn listed_replaceable_functions_are_widened() {
+    fn marked_replaceable_functions_are_widened() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
         let file = fixture.0.join("crates/lower/src/other.rs");
@@ -2543,7 +2543,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
-    fn unresolved_line_is_an_error_and_does_not_write_sources() {
+    fn ineligible_marker_is_an_error_and_does_not_write_sources() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
         fixture.put(
