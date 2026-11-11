@@ -13,7 +13,7 @@ source = source.replace("Sender<Event>", "ingress::Producer<Event>")
 source = source.replace("        mpsc::{Receiver, Sender, channel},\n", "")
 if "pub mod ingress;" not in source:
     source = source.replace("pub(crate) mod queued_writer;", "pub(crate) mod queued_writer;\npub mod ingress;\n#[cfg(test)]\nuse std::sync::mpsc::channel;")
-for lhs in ("(send, events)", "(_send, events)"):
+for lhs in ("(send, events)", "(_send, events)", "(send, _events)"):
     source = source.replace(f"let {lhs} = channel();", f"let {lhs} = event_channel();")
 source = source.replace("payload_events: channel().0,", "payload_events: event_channel().0,")
 net.write_text(source)
