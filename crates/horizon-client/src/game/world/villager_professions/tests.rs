@@ -652,6 +652,57 @@ fn villager_load_world_save_dir_preserves_custom_workstation() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn villager_native_slots_ignore_declaring_mod_order() {
+    struct NativeProfession(ProfessionDefinition);
+    #[mod_api::__subscriptions]
+    impl Hooks for NativeProfession {
+        fn register_villager_professions(
+            &self,
+            _: &RegistrationContext,
+            event: &mut RegisterVillagerProfessionsEvent<'_>,
+        ) {
+            event.professions.register(self.0.clone());
+        }
+    }
+
+    for reverse in [false, true] {
+        let mut mechanic = definition();
+        mechanic.key = ProfessionKey(Identifier::parse("test:mechanic").unwrap());
+        let bench = PoiKey(Identifier::parse("other:bench").unwrap());
+        mechanic.workstations = vec![ProfessionWorkstation {
+            poi: bench.clone(),
+            block: Identifier::parse("minecraft:furnace").unwrap(),
+            properties: vec![],
+        }];
+        mechanic.held_poi = vec![bench.clone()];
+        mechanic.acquirable_poi = vec![bench];
+        let mut mods = vec![
+            ModEntry::new("z_engineer", Box::new(NativeProfession(definition()))),
+            ModEntry::new("a_mechanic", Box::new(NativeProfession(mechanic))),
+        ];
+        if reverse {
+            mods.reverse();
+        }
+        mods.insert(0, ModEntry::new("trade_files", Box::new(TradeFiles)));
+        fixture(mods.into(), |game| {
+            let table = &game.stations().professions;
+            assert_eq!(table.resolve("test:engineer"), Some(15));
+            assert_eq!(table.resolve("test:mechanic"), Some(16));
+            assert_eq!(table.resolve("minecraft:weaponsmith"), Some(14));
+            assert_eq!(
+                table.pois.resolve("other:bench"),
+                Some(horizon_world::poi::PoiIdentity::Custom(0))
+            );
+            assert_eq!(
+                table.pois.resolve("test:assembler"),
+                Some(horizon_world::poi::PoiIdentity::Custom(1))
+            );
+        });
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn villager_wasm_slots_ignore_declaring_mod_order() {
     for reverse in [false, true] {
         let mut mechanic = definition();
