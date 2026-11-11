@@ -1141,8 +1141,9 @@ pub trait ItemEnv {
         None
     }
     /// What `fluid` draws with in an item: its still sprite and the tint
-    /// `FluidContentsTint` gives a stack holding it. `None` for a fluid the host does not
-    /// know, `minecraft:empty` included.
+    /// `FluidContentsTint` gives a stack holding it. `None` for a fluid the host has no
+    /// model for, `minecraft:empty` included; the resolver draws the missing sprite for
+    /// those, except the empty fluid, which draws nothing.
     fn fluid_appearance(&self, _fluid: &str) -> Option<FluidAppearance> {
         None
     }
@@ -1543,8 +1544,16 @@ impl Resolve<'_> {
         if let Some(base) = &textures.base {
             self.sprite_layer(out, base, None, Vec::new(), parent);
         }
-        if let (Some(mask), Some(appearance)) = (&textures.fluid, self.env.fluid_appearance(drawn))
-        {
+        // `fluid != EMPTY ? FluidStateModelSet.get(fluid).stillMaterial() : null` (offsets
+        // 129-145): a fluid the host has no model for gets `ModelBakery.MissingModels.fluid`,
+        // the missing sprite with no tint source, so it draws `missingno` untinted.
+        let appearance = self.env.fluid_appearance(drawn).or_else(|| {
+            (drawn != "minecraft:empty").then(|| FluidAppearance {
+                still: crate::item_bake::MISSING_SPRITE.to_owned(),
+                tint: -1,
+            })
+        });
+        if let (Some(mask), Some(appearance)) = (&textures.fluid, appearance) {
             // `FluidContentsTint` colours the layer from the fluid the stack holds, not the one
             // drawn: a stack holding none gets the empty fluid's model, which has no tint source,
             // so -1, even while the declared fluid is drawn. A stack that holds one draws that

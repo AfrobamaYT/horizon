@@ -184,7 +184,7 @@ fn a_fluid_containers_fluid_layer_takes_the_fluids_sprite_and_tint() {
     );
     write(
         "assets/tintdraw/items/flask.json",
-        r#"{"model":{"type":"neoforge:fluid_container","fluid":"tintdraw:empty",
+        r#"{"model":{"type":"neoforge:fluid_container","fluid":"minecraft:empty",
             "textures":{"base":"tintdraw:item/flask","fluid":"tintdraw:item/flask_mask"}}}"#,
     );
     let data = crate::test_resources::item_data(

@@ -267,19 +267,32 @@ fn an_empty_container_draws_its_declared_fluid_or_none() {
     assert_eq!(drawn[1].tints, vec![-1]);
 }
 
+/// A fluid with no client model gets `FluidStateModelSet`'s missing model: the missing
+/// sprite through the mask, with no tint source, so -1 whether the stack holds it or the
+/// model declares it.
 #[test]
-fn an_unknown_fluid_or_no_mask_draws_no_fluid_layer() {
-    let definition = r#"{"type":"neoforge:fluid_container","fluid":"mod:gas",
-        "textures":{"base":"mod:item/flask","fluid":"neoforge:item/mask/bucket_fluid"}}"#;
-    // The host knows the held fluid but not how it draws (NeoForge's null `still`).
-    let drawn = layers(
-        definition,
-        &Fluids {
-            held: Some("mod:unknown"),
-        },
-    );
-    let contents: Vec<LayerContent> = drawn.iter().map(|l| l.content.clone()).collect();
-    assert_eq!(contents, vec![sprite("mod:item/flask", None)]);
+fn an_unknown_fluid_draws_the_missing_sprite_and_no_mask_no_fluid_layer() {
+    for (declared, held) in [("mod:gas", Some("mod:unknown")), ("mod:unknown", None)] {
+        let drawn = layers(
+            &format!(
+                r#"{{"type":"neoforge:fluid_container","fluid":"{declared}",
+                    "textures":{{"base":"mod:item/flask","fluid":"neoforge:item/mask/bucket_fluid"}}}}"#
+            ),
+            &Fluids { held },
+        );
+        let contents: Vec<LayerContent> = drawn.iter().map(|l| l.content.clone()).collect();
+        assert_eq!(
+            contents,
+            vec![
+                sprite("mod:item/flask", None),
+                sprite(
+                    "minecraft:missingno",
+                    Some("neoforge:item/mask/bucket_fluid")
+                ),
+            ]
+        );
+        assert_eq!(drawn[1].tints, vec![-1]);
+    }
 
     // The type's `fluid` texture is the mask; without it there is no fluid layer.
     let drawn = layers(

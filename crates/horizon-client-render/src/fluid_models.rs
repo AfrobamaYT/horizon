@@ -200,8 +200,8 @@ pub const WATER_ITEM_TINT: i32 = 0xFF3F_76E4_u32 as i32;
 ///
 /// Vanilla's fluids come from the world renderer's own table ([`crate::block_sprites::fluid_faces`]),
 /// a mod's world fluid from its world model (see [`FluidData::reindex`]). `None` for
-/// `minecraft:empty` and every fluid no model knows; NeoForge would draw the missing model's
-/// sprite there (`FluidStateModelSet.get`'s `missingModel`), Horizon draws no fluid layer.
+/// `minecraft:empty` and every fluid no model knows: the item resolver then draws the
+/// missing model's sprite (`FluidStateModelSet.get`'s `missingModel`), or nothing for empty.
 ///
 /// One read lock and one hash lookup: the answers are resolved when the looks or models load.
 /// A resource pack that replaces a sprite's texture keeps its name, so the answer stays right
