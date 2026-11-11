@@ -438,6 +438,12 @@ cat > "$RUNNER_TEMP/changed" <<'PR_READY_CHANGED'
 {listing}
 PR_READY_CHANGED
 PARITY_HOSTS= python3 tools/parity.py --changed-files "$RUNNER_TEMP/changed" --timeout 1500"""
+    datafix = getattr(args, 'datafix', False)
+    harness.datafix_selected = datafix and affected is not None and 'datafix' in harness_names(affected)
+    if not datafix:
+        print('datafix parity not run: opt in with --datafix and a private HORIZON_DATAFIX_ROOT (default checkout .local/datafix).', file=sys.stderr)
+        if harness.command:
+            harness.command += ' --exclude datafix'
     steps.append(harness)
     return steps
 
@@ -448,7 +454,7 @@ def run_script(steps, host, verbose):
         return
     # Parity may generate datafix worlds, downloads and locks. Refuse before
     # starting any stage subprocess, not after the harness has begun writing.
-    if any(step.name == "Parity" for step in steps):
+    if host == 'local' and any(step.name == 'Parity' and getattr(step, 'datafix_selected', False) for step in steps):
         from tools.datafix_paths import writable_root
         writable_root()
     if host == "local" and os.name == "nt":
@@ -650,6 +656,7 @@ def main():
                         help="where builds, tests and harnesses run: local, or a fleet machine through ~/fleet/rbuild")
     parser.add_argument("--quick", action="store_true", help="list the affected harnesses instead of running them")
     parser.add_argument("--verbose", action="store_true", help="show every check's output")
+    parser.add_argument('--datafix', action='store_true', help='opt in to datafix parity downloads in a private HORIZON_DATAFIX_ROOT')
     args = parser.parse_args()
     if args.host != "local" and not RBUILD.exists():
         parser.error(f"--host {args.host} needs {RBUILD}; without the fleet, run it here (no --host)")
