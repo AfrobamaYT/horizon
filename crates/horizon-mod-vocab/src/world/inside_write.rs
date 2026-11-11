@@ -306,8 +306,7 @@ mod tests {
     /// an effect and flushes in step order.
     #[test]
     fn an_added_effect_is_a_write_in_the_plan() {
-        crate::content::registry_keys::resolve_effects(["minecraft:wither"], |_| Some(0))
-            .unwrap();
+        crate::content::registry_keys::resolve_effects(["minecraft:wither"], |_| Some(0)).unwrap();
         let wither = crate::content::registry_keys::effect_key("minecraft:wither").unwrap();
         let mut effects = InsideEffects::default();
         effects.advance_step(1);
