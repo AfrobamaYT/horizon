@@ -2627,6 +2627,9 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/modding/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    /// Glyphs mods' world text added to the font atlas this frame
+    /// (`native_draw_text`, reached through `&self`): uploaded with the frame.
+    text_patches: std::cell::RefCell<Vec<horizon_client::font::Patch>>,
     /// Prepared block-entity copies for this frame, in entity-stream order.
     prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
@@ -13531,7 +13534,8 @@ impl Game<'_> {
                 m,
                 horizon_client::block_entity_render::diffuse_lights(self.dim == Dim::Nether),
                 std::mem::take(out),
-            );
+            )
+            .animated(self.animation_time());
             let mut canceled = false;
             self.native_render_arm(
                 self.own_uuid(),
@@ -13872,15 +13876,15 @@ impl Game<'_> {
         }
         (out, runs)
     }
-    /// The renderer for the window, with the current block sprites, GUI
-    /// atlas and world border texture.
-    /// A new renderer's atlas holds only the pack's sprites: what was drawn into it at run time
-    /// (skins, maps, the themed UI's glyphs and corners) has to be drawn again.
+    /// Forget runtime atlas slots after replacing the renderer or its atlas.
+    /// Skins, maps, glyphs and corners must be uploaded again; queued uploads
+    /// and kept geometry refer to the old atlas and are discarded.
     pub(super) fn forget_atlas_slots(&mut self) {
         self.skin_slots.forget();
         self.maps.slots.forget();
         self.trim_slots.forget();
         self.map_patches.clear();
+        self.text_patches.get_mut().clear();
         self.kept_block_entities.get_mut().clear();
         horizon_client::ui_theme::reset_atlas();
     }
@@ -15365,6 +15369,7 @@ impl Game<'_> {
         // geometry (game/blocks/maps/mod.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
+        hud.patches.append(self.text_patches.get_mut());
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let entity_motion_posed = std::mem::take(self.entity_motion_posed.get_mut());
@@ -16278,6 +16283,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            text_patches: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
             debug_renderers: Vec::new(),
