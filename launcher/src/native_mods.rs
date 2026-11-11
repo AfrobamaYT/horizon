@@ -4012,7 +4012,7 @@ mod tests {
                     ]
                     .contains(step)
                 })
-                .last()
+                .next_back()
                 .unwrap_or("not_started");
             let diagnostic = [
                 ("install", "NATIVE_SERVER_EXPORT_INSTALL_OS="),
