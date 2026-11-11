@@ -437,14 +437,16 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         run: |
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
+      # Derive caller inputs from slot rows on the checked-out PR merge result.
+      # Keep this before doc tests so their failures cannot hide stale slots.
+      - name: Validate prebuilt source stage and listed slots
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/stage_slots.py --base "${BASE_SHA:-HEAD^}"
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
-      # Run on every Rust change: caller edits can invalidate listed identities even when
-      # the slot rows themselves did not change. Checkout is the PR merge result.
-      - name: Validate prebuilt source stage and listed slots
-        if: needs.changes.outputs.rust_required != 'false'
-        run: python3 tools/ci/stage_slots.py
       - name: Test listed call production export and real registry
         if: needs.changes.outputs.rust_required != 'false'
         env:
@@ -528,6 +530,17 @@ jobs:
             fi
           done
           HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+      - name: Retain typed preparation diagnostics only
+        if: failure() && steps.data.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: preparation-diagnostic-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/prepare-build.diagnostic.json
+            ${{ runner.temp }}/prepare.diagnostic.json
+            ${{ runner.temp }}/seed-extras.diagnostic.json
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Generate the fishing test's vanilla reference inputs
         if: steps.data.outputs.present != 'false' && (matrix.shard == 'horizon-client' || startsWith(matrix.shard, 'horizon-client#'))
         run: |
@@ -610,7 +623,7 @@ jobs:
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
+            bash tools/ci/install_launcher_deps.sh libxkbcommon-x11-dev libwayland-dev \
               libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then

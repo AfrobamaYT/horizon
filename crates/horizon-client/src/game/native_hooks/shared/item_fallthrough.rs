@@ -10,6 +10,9 @@ impl Game<'_> {
         let result = self.use_hand(Some(hit));
         self.guest_use = None;
         if result? {
+            if !self.use_failed {
+                self.finish_block_use(hit.pos, self.hand);
+            }
             return Ok(true);
         }
         self.use_hand(None)
@@ -29,10 +32,7 @@ impl Game<'_> {
             return None;
         }
         if let Some(answer) = self.right_click_item(self.hand, stack) {
-            if matches!(
-                answer,
-                mod_api::InteractionResult::Success | mod_api::InteractionResult::SuccessServer
-            ) {
+            if answer == mod_api::InteractionResult::SuccessServer {
                 self.swing_arm();
             }
             return Some(answer.consumes_action());

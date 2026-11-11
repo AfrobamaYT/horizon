@@ -70,8 +70,22 @@ pub enum CommandArgumentValue {
     Number(f64),
     /// A `boolean` argument.
     Boolean(bool),
-    /// The single online player selected by a `player` argument.
+    /// The single online player selected by a `player` argument. Side: server.
     Player(PlayerRef),
+    /// The single handled entity selected by an `entity` argument. Side: server.
+    /// Unresolvable handles are refused, not delivered.
+    Entity(EntityRef),
+    /// Handled entities selected by `entities`, in selector order. Side: server.
+    ///
+    /// Entities without a resolvable handle are omitted; an empty result refuses the
+    /// command. Lists have no additional cap beyond the wire frame limits.
+    /// Dragon parts are not selector members. Leash knots, item frames,
+    /// paintings and tridents are delivered when their residency handle resolves;
+    /// temporarily held-out and removed entities are omitted.
+    Entities(Vec<EntityRef>),
+    /// Online players selected by `players`, in selector order. Side: server.
+    /// Nonempty, with no additional cap beyond the wire frame limits.
+    Players(Vec<PlayerRef>),
     /// An `item` argument with its components applied and a count of one.
     Item(ItemStack),
     /// A `block_pos` argument resolved from world, relative or local coordinates.
@@ -107,9 +121,11 @@ impl CommandArgument {
 
 /// A native command parsed once by the server's dispatcher, never a raw line.
 ///
-/// Missing optional arguments are absent. Player selectors must resolve to one
-/// online player before any listener runs; a failed parse or resolution produces
-/// command feedback instead. Every source receives this same data.
+/// Missing optional arguments are absent. Selectors are permission-checked and resolved
+/// on the server before any listener runs. `entity` and `player` select exactly one;
+/// `entities` and `players` select one or more, in selector order. Unhandled entities
+/// are omitted, and an empty result is refused. Failed parsing or resolution produces
+/// command feedback instead. Every source receives this same data on native and wasm.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]

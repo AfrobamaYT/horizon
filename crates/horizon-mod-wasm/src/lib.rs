@@ -2,10 +2,12 @@
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
+mod compile_child;
 #[cfg(feature = "runtime-fixture")]
 pub mod fixture;
 pub mod link;
 mod module_cache;
+pub use compile_child::compile_child;
 #[cfg(test)]
 #[path = "../tests/support/no_hooks.rs"]
 mod no_hooks;
@@ -24,6 +26,9 @@ pub(crate) mod boundary {
 }
 pub(crate) use runtime::WeakWasmMod;
 pub use runtime::{CallClass, WasmHandler, WasmMod};
+
+#[cfg(test)]
+mod test_log;
 
 pub(crate) trait NoAnswer {
     fn no_answer() -> Self;
@@ -317,6 +322,15 @@ fn propagate_refusals(
 static REFUSED: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
 static INITIALIZED_REFUSALS: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
 
+/// Report through the initialized game logger and the server owner's stdout.
+/// A closed console pipe must not turn a mod refusal into a panic.
+fn report_refusals(refused: &[(String, Refusal)], stdout: &mut impl std::io::Write) {
+    for (id, why) in refused {
+        log::warn!("wasm mod {id} refused: {why}");
+        let _ = writeln!(stdout, "wasm mod {id} refused: {why}");
+    }
+}
+
 /// The wasm mods refused at startup, each with its reason, for the Mods page.
 pub fn refused() -> &'static [(String, Refusal)] {
     INITIALIZED_REFUSALS
@@ -344,7 +358,7 @@ pub fn refusal(id: &str) -> Option<Refusal> {
 /// startup: the same selection as content mods (`horizon_mod_package::selection`), so a wasm mod's
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
 pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
-    let cache = module_cache::ModuleCache::new(game_dir.join(".horizon-cache/wasm"));
+    let cache = module_cache::ModuleCache::new(game_dir.join(module_cache::CACHE_DIR));
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused: Vec<_> = horizon_mod_package::selection::package_errors(
         horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::DIR))
@@ -395,25 +409,12 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
                 }
             })
             .collect();
-    let mut loaded = match std::env::current_exe()
+    let std = std::env::current_exe()
         .ok()
-        .and_then(|exe| std::fs::read(exe.with_file_name("horizon-wasm-std.wasm")).ok())
-    {
-        Some(std) => load_with_cache(&std, packages, Some(&cache)),
-        None => Loaded {
-            modules: Vec::new(),
-            mods: Vec::new(),
-            manifests: Vec::new(),
-            refused: packages
-                .into_iter()
-                .map(|p| (p.manifest.id, Refusal::NoStd))
-                .collect(),
-        },
-    };
+        .and_then(|exe| std::fs::read(exe.with_file_name("horizon-wasm-std.wasm")).ok());
+    let mut loaded = load_available_std(std.as_deref(), packages, Some(&cache));
     refused.append(&mut loaded.refused);
-    for (id, why) in &refused {
-        log::warn!("wasm mod {id} refused: {why}");
-    }
+    report_refusals(&refused, &mut std::io::stdout().lock());
     let _ = REFUSED.set(refused.clone());
     loaded.refused = refused;
     let _ = MODULES.set(
@@ -499,6 +500,23 @@ fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -
             .is_some();
     }
     succeeded
+}
+
+fn load_available_std(
+    std: Option<&[u8]>,
+    packages: Vec<WasmPackage>,
+    cache: Option<&module_cache::ModuleCache>,
+) -> Loaded {
+    match std {
+        Some(std) => load_with_cache(std, packages, cache),
+        None => Loaded {
+            refused: packages
+                .into_iter()
+                .map(|p| (p.manifest.id, Refusal::NoStd))
+                .collect(),
+            ..Loaded::default()
+        },
+    }
 }
 
 pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
@@ -613,6 +631,52 @@ fn load_with_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_std_reports_mod_and_reason_to_console_and_logger() {
+        use crate::test_log::{CAPTURE, capture_logs};
+        capture_logs();
+        let mut console = Vec::new();
+        let loaded = load_available_std(
+            None,
+            vec![package("missing_std_mod", "1.0.0", "", 'a', "t", "")],
+            None,
+        );
+        assert!(loaded.mods.is_empty());
+        assert!(matches!(loaded.refused[0].1, Refusal::NoStd));
+        report_refusals(&loaded.refused, &mut console);
+        let expected =
+            "wasm mod missing_std_mod refused: this game has no wasm standard library member";
+        assert_eq!(String::from_utf8(console).unwrap(), format!("{expected}\n"));
+        assert!(
+            CAPTURE
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line == expected)
+        );
+    }
+
+    #[test]
+    fn installed_wasm_mixin_refuses_by_name() {
+        let root = std::env::temp_dir().join(format!("wasm-mixin-{}", std::process::id()));
+        let package = root.join("bad_mixin");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("horizon-mod.toml"), format!(
+            "id = 'bad_mixin'\nname = 'Bad mixin'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n[[native.mixin]]\nid = 'patch'\ntarget = 'game::tick'\nkind = 'HEAD'\nhelper = 'src/patch.rs'\n", "a".repeat(128)
+        )).unwrap();
+        let loaded = load_installed(&root, &[package]);
+        assert!(
+            loaded.refused.iter().any(|(id, reason)| id == "bad_mixin"
+                && reason
+                    .to_string()
+                    .contains("only [native] tables compile game code")),
+            "{:?}",
+            loaded.refused
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn package(
         id: &str,

@@ -27,6 +27,9 @@ use horizon_mod_runtime::attachments::{Attachments, Holder};
 use mod_api::{Transaction, TransactionSeal};
 use std::collections::HashMap;
 
+#[path = "transactions/decision.rs"]
+pub(in crate::game) mod decision;
+
 type Pos = (i32, i32, i32);
 
 /// One open transaction.
@@ -62,6 +65,9 @@ pub(super) struct Level {
     attachments: HashMap<Holder, KeptAttachments>,
     /// What the root commit does, in order.
     after: Vec<After>,
+    /// Internal decide/fire/apply state. No menu route uses this yet.
+    actions: decision::Journal,
+    action: Option<decision::ActiveAction>,
 }
 
 struct KeptAttachments {
@@ -260,6 +266,7 @@ impl Game<'_> {
         );
         match (commit, self.transactions.last_mut()) {
             (true, Some(outer)) => {
+                outer.actions.merge(level.actions);
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
@@ -554,6 +561,8 @@ impl Game<'_> {
         }
     }
     fn roll_back(&mut self, mut level: Level) {
+        // Discard deferred effects before undoing tentative action storage.
+        level.after.clear();
         // Each mob's equipment goes back as it was, and the attribute map is
         // made over it again (#932).
         let equipment = std::mem::take(&mut level.equipment);
@@ -648,6 +657,7 @@ impl Game<'_> {
                 });
             }
         }
+        level.actions.rollback();
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
                 g.inventory = kept.inventory;

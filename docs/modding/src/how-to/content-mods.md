@@ -671,6 +671,45 @@ mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook no
 Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
 data, and client prediction of its clicks.
 
+##### Lending ingredients and linking containers
+
+For a mod crafting menu, a server `recipe_sources` listener can lend the chest
+beside its machine to recipe-book placement and transfer checks:
+
+```rust,ignore
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for Machine {
+    fn recipe_sources(
+        &self,
+        _host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RecipeSourcesEvent<'_>,
+    ) {
+        if event.menu == "machine:crafting" {
+            let [x, y, z] = event.pos;
+            event.sources.push([x + 1, y, z]);
+        }
+    }
+}
+```
+
+`player` is the requesting player's UUID; their state is not swapped in. The
+engine uses the player's inventory first, then answered containers in mod/push
+order. It silently skips the open machine itself, duplicate positions (first
+wins), missing or non-lendable containers, and anything after 64 accepted
+containers. Chest-like block entities (including barrels, shulkers, hoppers,
+dispensers and droppers) and mod containers' declared slots can lend. No answer
+keeps vanilla placement. The engine owns ingredient removal, container
+write-back and `container_changed` notifications, not the listener.
+
+`menu_links` has the same input fields and an append-only `links` output for menu
+types declaring linked slots. It silently skips `pos`, duplicate positions, missing
+or non-lendable containers, and positions after 64 accepted containers
+(`MAX_MENU_LINKS`), preserving first-accepted answer order. It refreshes the named containers' displayed items
+in the same server tick. `recipe_sources` is asked per player action, never per
+tick; `menu_links` is asked per open linked mod menu each tick, only when a mod
+subscribes. With no listener its tick path does no work or allocation. Both hooks
+are public server collect hooks with identical native and wasm behavior.
+
 #### Namespaces and limits
 
 The fence: files go in the mod's own namespaces (`assets/<id>/`,
@@ -908,3 +947,19 @@ the entity and rotate with its yaw.
 Vanilla `FishingHook.shouldStopFishing` tests exact `Items.FISHING_ROD` identity, while the renderer chooses the holding arm using `instanceof FishingRodItem`. Broadening these checks for content rods is intentional.
 
 Ambient additions accept any finite `tick_chance`, without clamping to the unit interval. Music delays need not be ordered.
+
+### Custom block-state definition types
+
+Register a type id with `Hooks::register_block_state_models` before client resources
+load. Set `neoforge:definition_type` to that id in the blockstate JSON, and answer
+`Hooks::instantiate_block_state_definition` on every load and reload. Read the whole
+file from `event.config` and enumerate `event.states` in registry order. Append a
+`BlockStateModelPick::Model` for each state you choose, with its index, model id,
+quarter turns and UV-lock setting; append `Refuse` with a reason to reject a file.
+See the generated hook notes for a powered-block example.
+
+A state not picked inherits the lower pack layer's selection when present;
+otherwise it draws no model. Pack layers bind independently. An unknown type,
+explicit refusal, invalid model, out-of-range state, duplicate state or answer
+with no picks rejects the whole layer with a diagnostic, leaving lower layers
+available. Vanilla `variants` and `multipart` remain available for ordinary files.
