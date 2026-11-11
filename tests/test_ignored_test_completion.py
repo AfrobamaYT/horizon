@@ -217,6 +217,16 @@ class Legs(unittest.TestCase):
                     self.assertEqual(ignored_tests.run("example", [], 1, 2), {name: status == "ok"})
                 self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
 
+    def test_prefixed_first_marker_with_trailing_unlisted_record(self):
+        name = leg_names()[1][0]
+        record = f"PRIVATE_PAYLOAD test {name} ... ok test other ... ok\n"
+        def fake(command, **_):
+            text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+            return subprocess.CompletedProcess(command, 0, text)
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.run("example", [], 1, 2), {name: True})
+        self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+
     def test_multiple_distinct_listed_records_on_one_line(self):
         first, second = leg_names()[1][:2]
         record = f"test {first} ... ok test {second} - should panic ... ok\n"
