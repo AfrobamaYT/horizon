@@ -19,7 +19,11 @@ static DATA: LazyLock<RwLock<FluidData>> = LazyLock::new(|| RwLock::new(FluidDat
 /// it, the two steps of every resource load, and each rebuilds `items`: the index is never
 /// older than the data it was built from, and needs no invalidation of its own.
 struct FluidData {
+    /// The world fluids' looks: the only ones the world renderer and the atlas resolve.
     looks: Vec<FluidLook>,
+    /// The looks of fluids only a tank holds (`world: None`): no block, no flowing form and
+    /// no world model, but an item can still hold one and draw its sprite.
+    tank_looks: Vec<FluidLook>,
     registered: Vec<FluidModel>,
     /// [`item_appearance`]'s answers by fluid id, vanilla's included.
     items: HashMap<String, FluidAppearance>,
@@ -29,6 +33,7 @@ impl FluidData {
     fn new() -> Self {
         let mut data = Self {
             looks: Vec::new(),
+            tank_looks: Vec::new(),
             registered: Vec::new(),
             items: HashMap::new(),
         };
@@ -36,11 +41,10 @@ impl FluidData {
         data
     }
     fn set_looks<'a>(&mut self, looks: impl IntoIterator<Item = &'a FluidLook>) {
-        self.looks = looks
+        (self.looks, self.tank_looks) = looks
             .into_iter()
-            .filter(|look| look.world.is_some())
             .cloned()
-            .collect();
+            .partition(|look| look.world.is_some());
         self.reindex();
     }
     fn set_registered(&mut self, models: Vec<FluidModel>) {
@@ -73,6 +77,20 @@ impl FluidData {
                 ]
             })
             .collect();
+        // A tank-only fluid has no registered model (a model naming one is reported as naming
+        // no world fluid), so its look alone decides, by the same rule as a world fluid's.
+        for look in &self.tank_looks {
+            let model = resolve_look(look, &[], false);
+            let tint = match model.tint {
+                FluidTint::Fixed(rgb) => (0xFF00_0000 | rgb) as i32,
+                FluidTint::Biome => WATER_ITEM_TINT,
+            };
+            let appearance = FluidAppearance {
+                still: model.still,
+                tint,
+            };
+            items.entry(look.id.clone()).or_insert(appearance);
+        }
         for (fluid, block) in [
             ("minecraft:water", "minecraft:water"),
             ("minecraft:flowing_water", "minecraft:water"),
@@ -120,7 +138,8 @@ pub struct ResolvedFluidModel {
     pub tint: FluidTint,
 }
 
-/// Remembers the world fluids' looks; every resource load calls this before it reads them.
+/// Remembers the mods' fluid looks; every resource load calls this before it reads them. The
+/// world resolves only the world fluids' ([`resolved`]); an item's fluid layer reads all of them.
 pub fn set_world_looks<'a>(looks: impl IntoIterator<Item = &'a FluidLook>) {
     DATA.write()
         .unwrap_or_else(|e| e.into_inner())
@@ -202,9 +221,10 @@ pub const WATER_ITEM_TINT: i32 = 0xFF3F_76E4_u32 as i32;
 /// gives it (`fluidTintSource().colorAsStack(stack)`, white with no tint source).
 ///
 /// Vanilla's fluids come from the world renderer's own table ([`crate::block_sprites::fluid_faces`]),
-/// a mod's world fluid from its world model (see [`FluidData::reindex`]). `None` for
-/// `minecraft:empty` and every fluid no model knows: the item resolver then draws the
-/// missing model's sprite (`FluidStateModelSet.get`'s `missingModel`), or nothing for empty.
+/// a mod's fluid from its world model, or its look alone when only a tank holds it (see
+/// [`FluidData::reindex`]). `None` for `minecraft:empty` and every fluid no model knows: the
+/// item resolver then draws the missing model's sprite (`FluidStateModelSet.get`'s
+/// `missingModel`), or nothing for empty.
 ///
 /// One read lock and one hash lookup: the answers are resolved when the looks or models load.
 /// A resource pack that replaces a sprite's texture keeps its name, so the answer stays right
@@ -418,6 +438,32 @@ mod tests {
         });
         assert_eq!(data.items.get("a:flowing_oil").cloned(), oil);
         assert_eq!(data.items.get("a:oil").cloned(), oil);
+    }
+
+    /// A fluid only a tank holds (`world: None`) has no world model, but an item holding or
+    /// declaring it draws its look's sprite and tint; the world still resolves world fluids
+    /// only, and a tank-only fluid has no flowing form.
+    #[test]
+    fn a_tank_only_fluid_draws_its_look_in_an_item_but_not_in_the_world() {
+        let mut data = FluidData::new();
+        let goo = FluidLook {
+            world: None,
+            ..look("a:goo", Some("a:block/goo"), Some(0x8044_5566))
+        };
+        data.set_looks(&[look("a:oil", Some("a:block/oil"), None), goo]);
+        assert_eq!(
+            data.items.get("a:goo").cloned(),
+            Some(FluidAppearance {
+                still: "a:block/goo".into(),
+                tint: 0xFF44_5566_u32 as i32,
+            })
+        );
+        assert_eq!(data.items.get("a:flowing_goo"), None);
+        let world: Vec<String> = resolve(&data.looks, &data.registered)
+            .into_iter()
+            .map(|model| model.fluid)
+            .collect();
+        assert_eq!(world, ["a:oil"]);
     }
 
     /// `BucketResourceHandler` for the items whose class is exactly `BucketItem`: the water
