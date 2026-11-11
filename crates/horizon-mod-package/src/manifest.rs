@@ -289,6 +289,21 @@ impl Manifest {
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         mixin::Mixin::check_all(&m.mixin, &m.id, m.native.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        // A mixin edits the game's source. Another mod's functions are reached at its mod points.
+        if let Some(entry) = m
+            .mixin
+            .iter()
+            .find(|entry| m.mod_point_dependency(&entry.target).is_some())
+        {
+            return Err(format!(
+                "{MANIFEST}: {}",
+                mixin::MixinError::Invalid {
+                    id: format!("{}:{}", m.id, entry.id),
+                    field: "target",
+                    fix: "a mixin targets a game function; inject at another mod's point with [[inject]]",
+                }
+            ));
+        }
         if let Some(native) = &m.native {
             // horizon-mixins keeps one id space per mod, which injects share.
             let mut ids: std::collections::HashSet<_> =

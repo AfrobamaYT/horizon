@@ -316,6 +316,22 @@ mod tests {
     }
 
     #[test]
+    fn a_mixin_never_targets_another_mods_function() {
+        let row = ROW.replace("game::Game::next_autosave", "chem_lib::transfer");
+        let dependency = "[dependencies]\nchem_lib='^1.0'\n";
+        // Without the dependency the path is a game path for the tool to resolve.
+        assert!(parse(&native(), &row).is_ok());
+        let error = parse(&format!("{dependency}{}", native()), &row).unwrap_err();
+        assert!(
+            error.ends_with("E_MIXIN_INVALID: sample:autosave: invalid target; a mixin targets a game function; inject at another mod's point with [[inject]]"),
+            "{error}"
+        );
+        // The inject form at that mod's point stays accepted.
+        let inject = "[[inject]]\nid='double'\nat='chem_lib::transfer'\nkind='head'\nwith='double'\nhash='h'\n";
+        assert!(parse(&format!("{dependency}{}", native()), inject).is_ok());
+    }
+
+    #[test]
     fn mixins_bridges_states_modules_and_injects_share_one_id_space() {
         let tables = [
             ROW.to_owned(),
