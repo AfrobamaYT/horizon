@@ -19,13 +19,3 @@ pub fn double_rate(args: &mut chemlib::__horizon_points::TransferArgs) {
 pub fn saw_flow(args: &mut chemlib::__horizon_points::FlowArgs) {
     FLOW_RATE.store(args.rate, Ordering::Relaxed);
 }
-
-/// At `chemlib::transfer`'s return (`access = "internals"`): the library's own value, by reference.
-pub fn saw_moved(moved: &mut u32) {
-    MOVED.fetch_add(*moved, Ordering::Relaxed);
-}
-
-/// At `chemlib::tanks::record`'s head (`access = "internals"`): the ledger has no Wire form, but
-/// an internals listener gets it by reference, in its own type.
-pub fn mark_ledger(_: &mut chemlib::tanks::__TanksRecordRaw<'_, &mut chemlib::tanks::Ledger, u32>) {
-}

@@ -276,7 +276,6 @@ fn registrations(
         let points: Vec<horizon_mod_point_emit::Point> =
             serde_json::from_value(json["points"].clone())
                 .map_err(|e| format!("{}: {e}", path.display()))?;
-        wasm_route(&parsed.inject)?;
         let expressions = horizon_mod_point_emit::api(&parsed, &points, "crate::")?;
         let names = horizon_mod_point_emit::places(&parsed, &points)?;
         let registrations = expressions
@@ -293,40 +292,6 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
-/// A wasm module gets a guest listener for each API head, return and `replace`
-/// injection, which the shared emitter builds; `access = "internals"` and the call-site kinds
-/// exist only natively. The first that can't be built is refused, named with its reason.
-fn wasm_route(injects: &[horizon_mod_package::manifest::inject::Inject]) -> Result<(), String> {
-    use horizon_mod_package::manifest::inject::Access;
-    let Some(entry) = injects
-        .iter()
-        .find(|entry| entry.access != Access::Api || entry.call.is_some())
-    else {
-        return Ok(());
-    };
-    let kind = serde_json::to_value(entry.kind)
-        .ok()
-        .and_then(|kind| kind.as_str().map(str::to_owned))
-        .unwrap_or_default();
-
-    let why = if entry.access != Access::Api {
-        "`access = \"internals\"` is native-only".to_owned()
-    } else {
-        format!("the call-site kind `{kind}` is native-only")
-    };
-    Err(format!(
-        "{}: wasm takes API head, return and replace injections; {why}",
-        entry.id
-    ))
-}
-
-/// `build --wasm`: builds `mod.wasm` beside `horizon-mod.toml` and records it in `[wasm]`.
-pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> {
-    group::build(root, catalog, additional)
-}
-
-/// rustc emits a synthetic allocator-shim object for every final root. Its compiler-private
-/// symbols are local implementation details, not another copy of the library API.
 fn member_export(name: &str) -> bool {
     !matches!(name, "__horizon_mod_hooks" | "__dso_handle" | "__tls_base")
         && !rustc_demangle::try_demangle(name)
@@ -621,48 +586,6 @@ mod response_file_tests {
             "/tmp/a b/libx.rlib"
         );
         assert_eq!(response_file_arg(r"a\\b"), r"a\b");
-    }
-}
-
-#[cfg(test)]
-mod route_tests {
-    use super::wasm_route;
-    use horizon_mod_package::manifest::inject::{Access, Inject, Kind};
-
-    fn inject(id: &str, kind: Kind, access: Access, call: Option<&str>) -> Inject {
-        Inject {
-            id: id.into(),
-            at: "game::tick".into(),
-            kind,
-            with: "listen".into(),
-            access,
-            priority: 0,
-            hash: Some("pin".into()),
-            call: call.map(Into::into),
-            nth: call.map(|_| 0),
-            ctx: call.map(|_| "context".into()),
-        }
-    }
-
-    #[test]
-    fn wasm_takes_the_api_head_kinds_and_names_the_first_it_cant() {
-        let head_kinds = [Kind::Head, Kind::Return, Kind::Replace]
-            .map(|kind| inject("ok", kind, Access::Api, None));
-        assert_eq!(wasm_route(&head_kinds), Ok(()));
-        let internals = inject("raw", Kind::Head, Access::Internals, None);
-        assert_eq!(
-            wasm_route(&[head_kinds[0].clone(), internals]),
-            Err("raw: wasm takes API head, return and replace injections; \
-                 `access = \"internals\"` is native-only"
-                .into())
-        );
-        let site = inject("site", Kind::BeforeCall, Access::Api, Some("game::step"));
-        assert_eq!(
-            wasm_route(&[site]),
-            Err("site: wasm takes API head, return and replace injections; \
-                 the call-site kind `before_call` is native-only"
-                .into())
-        );
     }
 }
 

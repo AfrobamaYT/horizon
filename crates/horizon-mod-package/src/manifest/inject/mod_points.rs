@@ -79,7 +79,6 @@ pub enum Refusal {
         krate: String,
     },
     /// `internals` reaches the library's own types, so it needs the library's target.
-    CrossTargetInternals { id: String, library: String },
     /// An `api` record crosses targets only with a `Wire` form for every parameter.
     CrossTargetNoWire {
         id: String,
@@ -130,11 +129,6 @@ impl fmt::Display for Refusal {
                 "{id}: mod point library {library}'s crate is {krate}; a mod point library's crate \
                  is named after its mod id: {}",
                 library.replace('-', "_")
-            ),
-            Self::CrossTargetInternals { id, library } => write!(
-                f,
-                "{id}: internals access to {library} needs the same target: the same binary on \
-                 native, the same dependency group on wasm"
             ),
             Self::CrossTargetNoWire {
                 id,
@@ -219,49 +213,22 @@ pub fn route<'a>(
         }));
     }
     let mut slots = Vec::new();
-    if api || point.listener.is_some() {
+    if api {
         slots.push(SlotKind::Head);
     }
-    if (api && point.at_return) || (!api && point.return_listener.is_some()) {
+    if point.at_return {
         slots.push(SlotKind::Return);
     }
     let place = Place {
         at: inject.at.clone(),
         hash: point.hash.clone(),
         slots,
-        calls: Vec::new(),
-        native_only: false,
     };
-    // A mod point has head and return places only: call-site kinds have none.
-    if inject.kind.needs_call() {
-        return Err(Refusal::Inject(InjectError::NoSlot {
-            id,
-            reason: if api {
-                NoSlotReason::ApiSitesUnsupported
-            } else {
-                NoSlotReason::NotListed
-            },
-            declaration: format!("{}: a mod point has head and return places only", inject.at),
-        }));
-    }
-    // An internals replace needs the point's raw outcome shape, which the mod point catalog
-    // doesn't record; routed as a head it would run beside the body instead of replacing it.
-    if !api && inject.kind == super::Kind::Replace {
-        return Err(Refusal::Inject(InjectError::NoSlot {
-            id,
-            reason: NoSlotReason::KindHasNoSlot,
-            declaration: format!(
-                "{}: a mod point takes an api replace only; use access = \"api\"",
-                inject.at
-            ),
-        }));
-    }
     match super::route(
         Entry {
             inject,
             target: Target::Native,
             mod_id,
-            resolved_call: None,
         },
         std::slice::from_ref(&place),
     )
@@ -298,7 +265,6 @@ pub fn cross_target(
     let id = format!("{mod_id}:{}", inject.id);
     let library = library.to_owned();
     match (inject.access, &point.api_refusal) {
-        (super::Access::Internals, _) => Some(Refusal::CrossTargetInternals { id, library }),
         (super::Access::Api, Some(reason)) => Some(Refusal::CrossTargetNoWire {
             id,
             library,
@@ -307,7 +273,3 @@ pub fn cross_target(
         (super::Access::Api, None) => None,
     }
 }
-
-#[cfg(test)]
-#[path = "mod_points_tests.rs"]
-mod tests;
