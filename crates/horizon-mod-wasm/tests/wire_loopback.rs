@@ -216,6 +216,24 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 receive_cancelled: true,
             }]
         }
+        fn register_json_animation_types(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+        ) {
+            assert!(
+                event.types.is_empty(),
+                "the guest starts from its own batch"
+            );
+            for (target, id) in [(true, "wire_test:pulse"), (false, "wire_test:step")] {
+                let id = mod_api::Identifier::parse(id).unwrap();
+                event.types.push(if target {
+                    mod_api::JsonAnimationType::Target(id)
+                } else {
+                    mod_api::JsonAnimationType::Interpolation(id)
+                });
+            }
+        }
         fn render_gui_pre(
             &self,
             _: &dyn mod_api::ClientHost,
@@ -248,6 +266,16 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event.eat(2, 0.25);
             event.add_exhaustion(0.5);
             event.keep = false;
+        }
+        fn mob_submit(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::MobSubmitEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(event.hidden.contains_named("nose"));
+            event.hidden.hide_named("hat_rim").unwrap();
+            event.hidden.hide(mod_api::HumanoidPart::Head);
+            mod_api::Flow::Continue
         }
         fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
             assert_eq!(event.mob.kind, "test:mob");
@@ -290,6 +318,11 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             assert_eq!(source.position, Some([1.0, 2.0, 3.0]));
             assert!(event.context.tool.is_none());
             EXPECTED_LOOT_HAND.with(|expected| {
+                assert_eq!(
+                    event.context.weapon_item(host),
+                    expected.borrow().clone(),
+                    "the recorded weapon crosses the generated hook boundary"
+                );
                 assert_eq!(
                     host.entity(source.causing as u32)
                         .and_then(|e| host.living(e))
@@ -693,6 +726,69 @@ fn wire_loopback_readonly_private_projection() {
         assert_eq!(lines[1].1, expected);
     }
 }
+/// An answered collect crosses the generated wire proxies as the guest's own plain batch, run by the
+/// real guest dispatcher (natively; the wasm-mods workflow runs a wasm guest in `real_member`): the
+/// guest starts empty although a native mod pushed before it, and the host names the guest mod on
+/// each entry it pushed, after the native one's.
+#[test]
+fn wire_loopback_answered_collect_names_the_guest_mod() {
+    use mod_api::__private::game::RegistrationContextNew;
+    let id = |id: &str| mod_api::Identifier::parse(id).unwrap();
+    struct First;
+    #[mod_api::__subscriptions]
+    impl Hooks for First {
+        fn register_json_animation_types(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+        ) {
+            event.types.push(mod_api::JsonAnimationType::Target(
+                mod_api::Identifier::parse("first:glow").unwrap(),
+            ));
+        }
+    }
+    let mods = [
+        mod_api::ModEntry::new("first", Box::new(First)),
+        mod_api::ModEntry::new(
+            "wire_test",
+            Box::new(WasmMod {
+                group: 0,
+                subscribed: &[Some(mod_api::HookId::RegisterJsonAnimationTypes)],
+                listeners: &[],
+                corrupt: false,
+            }),
+        ),
+    ];
+    mod_api::testing::with_mods(Arc::from(mods), || {
+        let mut types = Vec::new();
+        mod_api::dispatch_register_json_animation_types(
+            &mod_api::RegistrationContext::new(),
+            &mut types,
+        );
+        let named: Vec<_> = types
+            .iter()
+            .map(|entry| (entry.answer.clone(), entry.mod_id))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                (
+                    mod_api::JsonAnimationType::Target(id("first:glow")),
+                    "first"
+                ),
+                (
+                    mod_api::JsonAnimationType::Target(id("wire_test:pulse")),
+                    "wire_test"
+                ),
+                (
+                    mod_api::JsonAnimationType::Interpolation(id("wire_test:step")),
+                    "wire_test"
+                ),
+            ]
+        );
+    });
+}
+
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     use mod_api::EffectTickChange;
@@ -936,6 +1032,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
     .unwrap();
     EXPECTED_LOOT_HAND.with(|expected| *expected.borrow_mut() = Some(hand.clone()));
     let context: mod_api::LootDrops = mod_api::__private::built::LootDrops {
+        weapon: Some(&hand),
         damage_source: Some(mod_api::HurtSource {
             damage_type: "minecraft:arrow",
             causing: 41,
@@ -1744,3 +1841,56 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
 
 #[path = "wire_loopback/arm_pose_registration.rs"]
 mod arm_pose_registration;
+
+#[test]
+fn wire_loopback_mob_submit_hidden_parts_write_back() {
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    struct Draw(u32);
+    impl mod_api::BlockEntityDrawContext for Draw {
+        fn set_light(&mut self, value: u32) {
+            self.0 = value;
+        }
+    }
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let mob = mod_api::MobRender {
+        id: 1,
+        kind: "test:mob",
+        custom_name: Some("custom"),
+        baby: false,
+        partial: 0.5,
+        age: 1.,
+        body_yaw: 0.,
+        head_yaw: 0.,
+        pitch: 0.,
+        walk_position: 0.,
+        walk_speed: 0.,
+        hurt_time: 0,
+        death_time: 0,
+        on_ground: true,
+    };
+    let mut hidden = mod_api::HiddenParts::default();
+    hidden.hide_named("nose").unwrap();
+    let mut draw = Draw(0);
+    module.mob_submit(
+        &Client,
+        &mut mod_api::MobSubmitEvent {
+            mob: &mob,
+            draw: &mut draw,
+            hidden: &mut hidden,
+            cancelled: false,
+        },
+    );
+    assert!(hidden.contains_named("nose"));
+    assert!(hidden.contains_named("hat_rim"));
+    assert!(hidden.contains(mod_api::HumanoidPart::Head));
+}

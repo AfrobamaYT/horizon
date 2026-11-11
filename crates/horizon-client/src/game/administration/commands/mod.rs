@@ -4,6 +4,7 @@ mod admin;
 pub(super) mod compute;
 mod data;
 mod difficulty;
+mod display_names;
 pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
@@ -816,13 +817,7 @@ impl Game<'_> {
                 let block = Text::translate(&format!("block.{block}"), &[]);
                 Text::translate("entity.minecraft.falling_block_type", &[block])
             }
-            Target::Mob(id) => self.mobs.iter().find(|m| m.id == id).map_or_else(
-                || Text::translate("entity.", &[]),
-                |m| match self.mob_team_of(m) {
-                    Some(team) => team.formatted_name(m.command_name()),
-                    None => m.command_name(),
-                },
-            ),
+            Target::Mob(id) => self.mob_command_name(id),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
                 let custom = super::native_entities::target_id(other)
@@ -2735,15 +2730,16 @@ impl Game<'_> {
         }
         let name;
         if kind == "minecraft:ender_dragon" || self.res.mob_types().contains_key(&kind) {
-            self.spawn_mob_spawned(
-                &short,
-                pos,
-                super::creatures::SpawnSite::Finalizing(
-                    horizon_client::mobs::spawn_rules::Reason::Command,
-                ),
-            )
-            .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
-            name = Text::translate(&entity_name_key(&kind), &[]);
+            let id = self
+                .spawn_mob_spawned(
+                    &short,
+                    pos,
+                    super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Command,
+                    ),
+                )
+                .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
+            name = self.target_name(Target::Mob(id));
         } else {
             match short.as_str() {
                 "item" => {
@@ -4252,9 +4248,9 @@ impl Game<'_> {
         };
         let from = self.source_position().map(|v| v.floor() as i32);
         const RANGE: i32 = 256;
-        let mut cache: std::collections::HashMap<u32, Option<&'static str>> =
+        let mut cache: std::collections::HashMap<u32, Option<&str>> =
             std::collections::HashMap::new();
-        let mut best: Option<(i64, [i32; 3], &'static str)> = None;
+        let mut best: Option<(i64, [i32; 3], &str)> = None;
         let (cx0, cz0) = ((from[0] - RANGE) >> 4, (from[2] - RANGE) >> 4);
         let (cx1, cz1) = ((from[0] + RANGE) >> 4, (from[2] + RANGE) >> 4);
         for cx in cx0..=cx1 {
@@ -6369,3 +6365,6 @@ mod global_selector_order_tests {
 #[cfg(test)]
 #[path = "incoming_tests/knot_identity.rs"]
 mod knot_identity_tests;
+
+#[cfg(test)]
+mod mob_display_name_tests;

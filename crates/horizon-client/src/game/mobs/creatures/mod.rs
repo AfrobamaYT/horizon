@@ -14,6 +14,7 @@ mod pufferfish_player;
 mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
+mod world_view;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
@@ -90,7 +91,9 @@ pub(super) enum Finalized {
 }
 
 mod death_source;
+mod death_weapon;
 pub(in crate::game) use death_source::death_hurt_source;
+pub(in crate::game) use death_weapon::AcceptedWeapon;
 
 /// A dying entity whose items drop (`LivingDropsEvent`).
 pub(super) struct DyingDrops<'a> {
@@ -1075,110 +1078,6 @@ impl Game<'_> {
         }
         self.world.bottom_y()
     }
-    pub(super) fn mob_world_base<'s>(&'s self, others: &'s [Seen]) -> MobWorld<'s> {
-        let (rain, thunder) = self.weather_levels(1.0);
-        let weather = self.can_have_weather();
-        let player = self.player_view();
-        MobWorld {
-            loop_context: &self.loop_context,
-            world: &self.world,
-            registry: self.pack.assets.registry,
-            facts: self.res.facts(),
-            fluid_tables: &self.motion.fluids,
-            attributes: &self.motion.attributes,
-            movement: &self.motion.blocks,
-            collision: self.collision,
-            suffocation: self.mob_suffocation(),
-            data: self.res.mob_data(),
-            controlling_player_movement: None,
-            nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
-            player,
-            player_identity: self.player_identity(),
-            player_selection: None,
-            others,
-            live_mobs: None,
-            dragon: self.dragon_target(),
-            leash_boats: &self.leash_boats,
-            others_grid: None,
-            others_index: None,
-            passenger_objects: &[],
-            others_villagers: None,
-            others_solid: None,
-            daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
-            // day.json: false from tick 12542, true from 23460 (a step track).
-            monsters_burn: self.dimension_type().has_timeline("minecraft:day")
-                && !(12542..23460).contains(&self.world.day_time.rem_euclid(24000)),
-            game_time: self.world.game_time,
-            day_time: self.world.day_time,
-            raining: weather && rain > 0.2,
-            thundering: weather && thunder > 0.9,
-            level: self.level_key(),
-            block_tags: &self.items().block_tags,
-            landing: &self.motion.landing,
-            biomes: world_biomes!(self),
-            mob_griefing: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
-            universal_anger: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::UNIVERSAL_ANGER),
-            mob_drops: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
-            max_entity_cramming: self
-                .ui
-                .rules
-                .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING),
-            dimension_type: self.dimension_type(),
-            world_seed: self.level.seed,
-            sea_level: self.dim.sea_level(),
-            teams: std::sync::Arc::new(self.mob_teams()),
-            items: Some(self.items()),
-            lid_openers: &self.lid_openers,
-            mod_effects: if self.remote.is_none() {
-                Some(self)
-            } else {
-                None
-            },
-            mob_hooks: (self.native_authoritative()
-                && [
-                    mod_api::HookId::EndermanAnger,
-                    mod_api::HookId::EntityMobGriefing,
-                    mod_api::HookId::LivingVisibility,
-                    mod_api::HookId::LivingChangeTarget,
-                ]
-                .into_iter()
-                .any(mod_api::__private::listened))
-            .then_some(self as &dyn horizon_client::mobs::MobHooks),
-            goal_host: (self.native_authoritative()
-                && (mod_api::__private::has_entity_parts()
-                    || mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)))
-            .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
-            asks_animal_tame: self.remote.is_none()
-                && mod_api::__private::listened(mod_api::HookId::AnimalTame),
-            asks_living_destroy_block: self.remote.is_none()
-                && mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock),
-            asks_baby_spawn: self.remote.is_none()
-                && mod_api::__private::listened(mod_api::HookId::BabyEntitySpawn),
-            // A warden's away suspects are UUIDs: on the server side, where the
-            // entity UUIDs live, they resolve back to the mobs that are here.
-            who_lookup: if self.remote.is_none() {
-                Some(self)
-            } else {
-                None
-            },
-            border: Some(self.border.geometry()),
-            // The first player in the level: a server has no player of its own.
-            difficulty: self.local_difficulty(
-                self.level_players_iter()
-                    .next()
-                    .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]),
-            ),
-        }
-    }
     /// What the generator finalizes this level's structure mobs with.
     pub(super) fn share_spawn_conditions(&self) {
         if let Some(terrain) = self.end.locator() {
@@ -2005,232 +1904,7 @@ impl Game<'_> {
         );
         if cancel { 0 } else { amount.max(0) }
     }
-    fn drop_death_loot(
-        &mut self,
-        m: &mut Mob,
-        player_uuid: Option<u128>,
-        player_killed: bool,
-        killer: horizon_world::loot::LootEntity,
-        consumed: bool,
-        pos: [f64; 3],
-        source: Option<(&'static str, u32)>,
-    ) {
-        use horizon_client::mobs::{DamageKind, Who, drops};
-        use horizon_world::loot::{LootDamage, LootEntity};
-        let Some(loot) = self.server_loot.get() else {
-            return;
-        };
-        let player = || killer.clone();
-        let damage = m.last_damage.map(|(d, _)| {
-            let source = match d.attacker {
-                Some(Who::Player) => Some(player()),
-                Some(Who::Mob(id)) => self
-                    .mobs
-                    .iter()
-                    .find(|o| o.id == id)
-                    .map(|o| drops::loot_entity(o, None))
-                    // A charged creeper's blast kills after the creeper left the list.
-                    .or_else(|| {
-                        self.combat
-                            .charged_exploders
-                            .contains(&id)
-                            .then(|| LootEntity {
-                                powered: true,
-                                ..LootEntity::new("minecraft:creeper")
-                            })
-                    }),
-                None => None,
-            };
-            let direct = match d.kind {
-                DamageKind::Arrow => Some(LootEntity {
-                    kind: "minecraft:arrow".into(),
-                    ..LootEntity::default()
-                }),
-                DamageKind::Fireball => Some(LootEntity {
-                    kind: "minecraft:fireball".into(),
-                    ..LootEntity::default()
-                }),
-                DamageKind::WitherSkull => Some(LootEntity {
-                    kind: "minecraft:wither_skull".into(),
-                    ..LootEntity::default()
-                }),
-                DamageKind::Fireworks => Some(LootEntity {
-                    kind: "minecraft:firework_rocket".into(),
-                    ..LootEntity::default()
-                }),
-                _ => source.clone(),
-            };
-            LootDamage {
-                kind: source_damage_type(d).into(),
-                source,
-                direct,
-            }
-        });
-        let vehicle = m
-            .extra
-            .mount
-            .and_then(|id| self.mobs.iter().find(|o| o.id == id))
-            .map(|o| LootEntity::new(&o.kind.id));
-        let kind = super::native_hooks::mob_kind(m);
-        let death = drops::Death {
-            loot: &loot,
-            damage,
-            player: player_uuid.is_some().then(player),
-            player_killed,
-            luck: 0.0,
-            vehicle,
-            mob_drops: self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
-            world_seed: self.level.seed,
-        };
-        let raider = horizon_client::mobs::raider::is_raider(m.species());
-        let to_stack = |stack: &horizon_world::loot::LootStack| {
-            if raider && stack.item == horizon_client::mobs::raider::BANNER {
-                horizon_client::mobs::raider::ominous_banner()
-            } else {
-                from_loot(stack)
-            }
-        };
-        // LootContextParams.ORIGIN of a death: the mob's position.
-        let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
-        let hurt = source.map(|(damage_type, causing)| death_hurt_source(damage_type, causing));
-        let enchanted_loot = hurt
-            .as_ref()
-            .filter(|_| mod_api::__private::listened(mod_api::HookId::EnchantedEntityLoot))
-            .zip(self.effect_living_ref(Some(m.id as i32)));
-        let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
-            let rolled = match enchanted_loot {
-                Some((source, entity)) => {
-                    let mut rolls = super::loot_rolls::ListenedRolls::new(self, entity, source);
-                    drops::roll_death(m, &death, &mut rolls)
-                }
-                None => {
-                    let mut rolls = drops::PlainRolls {
-                        sequences: &mut self.rand_sequences,
-                        level_random: &mut self.world.random,
-                    };
-                    drops::roll_death(m, &death, &mut rolls)
-                }
-            };
-            let Some(hurt) = &hurt else {
-                return drops::finish_death(m, &death, rolled, None);
-            };
-            // GetEquipmentDropChanceEvent, asked for each slot just before its roll.
-            let id = m.id;
-            let mut choose = |choice: drops::EquipmentChoice<'_>| {
-                let stack = match choice.stack {
-                    drops::Drop::Item(stack) => to_stack(stack),
-                    drops::Drop::Stack(stack) => stack.clone(),
-                    _ => return choice.chance,
-                };
-                let mut chance = choice.chance;
-                let Ok(stack) = stack.try_into_api() else {
-                    return chance;
-                };
-                self.native_get_equipment_drop_chance(
-                    mod_api::__private::GetEquipmentDropChanceCall {
-                        entity: id,
-                        kind: &kind,
-                        slot: EquipmentSlot::ALL[choice.slot],
-                        source: hurt,
-                        recently_hit: player_killed,
-                        stack: &stack,
-                        original_chance: choice.original,
-                        preserved: choice.preserved,
-                        chance: &mut chance,
-                    },
-                );
-                chance
-            };
-            drops::finish_death(m, &death, rolled, Some(&mut choose))
-        });
-        if skulls && let Some(Who::Mob(id)) = m.last_damage.and_then(|(d, _)| d.attacker) {
-            // Creeper.droppedSkulls: one head per charged explosion.
-            self.combat.charged_exploders.retain(|c| *c != id);
-            if let Some(creeper) = self.mobs.iter_mut().find(|o| o.id == id) {
-                creeper.extra.charged = false;
-            }
-        }
-        // The item drops come before the carried block and the orbs, so the
-        // mods get them all at once and they still spawn in that order.
-        let mut stacks = Vec::new();
-        let mut rest = Vec::new();
-        for d in items {
-            match d {
-                drops::Drop::Item(stack) => stacks.push(to_stack(&stack)),
-                drops::Drop::Stack(stack) => stacks.push(stack),
-                other => rest.push(other),
-            }
-        }
-        let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            damage_source: hurt,
-            table: table.as_deref().unwrap_or_default(),
-            dimension: self.dim.id(),
-            origin: [m.position.x, m.position.y, m.position.z],
-            block: None,
-            entity: Some((m.id, &kind)),
-            player: player_uuid,
-            tool: None,
-            explosion: None,
-            used: false,
-        });
-        self.native_loot_drops(&context, &mut stacks);
-        stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-        let mut experience = None;
-        for d in rest {
-            match d {
-                drops::Drop::CarriedBlock(state) => {
-                    // Enderman.dropCustomDeathLoot: spawnAtLocation for each
-                    // of the carried block's silk-touch drops.
-                    use horizon_client::mobs::enderman;
-                    let tool = enderman::carried_block_tool();
-                    let at = [m.position.x, m.position.y, m.position.z];
-                    let drops = self.roll_block_loot(
-                        at.map(|c| c.floor() as i32),
-                        state,
-                        Some(m.id),
-                        enderman::carried_block_roll(&tool),
-                    );
-                    stacks.extend(drops.into_iter().filter(enderman::carried_block_drop_kept));
-                }
-                drops::Drop::Experience(reward) if !consumed => experience = Some(reward),
-                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
-            }
-        }
-        let mut stacks: Vec<(ItemStack, [f64; 3])> =
-            stacks.into_iter().map(|stack| (stack, pos)).collect();
-        if m.species() == Species::CopperGolem {
-            // CopperGolem.dropEquipment: the preserved equipment is part of
-            // dropAllDeathLoot, so the mods hear it with the rest. It is
-            // `spawnAtLocation` with no offset: at the golem's feet.
-            let feet = [m.position.x, m.position.y, m.position.z];
-            stacks.extend(
-                Self::golem_preserved_equipment(m)
-                    .into_iter()
-                    .map(|stack| (stack, feet)),
-            );
-        }
-        // Every death drop is its own ItemEntity, and the drop entity's own
-        // random (not the level's) gives it the constructor's horizontal push
-        // (its motion otherwise stays [0, 0.2, 0] and the drops land stacked
-        // at the mob's centre, without disturbing the level random that the
-        // orbs' merge ids and block ticks read next).
-        let dying = DyingDrops {
-            entity: m.id,
-            kind: &kind,
-            player: None,
-            source: hurt,
-            recently_hit: player_killed,
-        };
-        self.drop_death_items(&dying, stacks, 10, |_| None);
-        if let Some(reward) = experience {
-            let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
-            self.spawn_orbs(pos, amount as u32);
-        }
-    }
+
     /// Adds the items a dying entity dropped to the level, each at its own
     /// position. With mods, they first hear the list (`native_living_drops`):
     /// edited or canceled.
@@ -2717,6 +2391,9 @@ impl Game<'_> {
                 }
                 MobEvent::Sound(name, at, volume, pitch) => {
                     self.audio.play(&full_id(name), Some(at), volume, pitch)
+                }
+                MobEvent::ProfessionWorkSound(name, at, volume, pitch) => {
+                    self.audio.play(&name, Some(at), volume, pitch)
                 }
                 MobEvent::LocalSound(name, at, volume, pitch) => {
                     self.audio
@@ -3308,7 +2985,7 @@ impl Game<'_> {
                         // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
                         let mut at = arrow.position;
                         at.y -= f64::from(0.15f32) - 0.1;
-                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                        self.launch_angled_rocket(at, &ammo, arrow.owner, |_| arrow.velocity);
                     } else {
                         Self::arrow_from_ammo(&ammo, &mut arrow);
                         self.launch_mob_projectile(arrow);
@@ -5235,91 +4912,6 @@ impl Game<'_> {
             self.mob_post_attack(id, p.owner, Some(direct), Some(damage_type));
         }
     }
-    /// What an arrow or a thrown trident hits an entity of type `victim`
-    /// for (`AbstractArrow.onHitEntity`, `ThrownTrident.onHitEntity`): a
-    /// trident's 8 through `EnchantmentHelper.modifyDamage` of the trident
-    /// (Impaling's `minecraft:damage` on `#sensitive_to_impaling`).
-    pub(in crate::game) fn shot_damage(
-        &mut self,
-        shot: &mut Projectile,
-        victim: Option<&str>,
-        who: Who,
-    ) -> f32 {
-        let trident = matches!(shot.kind, ProjectileKind::Trident);
-        let base = match shot.kind {
-            ProjectileKind::Arrow { base_damage, .. } => base_damage as f32,
-            _ => 8.0,
-        };
-        let weapon = shot.arrow.as_ref().and_then(|a| {
-            if trident {
-                Some(a.pickup_item.clone())
-            } else {
-                a.fired_from_weapon.clone()
-            }
-        });
-        let Some(weapon) = weapon else {
-            return if trident {
-                base
-            } else {
-                shot.arrow_damage() + shot.bonus.damage
-            };
-        };
-        let attacker_kind = match shot.owner {
-            Some(Who::Player) => Some("minecraft:player".to_owned()),
-            Some(Who::Mob(id)) => self
-                .mobs
-                .iter()
-                .find(|m| m.id == id)
-                .map(|m| m.kind.id.clone()),
-            None => None,
-        };
-        let ctx = horizon_client::enchant::EffectContext {
-            this: victim,
-            attacker: attacker_kind.as_deref(),
-            direct_attacker: Some(if trident {
-                "minecraft:trident"
-            } else if shot.is_spectral_arrow() {
-                "minecraft:spectral_arrow"
-            } else {
-                "minecraft:arrow"
-            }),
-            damage_type: Some(if trident {
-                "minecraft:trident"
-            } else {
-                "minecraft:arrow"
-            }),
-            ..Default::default()
-        };
-        let player = self.own_entity_id() as u32;
-        let attacker = shot.owner.map(|owner| match owner {
-            Who::Player => self
-                .combat
-                .enchantment_projectile_attacker
-                .or_else(|| self.player_attacker(shot.guest).map(|s| s.0))
-                .unwrap_or(player),
-            Who::Mob(id) => id,
-        });
-        let victim = match who {
-            Who::Player => player,
-            Who::Mob(id) => id,
-        };
-        let victim = if (super::dragon::SPECIAL..super::dragon::CRYSTAL_IDS).contains(&victim) {
-            self.dragon.as_ref().map_or(victim, |dragon| dragon.id)
-        } else if victim >= super::dragon::CRYSTAL_IDS {
-            self.crystals
-                .get((victim - super::dragon::CRYSTAL_IDS) as usize)
-                .map_or(victim, |crystal| crystal.id)
-        } else {
-            victim
-        };
-        let enchanted =
-            self.evaluate_weapon_damage(&weapon, attacker.map(|id| (id, victim)), ctx, base);
-        if trident {
-            enchanted
-        } else {
-            shot.arrow_damage_with_base(f64::from(enchanted)) + shot.bonus.damage
-        }
-    }
     /// A projectile's hurt of `amount` on the boat or minecart `id`
     /// (`VehicleEntity.hurtServer`): even 0 shakes it (`Snowball`, `ThrownEgg`,
     /// `ThrownEnderpearl` `.onHitEntity`), 5 from a small fireball destroys it.
@@ -5989,15 +5581,7 @@ impl Game<'_> {
                         [p.previous.x, p.previous.y, p.previous.z],
                         "minecraft:trident",
                     ),
-                    Who::Mob(id) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
-                        m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self, scoped),
-                            amount,
-                            source,
-                            aim,
-                            [p.velocity.x, p.velocity.z],
-                        )
-                    }),
+                    Who::Mob(id) => self.damage_projectile_with_weapon(p, id, amount, source, aim),
                 };
                 let outcome = if hurt {
                     self.shot_post_attack(p, who, "minecraft:trident", "minecraft:trident");
@@ -6066,15 +5650,7 @@ impl Game<'_> {
                         hurt
                     }
                     Who::Mob(id) => {
-                        let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
-                            m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self, scoped),
-                                amount,
-                                source,
-                                aim,
-                                [p.velocity.x, p.velocity.z],
-                            )
-                        });
+                        let hurt = self.damage_projectile_with_weapon(p, id, amount, source, aim);
                         dodged = !hurt
                             && self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
                                 m.species() == Species::Enderman
@@ -8483,10 +8059,8 @@ impl Game<'_> {
             let (modded, hidden) = match who {
                 _ if layers_only => (false, mod_api::HiddenParts::default()),
                 Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
-                None => (
-                    !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
-                    mod_api::HiddenParts::default(),
-                ),
+                None if is_player => (false, mod_api::HiddenParts::default()),
+                None => self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
             };
             if modded {
                 if let Some(rgb) = outline {
@@ -8544,6 +8118,7 @@ impl Game<'_> {
                     &lookup,
                     packed,
                     self.res.mob_data(),
+                    hidden,
                     listened.then_some(&mut parts),
                     out,
                     &mut skin,
@@ -11476,6 +11051,7 @@ mod pearl_tests {
             goal_host: None,
             live_mobs: None,
             teams: Default::default(),
+            professions: horizon_client::mobs::villager::profession_table(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
             world: &world,

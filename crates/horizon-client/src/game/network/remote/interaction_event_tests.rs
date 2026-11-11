@@ -3,6 +3,8 @@
 mod interaction_event_wasm_tests;
 #[path = "item_fallthrough_tests.rs"]
 mod item_fallthrough_tests;
+#[path = "item_used_on_block_tests.rs"]
+mod item_used_on_block_tests;
 #[path = "use_item_hand_tests.rs"]
 mod use_item_hand_tests;
 #[path = "use_item_result_tests.rs"]
@@ -53,6 +55,8 @@ struct Controls {
     item_on_answer: Option<Answer>,
     air_answer: Option<Answer>,
     consume_item: bool,
+    /// The block phase takes one item from the hand before its answer.
+    take_in_block: bool,
     expected_hand: Option<Hand>,
     part_answer: Option<Answer>,
     part_pass: bool,
@@ -60,6 +64,12 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    /// Cancel `right_click_block` with this answer.
+    click_answer: Option<Answer>,
+    /// How many `right_click_block` events fired.
+    clicks: usize,
+    click_hands: Vec<Hand>,
+    use_item_packets: usize,
     expect_empty_item_phase: bool,
 }
 
@@ -85,8 +95,24 @@ impl Hooks for Observer {
             r.item_part(item, self.clone());
         }
     }
+    fn client_packet_send(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::ClientPacketSendEvent<'_>,
+    ) -> Flow {
+        if event.packet.id.path() == "use_item" {
+            self.0.lock().unwrap().use_item_packets += 1;
+        }
+        Flow::Continue
+    }
     fn right_click_block(&self, _: HostSide<'_>, event: &mut RightClickBlockEvent<'_>) -> Flow {
-        let state = self.0.lock().unwrap();
+        let mut state = self.0.lock().unwrap();
+        state.clicks += 1;
+        state.click_hands.push(event.click.hand);
+        if let Some(answer) = state.click_answer {
+            *event.cancellation_result = answer;
+            return Flow::Cancel;
+        }
         *event.use_block = state.use_block;
         *event.use_item = state.use_item;
         Flow::Continue
@@ -119,8 +145,8 @@ impl Hooks for Observer {
             _ => unreachable!("UsePhase: unhandled variant"),
         };
         if let Some(answer) = answer {
-            if state.consume_item
-                && event.phase == UsePhase::ItemAfterBlock
+            if ((state.consume_item && event.phase == UsePhase::ItemAfterBlock)
+                || (state.take_in_block && event.phase == UsePhase::Block))
                 && let HostSide::Server(host) = host
             {
                 let player = host.player(event.click.player).unwrap();
@@ -719,6 +745,124 @@ fn canceled_item_results_keep_the_stack_wrappers_side_effects() {
     });
 }
 
+/// A spectator's click fires `right_click_block` on the client like anyone's, and a cancel
+/// answers in place of the server's menu turn: SUCCESS swings and ends the click, FAIL ends it,
+/// PASS goes on to the other hand.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectator_fires_right_click_block_on_the_client_and_its_cancel_answers() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            // Nobody answers: the event fired, and the spectator's click ends there, no swing.
+            *observer.0.lock().unwrap() = Controls::default();
+            let swings = game.swings_started;
+            assert!(game.remote_use_item_on(Hand::Main));
+            assert_eq!(observer.0.lock().unwrap().clicks, 1);
+            assert_eq!(game.swings_started, swings);
+            for (answer, ends, swings_by) in [
+                (Answer::Success, true, 1),
+                (Answer::Consume, true, 0),
+                (Answer::Fail, true, 0),
+                (Answer::Pass, false, 0),
+            ] {
+                *observer.0.lock().unwrap() = Controls {
+                    click_answer: Some(answer),
+                    ..Controls::default()
+                };
+                let swings = game.swings_started;
+                assert_eq!(game.remote_use_item_on(Hand::Main), ends, "{answer:?}");
+                assert_eq!(game.swings_started - swings, swings_by, "{answer:?}");
+                assert_eq!(observer.0.lock().unwrap().clicks, 1, "{answer:?}");
+            }
+        });
+    });
+}
+
+/// A cancelled block PASS tries both hands, but neither may send or predict item use.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectators_passing_block_click_skips_item_use_for_both_hands() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_pass_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            *observer.0.lock().unwrap() = Controls {
+                click_answer: Some(Answer::Pass),
+                // Let an erroneous item event reach the Part, which would consume the click.
+                part_answer: Some(Answer::Success),
+                ..Controls::default()
+            };
+            let swings = game.swings_started;
+            // The real target turn precedes remote_use_hands' item/off-hand sequence.
+            assert!(!game.remote_use_item_on(Hand::Main));
+            game.remote_use_hands(mod_api::InteractionAttempt::Press);
+            let state = observer.0.lock().unwrap();
+            assert_eq!(state.clicks, 2);
+            assert_eq!(state.click_hands, [Hand::Main, Hand::Off]);
+            assert_eq!(state.use_item_packets, 0);
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, Hand::Main)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, Hand::Off)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::ItemPart))
+                    .count(),
+                0
+            );
+            assert_eq!(game.swings_started - swings, 0);
+            assert!(game.using.is_none());
+        });
+    });
+}
+
 #[test]
 #[ignore = "requires prepared game resources"]
 fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() {
@@ -867,6 +1011,7 @@ fn before_block_cancellation_pass_continues_but_fail_and_consuming_results_stop(
                 for (answer, reaches_block, swings) in [
                     (Answer::Pass, true, 1),
                     (Answer::Fail, false, 0),
+                    (Answer::TryWithEmptyHand, false, 0),
                     (Answer::Success, false, 1),
                     (Answer::SuccessServer, false, u32::from(!client)),
                     (Answer::Consume, false, 0),
@@ -880,7 +1025,11 @@ fn before_block_cancellation_pass_continues_but_fail_and_consuming_results_stop(
                         ..Controls::default()
                     };
                     let before = game.swings_started;
-                    assert!(use_block(game, client), "{side:?}: {answer:?}");
+                    assert_eq!(
+                        use_block(game, client),
+                        answer != Answer::TryWithEmptyHand,
+                        "{side:?}: {answer:?}"
+                    );
                     assert_eq!(game.swings_started - before, swings);
                     assert_eq!(game.world.block(0, 64, 0) != lever, reaches_block);
                     let mut expected = vec![Step::Phase(UsePhase::ItemBeforeBlock, side)];
@@ -941,17 +1090,27 @@ fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
             game.world.set(0, 64, 0, lever).unwrap();
             game.forced_hit = Some(hit());
             let server = LogicalSide::Server;
-            let first = Step::Phase(UsePhase::ItemBeforeBlock, server);
 
-            // A Part's answer ends the click before the block is asked.
-            *observer.0.lock().unwrap() = Controls {
-                record_first: true,
-                first_part_answer: Some(Answer::Success),
-                ..Controls::default()
-            };
-            assert!(use_block(game, false));
-            assert_eq!(game.world.block(0, 64, 0), lever);
-            assert_eq!(observer.0.lock().unwrap().steps, [first, Step::FirstPart]);
+            // Every non-PASS Part answer stops before the block, including TRY.
+            for (answer, used, swings) in [
+                (Answer::Success, true, 1),
+                (Answer::SuccessServer, true, 1),
+                (Answer::Consume, true, 0),
+                (Answer::Fail, true, 0),
+                (Answer::TryWithEmptyHand, false, 0),
+            ] {
+                *observer.0.lock().unwrap() = Controls {
+                    record_first: true,
+                    first_part_answer: Some(answer),
+                    ..Controls::default()
+                };
+                let before = game.swings_started;
+                assert_eq!(use_block(game, false), used);
+                assert_eq!(game.swings_started - before, swings);
+                assert_eq!(game.world.block(0, 64, 0), lever);
+                let first = Step::Phase(UsePhase::ItemBeforeBlock, server);
+                assert_eq!(observer.0.lock().unwrap().steps, [first, Step::FirstPart]);
+            }
 
             // The broadcast event goes first: its cancel stops the Part.
             *observer.0.lock().unwrap() = Controls {
@@ -1118,4 +1277,117 @@ fn setup_interaction_guest(
     guest.game_mode = 1;
     game.lan.as_mut().unwrap().hub.guests.push(guest);
     rx
+}
+#[path = "interaction_key_tests.rs"]
+mod interaction_key_tests;
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn item_use_overlap_matrix_on_the_server() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "overlap",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(false, |game| {
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            item_used_on_block_tests::install_criteria(game, &[0], "minecraft:air");
+            for hand in [Hand::Main, Hand::Off] {
+                for held in [false, true] {
+                    for sneak in [false, true] {
+                        for gate in [TriState::True, TriState::Default, TriState::False] {
+                            for first in [Answer::Pass, Answer::TryWithEmptyHand, Answer::Consume] {
+                                for after in
+                                    [Answer::Success, Answer::Fail, Answer::Pass, Answer::Consume]
+                                {
+                                    game.inventory[game.selected] = None;
+                                    game.offhand = None;
+                                    if held {
+                                        let stack = Some(ItemStack::new("minecraft:stick", 1));
+                                        if hand == Hand::Main {
+                                            game.inventory[game.selected] = stack;
+                                        } else {
+                                            game.offhand = stack;
+                                        }
+                                    }
+                                    if sneak {
+                                        game.keys.insert(winit::keyboard::KeyCode::ShiftLeft);
+                                    } else {
+                                        game.keys.remove(&winit::keyboard::KeyCode::ShiftLeft);
+                                    }
+                                    *observer.0.lock().unwrap() = Controls {
+                                        expected_hand: Some(hand),
+                                        record_first: true,
+                                        first_answer: Some(first),
+                                        block_answer: Some(Answer::Pass),
+                                        item_on_answer: Some(after),
+                                        use_item: gate,
+                                        expect_empty_item_phase: !held,
+                                        ..Controls::default()
+                                    };
+                                    let stopped =
+                                        held && gate != TriState::False && first != Answer::Pass;
+                                    let item_phase = !stopped
+                                        && gate != TriState::False
+                                        && (held || gate == TriState::True);
+                                    let expected = if stopped {
+                                        first == Answer::Consume
+                                    } else {
+                                        item_phase
+                                            && matches!(
+                                                after,
+                                                Answer::Success | Answer::Fail | Answer::Consume
+                                            )
+                                    };
+                                    game.guest_use = Some(super::super::GuestUse::OnBlock(hand));
+                                    game.adv.progress = Default::default();
+                                    let swings = game.swings_started;
+                                    let used =
+                                        game.with_hand(hand, |g| g.use_hand(Some(&hit())).unwrap());
+                                    assert_eq!(
+                                        used, expected,
+                                        "{hand:?} held={held} sneak={sneak} {gate:?} {first:?} {after:?}"
+                                    );
+                                    assert_eq!(
+                                        game.swings_started - swings,
+                                        u32::from(item_phase && after == Answer::Success)
+                                    );
+                                    assert_eq!(
+                                        game.adv.progress.has("test:sticks0", "seen"),
+                                        item_phase
+                                            && matches!(after, Answer::Success | Answer::Consume)
+                                    );
+                                    let state = observer.0.lock().unwrap();
+                                    assert_eq!(
+                                        state.steps.contains(&Step::Phase(
+                                            UsePhase::ItemAfterBlock,
+                                            LogicalSide::Server
+                                        )),
+                                        item_phase
+                                    );
+                                    assert_eq!(
+                                        state.steps.contains(&Step::Phase(
+                                            UsePhase::Block,
+                                            LogicalSide::Server
+                                        )),
+                                        !stopped && !(sneak && held)
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
 }
