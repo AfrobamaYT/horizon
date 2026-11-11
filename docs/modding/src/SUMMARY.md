@@ -22,6 +22,8 @@
 - [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
 - [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
 - [Design: villager professions and trades](concepts/villager-professions.md)
+- [Design: decide, fire, apply](concepts/decide-fire-apply.md)
+- [Design: decide, fire, apply: route inventory](concepts/decide-fire-apply-routes.md)
 
 # How-to
 
