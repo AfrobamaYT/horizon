@@ -39,7 +39,7 @@ impl Plan {
         Ok(())
     }
 
-    fn arguments(
+    pub(super) fn arguments(
         &self,
         mut args: Vec<OsString>,
         manifest: Option<PathBuf>,
