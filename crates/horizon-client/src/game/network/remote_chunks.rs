@@ -445,7 +445,12 @@ impl Game<'_> {
             let state = self.world.block(pos.0, pos.1, pos.2);
             self.sync_block_entity(pos, None, state);
             // LevelChunk.replaceWithPacketData: the block entity loads its update tag.
-            self.remote_block_entity_data([pos.0, pos.1, pos.2], info.kind, &info.tag);
+            self.remote_block_entity_data(
+                [pos.0, pos.1, pos.2],
+                info.kind,
+                mod_api::BlockEntityDataSource::Chunk,
+                &info.tag,
+            );
             self.bind_remote_attachment(Holder::BlockEntity([pos.0, pos.1, pos.2]));
         }
         // After the column's block entities load: an attachment keeps its block entity if the

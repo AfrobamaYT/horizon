@@ -5677,7 +5677,7 @@ impl Game<'_> {
                     self.drop_remote_chunks_out_of_range((p.x, p.z), distance);
                 }
             }
-            C::BlockEntityData(p) => self.remote_block_entity_data(p.pos, p.kind, &p.tag),
+            C::BlockEntityData(p) => self.remote_block_entity_packet(p),
             C::OpenSignEditor(p) => self.remote_open_sign_editor(p),
             C::OpenBook(p) => self.remote_open_book(p.hand),
             // handleSetSpawn: ClientLevel.setRespawnData, which spawn compasses point at.

@@ -1,13 +1,15 @@
 //! Applies block entity synchronization before notifying client listeners.
 use super::*;
+use mod_api::BlockEntityDataSource;
 impl Game<'_> {
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
-    /// packet's type, loads the tag (`loadWithComponents`); an empty tag
-    /// changes nothing.
+    /// packet's type, loads the tag (`loadWithComponents`). An empty compound
+    /// leaves stored fields unchanged; update packets still send a notice.
     pub(in crate::game) fn remote_block_entity_data(
         &mut self,
         pos: [i32; 3],
         kind: i32,
+        source: BlockEntityDataSource,
         tag: &Tag,
     ) {
         let key = (pos[0], pos[1], pos[2]);
@@ -49,7 +51,9 @@ impl Game<'_> {
                 ) == Some(true)
             {
                 m.merge_update_tag(fields);
-                self.notify_block_entity_data_received(pos, fields);
+                if source == BlockEntityDataSource::UpdatePacket || !fields.is_empty() {
+                    self.notify_block_entity_data_received(pos, source, fields);
+                }
             }
             return;
         }
@@ -78,5 +82,14 @@ impl Game<'_> {
                 self.command_block_data_arrived(key);
             }
         }
+    }
+}
+
+impl Game<'_> {
+    pub(in crate::game) fn remote_block_entity_packet(
+        &mut self,
+        p: horizon_protocol::packets::play::BlockEntityData,
+    ) {
+        self.remote_block_entity_data(p.pos, p.kind, BlockEntityDataSource::UpdatePacket, &p.tag);
     }
 }

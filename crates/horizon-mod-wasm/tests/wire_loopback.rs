@@ -2018,6 +2018,7 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
         ) {
             assert_eq!(event.tag.get(&"count".into()), Some(&Tag::Int(3)));
             assert_eq!(event.entity, notice_handle());
+            assert_eq!(event.source, mod_api::BlockEntityDataSource::Chunk);
             CALLS.set(CALLS.get() + 1);
         }
     }
@@ -2052,6 +2053,7 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
         &Client,
         &mut mod_api::BlockEntityDataReceivedEvent {
             entity: notice_handle(),
+            source: mod_api::BlockEntityDataSource::Chunk,
             tag: &tag,
         },
     );

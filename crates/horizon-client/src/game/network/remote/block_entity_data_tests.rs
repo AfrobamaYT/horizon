@@ -4,7 +4,17 @@ use crate::game::native_entity_refs::tests::{run_fresh_cases, with_client_game};
 use mod_api::{BlockEntityPart, BlockPart, Hooks, Registrar};
 use std::sync::{Arc, Mutex};
 
-struct Observer(Arc<Mutex<Vec<(i32, i32)>>>);
+type Seen = Arc<
+    Mutex<
+        Vec<(
+            mod_api::BlockEntityDataSource,
+            [i32; 3],
+            horizon_core::nbt::Compound,
+            horizon_core::nbt::Compound,
+        )>,
+    >,
+>;
+struct Observer(Seen);
 #[mod_api::horizon_part]
 impl BlockPart for Observer {}
 #[mod_api::horizon_part]
@@ -14,17 +24,15 @@ impl BlockEntityPart for Observer {
         host: &dyn mod_api::ClientHost,
         event: &mut mod_api::BlockEntityDataReceivedEvent<'_>,
     ) {
-        let Some(Tag::Int(arrived)) = event.tag.get(&"count".into()) else {
-            panic!("missing arrived count")
-        };
-        let data = event.entity.data(host).unwrap();
-        let Some(Tag::Int(merged)) = data.get(&"count".into()) else {
-            panic!("missing merged count")
-        };
-        self.0.lock().unwrap().push((*arrived, *merged));
+        self.0.lock().unwrap().push((
+            event.source,
+            event.entity.position(host).unwrap(),
+            event.tag.clone(),
+            event.entity.data(host).unwrap(),
+        ));
     }
 }
-struct TestMod(Arc<Mutex<Vec<(i32, i32)>>>);
+struct TestMod(Seen);
 #[mod_api::__subscriptions]
 impl Hooks for TestMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
@@ -77,6 +85,8 @@ fn block_entity_data_received_after_merge() {
                         "minecraft:chest".into(),
                     ]),
                 );
+
+            use mod_api::BlockEntityDataSource::{Chunk, UpdatePacket};
             let stone = game
                 .pack
                 .assets
@@ -85,8 +95,9 @@ fn block_entity_data_received_after_merge() {
                 .unwrap();
             let mut column = horizon_client::chunk::Chunk::empty(0, 0);
             column.set(1, 64, 1, stone.0);
+            column.set(3, 64, 3, stone.0);
             let tag = |n| Tag::Compound([("count".into(), Tag::Int(n))].into());
-            let packet = horizon_protocol::packets::play::LevelChunkWithLight {
+            let mut packet = horizon_protocol::packets::play::LevelChunkWithLight {
                 x: 0,
                 z: 0,
                 chunk: horizon_protocol::chunk::ChunkData {
@@ -96,7 +107,7 @@ fn block_entity_data_received_after_merge() {
                         packed_xz: 0x11,
                         y: 64,
                         kind: 0,
-                        tag: tag(3),
+                        tag: Tag::Compound(Default::default()),
                     }],
                 },
                 light: horizon_protocol::chunk::LightData {
@@ -109,20 +120,88 @@ fn block_entity_data_received_after_merge() {
                 },
             };
             let format = game.remote.as_ref().unwrap().chunk_format.clone();
-            game.remote_chunk(&packet, Some((&format, Ok(column))));
-            assert_eq!(*seen.lock().unwrap(), [(3, 3)]);
-            game.remote_block_entity_data([1, 64, 1], 0, &tag(5));
-            assert_eq!(*seen.lock().unwrap(), [(3, 3), (5, 5)]);
+            game.remote_chunk(&packet, Some((&format, Ok(column.clone()))));
+            assert_eq!(seen.lock().unwrap().len(), 0, "chunk empty");
+            packet.chunk.block_entities[0].tag = tag(3);
+            game.remote_chunk(&packet, Some((&format, Ok(column.clone()))));
+            assert_eq!(seen.lock().unwrap().len(), 1, "chunk content");
+            assert_eq!(seen.lock().unwrap()[0].0, Chunk);
+            seen.lock().unwrap().clear();
+            game.remote_block_entity_data(
+                [1, 64, 1],
+                0,
+                UpdatePacket,
+                &Tag::Compound(Default::default()),
+            );
+            assert_eq!(seen.lock().unwrap().len(), 1, "packet empty");
+            assert_eq!(seen.lock().unwrap()[0].0, UpdatePacket);
+            assert!(seen.lock().unwrap()[0].2.is_empty());
+            assert_eq!(
+                seen.lock().unwrap()[0].3.get(&"count".into()),
+                Some(&Tag::Int(3))
+            );
+            seen.lock().unwrap().clear();
+            game.remote_block_entity_data([1, 64, 1], 0, UpdatePacket, &Tag::End);
+            assert_eq!(seen.lock().unwrap().len(), 0, "packet absent");
+            // Existing entity on an invalid holder must not receive or apply data.
             let dirt = game
                 .pack
                 .assets
                 .registry
                 .default_state("minecraft:dirt")
                 .unwrap();
+            game.world.set(1, 64, 1, dirt).unwrap();
+            game.remote_block_entity_data([1, 64, 1], 0, UpdatePacket, &tag(9));
+            assert_eq!(seen.lock().unwrap().len(), 0, "invalid holder");
+            // Packet order is deliberately different from position order.
+            packet.chunk.block_entities = vec![
+                horizon_protocol::chunk::BlockEntityInfo {
+                    packed_xz: 0x33,
+                    y: 64,
+                    kind: 0,
+                    tag: tag(7),
+                },
+                horizon_protocol::chunk::BlockEntityInfo {
+                    packed_xz: 0x11,
+                    y: 64,
+                    kind: 0,
+                    tag: Tag::Compound(
+                        [
+                            ("count".into(), Tag::Int(3)),
+                            ("name".into(), Tag::String("a".into())),
+                        ]
+                        .into(),
+                    ),
+                },
+            ];
+            game.remote_chunk(&packet, Some((&format, Ok(column))));
+            {
+                let records = seen.lock().unwrap();
+                assert_eq!(records.len(), 2);
+                assert_eq!(
+                    [(records[0].0, records[0].1), (records[1].0, records[1].1)],
+                    [(Chunk, [3, 64, 3]), (Chunk, [1, 64, 1])]
+                );
+            }
+            seen.lock().unwrap().clear();
+            game.remote_block_entity_data([1, 64, 1], 0, UpdatePacket, &tag(5));
+            game.remote_block_entity_data([1, 64, 1], 0, UpdatePacket, &tag(5));
+            let records = seen.lock().unwrap();
+            assert_eq!(records.len(), 2, "identical packets each notify");
+            for (source, position, arrived, merged) in records.iter() {
+                assert_eq!(*source, UpdatePacket);
+                assert_eq!(*position, [1, 64, 1]);
+                assert_eq!(*arrived, [("count".into(), Tag::Int(5))].into());
+                assert_eq!(merged.get(&"count".into()), Some(&Tag::Int(5)));
+                assert_eq!(merged.get(&"name".into()), Some(&Tag::String("a".into())));
+            }
+            drop(records);
+            seen.lock().unwrap().clear();
             game.world.set(2, 64, 2, dirt).unwrap();
             game.sync_block_entity((2, 64, 2), None, dirt);
-            game.remote_block_entity_data([2, 64, 2], 1, &tag(7));
-            assert_eq!(*seen.lock().unwrap(), [(3, 3), (5, 5)]);
+            game.remote_block_entity_data([2, 64, 2], 1, UpdatePacket, &tag(7));
+            game.remote_block_entity_data([4, 64, 4], 0, UpdatePacket, &tag(9));
+            game.remote_block_entity_data([1, 64, 1], 1, UpdatePacket, &tag(11));
             let vanilla = Tag::Compound(
                 [
                     ("id".into(), Tag::String("minecraft:chest".into())),
@@ -134,11 +213,12 @@ fn block_entity_data_received_after_merge() {
             );
             let (_, chest) = horizon_client::save::decode_block_entity(&vanilla).unwrap();
             game.world.block_entities.insert((4, 64, 4), chest);
-            game.remote_block_entity_data([4, 64, 4], 2, &tag(13));
-            game.remote_block_entity_data([1, 64, 1], 0, &Tag::End);
-            game.remote_block_entity_data([3, 64, 3], 0, &tag(9));
-            game.remote_block_entity_data([1, 64, 1], 1, &tag(11));
-            assert_eq!(*seen.lock().unwrap(), [(3, 3), (5, 5)]);
+            game.remote_block_entity_data([4, 64, 4], 2, UpdatePacket, &tag(13));
+            assert_eq!(
+                seen.lock().unwrap().len(),
+                0,
+                "silent, absent, mismatched, and vanilla entities"
+            );
         });
     });
 }

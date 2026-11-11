@@ -387,3 +387,13 @@ impl FallOnEvent<'_> {
         self.writes.push(write);
     }
 }
+
+/// Which client synchronization route supplied a block entity's data.
+// exhaustive: the protocol supplies block entity tags through these two routes
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+pub enum BlockEntityDataSource {
+    /// Initial synchronization in a chunk packet; empty tags send no notice.
+    Chunk,
+    /// A later block entity data packet; even an empty compound sends a notice.
+    UpdatePacket,
+}
