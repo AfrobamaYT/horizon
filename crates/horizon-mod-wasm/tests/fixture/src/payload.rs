@@ -16,6 +16,18 @@ pub fn register(registrar: &mut dyn Registrar) {
 struct Handler;
 impl IPayloadHandler for Handler {
     fn handle(&self, bytes: PayloadBytes, cx: &mut dyn IPayloadContext) -> Result<(), String> {
+        if bytes.0.len() == 1 {
+            cx.enqueue_work(Arc::new(TrapWork)).unwrap();
+            if bytes.0[0] == 1 {
+                cx.reply(
+                    &PayloadId("wasm_fixture:raw".into()),
+                    PayloadBytes(vec![4, 5]),
+                )
+                .unwrap();
+                panic!("handler trap after staging reply and work");
+            }
+            return Ok(());
+        }
         assert_eq!(bytes.0.len(), 1024 * 1024);
         for (i, byte) in bytes.0.iter().enumerate() {
             assert_eq!(*byte, (i % 251) as u8);
@@ -73,5 +85,17 @@ impl PayloadWork for Work {
             _ => unreachable!(),
         }
         Ok(())
+    }
+}
+
+struct TrapWork;
+impl PayloadWork for TrapWork {
+    fn run(&self, cx: &mut dyn IPayloadContext) -> Result<(), String> {
+        cx.reply(
+            &PayloadId("wasm_fixture:raw".into()),
+            PayloadBytes(vec![6, 7]),
+        )
+        .unwrap();
+        panic!("work trap after staging reply");
     }
 }

@@ -91,6 +91,29 @@ impl IPayloadContext for Context {
 #[test]
 #[ignore = "requires compiled HORIZON_WASM_FIXTURE and HORIZON_WASM_STD"]
 fn raw_payload_callback() {
+    const MODE: &str = "HORIZON_RAW_PAYLOAD_TEST_MODE";
+    if let Ok(mode) = std::env::var(MODE) {
+        exercise(mode.parse().unwrap());
+        return;
+    }
+    // Point replacement registration is process-global, and a trap poisons its
+    // entire VM group. Each case needs a fresh process, including the happy path
+    // when this suite also runs the existing real_member registration test.
+    for mode in 0..=2 {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "raw_payload::raw_payload_callback",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(MODE, mode.to_string())
+            .status()
+            .unwrap();
+        assert!(status.success(), "raw payload case {mode} failed");
+    }
+}
+fn exercise(mode: u8) {
     use horizon_mod_package::manifest::Package;
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let path = std::path::Path::new(&path);
@@ -127,6 +150,53 @@ fn raw_payload_callback() {
             .unwrap();
         assert_eq!(declaration.version, "exact-v1");
         assert_eq!(declaration.thread, HandlerThread::Network);
+        if mode != 0 {
+            let receiver = table
+                .handler(
+                    &declaration.id.0,
+                    PayloadProtocol::Play,
+                    PayloadDirection::ToServer,
+                )
+                .unwrap();
+            let mut cx = Context {
+                native: Native {
+                    reads: 0.into(),
+                    writes: 0,
+                },
+                flow: PayloadDirection::ToServer,
+                network: true,
+                replies: vec![],
+                work: None,
+            };
+            let handled = receiver.handle(PayloadBytes(vec![mode]), &mut cx);
+            if mode == 1 {
+                assert!(
+                    handled.is_err(),
+                    "a trapped handler must not authorize commit"
+                );
+                assert!(cx.work.is_some(), "work was staged before the trap");
+                assert_eq!(cx.replies, [PayloadBytes(vec![4, 5])]);
+            } else {
+                handled.unwrap();
+                let work = cx.work.take().unwrap();
+                cx.network = false;
+                assert!(
+                    receiver.run_work(&*work, &mut cx).is_err(),
+                    "trapped work must not authorize commit"
+                );
+                assert_eq!(cx.replies, [PayloadBytes(vec![6, 7])]);
+            }
+            // The native transaction owner can now abort instead of publishing effects.
+            cx.replies.clear();
+            cx.work = None;
+            assert!(cx.replies.is_empty() && cx.work.is_none());
+            assert!(
+                receiver.handle(PayloadBytes(vec![2]), &mut cx).is_err(),
+                "a poisoned group must refuse subsequent callbacks"
+            );
+            assert!(cx.replies.is_empty() && cx.work.is_none());
+            return;
+        }
         let body = PayloadBytes((0..1024 * 1024).map(|i| (i % 251) as u8).collect());
         for flow in [PayloadDirection::ToServer, PayloadDirection::ToClient] {
             let receiver = table
