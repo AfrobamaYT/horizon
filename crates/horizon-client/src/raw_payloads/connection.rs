@@ -51,7 +51,8 @@ impl Epoch {
         *self.pending.lock().unwrap() += 1;
         MainTask(self.clone())
     }
-    fn wait_main(&self) -> bool {
+    /// Wait for main-thread work without advancing this epoch; false on invalidation.
+    pub fn wait_main(&self) -> bool {
         let mut pending = self.pending.lock().unwrap();
         while *pending != 0 && self.active() {
             pending = self.drained.wait(pending).unwrap();
