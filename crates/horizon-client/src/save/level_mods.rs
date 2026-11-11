@@ -37,11 +37,9 @@ pub(super) fn saved(data: &Tag) -> Option<Vec<ModRecord>> {
     };
     Some(
         mods.iter()
-            .filter_map(|entry| {
-                Some(ModRecord {
-                    id: text(entry.get("ModId"))?,
-                    version: text(entry.get("ModVersion")).unwrap_or_default(),
-                })
+            .map(|entry| ModRecord {
+                id: text(entry.get("ModId")).unwrap_or_default(),
+                version: text(entry.get("ModVersion")).unwrap_or_default(),
             })
             .collect(),
     )
@@ -102,6 +100,31 @@ mod tests {
             id: id.into(),
             version: version.into(),
         }
+    }
+
+    #[test]
+    fn malformed_id_is_reported_as_missing() {
+        let root = Tag::compound([(
+            "fml",
+            Tag::compound([(
+                "LoadingModList",
+                Tag::List(vec![
+                    Tag::compound([("ModId", Tag::Int(7))]),
+                    Tag::compound([]),
+                ]),
+            )]),
+        )]);
+        let level = Level {
+            saved_mods: saved(&root),
+            ..Level::default()
+        };
+        let differences = level.mod_mismatches(&[]);
+        assert_eq!(differences.len(), 2);
+        assert!(
+            differences
+                .iter()
+                .all(|m| m.mod_id.is_empty() && m.current_version.is_none())
+        );
     }
 
     /// The loaded mods replace the list the file had and the other `fml` keys stay; a write
