@@ -13,10 +13,11 @@ pub trait Hooks {
     /// world only on the server (`native_window` is false there), not on a
     /// server's client. On the server it fires for every player of the world
     /// (the helpers read the acting one). On a server's client the result
-    /// arrives as the client predicts it (the used item less one unless the
-    /// player is in creative mode; a use remainder such as a bowl comes with
-    /// the server's inventory update), and a replacement is kept until that
-    /// update arrives.
+    /// arrives as vanilla's client `finishUsingItem` leaves it: an item that
+    /// is not a consumable unchanged (a spyglass), a consumable less one, and
+    /// its use remainder (the bowl of the last stew) once that empties the
+    /// hand; nothing is used up in creative mode. The hand holds the result,
+    /// a mod's replacement included, until the server's inventory update.
     #[hook(
         side = "both",
         contract = "listen",

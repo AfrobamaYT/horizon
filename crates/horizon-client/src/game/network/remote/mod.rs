@@ -9848,7 +9848,7 @@ impl Game<'_> {
             self.apply_remote_health();
         }
         // applyAfterUseComponentSideEffects, then LivingEntityUseItemEvent.Finish.
-        self.remote_use_item_finished(slot, &stack);
+        self.remote_use_item_finished(slot, &stack, &info);
     }
     /// MouseHandler updates KeyMapping; handleKeybinds sends packets on a tick.
     pub(super) fn remote_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {

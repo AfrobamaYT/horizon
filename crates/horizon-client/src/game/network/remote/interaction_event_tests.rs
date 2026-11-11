@@ -63,8 +63,9 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
-    /// Each `living_entity_use_item_finish`: side, hand and the count of the result it arrived with.
-    finishes: Vec<(LogicalSide, Hand, Option<u32>)>,
+    /// Each `living_entity_use_item_finish`: side, hand and the item and count of the result it
+    /// arrived with.
+    finishes: Vec<(LogicalSide, Hand, Option<(String, u32)>)>,
     /// What a finish listener does to the result when set: `None` clears it, `Some(n)` sets its count.
     finish_replacement: Option<Option<u32>>,
     /// Cancel `right_click_block` with this answer.
@@ -129,7 +130,10 @@ impl Hooks for Observer {
         state.finishes.push((
             side(&host),
             event.hand,
-            event.result.as_ref().map(|r| r.count()),
+            event.result.as_ref().map(|r| {
+                let item = mod_api::__private::item_key_id(r.item()).unwrap_or("?");
+                (item.to_owned(), r.count())
+            }),
         ));
         match state.finish_replacement {
             Some(None) => *event.result = None,
@@ -1315,40 +1319,163 @@ fn a_server_client_fires_use_item_finish_when_the_server_completes_the_use() {
     crate::game::api_values::install_parts(&mods).unwrap();
     mod_api::testing::with_mods(mods, || {
         with_interaction_game(true, |game| {
-            let apples = ItemStack::new("minecraft:apple", 3);
-            for (creative, replacement, held_after) in [
-                (false, None, Some(3)),
-                (true, None, Some(3)),
-                (false, Some(Some(7)), Some(7)),
-                (false, Some(None), None),
-            ] {
+            let offhand = super::super::shield::OFFHAND_SLOT;
+            // (slot, creative, used stack, replacement, what the listener sees, what the slot
+            // holds after), the expectations from vanilla's client finishUsingItem.
+            let cases: [(
+                usize,
+                bool,
+                (&str, u32),
+                Option<Option<u32>>,
+                Option<(&str, u32)>,
+                Option<(&str, u32)>,
+            ); 9] = [
+                // A consumable loses one.
+                (
+                    0,
+                    false,
+                    ("minecraft:apple", 3),
+                    None,
+                    Some(("minecraft:apple", 2)),
+                    Some(("minecraft:apple", 2)),
+                ),
+                // Nothing is used up in creative mode.
+                (
+                    0,
+                    true,
+                    ("minecraft:apple", 3),
+                    None,
+                    Some(("minecraft:apple", 3)),
+                    Some(("minecraft:apple", 3)),
+                ),
+                // The last stew leaves its use remainder, the bowl, in the hand.
+                (
+                    0,
+                    false,
+                    ("minecraft:mushroom_stew", 1),
+                    None,
+                    Some(("minecraft:bowl", 1)),
+                    Some(("minecraft:bowl", 1)),
+                ),
+                // A spyglass is not a consumable: it comes back as it was.
+                (
+                    0,
+                    false,
+                    ("minecraft:spyglass", 1),
+                    None,
+                    Some(("minecraft:spyglass", 1)),
+                    Some(("minecraft:spyglass", 1)),
+                ),
+                // The last apple leaves nothing.
+                (0, false, ("minecraft:apple", 1), None, None, None),
+                // A replacement goes into the hand: survival, cleared, creative.
+                (
+                    0,
+                    false,
+                    ("minecraft:apple", 3),
+                    Some(Some(7)),
+                    Some(("minecraft:apple", 2)),
+                    Some(("minecraft:apple", 7)),
+                ),
+                (
+                    0,
+                    false,
+                    ("minecraft:apple", 3),
+                    Some(None),
+                    Some(("minecraft:apple", 2)),
+                    None,
+                ),
+                (
+                    0,
+                    true,
+                    ("minecraft:apple", 3),
+                    Some(Some(7)),
+                    Some(("minecraft:apple", 3)),
+                    Some(("minecraft:apple", 7)),
+                ),
+                // The off hand, with a replacement.
+                (
+                    offhand,
+                    false,
+                    ("minecraft:apple", 2),
+                    Some(Some(5)),
+                    Some(("minecraft:apple", 1)),
+                    Some(("minecraft:apple", 5)),
+                ),
+            ];
+            let owned = |s: Option<(&str, u32)>| s.map(|(item, count)| (item.to_owned(), count));
+            for (slot, creative, (item, count), replacement, seen, after) in cases {
                 game.creative = creative;
-                game.inventory[game.selected] = Some(apples.clone());
-                game.using = Some((game.selected, 5));
+                game.inventory[game.selected] = None;
+                game.offhand = None;
+                let slot = if slot == offhand {
+                    offhand
+                } else {
+                    game.selected
+                };
+                *game.stack_in_mut(slot) = Some(ItemStack::new(item, count));
+                game.using = Some((slot, 5));
                 *observer.0.lock().unwrap() = Controls {
                     finish_replacement: replacement,
                     ..Controls::default()
                 };
                 game.remote_complete_using();
-                let seen = observer.0.lock().unwrap().finishes.clone();
-                // The listener sees the client's prediction: one eaten unless creative.
-                let predicted = Some(if creative { 3 } else { 2 });
-                assert_eq!(seen, [(LogicalSide::Client, Hand::Main, predicted)]);
-                // An unchanged result leaves the hand to the server's update; a
-                // replacement is kept until then.
-                let held = game.inventory[game.selected].as_ref().map(|s| s.count);
-                assert_eq!(held, held_after);
+                let hand = if slot == offhand {
+                    Hand::Off
+                } else {
+                    Hand::Main
+                };
+                assert_eq!(
+                    observer.0.lock().unwrap().finishes,
+                    [(LogicalSide::Client, hand, owned(seen))],
+                    "{item} x{count} creative={creative} {replacement:?}"
+                );
+                let held = game.stack_in(slot).map(|s| (s.item.to_string(), s.count));
+                assert_eq!(
+                    held,
+                    owned(after),
+                    "{item} x{count} creative={creative} {replacement:?}"
+                );
             }
-            // An off-hand use reports the off hand.
+            // The stack's use cooldown starts with the finish.
             game.creative = false;
-            game.offhand = Some(ItemStack::new("minecraft:apple", 1));
-            game.using = Some((super::super::shield::OFFHAND_SLOT, 5));
+            let mut cooling = ItemStack::new("minecraft:apple", 2);
+            cooling.data_mut().set_other(
+                "minecraft:use_cooldown",
+                Some(Tag::Compound(
+                    [
+                        ("seconds".into(), Tag::Float(1.0_f32.to_bits())),
+                        ("cooldown_group".into(), Tag::String("test:finish".into())),
+                    ]
+                    .into(),
+                )),
+            );
+            game.cooldowns.remove("test:finish");
+            game.inventory[game.selected] = Some(cooling);
+            game.using = Some((game.selected, 5));
             *observer.0.lock().unwrap() = Controls::default();
             game.remote_complete_using();
-            assert_eq!(
-                observer.0.lock().unwrap().finishes,
-                [(LogicalSide::Client, Hand::Off, None)]
-            );
+            assert!(game.cooldowns.is_on_cooldown("test:finish"));
+            // The server's inventory update replaces a mod's replacement.
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 3));
+            game.using = Some((game.selected, 5));
+            *observer.0.lock().unwrap() = Controls {
+                finish_replacement: Some(Some(7)),
+                ..Controls::default()
+            };
+            game.remote_complete_using();
+            assert_eq!(game.held().map(|s| s.count), Some(7));
+            let server = game.to_network(&Some(ItemStack::new("minecraft:apple", 2)));
+            game.handle_packet(
+                horizon_protocol::packets::play::Clientbound::SetPlayerInventory(
+                    horizon_protocol::packets::play::SetPlayerInventory {
+                        slot: game.selected as i32,
+                        item: server,
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(game.held().map(|s| s.count), Some(2));
         });
     });
 }
