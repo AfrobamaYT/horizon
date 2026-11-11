@@ -111,8 +111,11 @@ impl std::fmt::Display for Refusal {
             Self::Package(why) => write!(f, "{why}"),
             Self::Runtime(why) => write!(f, "{why}"),
             Self::Layout { .. } => write!(f, "built for another version of the mod API"),
-            Self::PointLayout { .. } => {
-                write!(f, "built for another version of the mod points API")
+            Self::PointLayout { built, game } => {
+                write!(
+                    f,
+                    "built for another version of the mod points API (mod layout {built}, game layout {game})"
+                )
             }
             Self::NoStd => write!(f, "this game has no wasm standard library member"),
             Self::Stopped => write!(f, "stopped after a trap or resource limit"),
@@ -626,6 +629,25 @@ fn load_with_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn point_layout_refusal_reports_both_layouts_to_console() {
+        let mut console = Vec::new();
+        report_refusals(
+            &[(
+                "layout_mod".into(),
+                Refusal::PointLayout {
+                    built: 123,
+                    game: 456,
+                },
+            )],
+            &mut console,
+        );
+        assert_eq!(
+            String::from_utf8(console).unwrap(),
+            "wasm mod layout_mod refused: built for another version of the mod points API (mod layout 123, game layout 456)\n"
+        );
+    }
 
     #[test]
     fn missing_std_reports_mod_and_reason_to_console_and_logger() {

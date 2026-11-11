@@ -613,6 +613,35 @@ pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint
     for (_, found) in all_points(&scanned, &list, wire)? {
         let target = found.target();
 
+        // Replacement normalizes parameter patterns. Keep the API contract of the original
+        // signature, including refusals, rather than promoting a staged function into a point.
+        let original = found
+            .attrs
+            .iter()
+            .find_map(|attr| {
+                if !attr.path().is_ident("doc") {
+                    return None;
+                }
+                let syn::Meta::NameValue(value) = &attr.meta else {
+                    return None;
+                };
+                let syn::Expr::Lit(value) = &value.value else {
+                    return None;
+                };
+                let syn::Lit::Str(value) = &value.lit else {
+                    return None;
+                };
+                value
+                    .value()
+                    .strip_prefix("horizon-point-signature: ")
+                    .map(str::to_owned)
+            })
+            .map(|text| syn::parse_str::<syn::Signature>(&text).map_err(|e| e.to_string()))
+            .transpose()?;
+        let found = Found {
+            sig: original.as_ref().unwrap_or(found.sig),
+            ..found
+        };
         let shape = found.shape()?;
         points.push(GamePoint::new(shape, &found, target));
     }
@@ -647,6 +676,7 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
     let mut staged = Staged::default();
     let mut packages = std::collections::BTreeSet::new();
     for (index, file) in scanned.iter().enumerate() {
+        let points_before = staged.points;
         let here: Vec<_> = points
             .iter()
             .filter(|(i, _)| *i == index)
@@ -683,6 +713,14 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
             };
             // A function with no API record has no listeners: it is not marked, and costs nothing.
             let shape = found.shape()?;
+            let original = syn::LitStr::new(
+                &format!("horizon-point-signature: {}", found.sig.to_token_stream()),
+                proc_macro2::Span::call_site(),
+            );
+            edits.push((
+                offset(source, &lines, start),
+                format!("{} ", quote!(#[doc = #original])),
+            ));
             if !shape.api() {
                 staged.refused += 1;
                 continue;
@@ -710,7 +748,9 @@ pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String
         out.push_str(&source[from..]);
         fs::write(&file.path, out).map_err(|e| format!("{}: {e}", file.path.display()))?;
         staged.files += 1;
-        if let Some(package) = &file.package {
+        if staged.points != points_before
+            && let Some(package) = &file.package
+        {
             packages.insert(package.clone());
         }
     }
@@ -1426,6 +1466,46 @@ name = 'horizon-mod-api-gen'
         put("crates/horizon-client/src/game/a_b.rs", "");
         assert!(points_with(&root, &WireTypes::new()).is_ok());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn replacement_keeps_destructured_parameter_point_layout() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-point-pattern-{}", std::process::id()));
+        let put = |name: &str, text: &str| {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        for name in [
+            "horizon-client",
+            "horizon-mod-points",
+            "horizon-mod-api-gen",
+        ] {
+            put(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = '{name}'\n"),
+            );
+        }
+        put("crates/horizon-mod-api-gen/internals.txt", "");
+        put("crates/horizon-mod-api-gen/replaceable.txt", "");
+        put("crates/horizon-client/src/lib.rs", "mod game;");
+        put(
+            "crates/horizon-client/src/game.rs",
+            "impl Game<'_> { fn connect_cancel(&self, (w, h): (f32, f32)) -> Option<(f32, f32)> { None } }",
+        );
+        let before = points_with(&root, &WireTypes::new()).unwrap();
+        assert!(before[0].api_refusal.is_some());
+        let layout = records(&before);
+        stage_with(&root, &WireTypes::new()).unwrap();
+        crate::replace::stage(&root).unwrap();
+        let after = points_with(&root, &WireTypes::new()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&before).unwrap(),
+            serde_json::to_value(&after).unwrap()
+        );
+        assert_eq!(layout, records(&after));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
