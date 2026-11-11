@@ -310,7 +310,7 @@ pub(crate) fn receives_cancelled(hook: generated::HookId) -> bool {
 
 /// A cancel hook's enabled subscribers in dispatch order, each with whether it is still told
 /// once the event is cancelled. Unlike [`entered`], nothing is marked: the dispatch enters only
-/// the mods it calls, through [`enter_listener`].
+/// the mods it calls, through [`ListenerScope::enter`].
 pub(crate) fn listening(
     hook_id: generated::HookId,
 ) -> impl Iterator<Item = (bool, &'static ModEntry)> {
