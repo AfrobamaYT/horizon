@@ -48,7 +48,10 @@ impl Hooks for Mod {
     }
 
     /// Counts server ticks through the ordinary hook, including on plain builds.
-    fn server_tick(&self, host: &mut dyn ServerHost, _: &mut ServerTickEvent<'_>) {
+    fn server_tick(&self, host: &mut dyn ServerHost, event: &mut ServerTickEvent<'_>) {
+        if !matches!(event.phase, mod_api::ServerTickPhase::ServerTickEnd { .. }) {
+            return;
+        }
         let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
         if ticks % 200 == 0 {
             host.messages()
