@@ -3555,7 +3555,7 @@ mod tests {
                         }));
                     }
                     3 => {
-                        event.elements = vec![
+                        *event.elements = vec![
                             TooltipElement::Text(mod_api::Text::literal("Name"), u32::MAX),
                             TooltipElement::Image(TooltipImage {
                                 stack: event.stack.clone(),

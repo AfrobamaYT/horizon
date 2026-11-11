@@ -319,7 +319,7 @@ mod tests {
             ) -> mod_api::Flow {
                 assert!(matches!(event.elements[1], TooltipElement::Image(_)));
                 let image = event.elements[1].clone();
-                event.elements = vec![
+                *event.elements = vec![
                     TooltipElement::Text(mod_api::Text::literal("A"), u32::MAX),
                     image,
                     TooltipElement::Text(mod_api::Text::literal("B"), u32::MAX),
