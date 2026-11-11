@@ -48,6 +48,7 @@ pub mod chat_filter;
 mod item_particles;
 mod spawn_info;
 use advancements::AdvancementOwners;
+use chat::yellow_names;
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
     pub const START_RAINING: u8 = 1;
@@ -623,15 +624,6 @@ impl Hub {
             None => yellow_names("multiplayer.player.joined", vec![display]),
         }
     }
-}
-
-/// A yellow translation of player names (`multiplayer.player.joined`).
-fn yellow_names(key: &str, names: Vec<Tag>) -> Tag {
-    Tag::compound([
-        ("translate", string(key)),
-        ("with", Tag::List(names)),
-        ("color", string("yellow")),
-    ])
 }
 
 /// An entity type's registry id, remembered once looked up.
@@ -1984,6 +1976,7 @@ impl Hub {
         self.mod_commands.1
     }
     /// Server mods' commands changed: every player gets their tree again.
+    #[horizon_mod_api_macros::replaceable]
     pub fn set_mod_commands(&mut self, key: u64, commands: serde_json::Value) {
         if self.store_mod_commands(key, commands) {
             for i in 0..self.guests.len() {
