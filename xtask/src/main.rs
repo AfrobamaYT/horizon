@@ -242,7 +242,7 @@ fn icons() -> Result<(), String> {
 fn package(binary: &Path, out: &Path) -> Result<(), String> {
     let repo = new_folder(out)?;
     copy_into(binary, out)?;
-    copy_beside(binary, &TOOLS, out)?;
+    copy_runtime(binary, &TOOLS, out)?;
     copy_exporters(&repo.join("exporters"), &out.join("exporters"))?;
     let play = repo.join("packaging/PLAY.txt");
     copy(&play, &out.join("PLAY.txt"))
@@ -252,7 +252,7 @@ fn package_server(engine: &Path, out: &Path) -> Result<(), String> {
     let repo = new_folder(out)?;
     copy_exporters(&repo.join("exporters"), &out.join("exporters"))?;
     copy(engine, &out.join(program_name(engine, "horizon-engine")))?;
-    copy_beside(engine, &SERVER_TOOLS, out)
+    copy_runtime(engine, &SERVER_TOOLS, out)
 }
 
 /// Release builds supply only our compiled classes and their integrity manifest.
@@ -300,6 +300,12 @@ fn program_name(program: &Path, name: &str) -> String {
     } else {
         name.to_string()
     }
+}
+
+/// Both bundle layouts require the same wasm runtime beside their engine.
+fn copy_runtime(program: &Path, tools: &[&str], out: &Path) -> Result<(), String> {
+    copy_beside(program, tools, out)?;
+    copy_into(&program.with_file_name("horizon-wasm-std.wasm"), out)
 }
 
 /// Copies `tools`, built beside `program`, into `out`.

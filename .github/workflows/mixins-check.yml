@@ -41,7 +41,7 @@ jobs:
           free -g
       - name: Install Rust and the headers the launcher and the game link against
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
+          bash tools/ci/install_launcher_deps.sh libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
           rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
