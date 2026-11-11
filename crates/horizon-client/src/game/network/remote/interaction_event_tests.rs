@@ -77,6 +77,8 @@ struct Controls {
     clicks: usize,
     click_hands: Vec<Hand>,
     use_item_packets: usize,
+    /// How many `set_creative_mode_slot` packets the client sent.
+    creative_slot_packets: usize,
     expect_empty_item_phase: bool,
 }
 
@@ -107,8 +109,10 @@ impl Hooks for Observer {
         _: &dyn mod_api::ClientHost,
         event: &mut mod_api::ClientPacketSendEvent<'_>,
     ) -> Flow {
-        if event.packet.id.path() == "use_item" {
-            self.0.lock().unwrap().use_item_packets += 1;
+        match event.packet.id.path() {
+            "use_item" => self.0.lock().unwrap().use_item_packets += 1,
+            "set_creative_mode_slot" => self.0.lock().unwrap().creative_slot_packets += 1,
+            _ => {}
         }
         Flow::Continue
     }
@@ -1498,6 +1502,41 @@ fn a_server_client_fires_use_item_finish_when_the_server_completes_the_use() {
             )
             .unwrap();
             assert_eq!(game.held().map(|s| s.count), Some(2));
+        });
+    });
+}
+
+/// Vanilla's client sends creative slot edits only through `CreativeInventoryListener`,
+/// which `CreativeModeInventoryScreen` adds to the inventory menu while it is open: a hand
+/// a finish listener replaced in creative mode is not sent as `SetCreativeModeSlot`.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_creative_hand_replaced_by_a_finish_listener_is_not_sent_as_a_creative_slot() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "finish_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.creative = true;
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 3));
+            game.remote_synced();
+            game.using = Some((game.selected, 5));
+            *observer.0.lock().unwrap() = Controls {
+                finish_replacement: Some(Some(7)),
+                ..Controls::default()
+            };
+            game.remote_complete_using();
+            assert_eq!(game.held().map(|s| s.count), Some(7));
+            game.send_creative_slots();
+            assert_eq!(observer.0.lock().unwrap().creative_slot_packets, 0);
+            // A creative edit of the hand is still sent: one packet.
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 5));
+            game.send_creative_slots();
+            assert_eq!(observer.0.lock().unwrap().creative_slot_packets, 1);
         });
     });
 }
