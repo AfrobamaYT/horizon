@@ -1,6 +1,6 @@
 //! Private custom-book connection state and client network services.
 use super::Game;
-use horizon_protocol::packets::{configuration::CustomPayload, play::Serverbound as S};
+use horizon_protocol::packets::play::Serverbound as S;
 use mod_api::{SendPacketError, ServerboundPlayPacket};
 use std::collections::HashMap;
 #[derive(Default)]

@@ -27,10 +27,7 @@ impl mod_api::Hooks for BookMod {
     }
 }
 fn receive(game: &mut Game<'_>, message: Message) {
-    game.remote_book_or_mod_payload(
-        horizon_client::recipe_book::settings_sync::CHANNEL,
-        &settings_codec::encode(&message).unwrap(),
-    );
+    game.remote_book_settings(&settings_codec::encode(&message).unwrap());
 }
 struct BoundBookMod;
 #[mod_api::__subscriptions]
@@ -127,9 +124,12 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
             game.connect_local(pipe, "Geometry").unwrap();
             let remote = game.remote.as_mut().unwrap();
-            remote.custom_books = true;
             remote.joined = true;
             remote.menu.set(Some((1, "geometry:menu".into())));
+            // A registered book alone must not authorize the private protocol.
+            receive(game, Message::Ready);
+            assert!(!game.native_net.book_ready);
+            game.remote.as_mut().unwrap().custom_books = true;
             game.settings.gui_scale = 1;
             // The fixture has no renderer; layout still needs the same viewport
             // used by geometry() to evaluate toggle gutters and book placement.

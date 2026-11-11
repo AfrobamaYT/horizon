@@ -75,12 +75,13 @@ fn uses_registered_payload_codec(channel: &str, play: bool, clientbound: bool) -
                 clientbound
             }
         }
-        crate::mod_net::CHANNEL | "horizon:lod" => play || clientbound,
+        "horizon:lod" => play || clientbound,
         crate::attachment_sync::CHANNEL
         | crate::menu_extra::CHANNEL
         | crate::anvil_cost::CHANNEL
         | "horizon:recipe_content" => play && clientbound,
-        "horizon:recipe_transfer" | "horizon:recipe_book_settings" => play,
+        "horizon:recipe_transfer" => play,
+        crate::custom_book::CHANNEL => play || clientbound,
         _ => false,
     }
 }
@@ -114,14 +115,17 @@ impl<const CLIENTBOUND: bool, const PLAY: bool> PayloadCodec<CLIENTBOUND, PLAY> 
     }
 
     fn validate_body(channel: &str, body: &[u8]) -> Result<()> {
-        if !PLAY
-            && CLIENTBOUND
-            && matches!(channel, crate::quiet::CHANNEL | crate::mod_net::CHANNEL)
-            && !body.is_empty()
-        {
+        if !PLAY && CLIENTBOUND && channel == crate::quiet::CHANNEL && !body.is_empty() {
             return Err(Error::new(format!(
                 "{channel} configuration advertisement must be empty"
             )));
+        }
+        if !PLAY
+            && CLIENTBOUND
+            && channel == crate::custom_book::CHANNEL
+            && body != crate::custom_book::CAPABILITY
+        {
+            return Err(Error::new("invalid custom-book capability version"));
         }
         validate_brand(channel, body)
     }
@@ -215,7 +219,6 @@ mod tests {
         for (channel, expected) in [
             ("minecraft:brand", [true, true, true, true]),
             ("horizon:quiet_commands", [false, true, true, false]),
-            ("horizon:mod_net", [false, true, true, true]),
             ("horizon:mod_list", [true, false, false, false]),
             ("horizon:attachment_sync", [false, false, false, true]),
             ("horizon:menu_extra", [false, false, false, true]),
@@ -224,7 +227,7 @@ mod tests {
             ("horizon:block_registry", [true, true, false, false]),
             ("horizon:recipe_content", [false, false, false, true]),
             ("horizon:recipe_transfer", [false, false, true, true]),
-            ("horizon:recipe_book_settings", [false, false, true, true]),
+            ("horizon:recipe_book_settings", [false, true, true, true]),
         ] {
             for ((play, clientbound), registered) in
                 [(false, false), (false, true), (true, false), (true, true)]
@@ -242,7 +245,7 @@ mod tests {
             "horizon:not_registered",
             "farmersdelight:flip_skillet",
             "minecraft:unknown",
-            "other:mod_net",
+            "other:application",
         ] {
             assert!(
                 !uses_registered_payload_codec(channel, false, false),
@@ -291,7 +294,7 @@ mod tests {
 
     #[test]
     fn configuration_feature_advertisements_have_empty_body_codecs() {
-        for channel in ["horizon:quiet_commands", "horizon:mod_net"] {
+        for channel in ["horizon:quiet_commands"] {
             let mut payload = CustomPayload {
                 channel: channel.into(),
                 data: vec![],
@@ -320,6 +323,42 @@ mod tests {
             assert!(error.0.contains("must be empty"));
             assert!(error.payload_limit().is_none());
         }
+    }
+
+    #[test]
+    fn custom_book_capability_requires_exact_version_in_configuration() {
+        for bytes in [vec![], vec![0], vec![2], vec![1, 0], vec![1; 1_048_577]] {
+            let payload = CustomPayload {
+                channel: crate::custom_book::CHANNEL.into(),
+                data: bytes,
+            };
+            assert!(
+                configuration::Clientbound::CustomPayload(payload.clone())
+                    .try_encode()
+                    .is_err()
+            );
+            let mut body = Writer::new();
+            body.string(&payload.channel);
+            body.bytes(&payload.data);
+            assert!(
+                configuration::Clientbound::decode(
+                    ids::configuration::clientbound::CUSTOM_PAYLOAD,
+                    &body.data
+                )
+                .is_err()
+            );
+        }
+        let packet = configuration::Clientbound::CustomPayload(CustomPayload {
+            channel: crate::custom_book::CHANNEL.into(),
+            data: crate::custom_book::CAPABILITY.to_vec(),
+        });
+        let encoded = packet.try_encode().unwrap();
+        let mut reader = Reader::new(&encoded);
+        let id = reader.varint().unwrap();
+        assert_eq!(
+            configuration::Clientbound::decode(id, reader.rest()).unwrap(),
+            packet
+        );
     }
 
     #[test]

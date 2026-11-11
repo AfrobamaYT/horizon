@@ -1290,12 +1290,12 @@ fn login_and_configure(
                 data: Vec::new(),
             }),
         )?;
-        // And that it carries native mods' messages (horizon_protocol::mod_net).
+        // Advertise private custom-book synchronization independently of mod registration.
         send(
             c,
             cfg::Clientbound::CustomPayload(cfg::CustomPayload {
-                channel: horizon_protocol::mod_net::CHANNEL.into(),
-                data: Vec::new(),
+                channel: horizon_protocol::custom_book::CHANNEL.into(),
+                data: horizon_protocol::custom_book::CAPABILITY.to_vec(),
             }),
         )?;
     }

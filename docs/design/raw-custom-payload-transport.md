@@ -7,7 +7,7 @@ no NeoForge implementation source was read by this implementation's author.
 
 ## One transport and one registration boundary
 
-Replace `horizon:mod_net`, its broadcast hooks, old send methods, brand gate,
+Replace the legacy envelope transport, its broadcast hooks, old send methods, brand gate,
 30,000-byte envelope bound and 32-message counters outright. Application packets
 use their declared namespaced custom-payload channel and exact opaque body bytes.
 There is no Horizon application envelope and no second path for typed payloads.

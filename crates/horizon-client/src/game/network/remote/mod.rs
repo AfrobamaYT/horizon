@@ -3830,9 +3830,11 @@ impl Game<'_> {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
             // thread, after all preceding packets (especially teleports).
             C::Ping(p) => self.send(S::Pong(p)),
-            // A native mod's server half to its client half.
-            C::CustomPayload(p) if self.is_book_or_mod_channel(&p.channel) => {
-                self.remote_book_or_mod_payload(&p.channel, &p.data);
+            // Private custom recipe-book settings and placement protocol.
+            C::CustomPayload(p)
+                if p.channel == horizon_client::recipe_book::settings_sync::CHANNEL =>
+            {
+                self.remote_book_settings(&p.data);
             }
             // The synced attachments of a holder the server shows the window.
             C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {

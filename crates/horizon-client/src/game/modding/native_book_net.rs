@@ -1,4 +1,4 @@
-//! The dedicated custom-book channel uses the negotiated mod-transport capability.
+//! Private custom-book synchronization, admitted by its own configuration capability.
 use super::Game;
 use horizon_client::recipe_book::{
     settings_codec,

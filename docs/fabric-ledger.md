@@ -709,11 +709,12 @@ and `menu_button`. All eleven record a gap; no keys are added.
 | `screen_tooltip` | **Gap:** `ItemTooltipCallback.EVENT` (partial) | [The item tooltip API][item-tooltip-api] line 33 declares the item-stack tooltip event, fired by [its mixin][item-tooltip-mixin] line 40 at `ItemStack.getTooltipLines` `RETURN` ordinal 1; [the client tooltip component callback][client-tooltip-component-api] line 37 only maps a `TooltipComponent` to a client component. Horizon's `Game::native_screen_tooltip` is a client collect hook asked by `draw_native_screen_tooltip` with the block id, data slots and cursor position when no item is under the cursor, appending plain lines that Horizon draws. The stack argument and the firing point differ: gap. |
 | `menu_button` | **Gap:** none; nearest `ItemClickBehaviorCallback.EVENT` (different moment) | [The item click callback][item-click-api] is fired by [its container menu mixin][item-click-mixin] at `AbstractContainerMenu.tryItemClickBehaviourOverride` `HEAD` for a slot click, with the hovered stack, slot, carried stack, slot access, click action and player. Horizon's `Game::native_menu_button` is a server listen hook asked by `api_menu_button` from the container's `clickMenuButton` path with a `MenuButtonContext`, a mutable block entity (out of the world) and the clicking player's carried stack, then writing the block entity snapshot back. No Fabric event fires at that moment or allows those mutations: gap. |
 
-## Event counterparts: base menus, mod networking, mobs and player gear (#1014)
+## Event counterparts: base menus, mobs and player gear (#1014)
 
 Fabric evidence is at `fabric-26.3/` pinned `2065040b236a0d5ac011bd6a45625dc49579b222`. Horizon call
-sites are named by function. Scope: the twelve `base` hooks `menu_clicked`, `menu_closed`,
-`hurt_enemy`, `inventory_tick`, `on_equip` and `block_signal`. All twelve record a gap; no keys are
+sites are named by function. Scope: the ten `base` hooks `menu_clicked`, `menu_closed`,
+`player_died`, `mob_spawned`, `mob_killed`, `item_picked_up`, `hurt_enemy`, `inventory_tick`,
+`on_equip` and `block_signal`. All ten record a gap; no keys are
 added.
 
 | Horizon hook | Fabric event considered / status | Evidence and porting boundary |
