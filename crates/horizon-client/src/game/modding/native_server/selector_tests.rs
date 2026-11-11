@@ -171,10 +171,12 @@ fn selector_kinds_publish_vanilla_flags_and_share_parser_suggestions() {
     assert!(problems.is_empty(), "{problems:?}");
     let mut dispatcher = Dispatcher::new();
     register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
-    let mut registries = horizon_client::command::Registries::default();
-    registries.permission = 4;
-    registries.players = vec!["Alice".into(), "Bob".into()];
-    registries.selected_entities = vec!["00000000-0000-0000-0000-000000000007".into()];
+    let mut registries = horizon_client::command::Registries {
+        permission: 4,
+        players: vec!["Alice".into(), "Bob".into()],
+        selected_entities: vec!["00000000-0000-0000-0000-000000000007".into()],
+        ..Default::default()
+    };
     for (name, amount, kind, single, players) in [
         ("one", "single", "entities", true, false),
         ("many", "multiple", "entities", false, false),
