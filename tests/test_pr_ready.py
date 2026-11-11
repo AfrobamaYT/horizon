@@ -56,6 +56,30 @@ class GitChangedPathsTests(unittest.TestCase):
         self.git("add", ".")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base")
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks and FIFO")
+    def test_revision_snapshot_never_reads_symlink_targets_or_nonregular_files(self):
+        self.write("tracked.txt", "base\n")
+        self.commit()
+        (self.root / "dangling").symlink_to("absent")
+        (self.root / "directory-link").symlink_to(self.root, target_is_directory=True)
+        os.mkfifo(self.root / "pipe")
+        actual_git = pr_ready.git
+        def git(*arguments):
+            if arguments[0] == "ls-files":
+                # Git may omit nonregular files; exercise the refusal even if listed.
+                return "dangling\0directory-link\0pipe\0"
+            return actual_git(*arguments)
+        with mock.patch.object(pr_ready, "git", side_effect=git), \
+                mock.patch.object(Path, "open", side_effect=AssertionError("must not read untracked objects")):
+            before = pr_ready.revision_state()
+            self.assertTrue(before[1])
+            self.assertIn("absent", before[2])
+            self.assertIn("pipe", before[2])
+            (self.root / "dangling").unlink()
+            (self.root / "dangling").symlink_to("another-absent")
+            after = pr_ready.revision_state()
+        self.assertNotEqual(before, after)
+
     def test_self_check_header_identifies_commit_and_dirty_state(self):
         self.write("tracked.txt", "base\n")
         self.write(".gitignore", "ignored-output/\n")

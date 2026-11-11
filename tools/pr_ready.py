@@ -30,6 +30,7 @@ from pathlib import Path
 import re
 import shlex
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -586,9 +587,19 @@ MARK = {"pass": "✅", "fail": "❌", "skip": "➖", "list": "➖", "warn": "⚠
 def revision_state():
     """Snapshot before selection and after checks; ignored build output is excluded."""
     untracked = git("ls-files", "--others", "--exclude-standard", "-z").split("\0")[:-1]
+    metadata = []
+    for path in untracked:
+        # Never open untracked content: symlinks can dangle or name directories,
+        # and FIFOs/devices must not be read. Dirty starts are uncertified anyway.
+        try:
+            info = (ROOT / path).lstat()
+            link = os.readlink(ROOT / path) if stat.S_ISLNK(info.st_mode) else None
+            metadata.append((path, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns, link))
+        except OSError:
+            metadata.append((path, "unavailable"))
     return (git("rev-parse", "HEAD").strip(),
             git("status", "--porcelain=v1", "--untracked-files=all"),
-            git("diff", "HEAD", "--binary") + (git("hash-object", "--", *untracked) if untracked else ""))
+            git("diff", "HEAD", "--binary") + repr(metadata))
 
 
 def block(args, base, merge_base, changed, counts, steps, label, elapsed, revision, changed_during_run=False):
