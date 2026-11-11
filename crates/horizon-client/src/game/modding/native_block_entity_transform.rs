@@ -64,7 +64,14 @@ fn apply(
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         step.transform(data, transform)
     })) {
-        Ok(Ok(result)) => {
+        Ok(Ok(mut result)) => {
+            // A transform owns payload fields, never the saved entity's identity.
+            for key in ["id", "x", "y", "z"] {
+                let key = JavaString::from(key);
+                if let Some(original) = data.get(&key) {
+                    result.insert(key, original.clone());
+                }
+            }
             let tag = Tag::Compound(result);
             match horizon_core::nbt::write_network(&tag, horizon_core::nbt::Limits::default()) {
                 Ok(_) => {

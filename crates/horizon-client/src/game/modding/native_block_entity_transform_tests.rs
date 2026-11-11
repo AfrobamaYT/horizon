@@ -52,6 +52,15 @@ impl mod_api::Hooks for Registration {
                 Ok(data)
             })
             .build();
+        r.block_entity_type("hostile")
+            .transform(|_: &Compound, _: mod_api::StructureTransform| {
+                Ok([
+                    ("id".into(), Tag::String("minecraft:chest".into())),
+                    ("facing".into(), Tag::String("east".into())),
+                ]
+                .into())
+            })
+            .build();
         r.block_entity_type("plain").build();
         r.block_entity_type("refuses")
             .transform(|_: &Compound, _: mod_api::StructureTransform| {
@@ -165,9 +174,29 @@ fn place(
     rotation: Rotation,
     mirror: Mirror,
 ) -> (World, Compound) {
+    place_block(
+        resources,
+        id,
+        facing,
+        &format!("test:{facing}"),
+        rotation,
+        mirror,
+    )
+}
+fn place_block(
+    resources: &StructureResources,
+    id: &str,
+    facing: &str,
+    block: &str,
+    rotation: Rotation,
+    mirror: Mirror,
+) -> (World, Compound) {
     let data: Compound = [
         ("id".into(), Tag::String(id.into())),
         ("facing".into(), Tag::String(facing.into())),
+        ("x".into(), Tag::Int(3)),
+        ("y".into(), Tag::Int(64)),
+        ("z".into(), Tag::Int(5)),
         ("bits".into(), Tag::Float(0x7fc00001)),
         (
             "utf16".into(),
@@ -179,10 +208,7 @@ fn place(
         ("size", Tag::List(vec![Tag::Int(1); 3])),
         (
             "palette",
-            Tag::List(vec![Tag::compound([(
-                "Name",
-                Tag::String(format!("test:{facing}").as_str().into()),
-            )])]),
+            Tag::List(vec![Tag::compound([("Name", Tag::String(block.into()))])]),
         ),
         (
             "blocks",
@@ -263,12 +289,44 @@ fn structure_transform_placement_rotations_mirrors_unset_and_refusal() {
                 mod_api::StructureMirror::None,
             ),
             (
+                Rotation::None,
+                Mirror::LeftRight,
+                "north",
+                "south",
+                mod_api::StructureRotation::None,
+                mod_api::StructureMirror::LeftRight,
+            ),
+            (
+                Rotation::None,
+                Mirror::FrontBack,
+                "north",
+                "north",
+                mod_api::StructureRotation::None,
+                mod_api::StructureMirror::FrontBack,
+            ),
+            (
                 Rotation::Clockwise90,
                 Mirror::None,
                 "north",
                 "east",
                 mod_api::StructureRotation::Clockwise90,
                 mod_api::StructureMirror::None,
+            ),
+            (
+                Rotation::Clockwise90,
+                Mirror::LeftRight,
+                "north",
+                "west",
+                mod_api::StructureRotation::Clockwise90,
+                mod_api::StructureMirror::LeftRight,
+            ),
+            (
+                Rotation::Clockwise90,
+                Mirror::FrontBack,
+                "north",
+                "east",
+                mod_api::StructureRotation::Clockwise90,
+                mod_api::StructureMirror::FrontBack,
             ),
             (
                 Rotation::Clockwise180,
@@ -279,6 +337,22 @@ fn structure_transform_placement_rotations_mirrors_unset_and_refusal() {
                 mod_api::StructureMirror::None,
             ),
             (
+                Rotation::Clockwise180,
+                Mirror::LeftRight,
+                "north",
+                "north",
+                mod_api::StructureRotation::Clockwise180,
+                mod_api::StructureMirror::LeftRight,
+            ),
+            (
+                Rotation::Clockwise180,
+                Mirror::FrontBack,
+                "north",
+                "south",
+                mod_api::StructureRotation::Clockwise180,
+                mod_api::StructureMirror::FrontBack,
+            ),
+            (
                 Rotation::Counterclockwise90,
                 Mirror::None,
                 "north",
@@ -287,44 +361,20 @@ fn structure_transform_placement_rotations_mirrors_unset_and_refusal() {
                 mod_api::StructureMirror::None,
             ),
             (
-                Rotation::None,
+                Rotation::Counterclockwise90,
                 Mirror::LeftRight,
                 "north",
-                "south",
-                mod_api::StructureRotation::None,
+                "east",
+                mod_api::StructureRotation::Counterclockwise90,
                 mod_api::StructureMirror::LeftRight,
             ),
             (
-                Rotation::None,
-                Mirror::LeftRight,
-                "east",
-                "east",
-                mod_api::StructureRotation::None,
-                mod_api::StructureMirror::LeftRight,
-            ),
-            (
-                Rotation::None,
+                Rotation::Counterclockwise90,
                 Mirror::FrontBack,
                 "north",
-                "north",
-                mod_api::StructureRotation::None,
-                mod_api::StructureMirror::FrontBack,
-            ),
-            (
-                Rotation::None,
-                Mirror::FrontBack,
-                "east",
                 "west",
-                mod_api::StructureRotation::None,
+                mod_api::StructureRotation::Counterclockwise90,
                 mod_api::StructureMirror::FrontBack,
-            ),
-            (
-                Rotation::Clockwise90,
-                Mirror::LeftRight,
-                "north",
-                "west",
-                mod_api::StructureRotation::Clockwise90,
-                mod_api::StructureMirror::LeftRight,
             ),
         ] {
             let (world, _) = place(&resources, "test:machine", input, rotation, mirror);
@@ -345,6 +395,15 @@ fn structure_transform_placement_rotations_mirrors_unset_and_refusal() {
                 world.stored.unwrap().get(&"facing".into()),
                 Some(&Tag::String(expected.into()))
             );
+        }
+        // Keep the east-facing mirror cases alongside the full north-facing matrix.
+        for (mirror, expected) in [(Mirror::LeftRight, "east"), (Mirror::FrontBack, "west")] {
+            let (world, _) = place(&resources, "test:machine", "east", Rotation::None, mirror);
+            assert_eq!(
+                world.stored.unwrap().get(&"facing".into()),
+                Some(&Tag::String(expected.into()))
+            );
+            assert!(calls.lock().unwrap().pop().is_some());
         }
         for id in [
             "test:plain",
@@ -396,4 +455,130 @@ fn structure_transform_unregistered_path_keeps_data_without_an_adapter() {
     );
     assert_eq!(world.state, BlockStateId(3));
     assert_eq!(world.stored, Some(original));
+}
+
+#[test]
+fn structure_transform_hostile_output_keeps_original_identity() {
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "test",
+        Box::new(Registration(Calls::default())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods.clone(), || {
+        mod_api::__private::part_tests::install_parts_fixture(&mods).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let resources = resources(dir.path());
+        prepare(resources.registry);
+        let (world, _) = place(
+            &resources,
+            "test:hostile",
+            "north",
+            Rotation::Clockwise90,
+            Mirror::None,
+        );
+        let stored = world.stored.unwrap();
+        assert_eq!(
+            stored,
+            [
+                ("id".into(), Tag::String("test:hostile".into())),
+                ("x".into(), Tag::Int(3)),
+                ("y".into(), Tag::Int(64)),
+                ("z".into(), Tag::Int(5)),
+                ("facing".into(), Tag::String("east".into())),
+            ]
+            .into()
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn structure_transform_survives_real_datapack_reload_with_its_registry() {
+    use crate::game::{native_entity_refs::tests::with_game, world_loading::WorldRequest};
+    let calls = Calls::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "test",
+        Box::new(Registration(calls.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_game(|game| {
+            let dir = tempfile::tempdir().unwrap();
+            let mut request = WorldRequest::new(
+                "transform_reload",
+                Some("transform_reload"),
+                Some(1),
+                true,
+                None,
+                Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            )
+            .unwrap();
+            request.save_root = dir.path().to_owned();
+            game.load_world(request).unwrap();
+            let registry = game.pack.assets.registry;
+            let frozen = registry
+                .structure_block_entity_transform
+                .get()
+                .unwrap()
+                .clone();
+            let transforms = StateTransforms::from_json(
+                &std::fs::read_to_string(
+                    game.options
+                        .resources
+                        .join("worldgen/blocks/structure-blocks.json"),
+                )
+                .unwrap(),
+                registry.len(),
+            )
+            .unwrap();
+            let resources = StructureResources::new(
+                registry,
+                transforms,
+                dir.path(),
+                Default::default(),
+                &Default::default(),
+            );
+            let check_placement = || {
+                let (world, _) = place_block(
+                    &resources,
+                    "test:machine",
+                    "north",
+                    "minecraft:furnace",
+                    Rotation::Clockwise90,
+                    Mirror::None,
+                );
+                assert_eq!(
+                    world.stored.unwrap().get(&"facing".into()),
+                    Some(&Tag::String("east".into()))
+                );
+                assert_eq!(
+                    registry.state(world.state).unwrap().properties["facing"],
+                    "east"
+                );
+            };
+            check_placement();
+            assert!(game.run_command("reload"));
+            assert!(std::ptr::eq(registry, game.pack.assets.registry));
+            assert!(Arc::ptr_eq(
+                &frozen,
+                game.pack
+                    .assets
+                    .registry
+                    .structure_block_entity_transform
+                    .get()
+                    .unwrap()
+            ));
+            check_placement();
+            assert_eq!(
+                *calls.lock().unwrap(),
+                vec![
+                    mod_api::StructureTransform::new(
+                        mod_api::StructureRotation::Clockwise90,
+                        mod_api::StructureMirror::None
+                    );
+                    2
+                ]
+            );
+        })
+    });
 }

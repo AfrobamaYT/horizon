@@ -47,12 +47,16 @@ impl From<(crate::Identifier, String)> for TransformRefusal {
     }
 }
 
-/// Pure deterministic saved-data transform, shared by native and wasm declarations.
+/// Saved-data transform, shared by native and wasm declarations.
+/// Runs on the server during structure placement, possibly on worldgen worker threads.
+/// Its only inputs are saved data, rotation and mirror. Determinism is the mod's
+/// obligation, not enforced: any matching `Send + Sync` closure is accepted.
+/// The engine preserves the original `id` and any original `x`, `y`, `z` fields.
 /// Return a refusal to keep the original data. Output must fit standard NBT limits
 /// (64 MiB, one million nodes, depth 512); invalid output keeps the original.
 /// Do not panic: native unwinds are caught, and wasm traps refuse the call.
 pub trait BlockEntityTransform: Send + Sync + 'static {
-    /// Transform saved data without world access.
+    /// Transform saved data; no Host or world handle is supplied.
     fn transform(
         &self,
         data: &crate::Compound,
@@ -133,7 +137,7 @@ impl BlockEntityTypeBuilder<'_> {
         self
     }
 
-    /// Set the optional deterministic saved-data transform.
+    /// Set the optional saved-data transform; the mod must ensure determinism.
     pub fn transform(mut self, step: impl BlockEntityTransform) -> Self {
         self.transform = Some(Arc::new(step));
         self
