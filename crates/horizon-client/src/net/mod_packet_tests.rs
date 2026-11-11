@@ -77,12 +77,10 @@ fn generic_submission_preserves_plugin_bytes_and_rejects_malformed_packets() {
 }
 #[test]
 fn generic_submission_cannot_bypass_registered_or_engine_channel_authority() {
-    crate::raw_payloads::test_support::with_peer(|server_transport| {
+    crate::raw_payloads::test_support::with_peer(|_server_transport| {
         let (mut session, _peer) = connected();
-        session.payloads = crate::raw_payloads::Transport::new(
-            server_transport.local.clone(),
-            crate::raw_payloads::Side::Client,
-        );
+        session.payloads =
+            crate::raw_payloads::Transport::capture(crate::raw_payloads::Side::Client).unwrap();
         for channel in [
             crate::raw_payloads::test_support::CHANNEL,
             horizon_protocol::payload_negotiation::CHANNEL,

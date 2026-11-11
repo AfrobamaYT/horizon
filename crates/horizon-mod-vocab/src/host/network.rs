@@ -31,15 +31,14 @@ pub trait NetworkClientHost {
     #[access(WorldOnly)]
     fn send_chat(&mut self, message: &str) -> Result<(), String>;
     /// Side: client.
-    /// Sends `packet` to the server as it is, to any server, a vanilla one
-    /// included: a plugin channel's payload (`ServerboundCustomPayloadPacket`)
-    /// or any other play packet. Nothing counts it, and the game doesn't apply
-    /// it on its side: a packet that needs a sequence number, a signature or
-    /// the client's own state is the mod's to get right. An error when the
-    /// player isn't in a server's play state, and for an unknown custom payload
-    /// past `ServerboundCustomPayloadPacket.MAX_PAYLOAD_SIZE` (the discard
-    /// fallback's limit). Registered engine channels use their own codecs'
-    /// constraints, not that byte cap. API 409.
+    /// Submits a vanilla play packet to any server, including unrelated plugin
+    /// payloads. The body is validated once and outgoing credit is reserved before
+    /// acceptance. Publication waits for the current root transaction to commit;
+    /// rollback, disconnect, or a protocol incarnation change cancels it.
+    /// Registered and engine-reserved channels are refused: use their payload or
+    /// service API. Unrelated plugin bodies retain vanilla's discard-codec limit.
+    /// No effects are applied locally. Sequence numbers, signatures, and client
+    /// state required by a packet remain the mod's responsibility. API 409.
     #[access(WorldOnly)]
     fn send_packet(&mut self, packet: ServerboundPlayPacket) -> Result<(), SendPacketError>;
 }

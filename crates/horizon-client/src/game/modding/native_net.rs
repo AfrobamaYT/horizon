@@ -1,6 +1,5 @@
 //! Private custom-book connection state and client network services.
 use super::Game;
-use horizon_protocol::packets::play::Serverbound as S;
 use mod_api::{SendPacketError, ServerboundPlayPacket};
 use std::collections::HashMap;
 #[derive(Default)]
@@ -57,14 +56,10 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// Sends `packet` to the server as it is, to any server, a vanilla one
-    /// included: a plugin channel's payload (`ServerboundCustomPayloadPacket`)
-    /// or any other play packet. Nothing counts it, and the game doesn't apply
-    /// it on its side: a packet that needs a sequence number, a signature or
-    /// the client's own state is the mod's to get right. An error when the
-    /// player isn't in a server's play state, and for an unknown custom payload
-    /// past the serverbound discard limit. Registered engine channels retain
-    /// their own codec constraints. API 409.
+    /// Validate and reserve a vanilla packet for root-commit publication on this
+    /// exact physical protocol incarnation. Registered and engine-reserved
+    /// channels require their payload/service API; unrelated plugin payloads
+    /// retain vanilla's discard-codec limit. No local effects are applied. API 409.
     pub(super) fn send_packet(
         &mut self,
         packet: ServerboundPlayPacket,

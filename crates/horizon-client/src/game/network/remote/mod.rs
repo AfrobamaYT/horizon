@@ -534,7 +534,7 @@ pub(super) struct Remote {
     pub(super) features: std::sync::Arc<[String]>,
     /// The server announced it runs mods' quiet commands.
     pub quiet_commands: bool,
-    /// The server announced it carries mod messages.
+    /// The server advertised private custom recipe-book synchronization.
     pub custom_books: bool,
     /// The synced attachments the server sent, by holder.
     pub attachments: HashMap<Holder, ResidentAttachments>,
