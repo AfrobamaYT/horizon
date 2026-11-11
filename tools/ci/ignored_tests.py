@@ -147,6 +147,87 @@ def known_failures():
     return known
 
 
+# Budgets include UTF-8 newlines; summary metadata is outside the payload budget.
+FAILURE_BYTES = 500
+FAILURE_TOTAL_BYTES = 128_000
+
+
+def failure_diagnostics(output):
+    """One record per failed result occurrence, including repeated names across targets.
+
+    Panic contexts use libtest's name model and the first panic for that name.
+    They cannot disambiguate identical names in different targets.
+    """
+    failures = []
+    contexts = {}
+    context = []
+    panic_reason_pending = False
+    panic_operands = 0
+    for line in output.splitlines():
+        if RESULT.match(line) or SUMMARY.match(line) or TARGET.match(line) or PANIC.match(line):
+            panic_reason_pending = False
+            panic_operands = 0
+        if panic_operands and line.strip():
+            if operand := re.fullmatch(r"\s*(left|right):\s*(-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|inf)|NaN|true|false)\s*", line):
+                context.append(f"  assertion {operand[1]}: {operand[2][:80]}")
+            elif re.match(r"\s*(?:left|right):", line):
+                context.append("  assertion operand withheld (private string/blob)")
+            panic_operands -= 1
+        if panic_reason_pending and line.strip():
+            context[:] = [item for item in context if item != "  panic reason missing from captured output"]
+            # No free-form panic text or assertion operands cross the resource boundary.
+            reason = next((label for prefix, label in (
+                ("assertion `left == right` failed", "assertion equality failed"),
+                ("assertion `left != right` failed", "assertion inequality failed"),
+                ("assertion failed:", "assertion condition failed"),
+                ("called `Result::unwrap()`", "Result::unwrap on an error"),
+                ("called `Option::unwrap()`", "Option::unwrap on None"),
+                ("index out of bounds", "index out of bounds"),
+                ("attempt to", "arithmetic failure"),
+            ) if line.strip().startswith(prefix)), "custom panic")
+            if bounds := re.fullmatch(r"index out of bounds: the len is (\d{1,20}) but the index is (\d{1,20})", line.strip()):
+                reason = f"index out of bounds: len={bounds[1]} index={bounds[2]}"
+            elif arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
+                reason = "attempt to " + arithmetic[1]
+            context.append(f"  panic reason: {reason}; payload withheld (resource privacy)")
+            panic_reason_pending = False
+            panic_operands = 2 if reason.startswith("assertion equality") or reason.startswith("assertion inequality") else 0
+        if found := RESULT.match(line):
+            if found[2] == "FAILED":
+                failures.append(found[1])
+        if found := PANIC.match(line):
+            context = []
+            contexts.setdefault(found[1], context)
+            location = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", found[2])
+            if location and source_lines(location[1]) is not None:
+                context.append(f"  panicked at {found[2]}")
+            else:
+                context.append("  panic location withheld (not a bounded tracked Rust location)")
+            context.append("  panic reason missing from captured output")
+            panic_reason_pending = True
+    used = 0
+    shown = 0
+    shortened = 0
+    for name in failures:
+        # Escape controls, including workflow command syntax on separate lines.
+        identity = name.encode("unicode_escape").decode("ascii")
+        details = contexts.get(name, ["  panic context missing from captured output"])
+        record = f"  failed test: {identity}\n" + "\n".join(details) + "\n"
+        raw = record.encode("utf-8")
+        if len(raw) > FAILURE_BYTES:
+            marker = b" [shortened: per-test byte budget]\n"
+            raw = raw[:FAILURE_BYTES - len(marker)].decode("utf-8", errors="ignore").encode("utf-8") + marker
+        if used + len(raw) > FAILURE_TOTAL_BYTES:
+            break
+        shortened += len(record.encode("utf-8")) > FAILURE_BYTES
+        print(raw.decode("utf-8"), end="")
+        used += len(raw)
+        shown += 1
+    print(f"failure diagnostics: {shown} shown; {len(failures) - shown} failing tests not shown "
+          f"(total byte budget {FAILURE_TOTAL_BYTES}); {shortened} records shortened "
+          f"(per-test byte budget {FAILURE_BYTES})")
+
+
 def run(package, skip, number=None, count=None):
     """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build."""
     # Resource-backed fixtures need a fresh home, not the runner user's game files.
@@ -210,36 +291,8 @@ def run(package, skip, number=None, count=None):
     target_number = 0
     awaiting_count = False
     incomplete = False
-    panic_reason_pending = False
-    panic_operands = 0
-    diagnostic_count = 0
+    failure_diagnostics(process.stdout)
     for line in process.stdout.splitlines():
-        if panic_operands and line.strip():
-            if operand := re.fullmatch(r"\s*(left|right):\s*(-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|inf)|NaN|true|false)\s*", line):
-                if diagnostic_count < 50:
-                    print(f"  assertion {operand[1]}: {operand[2][:80]}")
-            elif re.match(r"\s*(?:left|right):", line) and diagnostic_count < 50:
-                print("  assertion operand withheld (private string/blob)")
-            panic_operands -= 1
-        if panic_reason_pending and line.strip():
-            # No free-form panic text or assertion operands cross the resource boundary.
-            reason = next((label for prefix, label in (
-                ("assertion `left == right` failed", "assertion equality failed"),
-                ("assertion `left != right` failed", "assertion inequality failed"),
-                ("assertion failed:", "assertion condition failed"),
-                ("called `Result::unwrap()`", "Result::unwrap on an error"),
-                ("called `Option::unwrap()`", "Option::unwrap on None"),
-                ("index out of bounds", "index out of bounds"),
-                ("attempt to", "arithmetic failure"),
-            ) if line.strip().startswith(prefix)), "custom panic")
-            if bounds := re.fullmatch(r"index out of bounds: the len is (\d{1,20}) but the index is (\d{1,20})", line.strip()):
-                reason = f"index out of bounds: len={bounds[1]} index={bounds[2]}"
-            elif arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
-                reason = "attempt to " + arithmetic[1]
-            if diagnostic_count < 50:
-                print(f"  panic reason: {reason}; payload withheld (resource privacy)")
-            panic_reason_pending = False
-            panic_operands = 2 if reason.startswith("assertion equality") or reason.startswith("assertion inequality") else 0
         if TARGET.match(line):
             incomplete |= target_count is not None or awaiting_count
             target_number += 1
@@ -250,16 +303,6 @@ def run(package, skip, number=None, count=None):
             awaiting_count = False
         if found := RESULT.match(line):
             results[found[1]] = found[2] == "ok"
-            if found[2] == "FAILED":
-                diagnostic_count += 1
-                if diagnostic_count <= 50:
-                    print(f"  failed test: {found[1][:200]}")
-        elif found := PANIC.match(line):
-            diagnostic_count += 1
-            if diagnostic_count <= 50:
-                print(f"  {found[1][:200]} panicked at {found[2][:200]}")
-                panic_source(found[2])
-            panic_reason_pending = True
         elif line.startswith("screen-effect event loop error: "):
             print(line)
         elif found := SUMMARY.match(line):
@@ -272,10 +315,6 @@ def run(package, skip, number=None, count=None):
         elif status := re.search(r"\((?:signal|exit status): \d+", line):
             # Emit only the numeric status, never adjacent test output.
             print(f"{package}: {status[0]})")
-    if diagnostic_count > 50:
-        print(f"{package}: diagnostics truncated after 50 identities/locations")
-    if panic_reason_pending:
-        print(f"{package}: panic reason missing from captured output")
     if incomplete or awaiting_count or target_count is not None:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
         return None
