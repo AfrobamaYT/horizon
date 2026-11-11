@@ -100,12 +100,27 @@ pub struct ModGuard {
     _timing: Option<TimingGuard>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
+impl ModGuard {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            owner: None,
+            _timing: None,
+            _thread: std::marker::PhantomData,
+        }
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        if let Some((frame, call)) = self.owner.take() {
+            crate::content::crash::pop(frame, call);
+        }
+        drop(self._timing.take());
+    }
+}
 impl Drop for ModGuard {
     #[inline]
     fn drop(&mut self) {
-        if let Some((frame, call)) = self.owner {
-            crate::content::crash::pop(frame, call);
-        }
+        self.clear();
     }
 }
 
@@ -131,32 +146,54 @@ pub fn install(backend: Backend) -> Result<(), &'static str> {
         .map_err(|_| "dispatch instrumentation is already sealed")
 }
 
+/// Immutable dispatch-local instrumentation selection. Resolve the socket and
+/// profiler flag once, before walking listeners; nested dispatch takes its own snapshot.
+#[derive(Clone, Copy)]
+pub(crate) struct Scope {
+    installed: bool,
+    timing: Option<(fn(ModGuardFactory, ModCall) -> ModGuard, fn(State))>,
+}
+
+#[inline]
+pub(crate) fn snapshot() -> Scope {
+    let backend = BACKEND.get_or_init(|| None).as_ref();
+    Scope {
+        installed: backend.is_some(),
+        timing: backend.and_then(|backend| {
+            backend
+                .profiler_enabled
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .then_some((backend.enter, backend.leave))
+        }),
+    }
+}
+
 #[inline]
 pub(crate) fn enter(call: ModCall) -> ModGuard {
-    if let Some(backend) = BACKEND.get_or_init(|| None) {
-        let owner = crate::content::crash::push(call);
-        if backend
-            .profiler_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return (backend.enter)(
-                ModGuardFactory {
-                    leave: backend.leave,
-                    owner,
-                },
-                call,
-            );
-        }
-        return ModGuard {
-            owner: Some(owner),
-            _timing: None,
-            _thread: std::marker::PhantomData,
-        };
+    snapshot().enter(call)
+}
+
+impl Scope {
+    #[inline]
+    pub(crate) fn enter(self, call: ModCall) -> ModGuard {
+        let mut guard = ModGuard::empty();
+        self.replace(&mut guard, call);
+        guard
     }
-    ModGuard {
-        owner: None,
-        _timing: None,
-        _thread: std::marker::PhantomData,
+
+    /// Reuse the iterator's scope slot instead of moving a full guard through
+    /// `Option::take` and the iterator adapter on every listener.
+    #[inline]
+    pub(crate) fn replace(self, guard: &mut ModGuard, call: ModCall) {
+        guard.clear();
+        if self.installed {
+            let owner = crate::content::crash::push(call);
+            if let Some((enter, leave)) = self.timing {
+                *guard = enter(ModGuardFactory { leave, owner }, call);
+            } else {
+                guard.owner = Some(owner);
+            }
+        }
     }
 }
 

@@ -751,14 +751,14 @@ pub(super) fn emit<'a>(
             None if name == "setting_changed" => (
                 String::new(),
                 format!(
-                    "for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let (_entered, {mod_item}) = super::enter_listener(owner, \"{name}\"); {} }}",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let {mod_item} = {entered}.enter(owner, \"{name}\"); {} }} }}",
                     call(&mod_item, "break"),
                 ),
             ),
             None if mod_cancel => (
                 String::new(),
                 format!(
-                    "for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let ({entered}, {mod_item}) = super::enter_listener({mod_entry}, \"{name}\"); if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} *{o} = {event}.cancelled;",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let {mod_item} = {entered}.enter({mod_entry}, \"{name}\"); if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} }} *{o} = {event}.cancelled;",
                     o = out.unwrap()
                 ),
             ),
@@ -1817,7 +1817,13 @@ struct Owner {{ id: &'static str }}
 static OWNERS: [Owner; 2] = [Owner {{ id: "a" }}, Owner {{ id: "b" }}];
 fn listened(_: generated::HookId) -> bool {{ true }}
 fn listening(_: generated::HookId) -> impl Iterator<Item=(bool, &'static Owner)> {{ OWNERS.iter().map(|m| (false, m)) }}
-fn enter_listener<'a>(owner: &'a Owner, _: &str) -> ((), &'a Owner) {{ ((), owner) }}
+mod runtime {{
+    pub struct ListenerScope;
+    impl ListenerScope {{
+        pub fn new() -> Self {{ Self }}
+        pub fn enter<'a>(&mut self, owner: &'a super::Owner, _: &str) -> &'a super::Owner {{ owner }}
+    }}
+}}
 impl Owner {{ fn setting_changed(&self, _: &mut dyn generated::ClientHost, _: &mut generated::SettingChangedEvent<'_>) {{ if self.id == "a" {{ A.fetch_add(1, Ordering::Relaxed); }} else {{ B.fetch_add(1, Ordering::Relaxed); }} }} }}
 mod generated {{
 pub trait ClientHost {{}}

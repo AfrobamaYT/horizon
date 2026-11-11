@@ -68,5 +68,5 @@ pub use world::types::{
 pub(crate) mod built;
 
 pub use entity::types::Sentiment;
-pub(crate) use runtime::{enter_listener, listening, receives_cancelled};
+pub(crate) use runtime::{listening, receives_cancelled};
 pub use world::types::{StructureSearch, StructureSearchResult};
