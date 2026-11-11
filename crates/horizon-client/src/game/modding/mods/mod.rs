@@ -500,6 +500,7 @@ pub(super) fn register_client_presentations(role: ExecutionRole) {
     register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
+    register_render_pipelines(role);
 }
 
 /// Resolve client dimension-transition registrations once, before the first level opens.
@@ -529,6 +530,17 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     let mut editors = Vec::new();
     Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
     horizon_client::title::preset_editors::register(editors);
+}
+
+/// Keep the mods' render pipeline registrations once at startup, before resources load: every
+/// load builds them from its own shader files.
+pub(super) fn register_render_pipelines(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut pipelines = Vec::new();
+    Game::native_register_render_pipelines(&RegistrationContext::new(), &mut pipelines);
+    horizon_client_render::mod_pipelines::register(pipelines);
 }
 
 /// The native mods' meshing registrations, kept once at start, before resources load: colour
@@ -1671,6 +1683,55 @@ pub(in crate::game) fn collect_poi_extensions(
         }
     }
     (additions, refusals)
+}
+
+/// The fluid contents native mods give their cauldron blocks
+/// (`native_register_cauldron_fluid_content`), resolved against `registry` once its block
+/// definitions are published, in one table with vanilla's water and lava, which the fluid
+/// capability reads; collected again when the resources reload. Each refusal is logged once.
+pub(super) fn register_cauldron_fluid_contents(registry: &horizon_world::registry::BlockRegistry) {
+    let (contents, refusals) = collect_cauldron_fluid_contents(registry);
+    for refusal in refusals {
+        log::warn!("Horizon: cauldron fluid content refused: {refusal}");
+    }
+    crate::game::machines::cauldron_contents::install(contents);
+}
+
+/// Ask the mods, then resolve each registration against `registry` into the table after
+/// vanilla's contents, in registration order: a block or fluid already in the table, an
+/// unknown block or fluid, a level property the block lacks or that isn't an integer, and a
+/// total of 0 or one the levels don't divide evenly are refused, with their reasons.
+pub(in crate::game) fn collect_cauldron_fluid_contents(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> (
+    crate::game::machines::cauldron_contents::CauldronContents,
+    Vec<String>,
+) {
+    use crate::game::machines::cauldron_contents::{CauldronContent, CauldronContents};
+    let mut registrations = mod_api::CauldronFluidContentRegistry::default();
+    Game::native_register_cauldron_fluid_content(&RegistrationContext::new(), &mut registrations);
+    let mut contents = CauldronContents::vanilla();
+    let mut refusals = Vec::new();
+    for registration in registrations.into_entries() {
+        let resolved = match (
+            mod_api::__private::block_key_id(registration.block),
+            mod_api::__private::fluid_id(registration.fluid),
+        ) {
+            (None, _) => Err("an unknown block was given a cauldron fluid content".to_owned()),
+            (Some(block), None) => Err(format!("{block} was given an unknown fluid")),
+            (Some(block), Some(fluid)) => CauldronContent::resolve(
+                registry,
+                block,
+                fluid,
+                registration.total,
+                registration.level.as_deref(),
+            ),
+        };
+        if let Err(refusal) = resolved.and_then(|content| contents.add(content)) {
+            refusals.push(refusal);
+        }
+    }
+    (contents, refusals)
 }
 
 /// Registered callbacks indexed directly by the slots resolved in enchantment content.

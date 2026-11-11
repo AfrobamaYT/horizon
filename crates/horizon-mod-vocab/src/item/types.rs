@@ -662,7 +662,7 @@ pub enum UsePhase {
 }
 
 // no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
-/// A player's item use without a block or entity target (`RightClickItem`).
+/// A player's item use, including after target fallthrough (`RightClickItem`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct ItemClick<'a> {

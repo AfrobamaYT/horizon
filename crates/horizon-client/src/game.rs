@@ -59,7 +59,6 @@ fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOv
         None => horizon_world::loot::PackOverlay::NONE,
     }
 }
-
 include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
 /// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
@@ -2164,8 +2163,8 @@ struct PreparedParts {
     block_states: Arc<api_values::block_state::Index>,
     tags: HashMap<String, HashSet<mod_api::BlockKey>>,
     parts: Option<mod_api::Parts>,
+    cauldrons: Arc<cauldron_interactions::Table>,
 }
-
 struct PreparedWorldReload {
     structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns,
     tables: Option<WorldTables>,
@@ -3451,6 +3450,9 @@ struct Game<'a> {
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
+    block_entity_tick_key: Option<block_entity_tick_items::Key>,
+    block_entity_tick_items: Option<Box<block_entity_tick_items::Scope>>,
+    wasm_dispatch_failures: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The open world's dimensions past vanilla's three. One per process, as a window
 /// and its server thread name the same dimensions.
@@ -4717,12 +4719,6 @@ impl Game<'_> {
             let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
             Some([-angle.sin() * strength, 0.2, angle.cos() * strength])
         });
-    }
-    /// Item entity `i` leaves the level (`Entity.discard`); mods hear it.
-    pub(super) fn remove_dropped(&mut self, i: usize) -> ItemEntity {
-        let e = self.dropped.remove(i);
-        self.native_entity_left(e.id);
-        e
     }
     /// Experience orb `i` leaves the level (`Entity.discard`); mods hear it.
     pub(super) fn remove_orb(&mut self, i: usize) -> ExperienceOrb {
@@ -7146,10 +7142,12 @@ impl Game<'_> {
     /// One hand's turn in `startUseItem`: `useItemOn` the block aimed at,
     /// then `useItem`. Whether the click ends here (it acted or failed).
     fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
+        if self.guest_use.is_none()
+            && let Some(hit) = block_hit
+        {
+            return self.use_target_then_item(hit);
+        }
         self.use_failed = false;
-        // The click's target as it was decided, before the adventure gate
-        // below may drop the block for the item's own use.
-        let aimed_at_block = block_hit.is_some();
         // isSecondaryUseActive with something in either hand keeps blocks
         // from reacting.
         let sneaking = self.keys.held(Mapping::Sneak);
@@ -7549,18 +7547,8 @@ impl Game<'_> {
                 });
             }
         }
-        if !claimed && !on_block {
-            if let Some(answer) = self.right_click_item(self.hand, &stack, aimed_at_block) {
-                if matches!(answer, Answer::Success | Answer::SuccessServer) {
-                    self.swing_arm();
-                }
-                return Ok(answer.consumes_action());
-            }
-            self.use_item_in_hand(&stack, &mut claimed);
-        }
-        if claimed {
-            self.swing_arm();
-            return Ok(true);
+        if let Some(used) = self.use_item_fallthrough(&stack, on_block, claimed) {
+            return Ok(used);
         }
         // LeadItem.useOn follows the block and the item's override, including
         // when sneaking bypassed the block's useWithoutItem.
@@ -11797,6 +11785,7 @@ impl Game<'_> {
         // The ride the player's file names, once the vehicle is in the world.
         self.pending_vehicle = level.root_vehicle;
         self.level = level;
+        self.check_mod_mismatch();
         self.world_adopted = true;
         // ServerRecipeBook.loadUntrusted: recipes the manager does not have are dropped.
         let index = &world_stations!(self).recipe_index;
@@ -11863,8 +11852,7 @@ impl Game<'_> {
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
         self.load_world_state();
-        // The level the world opens in, before any of its chunks.
-        self.native_level_opened(dim);
+        self.native_world_opened(dim);
         self.open_saved_portal_levels()
     }
     /// PortalShape: an obsidian frame around 2..=21 by 3..=21 empty blocks.
@@ -12334,7 +12322,7 @@ impl Game<'_> {
         let id = self.world.block(pos[0], pos[1], pos[2]);
         let state = registry
             .state(id)
-            .filter(|s| s.name.ends_with("cauldron"))
+            .filter(|s| cauldron_interactions::snapshot().contains_block(&s.name))
             .cloned()?;
         let above = self.world.block(pos[0], pos[1] + 1, pos[2]);
         let under_water = registry
@@ -15483,7 +15471,7 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            world_primitives: world_geometry.batch(),
+            world_primitives: world_geometry.batch_with(&self.pack.render.mod_pipelines),
             shadow_only: &shadow_only,
             celestial: if self.settings.horizon.sky || title {
                 &celestial
@@ -16537,6 +16525,10 @@ impl<'a> Game<'a> {
             tnts: Default::default(),
             hoppers: HashMap::new(),
             transactions: Vec::new(),
+            block_entity_tick_key: None,
+            block_entity_tick_items: None,
+            wasm_dispatch_failures:
+                horizon_mod_runtime::dispatch_failures::dispatch_failure_counter(),
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
@@ -17491,9 +17483,7 @@ pub(crate) fn run_with(
     }
     mod_points::__private::seal();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
-    if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
-        panic!("Mod parts refused:\n{}", refused.join("\n"));
-    }
+    crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before
     // any world opens, as its StructureRegistry reads them.
     if horizon_world::worldgen::structure::mod_types::install_mod_structure_types(

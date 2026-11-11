@@ -18,6 +18,17 @@ def pr(number, title="Fix a thing", labels=(), paths=("crates/horizon-client/src
             "author": author, "url": f"https://github.com/horizon-rust/horizon/pull/{number}", "merged_at": NOW - merged}
 
 
+def merged_node(number, commit):
+    return {"number": number, "mergeCommit": {"oid": commit}, "title": " Fix a thing ",
+            "url": f"https://github.com/arismoko/horizon/pull/{number}",
+            "mergedAt": (NOW - dt.timedelta(hours=9)).isoformat(), "author": {"login": "contributor"},
+            "labels": {"nodes": []}, "closingIssuesReferences": {"nodes": []}}
+
+
+def metadata_page(nodes):
+    return {"data": {"repository": {"pullRequests": {"nodes": nodes}}}}
+
+
 class ReleaseTrainTests(unittest.TestCase):
     def test_repository_merge_identity_before_metadata(self):
         for repository in ("arismoko/horizon", "horizon-rust/horizon"):
@@ -25,17 +36,17 @@ class ReleaseTrainTests(unittest.TestCase):
                     mock.patch.object(train, "run", return_value="root"), \
                     mock.patch.object(train, "merged_pull_requests", return_value=[
                         (27, "imported"), (28, "collision"), (28, "own")]), \
-                    mock.patch.object(train, "gh_json", return_value=[[], [
-                        {"number": 28, "merge_commit_sha": "own", "merged_at": "date"},
-                        {"number": 27, "merge_commit_sha": "imported", "merged_at": None}]]) as api, \
-                    mock.patch.object(train, "pull_request", return_value=pr(28)) as metadata, \
+                    mock.patch.object(train, "gh_json", return_value=[metadata_page([]),
+                        metadata_page([merged_node(28, "own")])]) as api, \
                     mock.patch.object(train, "changed_paths", return_value=["launcher/src/main.rs"]):
                 last, prs = train.gather("launcher", "head", releases=[])
                 self.assertIsNone(last)
                 self.assertEqual([p["number"] for p in prs], [28])
-                metadata.assert_called_once_with(28)
-                api.assert_called_once_with("api", f"repos/{repository}/pulls?state=closed&per_page=100",
-                                            "--paginate", "--slurp")
+                api.assert_called_once()
+                args = api.call_args.args
+                self.assertEqual(args[:4], ("api", "graphql", "--paginate", "--slurp"))
+                self.assertIn(f"owner={repository.split('/')[0]}", args)
+                self.assertIn("name=horizon", args)
                 release, _ = train.decision("launcher", prs, NOW)
                 self.assertTrue(release)
                 _, body = train.notes("launcher", "launcher@0.2.0", prs, [])
@@ -45,12 +56,10 @@ class ReleaseTrainTests(unittest.TestCase):
     def test_first_fork_release_with_only_imported_history(self):
         with mock.patch.object(train, "run", return_value="root"), \
                 mock.patch.object(train, "merged_pull_requests", return_value=[(27, "imported")]), \
-                mock.patch.object(train, "gh_json", return_value=[[]]), \
-                mock.patch.object(train, "pull_request") as metadata:
+                mock.patch.object(train, "gh_json", return_value=[metadata_page([])]):
             last, prs = train.gather("launcher", "head", releases=[])
             self.assertIsNone(last)
             self.assertEqual(prs, [])
-            metadata.assert_not_called()
             self.assertEqual(train.next_launcher_tag([], False, (0, 2)), "launcher@0.2.0")
             self.assertTrue(train.decision("launcher", prs, NOW, new_line="0.2")[0])
             self.assertFalse(train.decision("launcher", prs, NOW)[0])
@@ -58,15 +67,49 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertNotIn("#27", body)
 
     def test_release_metadata_errors_are_not_imports(self):
-        for failing in ("gh_json", "pull_request"):
-            with self.subTest(failing=failing), \
-                    mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
-                    mock.patch.object(train, "gh_json", return_value=[[{
-                        "number": 28, "merge_commit_sha": "own", "merged_at": "date"}]]) as api, \
-                    mock.patch.object(train, "pull_request") as metadata:
-                (api if failing == "gh_json" else metadata).side_effect = RuntimeError("API unavailable")
-                with self.assertRaisesRegex(RuntimeError, "API unavailable"):
-                    train.merged_between("launcher", "base", "head")
+        with mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
+                mock.patch.object(train, "gh_json", side_effect=RuntimeError("API unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "API unavailable"):
+                train.merged_between("launcher", "base", "head")
+        broken = merged_node(28, "own")
+        broken["mergedAt"] = "invalid date"
+        with mock.patch.object(train, "merged_pull_requests", return_value=[(28, "own")]), \
+                mock.patch.object(train, "gh_json", return_value=[metadata_page([broken])]):
+            with self.assertRaises(ValueError):
+                train.merged_between("launcher", "base", "head")
+
+    def test_large_history_uses_paginated_metadata_without_per_pr_requests(self):
+        nodes = [merged_node(n, f"sha-{n}") for n in range(1, 301)]
+        nodes[0]["author"] = None
+        nodes[0]["labels"]["nodes"] = [{"name": "bug"}]
+        nodes[0]["closingIssuesReferences"]["nodes"] = [{"number": 9}, {"number": 3}]
+        pages = [metadata_page(nodes[i:i + 100]) for i in range(0, 300, 100)]
+        # Support the old N+1 implementation too: it returns the same records but must
+        # fail the request-count assertion, rather than failing on a changed fixture shape.
+        def response(*args):
+            if args[1] == "graphql":
+                return pages
+            if args[0] == "api":
+                return [[{"number": n["number"], "merge_commit_sha": n["mergeCommit"]["oid"],
+                          "merged_at": n["mergedAt"]} for n in nodes]]
+            node = nodes[int(args[2]) - 1].copy()
+            node["labels"] = node["labels"]["nodes"]
+            node["closingIssuesReferences"] = node["closingIssuesReferences"]["nodes"]
+            return node
+        with mock.patch.object(train, "merged_pull_requests", return_value=[
+                (n["number"], n["mergeCommit"]["oid"]) for n in nodes]), \
+                mock.patch.object(train, "gh_json", side_effect=response) as api, \
+                mock.patch.object(train, "changed_paths", return_value=["launcher/src/main.rs"]):
+            prs = train.merged_between("launcher", "base", "head")
+        self.assertEqual(len(prs), 300)
+        self.assertEqual(prs[0]["title"], "Fix a thing")
+        self.assertEqual(prs[0]["issues"], [3, 9])
+        self.assertEqual(prs[0]["labels"], ["bug"])
+        self.assertEqual(prs[0]["author"], "")
+        self.assertEqual(prs[-1]["number"], 300)
+        self.assertEqual(prs[-1]["merged_at"], NOW - dt.timedelta(hours=9))
+        api.assert_called_once()
+        self.assertEqual(api.call_args.args[:4], ("api", "graphql", "--paginate", "--slurp"))
 
     def test_launcher_decision_shell_fails_closed_and_succeeds_normally(self):
         workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
@@ -90,7 +133,8 @@ class ReleaseTrainTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True,
                                         text=True, env={**os.environ, "GITHUB_OUTPUT": str(output),
                                         "GITHUB_STEP_SUMMARY": str(root / "summary"), "GITHUB_SHA": "head",
-                                        "HEAD_SHA": "head", "FORCE": ""})
+                                        "BASE": "", "EVENT": "workflow_dispatch", "DRY_RUN": "true",
+                                        "SOURCE_SHA": "head", "FORCE": ""})
                 if status:
                     self.assertEqual(result.returncode, status, result.stderr)
                     self.assertEqual(output.read_text(), "")
@@ -265,30 +309,93 @@ class ReleaseTrainTests(unittest.TestCase):
         with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
             self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
 
+    def test_launcher_manual_base_is_pinned_and_must_belong_to_main(self):
+        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
+        selection = workflow.split("          set -euo pipefail\n", 1)[1].split(
+            "          python3 tools/release_train.py decide", 1)[0]
+        script = "set -euo pipefail\n" + textwrap.dedent(selection) + '\nprintf "%s" "$HEAD_SHA"'
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "main")
+            main = git("rev-parse", "HEAD")
+            git("remote", "add", "origin", folder)
+            git("checkout", "-b", "topic")
+            git("commit", "--allow-empty", "-m", "not main")
+            topic = git("rev-parse", "HEAD")
+            def select(base="", event="workflow_dispatch", dry_run="false"):
+                return subprocess.run(["bash", "-c", script], cwd=folder, text=True,
+                                      capture_output=True, env={**os.environ, "BASE": base,
+                                      "EVENT": event, "DRY_RUN": dry_run, "SOURCE_SHA": topic})
+            for dry_run in ("false", "true"):
+                result = select(main, dry_run=dry_run)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, main)
+            for invalid in ("does-not-exist", topic, "--help"):
+                result = select(invalid)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::base", result.stdout)
+            self.assertEqual(select().stdout, "", "default real manual run uses the gate picker")
+            self.assertEqual(select(event="push").stdout, topic)
+            self.assertEqual(select(dry_run="true").stdout, topic)
+
     @mock.patch.object(train, "REPO", "arismoko/horizon")
-    def test_fork_base_uses_its_green_main_pushes_without_disabled_workflows(self):
-        records = [
-            ("pr-head", "main", "pull_request", "completed", "success"),
-            ("topic-head", "topic", "push", "completed", "success"),
-            ("broken-main", "main", "push", "completed", "failure"),
-            ("good-main", "main", "push", "completed", "success"),
-            ("older-main", "main", "push", "completed", "success"),
-        ]
-        def runs(*arguments):
-            workflow = arguments[arguments.index("--workflow") + 1]
-            self.assertEqual(workflow, "dyna-checks", "the fork has no checks/parity-main runs")
-            table = records
-            for option, column in [("--branch", 1), ("--event", 2), ("--status", 4)]:
-                if option in arguments:
-                    wanted = arguments[arguments.index(option) + 1]
-                    table = [entry for entry in table if entry[column] == wanted]
-            return [{"headSha": sha, "status": status, "conclusion": conclusion}
-                    for sha, _, _, status, conclusion in table]
-        with mock.patch.object(train, "gh_json", side_effect=runs):
-            self.assertEqual(train.green_main_head(parity=True), "good-main")
-            self.assertEqual(train.green_main_head(), "good-main")
-            records[:] = [entry for entry in records if entry[0] not in ("good-main", "older-main")]
-            self.assertIsNone(train.green_main_head(parity=True), "no unchecked fallback to main")
+    def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
+        def record(sha, ident, event="push", branch="main"):
+            return dict(head_sha=sha, id=ident, event=event, head_branch=branch,
+                        status="completed", conclusion="failure")
+        def job(name, status="completed", conclusion="success"):
+            return dict(name=name, status=status, conclusion=conclusion)
+        gates = [job(name) for name in ("lint", "verify", "launcher", "pool-watch")]
+        records = [record("pr", 1, "pull_request"), record("topic", 2, branch="topic"),
+                   record("new", 3), record("good", 4), record("old", 5)]
+        jobs = {3: gates + [job("client-data", conclusion="failure")],
+                4: gates, 30: [job("fixture")], 40: [job("fixture")]}
+        fixture_sha = {"new": "different", "good": "good"}
+        def api(*arguments):
+            self.assertEqual(arguments[:4], ("api", "--paginate", "--slurp", arguments[3]))
+            path = arguments[3]
+            if "dyna-ci.yml/runs?" in path:
+                self.assertIn("branch=main&event=push", path)
+                return [{"workflow_runs": records[:3]}, {"workflow_runs": records[3:]}]
+            if "wasm-mods.yml/runs?" in path:
+                sha = path.split("head_sha=")[1].split("&")[0]
+                return [{"workflow_runs": [record(fixture_sha[sha], 30 if sha == "new" else 40)]}]
+            ident = int(path.split("/runs/")[1].split("/")[0])
+            self.assertIn("filter=latest", path)
+            return [{"jobs": jobs[ident][:2]}, {"jobs": jobs[ident][2:]}]
+        with mock.patch.object(train, "REPO", "arismoko/horizon"), \
+                mock.patch.object(train, "gh_json", side_effect=api):
+            self.assertEqual(train.green_main_head(parity=True), "good")
+            fixture_sha["new"] = "new"
+            self.assertEqual(train.green_main_head(), "new", "non-gate failure must not reject a build")
+            for status, conclusion in [("queued", None), ("in_progress", "success"),
+                                       ("completed", "skipped"), ("completed", "cancelled"),
+                                       ("completed", "failure"), ("completed", None),
+                                       ("completed", "unknown")]:
+                with self.subTest(status=status, conclusion=conclusion):
+                    jobs[3] = gates[:-1] + [job("pool-watch", status, conclusion)]
+                    self.assertEqual(train.green_main_head(), "good")
+                    jobs[3] = gates
+                    jobs[30] = [job("fixture", status, conclusion)]
+                    self.assertEqual(train.green_main_head(), "good")
+                    jobs[30] = [job("fixture")]
+            jobs[3] = gates[:-1]
+            self.assertEqual(train.green_main_head(), "good", "missing gate is not success")
+            records.insert(3, record("new", 99))
+            jobs[99] = gates
+            self.assertEqual(train.green_main_head(), "good", "an older run cannot override the latest run")
+            jobs[3] = gates
+            fixture_sha["new"] = "different"
+            fixture_sha["good"] = "different"
+            records[:] = records[:5]
+            self.assertIsNone(train.green_main_head(), "gates on different SHAs cannot be combined")
+            records[:] = records[:2]
+            self.assertIsNone(train.green_main_head(), "PR checks cannot supply a release base")
 
     def test_a_release_is_published_only_after_its_smoke_test_and_with_no_blocker(self):
         drew = {"error": None, "frames": 12710, "chunks": 81, "meshed_sections": 550, "player": [160.5, 71.0, 156.5]}

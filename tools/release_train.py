@@ -235,18 +235,42 @@ def changed_paths(commit):
     return run("git", "diff", "--name-only", f"{commit}^1", commit).split()
 
 
-def pull_request(number):
-    data = gh_json("pr", "view", str(number), "--repo", REPO, "--json",
-                   "number,title,url,labels,closingIssuesReferences,author,mergedAt")
-    return {
-        "number": data["number"],
-        "title": data["title"].strip(),
-        "url": data["url"],
-        "labels": sorted(label["name"] for label in data["labels"]),
-        "issues": sorted(issue["number"] for issue in data.get("closingIssuesReferences") or []),
-        "author": (data.get("author") or {}).get("login", ""),
-        "merged_at": dt.datetime.fromisoformat(data["mergedAt"].replace("Z", "+00:00")) if data.get("mergedAt") else None,
+def merged_pull_request_metadata():
+    """Repository-owned merge identities and note fields, without one network call per PR."""
+    owner, name = REPO.split("/")
+    query = """
+    query($owner: String!, $name: String!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(first: 100, states: MERGED, after: $endCursor) {
+          nodes {
+            number title url mergedAt mergeCommit { oid } author { login }
+            labels(first: 100) { nodes { name } }
+            closingIssuesReferences(first: 100) { nodes { number } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
     }
+    """
+    pages = gh_json("api", "graphql", "--paginate", "--slurp",
+                    "-F", f"owner={owner}", "-F", f"name={name}", "-f", f"query={query}")
+    owned = {}
+    for page in pages:
+        for data in page["data"]["repository"]["pullRequests"]["nodes"]:
+            # A historical merge commit can have been removed by a force-push. It cannot
+            # match a reachable candidate; GraphQL explicitly permits a null commit.
+            if data["mergeCommit"] is None:
+                continue
+            owned[(data["number"], data["mergeCommit"]["oid"])] = {
+                "number": data["number"],
+                "title": data["title"].strip(),
+                "url": data["url"],
+                "labels": sorted(label["name"] for label in data["labels"]["nodes"]),
+                "issues": sorted(issue["number"] for issue in data["closingIssuesReferences"]["nodes"]),
+                "author": (data["author"] or {}).get("login", ""),
+                "merged_at": dt.datetime.fromisoformat(data["mergedAt"].replace("Z", "+00:00")),
+            }
+    return owned
 
 
 def published_releases():
@@ -478,17 +502,14 @@ def merged_between(kind, base, head):
     candidates = merged_pull_requests(base, head)
     if not candidates:
         return []
-    # Merge subjects survive imports and PR numbers are repository-local. Enumerate this
-    # repository's closed PRs without a history cap, then require the actual merge SHA.
-    # A missing PR here is imported history, not a failed metadata request to suppress.
-    pages = gh_json("api", f"repos/{REPO}/pulls?state=closed&per_page=100", "--paginate", "--slurp")
-    owned = {(entry["number"], entry["merge_commit_sha"]) for page in pages for entry in page
-             if entry["merged_at"]}
+    # Merge subjects survive imports and PR numbers are repository-local. Fetch this
+    # repository's merge identities AND note fields in one fully paginated query.
+    owned = merged_pull_request_metadata()
     prs = []
     for number, commit in candidates:
         if (number, commit) not in owned:
             continue
-        pr = pull_request(number)
+        pr = owned[(number, commit)].copy()
         pr["paths"] = [path for path in changed_paths(commit) if player_facing(path, kind, exporter_paths)]
         prs.append(pr)
     return prs
@@ -502,18 +523,42 @@ def passed_on(workflow, sha):
     return bool(done) and done[0]["conclusion"] == "success"
 
 
+def gate_jobs_passed(run_id, required):
+    """Require every named gate on the latest attempt, regardless of non-gate failures."""
+    pages = gh_json("api", "--paginate", "--slurp",
+                    f"repos/{REPO}/actions/runs/{run_id}/jobs?filter=latest&per_page=100")
+    jobs = [job for page in pages for job in page["jobs"] if job["name"] in required]
+    return (required == {job["name"] for job in jobs}
+            and all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs))
+
+
 def green_main_head(parity=False):
     """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
     releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
     later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
     if REPO == "arismoko/horizon":
-        # The fork replaces checks/parity-main with dyna-checks. Never query disabled
-        # upstream workflows, and never turn an untested main head into a release base.
-        runs = gh_json("run", "list", "--repo", REPO, "--workflow", "dyna-checks", "--branch", "main",
-                       "--event", "push", "--status", "success", "--limit", "50", "--json", "headSha,status,conclusion")
-        return next((entry["headSha"] for entry in runs
-                     if entry["status"] == "completed" and entry["conclusion"] == "success"), None)
+        # Runs are ordered by creation, not completion: a late old run must not
+        # displace a newer push. Paginate beyond bursts of cancelled main runs.
+        pages = gh_json("api", "--paginate", "--slurp",
+                        f"repos/{REPO}/actions/workflows/dyna-ci.yml/runs?branch=main&event=push&per_page=100")
+        seen = set()
+        for page in pages:
+            for entry in page["workflow_runs"]:
+                sha = entry["head_sha"]
+                if entry["head_branch"] != "main" or entry["event"] != "push" or sha in seen:
+                    continue
+                seen.add(sha)
+                if not gate_jobs_passed(entry["id"], {"lint", "verify", "launcher", "pool-watch"}):
+                    continue
+                fixtures = gh_json("api", "--paginate", "--slurp",
+                                   f"repos/{REPO}/actions/workflows/wasm-mods.yml/runs"
+                                   f"?branch=main&event=push&head_sha={sha}&per_page=100")
+                runs = [run for page in fixtures for run in page["workflow_runs"]
+                        if run["head_sha"] == sha and run["head_branch"] == "main" and run["event"] == "push"]
+                if runs and gate_jobs_passed(runs[0]["id"], {"fixture"}):
+                    return sha
+        return None
     if parity:
         # Only the successful runs: while merges land, one run at a time finishes (the pending one is replaced at
         # every push), and a later failed or timed-out batch must not starve the Nightly of the commit an earlier

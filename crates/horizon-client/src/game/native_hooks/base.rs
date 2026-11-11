@@ -3471,9 +3471,8 @@ impl Game<'_> {
     }
     /// A player uses `call.stack` with this click's `call.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
-    /// starts. Each click reaches it once. Set `claimed` to take the use: the
-    /// hand swings and the item's own use doesn't run. Server-side, for every
-    /// player of the world; an item on cooldown is never used.
+    /// starts. Both sides return the full interaction result; Pass continues.
+    /// Consume handles without swinging. Cooldown items are skipped.
     pub(in crate::game) fn native_use_item(&mut self, call: mod_api::__private::UseItemCall<'_>) {
         self.fire_use_item(call);
     }
@@ -4141,13 +4140,10 @@ impl Game<'_> {
     /// `vehicle` of type `vehicle_kind` (`minecraft:oak_boat`, `minecraft:minecart`,
     /// `minecraft:horse`, `minecraft:cushion`). Set `canceled` and it does not: a player stays
     /// where they were, a mob does not board, a `/ride` fails, and a rider whose dismount is
-    /// canceled keeps riding. Told for a player boarding a boat, minecart, cushion or a mount (pig,
-    /// strider, horse and its kin, llama, nautilus, happy ghast) and getting off one by their
-    /// own input, `/ride`, a stab, a buck, a teleport or spectator mode; and for the mobs
-    /// Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one
-    /// (`/ride`, a stab). It is not told for a rider whose vehicle was removed from the
-    /// level (a boat or minecart destroyed, a broken cushion), nor for riders loaded with a
-    /// save. The acting player is the one whose action runs, a guest on a server. Server-side.
+    /// canceled keeps riding, including during vehicle destruction. A removed
+    /// boat or cart is no longer a valid handle. Explicit later dismounts notify
+    /// again; resident riders also retry in entity-ticking chunks, while rejected
+    /// passengers do not tick. Loading a save does not notify. Server-side.
     pub(in crate::game) fn native_entity_mount(
         &mut self,
         call: mod_api::__private::EntityMountCall<'_>,
