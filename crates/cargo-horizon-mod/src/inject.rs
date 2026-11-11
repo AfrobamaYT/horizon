@@ -102,28 +102,22 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Which access tiers can listen at the request's place: `access = "api"` (native and wasm) at a
-/// point whose every parameter has an API type, at its head or return; `access = "internals"`
-/// on native mods only.
+/// Whether the requested engine function has an API record.
 fn availability(catalog: &Catalog, request: &Request<'_>) -> String {
     use horizon_mod_point_emit::plain_path;
-    let api = if !matches!(request.kind, Kind::Head | Kind::Return | Kind::Replace) {
-        format!("refused, {} is internals only", request.kind_name)
-    } else {
-        match catalog
-            .points
-            .iter()
-            .find(|point| plain_path(&point.target) == plain_path(request.at))
-        {
-            Some(Point {
-                api_refusal: None, ..
-            }) => "available (native and wasm)".to_owned(),
-            Some(Point {
-                api_refusal: Some(why),
-                ..
-            }) => format!("refused, {why}"),
-            None => format!("refused, {} is not a point", request.at),
-        }
+    let api = match catalog
+        .points
+        .iter()
+        .find(|point| plain_path(&point.target) == plain_path(request.at))
+    {
+        Some(Point {
+            api_refusal: None, ..
+        }) => "available (native and wasm)".to_owned(),
+        Some(Point {
+            api_refusal: Some(why),
+            ..
+        }) => format!("refused, {why}"),
+        None => format!("refused, {} is not a point", request.at),
     };
     format!("api: {api}")
 }
