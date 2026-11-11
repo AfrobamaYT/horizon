@@ -39,9 +39,15 @@ impl Game<'_> {
         if let Some(chunk) = self.world.chunks.get_mut(&key)
             && (pending || chunk.dynamic_emission != answers)
         {
+            // Saved light was not computed from these answers, and admission queues no light
+            // job for it: relight the column when they differ.
+            let relight = chunk.light_loaded && chunk.dynamic_emission != answers;
             let chunk = Arc::make_mut(chunk);
             chunk.dynamic_emission = answers;
             chunk.dynamic_pending = false;
+            if relight {
+                self.world.dirty_light.insert(key);
+            }
         }
     }
     /// The cells this update's edits left in a `dynamic_light` state, asked before the

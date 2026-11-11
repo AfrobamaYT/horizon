@@ -433,7 +433,6 @@ impl Game<'_> {
         } else {
             self.streaming.insert_remote(&mut self.world, chunk);
         }
-        self.ask_chunk_light_emission((x, z));
         self.world
             .block_entities
             .unload(|k| (k.0 >> 4, k.2 >> 4) == (x, z));
@@ -460,6 +459,9 @@ impl Game<'_> {
                 _ => true,
             });
         }
+        // Asked once the packet's block entities and attachments are in, so a part reading them
+        // sees this column's data.
+        self.ask_chunk_light_emission((x, z));
     }
 
     /// `ClientPacketListener.handleChunksBiomes`: each loaded column takes
