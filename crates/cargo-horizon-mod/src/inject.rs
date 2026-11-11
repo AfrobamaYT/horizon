@@ -26,7 +26,6 @@ struct Point {
 }
 struct Request<'a> {
     at: &'a str,
-    kind: Kind,
     kind_name: &'a str,
     with: &'a str,
 }
@@ -53,12 +52,11 @@ fn request(args: &[String]) -> Result<Request<'_>, String> {
         }
     }
     let kind_name = kind.ok_or(USAGE)?;
-    let kind = serde_json::from_value(serde_json::Value::String(kind_name.into()))
+    let kind: Kind = serde_json::from_value(serde_json::Value::String(kind_name.into()))
         .map_err(|e| format!("invalid inject kind: {e}"))?;
     Ok(Request {
         at,
-        kind,
-        kind_name,
+        kind_name: kind.name(),
         with: with.unwrap_or("on_inject"),
     })
 }
