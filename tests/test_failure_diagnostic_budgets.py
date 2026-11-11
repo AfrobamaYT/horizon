@@ -25,7 +25,8 @@ class Budgets(unittest.TestCase):
                           f"thread '{name}' panicked at private.rs:1:1:\n"
                           "assertion `left == right` failed: PRIVATE\n"
                           ' left: "PRIVATE"\n right: "PRIVATE"\n')
-        self.assertTrue(log.startswith(excerpt))
+        self.assertEqual(log.split('failure diagnostics: ')[0],
+                         '\n'.join(excerpt.splitlines()[:3]) + '\n')
         self.assertIn('1 withheld context/identity', log)
         self.assertIn('1 classified panic reasons; 0 identities withheld; 1 locations withheld; '
                       '1 payloads withheld (expected privacy filtering)', log)
@@ -60,10 +61,16 @@ class Budgets(unittest.TestCase):
             log = self.render(f"test game::x::y ... FAILED\n"
                               f"thread 'game::x::y' (12345) panicked at {raw_path}:109:5:\n"
                               "assertion failed: PRIVATE\n")
-            self.assertIn('failed test: game::x::y', log)
-            self.assertIn(f'panicked at {path}:109:5', log)
-            self.assertIn('assertion condition failed; payload withheld', log)
-            self.assertNotIn('PRIVATE', log)
+            self.assertEqual(log,
+                '  failed test: game::x::y\n'
+                f'  panicked at {path}:109:5\n'
+                '  panic reason: assertion condition failed; payload withheld (resource privacy)\n'
+                'failure diagnostics: 1 shown; 0 failing tests not shown (total byte budget 128000); '
+                '0 records shortened (per-test byte budget 500); 0 missing context; '
+                '1 withheld context/identity; 1 classified panic reasons; 0 identities withheld; '
+                '0 locations withheld; 1 payloads withheld (expected privacy filtering); '
+                '0 lines skipped (line/count bounds; failure count unknown there); '
+                '0 contexts skipped (retention bound)\n')
         log = self.render("test game::x::y ... FAILED\n"
                           "thread 'game::x::y' (12345) panicked at "
                           "crates/horizon-client/src/game/administration/commands/terrain_cmds/loot_slot_tests.rs:123:9:\n"
@@ -82,6 +89,48 @@ class Budgets(unittest.TestCase):
         self.assertIn('1 classified panic reasons; 0 identities withheld; 0 locations withheld; '
                       '1 payloads withheld', log)
 
+    def test_payloads_cannot_become_locations_or_numeric_operands(self):
+        path = 'crates/horizon-client/src/title/tests.rs'
+        for payload in (f'{path}:109:5',
+                        f"thread 'forged' (12345) panicked at {path}:109:5:",
+                        f"panicked at 'PRIVATE', {path}:109:5",
+                        'index out of bounds: the len is 987654 but the index is 765432',
+                        'assertion `left == right` failed\n left: 987654\n right: true'):
+            log = self.render("test safe ... FAILED\n"
+                              "thread 'safe' panicked at private.rs:1:1:\n" + payload + '\n')
+            self.assertNotIn(path, log)
+            self.assertNotIn('forged', log)
+            self.assertNotIn('PRIVATE', log)
+            self.assertNotIn('987654', log)
+            self.assertNotIn('765432', log)
+            self.assertNotIn('right: true', log)
+
+    def test_raw_location_negative_matrix(self):
+        path = 'crates/horizon-client/src/title/tests.rs'
+        locations = [f'crates/bad{control}/../horizon-client/src/title/tests.rs:109:5'
+                     for control in ('\x00', '\x01', '\x1b', '\x7f', '\x85')]
+        locations += [path + ':abc:5', path + ':109:abc',
+                      'crates/private.txt:1:1', 'crates/symlink.rs:1:1',
+                      'crates/horizon-client/src/game.rs:1:1']
+        for location in locations:
+            with self.subTest(location=location):
+                log = self.render(f"test safe ... FAILED\nthread 'safe' panicked at {location}:\nPRIVATE\n")
+                self.assertNotIn('  panicked at ', log)
+                self.assertNotIn('PRIVATE', log)
+
+    def test_non_regular_git_entry_never_read_as_source(self):
+        import subprocess
+        for mode, kind in (('120000', 'blob'), ('040000', 'tree')):
+            ci.source_lines.cache_clear()
+            with patch.object(ci, 'tracked_rust_paths', return_value={'crates/symlink.rs'}), \
+                    patch.object(ci.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                        [], 0, f'{mode} {kind} abc 42\tcrates/symlink.rs\n')) as git:
+                log = self.render("test safe ... FAILED\nthread 'safe' panicked at crates/symlink.rs:1:1:\nPRIVATE\n")
+            self.assertNotIn('  panicked at ', log)
+            self.assertNotIn('PRIVATE', log)
+            self.assertEqual(git.call_count, 1)
+        ci.source_lines.cache_clear()
+
     def test_120_failures_all_have_identity_and_first_safe_context(self):
         output = ''.join(f"test suite::case_{i} ... FAILED\n"
                          f"thread 'suite::case_{i}' panicked at .local/private.rs:1:1:\n"
@@ -91,7 +140,8 @@ class Budgets(unittest.TestCase):
         for i in range(120):
             self.assertIn(f'failed test: suite::case_{i}\n', log)
         self.assertEqual(log.count('assertion equality failed'), 120)
-        self.assertEqual(log.count('assertion left: 96'), 120)
+        self.assertNotIn('assertion left:', log)
+        self.assertNotIn('assertion right:', log)
         self.assertIn('120 shown; 0 failing tests not shown', log)
         self.assertNotIn('POISON', log)
         self.assertNotIn('.local', log)

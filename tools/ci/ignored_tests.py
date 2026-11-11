@@ -204,7 +204,6 @@ def failure_diagnostics(output):
     contexts = {}
     context = []
     panic_reason_pending = False
-    panic_operands = 0
     skipped_lines = 0
     skipped_contexts = 0
     stream = io.StringIO(output)
@@ -215,18 +214,10 @@ def failure_diagnostics(output):
         if len(line) > DIAGNOSTIC_LINE_CHARS:
             skipped_lines += 1
             panic_reason_pending = False
-            panic_operands = 0
             continue
         line = line.rstrip("\r\n")
-        if RESULT.match(line) or SUMMARY.match(line) or TARGET.match(line) or PANIC.match(line):
+        if RESULT.match(line) or SUMMARY.match(line) or TARGET.match(line):
             panic_reason_pending = False
-            panic_operands = 0
-        if panic_operands and line.strip():
-            if operand := re.fullmatch(r"\s*(left|right):\s*(-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|inf)|NaN|true|false)\s*", line):
-                context.append(f"  assertion {operand[1]}: {operand[2][:80]}")
-            elif re.match(r"\s*(?:left|right):", line):
-                context.append("  assertion operand withheld (private string/blob)")
-            panic_operands -= 1
         if panic_reason_pending and line.strip():
             context[:] = [item for item in context if item != "  panic reason missing from captured output"]
             # No free-form panic text or assertion operands cross the resource boundary.
@@ -239,13 +230,11 @@ def failure_diagnostics(output):
                 ("index out of bounds", "index out of bounds"),
                 ("attempt to", "arithmetic failure"),
             ) if line.strip().startswith(prefix)), "custom panic")
-            if bounds := re.fullmatch(r"index out of bounds: the len is (\d{1,20}) but the index is (\d{1,20})", line.strip()):
-                reason = f"index out of bounds: len={bounds[1]} index={bounds[2]}"
-            elif arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
+            if arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
                 reason = "attempt to " + arithmetic[1]
             context.append(f"  panic reason: {reason}; payload withheld (resource privacy)")
             panic_reason_pending = False
-            panic_operands = 2 if reason.startswith("assertion equality") or reason.startswith("assertion inequality") else 0
+            continue
         if found := RESULT.match(line):
             if found[2] == "FAILED":
                 failures.append(found[1])
@@ -256,8 +245,11 @@ def failure_diagnostics(output):
                     contexts[found[1]] = context
                 else:
                     skipped_contexts += 1
+                    continue
             location = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", found[2])
             path = location[1] if location else ""
+            if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in path):
+                path = ""
             # game-discovery emits canonical absolute #[path] declarations. Only
             # this checkout's exact resolved prefix is authoritative; never guess
             # another checkout's prefix or search for a matching path suffix.
