@@ -60,7 +60,8 @@ pub fn main_with(
 ) {
     // Platform instrumentation must precede registration and the first mod guard.
     if let Err(error) = mod_api::__private::initialize() {
-        eprintln!("Horizon: mod instrumentation unavailable: {error}");
+        eprintln!("Horizon: refusing startup because mod instrumentation is unavailable: {error}");
+        return;
     }
     let Startup {
         launch,

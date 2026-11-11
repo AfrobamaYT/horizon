@@ -8,8 +8,8 @@ pub mod wire {
     #[path = "wire_resources.rs"]
     mod resources;
     mod static_strings;
-    pub(crate) fn initialize() {
-        resources::ensure_installed();
+    pub(crate) fn initialize() -> Result<(), &'static str> {
+        resources::ensure_installed()
     }
     #[doc(hidden)]
     pub use resources::{

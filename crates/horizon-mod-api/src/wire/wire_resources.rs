@@ -103,7 +103,8 @@ pub struct ScopeLease {
 }
 impl ScopeLease {
     pub fn new() -> Self {
-        ensure_installed();
+        ensure_installed()
+            .expect("platform resource backend must initialize before scope construction");
         let token = ACTIVE.with(|active| {
             let mut scopes = active.borrow_mut();
             while let Some(slot) = scopes.free {
@@ -284,16 +285,16 @@ pub(super) fn store(value: Box<dyn Any>) -> Result<Id, WireError> {
     current()?.store(value)
 }
 
-pub(super) fn ensure_installed() {
-    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    INSTALLED.get_or_init(|| {
-        let _ = mod_vocab::wire::install_resource_access(mod_vocab::wire::ResourceAccess {
+pub(super) fn ensure_installed() -> Result<(), &'static str> {
+    static INSTALLED: std::sync::OnceLock<Result<(), &'static str>> = std::sync::OnceLock::new();
+    *INSTALLED.get_or_init(|| {
+        mod_vocab::wire::install_resource_access(mod_vocab::wire::ResourceAccess {
             intern: super::static_strings::intern,
             store,
             load: |id, view| current()?.load(id, view),
             refused,
-        });
-    });
+        })
+    })
 }
 
 #[cfg(test)]

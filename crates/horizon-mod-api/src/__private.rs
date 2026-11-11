@@ -20,13 +20,14 @@ pub mod profiler;
 /// replacing a backend or disturbing an in-flight call.
 pub fn initialize() -> Result<(), &'static str> {
     crate::content::crash::ensure_installed()?;
-    crate::wire::initialize();
-    Ok(())
+    crate::wire::initialize()
 }
 
 /// Install instrumentation before publishing the process-wide mod list.
+/// This engine-only boundary treats conflicting initialization as an invariant
+/// failure. User-facing startup checks `initialize` first and refuses to launch.
 pub fn install(mods: crate::Mods) {
-    let _ = initialize();
+    initialize().expect("platform initialization must succeed before publishing mods");
     mod_vocab::__private::install(mods);
 }
 

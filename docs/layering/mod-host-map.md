@@ -226,7 +226,7 @@ Outside the host areas, 2770 `mod_api` references are in test code; 258 of them 
 
 |  | files | lines |
 |---|---|---|
-| all | 40 | 11598 |
+| all | 40 | 11600 |
 | pure (no generated include, unsafe, process state or non-core crate path) | 7 | 919 |
 | includes generator output (OUT_DIR) | 2 |  |
 | `unsafe` | 3 | 56 |
@@ -246,5 +246,5 @@ Blockers by file (generated includes, `unsafe`, state), lines:
 - `src/profiler.rs`: unsafe 136,226,242,280,302,360,370; state 9,10,17,18,20,21,22,23,24,127,138,140…
 - `src/wire/static_strings.rs`: state 6,7,12
 - `src/wire/wire_guest.rs`: generated_include 15; unsafe 19,33,38,40,52,200,224,279,314,315,316,320…; state 7,9,26,170,171,174,177,178,203,207,208,221…
-- `src/wire/wire_resources.rs`: unsafe 237,349,376,378; state 5,95,288
+- `src/wire/wire_resources.rs`: unsafe 238,350,377,379; state 5,95,289
 <!-- generated: end -->
