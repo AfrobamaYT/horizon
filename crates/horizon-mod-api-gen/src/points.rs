@@ -931,7 +931,7 @@ pub(crate) fn records_selected(
         mod guest_exports {
             use super::*;
             type Dispatch = fn(PointId, &mut ::mod_api::wire::Reader<'_>, &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError>;
-            pub(super) const TABLE: [Option<(PointId, Dispatch)>; POINT_COUNT] = {
+            pub(super) static TABLE: [Option<(PointId, Dispatch)>; POINT_COUNT] = {
                 let mut table = [None; POINT_COUNT];
                 #guest_entries
                 table
