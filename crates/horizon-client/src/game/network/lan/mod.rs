@@ -5,6 +5,7 @@
 mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
+mod mob_metadata;
 mod residency;
 
 use super::{
@@ -1017,7 +1018,7 @@ pub(super) fn mob_meta(
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
             let profession =
-                horizon_client::mobs::villager::profession(e.profession.index().unwrap_or(0)).id;
+                horizon_client::mobs::villager::profession_id(e.profession.index().unwrap_or(0));
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -1267,21 +1268,7 @@ pub(super) fn mob_meta(
                 defaults.push((index, serializer::BOOLEAN, Value::Bool(true)));
             }
         }
-        // Enderman.DATA_CARRY_STATE and DATA_CREEPY (angry: the open mouth).
-        "minecraft:enderman" => {
-            if let Some(state) = e.carried {
-                meta.push((
-                    16,
-                    serializer::OPTIONAL_BLOCK_STATE,
-                    Value::Id(state.0 as i32),
-                ));
-            }
-            if e.flag {
-                meta.push((17, serializer::BOOLEAN, Value::Bool(true)));
-            }
-            defaults.push((17, serializer::BOOLEAN, Value::Bool(false)));
-            defaults.push((16, serializer::OPTIONAL_BLOCK_STATE, Value::Id(0)));
-        }
+        "minecraft:enderman" => mob_metadata::enderman(e, meta, defaults),
         // Zombie.DATA_DROWNED_CONVERSION_ID (after DATA_BABY_ID and
         // DATA_SPECIAL_TYPE_ID): the shaking of the conversion under water.
         "minecraft:zombie" | "minecraft:husk" => {
@@ -1369,16 +1356,7 @@ pub(super) fn mob_meta(
 
 /// AbstractVillager.DATA_UNHAPPY_COUNTER (after AgeableMob's two): the head
 /// shake of a villager saying no counts it down from 40.
-fn unhappy_counter(
-    m: &Mob,
-    meta: &mut Vec<(u8, i32, Value)>,
-    defaults: &mut Vec<(u8, i32, Value)>,
-) {
-    if m.extra.ints[0] > 0 {
-        meta.push((18, serializer::INT, Value::Int(m.extra.ints[0])));
-    }
-    defaults.push((18, serializer::INT, Value::Int(0)));
-}
+use super::villager_client::unhappy_counter;
 
 /// A mob's effects as its swirls are computed from.
 fn mob_effects(m: &Mob) -> impl Iterator<Item = ShownEffect> + '_ {
@@ -2285,13 +2263,14 @@ impl Game<'_> {
             if bare {
                 continue;
             }
-            mob_meta(
+            super::villager_client::server_meta(
                 m,
                 hub,
                 player_entity(),
                 self.world.game_time,
                 &mut e.meta,
                 &mut e.defaults,
+                &self.stations().professions,
             );
             // HappyGhast.aiStep: requiresPrecisePosition while on a still timeout.
             e.precise = m.species() == horizon_client::mobs::Species::HappyGhast
@@ -4869,6 +4848,33 @@ mod tests {
         );
     }
 
+    /// `Enderman.setTarget` and `setBeingStaredAt` reach normal tracker data,
+    /// including defaults needed to send the clear.
+    #[test]
+    #[ignore = "needs prepared resources in .local/horizon-client/26.3"]
+    fn enderman_target_flags_are_tracked_and_cleared() {
+        let mut enderman = mob_of("minecraft:enderman").expect("prepared mob types");
+        let hub = meta_hub("EndermanTargetMetaTest");
+        let metadata = |m: &Mob| {
+            let (mut values, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(m, &hub, None, 0, &mut values, &mut defaults);
+            (values, defaults)
+        };
+        enderman.extra.flag2 = true;
+        enderman.set_target(Some(horizon_client::mobs::Who::Mob(2)));
+        let (values, defaults) = metadata(&enderman);
+        for index in [17, 18] {
+            assert!(values.contains(&(index, serializer::BOOLEAN, Value::Bool(true))));
+            assert!(defaults.contains(&(index, serializer::BOOLEAN, Value::Bool(false))));
+        }
+        enderman.set_target(None);
+        let (values, defaults) = metadata(&enderman);
+        for index in [17, 18] {
+            assert!(!values.iter().any(|entry| entry.0 == index));
+            assert!(defaults.contains(&(index, serializer::BOOLEAN, Value::Bool(false))));
+        }
+    }
+
     /// What is stuck in a mob goes out through the tracker's metadata
     /// (`LivingEntity.DATA_ARROW_COUNT_ID`, `DATA_STINGER_COUNT_ID`): the
     /// counts that are set, and zero as the default so a count that falls
@@ -5006,56 +5012,7 @@ mod tests {
         }
     }
 
-    /// A hub with no players and empty registries, for `mob_meta`.
-    pub(super) fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
-        use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
-        let mut sync = data::SyncData::empty();
-        for (registry, id) in [
-            ("minecraft:villager_type", "minecraft:plains"),
-            ("minecraft:villager_profession", "minecraft:none"),
-        ] {
-            sync.builtin.registries.insert(
-                registry.into(),
-                horizon_protocol::registry::Ids::from_names(vec![id.into()]),
-            );
-        }
-        let sync = std::sync::Arc::new(sync);
-        let config = NetConfig {
-            announce: false,
-            ..NetConfig::loopback(0, name.into(), 2)
-        };
-        let lan = Lan::start_with(sync.clone(), config).unwrap();
-        let encoder = ChunkEncoder::new(
-            [] as [(std::sync::Arc<str>, bool); 0],
-            &horizon_protocol::registry::Builtin::default(),
-            &[],
-            &[],
-        );
-        let hub_config = hub::HubConfig {
-            default_game_mode: 0,
-            guest_commands: false,
-            force_game_mode: false,
-            hardcore: false,
-            view_distance: 10,
-            simulation_distance: 10,
-            dimension: "minecraft:overworld".into(),
-            allow_flight: false,
-            seed: 0,
-            max_players: 20,
-            integrated: false,
-            levels: Default::default(),
-        };
-        hub::Hub::new(
-            lan,
-            sync,
-            encoder,
-            hub_config,
-            std::sync::Arc::new(
-                crate::game::test_server_load()
-                    .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
-            ),
-        )
-    }
+    pub(super) use crate::game::villager_client::tests::meta_hub;
 
     /// `LivingEntity.startUsingItem` sets flag 1 for the use and flag 2 for
     /// the off hand, so an off-hand use is 3, not 2. A reader takes bit 0 as

@@ -17,6 +17,12 @@
 - [Wire types](how-to/wire-types.md)
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: vehicle health layout](concepts/vehicle-health-layout.md)
+- [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
+- [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
+- [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
+- [Design: villager professions and trades](concepts/villager-professions.md)
+- [Villager profession resources and clients](concepts/villager-professions-client.md)
 
 # How-to
 
@@ -45,3 +51,4 @@
 # Contributing
 
 - [Where each doc lives](contributing.md)
+- [Design: scoped whole-stack rollback](reference/design-stack-snapshot.md)

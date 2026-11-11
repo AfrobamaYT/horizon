@@ -72,6 +72,8 @@ pub(super) struct CodeSwitches {
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    pub(super) profession_declarations:
+        Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
@@ -101,7 +103,7 @@ pub(super) struct ModsState {
     pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,
     /// The entries of the mods' datapack registries this world session has published, at the
     /// generation of the load or reload that built them; `None` when no mod declared one.
-    pub(super) datapack_registries: Option<mod_api::DatapackRegistrySet>,
+    pub(super) datapack_registries: Option<Arc<mod_api::DatapackRegistrySet>>,
     /// The entries a table load decoded and checked, until its world open or reload takes them
     /// to publish.
     pub(super) datapack_candidate: Option<mod_api::DatapackCandidate>,
@@ -173,9 +175,7 @@ impl ModsState {
                     let id = &selected.package.manifest.id;
                     // A refused wasm mod's content stays out with its code.
                     !self.native.built().iter().any(|built| built.id == *id)
-                        && !horizon_mod_wasm::refused()
-                            .iter()
-                            .any(|(refused, _)| refused == id)
+                        && !crate::entry::code_startup_refused(id)
                 })
                 .collect();
         self.refused = Default::default();
@@ -475,8 +475,11 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
 /// The types native mods register for resource definitions, kept once at start, before
 /// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
 /// them read the mod's colour; atlas sprite sources (`native_register_sprite_sources`), so atlas
-/// definitions' entries on them list the mod's sprites; and model loaders
-/// (`native_register_model_loaders`), so models naming one get the mod's quads.
+/// definitions' entries on them list the mod's sprites; model loaders
+/// (`native_register_model_loaders`), so models naming one get the mod's quads; item model node
+/// types (`native_register_item_models`), so item definitions' nodes of them draw what the mod
+/// answers; and animation targets and interpolations (`native_register_json_animation_types`), so
+/// animation files may name them.
 pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -490,6 +493,12 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     let mut loaders = Vec::new();
     Game::native_register_model_loaders(&RegistrationContext::new(), &mut loaders);
     horizon_client_render::mod_model_loaders::register(loaders);
+    let mut models = Vec::new();
+    Game::native_register_item_models(&RegistrationContext::new(), &mut models);
+    horizon_assets::item_model::register_item_models(models);
+    let mut types = Vec::new();
+    Game::native_register_json_animation_types(&RegistrationContext::new(), &mut types);
+    horizon_client_render::mod_animations::register(types);
 }
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
@@ -497,6 +506,7 @@ pub(super) fn register_client_presentations(role: ExecutionRole) {
     register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
+    register_render_pipelines(role);
 }
 
 /// Resolve client dimension-transition registrations once, before the first level opens.
@@ -526,6 +536,17 @@ pub(super) fn register_preset_editors(role: ExecutionRole) {
     let mut editors = Vec::new();
     Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
     horizon_client::title::preset_editors::register(editors);
+}
+
+/// Keep the mods' render pipeline registrations once at startup, before resources load: every
+/// load builds them from its own shader files.
+pub(super) fn register_render_pipelines(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut pipelines = Vec::new();
+    Game::native_register_render_pipelines(&RegistrationContext::new(), &mut pipelines);
+    horizon_client_render::mod_pipelines::register(pipelines);
 }
 
 /// The native mods' meshing registrations, kept once at start, before resources load: colour
@@ -1429,7 +1450,7 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let refused = horizon_mod_wasm::refusal(&m.id);
+                let refused = crate::entry::code_refusal(&m.id);
                 live_switch_of(
                     path,
                     &package,
@@ -1684,6 +1705,55 @@ pub(in crate::game) fn collect_poi_extensions(
         }
     }
     (additions, refusals)
+}
+
+/// The fluid contents native mods give their cauldron blocks
+/// (`native_register_cauldron_fluid_content`), resolved against `registry` once its block
+/// definitions are published, in one table with vanilla's water and lava, which the fluid
+/// capability reads; collected again when the resources reload. Each refusal is logged once.
+pub(super) fn register_cauldron_fluid_contents(registry: &horizon_world::registry::BlockRegistry) {
+    let (contents, refusals) = collect_cauldron_fluid_contents(registry);
+    for refusal in refusals {
+        log::warn!("Horizon: cauldron fluid content refused: {refusal}");
+    }
+    crate::game::machines::cauldron_contents::install(contents);
+}
+
+/// Ask the mods, then resolve each registration against `registry` into the table after
+/// vanilla's contents, in registration order: a block or fluid already in the table, an
+/// unknown block or fluid, a level property the block lacks or that isn't an integer, and a
+/// total of 0 or one the levels don't divide evenly are refused, with their reasons.
+pub(in crate::game) fn collect_cauldron_fluid_contents(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> (
+    crate::game::machines::cauldron_contents::CauldronContents,
+    Vec<String>,
+) {
+    use crate::game::machines::cauldron_contents::{CauldronContent, CauldronContents};
+    let mut registrations = mod_api::CauldronFluidContentRegistry::default();
+    Game::native_register_cauldron_fluid_content(&RegistrationContext::new(), &mut registrations);
+    let mut contents = CauldronContents::vanilla();
+    let mut refusals = Vec::new();
+    for registration in registrations.into_entries() {
+        let resolved = match (
+            mod_api::__private::block_key_id(registration.block),
+            mod_api::__private::fluid_id(registration.fluid),
+        ) {
+            (None, _) => Err("an unknown block was given a cauldron fluid content".to_owned()),
+            (Some(block), None) => Err(format!("{block} was given an unknown fluid")),
+            (Some(block), Some(fluid)) => CauldronContent::resolve(
+                registry,
+                block,
+                fluid,
+                registration.total,
+                registration.level.as_deref(),
+            ),
+        };
+        if let Err(refusal) = resolved.and_then(|content| contents.add(content)) {
+            refusals.push(refusal);
+        }
+    }
+    (contents, refusals)
 }
 
 /// Registered callbacks indexed directly by the slots resolved in enchantment content.

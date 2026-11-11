@@ -24,7 +24,6 @@ pub fn biome_modifier_declarations() -> &'static [BiomeModifierDeclaration] {
     installed().map_or(&[], |installed| &installed.biome_modifiers)
 }
 
-
 /// Registrar operations for biome modifiers.
 pub trait BiomeModifiersRegistrar {
     /// Declare a biome modifier `path` (`no_zombies` or `mymod:no_zombies`) in code: the same
@@ -50,5 +49,3 @@ pub trait BiomeModifiersRegistrar {
         modifier: crate::BiomeModifier,
     ) -> Result<(), crate::BiomeModifierError>;
 }
-
-

@@ -32,7 +32,7 @@ TEMPLATE = "native_main.rs.template"
 # Source files the folder carries besides compiler outputs.
 CARRIED = {IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
 # What the game's build script asks the `horizon-client` executable's link for (Windows' 8 MB main stack).
-LINK_ARG = "cargo:rustc-link-arg-bin=horizon-client="
+LINK_ARG = "cargo:horizon-executable-link-arg="
 # Native libraries the build scripts point the final link at (the `windows` crates' MinGW import libraries):
 # cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
 NATIVE = "native"
@@ -88,8 +88,9 @@ def stage(target_dir: Path) -> Path:
               cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
     # Only the prebuilt game splits the wasm runtime out: normal source builds stay static. With
     # prefer-dynamic, rustc picks this dylib for the game rather than folding its runtime stack into it.
-    with (staged / "crates/horizon-mod-wasm/Cargo.toml").open("a") as manifest:
-        manifest.write('\n[lib]\ncrate-type = ["rlib", "dylib"]\n')
+    for crate in ("horizon-mod-wasm",):
+        with (staged / f"crates/{crate}/Cargo.toml").open("a") as manifest:
+            manifest.write('\n[lib]\ncrate-type = ["rlib", "dylib"]\n')
     return staged
 
 
@@ -104,38 +105,59 @@ def cargo_features(server: bool, platform: str) -> list[str]:
     return features
 
 
-def copy_artifacts(messages: list[dict], deps: Path) -> None:
-    """Copy this Cargo run's compiler outputs, not stale files left by earlier builds."""
-    files = {
-        Path(name)
-        for message in messages if message["reason"] == "compiler-artifact"
-        for name in message["filenames"] if name.endswith(SUFFIXES)
-    }
-    for file in sorted(files):
-        shutil.copy2(file, deps / file.name)
+def copy_artifacts(messages: list[dict], deps: Path, host: Path, target_dir: Path) -> None:
+    """Keep target metadata separate from the host proc-macros loaded by rustc.
+
+    An explicit Cargo --target keeps host build dependencies outside target_dir;
+    those libraries are not part of the target SDK. Proc-macros alone run on the host.
+    """
+    for message in messages:
+        if message["reason"] != "compiler-artifact":
+            continue
+        proc_macro = "proc-macro" in message["target"]["kind"]
+        for name in message["filenames"]:
+            file = Path(name)
+            if not name.endswith(SUFFIXES):
+                continue
+            if proc_macro:
+                if name.endswith((".so", ".dll", ".dylib", ".dll.a")):
+                    shutil.copy2(file, host / file.name)
+            elif file.is_relative_to(target_dir):
+                shutil.copy2(file, deps / file.name)
 
 
-def runtime_crates(metadata: dict) -> set[str]:
-    """Normal library dependencies of the game, excluding build and proc-macro dependency trees."""
+def runtime_packages(metadata: dict, root: str) -> set[str]:
+    """Normal SDK library package IDs, excluding host build/proc-macro trees."""
     packages = {package["id"]: package for package in metadata["packages"]}
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    pending = [package["id"] for package in metadata["packages"] if package["name"] == "horizon-client"]
+    pending = [package["id"] for package in metadata["packages"] if package["name"] == root]
     visited = set()
-    names = set()
+    runtime = set()
     while pending:
         package_id = pending.pop()
         if package_id in visited:
             continue
         visited.add(package_id)
-        targets = packages[package_id]["targets"]
-        libraries = [target["name"] for target in targets
-                     if any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])]
-        if not libraries:
+        if not any(any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])
+                   for target in packages[package_id]["targets"]):
             continue
-        names.update(libraries)
+        runtime.add(package_id)
         pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"]
                        if any(kind["kind"] is None for kind in dependency["dep_kinds"]))
-    return names
+    return runtime
+
+
+def runtime_crates(metadata: dict, root: str) -> set[str]:
+    runtime = runtime_packages(metadata, root)
+    return {target["name"] for package in metadata["packages"] if package["id"] in runtime
+            for target in package["targets"]
+            if any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])}
+
+
+def native_links(metadata: dict, root: str) -> list[dict]:
+    runtime = runtime_packages(metadata, root)
+    return [{"name": package["name"], "version": package["version"], "library": package["links"]}
+            for package in metadata["packages"] if package["id"] in runtime and package.get("links")]
 
 
 def facade_crates(deps: Path, runtime: set[str]) -> list[str]:
@@ -157,6 +179,7 @@ def build(out: Path, server: bool) -> None:
     # Resolved here: the staging and build steps run from the staged copy.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
+    host = rustc_host()
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
     # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
@@ -166,11 +189,13 @@ def build(out: Path, server: bool) -> None:
     # Linux's executable RUNPATH doesn't cover transitive dependencies: the game itself must find
     # the wasm runtime beside it. macOS's @rpath install names use the executable's rpath.
     link = ["--", "-C", "link-arg=-Wl,-rpath,$ORIGIN"] if sys.platform == "linux" else []
+    # Encoded flags take precedence over RUSTFLAGS in Cargo.
+    environment = {key: value for key, value in os.environ.items() if key != "CARGO_ENCODED_RUSTFLAGS"}
     messages = run(
-        ["cargo", "rustc", "--locked", "-p", "horizon-client", "--lib", "--crate-type", "dylib",
-         "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features, *link],
+        ["cargo", "rustc", "--locked", "-p", "horizon-mod-host", "--lib", "--crate-type", "dylib",
+         "--target", host, "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features, *link],
         cwd=staged,
-        env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
+        env={**environment, "RUSTFLAGS": rustflags + " -D warnings", "CARGO_TARGET_DIR": str(target_dir)},
     )
     artifacts = list(map(json.loads, messages.splitlines()))
     scripts = [
@@ -181,12 +206,14 @@ def build(out: Path, server: bool) -> None:
         shutil.rmtree(out)
     deps = out / "deps"
     deps.mkdir(parents=True)
-    copy_artifacts(artifacts, deps)
+    macros = out / "host"
+    macros.mkdir()
+    copy_artifacts(artifacts, deps, macros, target_dir / host)
     metadata = json.loads(run([
-        "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", rustc_host(),
+        "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", host,
         *features,
     ], cwd=staged))
-    eligible = facade_crates(deps, runtime_crates(metadata))
+    eligible = facade_crates(deps, runtime_crates(metadata, "horizon-mod-host"))
     assert_externs(out, eligible)
     native = out / NATIVE
     native.mkdir()
@@ -211,21 +238,28 @@ def build(out: Path, server: bool) -> None:
     for manifest in (POINTS, INTERNALS, CATALOG):
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
-    link_args = [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
+    link_args = executable_link_args(output)
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
         "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
         "rustc": run(["rustc", "-vV"]).strip(),
-        "target": rustc_host(),
+        "target": host,
         "profile": PROFILE,
         "side": "server" if server else "client",
         "rustflags": rustflags,
         "link_args": link_args,
         "facade_crates": eligible,
+        "registry_lock": (staged / "Cargo.lock").read_text(),
+        "native_links": native_links(metadata, "horizon-mod-host"),
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
     check(out)
+
+
+def executable_link_args(output: Path) -> list[str]:
+    """Executable policy emitted by the engine library's build script into the SDK identity."""
+    return [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
 
 
 def dylib(deps: Path, crate: str) -> Path | None:
@@ -251,11 +285,12 @@ def check(out: Path) -> None:
         path for path in out.rglob("*")
         if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG)))
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
+        and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
-    for crate in ("horizon_client", "horizon_mod_wasm"):
+    for crate in ("horizon_mod_wasm", "horizon_mod_host"):
         if dylib(out / "deps", crate) is None:
             sys.exit(f"prebuilt folder has no {crate.replace('_', '-')} dylib")
 
@@ -274,7 +309,7 @@ def smoke(out: Path) -> None:
         return extern_args(deps, crate)
 
     common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=1", "-L", f"dependency={deps}",
-              "-L", f"native={out / NATIVE}"]
+              "-L", f"dependency={out / 'host'}", "-L", f"native={out / NATIVE}"]
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
         scratch = Path(scratch)
         starter = (ROOT / "crates/cargo-horizon-mod/template/native/lib.rs").read_text()
@@ -290,7 +325,7 @@ def smoke(out: Path) -> None:
         link_args = json.loads((out / IDENTITY).read_text())["link_args"]
         run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_client_smoke",
              *(flag for arg in link_args for flag in ("-C", f"link-arg={arg}")),
-             "--extern", f"horizon_client={dylib(deps, 'horizon_client')}", *extern("mod_api"), *extern("horizon_mod_package"),
+             *extern("horizon_client"), *extern("mod_api"), *extern("horizon_mod_package"), "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(scratch / "horizon-client"), str(scratch / "main.rs")])
     print(f"smoke: the starter mod and the game executable built against {out} alone")

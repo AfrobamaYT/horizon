@@ -166,6 +166,21 @@ def violations(files: dict[str, str], allowed: dict[str, dict]) -> list[str]:
                 errors.append(f"{path}:{line}: unlisted process state {name}: {kind}")
             elif kind != entry['type']:
                 errors.append(f"{path}:{line}: {name} changed type: {entry['type']} -> {kind}")
+            if entry is not None and entry.get('category') == 'test-support':
+                code = blank(source)
+                declaration = next(match for match in STATE.finditer(code)
+                                   if match['name'] == name.split('::')[-1]
+                                   and code.count('\n', 0, match.start()) + 1 == line)
+                attributes = re.search(r'(?:#\[[^\]]*\]\s*)+(?:pub(?:\([^)]*\))?\s+)?$', code[:declaration.start()])
+                predicates = [source[attributes.start() + cfg.start(1):attributes.start() + cfg.end(1)]
+                              for cfg in re.finditer(r'#\[\s*cfg\s*\(([^\]]*)\)\s*\]',
+                                                     code[attributes.start():attributes.end()])] if attributes else []
+                guarded = any(re.sub(r'\s+', '', predicate) in {
+                    'test', 'feature="testing"', 'any(test,feature="testing")',
+                    'any(feature="testing",test)',
+                } for predicate in predicates)
+                if not guarded:
+                    errors.append(f'{path}:{line}: test-support state requires a direct test/testing-only cfg')
     for key in sorted({key for key in allowed if not key.startswith('@generated/')} - seen):
         errors.append(f"stale state inventory entry: {key}")
     return errors
@@ -191,7 +206,9 @@ named immutable caches below. Ordinary installed key and Part reads never call a
 Registration callbacks are consulted only while the API-owned activity counter is nonzero.
 
 Every production static/TLS declaration, including declarations behind the `testing` feature, is
-listed below. Unconditional unit-test items and explicitly test-only module files are excluded.
+listed below. The `test-support` category requires a direct `cfg(test)`, `cfg(feature = "testing")`,
+or their two-way `cfg(any(...))`; broader or unrecognized predicates are refused. Its entries hold
+set-once installed test metadata, never live authoring requests, and are absent from production builds. Unconditional unit-test items and explicitly test-only module files are excluded.
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
 exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
 include boundaries are refused. Path modules must target the scanned vocabulary source set;

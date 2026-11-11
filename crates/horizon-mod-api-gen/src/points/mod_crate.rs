@@ -114,7 +114,8 @@ fn api_types(
 }
 
 /// The point's name: its path from the crate root, the `impl`'s type snake-cased, then the
-/// function (`tanks_tank_fill` for `chemlib::tanks::Tank::fill`).
+/// function (`tanks_tank_fill` for `chemlib::tanks::Tank::fill`). The form is not injective
+/// (`a::b_c` and `a_b::c` collide): `listed` refuses two points of one name, naming both.
 fn name(found: &Found<'_>, krate: &str) -> String {
     let mut parts: Vec<String> = found
         .module

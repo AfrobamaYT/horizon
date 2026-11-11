@@ -82,6 +82,14 @@ class RustChangesTests(unittest.TestCase):
                 self.assertTrue(needs_tooling([(status, "docs/setup.md")]))
         self.assertTrue(needs_tooling([("D", "docs/old.md"), ("A", "docs/new.md")]))
 
+    def test_boundary_uses_fail_closed_rust_selection(self):
+        # The lint boundary step consumes this same central decision.
+        for path in ["Cargo.toml", "crates/example/Cargo.toml", "launcher/Cargo.toml",
+                     "crates/example/src/lib.rs", UNKNOWN_CHANGE]:
+            with self.subTest(path=path):
+                self.assertTrue(selections([("M", path)])["rust_required"])
+        self.assertFalse(selections([("M", "docs/setup.md")])["rust_required"])
+
     def test_shared_selections_preserve_launcher_and_sample_requirements(self):
         self.assertEqual(selections([("M", "docs/setup.md")]), {
             "rust_required": False, "launcher_required": False,

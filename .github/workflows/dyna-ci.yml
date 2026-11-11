@@ -205,9 +205,14 @@ jobs:
         run: exit 1
       - name: Documentation needs no Rust lint
         if: needs.changes.outputs.rust_required == 'false'
-        run: echo 'Rust lint is not selected; verify retains documentation hygiene and relevant contracts.'
+        run: echo 'Rust lint is not selected; repository hygiene still runs.'
+      # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
+      - name: Check repository artifacts and workflow YAML
+        run: python3 tools/ci/check_repository_hygiene.py
+      - name: Check mod API boundary
         if: needs.changes.outputs.rust_required != 'false'
+        run: python3 tools/ci/check_api_boundary.py --source-only
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -277,25 +282,34 @@ jobs:
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Check formatting and lint
+      - name: Check formatting
         if: needs.changes.outputs.rust_required != 'false'
-        id: native-lint
+        id: formatting
+        continue-on-error: true
         run: |
           cargo +stable fmt --all -- --check
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
           rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
-          cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
+      - name: Lint native targets
+        if: needs.changes.outputs.rust_required != 'false'
+        id: native-lint
+        run: cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: needs.changes.outputs.rust_required != 'false'
         id: server-lint
-        run: cargo +stable clippy $JOBS --keep-going -p horizon-client --all-targets --no-default-features -- -D warnings
+        run: cargo +stable clippy $JOBS --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features -- -D warnings
       - name: The machine sample builds against this API
         if: needs.changes.outputs.sample_required == 'true'
         run: python3 tools/ci/check_machine_sample.py
       - name: The mod API builds for wasm32
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
+      - name: Propagate formatting failure
+        if: ${{ always() && steps.formatting.outcome == 'failure' }}
+        run: |
+          echo '::error::Formatting failed; see Check formatting. Independent build failures remain above.'
+          exit 1
       - name: Report lint compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
@@ -425,18 +439,45 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         run: |
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
+      # Derive caller inputs from slot rows on the checked-out PR merge result.
+      # Keep this before doc tests so their failures cannot hide stale slots.
+      - name: Validate prebuilt source stage and listed slots
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/stage_slots.py --base "${BASE_SHA:-HEAD^}"
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
+      - name: Test listed call production export and real registry
+        if: needs.changes.outputs.rust_required != 'false'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/listed_calls.py --base "${BASE_SHA:-HEAD^}"
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
-      # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
+      # Last, so a tooling failure never skips the Rust tests. Only after every earlier step succeeded (success(),
+      # not !cancelled()): after a failure the Rust install was skipped, and tests that launch rustc would add a
+      # second, misleading failure.
       - name: Test offline research tooling
-        if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
+        if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
+      # The mod-host map's tables (#2534), built on main's pushes instead of committed, so no PR has to regenerate
+      # them: docs/layering/mod-host-map.md points here. Main pushes only, never pull requests; about 17 s of Python
+      # measured locally, no build.
+      - name: Build the mod-host map tables
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        run: python3 tools/layering/scan_engine_mod_edges.py --map target/layering/mod-host-map-tables.md
+      - name: Upload the mod-host map tables
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-host-map
+          path: target/layering/mod-host-map-tables.md
+          if-no-files-found: error
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -451,8 +492,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
-    runs-on: dyna-large
-    timeout-minutes: 60
+    # Owner-approved stopgap: #2944 removes this when the legs run under 15 minutes.
+    runs-on: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 'dyna-xlarge' || 'dyna-large' }}
+    # Temporary: #2944 brings client data legs under 15 minutes and restores the 60-minute cap.
+    timeout-minutes: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 90 || 60 }}
     permissions:
       contents: read
     steps:
@@ -471,6 +514,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Record data-leg start and compiler cache
+        run: |
+          date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -495,9 +542,28 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: stable
           SHARD: ${{ matrix.shard }}
+          HORIZON_DATA_LEG_TIMING: '1'
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
+      - name: Record data-leg end and compiler cache
+        if: always()
+        run: |
+          date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          # Whole-job cgroup high-water: compilation, tests and file cache, not per-test RSS
+          # or an isolated test-execution peak. Fixed kernel files only; telemetry is best effort.
+          echo 'data-leg memory_scope=whole_job_cgroup_including_compilation_tests_file_cache'
+          for metric in memory.peak memory.max memory.swap.peak memory.swap.max; do
+            field="${metric//./_}_bytes"
+            value=unavailable
+            if IFS= read -r sample 2>/dev/null < "/sys/fs/cgroup/$metric"; then
+              if [[ "$sample" =~ ^[0-9]+$ || "$sample" == max ]]; then
+                value="$sample"
+              fi
+            fi
+            echo "data-leg $field=$value"
+          done
+          sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
     needs: [changes, ignored-tests-shards]

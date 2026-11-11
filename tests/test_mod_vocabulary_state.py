@@ -10,6 +10,20 @@ with mock.patch.object(sys, 'path', [*sys.path, str(Path(__file__).resolve().par
 
 
 class VocabularyStateGate(unittest.TestCase):
+    def test_test_support_permission_cannot_escape_into_production(self):
+        allowed = {'fixture.rs::DECLARATIONS': {
+            'type': 'OnceLock<Vec<Declaration>>', 'category': 'test-support',
+        }}
+        state = 'static DECLARATIONS: OnceLock<Vec<Declaration>> = OnceLock::new();'
+        for cfg in ('#[cfg(feature = "testing")]', '#[cfg(any(test, feature = "testing"))]'):
+            self.assertEqual(violations({'fixture.rs': cfg + '\n' + state}, allowed), [])
+        for cfg in ('', '#[doc = r#"#[cfg(feature = "testing")]"#]',
+                    '#[cfg(feature = "production")]', '#[cfg(not(feature = "testing"))]',
+                    '#[cfg(any(feature = "testing", feature = "production"))]'):
+            with self.subTest(cfg=cfg):
+                errors = violations({'fixture.rs': cfg + '\n' + state}, allowed)
+                self.assertTrue(any('test-support state requires' in error for error in errors))
+
     def test_macro_metavariable_cannot_hide_a_new_static(self):
         mutant = 'macro_rules! slot { ($n:ident) => { static $n: AtomicBool = AtomicBool::new(false); }; } slot!(EXTRA);'
         self.assertTrue(expansion_violations({'macro.rs': mutant}))

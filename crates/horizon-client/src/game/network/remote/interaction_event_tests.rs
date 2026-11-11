@@ -1,4 +1,10 @@
 //! Behavioural proofs of the broadcast events around scoped interaction Parts.
+#[path = "item_fallthrough_tests.rs"]
+mod item_fallthrough_tests;
+#[path = "use_item_hand_tests.rs"]
+mod use_item_hand_tests;
+#[path = "use_item_result_tests.rs"]
+mod use_item_result_tests;
 use super::super::{
     Game, Hit, execution_role::ExecutionRole, lan::LanSettings,
     native_entity_refs::tests::with_game,
@@ -46,10 +52,18 @@ struct Controls {
     air_answer: Option<Answer>,
     consume_item: bool,
     expected_hand: Option<Hand>,
+    part_answer: Option<Answer>,
+    part_pass: bool,
     /// Every hand `use_item_on_block` fired for, in order, instead of asserting one.
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    /// Cancel `right_click_block` with this answer.
+    click_answer: Option<Answer>,
+    /// How many `right_click_block` events fired.
+    clicks: usize,
+    click_hands: Vec<Hand>,
+    use_item_packets: usize,
 }
 
 #[derive(Clone, Default)]
@@ -74,8 +88,24 @@ impl Hooks for Observer {
             r.item_part(item, self.clone());
         }
     }
+    fn client_packet_send(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::ClientPacketSendEvent<'_>,
+    ) -> Flow {
+        if event.packet.id.path() == "use_item" {
+            self.0.lock().unwrap().use_item_packets += 1;
+        }
+        Flow::Continue
+    }
     fn right_click_block(&self, _: HostSide<'_>, event: &mut RightClickBlockEvent<'_>) -> Flow {
-        let state = self.0.lock().unwrap();
+        let mut state = self.0.lock().unwrap();
+        state.clicks += 1;
+        state.click_hands.push(event.click.hand);
+        if let Some(answer) = state.click_answer {
+            *event.cancellation_result = answer;
+            return Flow::Cancel;
+        }
         *event.use_block = state.use_block;
         *event.use_item = state.use_item;
         Flow::Continue
@@ -170,9 +200,17 @@ impl ItemPart for Observer {
         self.0.lock().unwrap().steps.push(Step::UseOnPart);
         Flow::Cancel
     }
-    fn use_item(&self, _: &mut dyn ServerHost, _: &mut UseItemEvent<'_>) -> Flow {
-        self.0.lock().unwrap().steps.push(Step::ItemPart);
-        Flow::Cancel
+    fn use_item(&self, _: HostSide<'_>, event: &mut UseItemEvent<'_>) -> Option<Answer> {
+        if let Some(hand) = self.0.lock().unwrap().expected_hand {
+            assert_eq!(event.hand, hand);
+        }
+        let mut state = self.0.lock().unwrap();
+        state.steps.push(Step::ItemPart);
+        if state.part_pass {
+            None
+        } else {
+            Some(state.part_answer.unwrap_or(Answer::SuccessServer))
+        }
     }
 }
 
@@ -198,55 +236,7 @@ fn with_interaction_game(client: bool, test: impl FnOnce(&mut Game<'_>)) {
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
             test(game);
         } else {
-            game.lan_host(
-                LanSettings {
-                    port: 0,
-                    guest_commands: false,
-                    force_game_mode: false,
-                },
-                NetConfig {
-                    listen: false,
-                    announce: false,
-                    lod_distance: 0,
-                    ..NetConfig::lan(0, String::new(), 2)
-                },
-                HubConfig {
-                    default_game_mode: 1,
-                    guest_commands: false,
-                    force_game_mode: false,
-                    hardcore: false,
-                    view_distance: 2,
-                    simulation_distance: 2,
-                    dimension: game.dim.id().to_owned(),
-                    allow_flight: true,
-                    seed: 0,
-                    max_players: 2,
-                    integrated: true,
-                    levels: game.level_shapes,
-                },
-            )
-            .unwrap();
-            let (tx, _rx) = std::sync::mpsc::channel();
-            let mut guest = Guest::new(
-                Joined {
-                    conn: 12,
-                    uuid: 12,
-                    name: "interaction_guest".into(),
-                    properties: Vec::new(),
-                    info: ClientInformation::new(8),
-                    brand: String::new(),
-                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
-                    latency: Arc::new(AtomicI32::new(0)),
-                    address: "127.0.0.1:1".parse().unwrap(),
-                    expected: false,
-                },
-                12,
-                [0.5, 64.0, 3.5],
-                10,
-            );
-            guest.placed = true;
-            guest.game_mode = 1;
-            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            let _receiver = setup_interaction_guest(game);
             game.as_guest(12, |game| {
                 game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
                 test(game);
@@ -606,6 +596,124 @@ fn canceled_item_results_keep_the_stack_wrappers_side_effects() {
     });
 }
 
+/// A spectator's click fires `right_click_block` on the client like anyone's, and a cancel
+/// answers in place of the server's menu turn: SUCCESS swings and ends the click, FAIL ends it,
+/// PASS goes on to the other hand.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectator_fires_right_click_block_on_the_client_and_its_cancel_answers() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            // Nobody answers: the event fired, and the spectator's click ends there, no swing.
+            *observer.0.lock().unwrap() = Controls::default();
+            let swings = game.swings_started;
+            assert!(game.remote_use_item_on(Hand::Main));
+            assert_eq!(observer.0.lock().unwrap().clicks, 1);
+            assert_eq!(game.swings_started, swings);
+            for (answer, ends, swings_by) in [
+                (Answer::Success, true, 1),
+                (Answer::Consume, true, 0),
+                (Answer::Fail, true, 0),
+                (Answer::Pass, false, 0),
+            ] {
+                *observer.0.lock().unwrap() = Controls {
+                    click_answer: Some(answer),
+                    ..Controls::default()
+                };
+                let swings = game.swings_started;
+                assert_eq!(game.remote_use_item_on(Hand::Main), ends, "{answer:?}");
+                assert_eq!(game.swings_started - swings, swings_by, "{answer:?}");
+                assert_eq!(observer.0.lock().unwrap().clicks, 1, "{answer:?}");
+            }
+        });
+    });
+}
+
+/// A cancelled block PASS tries both hands, but neither may send or predict item use.
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_spectators_passing_block_click_skips_item_use_for_both_hands() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "spectator_pass_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.set_mode_id(3);
+            assert!(game.spectator());
+            game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            *observer.0.lock().unwrap() = Controls {
+                click_answer: Some(Answer::Pass),
+                // Let an erroneous item event reach the Part, which would consume the click.
+                part_answer: Some(Answer::Success),
+                ..Controls::default()
+            };
+            let swings = game.swings_started;
+            // The real target turn precedes remote_use_hands' item/off-hand sequence.
+            assert!(!game.remote_use_item_on(Hand::Main));
+            game.remote_use_hands(mod_api::InteractionAttempt::Press);
+            let state = observer.0.lock().unwrap();
+            assert_eq!(state.clicks, 2);
+            assert_eq!(state.click_hands, [Hand::Main, Hand::Off]);
+            assert_eq!(state.use_item_packets, 0);
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, Hand::Main)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, Hand::Off)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::ItemPart))
+                    .count(),
+                0
+            );
+            assert_eq!(game.swings_started - swings, 0);
+            assert!(game.using.is_none());
+        });
+    });
+}
+
 #[test]
 #[ignore = "requires prepared game resources"]
 fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() {
@@ -674,7 +782,7 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                         [Step::Air(side, Hand::Main), Step::ItemPart]
                     );
                 }
-                observer.0.lock().unwrap().steps.clear();
+                *observer.0.lock().unwrap() = Controls::default();
                 let stone = game
                     .pack
                     .assets
@@ -683,12 +791,16 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                     .unwrap();
                 game.world.set(0, 64, 0, stone).unwrap();
                 game.forced_hit = Some(hit());
-                // Even a passing block remains a block target for Item.use.
+                // A passing target permits the same hand's Item.use hook.
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), true)
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
                         .is_none()
                 );
-                assert!(observer.0.lock().unwrap().steps.is_empty());
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Air(side, Hand::Main)]
+                );
+                observer.0.lock().unwrap().steps.clear();
                 game.forced_hit = None;
                 let kind = game
                     .res
@@ -704,10 +816,13 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 ));
                 assert!(game.entity_targeted());
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), false)
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
                         .is_none()
                 );
-                assert!(observer.0.lock().unwrap().steps.is_empty());
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Air(side, Hand::Main)]
+                );
             });
         }
     });
@@ -859,4 +974,59 @@ fn an_item_used_from_the_off_hand_reaches_the_use_hooks_on_the_server() {
             }
         });
     });
+}
+
+fn setup_interaction_guest(
+    game: &mut Game<'_>,
+) -> std::sync::mpsc::Receiver<horizon_client::lan::Out> {
+    game.lan_host(
+        LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        },
+        NetConfig {
+            listen: false,
+            announce: false,
+            lod_distance: 0,
+            ..NetConfig::lan(0, String::new(), 2)
+        },
+        HubConfig {
+            default_game_mode: 1,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 2,
+            simulation_distance: 2,
+            dimension: game.dim.id().to_owned(),
+            allow_flight: true,
+            seed: 0,
+            max_players: 2,
+            integrated: true,
+            levels: game.level_shapes,
+        },
+    )
+    .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut guest = Guest::new(
+        Joined {
+            conn: 12,
+            uuid: 12,
+            name: "interaction_guest".into(),
+            properties: Vec::new(),
+            info: ClientInformation::new(8),
+            brand: String::new(),
+            sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+            latency: Arc::new(AtomicI32::new(0)),
+            address: "127.0.0.1:1".parse().unwrap(),
+            expected: false,
+        },
+        12,
+        [0.5, 64.0, 3.5],
+        10,
+    );
+    guest.placed = true;
+    guest.game_mode = 1;
+    game.lan.as_mut().unwrap().hub.guests.push(guest);
+    rx
 }

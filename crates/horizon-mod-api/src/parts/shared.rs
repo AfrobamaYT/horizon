@@ -40,8 +40,7 @@ pub(crate) fn with_registering_keys<T>(
 pub struct PartRegistrar {
     pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
     pub(crate) datapack_registries: Vec<crate::DatapackRegistryDeclaration>,
-    pub(crate) menu_recipe_books:
-        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
+    pub(crate) menu_recipe_books: HashMap<String, MenuBookDeclaration>,
     pub(crate) self_refusal: Option<String>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,

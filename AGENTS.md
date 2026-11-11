@@ -146,9 +146,9 @@ reads `README.md`, `launcher/links.json`, `docs/api/`, `roadmap/roadmap.json` an
 ```sh
 python3 tools/pr_ready.py                  # the self-check: fmt, clippy -D warnings, touched crates' tests, harnesses; paste its block in the PR
 python3 tools/pr_ready.py --quick          # same without harnesses
-cargo test -p horizon-client -p horizon-client-lib --lib --bins --tests   # skips the examples (pr_ready does this); `--doc` separately
+cargo test -p horizon-client -p horizon-game -p horizon-client-lib --lib --bins --tests   # skips the examples (pr_ready does this); `--doc` separately
 cargo test -p horizon-client-lib --lib mod_content::tests:: -- --ignored   # the slow content-root tests, #[ignore]d; pr_ready runs them when mod content, assets, blocks or items change
-cargo build --profile fast -p horizon-client        # optimized, quick to link: use it to play or run lan_e2e
+cargo build --profile fast -p horizon-game        # optimized, quick to link: use it to play or run lan_e2e
 python3 tools/parity.py --changed origin/main       # the harnesses your branch can affect (CI's parity job)
 python3 tools/parity.py --changed-files paths.txt --list   # which harnesses cover these files, without running them
 python3 tools/parity.py mob_ai sculk       # named harnesses
@@ -157,6 +157,8 @@ python3 tools/agent_control_e2e.py         # horizon-ctl / MCP end to end
 python3 tools/lang_coverage.py --summary   # the keys each language still misses, and its English leftovers
 ```
 
+- For a player-facing change, drive the game once with `horizon-ctl` (launch, the action, a `state` or `screenshot`)
+  and report the result in the PR's "Tried in game" line; never claim it when it was not run.
 - Harnesses and the game need the vanilla data in `.local/` (`minecraft/`, `horizon-client/26.3`, `datagen/`,
   `tools/`): see [docs/parity-workflow.md](docs/parity-workflow.md). Without it, pr_ready lists the
   harnesses for CI.
@@ -259,7 +261,7 @@ Single player, LAN guests and dedicated servers all run the server code, so a fi
 Test the server thread when you touch player-facing gameplay:
 
 ```sh
-cargo run --profile fast -p horizon-client -- --resources .local/horizon-client/26.3 --world T               # server thread
+cargo run --profile fast -p horizon-game -- --resources .local/horizon-client/26.3 --world T               # server thread
 python3 tools/lan_e2e.py --check <name>                  # host on its server thread, guest is a server client
 python3 tools/parity.py dedicated_server server_entities server_player_damage
 ```

@@ -35,6 +35,7 @@ pub mod dolphin;
 pub mod doors;
 pub mod drops;
 pub mod enderman;
+pub mod entity_sounds;
 pub mod equine;
 pub mod equip;
 pub mod farm;
@@ -100,6 +101,7 @@ pub mod suffocation;
 pub mod sulfur_cube;
 pub mod sync;
 pub mod tame;
+mod target;
 pub mod trader;
 pub mod transport_items;
 pub mod trial_spawner;
@@ -118,7 +120,6 @@ use living::totem_death_effects;
 pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
-
 /// A mob's stored active effect with its registry index resolved once at creation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoredEffect {
@@ -502,9 +503,8 @@ pub struct MobType {
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
-    /// Ambient, hurt and death sound events (without the namespace).
     pub sounds: [&'static str; 3],
-    pub step_sound: Option<&'static str>,
+    pub sound_overrides: entity_sounds::Sounds,
     /// Animal.isFood items (resolved from the item tag).
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
@@ -841,7 +841,7 @@ impl MobTypes {
                     brain: def.brain(),
                     anim: def.anim,
                     sounds: def.sounds,
-                    step_sound: def.step_sound,
+                    sound_overrides: entity_sounds::Sounds::load(&id, t)?,
                     food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
@@ -1331,6 +1331,7 @@ pub struct Extra {
     /// `Fox.DATA_TRUSTED_ID_0` and `_1`: the players a fox trusts, first free
     /// slot first, and a third replaces the second (`Fox.addTrustedEntity`).
     pub trusted: [Option<[i32; 4]>; 2],
+    pub last_stare_sound: Option<u32>,
     /// `Animal.LoveCause`: the player who fed this animal into love, which a
     /// fox's breeding hands to its baby as trust (`Fox.FoxBreedGoal.breed`).
     pub love_cause: Option<[i32; 4]>,
@@ -2024,6 +2025,7 @@ pub enum MobEvent {
         count: u32,
     },
     Sound(&'static str, [f64; 3], f32, f32),
+    ProfessionWorkSound(Arc<str>, [f64; 3], f32, f32),
     /// `level.playSound(null, mob, sound, source, volume, pitch)`: a sound
     /// bound to mob `mob` (`ServerLevel.playSeededSound`'s entity overload),
     /// in vanilla's `source`, from where the mob stands.
@@ -2359,11 +2361,12 @@ pub enum MobEvent {
         mob: u32,
         target: Who,
     },
-    /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
-    /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
+    PiglinAlertTarget(undead::PiglinAlert),
+    /// `HoglinAi.broadcastAttackTarget`: receiver and source player connection.
     HoglinAttackTarget {
         mob: u32,
         target: Who,
+        player: Option<u32>,
     },
     /// `StartHuntingHoglin` for a nearby adult piglin: it takes the hoglin as
     /// its anger target (when it has none) and starts its `HUNTED_RECENTLY` wait.
@@ -2976,6 +2979,7 @@ pub struct Seen {
     pub meeting: Option<[i32; 3]>,
     /// A villager's vanilla profession projection, absent for unknown IDs.
     pub profession: Option<u8>,
+    pub custom_profession: Option<Arc<str>>,
     /// A llama's strength or a horse's markings.
     pub secondary_variant: u8,
     /// A villager's experience.
@@ -3039,19 +3043,7 @@ impl Seen {
 impl Mob {
     /// The name used by command replies: CustomName takes precedence over the type.
     pub fn command_name(&self) -> crate::text::Text {
-        if let Some(name) = &self.custom_name {
-            return crate::text::Text::literal(name);
-        }
-        // Villager.getTypeName returns its registered profession's name.
-        if self.species() == Species::Villager {
-            let profession = villager::profession(self.extra.profession.index().unwrap_or(0)).id;
-            return crate::text::Text::translate(
-                &format!("entity.minecraft.villager.{profession}"),
-                &[],
-            );
-        }
-        let id = crate::command::args::normalize(&self.kind.id);
-        crate::text::Text::translate(&format!("entity.{}", id.replace(':', ".")), &[])
+        villager::command_name(self)
     }
 
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
@@ -3211,6 +3203,7 @@ impl Mob {
             potential_job: villager_brain::potential_job_site(m),
             meeting: villager.then_some(m.extra.meeting).flatten(),
             profession: villager.then(|| m.extra.profession.index()).flatten(),
+            custom_profession: villager::seen_profession_name(m, villager),
             secondary_variant: m.extra.variant2,
             xp: villager::xp(m),
             villager: villager.then(|| Arc::new(villager::seen(m))),
@@ -3609,6 +3602,7 @@ pub trait LiveMobs {
 
 #[derive(Clone)]
 pub struct MobWorld<'a> {
+    pub professions: &'a villager::ResolvedProfessions,
     /// What the motion value hooks are given: the loop context of the side that
     /// ticks these mobs.
     pub loop_context: &'a horizon_world::native_load_context::LoopContext,
@@ -4634,7 +4628,7 @@ impl Mob {
             let sound = if absorbed {
                 "item.wolf_armor.damage"
             } else {
-                ai::voice_sounds(self)[if dead { 2 } else { 1 }]
+                entity_sounds::voices(self)[if dead { 2 } else { 1 }]
             };
             if !dead {
                 self.ambient_timer = -self.ambient_interval();
@@ -4839,10 +4833,8 @@ impl Mob {
     /// Movement speed attribute bonus (baby zombies, sprinting modifiers).
     /// MOVEMENT_SPEED including effects (speed +20%/level, slowness -15%/level).
     pub fn movement_speed(&self) -> f64 {
-        let mut v = strider::movement_speed(
-            self,
-            witch::speed(self, self.attrs.speed) + enderman::attacking_speed(self),
-        ) * self.speed_bonus();
+        let mut v = strider::movement_speed(self, witch::speed(self, self.attrs.speed))
+            * self.speed_bonus();
         // LivingEntity.SPEED_MODIFIER_SPRINTING: 0.3F, ADD_MULTIPLIED_TOTAL.
         if self.extra.sprinting {
             v *= 1.0 + f64::from(0.3f32);
@@ -5751,7 +5743,7 @@ pub(crate) mod sensor_scan_tests {
             brain: Brain::Passive,
             anim: Anim::Rabbit,
             sounds: [""; 3],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Arc::default(),
             tempt: Arc::default(),
             passenger_attachments: Vec::new(),

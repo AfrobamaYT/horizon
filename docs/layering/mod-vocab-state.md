@@ -17,7 +17,9 @@ named immutable caches below. Ordinary installed key and Part reads never call a
 Registration callbacks are consulted only while the API-owned activity counter is nonzero.
 
 Every production static/TLS declaration, including declarations behind the `testing` feature, is
-listed below. Unconditional unit-test items and explicitly test-only module files are excluded.
+listed below. The `test-support` category requires a direct `cfg(test)`, `cfg(feature = "testing")`,
+or their two-way `cfg(any(...))`; broader or unrecognized predicates are refused. Its entries hold
+set-once installed test metadata, never live authoring requests, and are absent from production builds. Unconditional unit-test items and explicitly test-only module files are excluded.
 CI rejects an unlisted declaration, a changed type, a stale entry, unsafe source outside the points
 exception, or a lint suppression outside that file. State-declaring macro definitions and unchecked
 include boundaries are refused. Path modules must target the scanned vocabulary source set;
@@ -55,6 +57,7 @@ OUT_DIR file checked by the generator before writing it.
 | `content/registry_keys.rs::resolved_items::EMPTY` | `std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
 | `dispatch_scope.rs::BACKEND` | `OnceLock<Option<Backend>>` | set-once socket | Set-once platform callback registration; mutable platform storage lives above the engine. |
 | `parts/block_entities.rs::resolved_block_entity_types::EMPTY` | `OnceLock<horizon_mod_runtime::registry_keys::Names>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
+| `parts/datapack_registries.rs::PROCESS_DECLARATIONS` | `OnceLock<Vec<DatapackRegistryDeclaration>>` | test-support | Compiled only under cfg(any(test, feature = "testing")), never in a production build. Set once with installed datapack-registry declarations so connection tests on other threads can look them up; holds no live authoring requests. |
 | `parts/effects.rs::resolved_effects::EMPTY` | `OnceLock<horizon_mod_runtime::registry_keys::Effects>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
 | `parts/fluids.rs::resolved_fluids::EMPTY` | `OnceLock<horizon_mod_runtime::registry_keys::Names>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
 | `parts/shared.rs::GAME_PARTS` | `RefCell<GamePartsLookup>` | Parts lookup table | Per-game lookup table and its world/thread validity context, replaced when world tags change. |

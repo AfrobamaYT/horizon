@@ -149,6 +149,11 @@
     "category": "immutable lookup cache",
     "reason": "Three vanilla bucket identifiers resolved once; no live registration or world state."
   },
+  "parts/datapack_registries.rs::PROCESS_DECLARATIONS": {
+    "type": "OnceLock<Vec<DatapackRegistryDeclaration>>",
+    "category": "test-support",
+    "reason": "Compiled only under cfg(any(test, feature = \"testing\")), never in a production build. Set once with installed datapack-registry declarations so connection tests on other threads can look them up; holds no live authoring requests."
+  },
   "@generated/wire_generated.rs::WIRE_LAYOUT": {
     "type": "::std::sync::LazyLock<u64>",
     "category": "immutable ABI layout fingerprint",

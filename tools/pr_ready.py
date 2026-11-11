@@ -30,6 +30,7 @@ from pathlib import Path
 import re
 import shlex
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -46,7 +47,7 @@ if "PARITY_SHARED" not in os.environ and not (ROOT / ".local" / "minecraft").exi
     # A fleet worktree without vanilla data still knows each harness's dependencies.
     os.environ["PARITY_SHARED"] = str(FLEET_SHARED)
 from tools import parity, release_train  # noqa: E402
-from tools.ci import rust_changes  # noqa: E402
+from tools.ci import listed_calls, rust_changes  # noqa: E402
 
 RBUILD = Path.home() / "fleet" / "rbuild"
 # What rbuild's login shell needs on each fleet machine before cargo (it adds sccache itself). The ThinkPad no
@@ -288,7 +289,7 @@ def parity_summary(output):
 # CI's verify job (.github/workflows/ci.yml): clippy over the whole workspace, and over the server build (the game
 # without sound or controllers).
 CI_CLIPPY = "cargo clippy --workspace --all-targets --locked -- -D warnings"
-CI_CLIPPY_SERVER = "cargo clippy -p horizon-client --all-targets --locked --no-default-features -- -D warnings"
+CI_CLIPPY_SERVER = "cargo clippy -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --locked --no-default-features -- -D warnings"
 
 
 # CI installs the current stable each run (rustup toolchain install stable), and Rust ships one every six weeks
@@ -370,9 +371,10 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
     steps = [
         Step("Cargo.lock", where="git"),
         Step("Public tree", "python3 tools/check_public_tree.py", where="here"),
-        # Upstream layer/address policies are not yet fully adapted to the fork's
-        # split mod crates and separate launcher/registry workspaces. Run their
-        # diagnostics manually until the fork baseline is reviewed.
+        Step("Repository hygiene", "python3 tools/ci/check_repository_hygiene.py", where="here"),
+        # docs/layers.md: a crate depends only on its own layer or a lower one, and the exceptions only shrink.
+        Step("Layers", f"python3 tools/check_layers.py --base {shlex.quote(base)}", where="here"),
+        Step("Addresses", f"python3 tools/check_addresses.py --base {shlex.quote(base)}", where="here"),
         Step("File size", f"python3 tools/check_file_size.py --base {shlex.quote(base)}", where="here"),
         # Always, as in CI: some read the crates, the roadmap or the workflows.
         Step("Python tests", "python3 -m unittest discover -s tests", where="here", summary=unittest_passed),
@@ -410,6 +412,8 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
                           ("launcher tests", "cargo test --locked --lib --bins $features")]:
         steps.append(Step(name, f"cd launcher && {LAUNCHER_FEATURES}\nin_shell {shlex.quote(command)}", skip=launcher_skip,
                           summary=tests_passed if name == "launcher tests" else None))
+    steps.append(Step("listed call loader proof", "python3 tools/ci/listed_calls.py --force",
+                      skip=None if listed_calls.applies(changed) else "listed call machinery untouched"))
     harness = Step("Parity", summary=parity_summary)
     affected = affected_here(changed)
     local_data = (ROOT / ".local" / "minecraft").exists() and (ROOT / ".local" / "horizon-client").exists()
@@ -583,13 +587,35 @@ def finish(step, verbose):
 MARK = {"pass": "✅", "fail": "❌", "skip": "➖", "list": "➖", "warn": "⚠️"}
 
 
-def block(args, base, merge_base, changed, counts, steps, label, elapsed):
+def revision_state():
+    """Snapshot before selection and after checks; ignored build output is excluded."""
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z").split("\0")[:-1]
+    metadata = []
+    for path in untracked:
+        # Never open untracked content: symlinks can dangle or name directories,
+        # and FIFOs/devices must not be read. Dirty starts are uncertified anyway.
+        try:
+            info = (ROOT / path).lstat()
+            link = os.readlink(ROOT / path) if stat.S_ISLNK(info.st_mode) else None
+            metadata.append((path, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns, link))
+        except OSError:
+            metadata.append((path, "unavailable"))
+    return (git("rev-parse", "HEAD").strip(),
+            git("status", "--porcelain=v1", "--untracked-files=all"),
+            git("diff", "HEAD", "--binary") + repr(metadata))
+
+
+def block(args, base, merge_base, changed, counts, steps, label, elapsed, revision, changed_during_run=False):
     where = socket.gethostname().split(".")[0] if args.host == "local" else args.host
+    head, status, _ = revision
+    dirty = bool(status)
     flags = "".join(f" --{flag}" for flag in ("quick",) if getattr(args, flag)) + \
         ("" if args.host == "local" else f" --host {args.host}") + ("" if base == "origin/main" else f" --base {base}")
     added, removed = (sum(count[i] for count in counts.values()) for i in (0, 1))
     warnings = scope_warnings(changed)
-    lines = [f"**pr_ready** (`tools/pr_ready.py{flags}` on {where}, against {base} at {merge_base[:9]}, "
+    lines = [f"**pr_ready** (`tools/pr_ready.py{flags}`, commit `{head}`{' dirty' if dirty else ''}, "
+             f"{'changed during run; checks do not certify the ending worktree, ' if changed_during_run else ''}"
+             f"host `{where}`, against {base} at {merge_base[:9]}, "
              f"{duration(elapsed)})", "", "| Check | Result |", "| --- | --- |",
              f"| Scope | {'⚠️' if warnings else '✅'} {len(changed)} files, +{added} −{removed}"
              + "".join(f"; {warning}" for warning in warnings) + " |"]
@@ -597,6 +623,17 @@ def block(args, base, merge_base, changed, counts, steps, label, elapsed):
         took = f" ({duration(step.seconds)})" if step.seconds else ""
         detail = f" {step.detail}" if step.detail else ""
         lines.append(f"| {step.name} | {MARK[step.status]}{detail}{took} |")
+    content = next((step for step in steps if step.name == "content root tests"), None)
+    resource_override = os.environ.get("HORIZON_TEST_RESOURCES")
+    resource_roots = [Path(resource_override)] if resource_override is not None else [
+        ROOT / ".local/horizon-client/26.3", ROOT.parent.parent / ".local/horizon-client/26.3"]
+    if args.host == "local" and not any((root / "gameplay-facts.json").is_file() for root in resource_roots):
+        data_tests = "data-backed tests not run: no prepared data here"
+    elif content and content.status in {"pass", "fail"}:
+        data_tests = f"data-backed tests: horizon-client-lib mod_content::tests:: (--ignored): {content.detail or content.status}"
+    else:
+        data_tests = "data-backed tests not run: content root untouched"
+    lines.append(f"| Data-backed cargo tests | {data_tests} |")
     lines.append(f"| Label | {label} |")
     return "\n".join(lines)
 
@@ -612,6 +649,7 @@ def main():
     if args.host != "local" and not RBUILD.exists():
         parser.error(f"--host {args.host} needs {RBUILD}; without the fleet, run it here (no --host)")
     started = time.monotonic()
+    revision = revision_state()
     changed = parity.changed_files(args.base)
     if changed is None:
         parser.error(f"no merge base with {args.base} (git fetch?)")
@@ -633,7 +671,7 @@ def main():
 
     label = suggested_label(changed, release_train.exporters())
     print(block(args, args.base, merge_base, sorted(changed), counts, steps, label,
-                time.monotonic() - started))
+                time.monotonic() - started, revision, revision_state() != revision))
     return 1 if any(step.status == "fail" for step in steps) else 0
 
 

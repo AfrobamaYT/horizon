@@ -11,6 +11,7 @@ impl MenusRegistrar for PartRegistrar {
         book: &crate::RecipeBookTypeKey,
         recipe_type: &str,
         layout: crate::RecipeBookLayout,
+        screen: crate::Screen,
     ) -> Result<(), String> {
         let result: Result<(), String> = (|| {
             if mod_vocab::__private::parts_installation::parts_installed() {
@@ -35,8 +36,20 @@ impl MenusRegistrar for PartRegistrar {
                 return Err("explicit recipe type namespace required".into());
             }
             layout.validate(256)?;
-            self.menu_recipe_books
-                .insert(menu.into(), (book.clone(), recipe_type.into(), layout));
+            layout.validate_screen(&screen)?;
+            if screen.recipe_book.as_ref() != Some(book) {
+                return Err("screen book differs from menu book".into());
+            }
+            self.menu_recipe_books.insert(
+                menu.into(),
+                MenuBookDeclaration {
+                    owner: self.mod_id,
+                    book: book.clone(),
+                    recipe_type: recipe_type.into(),
+                    layout,
+                    screen,
+                },
+            );
             Ok(())
         })();
         result.map_err(|reason| {

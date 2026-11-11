@@ -4,8 +4,7 @@ use super::*;
 /// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
 pub(crate) struct Installed {
-    pub(crate) menu_recipe_books:
-        HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
+    pub(crate) menu_recipe_books: HashMap<String, crate::parts::menus::MenuBookDeclaration>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
@@ -37,5 +36,3 @@ pub(crate) struct Installed {
     pub(crate) hook_bits: Vec<bool>,
     pub(crate) tag_hook_bits: Vec<bool>,
 }
-
-

@@ -639,6 +639,15 @@ pub trait EntitiesBackendMut {
     /// chest boat or a minecart with a chest still drops what it holds, and
     /// a boat its lead, as vanilla's `remove` does. False for a player, a dragon
     /// part (it leaves with its dragon), or a stale handle.
+    /// The tick scope below is the port's own transactional requirement:
+    /// NeoForge adds no event, deferral or drop capture around a block entity's
+    /// tick, and new item spawning stays immediate. With no scope open the
+    /// engine behaves exactly as vanilla for these item operations: removal
+    /// is immediate, no overlay is created, and nothing is staged.
+    /// Dropped-item removal during a mod block-entity tick is staged with its
+    /// final snapshot, and immediately hidden from that scope's reads. It is
+    /// discarded on writeback rejection. Non-item removal and spawning are
+    /// deliberately immediate and are not undone by rejection.
     #[access(WorldOnly)]
     fn entity_discard(&mut self, entity: EntityRef) -> bool;
     /// Side: server.
@@ -647,6 +656,8 @@ pub trait EntitiesBackendMut {
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
     /// still with no death and no loot. False for a player, a dragon part (it
     /// leaves with its dragon), or a stale handle.
+    /// Dropped items share `entity_discard`'s block-entity tick staging;
+    /// non-item removal is deliberately immediate.
     #[access(WorldOnly)]
     fn entity_remove(&mut self, entity: EntityRef, reason: RemovalReason) -> bool;
     /// Side: server.

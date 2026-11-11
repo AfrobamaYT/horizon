@@ -124,9 +124,10 @@ pub struct LootDrops<'a> {
     /// `causing` and `direct` are the attacking and direct attacking entity IDs;
     /// 0 means absent or unknown, as on the other damage hooks.
     pub damage_source: Option<crate::entity::health::HurtSource<'a>>,
-    /// What broke the block (`LootContextParams.TOOL`), or the killing entity's
-    /// held stack captured at death, before death or loot listeners run. None when no
-    /// tool or killer hand is available; never read from later inventory state.
+    /// The breaking or using tool (`LootContextParams.TOOL`). Always None for
+    /// entity deaths. For the attacker's live hand, resolve `damage_source.causing`
+    /// through `host.entity`, then `host.living`, and read `living.hand_item(host, Hand::Main)`.
+    /// This reads when called, including changes made by earlier loot listeners.
     pub tool: Option<&'a ItemStack>,
     /// The radius of the explosion that broke the block.
     pub explosion: Option<f32>,
@@ -661,7 +662,7 @@ pub enum UsePhase {
 }
 
 // no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
-/// A player's item use without a block or entity target (`RightClickItem`).
+/// A player's item use, including after target fallthrough (`RightClickItem`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct ItemClick<'a> {
