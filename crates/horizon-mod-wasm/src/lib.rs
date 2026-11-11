@@ -479,10 +479,10 @@ fn initialize_selected<'a>(
         };
         if let Err(why) = result {
             module.disable();
-            log::error!("wasm mod {} refused: {why}", manifest.id);
             refused.push((manifest.id.clone(), why));
         }
     }
+    report_refusals(&refused, &mut std::io::stdout().lock());
     refused
 }
 fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -> bool {
