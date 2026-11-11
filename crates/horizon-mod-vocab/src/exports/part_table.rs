@@ -10,6 +10,7 @@ pub use parts::{
     ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts, ProvidedBy,
     Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
+pub use parts::limits as general_entity_limits;
 pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
 mod __private {
     #[cfg(any(test, feature = "testing"))]
