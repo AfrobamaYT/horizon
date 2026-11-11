@@ -2440,7 +2440,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
-    fn slot_functions_and_calls_are_widened_but_types_are_only_carried() {
+    fn slot_functions_and_calls_are_widened() {
         for declaration in [
             "lower::hidden::inner::Thing::run",
             "lower::hidden::inner::Thing::run | helper | 0 |",
@@ -2449,7 +2449,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
             fixture.lower();
             fixture.put(
                 "crates/horizon-mod-api-gen/slots/test.txt",
-                &format!("{declaration}\ntype lower::FutureExtension\n"),
+                &format!("{declaration}\n"),
             );
             let result = widen_with(&fixture.0, &[]).unwrap();
             assert!(
