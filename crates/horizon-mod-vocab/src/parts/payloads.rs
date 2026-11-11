@@ -22,6 +22,7 @@ struct Registered {
 /// Immutable payload registry for engine connection setup and dispatch.
 /// It is absent entirely when no mod registers a payload.
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Payloads {
     phases: [HashMap<String, Registered>; 2],
 }
@@ -29,6 +30,7 @@ pub struct Payloads {
 // no wire: resolved process-local callback and its owning mod's live enable guard.
 /// A receiving callback resolved once while a connection freezes its table.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct PayloadReceiver {
     /// The sole registered receiver.
     handler: Arc<dyn IPayloadHandler>,
@@ -144,6 +146,7 @@ impl Payloads {
 }
 
 /// The frozen process registry, shared rather than copied into every connection.
+// hidden: engine registry accessor exported only through __private::game.
 #[doc(hidden)]
 pub fn installed_payloads() -> Option<Arc<Payloads>> {
     installed().and_then(|installed| installed.keys.payloads.clone())

@@ -11,15 +11,18 @@ use std::sync::Arc;
 
 /// Opaque application bytes. The transport never prepends a mod envelope.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: the single public field is the opaque-byte constructor contract.
 pub struct PayloadBytes(pub Vec<u8>);
 
 /// A namespaced application channel, validated by the registration boundary.
 /// Sends resolve it against the frozen declarations; constructing one grants no authority.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
+// exhaustive: the single public field is the channel constructor contract; registration owns validation.
 pub struct PayloadId(pub String);
 
 /// The protocols occupied by a registration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: the closed registration protocol set is configuration, play, or their union.
 pub enum PayloadProtocol {
     /// Configuration only.
     Configuration,
@@ -31,6 +34,7 @@ pub enum PayloadProtocol {
 
 /// The declared flow; bidirectional declarations must agree on both peers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: the closed registration flow set is clientbound, serverbound, or both.
 pub enum PayloadDirection {
     /// Server to client.
     ToClient,
@@ -42,6 +46,7 @@ pub enum PayloadDirection {
 
 /// Where a receiving handler executes. Network handlers must enqueue world work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: the two executors define the complete world-access scheduling contract.
 pub enum HandlerThread {
     /// The logical receiving main thread (the default).
     Main,
@@ -51,6 +56,7 @@ pub enum HandlerThread {
 
 /// A registration's complete compatibility and scheduling declaration.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: callers construct the complete compatibility and scheduling record explicitly.
 pub struct PayloadDeclaration {
     /// Exact channel written into vanilla custom-payload framing.
     pub id: PayloadId,
@@ -68,6 +74,7 @@ pub struct PayloadDeclaration {
 
 /// Queued locally, not a delivery acknowledgement. Disconnect invalidates pending work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: local queue acceptance is the only success state, never a remote acknowledgement.
 pub enum PayloadAccepted {
     /// Accepted by the current connection and transaction.
     Queued,
@@ -75,6 +82,7 @@ pub enum PayloadAccepted {
 
 /// Which whole-packet framing bound refused a send.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: physical framing has exactly encoded and pre-compression bounds.
 pub enum PayloadFrameStage {
     /// Contents after the optional compression header and compression.
     Encoded,
@@ -84,6 +92,7 @@ pub enum PayloadFrameStage {
 
 /// Explicit local refusal. No rejected send writes any application bytes.
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: callers can handle every explicit local refusal in the closed Wire result schema.
 pub enum PayloadSendError {
     /// No local declaration has this id.
     UnknownPayload(PayloadId),
@@ -124,6 +133,7 @@ impl crate::NoBackend for PayloadSendError {
 
 /// A context operation cannot run in this phase, side or executor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: the closed Wire result schema enumerates all context capability refusals.
 pub enum PayloadContextError {
     /// Configuration has no authenticated play player.
     NoPlayer,
@@ -139,6 +149,7 @@ pub enum PayloadContextError {
 
 /// Status of work submitted through the payload context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: work either completes in the current root or queues on the receiving main thread.
 pub enum PayloadWorkStatus {
     /// A main-thread submission ran immediately in the current transaction.
     Complete,

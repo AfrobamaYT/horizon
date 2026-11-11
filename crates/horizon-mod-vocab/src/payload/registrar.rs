@@ -9,6 +9,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 /// NeoForge-style registration settings. Modifiers return another view and leave
 /// this view unchanged. Register from Hooks::register; the installed table is frozen.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct PayloadRegistrar<'a> {
     registrar: Rc<RefCell<&'a mut dyn Registrar>>,
     version: String,
@@ -137,6 +138,7 @@ methods!(
 
 // no wire: the load event borrows its registrar and has no invocation data representation.
 /// The load-time payload registration event, reached from the current Registrar.
+#[non_exhaustive]
 pub struct RegisterPayloadHandlersEvent<'a> {
     registrar: &'a mut dyn Registrar,
 }
@@ -149,6 +151,7 @@ impl RegisterPayloadHandlersEvent<'_> {
 
 // no wire: the load event borrows its registrar; handler callbacks cross separately.
 /// Assign client handlers to already declared clientbound payloads before freeze.
+#[non_exhaustive]
 pub struct RegisterClientPayloadHandlersEvent<'a> {
     registrar: &'a mut dyn Registrar,
 }
