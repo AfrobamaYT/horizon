@@ -1591,7 +1591,7 @@ enum Act {
     /// The Music page: turn this track off, or back on.
     MusicTrackOn(String, bool),
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum WKind {
     Button {
         label: Text,
@@ -1614,7 +1614,7 @@ enum WKind {
         code: String,
     },
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Widget {
     x: f32,
     y: f32,
@@ -1914,7 +1914,7 @@ pub struct OptionsUi {
     rev: u64,
     /// The page's layout at `layout_key`: shared by the drawing, the hit
     /// tests and the scroll, so all three read the same rectangles.
-    layout_cache: Option<((f32, f32, u64), std::sync::Arc<OptionsLayout>)>,
+    layout_cache: Option<((f32, f32, u64, u32), std::sync::Arc<OptionsLayout>)>,
     /// How many layouts were made (the caching test).
     #[cfg(test)]
     layouts_built: u32,
@@ -4483,6 +4483,8 @@ impl OptionsUi {
             if self.language_search.shortcut(shortcut, clipboard) {
                 self.scroll = 0.0;
             }
+            // Select all, copy, paste and cut: the box's text is a layout input.
+            self.relayout();
             return true;
         }
         if self.page() == Page::SplitProfiles {
@@ -4498,11 +4500,14 @@ impl OptionsUi {
             if self.settings_search.shortcut(shortcut, clipboard) {
                 self.scroll = 0.0;
             }
+            self.relayout();
             return true;
         }
         false
     }
     fn bind_key(&mut self, s: &mut Settings, value: String) -> Vec<Event> {
+        // The waiting marker and the binding are both layout inputs.
+        self.relayout();
         self.pending_mod_key = None;
         let Some(name) = self.selected_key.take() else {
             return Vec::new();
@@ -5108,6 +5113,135 @@ mod tests {
         ui.type_text(&atlas(), "abc");
         ui.built_layout(&s, 854.0, 480.0);
         assert_eq!(ui.layouts_built, 5);
+    }
+
+    /// Every operation that changes an input the page layout reads must show
+    /// in the cached layout: after each step it equals one built fresh from
+    /// the same state. Covers the wheel and a scrollbar drag, Tab and arrow
+    /// focus movement that scrolls the list, search typing, clipboard paste
+    /// and cut, a modifier-only key bind and the Agent page's status.
+    #[test]
+    fn the_cached_layout_follows_every_input() {
+        use crate::clipboard::{EditShortcut, MemoryClipboard};
+        use winit::keyboard::KeyCode as K;
+
+        let atlas = atlas();
+        let mut s = Settings::default();
+        s.mods.installed.push(crate::mod_list::Installed {
+            id: "sample".into(),
+            title: "Sample".into(),
+            description: String::new(),
+            problem: None,
+            dev: false,
+            native: Some(crate::mod_list::NativePage {
+                mappings: vec![crate::mod_list::KeyMapping {
+                    id: "zoom".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        });
+        let mut ui = OptionsUi::default();
+        ui.open_at(false, Page::Main);
+        ui.size = (427.0, 240.0);
+        fn fresh(ui: &mut OptionsUi, s: &Settings, step: &str, stale: &mut Vec<String>) {
+            let size = ui.size;
+            let built = ui.built_layout(s, size.0, size.1);
+            let now = ui.layout_now(s, size.0, size.1);
+            if *built != now {
+                stale.push(step.to_owned());
+            }
+        }
+        let mut stale = Vec::new();
+
+        fresh(&mut ui, &s, "open", &mut stale);
+        ui.size = (854.0, 480.0);
+        fresh(&mut ui, &s, "resize", &mut stale);
+
+        // A long page: the wheel, a scrollbar drag, Tab and the arrows all
+        // move the list under the drawing.
+        ui.show(Page::KeyBinds);
+        fresh(&mut ui, &s, "Key Binds", &mut stale);
+        ui.wheel(&mut s, ui.size, (200.0, 200.0), [1708, 960], -3.0);
+        fresh(&mut ui, &s, "wheel scroll", &mut stale);
+        let sx = ui.scrollbar_x(ui.size.0);
+        ui.scrollbar_drag_y = Some(100.0);
+        ui.click(
+            &mut s,
+            &atlas,
+            sx + 1.0,
+            120.0,
+            ui.size,
+            [1708, 960],
+            true,
+            false,
+        );
+        fresh(&mut ui, &s, "scrollbar drag", &mut stale);
+        for step in 0..60 {
+            ui.key(&mut s, &atlas, K::Tab, None);
+            fresh(&mut ui, &s, &format!("Tab {step}"), &mut stale);
+        }
+        for step in 0..40 {
+            ui.key(&mut s, &atlas, K::ArrowDown, None);
+            fresh(&mut ui, &s, &format!("arrow down {step}"), &mut stale);
+        }
+
+        // Search typing, then the clipboard shortcuts in the same box.
+        ui.show(Page::Video);
+        ui.settings_search.focused = true;
+        for (step, c) in ["a", "b", "c"].iter().enumerate() {
+            ui.key(&mut s, &atlas, K::KeyA, Some(c));
+            fresh(&mut ui, &s, &format!("typing {step}"), &mut stale);
+        }
+        // A query that matches options: the rows change with the text.
+        let mut clipboard = MemoryClipboard("render".into());
+        ui.shortcut(&atlas, EditShortcut::SelectAll, &mut clipboard);
+        fresh(&mut ui, &s, "select all", &mut stale);
+        ui.shortcut(&atlas, EditShortcut::Paste, &mut clipboard);
+        assert_eq!(
+            ui.settings_search.value, "render",
+            "the clipboard went into the box"
+        );
+        fresh(&mut ui, &s, "paste", &mut stale);
+        ui.shortcut(&atlas, EditShortcut::Cut, &mut clipboard);
+        fresh(&mut ui, &s, "cut", &mut stale);
+
+        // A modifier-only key bind takes the waiting selection away.
+        ui.show(Page::KeyBinds);
+        ui.selected_key = Some(MOD_KEY);
+        ui.selected_mod_key = Some((0, 0));
+        ui.pending_mod_key = Some(K::ShiftLeft);
+        fresh(&mut ui, &s, "waiting for a mod key", &mut stale);
+        ui.key_released(&mut s, K::ShiftLeft);
+        fresh(&mut ui, &s, "modifier-only bind", &mut stale);
+
+        // The Agent page's status and recording, as the game's poll sets them.
+        ui.show(Page::Agent);
+        fresh(&mut ui, &s, "agent page", &mut stale);
+        ui.set_agent_status(vec!["Running.".into()], true);
+        fresh(&mut ui, &s, "agent status", &mut stale);
+
+        // The language page's search click moves the list back to the top.
+        ui.show(Page::Language);
+        ui.wheel(&mut s, ui.size, (200.0, 200.0), [1708, 960], -3.0);
+        fresh(&mut ui, &s, "language wheel", &mut stale);
+        let (x, y) = (ui.language_search.x, ui.language_search.y);
+        ui.click(
+            &mut s,
+            &atlas,
+            x + 5.0,
+            y + 5.0,
+            ui.size,
+            [1708, 960],
+            false,
+            false,
+        );
+        fresh(&mut ui, &s, "language search click", &mut stale);
+
+        assert!(
+            stale.is_empty(),
+            "the cached layout is stale after: {stale:?}"
+        );
     }
 
     #[test]

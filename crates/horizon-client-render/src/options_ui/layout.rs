@@ -6,7 +6,7 @@ use super::*;
 /// A page's built layout: its widgets, the list's top and bottom and its
 /// content height. `OptionsUi` makes it once per size and revision; every
 /// reader of the page's rectangles reads this.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OptionsLayout {
     widgets: Vec<Widget>,
     top: f32,
@@ -31,6 +31,15 @@ impl OptionsUi {
     pub fn layout_changed(&mut self) {
         self.relayout();
     }
+    /// The Agent page's status lines and recording flag, from the game's
+    /// poll: the page lays out again only when one of them changed.
+    pub fn set_agent_status(&mut self, status: Vec<String>, recording: bool) {
+        if self.agent_status != status || self.agent_recording != recording {
+            self.agent_status = status;
+            self.agent_recording = recording;
+            self.relayout();
+        }
+    }
     /// The page's layout at `(w, h)`: made on the first read after an open, a
     /// resize or a revision change, then read as is.
     pub(super) fn built_layout(
@@ -39,13 +48,17 @@ impl OptionsUi {
         w: f32,
         h: f32,
     ) -> std::sync::Arc<OptionsLayout> {
-        let key = (w, h, self.rev);
+        // The scroll is an input too: a drag, the wheel or a focus move can
+        // change it without a revision bump, and the rows move with it.
+        let key = (w, h, self.rev, self.scroll.to_bits());
         if let Some((cached, layout)) = &self.layout_cache
             && *cached == key
         {
             return std::sync::Arc::clone(layout);
         }
         let (widgets, top, bottom, content) = self.layout(s, w, h);
+        // `layout` clamps the scroll; key the settled value.
+        let key = (w, h, self.rev, self.scroll.to_bits());
         let layout = std::sync::Arc::new(OptionsLayout {
             widgets,
             top,
@@ -58,6 +71,18 @@ impl OptionsUi {
             self.layouts_built += 1;
         }
         layout
+    }
+    /// The layout built straight from the current state, for the caching
+    /// test: the cached one must equal this after every operation.
+    #[cfg(test)]
+    pub(super) fn layout_now(&mut self, s: &Settings, w: f32, h: f32) -> OptionsLayout {
+        let (widgets, top, bottom, content) = self.layout(s, w, h);
+        OptionsLayout {
+            widgets,
+            top,
+            bottom,
+            content,
+        }
     }
     /// Build every widget of the current page.
     pub(super) fn layout(&mut self, s: &Settings, w: f32, h: f32) -> (Vec<Widget>, f32, f32, f32) {

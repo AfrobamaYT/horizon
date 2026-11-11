@@ -161,7 +161,10 @@ def main():
             bad.append((case, 'hits', [a['hits'][i] for i in differing],
                         [b['hits'][i] for i in differing]))
     for case, key, vanilla, horizon in bad[:args.detail]:
-        print(f'{case["kind"]} rows {case["rows"]} book {case["book"]} {case["window"]} scale {case["scale"]}: {key}')
+        labels = f'{case["kind"]}'
+        if 'rows' in case:
+            labels += f' rows {case["rows"]} book {case["book"]}'
+        print(f'{labels} {case["window"]} scale {case["scale"]}: {key}')
         print('  vanilla', vanilla)
         print('  horizon', horizon)
     print(f'{len(chosen) - len(bad) - errors}/{len(chosen)} cases match ({errors} errors)')

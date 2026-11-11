@@ -120,11 +120,26 @@ impl ContainerLayout {
 /// rebuilt per call.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct PauseLayout {
+    /// The `PauseScreen.init` inputs this layout was made from: a server's
+    /// links or a custom-additions dialog appearing, or a page registering a
+    /// row, is a new layout even at the same size.
+    pub(super) inputs: PauseInputs,
     /// `(x, y, width, label key, action id, active)`, in `PauseScreen`'s order.
     pub(super) buttons: Vec<(f32, f32, f32, &'static str, u8, bool)>,
     /// `(x, y, sprite)`: the report bugs, feedback, friends and player reporting
     /// icons, in that order.
     pub(super) icons: [(f32, f32, &'static str); 4],
+}
+
+/// What `PauseScreen.init` reads and the paused screen can see change while it
+/// is open: the connection (the disconnect label), a server's links, the
+/// custom-additions dialog and the extra page rows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct PauseInputs {
+    pub(super) remote: bool,
+    pub(super) links: bool,
+    pub(super) additions: bool,
+    pub(super) rows: Vec<(&'static str, u8)>,
 }
 
 /// A screen's own widgets, as rectangles.
@@ -459,15 +474,28 @@ impl Game<'_> {
                 )
             })
         });
-        // The pause menu has no input that moves under a kept build: it is
-        // laid out only when the screen opens or the window resizes it.
-        let pause = (shown
-            && self.screen == Screen::Paused
-            && self
-                .screen_state
-                .build
-                .needs_build(self.screen, shown, identity, gui))
-        .then(|| self.pause_layout(gui.size[0] as f32, gui.size[1] as f32));
+        // The pause menu's inputs can change while it is open: a server's
+        // links or a custom-additions dialog arriving. Compare them here and
+        // make the layout only when they moved.
+        let pause = (shown && self.screen == Screen::Paused)
+            .then(|| self.pause_inputs())
+            .and_then(|inputs| {
+                let unchanged = self
+                    .screen_state
+                    .build
+                    .current
+                    .as_ref()
+                    .is_some_and(|build| {
+                        build.screen == self.screen
+                            && build.identity == identity
+                            && build.scale == gui.scale as f32
+                            && build
+                                .pause(gui.size[0] as f32, gui.size[1] as f32)
+                                .is_some_and(|old| old.inputs == inputs)
+                    });
+                (!unchanged)
+                    .then(|| self.pause_layout_for(&inputs, gui.size[0] as f32, gui.size[1] as f32))
+            });
         let layout = container
             .map(ScreenLayout::Container)
             .or_else(|| pause.map(ScreenLayout::Pause));
@@ -501,7 +529,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BuildLayout, ContainerLayout, EffectsLayout, PauseLayout, ScreenBuildState, ScreenLayout,
+        BuildLayout, ContainerLayout, EffectsLayout, PauseInputs, PauseLayout, ScreenBuildState,
+        ScreenLayout,
     };
     use crate::game::Screen;
     use horizon_client::hud::{GuiScale, HudBatch};
@@ -745,6 +774,7 @@ mod tests {
         let mut state = ScreenBuildState::default();
         let small = gui([854, 480], 0);
         let layout = PauseLayout {
+            inputs: PauseInputs::default(),
             buttons: vec![
                 (113.0, 74.0, 204.0, "menu.returnToGame", 0, true),
                 (113.0, 98.0, 98.0, "gui.advancements", 4, true),
@@ -777,6 +807,7 @@ mod tests {
         // Another size is another build, and reads the new one.
         let large = gui([1920, 1080], 0);
         let moved = PauseLayout {
+            inputs: PauseInputs::default(),
             buttons: vec![(500.0, 200.0, 204.0, "menu.returnToGame", 0, true)],
             icons: layout.icons,
         };
@@ -804,9 +835,44 @@ mod tests {
                 .pause(small.size[0] as f32, small.size[1] as f32),
             None
         );
+        // A server's links appearing while the menu is open is another
+        // layout at the same size, even with the same buttons.
+        let linked = PauseLayout {
+            inputs: PauseInputs {
+                links: true,
+                ..Default::default()
+            },
+            buttons: moved.buttons.clone(),
+            icons: moved.icons,
+        };
+        state.sync(
+            Screen::Paused,
+            true,
+            None,
+            large,
+            Some(ScreenLayout::Pause(linked.clone())),
+        );
+        assert_eq!(state.builds, 3);
+        assert_eq!(
+            state
+                .current
+                .as_ref()
+                .unwrap()
+                .pause(large.size[0] as f32, large.size[1] as f32),
+            Some(&linked)
+        );
+        // The same inputs keep it.
+        state.sync(
+            Screen::Paused,
+            true,
+            None,
+            large,
+            Some(ScreenLayout::Pause(linked)),
+        );
+        assert_eq!(state.builds, 3);
         // A different screen is its own build.
         state.sync(Screen::Options, true, None, large, None);
-        assert_eq!(state.builds, 3);
+        assert_eq!(state.builds, 4);
         assert!(matches!(
             state.current.as_ref().unwrap().layout,
             BuildLayout::Empty

@@ -1,5 +1,5 @@
 //! The pause menu (PauseScreen) and death screen (DeathScreen) layouts.
-use super::screen_build::PauseLayout;
+use super::screen_build::{PauseInputs, PauseLayout};
 use super::{Game, Screen};
 use horizon_client::{
     Result,
@@ -308,16 +308,36 @@ impl Game<'_> {
     pub(super) fn external_server(&self) -> bool {
         self.remote.is_some() && self.integrated.is_none()
     }
+    /// What `PauseScreen.init` reads and this screen can see change while it
+    /// is open: the connection, a server's links, the custom-additions dialog
+    /// and the rows the registered pages add.
+    pub(super) fn pause_inputs(&self) -> PauseInputs {
+        PauseInputs {
+            remote: self.external_server(),
+            links: !self.server_links().is_empty(),
+            additions: self.pause_screen_additions().is_some(),
+            rows: self.pause_rows(),
+        }
+    }
     /// The pause menu's widgets for a `ScreenBuild` at `(w, h)`: the buttons
-    /// and the icon row. The build makes it once per open and resize; the
-    /// drawing, the click hit test and the key focus list read it.
+    /// and the icon row. The build makes it once per open, resize and input
+    /// change; the drawing, the click hit test and the key focus list read it.
     pub(super) fn pause_layout(&self, w: f32, h: f32) -> PauseLayout {
-        let links = !self.server_links().is_empty();
-        let additions = self.pause_screen_additions().is_some();
-        let rows = self.pause_rows();
+        self.pause_layout_for(&self.pause_inputs(), w, h)
+    }
+    /// `pause_layout` from inputs already read, as the build compares them.
+    pub(super) fn pause_layout_for(&self, inputs: &PauseInputs, w: f32, h: f32) -> PauseLayout {
         PauseLayout {
-            buttons: pause_buttons(w, h, self.external_server(), links, additions, &rows),
-            icons: pause_icons(w, h, links, additions, &rows),
+            inputs: inputs.clone(),
+            buttons: pause_buttons(
+                w,
+                h,
+                inputs.remote,
+                inputs.links,
+                inputs.additions,
+                &inputs.rows,
+            ),
+            icons: pause_icons(w, h, inputs.links, inputs.additions, &inputs.rows),
         }
     }
     pub(super) fn draw_pause_menu(&mut self, batch: &mut HudBatch) {
