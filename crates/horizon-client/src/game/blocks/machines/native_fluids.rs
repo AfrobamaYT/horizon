@@ -23,16 +23,16 @@ enum FluidAt {
 #[derive(Clone)]
 struct CauldronFluids {
     contents: Arc<CauldronContents>,
-    held: Option<(usize, u8)>,
+    held: Option<(usize, u32)>,
 }
 impl CauldronFluids {
     /// What it holds, and at which level.
-    fn held(&self) -> Option<(&CauldronContent, u8)> {
+    fn held(&self) -> Option<(&CauldronContent, u32)> {
         let (index, level) = self.held?;
         Some((self.contents.get(index), level))
     }
     /// The same cauldron holding `held`.
-    fn with(&self, held: Option<(usize, u8)>) -> Self {
+    fn with(&self, held: Option<(usize, u32)>) -> Self {
         Self {
             contents: self.contents.clone(),
             held,
@@ -466,9 +466,9 @@ mod tests {
     /// cauldron holds as (water level, lava) for the assertions.
     fn vanilla_cauldrons() -> (
         CauldronFluids,
-        impl Fn(u8) -> CauldronFluids,
+        impl Fn(u32) -> CauldronFluids,
         CauldronFluids,
-        impl Fn(&CauldronFluids) -> (u8, bool),
+        impl Fn(&CauldronFluids) -> (u32, bool),
     ) {
         let contents = Arc::new(CauldronContents::vanilla());
         let water = contents.of_block("minecraft:water_cauldron").unwrap().0;
@@ -552,7 +552,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level("minecraft:overworld").unwrap();
-            let water = |game: &Game<'_>, n: u8| {
+            let water = |game: &Game<'_>, n: u32| {
                 let state = horizon_world::chunk::BlockState {
                     name: "minecraft:water_cauldron".to_owned(),
                     properties: [("level".to_owned(), n.to_string())].into_iter().collect(),
@@ -667,7 +667,7 @@ mod tests {
                     .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
                 let level = game.level("minecraft:overworld").unwrap();
                 let flags = BlockUpdateFlags::NEIGHBORS;
-                let block = |game: &Game<'_>, name: &str, level: Option<u8>| {
+                let block = |game: &Game<'_>, name: &str, level: Option<u32>| {
                     let state = horizon_world::chunk::BlockState {
                         name: name.to_owned(),
                         properties: level

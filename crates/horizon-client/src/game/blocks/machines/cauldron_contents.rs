@@ -19,7 +19,7 @@ pub(in crate::game) struct CauldronContent {
     /// Millibuckets when full.
     pub total: u32,
     /// The block's integer level property and its greatest value, the number of levels.
-    pub level: Option<(String, u8)>,
+    pub level: Option<(String, u32)>,
 }
 
 impl CauldronContent {
@@ -43,34 +43,45 @@ impl CauldronContent {
                         "{block} has no property {property} to hold {fluid}'s level"
                     ));
                 }
-                let greatest = values
+                let mut integers = values
                     .iter()
-                    .map(|value| value.parse::<i64>().ok())
-                    .max()
-                    .flatten()
-                    .ok_or_else(|| {
-                        format!(
-                            "{block}'s property {property} isn't an integer property, so it \
-                             can't hold {fluid}'s level"
-                        )
+                    .map(|value| {
+                        value
+                            .parse::<u32>()
+                            .ok()
+                            .filter(|n| n.to_string() == *value)
+                            .ok_or(())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| {
+                        format!("{block}'s property {property} isn't an integer property")
                     })?;
-                let levels = u8::try_from(greatest)
-                    .ok()
-                    .filter(|levels| *levels >= 1)
-                    .ok_or_else(|| {
-                        format!(
-                            "{block}'s property {property} goes up to {greatest}; a cauldron \
-                             holding {fluid} has 1 to 255 levels"
-                        )
-                    })?;
+                integers.sort_unstable();
+                let levels = *integers.last().unwrap();
+                let first = integers[0];
+                if levels == 0
+                    || first > 1
+                    || integers
+                        .windows(2)
+                        .any(|pair| pair[0].checked_add(1) != Some(pair[1]))
+                {
+                    return Err(format!(
+                        "{block}'s property {property} must contain every integer level from 1"
+                    ));
+                }
                 Some((property.to_owned(), levels))
             }
         };
         let levels = level.as_ref().map_or(1, |&(_, levels)| levels);
+        if total > i32::MAX as u32 {
+            return Err(format!(
+                "{block} holds more {fluid} than the fluid capability can represent"
+            ));
+        }
         if total == 0 {
             return Err(format!("{block} would hold 0 mB of {fluid}"));
         }
-        if !total.is_multiple_of(u32::from(levels)) {
+        if !total.is_multiple_of(levels) {
             return Err(format!(
                 "{block} would hold {total} mB of {fluid}, which doesn't divide evenly by its \
                  {levels} levels"
@@ -84,19 +95,19 @@ impl CauldronContent {
         })
     }
     /// How many levels fill it: one for a cauldron only ever full.
-    pub fn levels(&self) -> u8 {
+    pub fn levels(&self) -> u32 {
         self.level.as_ref().map_or(1, |&(_, levels)| levels)
     }
     /// What `level` levels hold: `level * total / levels`, so each level holds its share of
     /// `total`, and water keeps `LayeredCauldronBlock`'s thirds of a bucket (333, 666, 1000),
     /// which has no finer unit than a bottle.
-    pub fn amount(&self, level: u8) -> i32 {
+    pub fn amount(&self, level: u32) -> i32 {
         let held = u64::from(level) * u64::from(self.total) / u64::from(self.levels());
         i32::try_from(held).unwrap_or(i32::MAX)
     }
     /// The level a fill of `given` millibuckets raises `level` to: a level rises only while
     /// its whole amount fits what is left of the give, so no sum ever grows past `total`.
-    pub fn fill_level(&self, level: u8, given: i32) -> u8 {
+    pub fn fill_level(&self, level: u32, given: i32) -> u32 {
         let mut new = level;
         while new < self.levels() && self.amount(new + 1) - self.amount(level) <= given {
             new += 1;
@@ -106,7 +117,7 @@ impl CauldronContent {
     /// What a drain of at most `amount` takes out of level `level`, in whole levels — never
     /// more than was asked, as `IFluidHandler.drain`'s `maxDrain`: less than the topmost
     /// whole level takes nothing. Answers what it took and the level it left.
-    pub fn drain_take(&self, level: u8, amount: i32) -> (i32, u8) {
+    pub fn drain_take(&self, level: u32, amount: i32) -> (i32, u32) {
         let mut taken = 0;
         let mut left = level;
         while left > 0 {
@@ -216,7 +227,7 @@ mod tests {
             .clone()
     }
 
-    fn syrup(total: u32, levels: Option<u8>) -> CauldronContent {
+    fn syrup(total: u32, levels: Option<u32>) -> CauldronContent {
         CauldronContent {
             block: "test:syrup_cauldron".to_owned(),
             fluid: "test:syrup".to_owned(),
@@ -331,6 +342,32 @@ mod tests {
     }
 
     #[test]
+    fn registration_refuses_sparse_and_mixed_levels_but_accepts_large_ranges() {
+        for (values, accepted) in [
+            (vec!["1".to_owned(), "3".to_owned()], false),
+            (vec!["1".to_owned(), "bad".to_owned()], false),
+            ((1..=300).map(|n| n.to_string()).collect(), true),
+        ] {
+            let states: Vec<_> = values.iter().map(|value| serde_json::json!(
+                ["p", false, false, "", {"id":"test:cauldron", "properties":{"level":value}}]
+            )).collect();
+            let facts = serde_json::json!({"defaults":{"test:cauldron":0},"states":states});
+            let registry = BlockRegistry::from_facts_json(facts.to_string().as_bytes()).unwrap();
+            assert_eq!(
+                CauldronContent::resolve(
+                    &registry,
+                    "test:cauldron",
+                    "test:syrup",
+                    3000,
+                    Some("level")
+                )
+                .is_ok(),
+                accepted
+            );
+        }
+    }
+
+    #[test]
     fn a_registration_resolves_its_level_property_and_total_against_the_registry() {
         let facts = r#"{"defaults":{"minecraft:cauldron":0,"minecraft:powder_snow_cauldron":1,"minecraft:stone":4,"minecraft:hay_block":5},"states":[
             ["c",false,false,"","minecraft:cauldron"],
@@ -363,6 +400,7 @@ mod tests {
                 level: None,
             })
         );
+        assert!(resolve("minecraft:powder_snow_cauldron", u32::MAX, Some("level")).is_err());
         let missing = resolve("minecraft:stone", 1000, Some("level")).unwrap_err();
         assert!(
             missing.contains("minecraft:stone") && missing.contains("level"),

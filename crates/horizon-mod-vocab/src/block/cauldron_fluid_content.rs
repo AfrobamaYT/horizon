@@ -8,6 +8,8 @@ pub trait CauldronFluidContents {
     /// integer level property, whose greatest value is the number of levels the cauldron
     /// fills by; none means the cauldron is only ever full, as a lava cauldron. Each level
     /// holds `total` ÷ the number of levels, so `total` must divide evenly by it.
+    /// Totals must be in `1..=i32::MAX`, the fluid capability amount range. The property
+    /// must contain every canonical integer from 1 through its maximum (and may include 0).
     fn register(&mut self, block: BlockKey, fluid: FluidKey, total: u32, level: Option<&str>);
 }
 
