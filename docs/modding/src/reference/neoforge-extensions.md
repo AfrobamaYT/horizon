@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 6 | 21 | 33 | 0 |
-| `IBlockStateExtension` | 57 | 5 | 20 | 32 | 0 |
+| `IBlockExtension` | 60 | 7 | 20 | 33 | 0 |
+| `IBlockStateExtension` | 57 | 6 | 19 | 32 | 0 |
 | `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -58,7 +58,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
-| `getFriction(state, level, pos, entity)` | Partial | `BlockProperties.friction` → `StateFacts.friction` | Static; the entity is not consulted. |
+| `getFriction(state, level, pos, entity)` | Covered | `BlockPart::friction` (`hooks/friction.rs`) | Asked where an entity on the block reads its friction, with the entity's id and type and the position, from the block's own value; an answer that is not finite or is outside `0..=2` is dropped. Players, mobs, armor stands, items, experience orbs, boats and leads. The part answers from its inputs, without the level. |
 | `hasDynamicLightEmission(state)` | Missing | — | `StateFacts.emission` is a fixed level, not a dynamic emission. |
 | `getLightEmission(state, level, pos)` | Partial | `BlockProperties.light` → `StateFacts.emission` | Static; no level or position. |
 | `ignitedByLava(state, level, pos, direction)` | Partial | template state flag (`StateFacts`, `state_flags::IGNITED_BY_LAVA`) | Inherited from the template's prepared data; no content field or Part changes it. |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 5 covered, 20 partial, 32 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 6 covered, 19 partial, 32 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 

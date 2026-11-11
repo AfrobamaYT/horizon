@@ -318,6 +318,39 @@ pub mod tests {
         mark_game_thread();
     }
 
+    /// Install parts that answer a block's friction: glass is 0.98 to a player only, white wool
+    /// 0.98 to every entity, and red and blue wool answer NaN and 3.0, which are out of range.
+    pub fn friction_game_thread() {
+        struct Answer(f32, Option<&'static str>);
+        #[mod_api::horizon_part]
+        impl BlockPart for Answer {
+            fn friction(&self, _: &dyn LoopContext, event: &mut FrictionEvent<'_>) {
+                if self.1.is_none_or(|kind| kind == event.kind) {
+                    event.friction = self.0;
+                }
+            }
+        }
+        struct FrictionMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for FrictionMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                for (block, answer) in [
+                    ("minecraft:glass", Answer(0.98, Some("minecraft:player"))),
+                    ("minecraft:white_wool", Answer(0.98, None)),
+                    ("minecraft:red_wool", Answer(f32::NAN, None)),
+                    ("minecraft:blue_wool", Answer(3.0, None)),
+                ] {
+                    let key = r.block_key(block);
+                    r.block_part(key, answer);
+                }
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new("friction_test", Box::new(FrictionMod))].into();
+        crate::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+    }
+
     /// Install soil parts: glass sustains any plant, and grass sustains none.
     pub fn sustain_plant_game_thread() {
         struct Soil(bool);

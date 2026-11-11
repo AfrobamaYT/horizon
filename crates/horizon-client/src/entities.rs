@@ -9,6 +9,7 @@ use crate::{
     blocks::{BlockFacts, Fluid},
     collisions::SceneCollisions,
     items::ItemStack,
+    motion::block_friction,
     world::World,
 };
 use horizon_core::{
@@ -419,8 +420,8 @@ impl ItemEntity {
         border: Option<&BorderGeometry>,
         blocks: Option<&BoundMovementProperties>,
     ) -> bool {
-        let (water, lava) =
-            self.update_fluids(world, fluids, crate::test_resources::server_loop_context());
+        let context = crate::test_resources::server_loop_context();
+        let (water, lava) = self.update_fluids(world, fluids, context);
         self.water_entry(water > 0.0, self.ticks == 0, &mut |_| {});
         self.lava_fall(lava > 0.0);
         let step = self.tick_move(
@@ -432,7 +433,7 @@ impl ItemEntity {
             entity_boxes,
             border,
             blocks,
-            crate::test_resources::server_loop_context(),
+            context,
         );
         crate::motion::bubble_column_push(
             world,
@@ -442,9 +443,8 @@ impl ItemEntity {
             self.bounds(),
             &mut self.velocity,
         );
-        let alive = self.tick_settle(world, facts, no_physics, step);
-        let (water, _) =
-            self.update_fluids(world, fluids, crate::test_resources::server_loop_context());
+        let alive = self.tick_settle(world, facts, no_physics, step, context);
+        let (water, _) = self.update_fluids(world, fluids, context);
         self.water_entry(water > 0.0, false, &mut |_| {});
         alive
     }
@@ -955,6 +955,7 @@ impl ItemEntity {
         facts: &BlockFacts,
         no_physics: bool,
         step: ItemStep,
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> bool {
         if step.movement.is_some() {
             // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn, with the
@@ -966,12 +967,9 @@ impl ItemEntity {
             // the block's friction as a float, then widened for the scale.
             let mut friction = 0.98_f32;
             if self.on_ground {
-                let below = world.block(
-                    self.position.x.floor() as i32,
-                    (self.position.y - 0.999_999).floor() as i32,
-                    self.position.z.floor() as i32,
-                );
-                friction *= facts.get(below).friction;
+                let below =
+                    BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.999_999, 0.0)));
+                friction *= block_friction(context, self.id, "minecraft:item", world, facts, below);
             }
             let friction = f64::from(friction);
             let air = f64::from(0.98_f32);
@@ -1793,12 +1791,10 @@ impl ExperienceOrb {
         // friction multiplied in as a float, widened once for the scale.
         let mut friction = 0.98_f32;
         if self.on_ground {
-            let below = world.block(
-                self.position.x.floor() as i32,
-                (self.position.y - 0.999_999).floor() as i32,
-                self.position.z.floor() as i32,
-            );
-            friction *= facts.get(below).friction;
+            let below =
+                BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.999_999, 0.0)));
+            let kind = "minecraft:experience_orb";
+            friction *= block_friction(context, self.id, kind, world, facts, below);
         }
         let friction = f64::from(friction);
         // The drag scales every axis by the same friction, the ground's
@@ -2388,7 +2384,8 @@ impl ArmorStand {
         in_water: bool,
         border: Option<&BorderGeometry>,
     ) {
-        if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border, &[]) {
+        let context = crate::test_resources::server_loop_context();
+        if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border, &[], context) {
             let medium = if in_water {
                 StandMedium::Water
             } else {
@@ -2730,6 +2727,7 @@ impl ArmorStand {
         in_water: bool,
         border: Option<&BorderGeometry>,
         entities: &[Aabb],
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> Option<StandStep> {
         use crate::entity_rules::EntityRules;
         self.previous = self.position;
@@ -2757,12 +2755,10 @@ impl ArmorStand {
         // `travelInAir` reads ground friction before the move.
         let falling = wanted.y <= 0.0;
         let friction = if !in_water && self.on_ground {
-            let below = scene.world.block(
-                self.position.x.floor() as i32,
-                (self.position.y - 0.500_001).floor() as i32,
-                self.position.z.floor() as i32,
-            );
-            facts.get(below).friction
+            let below =
+                BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.500_001, 0.0)));
+            let kind = "minecraft:armor_stand";
+            block_friction(context, self.id, kind, scene.world, facts, below)
         } else {
             1.0
         };
@@ -4285,6 +4281,7 @@ mod slime_bounce_tests {
                 prior_fall: item.fall_distance,
                 fall_move: None,
             },
+            crate::test_resources::server_loop_context(),
         );
         assert_eq!(item.velocity.x.to_bits(), 0x3fb9_1687_3333_3334);
         assert_eq!(item.velocity.y.to_bits(), 0x3fc9_1687_3333_3334);
@@ -4940,6 +4937,7 @@ mod armor_stand_motion_tests {
         )
         .unwrap();
         let shulker = Aabb::new(Vec3::new(20.0, 4.0, 20.0), Vec3::new(21.0, 5.0, 21.0));
+        let context = crate::test_resources::server_loop_context();
         let run = |stand: &mut ArmorStand, boxes: &[Aabb], ticks: usize| {
             for _ in 0..ticks {
                 let mut scene = SceneCollisions {
@@ -4948,7 +4946,7 @@ mod armor_stand_motion_tests {
                     subject: None,
                 };
                 if let Some(step) =
-                    stand.tick_move(&mut scene, &facts, &climbing, false, None, boxes)
+                    stand.tick_move(&mut scene, &facts, &climbing, false, None, boxes, context)
                 {
                     stand.tick_settle(StandMedium::Air, step);
                 }

@@ -693,7 +693,13 @@ impl Game<'_> {
             self.res.facts(),
             self.collision,
         );
-        let alive = item.tick_settle(&self.world, self.res.facts(), no_physics, step);
+        let alive = item.tick_settle(
+            &self.world,
+            self.res.facts(),
+            no_physics,
+            step,
+            &self.loop_context,
+        );
         // ItemEntity.tick refreshes immersion and splashes on water entry.
         let (water, _) =
             item.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
