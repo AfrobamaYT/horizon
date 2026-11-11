@@ -487,7 +487,7 @@ mod tests {
             let mut node = &mut root;
             for index in 0..depth {
                 node.passengers
-                    .push(record([index as i32 + 1, 0, 0, 0], "mymod:robot"));
+                    .push(record([index + 1, 0, 0, 0], "mymod:robot"));
                 node = node.passengers.last_mut().unwrap();
             }
             let expected = if depth == 16 {

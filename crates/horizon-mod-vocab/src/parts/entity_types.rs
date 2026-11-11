@@ -73,6 +73,26 @@ pub struct GeneralEntityTypeDeclaration {
     pub required_features: Vec<String>,
 }
 
+/// A placeholder to build a declaration from: empty ids, a miscellaneous type that saves, vanilla's
+/// default player-sized box and no requirements. Registration validates what a mod sets.
+impl Default for GeneralEntityTypeDeclaration {
+    fn default() -> Self {
+        Self {
+            mod_id: String::new(),
+            id: String::new(),
+            category: GeneralEntityCategory::Misc,
+            width: 0.6,
+            height: 1.8,
+            save_policy: GeneralSavePolicy::Save,
+            summonable: true,
+            tracking_chunks: 5,
+            update_interval: 3,
+            payload_version: 1,
+            required_features: Vec::new(),
+        }
+    }
+}
+
 /// Why a mod's general entity type declaration was refused
 /// ([`Registrar::declare_general_entity`](GeneralTypesRegistrar::declare_general_entity)).
 #[derive(Clone, Debug, PartialEq, Eq)]
