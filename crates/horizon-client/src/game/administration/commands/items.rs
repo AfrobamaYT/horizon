@@ -556,9 +556,7 @@ impl Game<'_> {
         slot: &Slot,
         stack: Option<ItemStack>,
     ) -> bool {
-        self.slot_accepts(slot, stack.as_ref())
-            && self.equipment_slot_accepts(slot, &stack)
-            && self.slot_set(slot, stack)
+        self.equipment_slot_accepts(slot, &stack) && self.slot_set(slot, stack)
     }
     /// Put a stack (or nothing) in a slot; false when the slot cannot take it.
     pub(in crate::game) fn slot_set(&mut self, s: &Slot, stack: Option<ItemStack>) -> bool {

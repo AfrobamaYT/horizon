@@ -235,16 +235,7 @@ pub(crate) fn spawn(command: &mut Command, piped: bool) -> std::io::Result<std::
                 };
                 let prepared =
                     holder::Prepared::new(data.clone(), trees, program, &selection.context)?;
-                let marker = horizon_mod_package::local_control::Marker::new(
-                    data.join("run-records").join(format!(
-                        "holder-control-{}-{}",
-                        std::process::id(),
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_err(std::io::Error::other)?
-                            .as_nanos()
-                    )),
-                )?;
+                let marker = horizon_mod_package::local_control::Marker::runtime()?;
                 let mut holder_command = Command::new(executable);
                 // Private bootstrap ignores arguments; retaining the final command's arguments
                 // also permits receiver harnesses whose process entry parses test filters first.

@@ -92,22 +92,10 @@ impl Game<'_> {
 
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if self.held_out.contains(&entity.id())
-            || !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(entity.epoch())
-        {
-            return None;
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_native_entity_target(entity);
         }
-        let horizon_client::join_seq::residency::table::EntityLookup::Found { location, value } =
-            self.server_resident_entity(entity.id())
-        else {
-            return None;
-        };
-        // Players are server-wide records. Ordinary body operations retain
-        // their existing current-level domain; source membership is global.
-        (matches!(value, Target::Player | Target::Guest(_))
-            || location.owner.dimension == self.dim.key())
-        .then_some(value)
+        self.unscoped_native_entity_target(entity)
     }
     /// What a handle names on a client: the local player, or an entity the
     /// server told this client of (`ClientLevel.getEntity`, whose entities are
@@ -215,25 +203,11 @@ impl Game<'_> {
     /// All lookup members of the active server level, without spatial filtering.
     /// Parts are not lookup members. Refuses remote, stale and parked levels.
     pub(super) fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
-        if !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(level.epoch())
-            || level.dimension() != self.dim.key()
-        {
-            return None;
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_level_all_entities(level);
         }
-        let ids = self
-            .resident_entities
-            .table
-            .borrow_mut()
-            .level_entities(level.dimension());
-        ids.into_iter()
-            .map(|id| {
-                let entity = EntityRef::new(level.epoch(), id);
-                self.native_entity_target(entity).map(|_| entity)
-            })
-            .collect()
+        self.unscoped_level_all_entities(level)
     }
-
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -842,6 +816,9 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
         .fold(0, |uuid, w| (uuid << 32) | u128::from(*w as u32))
 }
 
+include!("native_entity_refs/tick_item_read.rs");
+include!("native_entity_refs/tick_item_selector.rs");
+
 #[cfg(test)]
 mod ray_tests {
     use super::*;
@@ -916,8 +893,8 @@ pub(super) mod tests {
             std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
                 .canonicalize()
                 .unwrap();
-        let target = std::env::current_dir().unwrap().join("target");
-        std::fs::create_dir_all(&target).unwrap();
+        let scratch_owner = tempfile::tempdir().unwrap();
+        let target = scratch_owner.path();
         for case in cases {
             let scratch = target.join(format!(
                 "be-types-fixture-{}-{}",

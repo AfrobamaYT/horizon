@@ -1,5 +1,9 @@
 #[path = "shared/book_screen.rs"]
 mod book_screen;
+#[path = "shared/item_fallthrough.rs"]
+mod item_fallthrough;
+#[path = "shared/loot.rs"]
+mod loot;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -2106,32 +2110,6 @@ impl Game<'_> {
             })
             .collect()
     }
-    /// Sets the stack of item entity `id` in the server level `dimension`, as
-    /// a hopper's `addItem` leaves what it couldn't take (`ItemEntity.setItem`);
-    /// an empty stack (count 0) removes the entity (`setItem(EMPTY)`, then
-    /// `discard`). Players see it on their next tracker update. False when the
-    /// level in place has no such item entity, or on a client.
-    pub(super) fn native_set_item_entity(
-        &mut self,
-        dimension: &str,
-        id: u32,
-        stack: ItemStack,
-    ) -> bool {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return false;
-        }
-        let Some(i) = self.dropped.iter().position(|e| e.id == id) else {
-            return false;
-        };
-        if stack.count == 0 {
-            self.remove_dropped(i);
-        } else {
-            self.dropped[i].stack = stack;
-        }
-        true
-    }
     /// Runs `change` on the mod block entity at `pos` (a generator charging
     /// the machine beside it) and returns what it returns; none for any
     /// other block entity, and for the one ticking now, which is out of the
@@ -2641,8 +2619,8 @@ impl Game<'_> {
         Some(result)
     }
     /// `ItemStack.onItemUseFirst` for a click on a block: the broadcast
-    /// event's `ItemBeforeBlock` phase, then the held item's Part. The first
-    /// to answer ends the click; a `Pass` goes on to the block.
+    /// event's `ItemBeforeBlock` phase, then the held item's Part. Canceling skips that Part.
+    /// Only `Pass` continues to the block.
     pub(super) fn item_use_first(
         &mut self,
         hit: &super::Hit,
@@ -2662,48 +2640,6 @@ impl Game<'_> {
         let mut answer = None;
         self.native_on_item_use_first(&snapshot, &click, &mut answer);
         answer.filter(|answer| *answer != mod_api::InteractionResult::Pass)
-    }
-    /// Air use only: a passing block or entity keeps its target, rather than
-    /// becoming a `RightClickItem` interaction. `block_aimed` is the click's
-    /// own decided block target (the one `use_item_on_block` was asked about),
-    /// not a fresh ray cast.
-    pub(super) fn right_click_item(
-        &mut self,
-        hand: Hand,
-        stack: &ItemStack,
-        block_aimed: bool,
-    ) -> Option<mod_api::InteractionResult> {
-        if !mod_api::__private::listened(mod_api::HookId::RightClickItem)
-            || self.entity_targeted()
-            || block_aimed
-        {
-            return None;
-        }
-        let pos = self
-            .target_position(super::commands::Target::Player)?
-            .map(|v| v.floor() as i32);
-        let (player, player_entity_id) = self.native_clicker();
-        let snapshot = stack.try_into_api().ok()?;
-        let click = ItemClick::from(mod_api::__private::built::ItemClick {
-            side: if self.remote.is_some() {
-                LogicalSide::Client
-            } else {
-                LogicalSide::Server
-            },
-            dimension: self.dim.level(),
-            pos,
-            hand,
-            stack: &snapshot,
-            player,
-            player_entity_id,
-        });
-        let instant = self.use_duration(stack) <= 0;
-        let (mut result, mut canceled) = (mod_api::InteractionResult::Pass, false);
-        self.native_right_click_item(&click, &mut result, &mut canceled);
-        if canceled && instant && result.consumes_action() {
-            self.with_hand(hand, |game| game.apply_after_use_components(stack));
-        }
-        canceled.then_some(result)
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
@@ -2761,85 +2697,7 @@ impl Game<'_> {
     pub(super) fn native_acting_id(&mut self) -> u128 {
         horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
     }
-    /// The mods' say on a broken block's drops (`native_loot_drops`).
-    pub(super) fn native_block_loot(
-        &mut self,
-        pos: [i32; 3],
-        state: BlockStateId,
-        player: Option<u128>,
-        tool: Option<&ItemStack>,
-        explosion: Option<f32>,
-        drops: &mut Vec<ItemStack>,
-    ) {
-        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            return;
-        }
-        let Ok(snapshot) = tool.try_into_api() else {
-            return;
-        };
-        let items = match &self.world_tables {
-            Some(tables) => &tables.items,
-            None => self.res.items(),
-        };
-        let table = items.block_loot_table(self.pack.assets.registry, state);
-        let Ok(state) = state.try_into_api() else {
-            return;
-        };
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            damage_source: None,
-            table: table.as_deref().unwrap_or_default(),
-            dimension: self.dim.id(),
-            origin: pos.map(|c| f64::from(c) + 0.5),
-            block: Some((pos, state)),
-            entity: None,
-            player,
-            tool: snapshot.as_ref(),
-            explosion,
-            used: false,
-        });
-        self.native_loot_drops(&context, drops);
-        drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-    }
-    /// The mods' say on what a use drops (`LootDrops::used`): `table`
-    /// is the loot table rolled, if any, and `player` the user, none for a
-    /// dispenser.
-    pub(super) fn native_use_drops(
-        &mut self,
-        table: &str,
-        origin: [f64; 3],
-        block: Option<([i32; 3], BlockStateId)>,
-        entity: Option<(u32, &str)>,
-        player: Option<u128>,
-        tool: Option<&ItemStack>,
-        drops: &mut Vec<ItemStack>,
-    ) {
-        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
-            return;
-        }
-        let Ok(snapshot) = tool.try_into_api() else {
-            return;
-        };
-        let Ok(block) = block
-            .map(|(pos, state)| state.try_into_api().map(|state| (pos, state)))
-            .transpose()
-        else {
-            return;
-        };
-        let context = LootDrops::from(mod_api::__private::built::LootDrops {
-            damage_source: None,
-            table,
-            dimension: self.dim.id(),
-            origin,
-            block,
-            entity,
-            player,
-            tool: snapshot.as_ref(),
-            explosion: None,
-            used: true,
-        });
-        self.native_loot_drops(&context, drops);
-        drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-    }
+
     /// Whether a native mod keeps the acting player from taking `stack`.
     pub(super) fn native_pickup_refused(&mut self, stack: &ItemStack) -> bool {
         let player = self.native_acting_id();
@@ -3280,6 +3138,7 @@ impl Game<'_> {
         };
         // An empty id marks its place while the mod has it.
         let mut taken = std::mem::take(&mut **m);
+        let placeholder_identity = m.revision().identity();
         let state = self.world.block(pos.0, pos.1, pos.2).0;
         let slots = self
             .world
@@ -3296,15 +3155,26 @@ impl Game<'_> {
             let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
             taken.nbt.insert("Items".into(), items);
         }
+        let parent = (
+            self.block_entity_tick_key
+                .replace(super::block_entity_tick_items::Key {
+                    pos,
+                    placeholder_identity,
+                    failure_generation: self.wasm_dispatch_failures.get(),
+                    transaction_depth: self.transactions.len(),
+                    unbalanced: false,
+                }),
+            self.block_entity_tick_items.take(),
+        );
         self.api_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
-        self.put_back_mod_block_entity(pos, taken, &items);
+        self.finish_tick_item_writeback(pos, taken, &items, parent);
     }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
     pub(super) fn put_back_mod_block_entity(
         &mut self,
         pos: Pos,
-        mut taken: EngineBlockEntity,
+        taken: EngineBlockEntity,
         items: &[Option<ItemStack>],
     ) {
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos)
@@ -3318,17 +3188,8 @@ impl Game<'_> {
             if moved {
                 self.container_changed(pos);
             }
-        } else if taken.items.iter().any(Option::is_some) {
-            // The mod removed or replaced its own block during the call. Vanilla
-            // ticks it in the world and drops a container's contents on removal.
-            let lost = std::mem::take(&mut taken.items);
-            let at = BlockPos {
-                x: pos.0,
-                y: pos.1,
-                z: pos.2,
-            };
-            self.with_level(|_, level, _| level.drop_lost_contents(at, lost));
-            self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
+        } else {
+            self.drop_unreturned_mod_contents(pos, taken);
         }
     }
     /// Menu button `id` on the mod container at `pos` (`clickMenuButton`),
@@ -3537,25 +3398,6 @@ impl Game<'_> {
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.settings = settings;
         }
-    }
-    /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that
-    /// `key` is about to act with `hand`. `None` when the action goes on; when a mod
-    /// cancelled it, `Some` of whether the hand swings.
-    pub(super) fn native_interaction(
-        &mut self,
-        key: InteractionKey,
-        hand: Hand,
-        attempt: InteractionAttempt,
-    ) -> Option<bool> {
-        let (mut swing_hand, mut canceled) = (true, false);
-        self.native_interaction_key_mapping_triggered(
-            key,
-            hand,
-            attempt,
-            &mut swing_hand,
-            &mut canceled,
-        );
-        canceled.then_some(swing_hand)
     }
     /// A client mod's command (the `command` hook); a server never asks.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {
