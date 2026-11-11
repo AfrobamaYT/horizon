@@ -134,7 +134,13 @@ impl Game<'_> {
                 [p.x, p.y, p.z]
             }),
             // Stage 3's insertion joins live rows; a selector cannot find one yet.
-            Target::General(_) => None,
+            Target::General(id) => self
+                .resident_entities
+                .general
+                .rows
+                .iter()
+                .find(|row| row.id == id)
+                .map(|row| [row.position.x, row.position.y, row.position.z]),
         }
     }
     pub(in crate::game) fn target_type(&self, t: Target) -> String {
@@ -221,6 +227,7 @@ pub(super) fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Spawner(id)
     | Target::Cloud(id)
     | Target::Hook(id)
+    | Target::General(id)
     | Target::Knot(id)) = t
     else {
         return None;

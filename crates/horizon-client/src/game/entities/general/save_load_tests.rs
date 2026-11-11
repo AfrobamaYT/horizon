@@ -99,6 +99,10 @@ fn general_tree_loads_joins_and_saves_one_record() {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
         assert_eq!(rows[1].mount, Some(rows[0].id));
+        assert_eq!(
+            game.target_position(crate::game::commands::Target::General(rows[0].id)),
+            Some([0.5, 64.0, 0.5])
+        );
         assert_eq!(rows[0].payload_bytes, b"payload");
         assert_eq!(rows[0].payload_version, 3);
         assert!(rows[0].join.is_joined() && rows[1].join.is_joined());
