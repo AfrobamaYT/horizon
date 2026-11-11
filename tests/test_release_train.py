@@ -309,29 +309,58 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
 
     @mock.patch.object(train, "REPO", "arismoko/horizon")
-    def test_fork_base_uses_its_green_main_pushes_without_disabled_workflows(self):
-        records = [
-            ("pr-head", "main", "pull_request", "completed", "success"),
-            ("topic-head", "topic", "push", "completed", "success"),
-            ("broken-main", "main", "push", "completed", "failure"),
-            ("good-main", "main", "push", "completed", "success"),
-            ("older-main", "main", "push", "completed", "success"),
-        ]
-        def runs(*arguments):
-            workflow = arguments[arguments.index("--workflow") + 1]
-            self.assertEqual(workflow, "dyna-checks", "the fork has no checks/parity-main runs")
-            table = records
-            for option, column in [("--branch", 1), ("--event", 2), ("--status", 4)]:
-                if option in arguments:
-                    wanted = arguments[arguments.index(option) + 1]
-                    table = [entry for entry in table if entry[column] == wanted]
-            return [{"headSha": sha, "status": status, "conclusion": conclusion}
-                    for sha, _, _, status, conclusion in table]
-        with mock.patch.object(train, "gh_json", side_effect=runs):
-            self.assertEqual(train.green_main_head(parity=True), "good-main")
-            self.assertEqual(train.green_main_head(), "good-main")
-            records[:] = [entry for entry in records if entry[0] not in ("good-main", "older-main")]
-            self.assertIsNone(train.green_main_head(parity=True), "no unchecked fallback to main")
+    def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
+        def record(sha, ident, event="push", branch="main"):
+            return dict(head_sha=sha, id=ident, event=event, head_branch=branch,
+                        status="completed", conclusion="failure")
+        def job(name, status="completed", conclusion="success"):
+            return dict(name=name, status=status, conclusion=conclusion)
+        gates = [job(name) for name in ("lint", "verify", "launcher", "pool-watch")]
+        records = [record("pr", 1, "pull_request"), record("topic", 2, branch="topic"),
+                   record("new", 3), record("good", 4), record("old", 5)]
+        jobs = {3: gates + [job("client-data", conclusion="failure")],
+                4: gates, 30: [job("fixture")], 40: [job("fixture")]}
+        fixture_sha = {"new": "different", "good": "good"}
+        def api(*arguments):
+            self.assertEqual(arguments[:4], ("api", "--paginate", "--slurp", arguments[3]))
+            path = arguments[3]
+            if "dyna-ci.yml/runs?" in path:
+                self.assertIn("branch=main&event=push", path)
+                return [{"workflow_runs": records[:3]}, {"workflow_runs": records[3:]}]
+            if "wasm-mods.yml/runs?" in path:
+                sha = path.split("head_sha=")[1].split("&")[0]
+                return [{"workflow_runs": [record(fixture_sha[sha], 30 if sha == "new" else 40)]}]
+            ident = int(path.split("/runs/")[1].split("/")[0])
+            self.assertIn("filter=latest", path)
+            return [{"jobs": jobs[ident][:2]}, {"jobs": jobs[ident][2:]}]
+        with mock.patch.object(train, "REPO", "arismoko/horizon"), \
+                mock.patch.object(train, "gh_json", side_effect=api):
+            self.assertEqual(train.green_main_head(parity=True), "good")
+            fixture_sha["new"] = "new"
+            self.assertEqual(train.green_main_head(), "new", "non-gate failure must not reject a build")
+            for status, conclusion in [("queued", None), ("in_progress", "success"),
+                                       ("completed", "skipped"), ("completed", "cancelled"),
+                                       ("completed", "failure"), ("completed", None),
+                                       ("completed", "unknown")]:
+                with self.subTest(status=status, conclusion=conclusion):
+                    jobs[3] = gates[:-1] + [job("pool-watch", status, conclusion)]
+                    self.assertEqual(train.green_main_head(), "good")
+                    jobs[3] = gates
+                    jobs[30] = [job("fixture", status, conclusion)]
+                    self.assertEqual(train.green_main_head(), "good")
+                    jobs[30] = [job("fixture")]
+            jobs[3] = gates[:-1]
+            self.assertEqual(train.green_main_head(), "good", "missing gate is not success")
+            records.insert(3, record("new", 99))
+            jobs[99] = gates
+            self.assertEqual(train.green_main_head(), "good", "an older run cannot override the latest run")
+            jobs[3] = gates
+            fixture_sha["new"] = "different"
+            fixture_sha["good"] = "different"
+            records[:] = records[:5]
+            self.assertIsNone(train.green_main_head(), "gates on different SHAs cannot be combined")
+            records[:] = records[:2]
+            self.assertIsNone(train.green_main_head(), "PR checks cannot supply a release base")
 
     def test_a_release_is_published_only_after_its_smoke_test_and_with_no_blocker(self):
         drew = {"error": None, "frames": 12710, "chunks": 81, "meshed_sections": 550, "player": [160.5, 71.0, 156.5]}
