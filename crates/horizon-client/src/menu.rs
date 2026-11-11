@@ -4900,6 +4900,8 @@ pub(crate) mod tests {
     #[test]
     fn installed_slot_rules_change_mod_menu_placement() {
         static JUMPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        static STILL_VALID_ASKED: std::sync::atomic::AtomicUsize =
+            std::sync::atomic::AtomicUsize::new(0);
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
                 menu_slot_rules: |context, menu, slot, _, may_place, max_stack| {
@@ -4910,6 +4912,13 @@ pub(crate) mod tests {
                             .map_or(7, |value| value.parse().unwrap());
                     }
                 },
+                menu_still_valid: |context, player, menu, _, eye, valid| {
+                    STILL_VALID_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if menu == "test:rules" && player == 2 && eye[2] == 0.0 {
+                        *valid = context.setting("rules_mod", "stack").is_some();
+                    }
+                },
+                menu_still_valid_listens: |menu| menu == "test:rules",
                 item_stacked_on_other: |context, _, canceled| {
                     *canceled = context.setting("rules_mod", "stack").is_some();
                 },
@@ -5212,6 +5221,88 @@ pub(crate) mod tests {
         };
         assert_eq!(health(&before), (2.0, false, true, 1, false, 2.0));
         assert_eq!(health(&after), (3.0, true, false, 5, true, 3.0));
+        // A server's block menu: the game's `stillValid` answer arrives first and
+        // the parts on its mod menu type may change it; a vanilla menu type never
+        // asks them, and a menu whose block entity is gone closes without asking.
+        let mod_type: &'static crate::containers::ModMenuType =
+            Box::leak(Box::new(crate::containers::ModMenuType {
+                id: "test:rules",
+                slots: 27,
+                data_slots: 0,
+                results: vec![],
+                links: None,
+                crafting: None,
+            }));
+        let still_valid = |context: &LoopContext,
+                           mod_type: Option<&'static crate::containers::ModMenuType>,
+                           registry_id: &str,
+                           k: (i32, i32, i32),
+                           entity: bool| {
+            let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
+            if entity {
+                world
+                    .block_entities
+                    .insert(k, crate::containers::BlockEntity::Chest(vec![None; 27]));
+            }
+            let guest = crate::lan::menu::tests::guest();
+            let menu = crate::lan::menu::Menu {
+                window: 1,
+                kind: 2,
+                pos: Some(k),
+                slots: crate::lan::menu::Slots::Block(k),
+                size: 27,
+                state: 0,
+                sent: Vec::new(),
+                drag: None,
+                sent_data: Vec::new(),
+                hidden: Vec::new(),
+                mod_type,
+                registry_id: registry_id.into(),
+                craft: None,
+                links: Vec::new(),
+                asks_still_valid: crate::lan::menu::asks_still_valid(mod_type, registry_id),
+            };
+            menu.still_valid(context, &world, &guest)
+        };
+        let asked = || STILL_VALID_ASKED.load(std::sync::atomic::Ordering::Relaxed);
+        // The guest's eyes are at (0, 65.62, 0), its reach 4.5 plus 4: a chest 3
+        // blocks away stays open, one 20 blocks away closes, and a vanilla menu
+        // type asks no part either way.
+        let (near, far) = ((0, 64, 3), (0, 64, 20));
+        assert!(still_valid(
+            &after,
+            None,
+            "minecraft:generic_9x3",
+            near,
+            true
+        ));
+        assert!(!still_valid(
+            &after,
+            None,
+            "minecraft:generic_9x3",
+            far,
+            true
+        ));
+        assert_eq!(asked(), 0);
+        // The part keeps the far menu open, or closes the near one.
+        assert!(still_valid(&after, Some(mod_type), "test:rules", far, true));
+        assert!(!still_valid(
+            &before,
+            Some(mod_type),
+            "test:rules",
+            near,
+            true
+        ));
+        assert_eq!(asked(), 2);
+        // Gone: closed whatever the part would answer, and the part is not asked.
+        assert!(!still_valid(
+            &after,
+            Some(mod_type),
+            "test:rules",
+            far,
+            false
+        ));
+        assert_eq!(asked(), 2);
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

@@ -1986,6 +1986,7 @@ mod recipe_check_tests {
                 mod_type: Some(station),
                 craft: None,
                 links: Vec::new(),
+                asks_still_valid: false,
             });
             game.lan.as_mut().unwrap().hub.guests.push(guest);
             sent(&rx);
