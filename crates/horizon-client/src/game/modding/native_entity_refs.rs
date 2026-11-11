@@ -4148,8 +4148,8 @@ pub(super) mod tests {
                 ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
                 Some(vec![15])
             );
-            let foreign = LevelRef::new(level.epoch(), horizon_core::level_key::LevelKey::NETHER);
-            assert_eq!(ids(game, foreign, [-1.0; 3], [3.0; 3]), None);
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(ids(game, nether, [-1.0; 3], [3.0; 3]), None);
             let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             assert_eq!(ids(game, stale, [-1.0; 3], [3.0; 3]), None);
             game.remote.as_mut().unwrap().logged_in = false;
