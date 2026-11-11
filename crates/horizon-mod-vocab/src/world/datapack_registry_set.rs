@@ -8,7 +8,9 @@ use super::datapack_registry::{
     DatapackDecodeError, DatapackEntry, DatapackFieldKind, DatapackRegistryDeclaration,
     DatapackValue, valid_namespaced,
 };
-use super::datapack_snapshot::{MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ENTRIES, MAX_SNAPSHOT_REGISTRIES};
+use super::datapack_snapshot::{
+    MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ENTRIES, MAX_SNAPSHOT_REGISTRIES, snapshot_fits,
+};
 use std::collections::BTreeMap;
 
 /// The most bytes one entry's winning file may take.
@@ -31,6 +33,10 @@ pub enum DatapackLoadReason {
     /// The winning files of the whole candidate are more than [`MAX_SNAPSHOT_BYTES`]; `entry` is
     /// the first one over.
     CandidateTooLarge,
+    /// The snapshot of every synchronized registry would encode to more than
+    /// [`MAX_SNAPSHOT_BYTES`] (field defaults and entry ids are not in the files); it names no
+    /// registry, entry or file.
+    SnapshotTooLarge,
     /// The entry's id (from its namespace and file name) is not a lowercase `namespace:path`.
     InvalidEntryId,
     /// The file did not decode against the registry's schema.
@@ -98,7 +104,8 @@ impl DatapackCandidate {
     /// and its bytes, so a refusal names the pack. A candidate over a limit is refused whole:
     /// [`MAX_SNAPSHOT_REGISTRIES`] registries, [`MAX_DATAPACK_ENTRY_BYTES`] per entry,
     /// [`MAX_SNAPSHOT_ENTRIES`] entries per registry and [`MAX_SNAPSHOT_BYTES`] of winning files
-    /// in all, the bounds its snapshot must also fit. The error is boxed: it is large, and a
+    /// in all, the bounds its snapshot must also fit, and a trial encode refuses a candidate whose
+    /// snapshot of every synchronized registry would be over [`MAX_SNAPSHOT_BYTES`]. The error is boxed: it is large, and a
     /// refused candidate is rare.
     pub fn build(
         declarations: &[DatapackRegistryDeclaration],
@@ -171,6 +178,15 @@ impl DatapackCandidate {
             }
             error
         })?;
+        if !snapshot_fits(declarations, &registries) {
+            return Err(Box::new(DatapackLoadError {
+                registry: String::new(),
+                entry: String::new(),
+                file: String::new(),
+                pack: String::new(),
+                reason: DatapackLoadReason::SnapshotTooLarge,
+            }));
+        }
         Ok(Self { registries })
     }
 }
@@ -711,6 +727,70 @@ mod tests {
         );
         files.pop();
         assert_eq!(old.reload(candidate(&files)).unwrap().generation(), 2);
+    }
+
+    /// `example:spell`, synchronized, with a 64 KiB text default that no file spells out.
+    fn padded_spell() -> DatapackRegistryDeclaration {
+        DatapackRegistryDeclaration {
+            fields: vec![
+                DatapackField::required("power", DatapackFieldKind::Int { min: 0, max: 100 }),
+                DatapackField::with_default(
+                    "lore",
+                    DatapackFieldKind::Text { max_len: 1 << 16 },
+                    DatapackValue::Text("x".repeat(1 << 16)),
+                ),
+            ],
+            sync: DatapackRegistrySync::Optional,
+            ..spell()
+        }
+    }
+
+    /// `count` small entries, the first `example:fire`.
+    fn small_entries(count: usize) -> Vec<(String, Vec<(String, Vec<u8>)>)> {
+        (0..count)
+            .map(|n| match n {
+                0 => file(&entry_path("fire"), &[r#"{"power": 1}"#]),
+                n => file(&entry_path(&format!("e{n}")), &[r#"{"power": 1}"#]),
+            })
+            .collect()
+    }
+
+    /// A candidate whose files are small but whose snapshot, defaults filled in, would encode to
+    /// more than 64 MiB is refused before it commits, with a named reason; the old generation
+    /// stays and the next candidate that fits still publishes. A server-only registry is never
+    /// sent, so the same entries there are accepted.
+    #[test]
+    fn a_candidate_whose_snapshot_is_over_64_mib_is_refused_before_commit() {
+        let declarations = [padded_spell()];
+        let fits = small_entries(1000);
+        let old =
+            DatapackRegistrySet::first(DatapackCandidate::build(&declarations, &fits).unwrap(), 1);
+        let over = small_entries(MAX_SNAPSHOT_BYTES / (1 << 16) + 1);
+        let error = DatapackCandidate::build(&declarations, &over).unwrap_err();
+        assert_eq!(error.reason, DatapackLoadReason::SnapshotTooLarge);
+        assert_eq!(error.registry, "");
+        assert_eq!(old.generation(), 1);
+        let next = DatapackCandidate::build(&declarations, &fits).unwrap();
+        assert_eq!(old.reload(next).unwrap().generation(), 2);
+        let server_only = DatapackRegistryDeclaration {
+            sync: DatapackRegistrySync::ServerOnly,
+            ..padded_spell()
+        };
+        assert!(DatapackCandidate::build(&[server_only], &over).is_ok());
+    }
+
+    /// A file nested 65 deep refuses the candidate (the schema has no nested field, so it is a
+    /// decode error), and the old generation stays.
+    #[test]
+    fn an_entry_nested_65_deep_refuses_the_candidate() {
+        let old = DatapackRegistrySet::first(candidate(&small_entries(1)), 1);
+        let deep = format!(r#"{{"power": {}7{}}}"#, "[".repeat(64), "]".repeat(64));
+        let error =
+            DatapackCandidate::build(&[spell()], &[file(&entry_path("fire"), &[deep.as_str()])])
+                .unwrap_err();
+        assert!(matches!(error.reason, DatapackLoadReason::Decode(_)));
+        assert_eq!(old.generation(), 1);
+        assert_eq!(power(&old, "example:fire"), DatapackValue::Int(1));
     }
 
     /// 256 declared registries are accepted; the 257th refuses every candidate, naming it.
