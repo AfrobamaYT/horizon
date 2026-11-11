@@ -12,9 +12,9 @@ sdk=$(realpath "$2")
 scratch=$3
 resources=${4:-}
 root=$(git rev-parse --show-toplevel)
-revision=$(git -C "$root" rev-parse HEAD)
+# The game revision is the SDK's: its source is what a patched function is copied out of.
+revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
 mixins=$(sed -n 's/^pub const MIXINS_REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
-test "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$sdk/horizon-prebuilt.json")" = "$revision"
 
 rm -rf "$scratch"
 mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
@@ -24,7 +24,7 @@ data=$scratch/launcher
 # The pinned source a patched function is copied out of, from this checkout.
 source=$data/native/source/$revision
 mkdir -p "$source"
-git -C "$root" archive HEAD | tar -x -C "$source"
+git -C "$root" archive "$revision" | tar -x -C "$source"
 find "$source" -type l -delete
 printf '%s' "$revision" > "$source/.horizon-revision"
 
