@@ -7,9 +7,11 @@ static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 pub mod area_macros;
 pub mod datapack;
 pub mod interaction;
+pub mod lending;
 pub mod matrix;
 pub mod projectile_owner;
 pub mod replace;
+pub mod selector_command;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
 pub mod shutdown;
@@ -49,6 +51,43 @@ impl Hooks for Mod {
         } else {
             mod_api::Flow::Continue
         }
+    }
+
+    fn register_commands(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RegisterCommandsEvent<'_>,
+    ) {
+        event.commands.extend([
+            mod_api::Command::new("wasmheal <targets:players>"),
+            mod_api::Command::new("wasmentity <target:entity>"),
+            mod_api::Command::new("wasmentities <targets:entities>"),
+            mod_api::Command::new("wasmplayer <target:player>"),
+        ]);
+    }
+
+    fn run_mod_command(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RunModCommandEvent<'_>,
+    ) -> mod_api::Flow {
+        selector_command::run(event)
+    }
+
+    fn recipe_sources(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::RecipeSourcesEvent<'_>,
+    ) {
+        lending::Lender.recipe_sources(host, event);
+    }
+
+    fn menu_links(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::MenuLinksEvent<'_>,
+    ) {
+        lending::Lender.menu_links(host, event);
     }
 
     fn register_json_animation_types(
