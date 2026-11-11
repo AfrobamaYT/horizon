@@ -7,6 +7,13 @@
 //! player's plain items: count, take, give. They act on the server's own
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
+#[cfg(test)]
+#[path = "native_server/selector_tests.rs"]
+mod selector_tests;
+#[cfg(test)]
+#[path = "native_server/wasm_selector_tests.rs"]
+mod wasm_selector_tests;
+
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Dim, Game, commands::execute, lan::LanHost, respawn_anchor::RespawnConfig};
 use crate::game::level_control_hooks::LevelControl;
@@ -48,13 +55,16 @@ pub(crate) struct NativeSidebar {
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
 
 /// The argument kinds a native usage may name, each with a [`parser`].
-const KINDS: [&str; 8] = [
+const KINDS: [&str; 11] = [
     "word",
     "text",
     "integer",
     "number",
     "boolean",
     "player",
+    "entity",
+    "entities",
+    "players",
     "item",
     "block_pos",
 ];
@@ -71,6 +81,7 @@ pub(super) fn command_arguments() -> CommandArguments {
 }
 
 /// The brigadier parser of an argument kind, its properties and its dispatcher type.
+/// `EntityArgument.entity` / `entities` / `player` / `players` share the vanilla parser.
 fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
     Some(match kind {
         "word" => ("brigadier:string", json!({"type": "word"}), ArgType::Word),
@@ -96,14 +107,18 @@ fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
             },
         ),
         "boolean" => ("brigadier:bool", Value::Null, ArgType::Bool),
-        "player" => (
-            "minecraft:entity",
-            json!({"amount": "single", "type": "players"}),
-            ArgType::Entity {
-                single: true,
-                players: true,
-            },
-        ),
+        "entity" | "entities" | "player" | "players" => {
+            let single = matches!(kind, "entity" | "player");
+            let players = matches!(kind, "player" | "players");
+            (
+                "minecraft:entity",
+                json!({
+                    "amount": if single { "single" } else { "multiple" },
+                    "type": if players { "players" } else { "entities" },
+                }),
+                ArgType::Entity { single, players },
+            )
+        }
         "item" => ("minecraft:item_stack", Value::Null, ArgType::Item),
         "block_pos" => ("minecraft:block_pos", Value::Null, ArgType::BlockPos),
         _ => return None,
@@ -2119,12 +2134,33 @@ impl Game<'_> {
         }
     }
 
-    /// Convert the native tree's validated argument kinds using vanilla's source-aware paths.
+    fn native_command_player_target(&self, target: super::commands::Target) -> Option<PlayerRef> {
+        use super::commands::Target;
+        match target {
+            Target::Player => self.native_acting_player(),
+            Target::Guest(conn) => self.command_guest(conn).and_then(|guest| self.player(guest.uuid)),
+            _ => None,
+        }
+    }
+
+    fn native_command_entity_target(
+        &mut self,
+        target: super::commands::Target,
+    ) -> Option<mod_api::EntityRef> {
+        if let Some(player) = self.native_command_player_target(target) {
+            return Some(player.entity());
+        }
+        let id = super::native_entities::target_id(target)?;
+        self.in_target_level(target, |game| game.entity(id)).flatten()
+    }
+
+    /// `EntityArgument.getEntity` / `getEntities` / `getPlayer` / `getPlayers`:
+    /// convert validated arguments through the shared source-aware selector resolver.
     fn resolve_native_command(
         &mut self,
         context: Context,
     ) -> Result<mod_api::CommandInvocation, horizon_client::command::CommandError> {
-        use super::commands::{Target, err};
+        use super::commands::err;
         use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
         let mut arguments = Vec::with_capacity(context.args.len());
         for argument in context.args {
@@ -2134,19 +2170,50 @@ impl Game<'_> {
                 Arg::Double(value) => Value::Number(value),
                 Arg::Bool(value) => Value::Boolean(value),
                 Arg::Entity(selector) => {
-                    let targets = self.resolve_entity_argument(&selector, true)?;
-                    let [target] = targets.as_slice() else {
-                        return Err(err("argument.entity.toomany", &[]));
-                    };
-                    let player = match target {
-                        Target::Player => self.native_acting_player(),
-                        Target::Guest(conn) => self
-                            .command_guest(*conn)
-                            .and_then(|guest| self.player(guest.uuid)),
-                        _ => None,
+                    // The parsed node, not its name, determines cardinality: usages may
+                    // repeat an argument name or use different kinds on separate branches.
+                    let (single, players) = context.nodes.iter().find_map(|(node, range)| {
+                        if *range != argument.range {
+                            return None;
+                        }
+                        match &self.ui.dispatcher.0.nodes[*node].kind {
+                            horizon_client::command::NodeKind::Argument {
+                                ty: ArgType::Entity { single, players }, ..
+                            } => Some((*single, *players)),
+                            _ => None,
+                        }
+                    }).expect("parsed entity argument has its dispatcher node");
+                    let targets = self.resolve_entity_argument(&selector, players)?;
+                    if single && targets.len() > 1 {
+                        return Err(err(if players {
+                            "argument.player.toomany"
+                        } else {
+                            "argument.entity.toomany"
+                        }, &[]));
                     }
-                    .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
-                    Value::Player(player)
+                    if players {
+                        if single {
+                            Value::Player(self.native_command_player_target(targets[0])
+                                .ok_or_else(|| err("argument.entity.notfound.player", &[]))?)
+                        } else {
+                            let selected = targets.into_iter()
+                                .map(|target| self.native_command_player_target(target)
+                                    .ok_or_else(|| err("argument.entity.notfound.player", &[])))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            Value::Players(selected)
+                        }
+                    } else if single {
+                        Value::Entity(self.native_command_entity_target(targets[0])
+                            .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?)
+                    } else {
+                        let selected: Vec<_> = targets.into_iter()
+                            .filter_map(|target| self.native_command_entity_target(target))
+                            .collect();
+                        if selected.is_empty() {
+                            return Err(err("argument.entity.notfound.entity", &[]));
+                        }
+                        Value::Entities(selected)
+                    }
                 }
                 Arg::Coords(coordinates) => {
                     Value::BlockPos(self.resolve_coords(&coordinates).map(|v| v.floor() as i32))
