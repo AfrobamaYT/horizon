@@ -165,7 +165,7 @@ fn wasm_server_tick_messages_reach_dedicated_game() {
                 );
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
             let context =
-                mod_api::LifecycleContext::from(mod_api::__private::game::LifecycleContext {
+                mod_api::LifecycleContext::from(mod_api::__private::built::LifecycleContext {
                     authority: mod_api::Authority::DedicatedServer,
                     epoch: mod_api::WorldEpoch::new(73),
                     tick: mod_api::TickId::new(1),
