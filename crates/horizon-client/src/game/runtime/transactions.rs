@@ -124,6 +124,7 @@ struct KeptMenus {
 
 /// What a write tells the world, at the root commit.
 pub(super) enum After {
+    Cauldron(super::cauldron_interactions::Effects),
     /// `BlockEntity.setChanged`.
     Changed(Pos),
     /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
@@ -457,6 +458,7 @@ impl Game<'_> {
     }
     fn run_after(&mut self, after: After) {
         match after {
+            After::Cauldron(effects) => self.commit_cauldron_effects(effects),
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
