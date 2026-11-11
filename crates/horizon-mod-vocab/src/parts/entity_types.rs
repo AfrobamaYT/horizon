@@ -10,8 +10,9 @@ pub mod limits {
     /// one byte larger is refused, never truncated into a valid-looking
     /// entity.
     pub const PAYLOAD_LIMIT: usize = 65_536;
-    /// The deepest record nesting a general entity tree may have, root
-    /// included.
+    /// The deepest nesting of a general entity's decoded data. Stage 3's
+    /// payload decode checks it; the record tree itself has the stricter
+    /// passenger-depth bound.
     pub const MAX_NESTING: u32 = 32;
     /// The deepest chain of passengers a general entity tree may carry.
     pub const MAX_PASSENGER_DEPTH: u32 = 16;

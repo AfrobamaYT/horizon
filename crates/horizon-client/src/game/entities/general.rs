@@ -68,7 +68,10 @@ pub enum GeneralRecordError {
     /// A mod payload exceeds [`limits::PAYLOAD_LIMIT`]. The bound applies to
     /// mod payloads only, never to a record of a vanilla type.
     PayloadTooLarge { size: usize },
-    /// The record tree is deeper than [`limits::MAX_NESTING`], root included.
+    /// The decoded data of a payload is nested deeper than
+    /// [`limits::MAX_NESTING`]. Stage 3's payload decode owns this check —
+    /// the record walk never fires it, because a passenger tree reaches
+    /// [`GeneralRecordError::PassengerDepthTooDeep`] first.
     NestingTooDeep { depth: u32 },
     /// A passenger chain is deeper than [`limits::MAX_PASSENGER_DEPTH`].
     PassengerDepthTooDeep { depth: u32 },
@@ -133,13 +136,16 @@ pub enum GeneralRecordCheck {
 /// row. `is_known_type` answers whether a type key's namespace belongs to
 /// vanilla or a loaded mod; the caller supplies the frozen registry's view.
 ///
-/// Structural faults (payload size, nesting, passenger depth, cycles,
+/// Structural faults (payload size, passenger depth, cycles,
 /// duplicate UUIDs, non-finite coordinates) refuse the tree whatever its
 /// type; only a structurally sound record of an unresolvable type reports
 /// [`GeneralRecordCheck::UnknownType`], so quarantine never preserves an
-/// over-budget or malformed payload. Nothing is written, allocated beyond
-/// the walk's own bookkeeping, or panicked on; a refused tree leaves no
-/// partial state, and the next valid record checks cleanly.
+/// over-budget or malformed payload. The design's separate data-nesting
+/// bound is the payload decode's to check (stage 3), not this walk's: a
+/// passenger tree reaches the passenger-depth refusal first. Nothing is
+/// written, allocated beyond the walk's own bookkeeping, or panicked on; a
+/// refused tree leaves no partial state, and the next valid record checks
+/// cleanly.
 #[allow(
     dead_code,
     reason = "stage 3's load path and the row's construction are the first non-test users"
@@ -179,9 +185,6 @@ fn check_record(
         return Err(GeneralRecordError::PayloadTooLarge {
             size: record.envelope.payload_bytes.len(),
         });
-    }
-    if depth > limits::MAX_NESTING {
-        return Err(GeneralRecordError::NestingTooDeep { depth });
     }
     if depth - 1 > limits::MAX_PASSENGER_DEPTH {
         return Err(GeneralRecordError::PassengerDepthTooDeep { depth: depth - 1 });
@@ -458,33 +461,10 @@ mod tests {
         );
     }
 
-    /// A tree one level deeper than the nesting bound refuses at that depth.
-    /// The passenger bound (16) is stricter than the nesting bound (32), so
-    /// no valid passenger tree can reach this fault; the branch guards the
-    /// record shape stage 3 grows (nested non-passenger state) and is checked
-    /// where only it can fire.
-    #[test]
-    fn nesting_bound_refuses_past_the_limit() {
-        let record = record([1, 2, 3, 4], "mymod:robot");
-        let mut ancestors = Vec::new();
-        let mut seen = FxHashSet::default();
-        seen.insert([1, 2, 3, 4]);
-        assert_eq!(
-            check_record(
-                &record,
-                &mut ancestors,
-                &mut seen,
-                limits::MAX_NESTING + 1,
-                &known("mymod:robot"),
-            ),
-            Err(GeneralRecordError::NestingTooDeep {
-                depth: limits::MAX_NESTING + 1
-            })
-        );
-    }
-
     /// A passenger chain one ride deeper than the passenger bound refuses,
-    /// the root's own level excluded from the count.
+    /// the root's own level excluded from the count. The design's separate
+    /// data-nesting bound is stage 3's payload decode; this walk never
+    /// reaches it, because this refusal fires first.
     #[test]
     fn passenger_depth_bound_refuses_past_the_limit() {
         let mut root = record([1, 2, 3, 4], "mymod:robot");
