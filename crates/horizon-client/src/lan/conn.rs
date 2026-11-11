@@ -1643,74 +1643,77 @@ fn wait_alive<T>(
     negotiation: &mut horizon_protocol::payload_negotiation::Negotiation,
     mut answer: impl FnMut(Result<cfg::Serverbound, String>) -> Option<Result<T, String>>,
 ) -> Result<T, String> {
-    let writer = Mutex::new(&mut c.writer);
-    let result = std::thread::scope(|scope| {
-        let (stop, stopped) = channel::<()>();
-        let keep_writer = &writer;
-        scope.spawn(move || {
-            let start = Instant::now();
-            while stopped.recv_timeout(KEEP_ALIVE_EVERY) == Err(RecvTimeoutError::Timeout) {
-                let id = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
-                let keep_alive = cfg::Clientbound::KeepAlive(cfg::KeepAlive { id });
-                if keep_writer
-                    .lock()
-                    .unwrap()
-                    .send(&keep_alive.encode())
-                    .is_err()
+    let result = {
+        let writer = Mutex::new(&mut c.writer);
+        std::thread::scope(|scope| {
+            let (stop, stopped) = channel::<()>();
+            let keep_writer = &writer;
+            scope.spawn(move || {
+                let start = Instant::now();
+                while stopped.recv_timeout(KEEP_ALIVE_EVERY) == Err(RecvTimeoutError::Timeout) {
+                    let id = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
+                    let keep_alive = cfg::Clientbound::KeepAlive(cfg::KeepAlive { id });
+                    if keep_writer
+                        .lock()
+                        .unwrap()
+                        .send(&keep_alive.encode())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            let result = loop {
+                let packet = match c.reader.recv() {
+                    Ok((id, payload)) => cfg::Serverbound::decode_with_payload_codecs(
+                        id,
+                        &payload,
+                        &transport.local.codecs,
+                    )
+                    .map_err(|e| e.to_string()),
+                    Err(err) => break Err(err.to_string()),
+                };
+                if let Ok(cfg::Serverbound::CustomPayload(payload)) = &packet
+                    && payload.channel == horizon_protocol::payload_negotiation::CHANNEL
                 {
-                    break;
+                    let result = (|| {
+                        let control =
+                            horizon_protocol::payload_negotiation::Control::decode(&payload.data)
+                                .map_err(|e| e.to_string())?;
+                        if let Some(reply) =
+                            negotiation.receive(control).map_err(|e| e.to_string())?
+                        {
+                            let body = cfg::Clientbound::CustomPayload(
+                                horizon_protocol::packets::custom_payload::CustomPayload {
+                                    channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
+                                    data: reply.encode().map_err(|e| e.to_string())?,
+                                },
+                            )
+                            .encode();
+                            writer
+                                .lock()
+                                .unwrap()
+                                .send(&body)
+                                .map_err(|e| e.to_string())?;
+                        }
+                        if let Some(accepted) = negotiation.accepted() {
+                            transport.accept(accepted)?;
+                        }
+                        Ok::<(), String>(())
+                    })();
+                    if let Err(error) = result {
+                        break Err(error);
+                    }
+                    continue;
                 }
-            }
-        });
-        let result = loop {
-            let packet = match c.reader.recv() {
-                Ok((id, payload)) => cfg::Serverbound::decode_with_payload_codecs(
-                    id,
-                    &payload,
-                    &transport.local.codecs,
-                )
-                .map_err(|e| e.to_string()),
-                Err(err) => break Err(err.to_string()),
+                if let Some(result) = answer(packet) {
+                    break result;
+                }
             };
-            if let Ok(cfg::Serverbound::CustomPayload(payload)) = &packet
-                && payload.channel == horizon_protocol::payload_negotiation::CHANNEL
-            {
-                let result = (|| {
-                    let control =
-                        horizon_protocol::payload_negotiation::Control::decode(&payload.data)
-                            .map_err(|e| e.to_string())?;
-                    if let Some(reply) = negotiation.receive(control).map_err(|e| e.to_string())? {
-                        let body = cfg::Clientbound::CustomPayload(
-                            horizon_protocol::packets::custom_payload::CustomPayload {
-                                channel: horizon_protocol::payload_negotiation::CHANNEL.into(),
-                                data: reply.encode().map_err(|e| e.to_string())?,
-                            },
-                        )
-                        .encode();
-                        writer
-                            .lock()
-                            .unwrap()
-                            .send(&body)
-                            .map_err(|e| e.to_string())?;
-                    }
-                    if let Some(accepted) = negotiation.accepted() {
-                        transport.accept(accepted)?;
-                    }
-                    Ok::<(), String>(())
-                })();
-                if let Err(error) = result {
-                    break Err(error);
-                }
-                continue;
-            }
-            if let Some(result) = answer(packet) {
-                break result;
-            }
-        };
-        drop(stop);
-        result
-    });
-    drop(writer);
+            drop(stop);
+            result
+        })
+    };
     result.map_err(|error| payload_disconnect(c, error))
 }
 
