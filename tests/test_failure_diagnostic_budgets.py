@@ -31,6 +31,29 @@ class Budgets(unittest.TestCase):
                       '1 payloads withheld (expected privacy filtering)', log)
         self.assertNotIn('PRIVATE', log)
 
+    def test_generated_absolute_location_uses_only_this_checkout_root(self):
+        root = Path(ci.__file__).resolve().parents[2]
+        path = 'crates/horizon-client/src/game/administration/commands/incoming_tests/knot_identity.rs'
+        location = f'{root / path}:176:1'
+        log = self.render(f"test safe ... FAILED\nthread 'safe' panicked at {location}:\n"
+                          "assertion failed: PRIVATE\n")
+        self.assertIn(f'panicked at {path}:176:1', log)
+        self.assertNotIn(str(root), log)
+        self.assertNotIn('PRIVATE', log)
+        for rejected in (f'/another-checkout/{path}:176:1',
+                         f'{root}-other/{path}:176:1',
+                         f'{root}/../{root.name}/{path}:176:1',
+                         f'{root}/{path}:999999:1',
+                         f'{root}/{path}:176:0',
+                         f'{root}/crates/horizon-client/src/game.rs:1:1',
+                         f'{root}/.local/private.rs:1:1'):
+            with self.subTest(location=rejected):
+                log = self.render(f"test safe ... FAILED\nthread 'safe' panicked at {rejected}:\n"
+                                  "assertion failed: PRIVATE\n")
+                self.assertIn('panic location withheld', log)
+                self.assertNotIn('  panicked at ', log)
+                self.assertNotIn(str(root), log)
+
     def test_payload_filtering_does_not_imply_location_or_identity_loss(self):
         with patch.object(ci, 'tracked_rust_paths', return_value={'crates/example.rs'}):
             log = self.render("test safe ... FAILED\n"

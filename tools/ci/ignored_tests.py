@@ -257,8 +257,18 @@ def failure_diagnostics(output):
                 else:
                     skipped_contexts += 1
             location = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", found[2])
-            if location and location[1] in tracked_rust_paths():
-                context.append(f"  panicked at {found[2]}")
+            path = location[1] if location else ""
+            # game-discovery emits canonical absolute #[path] declarations. Only
+            # this checkout's exact resolved prefix is authoritative; never guess
+            # another checkout's prefix or search for a matching path suffix.
+            prefix = str(Path(__file__).resolve().parents[2]) + os.sep
+            if path.startswith(prefix):
+                path = path[len(prefix):]
+                lines = source_lines(path)
+                if lines is None or not 1 <= int(location[2]) <= len(lines) or int(location[3]) < 1:
+                    path = ""
+            if location and path in tracked_rust_paths():
+                context.append(f"  panicked at {path}:{location[2]}:{location[3]}")
             else:
                 context.append("  panic location withheld (not a bounded tracked Rust location)")
             context.append("  panic reason missing from captured output")
