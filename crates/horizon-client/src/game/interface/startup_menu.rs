@@ -773,6 +773,7 @@ impl Loading {
             return;
         }
         let was_disabled = super::narrator::cycle_status(&mut self.settings);
+        self.menu.options.layout_changed();
         super::narrator::update_status(
             self.settings.narrator(),
             &mut self.menu.pending_narrator_toast,

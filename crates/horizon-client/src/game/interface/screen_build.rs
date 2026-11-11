@@ -477,25 +477,23 @@ impl Game<'_> {
         // The pause menu's inputs can change while it is open: a server's
         // links or a custom-additions dialog arriving. Compare them here and
         // make the layout only when they moved.
-        let pause = (shown && self.screen == Screen::Paused)
-            .then(|| self.pause_inputs())
-            .and_then(|inputs| {
-                let unchanged = self
-                    .screen_state
-                    .build
-                    .current
-                    .as_ref()
-                    .is_some_and(|build| {
-                        build.screen == self.screen
-                            && build.identity == identity
-                            && build.scale == gui.scale as f32
-                            && build
-                                .pause(gui.size[0] as f32, gui.size[1] as f32)
-                                .is_some_and(|old| old.inputs == inputs)
-                    });
-                (!unchanged)
-                    .then(|| self.pause_layout_for(&inputs, gui.size[0] as f32, gui.size[1] as f32))
-            });
+        let pause = (shown && self.screen == Screen::Paused).then(|| {
+            let unchanged = self
+                .screen_state
+                .build
+                .current
+                .as_ref()
+                .is_some_and(|build| {
+                    build.screen == self.screen
+                        && build.identity == identity
+                        && build.scale == gui.scale as f32
+                        && build
+                            .pause(gui.size[0] as f32, gui.size[1] as f32)
+                            .is_some_and(|old| self.pause_inputs_match(&old.inputs))
+                });
+            (!unchanged).then(|| self.pause_layout(gui.size[0] as f32, gui.size[1] as f32))
+        });
+        let pause = pause.flatten();
         let layout = container
             .map(ScreenLayout::Container)
             .or_else(|| pause.map(ScreenLayout::Pause));

@@ -316,8 +316,14 @@ impl Game<'_> {
             remote: self.external_server(),
             links: !self.server_links().is_empty(),
             additions: self.pause_screen_additions().is_some(),
-            rows: self.pause_rows(),
+            rows: self.pause_rows().collect(),
         }
+    }
+    pub(super) fn pause_inputs_match(&self, old: &PauseInputs) -> bool {
+        old.remote == self.external_server()
+            && old.links == !self.server_links().is_empty()
+            && old.additions == self.pause_screen_additions().is_some()
+            && self.pause_rows().eq(old.rows.iter().copied())
     }
     /// The pause menu's widgets for a `ScreenBuild` at `(w, h)`: the buttons
     /// and the icon row. The build makes it once per open, resize and input
@@ -498,7 +504,7 @@ impl Game<'_> {
     }
     /// The pause menu's full-width rows above Options: Splitscreen's settings, then the pages
     /// crates registered for the pause menu (`horizon_hooks::pages`), by their title.
-    fn pause_rows(&self) -> Vec<(&'static str, u8)> {
+    fn pause_rows(&self) -> impl Iterator<Item = (&'static str, u8)> {
         let split = self.options.split_guest || self.split_hud.menu;
         let pages = horizon_hooks::pages::engine::all().iter().enumerate();
         let added = pages
@@ -511,7 +517,6 @@ impl Game<'_> {
             .then_some((SPLIT_SETTINGS, 30))
             .into_iter()
             .chain(added)
-            .collect()
     }
     pub(super) fn pause_click(&mut self) -> Result<()> {
         let (w, h) = {

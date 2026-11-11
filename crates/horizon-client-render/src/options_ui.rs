@@ -3971,6 +3971,7 @@ impl OptionsUi {
                         events.extend(self.back(s));
                     } else {
                         self.language_choice = Some(code.clone());
+                        self.relayout();
                     }
                 }
                 _ => {}
@@ -5199,8 +5200,45 @@ mod tests {
             "the clipboard went into the box"
         );
         fresh(&mut ui, &s, "paste", &mut stale);
+        ui.shortcut(&atlas, EditShortcut::SelectAll, &mut clipboard);
         ui.shortcut(&atlas, EditShortcut::Cut, &mut clipboard);
+        assert!(ui.settings_search.value.is_empty());
         fresh(&mut ui, &s, "cut", &mut stale);
+
+        ui.languages = languages();
+        ui.show(Page::Language);
+        fresh(&mut ui, &s, "language open", &mut stale);
+        let (widgets, top, bottom, _) = ui.layout(&s, ui.size.0, ui.size.1);
+        let row = widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    &w.kind,
+                    WKind::LanguageRow {
+                        selected: false,
+                        ..
+                    }
+                ) && w.y >= top
+                    && w.y + w.h <= bottom
+            })
+            .unwrap();
+        let WKind::LanguageRow { code, .. } = &row.kind else {
+            unreachable!()
+        };
+        let code = code.clone();
+        ui.click(
+            &mut s,
+            &atlas,
+            row.x + 1.0,
+            row.y + 1.0,
+            ui.size,
+            [1708, 960],
+            false,
+            false,
+        );
+        fresh(&mut ui, &s, "language selection", &mut stale);
+        assert!(ui.built_layout(&s, ui.size.0, ui.size.1).parts().0.iter().any(|w|
+            matches!(&w.kind, WKind::LanguageRow { code: selected, selected: true, .. } if selected == &code)));
 
         // A modifier-only key bind takes the waiting selection away.
         ui.show(Page::KeyBinds);
