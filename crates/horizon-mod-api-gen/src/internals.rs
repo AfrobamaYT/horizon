@@ -191,7 +191,6 @@ struct Pass {
     /// Widening only: the items and fields visited are made public and listed nowhere, for a
     /// lower-crate shape the wasm internals table walks (#589 W).
     reaching: bool,
-    visibility_only: bool,
     discovery: bool,
 }
 
@@ -653,8 +652,10 @@ impl Pass {
             edits: BTreeMap::new(),
             annotations: BTreeMap::new(),
         });
-        // Macro-generated declarations are absent from syn's item inventory. Widen
-        // literal type declarations in rule expansions too, without interpreting matches.
+        // A loaded staging unit may have widened fields or methods whose signatures
+        // were not catalogued (layout-only traversal). Give its type declarations the
+        // same visibility, independently of whether their layouts can cross the ABI.
+        // Macro-generated declarations need the equivalent rule on expansion tokens.
         fn declarations(source: &mut Source, tokens: proc_macro2::TokenStream) {
             use proc_macro2::TokenTree;
             let tokens: Vec<_> = tokens.into_iter().collect();
@@ -683,8 +684,44 @@ impl Pass {
                 }
             }
         }
-        struct MacroDeclarations<'a>(&'a mut Source);
-        impl<'ast> syn::visit::Visit<'ast> for MacroDeclarations<'_> {
+        struct StagedTypes<'a>(&'a mut Source);
+        impl<'ast> syn::visit::Visit<'ast> for StagedTypes<'_> {
+            fn visit_block(&mut self, _: &'ast syn::Block) {}
+            fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+                if !test_only(&item.attrs) {
+                    syn::visit::visit_item_mod(self, item);
+                }
+            }
+            fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.struct_token.span(), "struct");
+            }
+            fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.enum_token.span(), "enum");
+            }
+            fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.union_token.span(), "union");
+            }
+            fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.trait_token.span(), "trait");
+            }
+            fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+                if test_only(&item.attrs) {
+                    return;
+                }
+                self.0.public(&item.vis, item.type_token.span(), "type");
+            }
             fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
                 if item.mac.path.is_ident("macro_rules") {
                     let tokens: Vec<_> = item.mac.tokens.clone().into_iter().collect();
@@ -699,7 +736,7 @@ impl Pass {
                 }
             }
         }
-        syn::visit::Visit::visit_file(&mut MacroDeclarations(&mut self.sources[index]), &parsed);
+        syn::visit::Visit::visit_file(&mut StagedTypes(&mut self.sources[index]), &parsed);
         Ok(index)
     }
 
@@ -917,7 +954,7 @@ impl Pass {
                 let (ident, generics) = (&value.ident, &value.generics);
                 let signature = shape_signature(item).expect("a struct");
                 expose!(value, "struct", value.struct_token.span(), signature);
-                if children || (self.reaching && !self.visibility_only) {
+                if children || self.reaching {
                     self.fields(
                         file,
                         module,
@@ -938,7 +975,7 @@ impl Pass {
                 };
                 signature.fields = fields;
                 expose!(value, "struct", value.union_token.span(), signature);
-                if children || (self.reaching && !self.visibility_only) {
+                if children || self.reaching {
                     self.fields(
                         file,
                         module,
@@ -1218,7 +1255,9 @@ impl Pass {
                                     (definition.module.clone(), TypeUses::item(&definition.item))
                                 });
                             }
-                        } else if !self.entries.contains_key(&key) {
+                        } else if !path.starts_with("horizon_client::")
+                            && !self.entries.contains_key(&key)
+                        {
                             self.cfg = definition.cfg;
                             self.entry(
                                 &definition.module,
@@ -1240,24 +1279,6 @@ impl Pass {
         self.cfg.clear();
         // Each shape's module path, item and fields, public in the staged copy, so the wasm
         // internals table at the game's root can walk it. The mod API's own types keep theirs.
-        // Visibility follows signature reachability, including traits and aliases. Layout
-        // eligibility below is a separate question and must not prevent widening.
-        let visible: BTreeSet<String> = self
-            .entries
-            .values()
-            .filter(|entry| {
-                matches!(entry.kind, "struct" | "enum" | "type" | "trait")
-                    && !API_CRATES.contains(&entry.path.split("::").next().unwrap_or_default())
-            })
-            .map(|entry| entry.path.clone())
-            .collect();
-        self.reaching = true;
-        self.visibility_only = true;
-        for path in visible {
-            let _ = self.lower(root, &path);
-        }
-        self.visibility_only = false;
-        self.reaching = false;
         let reached: Vec<String> = self
             .entries
             .values()
@@ -2096,7 +2117,7 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
                 .iter()
                 .all(|entry| !entry.path.starts_with("horizon_items::") || entry.shape_only)
         );
-        assert_eq!(result.files, 6);
+        assert_eq!(result.files, 5);
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
@@ -2213,7 +2234,7 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             let source =
                 fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
                     .unwrap();
-            assert!(source.contains("pub struct ItemStack"));
+            assert!(source.contains("pub(crate) struct ItemStack"));
         }
     }
 
@@ -2437,7 +2458,7 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
     }
 
     #[test]
-    fn widens_items_without_touching_uses_traits_macros_or_local_items() {
+    fn widens_items_without_touching_uses_trait_impls_or_local_items() {
         let fixture = Fixture::new(
             r#"use std::fmt;
 pub(crate) struct Game<'a> { world: u32, marker: &'a str }
@@ -2492,7 +2513,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
             "struct Local;",
             "#[cfg(test)] fn test_method() {}",
             "impl Trait for Game<'_> { fn call(&self) {} }",
-            "macro_rules! untouched { () => { struct MacroItem; } }",
+            "macro_rules! untouched { () => { pub struct MacroItem; } }",
             "#[cfg(test)] mod tests { struct Private; }",
             "#[cfg(test)] struct TestItem;",
             "#[test] fn test_function() {}",
