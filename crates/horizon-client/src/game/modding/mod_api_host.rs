@@ -43,16 +43,21 @@ fn world_attachments(
 }
 
 impl Game<'_> {
-    /// Whether entity `id` is in the level, as a holder of attachments: one walk
-    /// over the entity lists (a kind added there holds attachments too), then the
-    /// kinds that are not on it.
+    /// Attachment membership uses physical presence (except removed mobs), not the
+    /// command resolver's pending-removal masks. Limit resolution to this level.
     fn attachment_entity_exists(&self, id: u32) -> bool {
-        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
-        let mut found = false;
-        for_each_entity!(entity_lists_of!(self), entity => {
-            found |= entity.id() == id && !entity.is_removed();
-        });
-        found || self.entity_ids_off_walk().any(|e| e == id) || self.level_dragon_part(id).is_some()
+        use horizon_client::join_seq::residency::table::EntityLookup;
+        matches!(
+            self.resident_entities
+                .table
+                .borrow_mut()
+                .entity_lookup(&self.dim.key(), id, |at| self
+                    .locate_resident_attachment_owner(at)),
+            EntityLookup::Found {
+                value: (_, true),
+                ..
+            }
+        )
     }
 
     /// Object ownership for persistence cleanup, never a level-query membership set.
