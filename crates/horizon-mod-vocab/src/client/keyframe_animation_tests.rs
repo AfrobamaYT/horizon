@@ -524,3 +524,25 @@ fn sampling_a_registered_segment_without_its_code_is_none() {
     let built_in = &typed_holder().bones[0].1[1];
     assert_eq!(built_in.sample(0.5, 1.0), Some([1.0, 0.0, 0.0]));
 }
+
+/// A holder crosses the wire with its types, and decoding refuses one whose `Registered` index
+/// its own list doesn't back, so no bare index crosses alone.
+#[test]
+fn a_holder_crosses_the_wire_only_with_the_types_its_indexes_name() {
+    use crate::wire::{Reader, WireError, Writer};
+    let decode = |holder: &AnimationHolder| {
+        let mut out = Writer::new();
+        out.put(holder);
+        assert_eq!(out.error(), None);
+        Reader::new(out.bytes()).take::<AnimationHolder>()
+    };
+    let holder = typed_holder();
+    assert_eq!(decode(&holder), Ok(holder.clone()));
+
+    let mut past = holder.clone();
+    past.bones[0].1[0].keyframes[1].interpolation = Interpolation::Registered(2);
+    assert!(matches!(decode(&past), Err(WireError::Invalid(_))));
+    let mut wrong_kind = holder;
+    wrong_kind.bones[0].1[0].target = AnimationTarget::Registered(1);
+    assert!(matches!(decode(&wrong_kind), Err(WireError::Invalid(_))));
+}

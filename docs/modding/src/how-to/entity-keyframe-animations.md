@@ -28,7 +28,8 @@ Put this file at `assets/demo/neoforge/animations/entity/arm/wave.json`. Its ani
 }
 ```
 
-`length` and `timestamp` are seconds. Keep keyframes in time order and use finite values.
+`length` and `timestamp` are seconds. Keep keyframes in time order. A number that isn't
+finite (as an f32), or a `length` of 0 or less, rejects the file with a named diagnostic.
 `loop` defaults to false. The built-in targets use vanilla's builder conventions:
 
 - `minecraft:position`: texels, with the JSON y value negated when loaded.

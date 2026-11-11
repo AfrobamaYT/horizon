@@ -170,6 +170,7 @@ impl RegisteredAnimationType {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: plain data a parser builds
 #[derive(horizon_mod_api_macros::Wire)]
+#[wire(via = AnimationHolderWire)]
 pub struct AnimationHolder {
     /// The animation's id (`mymod:golem/attack`), which bake errors name.
     pub id: Identifier,
@@ -183,6 +184,48 @@ pub struct AnimationHolder {
     /// point into. A registered target's values are as the file wrote them: its
     /// [`AnimationTypes::convert_target`] converts them at bake.
     pub types: Vec<RegisteredAnimationType>,
+}
+
+/// [`AnimationHolder`] as it crosses the wire: a decoded holder whose `Registered` index doesn't
+/// name a type of its kind in its own `types` is refused, so an index never arrives without its
+/// list.
+#[doc(hidden)]
+#[derive(horizon_mod_api_macros::Wire)]
+// exhaustive: the holder's wire form, field for field
+pub struct AnimationHolderWire {
+    id: Identifier,
+    length: f32,
+    looping: bool,
+    bones: Vec<(String, Vec<AnimationChannel>)>,
+    types: Vec<RegisteredAnimationType>,
+}
+
+impl From<&AnimationHolder> for AnimationHolderWire {
+    fn from(holder: &AnimationHolder) -> Self {
+        let holder = holder.clone();
+        Self {
+            id: holder.id,
+            length: holder.length,
+            looping: holder.looping,
+            bones: holder.bones,
+            types: holder.types,
+        }
+    }
+}
+
+impl TryFrom<AnimationHolderWire> for AnimationHolder {
+    type Error = AnimationError;
+    fn try_from(wire: AnimationHolderWire) -> Result<Self, AnimationError> {
+        let holder = Self {
+            id: wire.id,
+            length: wire.length,
+            looping: wire.looping,
+            bones: wire.bones,
+            types: wire.types,
+        };
+        holder.check_indexes()?;
+        Ok(holder)
+    }
 }
 
 /// What a mod's registered targets and interpolations do (the `AnimationTarget` and
@@ -381,8 +424,7 @@ impl AnimationHolder {
 /// interpolations: each channel holds the path to its part, so playing it walks no names.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: built by `AnimationHolder::bake` only; its fields are private
-#[derive(horizon_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
+// no wire: baked and played in the mod; a `Registered` index crosses only in its holder's types.
 pub struct KeyframeAnimation {
     pub(crate) length: f32,
     pub(crate) looping: bool,
@@ -450,7 +492,8 @@ impl KeyframeAnimation {
                     Some((types, ids)) => {
                         types.interpolate(ids[usize::from(index)].id(), k, prev, next, alpha, scale)
                     }
-                    // Without the code there is no registered segment: `bake` refuses one.
+                    // Without the code there is no registered segment: only `bake` builds a
+                    // `KeyframeAnimation`, and it refuses one.
                     None => k[prev].post.map(|v| v * scale),
                 }
             });
@@ -458,7 +501,8 @@ impl KeyframeAnimation {
                 AnimationTarget::Position => part.offset_pos(value),
                 AnimationTarget::Rotation => part.offset_rotation(value),
                 AnimationTarget::Scale => part.offset_scale(value),
-                // Without the code there is no registered channel: `bake` refuses one.
+                // Without the code there is no registered channel: only `bake` builds a
+                // `KeyframeAnimation`, and it refuses one.
                 AnimationTarget::Registered(index) => {
                     if let Some((types, ids)) = registered {
                         types.apply_target(ids[usize::from(index)].id(), part, value);

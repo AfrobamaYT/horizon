@@ -435,6 +435,13 @@ mod tests {
             Interpolation::Registered(1),
             "the second use shares the first's index"
         );
+        let huge = r#"{"length":1,"animations":[{"bone":"a","target":"animfile:pulse",
+            "keyframes":[{"timestamp":0,"target":[1e40,0,0],"interpolation":"linear"}]}]}"#;
+        assert_eq!(
+            read(huge).unwrap_err(),
+            "animations[0].keyframes[0]: `target` is not three finite numbers",
+            "a registered target's raw values are checked as the built-in ones are"
+        );
     }
 
     /// A target and an interpolation are separate kinds: an id registered only as a target fails

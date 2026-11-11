@@ -216,6 +216,24 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 receive_cancelled: true,
             }]
         }
+        fn register_json_animation_types(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+        ) {
+            assert!(
+                event.types.is_empty(),
+                "the guest starts from its own batch"
+            );
+            for (target, id) in [(true, "wire_test:pulse"), (false, "wire_test:step")] {
+                let id = mod_api::Identifier::parse(id).unwrap();
+                event.types.push(if target {
+                    mod_api::JsonAnimationType::Target(id)
+                } else {
+                    mod_api::JsonAnimationType::Interpolation(id)
+                });
+            }
+        }
         fn render_gui_pre(
             &self,
             _: &dyn mod_api::ClientHost,
@@ -693,6 +711,47 @@ fn wire_loopback_readonly_private_projection() {
         assert_eq!(lines[1].1, expected);
     }
 }
+/// An answered collect crosses the boundary as the guest's plain batch: the host names the guest
+/// mod on each entry it pushed, after any entries already there.
+#[test]
+fn wire_loopback_answered_collect_names_the_guest_mod() {
+    use mod_api::__private::game::RegistrationContextNew;
+    let mods = [mod_api::ModEntry::new(
+        "wire_test",
+        Box::new(WasmMod {
+            group: 0,
+            subscribed: &[Some(mod_api::HookId::RegisterJsonAnimationTypes)],
+            listeners: &[],
+            corrupt: false,
+        }),
+    )];
+    mod_api::testing::with_mods(Arc::from(mods), || {
+        let mut types = Vec::new();
+        mod_api::dispatch_register_json_animation_types(
+            &mod_api::RegistrationContext::new(),
+            &mut types,
+        );
+        let named: Vec<_> = types
+            .iter()
+            .map(|entry| (entry.answer.clone(), entry.mod_id))
+            .collect();
+        let id = |id: &str| mod_api::Identifier::parse(id).unwrap();
+        assert_eq!(
+            named,
+            [
+                (
+                    mod_api::JsonAnimationType::Target(id("wire_test:pulse")),
+                    "wire_test"
+                ),
+                (
+                    mod_api::JsonAnimationType::Interpolation(id("wire_test:step")),
+                    "wire_test"
+                ),
+            ]
+        );
+    });
+}
+
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     use mod_api::EffectTickChange;
