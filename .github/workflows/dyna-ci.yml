@@ -536,6 +536,19 @@ jobs:
         if: always()
         run: |
           date -u '+data-leg end utc=%Y-%m-%dT%H:%M:%SZ'
+          # Whole-job cgroup high-water: compilation, tests and file cache, not per-test RSS
+          # or an isolated test-execution peak. Fixed kernel files only; telemetry is best effort.
+          echo 'data-leg memory_scope=whole_job_cgroup_including_compilation_tests_file_cache'
+          for metric in memory.peak memory.max memory.swap.peak memory.swap.max; do
+            field="${metric//./_}_bytes"
+            value=unavailable
+            if IFS= read -r sample 2>/dev/null < "/sys/fs/cgroup/$metric"; then
+              if [[ "$sample" =~ ^[0-9]+$ || "$sample" == max ]]; then
+                value="$sample"
+              fi
+            fi
+            echo "data-leg $field=$value"
+          done
           sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
