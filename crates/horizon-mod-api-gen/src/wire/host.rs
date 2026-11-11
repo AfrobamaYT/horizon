@@ -704,7 +704,10 @@ pub fn generate_coverage(root: &std::path::Path) -> Result<String, String> {
 
 fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String> {
     let generated = crate::sources(root, crate::FillMode::Require)?;
-    let providers = crate::capability_providers::generate(root, &[])?.0;
+    let (providers, provider_sources) = crate::capability_providers::generate(root, &[])?;
+    for path in provider_sources {
+        crate::rerun_if_changed(&path.display());
+    }
     let included = [
         ("mod_api_generated.rs", generated.hooks.as_str()),
         ("mod_api_generated_host.rs", generated.host.as_str()),
@@ -798,6 +801,9 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
         .unwrap();
     }
     code.push_str("_ => None } } pub fn subscriptions_of(owner: &str, names: Vec<String>) -> &'static [Option<mod_api::HookId>] { names.into_iter().filter_map(|name| { let id = hook_id(&name); if id.is_none() { log::warn!(\"wasm {owner}: unknown hook {name}\"); } id.map(Some) }).collect::<Vec<_>>().leak() }\n");
+    for path in surface.types.index.read.take() {
+        crate::rerun_if_changed(&path.display());
+    }
     Ok((code, report))
 }
 
@@ -812,9 +818,9 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                *crate::CAPTURED_RERUNS.lock().unwrap() = Some(Vec::new());
+                crate::CAPTURED_RERUNS.set(Some(Vec::new()));
                 let result = super::generate_host(&root);
-                let captured = crate::CAPTURED_RERUNS.lock().unwrap().take().unwrap();
+                let captured = crate::CAPTURED_RERUNS.take().unwrap();
                 result.unwrap();
                 captured
             })
@@ -830,6 +836,8 @@ mod tests {
             "crates/horizon-mod-vocab/src/exports",
             "crates/horizon-mod-vocab/src/parts",
             "crates/horizon-mod-vocab/src/lib.rs",
+            "crates/horizon-mod-vocab/src/host/draw.rs",
+            "crates/horizon-mod-vocab/src/exports/generated_host.rs",
             "crates/horizon-client/src/game/native_hooks",
         ] {
             assert!(
