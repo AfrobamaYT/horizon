@@ -350,11 +350,14 @@ mod tests {
         let files = vec![
             (
                 "data/addon/example/spell/fire.json".to_owned(),
-                vec![br#"{"power": 7}"#.to_vec()],
+                vec![("pack".to_owned(), br#"{"power": 7}"#.to_vec())],
             ),
             (
                 "data/addon/example/spell/ice.json".to_owned(),
-                vec![br#"{"power": 4, "next": "addon:fire"}"#.to_vec()],
+                vec![(
+                    "pack".to_owned(),
+                    br#"{"power": 4, "next": "addon:fire"}"#.to_vec(),
+                )],
             ),
         ];
         let candidate =
@@ -372,7 +375,7 @@ mod tests {
                     std::slice::from_ref(&declaration),
                     &[(
                         "data/addon/example/spell/fire.json".to_owned(),
-                        vec![br#"{"power": 9}"#.to_vec()],
+                        vec![("pack".to_owned(), br#"{"power": 9}"#.to_vec())],
                     )],
                 )
                 .unwrap(),

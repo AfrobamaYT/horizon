@@ -361,17 +361,21 @@ impl Game<'_> {
         let packs: Vec<_> = std::iter::once(&stack.content)
             .chain(stack.enabled_packs())
             .collect();
-        let files: Vec<(String, Vec<Vec<u8>>)> =
+        let files: Vec<(String, Vec<(String, Vec<u8>)>)> =
             horizon_client::datapack::registry_files(&packs, &keys)
                 .into_iter()
                 .map(|(path, versions)| {
                     let versions = versions
                         .into_iter()
-                        .filter_map(|bytes| {
+                        .filter_map(|(pack, bytes)| {
+                            // Over the entry limit: the candidate refuses it, unparsed.
+                            if bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES {
+                                return Some((pack, bytes));
+                            }
                             let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes)
                             else {
-                                // Malformed: the decoder reports it, naming the file.
-                                return Some(bytes);
+                                // Malformed: the decoder reports it, naming the pack and file.
+                                return Some((pack, bytes));
                             };
                             if !conditions.allows(&json) {
                                 return None;
@@ -379,7 +383,7 @@ impl Game<'_> {
                             if let Some(object) = json.as_object_mut() {
                                 object.remove("neoforge:conditions");
                             }
-                            serde_json::to_vec(&json).ok()
+                            serde_json::to_vec(&json).ok().map(|bytes| (pack, bytes))
                         })
                         .collect();
                     (path, versions)
@@ -389,8 +393,8 @@ impl Game<'_> {
             .map(Some)
             .map_err(|error| {
                 format!(
-                    "datapack registry {} entry {} ({}): {:?}",
-                    error.registry, error.entry, error.file, error.reason
+                    "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                    error.registry, error.entry, error.pack, error.file, error.reason
                 )
                 .into()
             })
