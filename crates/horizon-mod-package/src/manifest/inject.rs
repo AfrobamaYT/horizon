@@ -99,25 +99,29 @@ pub(super) fn rows<'de, D: serde::Deserializer<'de>>(
 ) -> Result<Vec<Inject>, D::Error> {
     Vec::<toml::Table>::deserialize(deserializer)?
         .into_iter()
-        .map(|row| {
-            if let Some(kind) = row.get("kind") {
-                Kind::deserialize(kind.clone())?;
-            }
-            if let Some(access) = row.get("access") {
-                return Err(serde::de::Error::custom(
-                    if access.as_str() == Some("internals") {
-                        "E_INJECT_INVALID: field `access`: `internals` injections were removed: \
-                         use `[[native.mixin]]` in a native mod"
-                    } else {
-                        "E_INJECT_INVALID: field `access` was removed, an injection is always \
-                         through the API: remove this line"
-                    },
-                ));
-            }
-            row.try_into()
-        })
+        .map(row)
         .collect::<Result<_, toml::de::Error>>()
         .map_err(serde::de::Error::custom)
+}
+
+/// One `[[inject]]` row: the one place a row is read, so a removed kind or key gets its own
+/// refusal and never serde's "unknown field".
+pub(super) fn row(row: toml::Table) -> Result<Inject, toml::de::Error> {
+    if let Some(kind) = row.get("kind") {
+        Kind::deserialize(kind.clone())?;
+    }
+    if let Some(access) = row.get("access") {
+        return Err(serde::de::Error::custom(
+            if access.as_str() == Some("internals") {
+                "E_INJECT_INVALID: field `access`: `internals` injections were removed: \
+                 use `[[native.mixin]]` in a native mod"
+            } else {
+                "E_INJECT_INVALID: field `access` was removed, an injection is always \
+                 through the API: remove this line"
+            },
+        ));
+    }
+    row.try_into()
 }
 
 impl Kind {

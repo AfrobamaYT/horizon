@@ -276,7 +276,7 @@ impl Manifest {
                 && let Some(rows) = table.get("inject").and_then(toml::Value::as_array)
             {
                 for row in rows {
-                    if let Err(error) = row.clone().try_into::<inject::Inject>() {
+                    if let Some(Err(error)) = row.as_table().cloned().map(inject::row) {
                         let field = |key| row.get(key).and_then(toml::Value::as_str).unwrap_or("?");
                         let id = table.get("id").and_then(toml::Value::as_str).unwrap_or("?");
                         return format!(
