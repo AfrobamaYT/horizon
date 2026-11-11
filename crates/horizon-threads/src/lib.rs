@@ -481,9 +481,16 @@ pub fn catch_stop_signals() {}
 /// World generation, meshing and the tick allocate and free small blocks on
 /// every worker at once; the system heaps serialise them (Windows' heap was
 /// 16% of a chunk's generation time), mimalloc keeps a heap per thread.
+#[cfg(not(feature = "test-allocation-count"))]
 pub type Allocator = mimalloc::MiMalloc;
 /// The game's mimalloc allocator.
+#[cfg(not(feature = "test-allocation-count"))]
 pub const ALLOCATOR: Allocator = mimalloc::MiMalloc;
+
+#[cfg(feature = "test-allocation-count")]
+pub mod allocation_count;
+#[cfg(feature = "test-allocation-count")]
+pub use allocation_count::{ALLOCATOR, Allocator};
 
 /// The global allocator of a build with the `alloc-census` feature: live
 /// heap bytes by startup step and thread, for `horizon-ctl memory`.
