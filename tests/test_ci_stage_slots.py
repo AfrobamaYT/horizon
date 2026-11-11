@@ -30,7 +30,12 @@ class StageSlotTests(unittest.TestCase):
         shutil.rmtree(tree, ignore_errors=True)
         subprocess.run(["git", "clone", "--quiet", "--shared", str(ROOT), str(tree)], check=True)
         row = tree / "crates/horizon-mod-api-gen/slots/portizon.txt"
-        row.write_text(row.read_text().replace("88fb00429ac8116f", "0000000000000000"))
+        lines = row.read_text().splitlines()
+        farmland = next(i for i, line in enumerate(lines) if "::sense_secondary |" in line)
+        parts = lines[farmland].split("|")
+        parts[-1] = " 0000000000000000"
+        lines[farmland] = "|".join(parts)
+        row.write_text("\n".join(lines) + "\n")
         # Share only tool artifacts, not staged sources, with the positive proof.
         tools = tree / "target/slot-stage-check/tools"
         tools.parent.mkdir(parents=True)
