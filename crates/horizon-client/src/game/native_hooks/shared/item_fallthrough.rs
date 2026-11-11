@@ -1,6 +1,49 @@
 use super::*;
 
 impl Game<'_> {
+    /// Finish all useOn handlers, including placement, before entering Item.use.
+    pub(in crate::game) fn use_target_then_item(
+        &mut self,
+        hit: &crate::game::Hit,
+    ) -> horizon_client::Result<bool> {
+        self.guest_use = Some(crate::game::GuestUse::OnBlock(self.hand));
+        let result = self.use_hand(Some(hit));
+        self.guest_use = None;
+        if result? {
+            return Ok(true);
+        }
+        self.use_hand(None)
+    }
+
+    pub(in crate::game) fn use_item_fallthrough(
+        &mut self,
+        stack: &ItemStack,
+        on_block: bool,
+        mut claimed: bool,
+    ) -> Option<bool> {
+        if claimed {
+            self.swing_arm();
+            return Some(true);
+        }
+        if on_block {
+            return None;
+        }
+        if let Some(answer) = self.right_click_item(self.hand, stack) {
+            if matches!(
+                answer,
+                mod_api::InteractionResult::Success | mod_api::InteractionResult::SuccessServer
+            ) {
+                self.swing_arm();
+            }
+            return Some(answer.consumes_action());
+        }
+        self.use_item_in_hand(stack, &mut claimed);
+        if claimed {
+            self.swing_arm();
+        }
+        claimed.then_some(true)
+    }
+
     /// Item.use after the same hand's target passed, or for a server UseItem packet.
     pub(in crate::game) fn right_click_item(
         &mut self,

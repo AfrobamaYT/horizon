@@ -205,55 +205,7 @@ fn with_interaction_game(client: bool, test: impl FnOnce(&mut Game<'_>)) {
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
             test(game);
         } else {
-            game.lan_host(
-                LanSettings {
-                    port: 0,
-                    guest_commands: false,
-                    force_game_mode: false,
-                },
-                NetConfig {
-                    listen: false,
-                    announce: false,
-                    lod_distance: 0,
-                    ..NetConfig::lan(0, String::new(), 2)
-                },
-                HubConfig {
-                    default_game_mode: 1,
-                    guest_commands: false,
-                    force_game_mode: false,
-                    hardcore: false,
-                    view_distance: 2,
-                    simulation_distance: 2,
-                    dimension: game.dim.id().to_owned(),
-                    allow_flight: true,
-                    seed: 0,
-                    max_players: 2,
-                    integrated: true,
-                    levels: game.level_shapes,
-                },
-            )
-            .unwrap();
-            let (tx, _rx) = std::sync::mpsc::channel();
-            let mut guest = Guest::new(
-                Joined {
-                    conn: 12,
-                    uuid: 12,
-                    name: "interaction_guest".into(),
-                    properties: Vec::new(),
-                    info: ClientInformation::new(8),
-                    brand: String::new(),
-                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
-                    latency: Arc::new(AtomicI32::new(0)),
-                    address: "127.0.0.1:1".parse().unwrap(),
-                    expected: false,
-                },
-                12,
-                [0.5, 64.0, 3.5],
-                10,
-            );
-            guest.placed = true;
-            guest.game_mode = 1;
-            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            let _receiver = setup_interaction_guest(game);
             game.as_guest(12, |game| {
                 game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
                 test(game);
@@ -873,4 +825,59 @@ fn an_item_used_from_the_off_hand_reaches_the_use_hooks_on_the_server() {
             }
         });
     });
+}
+
+fn setup_interaction_guest(
+    game: &mut Game<'_>,
+) -> std::sync::mpsc::Receiver<horizon_client::lan::Out> {
+    game.lan_host(
+        LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        },
+        NetConfig {
+            listen: false,
+            announce: false,
+            lod_distance: 0,
+            ..NetConfig::lan(0, String::new(), 2)
+        },
+        HubConfig {
+            default_game_mode: 1,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 2,
+            simulation_distance: 2,
+            dimension: game.dim.id().to_owned(),
+            allow_flight: true,
+            seed: 0,
+            max_players: 2,
+            integrated: true,
+            levels: game.level_shapes,
+        },
+    )
+    .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut guest = Guest::new(
+        Joined {
+            conn: 12,
+            uuid: 12,
+            name: "interaction_guest".into(),
+            properties: Vec::new(),
+            info: ClientInformation::new(8),
+            brand: String::new(),
+            sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+            latency: Arc::new(AtomicI32::new(0)),
+            address: "127.0.0.1:1".parse().unwrap(),
+            expected: false,
+        },
+        12,
+        [0.5, 64.0, 3.5],
+        10,
+    );
+    guest.placed = true;
+    guest.game_mode = 1;
+    game.lan.as_mut().unwrap().hub.guests.push(guest);
+    rx
 }

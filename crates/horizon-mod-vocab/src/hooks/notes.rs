@@ -2855,7 +2855,7 @@ registration path.
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
   (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
   canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
-  success or FAIL prevents item fallback; the server fires this on the separate UseItem packet
+  success, block FAIL, or entity success prevents item fallback; the server fires this on the separate UseItem packet
   rather than on UseItemOn.
 
 - A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces

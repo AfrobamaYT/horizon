@@ -7146,6 +7146,11 @@ impl Game<'_> {
     /// One hand's turn in `startUseItem`: `useItemOn` the block aimed at,
     /// then `useItem`. Whether the click ends here (it acted or failed).
     fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
+        if self.guest_use.is_none()
+            && let Some(hit) = block_hit
+        {
+            return self.use_target_then_item(hit);
+        }
         self.use_failed = false;
         // isSecondaryUseActive with something in either hand keeps blocks
         // from reacting.
@@ -7546,18 +7551,8 @@ impl Game<'_> {
                 });
             }
         }
-        if !claimed && !on_block {
-            if let Some(answer) = self.right_click_item(self.hand, &stack) {
-                if matches!(answer, Answer::Success | Answer::SuccessServer) {
-                    self.swing_arm();
-                }
-                return Ok(answer.consumes_action());
-            }
-            self.use_item_in_hand(&stack, &mut claimed);
-        }
-        if claimed {
-            self.swing_arm();
-            return Ok(true);
+        if let Some(used) = self.use_item_fallthrough(&stack, on_block, claimed) {
+            return Ok(used);
         }
         // LeadItem.useOn follows the block and the item's override, including
         // when sneaking bypassed the block's useWithoutItem.

@@ -24,10 +24,16 @@ fn targeted_item_fallthrough_keeps_hand_and_fail_vetoes_item_action() {
                         air_answer: Some(Answer::Fail),
                         ..Controls::default()
                     };
-                    let apple = ItemStack::new("minecraft:apple", 1);
-                    assert_eq!(game.right_click_item(hand, &apple), Some(Answer::Fail));
+                    game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 1));
+                    game.offhand = Some(ItemStack::new("minecraft:apple", 1));
+                    if client {
+                        assert!(!game.remote_use_item(hand));
+                    } else {
+                        assert!(!game.with_hand(hand, |g| g.use_hand(None)).unwrap());
+                    }
                     assert_eq!(observer.0.lock().unwrap().steps, [Step::Air(side, hand)]);
                     assert!(game.using.is_none());
+                    assert!(!observer.0.lock().unwrap().steps.contains(&Step::ItemPart));
                 }
             });
         }
@@ -57,14 +63,13 @@ fn block_pass_falls_through_but_fail_and_success_stop_the_apple() {
             for (answer, expected) in [(Answer::Pass, 1), (Answer::Fail, 0), (Answer::Success, 0)] {
                 game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 1));
                 *observer.0.lock().unwrap() = Controls {
+                    hands: Some(Vec::new()),
                     block_answer: Some(Answer::Pass),
                     item_on_answer: Some(answer),
                     air_answer: Some(Answer::Fail),
                     ..Controls::default()
                 };
-                if !game.remote_use_block(Hand::Main) {
-                    game.remote_use_item(Hand::Main);
-                }
+                game.remote_use(mod_api::InteractionAttempt::Press);
                 let state = observer.0.lock().unwrap();
                 assert_eq!(
                     state
@@ -180,55 +185,7 @@ fn with_packet_game(test: impl FnOnce(&mut Game<'_>)) {
         game.world
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.lan_host(
-            LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            },
-            NetConfig {
-                listen: false,
-                announce: false,
-                lod_distance: 0,
-                ..NetConfig::lan(0, String::new(), 2)
-            },
-            HubConfig {
-                default_game_mode: 1,
-                guest_commands: false,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 2,
-                simulation_distance: 2,
-                dimension: game.dim.id().to_owned(),
-                allow_flight: true,
-                seed: 0,
-                max_players: 2,
-                integrated: true,
-                levels: game.level_shapes,
-            },
-        )
-        .unwrap();
-        let (tx, _rx) = std::sync::mpsc::channel();
-        let mut guest = Guest::new(
-            Joined {
-                conn: 12,
-                uuid: 12,
-                name: "interaction_guest".into(),
-                properties: Vec::new(),
-                info: ClientInformation::new(8),
-                brand: String::new(),
-                sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
-                latency: Arc::new(AtomicI32::new(0)),
-                address: "127.0.0.1:1".parse().unwrap(),
-                expected: false,
-            },
-            12,
-            [0.5, 64.0, 3.5],
-            10,
-        );
-        guest.placed = true;
-        guest.game_mode = 1;
-        game.lan.as_mut().unwrap().hub.guests.push(guest);
+        let _receiver = setup_interaction_guest(game);
         test(game);
     });
 }
@@ -314,4 +271,99 @@ fn server_use_item_packet_fires_once_after_use_item_on_with_block_crosshair() {
             assert_eq!(hands, [Hand::Main]);
         });
     });
+}
+
+fn assert_block_item_before_fallthrough(
+    item: &str,
+    block: &str,
+    expected: &str,
+    expected_events: usize,
+) {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "use_on_order",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(false, |game| {
+            game.set_mode_id(0);
+            let state = game.pack.assets.registry.default_state(block).unwrap();
+            let dirt = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:dirt")
+                .unwrap();
+            game.world.set(0, 63, 0, dirt).unwrap();
+            game.world.set(0, 64, 0, state).unwrap();
+            game.forced_hit = Some(hit());
+            game.inventory[game.selected] = Some(ItemStack::new(item, 2));
+            *observer.0.lock().unwrap() = Controls {
+                air_answer: Some(Answer::Fail),
+                ..Controls::default()
+            };
+            let used = game.use_hand(Some(&hit())).unwrap();
+            assert_eq!(used, expected_events == 0);
+            let y = if item == "minecraft:stone" { 65 } else { 64 };
+            assert_eq!(&*game.block_name([0, y, 0]), expected);
+            if item == "minecraft:bone_meal" || item == "minecraft:stone" {
+                assert_eq!(game.held().unwrap().count, 1);
+            }
+            let state = observer.0.lock().unwrap();
+            assert_eq!(
+                state
+                    .steps
+                    .iter()
+                    .filter(|s| matches!(s, Step::Air(_, _)))
+                    .count(),
+                expected_events
+            );
+        });
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn bone_meal_grows_grass_before_item_fallthrough() {
+    assert_block_item_before_fallthrough(
+        "minecraft:bone_meal",
+        "minecraft:short_grass",
+        "minecraft:tall_grass",
+        0,
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn axe_strips_oak_log_before_item_fallthrough() {
+    assert_block_item_before_fallthrough(
+        "minecraft:iron_axe",
+        "minecraft:oak_log",
+        "minecraft:stripped_oak_log",
+        0,
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn stone_places_before_item_fallthrough() {
+    assert_block_item_before_fallthrough(
+        "minecraft:stone",
+        "minecraft:stone",
+        "minecraft:stone",
+        0,
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn apple_on_stone_passes_to_item_fallthrough_once() {
+    assert_block_item_before_fallthrough(
+        "minecraft:apple",
+        "minecraft:stone",
+        "minecraft:stone",
+        1,
+    );
 }
