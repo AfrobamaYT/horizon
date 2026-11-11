@@ -423,17 +423,6 @@ impl syn::parse::Parse for IfInstalled {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn verbatim_items_are_uninspectable() {
-        let item = ImplItem::Verbatim(quote!(future syntax));
-        assert!(uninspectable(&item));
-    }
-}
-
 /// Marks a function below the game crate as accepting native function replacements.
 /// Game functions need no marker. This has no effect on a plain build: the stager
 /// rewrites the function only in its staged copy. Use on free functions or impl methods,
@@ -459,4 +448,15 @@ pub fn replaceable(args: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
     item
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_items_are_uninspectable() {
+        let item = ImplItem::Verbatim(quote!(future syntax));
+        assert!(uninspectable(&item));
+    }
 }
