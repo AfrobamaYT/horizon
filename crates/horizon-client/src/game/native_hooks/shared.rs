@@ -1,5 +1,7 @@
 #[path = "shared/book_screen.rs"]
 mod book_screen;
+#[path = "shared/item_fallthrough.rs"]
+mod item_fallthrough;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -96,7 +98,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
-        self.apply_screen(screen, owner);
+        self.apply_screen_with_mod_book(screen, owner);
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
@@ -2662,48 +2664,6 @@ impl Game<'_> {
         let mut answer = None;
         self.native_on_item_use_first(&snapshot, &click, &mut answer);
         answer.filter(|answer| *answer != mod_api::InteractionResult::Pass)
-    }
-    /// Air use only: a passing block or entity keeps its target, rather than
-    /// becoming a `RightClickItem` interaction. `block_aimed` is the click's
-    /// own decided block target (the one `use_item_on_block` was asked about),
-    /// not a fresh ray cast.
-    pub(super) fn right_click_item(
-        &mut self,
-        hand: Hand,
-        stack: &ItemStack,
-        block_aimed: bool,
-    ) -> Option<mod_api::InteractionResult> {
-        if !mod_api::__private::listened(mod_api::HookId::RightClickItem)
-            || self.entity_targeted()
-            || block_aimed
-        {
-            return None;
-        }
-        let pos = self
-            .target_position(super::commands::Target::Player)?
-            .map(|v| v.floor() as i32);
-        let (player, player_entity_id) = self.native_clicker();
-        let snapshot = stack.try_into_api().ok()?;
-        let click = ItemClick::from(mod_api::__private::built::ItemClick {
-            side: if self.remote.is_some() {
-                LogicalSide::Client
-            } else {
-                LogicalSide::Server
-            },
-            dimension: self.dim.level(),
-            pos,
-            hand,
-            stack: &snapshot,
-            player,
-            player_entity_id,
-        });
-        let instant = self.use_duration(stack) <= 0;
-        let (mut result, mut canceled) = (mod_api::InteractionResult::Pass, false);
-        self.native_right_click_item(&click, &mut result, &mut canceled);
-        if canceled && instant && result.consumes_action() {
-            self.with_hand(hand, |game| game.apply_after_use_components(stack));
-        }
-        canceled.then_some(result)
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).

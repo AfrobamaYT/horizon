@@ -35,6 +35,7 @@ pub mod dolphin;
 pub mod doors;
 pub mod drops;
 pub mod enderman;
+pub mod entity_sounds;
 pub mod equine;
 pub mod equip;
 pub mod farm;
@@ -502,9 +503,8 @@ pub struct MobType {
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
-    /// Ambient, hurt and death sound events (without the namespace).
     pub sounds: [&'static str; 3],
-    pub step_sound: Option<&'static str>,
+    pub sound_overrides: entity_sounds::Sounds,
     /// Animal.isFood items (resolved from the item tag).
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
@@ -841,7 +841,7 @@ impl MobTypes {
                     brain: def.brain(),
                     anim: def.anim,
                     sounds: def.sounds,
-                    step_sound: def.step_sound,
+                    sound_overrides: entity_sounds::Sounds::load(&id, t)?,
                     food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
@@ -2361,11 +2361,11 @@ pub enum MobEvent {
         target: Who,
     },
     PiglinAlertTarget(undead::PiglinAlert),
-    /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
-    /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
+    /// `HoglinAi.broadcastAttackTarget`: receiver and source player connection.
     HoglinAttackTarget {
         mob: u32,
         target: Who,
+        player: Option<u32>,
     },
     /// `StartHuntingHoglin` for a nearby adult piglin: it takes the hoglin as
     /// its anger target (when it has none) and starts its `HUNTED_RECENTLY` wait.
@@ -4636,7 +4636,7 @@ impl Mob {
             let sound = if absorbed {
                 "item.wolf_armor.damage"
             } else {
-                ai::voice_sounds(self)[if dead { 2 } else { 1 }]
+                entity_sounds::voices(self)[if dead { 2 } else { 1 }]
             };
             if !dead {
                 self.ambient_timer = -self.ambient_interval();
@@ -5751,7 +5751,7 @@ pub(crate) mod sensor_scan_tests {
             brain: Brain::Passive,
             anim: Anim::Rabbit,
             sounds: [""; 3],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Arc::default(),
             tempt: Arc::default(),
             passenger_attachments: Vec::new(),

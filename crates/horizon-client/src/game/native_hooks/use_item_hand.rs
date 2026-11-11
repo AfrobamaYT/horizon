@@ -6,7 +6,7 @@ impl Game<'_> {
         hand: Hand,
         stack: &ItemStack,
     ) -> Option<bool> {
-        if let Some(answer) = self.right_click_item(hand, stack, self.pick().is_some()) {
+        if let Some(answer) = self.right_click_item(hand, stack) {
             let success = answer == mod_api::InteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);
@@ -14,23 +14,6 @@ impl Game<'_> {
             return Some(success);
         }
         self.with_hand(hand, |g| g.use_item_in_hand(stack))
-    }
-
-    pub(in crate::game) fn server_item_interaction(
-        &mut self,
-        stack: &ItemStack,
-        aimed: bool,
-    ) -> Option<bool> {
-        if let Some(answer) = self.right_click_item(self.hand, stack, aimed) {
-            if matches!(
-                answer,
-                mod_api::InteractionResult::Success | mod_api::InteractionResult::SuccessServer
-            ) {
-                self.swing_arm();
-            }
-            return Some(answer.consumes_action());
-        }
-        self.use_item_in_hand(stack)
     }
 
     /// Dispatch the item Part and apply the result on this logical side.
