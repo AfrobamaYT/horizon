@@ -14,6 +14,7 @@ fn main() {
     }
     collect(root.join("packets"), &mut paths);
     for path in paths {
+        if path.file_name().unwrap().to_string_lossy().contains("tests") || path.file_name().unwrap() == "registry.rs" { continue; }
         let original = fs::read_to_string(&path).unwrap();
         let original = original.split(MARKER).next().unwrap().trim_end();
         let file = syn::parse_file(original).unwrap();
