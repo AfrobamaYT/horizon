@@ -1199,6 +1199,13 @@ mod tests {
         );
         check(Tuple(7), &[7, 0, 0, 0]);
         check(Unit, &[]);
+        // Independent FNV-1a fixture: enum shape, Plain seed, First then Second.
+        // Explicit discriminants do not replace declaration-order wire tags.
+        assert_eq!(Plain::layout(&mut vec![]), 0xc2ea_ba70_1b5e_e4a0);
+        let mut visiting = vec![std::any::type_name::<Plain>()];
+        assert_eq!(Plain::layout(&mut visiting), 0x1923_c164_45af_9a57);
+        assert_eq!(visiting, [std::any::type_name::<Plain>()]);
+        check(Plain::First, &[0, 0, 0, 0]);
         check(Plain::Second, &[1, 0, 0, 0]);
         check(Payload::Tuple(5), &[1, 0, 0, 0, 5]);
         check(Payload::Named { value: 7 }, &[2, 0, 0, 0, 7, 0, 0, 0]);
