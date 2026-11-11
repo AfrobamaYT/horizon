@@ -10044,6 +10044,8 @@ impl Game<'_> {
         }
         // ItemStack.finishUsingItem's applyAfterUseComponentSideEffects.
         self.apply_use_cooldown(&stack);
+        // LivingEntityUseItemEvent.Finish fires here too.
+        self.remote_use_item_finished(slot, &stack);
     }
     /// MouseHandler updates KeyMapping; handleKeybinds sends packets on a tick.
     pub(super) fn remote_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {

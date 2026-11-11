@@ -224,6 +224,24 @@ impl Game<'_> {
             *self.held_mut() = result.filter(|s| s.count > 0);
         }
     }
+    /// `LivingEntityUseItemEvent.Finish` on a server's client, whose
+    /// `completeUsingItem` (`handleEntityEvent(9)`) ran for `stack` in `slot`:
+    /// the result a mod sees is the client's prediction, `stack` less one
+    /// unless creative (the use remainder comes with the server's inventory
+    /// update). A mod's replacement is put in the slot until that update.
+    pub(super) fn remote_use_item_finished(&mut self, slot: usize, stack: &ItemStack) {
+        let mut predicted = stack.clone();
+        if !self.creative {
+            predicted.count = predicted.count.saturating_sub(1);
+        }
+        let predicted = Some(predicted).filter(|s| s.count > 0);
+        let mut result = predicted.clone();
+        let hand = hand_of(Some((slot, 0))).unwrap_or(self.hand);
+        self.native_living_entity_use_item_finish(stack, None, hand, 0, &mut result);
+        if result != predicted {
+            *self.stack_in_mut(slot) = result.filter(|s| s.count > 0);
+        }
+    }
     /// `LivingEntityUseItemEvent.Tick` for `stack` in use `ticks` so far, as
     /// `updatingUsingItem` starts: a mod may change the ticks left, which
     /// moves the end. False when it ran the use out (`tick_ran_out`): the

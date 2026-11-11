@@ -273,7 +273,7 @@ fn item_finish_can_clear_vanilla_result() {
     install(mods.clone());
     let mut result = Some(ItemStack::default());
     dispatch_living_entity_use_item_finish(
-        &mut TestHost,
+        HostSide::Server(&mut TestHost),
         &ItemStack::default(),
         None,
         Hand::Main,

@@ -22,8 +22,9 @@ use horizon_protocol::{connection::Pipe, packets::configuration::ClientInformati
 use mod_api::InteractionResult as Answer;
 use mod_api::{
     self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
-    LogicalSide, Registrar, RightClickBlockEvent, RightClickItemEvent, ServerHost, TriState,
-    UseItemEvent, UseItemOnBlockEvent, UseItemOnEvent, UseOnEvent, UsePhase,
+    LivingEntityUseItemFinishEvent, LogicalSide, Registrar, RightClickBlockEvent,
+    RightClickItemEvent, ServerHost, TriState, UseItemEvent, UseItemOnBlockEvent, UseItemOnEvent,
+    UseOnEvent, UsePhase,
 };
 use std::sync::{
     Arc, Mutex,
@@ -58,6 +59,10 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    /// Each `living_entity_use_item_finish`: side, hand and the count of the result it arrived with.
+    finishes: Vec<(LogicalSide, Hand, Option<u32>)>,
+    /// What a finish listener does to the result when set: `None` clears it, `Some(n)` sets its count.
+    finish_replacement: Option<Option<u32>>,
 }
 
 #[derive(Clone, Default)]
@@ -87,6 +92,27 @@ impl Hooks for Observer {
         *event.use_block = state.use_block;
         *event.use_item = state.use_item;
         Flow::Continue
+    }
+    fn living_entity_use_item_finish(
+        &self,
+        host: HostSide<'_>,
+        event: &mut LivingEntityUseItemFinishEvent<'_>,
+    ) {
+        let mut state = self.0.lock().unwrap();
+        state.finishes.push((
+            side(&host),
+            event.hand,
+            event.result.as_ref().map(|r| r.count()),
+        ));
+        match state.finish_replacement {
+            Some(None) => *event.result = None,
+            Some(Some(count)) => {
+                if let Some(result) = event.result.as_mut() {
+                    result.set_count(count).unwrap();
+                }
+            }
+            None => {}
+        }
     }
     fn use_item_on_block(&self, host: HostSide<'_>, event: &mut UseItemOnBlockEvent<'_>) -> Flow {
         assert_eq!(side(&host), event.click.side);
@@ -889,4 +915,54 @@ fn setup_interaction_guest(
     guest.game_mode = 1;
     game.lan.as_mut().unwrap().hub.guests.push(guest);
     rx
+}
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_server_client_fires_use_item_finish_when_the_server_completes_the_use() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "finish_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            let apples = ItemStack::new("minecraft:apple", 3);
+            for (creative, replacement, held_after) in [
+                (false, None, Some(3)),
+                (true, None, Some(3)),
+                (false, Some(Some(7)), Some(7)),
+                (false, Some(None), None),
+            ] {
+                game.creative = creative;
+                game.inventory[game.selected] = Some(apples.clone());
+                game.using = Some((game.selected, 5));
+                *observer.0.lock().unwrap() = Controls {
+                    finish_replacement: replacement,
+                    ..Controls::default()
+                };
+                game.remote_complete_using();
+                let seen = observer.0.lock().unwrap().finishes.clone();
+                // The listener sees the client's prediction: one eaten unless creative.
+                let predicted = Some(if creative { 3 } else { 2 });
+                assert_eq!(seen, [(LogicalSide::Client, Hand::Main, predicted)]);
+                // An unchanged result leaves the hand to the server's update; a
+                // replacement is kept until then.
+                let held = game.inventory[game.selected].as_ref().map(|s| s.count);
+                assert_eq!(held, held_after);
+            }
+            // An off-hand use reports the off hand.
+            game.creative = false;
+            game.offhand = Some(ItemStack::new("minecraft:apple", 1));
+            game.using = Some((super::super::shield::OFFHAND_SLOT, 5));
+            *observer.0.lock().unwrap() = Controls::default();
+            game.remote_complete_using();
+            assert_eq!(
+                observer.0.lock().unwrap().finishes,
+                [(LogicalSide::Client, Hand::Off, None)]
+            );
+        });
+    });
 }
