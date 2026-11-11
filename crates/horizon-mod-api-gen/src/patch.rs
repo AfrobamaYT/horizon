@@ -1003,10 +1003,12 @@ fn mirror(
         })
         .collect();
     let root = !path.contains("::");
+    let only_public =
+        root || (path.split("::").next() != Some("horizon_client") && tree.copies.is_empty());
     let explicit = defined(&items)
         .into_iter()
         .filter(|(ident, _)| !reserved.contains(&ident.to_string()))
-        .filter(|(ident, _)| !root || public.contains(&ident.to_string()))
+        .filter(|(ident, _)| !only_public || public.contains(&ident.to_string()))
         .map(|(ident, cfg)| quote!(#(#cfg)* pub use #original::#ident;));
     let uses = uses(&items).into_iter().filter(|item| {
         // A `use` naming a child mirror or a copy would collide with it.
@@ -1380,6 +1382,61 @@ mod tests {
             .collect();
         assert_eq!(imports, ["std :: sync :: Arc", "std :: collections :: *"]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn lower_ancestors_do_not_export_unwidened_private_items() {
+        let mut source = Source {
+            root: PathBuf::new(),
+            loaded: BTreeSet::new(),
+            files: BTreeMap::new(),
+            parsed: BTreeMap::from([(
+                "lower::ancestor".to_owned(),
+                Module {
+                    items: syn::parse_file("fn private_helper() {} pub fn public_helper() {}")
+                        .unwrap()
+                        .items,
+                },
+            )]),
+            local_macros: BTreeSet::new(),
+        };
+        let ancestor = mirror(
+            &mut source,
+            "lower::ancestor",
+            &Tree::default(),
+            false,
+            None,
+        )
+        .unwrap()
+        .to_string();
+        assert!(ancestor.contains("public_helper"));
+        assert!(!ancestor.contains("private_helper"));
+        let mut target = Tree::default();
+        target.copies.push(quote!(
+            pub fn copy() {}
+        ));
+        let target = mirror(&mut source, "lower::ancestor", &target, false, None)
+            .unwrap()
+            .to_string();
+        assert!(target.contains("private_helper"));
+        source.parsed.insert(
+            "horizon_client::game".to_owned(),
+            Module {
+                items: syn::parse_file("fn game_helper() {}").unwrap().items,
+            },
+        );
+        assert!(
+            mirror(
+                &mut source,
+                "horizon_client::game",
+                &Tree::default(),
+                false,
+                None
+            )
+            .unwrap()
+            .to_string()
+            .contains("game_helper")
+        );
     }
 
     #[test]
