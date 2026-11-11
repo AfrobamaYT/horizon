@@ -14,8 +14,8 @@ pub trait Hooks {
     /// Server-side (the single player's integrated server included).
     #[notes = r##"## Mod mismatch
 
-A world records the code mods it was saved with in `level.dat`, under
-`Data.fml.LoadingModList`, the list NeoForge keeps: one `{ModId, ModVersion}`
+A world records the code mods it was saved with at the root of `level.dat`, beside `Data`, under
+`fml.LoadingModList`, the list NeoForge keeps: one `{ModId, ModVersion}`
 compound per loaded mod, in load order, rewritten on every save of the world.
 The version is the mod's `horizon-mod.toml` `version`, or `""` when the game
 doesn't know it. A world without the list (vanilla, or saved before Horizon
