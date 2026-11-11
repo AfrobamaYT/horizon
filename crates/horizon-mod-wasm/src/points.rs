@@ -76,8 +76,7 @@ impl Endpoint {
     }
 }
 
-/// Check engine subscriptions completely before registering in the host's list. Mod-point
-/// subscriptions are registered inside their dependency group, not forwarded through the host.
+/// Check engine subscriptions completely before registering in the host's list.
 pub(crate) fn listen(manifest: &Manifest, module: &WasmMod) -> Result<(), Refusal> {
     listen_checked(manifest, module).map_err(Refusal::Runtime)
 }
