@@ -41,9 +41,7 @@ impl Game<'_> {
             .dropped
             .iter()
             .filter(|d| {
-                d.pickup_delay == 0
-                    && d.target.is_none_or(|t| t == uuid)
-                    && (d.position.x - position[0]).abs() < 1.5
+                (d.position.x - position[0]).abs() < 1.5
                     && (d.position.z - position[2]).abs() < 1.5
                     && d.position.y > position[1] - 0.6
                     && d.position.y < position[1] + 2.4
@@ -56,13 +54,15 @@ impl Game<'_> {
                 continue;
             };
             let stack = item.stack.clone();
-            let refused = self.as_guest(conn, |g| g.native_pickup_refused(&stack)) == Some(true);
+            let answer = self
+                .as_guest(conn, |g| g.native_pickup_answer(&stack))
+                .unwrap_or_default();
             // The hook can remove or change any item entity.
             let Some(i) = self.dropped.iter().position(|d| d.id == item_id) else {
                 continue;
             };
-            if refused {
-                self.dropped[i].pickup_delay = 10;
+            let d = &mut self.dropped[i];
+            if !Self::pickup_decision(&mut d.pickup_delay, d.target, uuid, answer) {
                 continue;
             }
             let stack = self.dropped[i].stack.clone();

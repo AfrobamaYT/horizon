@@ -28,12 +28,10 @@ impl Hooks for Pickups {
     ) {
         self.1.lock().unwrap().push("criterion");
     }
-    fn item_picked_up(&self, _: &mut dyn ServerHost, event: &mut ItemPickedUpEvent<'_>) -> Flow {
+    fn item_picked_up(&self, _: &mut dyn ServerHost, event: &mut ItemPickedUpEvent<'_>) {
         self.0.lock().unwrap().push(event.count);
         if event.count == 2 {
-            Flow::Cancel
-        } else {
-            Flow::Continue
+            *event.can_pickup = mod_api::TriState::False;
         }
     }
 }

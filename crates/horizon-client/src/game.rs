@@ -5295,12 +5295,8 @@ impl Game<'_> {
                 && b.max_position().y > min[1]
                 && b.min_position().z < max[2]
                 && b.max_position().z > min[2];
-            // ItemEntity.playerTouch: no pickup delay, and the target (if any) is this player.
-            if touching && item.pickup_delay == 0 && item.target.is_none_or(|t| t == own) {
-                if game.native_pickup_refused(&item.stack) {
-                    item.pickup_delay = 10;
-                    return false;
-                }
+            // ItemEntity.playerTouch: `item_picked_up`, then vanilla's delay and target rule.
+            if touching && game.native_pickup_allowed(item, own) {
                 let before = item.stack.count;
                 let kind = item.stack.item.clone();
                 let thrower = item.thrower;
