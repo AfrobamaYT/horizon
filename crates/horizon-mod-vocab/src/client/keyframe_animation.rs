@@ -190,7 +190,7 @@ pub struct AnimationHolder {
 /// refuses a holder whose `Registered` index doesn't name a type of its kind in its own `types`,
 /// so an index never crosses without its list.
 #[derive(horizon_mod_api_macros::Wire)]
-pub(crate) struct AnimationHolderWire {
+struct AnimationHolderWire {
     id: Identifier,
     length: f32,
     looping: bool,
@@ -345,7 +345,7 @@ pub trait AnimationTypes {
 /// Why an animation can't be baked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(horizon_mod_api_macros::Wire)]
+// no wire: `bake` returns it to the mod that bakes; it names an index without its list.
 pub enum AnimationError {
     /// It names registered targets or interpolations: bake it with
     /// [`AnimationHolder::bake_with`] and the code that plays them.

@@ -538,6 +538,24 @@ fn a_holder_crosses_the_wire_only_with_the_types_its_indexes_name() {
     };
     let holder = typed_holder();
     assert_eq!(decode(&holder), Ok(holder.clone()));
+    // Every target and interpolation, and a keyframe arriving and leaving at different values,
+    // come back as they went.
+    let mut every = holder.clone();
+    every.bones[0].1.extend(
+        [AnimationTarget::Position, AnimationTarget::Scale].map(|target| AnimationChannel {
+            target,
+            keyframes: vec![
+                Keyframe {
+                    time: 0.25,
+                    pre: [1.0, 2.0, 3.0],
+                    post: [4.0, 5.0, 6.0],
+                    interpolation: Interpolation::CatmullRom,
+                },
+                key(0.5, [7.0; 3], Interpolation::Linear),
+            ],
+        }),
+    );
+    assert_eq!(decode(&every), Ok(every.clone()));
 
     let mut past = holder.clone();
     past.bones[0].1[0].keyframes[1].interpolation = Interpolation::Registered(2);
