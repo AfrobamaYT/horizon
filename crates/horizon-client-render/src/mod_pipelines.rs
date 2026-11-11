@@ -236,6 +236,12 @@ pub fn compose(text: &str) -> Result<String, String> {
             .map(|range| range.start);
         located(at, e.message().to_owned())
     })?;
+    for (_, function) in module.functions.iter() {
+        if function.expressions.iter().any(|(_, expression)| matches!(expression,
+            naga::Expression::GlobalVariable(handle) if module.global_variables[*handle].name.as_deref() == Some("horizon_pipeline_view"))) {
+            return Err("horizon_pipeline_view is vertex-only".into());
+        }
+    }
     signature(&module)?;
     if !module.entry_points.is_empty() {
         return Err("it declares an entry point; the game supplies both stages".into());
@@ -301,6 +307,11 @@ fn signature(module: &naga::Module) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fragment_cannot_read_vertex_uniform() {
+        assert!(compose("fn pipeline_fragment(input: PipelineInput) -> vec4<f32> { return horizon_pipeline_view * input.color; }").unwrap_err().contains("horizon_pipeline_view"));
+    }
 
     const GLOW: &str = "\
 fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {

@@ -137,7 +137,8 @@ impl ModPipelines {
     }
 
     /// One load's pipeline: its checked shader with the fixed state it registered.
-    fn pipeline(&self, device: &wgpu::Device, built: &Built) -> wgpu::RenderPipeline {
+    fn pipeline(&self, device: &wgpu::Device, built: &Built) -> Option<wgpu::RenderPipeline> {
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Mod pipeline"),
             source: wgpu::ShaderSource::Wgsl(built.shader.as_str().into()),
@@ -160,7 +161,7 @@ impl ModPipelines {
             },
             _ => wgpu::BlendState::ALPHA_BLENDING,
         };
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Mod pipeline"),
             layout: Some(&self.layout),
             vertex: wgpu::VertexState {
@@ -203,7 +204,13 @@ impl ModPipelines {
             }),
             multiview_mask: None,
             cache: None,
-        })
+        });
+        if let Some(error) = pollster::block_on(scope.pop()) {
+            log::warn!("Mod render pipeline invalid: {error}");
+            None
+        } else {
+            Some(pipeline)
+        }
     }
 
     /// Builds the pipelines of a load this renderer has not built yet, then uploads the frame's
@@ -226,7 +233,7 @@ impl ModPipelines {
             self.pipelines = set
                 .built()
                 .iter()
-                .map(|built| built.as_ref().map(|built| self.pipeline(device, built)))
+                .map(|built| built.as_ref().and_then(|built| self.pipeline(device, built)))
                 .collect();
         }
         let mut next = 0;
