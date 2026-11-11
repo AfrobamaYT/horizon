@@ -120,11 +120,13 @@ impl mod_api::BlockEntityPart for Node {
 // registrar.block_entity_part(&node_type, Node)?;
 ```
 
-`event.pos` is where it stands and `event.entity` its data as the chunk was saved. The chunk was saved
-before the call, so a change made in it is not kept; on a server the chunk may already have left the
-level, so its handle's reads find nothing there. It is not called when the world closes, nor on a client
-when its whole level goes, and never for a vanilla block entity. The chunk-wide notice is still
-`native_chunk_unload`, told after the chunk's block entities ([hook notes](../reference/hook-notes.md#when-a-block-entitys-chunk-unloads)).
+`event.pos` is where it stands and `event.entity` its data at the call: on a server what the chunk was
+just saved with, on a client its copy as the server last sent it. On a server the chunk is saved before
+the call, so a change made in it is not kept, and the chunk may already have left the level, so its
+handle's reads find nothing there. It is not called when the world closes, nor on a client when its whole
+level goes, and never for a vanilla block entity. The chunk-wide notice is still `native_chunk_unload`, a
+server hook told after the chunk's block entities; a client is told of the block entities alone
+([hook notes](../reference/hook-notes.md#when-a-block-entitys-chunk-unloads)).
 
 `player.open_menu(host, entity)` also returns `Result<bool, BlockEntityError>`:
 `Ok(true)` means opened, `Ok(false)` means a non-provider, cancelled open or
