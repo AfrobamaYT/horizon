@@ -36,7 +36,10 @@ fn main() {
             continue;
         }
         let original = fs::read_to_string(&path).unwrap();
-        let original = original.split(MARKER).next().unwrap().trim_end();
+        let original = if let Some((before, after)) = original.split_once(MARKER) {
+            format!("{}{}", before, after.split_once("// End generated retained traversals.").map_or("", |(_,tail)| tail))
+        } else { original };
+        let original = original.trim_end();
         let file = syn::parse_file(original).unwrap();
         let mut generated = Vec::new();
         for item in file.items {
@@ -61,10 +64,8 @@ fn main() {
             };
             generated.push(quote! { impl crate::retained::OwnedHeap for #name { fn owned_heap_bytes(&self) -> usize { #arms } } });
         }
-        fs::write(
-            path,
-            format!("{original}\n\n{MARKER}\n{}\n", quote! { #(#generated)* }),
-        )
-        .unwrap();
+        let at = original.find("\n#[cfg(test)]").unwrap_or(original.len());
+        let (before, after) = original.split_at(at);
+        fs::write(path, format!("{before}\n\n{MARKER}\n{}\n// End generated retained traversals.\n{after}\n", quote! { #(#generated)* })).unwrap();
     }
 }
