@@ -381,6 +381,53 @@ mod tests {
     /// already hold, with no engine type leaking. Red if the supertrait
     /// wiring is lost: `declare_general_entity` would not resolve on
     /// `dyn Registrar`.
+    /// Two mods may own one namespace (a manifest's `namespaces`), but their
+    /// registrations run against the one registrar `register_all` drives
+    /// (`parts/shared.rs`), so the second mod's declaration of the same key
+    /// is a `Duplicate` at registration, with a refusal naming it — never a
+    /// panic in the game thread at freeze. Red without the duplicate check:
+    /// the second declaration would stand and the frozen registry would hit
+    /// the unreachable.
+    #[test]
+    pub(crate) fn general_entity_types_two_mods_one_key_refuse_the_second() {
+        use crate::world::phase::{
+            PackageInfo, PackageKind, with_test_package_inventory,
+        };
+        let packages = vec![
+            PackageInfo::new(
+                "amod".to_owned(),
+                "1".to_owned(),
+                PackageKind::Code,
+                crate::Side::Both,
+                vec!["shared".to_owned()],
+                vec![],
+            ),
+            PackageInfo::new(
+                "bmod".to_owned(),
+                "1".to_owned(),
+                PackageKind::Code,
+                crate::Side::Both,
+                vec!["shared".to_owned()],
+                vec![],
+            ),
+        ];
+        let _scope = PhaseOwner::scope(ModPhase::Registration);
+        with_test_package_inventory(packages, || {
+            let mut registrar = PartRegistrar::new("amod");
+            declare(&mut registrar, "shared:x", 0.8, 1.9, 8, 3, &[]).unwrap();
+            // What `register_all` does between mods: the same registrar, the
+            // next mod's id.
+            registrar.mod_id = "bmod";
+            assert_eq!(
+                declare(&mut registrar, "shared:x", 0.6, 1.2, 4, 2, &[]),
+                Err(Error::Duplicate)
+            );
+            assert_eq!(registrar.general_entity_types.len(), 1);
+            assert_eq!(registrar.general_entity_types[0].mod_id, "amod");
+            assert_eq!(registrar.refused.len(), 1);
+        });
+    }
+
     #[test]
     pub(crate) fn declare_general_entity_reaches_mods_through_dyn_registrar() {
         let _scope = PhaseOwner::scope(ModPhase::Registration);

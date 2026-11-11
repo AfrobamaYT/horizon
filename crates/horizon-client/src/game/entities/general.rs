@@ -272,7 +272,14 @@ impl GeneralTypeCatalog {
 pub fn general_type_catalog() -> &'static GeneralTypeCatalog {
     static CATALOG: LazyLock<GeneralTypeCatalog> = LazyLock::new(|| {
         GeneralTypeCatalog::freeze(mod_api::__private::general_entity_type_declarations())
-            .unwrap_or_else(|duplicate| panic!("frozen general entity type registry: {duplicate}"))
+            .unwrap_or_else(|duplicate| {
+                // Unreachable: a duplicate key was already refused at
+                // registration — every mod declares through the one
+                // registrar `register_all` runs (`parts/shared.rs`), so the
+                // second mod's `declare_general_entity` sees the first's
+                // key and returns `Duplicate`, never reaching here.
+                unreachable!("duplicate general entity type at freeze: {duplicate}")
+            })
     });
     &CATALOG
 }
