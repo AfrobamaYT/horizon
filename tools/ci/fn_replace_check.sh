@@ -56,7 +56,7 @@ env_vars=(HORIZON_HOME="$scratch/home" HORIZON_LAUNCHER_HOME="$data" XDG_DATA_HO
   HORIZON_LAUNCHER_TRASH="$scratch/trash" HORIZON_LAUNCHER_CLIPBOARD="$scratch/clipboard"
   HORIZON_LAUNCHER_DESKTOP="$scratch/desktop")
 started=$(date +%s.%N)
-env "${env_vars[@]}" "$launcher" native-build "$mods" --server-output "$scratch/engine" --version native-ci \
+env "${env_vars[@]}" "$launcher" native-build "$mods" --server-output "$scratch/engine" --version native-ci --profile optimized \
   --trust-native-code
 echo "native build: $(python3 -c "print(round($(date +%s.%N) - $started, 1))") s"
 test -x "$scratch/engine/horizon-engine"
