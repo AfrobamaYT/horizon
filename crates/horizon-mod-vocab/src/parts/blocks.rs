@@ -300,7 +300,7 @@ pub mod tests {
         }
         #[mod_api::horizon_part]
         impl BlockPart for Answer {
-            fn sound_type(&self, _: &dyn LoopContext, event: &mut SoundTypeEvent<'_, '_>) {
+            fn sound_type(&self, _: &dyn LoopContext, event: &mut SoundTypeEvent<'_>) {
                 let player = |(_, kind): (u32, &str)| kind == "minecraft:player";
                 if self.players_only && !event.entity.is_some_and(player) {
                     return;
