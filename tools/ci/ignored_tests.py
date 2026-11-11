@@ -23,6 +23,7 @@ payloads: the prepared data is Mojang's. Compile/list failures expose bounded co
 """
 
 import os
+import io
 from functools import lru_cache
 import re
 import subprocess
@@ -150,6 +151,47 @@ def known_failures():
 # Budgets include UTF-8 newlines; summary metadata is outside the payload budget.
 FAILURE_BYTES = 500
 FAILURE_TOTAL_BYTES = 128_000
+DIAGNOSTIC_LINES = 100_000
+DIAGNOSTIC_LINE_CHARS = 4096
+DIAGNOSTIC_CONTEXTS = 4096
+_active_budget = None
+
+
+def safe_identity(name):
+    # Rust path segments only, not arbitrary libtest payloads or GitHub tokens.
+    if re.fullmatch(r"(?:r#)?[^\W\d]\w*(?:::(?:r#)?[^\W\d]\w*)*", name) and not re.search(
+            r"(?:gh[pousr]_|github_pat_|token|secret)", name, re.IGNORECASE):
+        return name
+    return "identity withheld (unclassified test name)"
+
+
+@lru_cache(maxsize=1)
+def tracked_rust_paths():
+    listing = subprocess.run(["git", "ls-tree", "-rl", "HEAD", "--", "crates", "launcher"],
+                             capture_output=True, text=True, errors="replace")
+    paths = set()
+    if listing.returncode == 0:
+        for line in listing.stdout.splitlines():
+            fields = line.split()
+            if (len(fields) == 5 and fields[0] in ("100644", "100755") and
+                    fields[1] == "blob" and fields[3].isdigit() and int(fields[3]) <= 256_000 and
+                    re.fullmatch(r"(?:crates|launcher)/[A-Za-z0-9_./-]+\.rs", fields[4]) and
+                    not any(part in ("", ".", "..", "target", ".local") for part in fields[4].split("/"))):
+                paths.add(fields[4])
+    return paths
+
+
+def bounded_record(record, remaining):
+    raw = record.encode("utf-8")
+    shortened = len(raw) > FAILURE_BYTES
+    if shortened:
+        marker = b" [shortened: per-test byte budget]\n"
+        raw = raw[:max(0, FAILURE_BYTES - len(marker))].decode("utf-8", errors="ignore").encode("utf-8") + marker
+    if len(raw) > remaining[0]:
+        return False, False
+    print(raw.decode("utf-8"), end="")
+    remaining[0] -= len(raw)
+    return True, shortened
 
 
 def failure_diagnostics(output):
@@ -163,7 +205,19 @@ def failure_diagnostics(output):
     context = []
     panic_reason_pending = False
     panic_operands = 0
-    for line in output.splitlines():
+    skipped_lines = 0
+    skipped_contexts = 0
+    stream = io.StringIO(output)
+    for index, line in enumerate(stream):
+        if index >= DIAGNOSTIC_LINES:
+            skipped_lines += 1 + sum(1 for _ in stream)
+            break
+        if len(line) > DIAGNOSTIC_LINE_CHARS:
+            skipped_lines += 1
+            panic_reason_pending = False
+            panic_operands = 0
+            continue
+        line = line.rstrip("\r\n")
         if RESULT.match(line) or SUMMARY.match(line) or TARGET.match(line) or PANIC.match(line):
             panic_reason_pending = False
             panic_operands = 0
@@ -197,35 +251,34 @@ def failure_diagnostics(output):
                 failures.append(found[1])
         if found := PANIC.match(line):
             context = []
-            contexts.setdefault(found[1], context)
+            if found[1] not in contexts:
+                if len(contexts) < DIAGNOSTIC_CONTEXTS:
+                    contexts[found[1]] = context
+                else:
+                    skipped_contexts += 1
             location = re.fullmatch(r"(.+\.rs):(\d+):(\d+)", found[2])
-            if location and source_lines(location[1]) is not None:
+            if location and location[1] in tracked_rust_paths():
                 context.append(f"  panicked at {found[2]}")
             else:
                 context.append("  panic location withheld (not a bounded tracked Rust location)")
             context.append("  panic reason missing from captured output")
             panic_reason_pending = True
-    used = 0
-    shown = 0
-    shortened = 0
+    remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
+    shown = shortened = missing = withheld = 0
     for name in failures:
-        # Escape controls, including workflow command syntax on separate lines.
-        identity = name.encode("unicode_escape").decode("ascii")
+        identity = safe_identity(name)
         details = contexts.get(name, ["  panic context missing from captured output"])
+        missing += any("missing from captured output" in item for item in details)
+        withheld += identity != name or any("withheld" in item for item in details)
         record = f"  failed test: {identity}\n" + "\n".join(details) + "\n"
-        raw = record.encode("utf-8")
-        if len(raw) > FAILURE_BYTES:
-            marker = b" [shortened: per-test byte budget]\n"
-            raw = raw[:FAILURE_BYTES - len(marker)].decode("utf-8", errors="ignore").encode("utf-8") + marker
-        if used + len(raw) > FAILURE_TOTAL_BYTES:
-            break
-        shortened += len(record.encode("utf-8")) > FAILURE_BYTES
-        print(raw.decode("utf-8"), end="")
-        used += len(raw)
-        shown += 1
+        emitted, cut = bounded_record(record, remaining)
+        shown += emitted
+        shortened += cut
     print(f"failure diagnostics: {shown} shown; {len(failures) - shown} failing tests not shown "
           f"(total byte budget {FAILURE_TOTAL_BYTES}); {shortened} records shortened "
-          f"(per-test byte budget {FAILURE_BYTES})")
+          f"(per-test byte budget {FAILURE_BYTES}); {missing} missing context; {withheld} withheld context/identity; "
+          f"{skipped_lines} lines skipped (line/count bounds; failure count unknown there); "
+          f"{skipped_contexts} contexts skipped (retention bound)")
 
 
 def run(package, skip, number=None, count=None):
@@ -325,8 +378,12 @@ def run(package, skip, number=None, count=None):
         return None
     if missing := sorted(expected - results.keys()):
         print(f"{package}: {len(missing)} listed tests of this leg never reported a result:")
-        for name in missing[:50]:
-            print(f"  {name}")
+        remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
+        shown = 0
+        for name in missing:
+            emitted, _ = bounded_record(f"  {safe_identity(name)}\n", remaining)
+            shown += emitted
+        print(f"{len(missing) - shown} missing identities not shown (shared total byte budget)")
         return None
     if not summaries:
         # Unknown output is not necessarily a compiler diagnostic: never forward
@@ -337,11 +394,14 @@ def run(package, skip, number=None, count=None):
 
 
 def main(shards):
+    global _active_budget
+    _active_budget = [FAILURE_TOTAL_BYTES]
     known = known_failures()
     skipped = {"harness"} if has_vulkan() else {"harness", "gpu"}
     if "gpu" in skipped:
         print("no Vulkan driver on this runner: the tests marked `gpu` are skipped")
     problems = []
+    accepted_unshown = 0
     # Reuse the hash selection in two consecutive processes on the same runner.
     # Resource-backed client-lib families retain registries across tests; releasing
     # the process between halves bounds that retention without another CI leg.
@@ -362,19 +422,31 @@ def main(shards):
             continue
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
-            if not passed and listed and known[(package, test)] != "gpu":
-                print(f"{package} {test}: accepted failure policy={KNOWN.name} mark={known[(package, test)] or 'known'}")
+            policy_test = test
+            test = safe_identity(test)
+            if not passed and listed and known[(package, policy_test)] != "gpu":
+                emitted, _ = bounded_record(
+                    f"{package} {test}: accepted failure policy={KNOWN.name} "
+                    f"mark={known[(package, policy_test)] or 'known'}\n", _active_budget)
+                accepted_unshown += not emitted
             if not passed and not listed:
                 problems.append(f"{package} {test}: failed, and isn't a known failure")
-            elif not passed and known[(package, test)] == "gpu":
+            elif not passed and known[(package, policy_test)] == "gpu":
                 problems.append(f"{package} {test}: failed with a Vulkan driver present")
-            elif passed and listed and known[(package, test)] is None:
+            elif passed and listed and known[(package, policy_test)] is None:
                 problems.append(f"{package} {test}: passes now; take it off {KNOWN.name}")
         for (listed, test), mark in known.items():
             if listed == package and mark not in skipped and in_leg(test, number, count) and test not in results:
-                problems.append(f"{package} {test}: listed in {KNOWN.name} but no longer runs")
+                problems.append(f"{package} {safe_identity(test)}: listed in {KNOWN.name} but no longer runs")
+    shown = 0
     for problem in problems:
-        print(f"::error::{problem}")
+        emitted, _ = bounded_record(f"::error::{problem}\n", _active_budget)
+        shown += emitted
+    if problems:
+        print(f"policy diagnostics: {len(problems) - shown} problems not shown (shared total byte budget)")
+    if accepted_unshown:
+        print(f"{accepted_unshown} accepted policy records not shown (shared total byte budget)")
+    _active_budget = None
     return 1 if problems else 0
 
 
