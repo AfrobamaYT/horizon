@@ -1,4 +1,5 @@
 """Exercise the temporary client runner and actual cargo command contract."""
+import ast
 import contextlib
 import io
 from pathlib import Path
@@ -6,7 +7,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from test_ci_concurrency import expression_value, yaml
+from tests.test_ci_concurrency import expression_value, yaml
 from tools.ci import ignored_shards, ignored_tests
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,8 +23,16 @@ class ClientStopgap(unittest.TestCase):
         ]
         for selector in selectors:
             with self.subTest(selector=selector):
-                # Reuse the restricted evaluator with its context name mapped to matrix.
-                actual = expression_value(expression.removeprefix('${{').removesuffix('}}').replace('matrix.', 'github.'), {"shard": selector}) if expression.startswith('${{') else expression
+                actual = expression
+                if expression.startswith('${{'):
+                    source = expression.removeprefix('${{').removesuffix('}}').strip()
+                    tree = ast.parse(source.replace('&&', ' and ').replace('||', ' or '), mode='eval')
+                    # Validate context identity before adapting to the shared evaluator.
+                    # In particular github.shard must not receive matrix selector data.
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Name):
+                            self.assertIn(node.id, ('matrix', 'true', 'false'))
+                    actual = expression_value(source.replace('matrix.', 'github.'), {"shard": selector})
                 expected = "dyna-xlarge" if selector in ("horizon-client#1of2", "horizon-client#2of2") else "dyna-large"
                 self.assertEqual(actual, expected)
 
