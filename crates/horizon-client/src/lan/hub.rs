@@ -1984,6 +1984,7 @@ impl Hub {
         self.mod_commands.1
     }
     /// Server mods' commands changed: every player gets their tree again.
+    #[horizon_mod_api_macros::replaceable]
     pub fn set_mod_commands(&mut self, key: u64, commands: serde_json::Value) {
         if self.store_mod_commands(key, commands) {
             for i in 0..self.guests.len() {

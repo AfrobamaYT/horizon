@@ -1275,6 +1275,7 @@ impl MotionWorld<'_, '_, '_> {
         self.controlled_simulation_tick_with_sprint_window(keys, 7)
     }
     /// Local simulation with the configured double-tap sprint window.
+    #[horizon_mod_api_macros::replaceable]
     pub fn controlled_simulation_tick_with_sprint_window(
         &mut self,
         keys: crate::sprint::Keys,

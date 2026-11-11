@@ -2118,6 +2118,7 @@ impl Menu {
     }
 
     /// `CraftingMenu.slotChangedCraftingGrid`.
+    #[horizon_mod_api_macros::replaceable]
     fn recompute(&mut self, env: &Env) {
         if self.grid_size == 0 {
             return;

@@ -5585,6 +5585,7 @@ impl Renderer {
     }
     /// LevelRenderer.submitBlockOutline: the buffer holds `edges` per stroke, the black
     /// secondary stroke first when high contrast is on.
+    #[horizon_mod_api_macros::replaceable]
     fn draw_outline(&self, pass: &mut wgpu::RenderPass<'_>, edges: u32, high_contrast: bool) {
         pass.set_vertex_buffer(0, self.outline.slice(..));
         // Both strokes are LINES: a pack's rendertype_lines draws them.
@@ -5639,6 +5640,7 @@ impl Renderer {
     }
     /// Hand the window surface over to the renderer that replaces this one on
     /// the same device (it takes `spare_surface`).
+    #[horizon_mod_api_macros::replaceable]
     pub fn release_surface(&mut self) {
         self.frame_gen.stop();
         self.queue.wait();
@@ -8072,6 +8074,7 @@ impl Renderer {
             );
         }
     }
+    #[horizon_mod_api_macros::replaceable]
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
         // A lost device cannot accept uploads either. Leave recovery to the
         // owner instead of submitting atlas patches to the invalid device.

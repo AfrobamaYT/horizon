@@ -1645,6 +1645,7 @@ impl ParticleEngine {
     }
     /// `ClientLevel.addParticle(particle, overrideLimiter, alwaysShow, ...)`
     /// (`doAddParticle`). `always_show` is `addAlwaysVisibleParticle`'s flag.
+    #[horizon_mod_api_macros::replaceable]
     pub fn add_with(
         &mut self,
         options: &ParticleOptions,

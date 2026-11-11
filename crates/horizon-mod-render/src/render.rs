@@ -133,6 +133,7 @@ pub struct RenderNeeds {
 
 /// The world is drawn (see [`WorldDrawn`]). Not called on the title screen's panorama.
 #[inline(never)]
+#[horizon_mod_api_macros::replaceable]
 pub fn world_drawn(world: &mut WorldDrawn<'_>) {
     let _ = world;
 }
@@ -140,12 +141,14 @@ pub fn world_drawn(world: &mut WorldDrawn<'_>) {
 /// The first-person hand is drawn (see [`HandDrawn`]), on every frame [`world_drawn`]
 /// runs, with no hand too.
 #[inline(never)]
+#[horizon_mod_api_macros::replaceable]
 pub fn hand_drawn(hand: &mut HandDrawn<'_>) {
     let _ = hand;
 }
 
 /// Asked as a frame is built and drawn: set what your mod needs.
 #[inline(never)]
+#[horizon_mod_api_macros::replaceable]
 pub fn render_needs(needs: &mut RenderNeeds) {
     let _ = needs;
 }
@@ -253,12 +256,14 @@ pub struct WorldViewDrawn<'a> {
 /// [`MAX_WORLD_VIEWS`] valid ones draw; one with a value out of range, or an `id` already asked
 /// for, is left out. Keep it cheap.
 #[inline(never)]
+#[horizon_mod_api_macros::replaceable]
 pub fn world_views(views: &mut Vec<WorldView>) {
     let _ = views;
 }
 
 /// A world view is drawn (see [`WorldViewDrawn`]): once per view asked for this frame.
 #[inline(never)]
+#[horizon_mod_api_macros::replaceable]
 pub fn world_view_drawn(view: &mut WorldViewDrawn<'_>) {
     let _ = view;
 }
