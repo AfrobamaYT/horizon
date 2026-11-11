@@ -507,7 +507,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
- "horizon-mod-point-shape",
  "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
