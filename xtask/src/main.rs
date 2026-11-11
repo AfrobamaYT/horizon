@@ -242,7 +242,7 @@ fn icons() -> Result<(), String> {
 fn package(binary: &Path, out: &Path) -> Result<(), String> {
     let repo = new_folder(out)?;
     copy_into(binary, out)?;
-    copy_beside(binary, &TOOLS, out)?;
+    copy_runtime(binary, &TOOLS, out)?;
     copy_exporters(&repo.join("exporters"), &out.join("exporters"))?;
     let play = repo.join("packaging/PLAY.txt");
     copy(&play, &out.join("PLAY.txt"))
@@ -252,7 +252,7 @@ fn package_server(engine: &Path, out: &Path) -> Result<(), String> {
     let repo = new_folder(out)?;
     copy_exporters(&repo.join("exporters"), &out.join("exporters"))?;
     copy(engine, &out.join(program_name(engine, "horizon-engine")))?;
-    copy_beside(engine, &SERVER_TOOLS, out)
+    copy_runtime(engine, &SERVER_TOOLS, out)
 }
 
 /// Release builds supply only our compiled classes and their integrity manifest.
@@ -300,6 +300,12 @@ fn program_name(program: &Path, name: &str) -> String {
     } else {
         name.to_string()
     }
+}
+
+/// Both bundle layouts require the same wasm runtime beside their engine.
+fn copy_runtime(program: &Path, tools: &[&str], out: &Path) -> Result<(), String> {
+    copy_beside(program, tools, out)?;
+    copy_into(&program.with_file_name("horizon-wasm-std.wasm"), out)
 }
 
 /// Copies `tools`, built beside `program`, into `out`.
@@ -472,6 +478,47 @@ fn extract(tar: &[u8], out: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_bundle_requires_and_ships_wasm_std() {
+        use super::*;
+        let root = std::env::temp_dir().join(format!("packer-std-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        // Every game-build matrix target, for each of the two runtime layouts.
+        for target in [
+            "linux",
+            "linux-musl",
+            "windows",
+            "windows-arm64",
+            "macos-arm64",
+            "macos-x64",
+        ] {
+            for (layout, tools) in [
+                ("client", TOOLS.as_slice()),
+                ("server", SERVER_TOOLS.as_slice()),
+            ] {
+                let source = root.join(format!("{target}-{layout}"));
+                let out = source.join("out");
+                fs::create_dir_all(&out).unwrap();
+                let binary = source.join(if target.starts_with("windows") {
+                    "horizon-client.exe"
+                } else {
+                    "horizon-client"
+                });
+                for tool in tools {
+                    fs::write(source.join(program_name(&binary, tool)), b"program").unwrap();
+                }
+                assert!(copy_runtime(&binary, tools, &out).is_err());
+                fs::write(source.join("horizon-wasm-std.wasm"), b"wasm-member").unwrap();
+                copy_runtime(&binary, tools, &out).unwrap();
+                assert_eq!(
+                    fs::read(out.join("horizon-wasm-std.wasm")).unwrap(),
+                    b"wasm-member"
+                );
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
     use super::*;
 
     fn header(name: &str, mode: u32, size: usize, kind: u8) -> Vec<u8> {

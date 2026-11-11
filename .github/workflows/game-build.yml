@@ -77,6 +77,15 @@ jobs:
           if [[ -z "${DYNA_CI_BUILD:-}" ]]; then bash tools/ci/runner-env.sh; fi
         env:
           HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
+      - name: Build the shared wasm standard library
+        shell: bash
+        run: |
+          cargo run --locked -p cargo-horizon-mod -- horizon-mod wasm-std horizon-wasm-std.wasm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wasm-std
+          path: horizon-wasm-std.wasm
+          if-no-files-found: error
       - name: Private exporter inputs
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
@@ -356,6 +365,11 @@ jobs:
         with:
           name: original-exporters
           path: exporters
+      # The wasm member is target-independent, including on musl and Windows.
+      - uses: actions/download-artifact@v8
+        with:
+          name: wasm-std
+          path: ${{ env.BIN }}
       - name: Build, check and package for musl in Alpine
         if: matrix.musl
         # Run Docker on the Ubuntu host: JavaScript actions themselves require glibc.
