@@ -1517,7 +1517,7 @@ pub fn encode_with(
                 biome_packed
                     .palette
                     .iter()
-                    .map(|&b| string(&biomes.get(b as u16).name))
+                    .map(|&b| string(&biomes.saved_name(b as u16)))
                     .collect(),
             ),
         )];
@@ -1856,7 +1856,7 @@ fn decode_column(
             let ids: Vec<u16> = palette
                 .iter()
                 .map(|p| match p {
-                    Tag::String(s) => biomes.id(&s.to_string_lossy()),
+                    Tag::String(s) => biomes.saved_id(&s.to_string_lossy()),
                     _ => 0,
                 })
                 .collect();
@@ -6192,6 +6192,55 @@ mod tests {
             ),
             Ok(21)
         );
+    }
+
+    #[test]
+    fn a_biome_the_world_lacks_is_saved_back_unchanged() {
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let assets = crate::assets::Assets::load(&root).expect("assets");
+        let load = || {
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .expect("biomes")
+        };
+        let palette = |saved: &NamedTag| -> Vec<String> {
+            let Some(Tag::List(sections)) = saved.tag.get("sections") else {
+                panic!("sections");
+            };
+            sections
+                .iter()
+                .filter_map(|s| match s.get("biomes")?.get("palette")? {
+                    Tag::List(p) => Some(p.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .filter_map(|t| match t {
+                    Tag::String(s) => Some(s.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect()
+        };
+        // A world saved while a mod's biome was installed.
+        let before = load();
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set_biome_cell(1, 20, 2, before.saved_id("gone_mod:highland"));
+        let saved = encode(&chunk, assets.registry, &before);
+        assert!(palette(&saved).contains(&"gone_mod:highland".to_owned()));
+        // Reopened without that mod: the column plays as plains...
+        let after = load();
+        let loaded = decode(&saved, assets.registry, &after).expect("chunk");
+        // Quart (1, 20, 2) above the bottom at -64: block (4, 16, 8).
+        let id = loaded.biome(4, 16, 8);
+        assert_eq!(after.name(id), "minecraft:plains");
+        // ...and its next save still names the missing biome, not plains.
+        let resaved = encode(&loaded, assets.registry, &after);
+        let names = palette(&resaved);
+        assert!(names.contains(&"gone_mod:highland".to_owned()), "{names:?}");
+        assert!(!names.contains(&"minecraft:plains".to_owned()), "{names:?}");
     }
 
     #[test]

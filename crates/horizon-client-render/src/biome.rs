@@ -7,8 +7,9 @@ use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom
 pub use mod_api::world::biome::{BiomeColors, SpawnEntry};
 use serde_json::Value;
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +168,11 @@ pub struct Biomes {
     packs: BTreeMap<String, Arc<Value>>,
     /// The built-in biomes' own files, to tell a server's data that differs.
     files: Arc<BTreeMap<String, Value>>,
+    /// Biome names read from saved chunks that this table lacks (a removed mod's biome), in
+    /// first-read order: placeholder `i` has id `list.len() + i`. A placeholder plays as
+    /// plains, but a chunk saves its name back unchanged. Shared by clones (recoloured
+    /// copies keep the ids); a table rebuilt with other packs starts empty.
+    placeholders: Arc<Mutex<Vec<String>>>,
 }
 /// The grass, foliage and dry foliage colormaps.
 struct Colormaps {
@@ -361,6 +367,7 @@ impl Biomes {
             packs: BTreeMap::new(),
             files: Arc::new(files_by_name),
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+            placeholders: Default::default(),
         })
     }
     /// The built-in biomes with a world's data packs' biome files (id →
@@ -370,6 +377,7 @@ impl Biomes {
     /// table whatever packs `self` has.
     pub fn with_packs<'a>(&self, files: impl IntoIterator<Item = (&'a str, &'a Value)>) -> Self {
         let mut out = self.builtin_only();
+        out.placeholders = Arc::default();
         let mut files: Vec<(&str, &Value)> = files.into_iter().collect();
         files.sort_by(|a, b| identifier_order(a.0, b.0));
         for (name, json) in files {
@@ -433,15 +441,45 @@ impl Biomes {
     pub fn contains(&self, name: &str) -> bool {
         self.index.contains_key(name)
     }
+    /// Biome `id`, or plains (the last entry without one) when the id is past this table:
+    /// a placeholder, or a column a server sent under its earlier, longer registry (a
+    /// proxy's previous server), which keeps its ids until the next login replaces it.
     pub fn get(&self, id: u16) -> &BiomeInfo {
-        &self.list[usize::from(id).min(self.list.len() - 1)]
+        self.list.get(usize::from(id)).unwrap_or_else(|| {
+            &self.list[usize::from(self.id("minecraft:plains")).min(self.list.len() - 1)]
+        })
+    }
+    /// The id a saved chunk's biome `name` loads as: its own, or a placeholder that keeps the
+    /// name for the next save when this table lacks it (`id` would make it plains for good).
+    /// Plains when the ids run out.
+    pub fn saved_id(&self, name: &str) -> u16 {
+        if let Some(&id) = self.index.get(name) {
+            return id;
+        }
+        let mut placeholders = self.placeholders.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = match placeholders.iter().position(|p| p == name) {
+            Some(slot) => slot,
+            None => {
+                log::warn!(
+                    "saved biome {name} is not in this world's biomes; it plays as plains and is saved unchanged"
+                );
+                placeholders.push(name.to_owned());
+                placeholders.len() - 1
+            }
+        };
+        u16::try_from(self.list.len() + slot).unwrap_or_else(|_| self.id("minecraft:plains"))
+    }
+    /// The name a chunk saves for biome `id`: a placeholder's saved name, else `name`'s.
+    pub fn saved_name(&self, id: u16) -> Cow<'_, str> {
+        let slot = usize::from(id).checked_sub(self.list.len());
+        let placeholders = self.placeholders.lock().unwrap_or_else(|e| e.into_inner());
+        match slot.and_then(|s| placeholders.get(s)) {
+            Some(name) => Cow::Owned(name.clone()),
+            None => Cow::Borrowed(self.name(id)),
+        }
     }
     /// The name of biome `id`, plains (as for an unknown name) when the id is
-    /// past this table: a column a server sent under its earlier, longer
-    /// registry (a proxy's previous server) keeps its ids until the next
-    /// login replaces it. `get` clamps such an id to the last entry instead,
-    /// so for that stale column the colours and this name can come from
-    /// different biomes until the login.
+    /// past this table, as for `get`: a placeholder, or a stale server column.
     pub fn name(&self, id: u16) -> &str {
         self.list
             .get(usize::from(id))
@@ -642,6 +680,7 @@ mod pack_tests {
                 .collect(),
             list,
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+            placeholders: Default::default(),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
             files: Arc::default(),
@@ -742,6 +781,7 @@ impl Biomes {
                 .collect(),
             list,
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+            placeholders: Default::default(),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
             files: Arc::new(
@@ -787,6 +827,7 @@ mod color_tests {
                 .collect(),
             list,
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+            placeholders: Default::default(),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
             files: Arc::default(),
@@ -1039,5 +1080,44 @@ mod climate_tests {
         );
         assert_eq!(biomes.properties("minecraft:nowhere"), None);
         assert_eq!(biomes.properties(""), None);
+    }
+}
+
+#[cfg(test)]
+mod placeholder_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn table() -> Biomes {
+        Biomes::from_jsons(&[
+            ("minecraft:forest", json!({"effects": {"water_color": 1}})),
+            ("minecraft:plains", json!({"effects": {"water_color": 2}})),
+        ])
+    }
+
+    #[test]
+    fn a_missing_saved_biome_plays_as_plains_and_keeps_its_name() {
+        let biomes = table();
+        assert_eq!(biomes.saved_id("minecraft:forest"), 0);
+        let gone = biomes.saved_id("gone_mod:highland");
+        let other = biomes.saved_id("gone_mod:lowland");
+        assert_ne!(gone, other);
+        assert!(usize::from(gone) >= biomes.list.len());
+        assert_eq!(
+            biomes.saved_id("gone_mod:highland"),
+            gone,
+            "one id per name"
+        );
+        assert_eq!(biomes.name(gone), "minecraft:plains");
+        assert_eq!(biomes.get(gone).name, "minecraft:plains");
+        assert_eq!(biomes.get(gone).water, 2);
+        assert_eq!(biomes.saved_name(gone), "gone_mod:highland");
+        assert_eq!(biomes.saved_name(other), "gone_mod:lowland");
+        assert_eq!(biomes.saved_name(0), "minecraft:forest");
+        // A recoloured copy keeps the ids; a table rebuilt from packs does not share them.
+        let recolored = biomes.with_colors(|_, c| c.water = 3).unwrap();
+        assert_eq!(recolored.saved_name(gone), "gone_mod:highland");
+        let rebuilt = biomes.with_packs([]);
+        assert_eq!(rebuilt.saved_name(gone), "minecraft:plains");
     }
 }
