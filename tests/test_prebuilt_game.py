@@ -209,8 +209,11 @@ class PrebuiltContentsTests(unittest.TestCase):
             prebuilt_game.extern_args(root, "horizon_mod_package")
 
     def test_host_macros_pass_but_host_dependency_metadata_is_refused(self):
-        root = self.folder("deps/libhorizon_client.so", "deps/libhorizon_mod_wasm.so",
+        root = self.folder("deps/libhorizon_client.so", "deps/libhorizon_mod_wasm.so", "deps/libhorizon_mod_host.so",
                            "host/libderive.so", "host/derive.dll", "host/libderive.dylib")
+        (root / prebuilt_game.CATALOG).write_bytes(b"{}")
+        (root / prebuilt_game.IDENTITY).write_text(json.dumps({"files": {
+            prebuilt_game.CATALOG: prebuilt_game.sha256(root / prebuilt_game.CATALOG)}}))
         prebuilt_game.check(root)
         (root / "host/libshared-host.rmeta").write_bytes(b"")
         with self.assertRaisesRegex(SystemExit, "aren't compiler outputs"):
