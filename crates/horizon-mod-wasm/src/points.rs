@@ -153,6 +153,12 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
 /// against the game's own point list, not what the module says of itself: the target, the phase,
 /// and, for a `replace`, that its head returns `()` or an API value the listener can produce.
 fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, String> {
+    if inject.access == Access::Internals {
+        return Err(format!(
+            "{id}: {}: internals access is native-only",
+            inject.at
+        ));
+    }
     if !mod_points::STAGED {
         return Err(format!(
             "{id}: {}: this build has no point sites; start the game through the launcher's mod build",
@@ -205,6 +211,17 @@ mod tests {
             nth: None,
             ctx: None,
         }
+    }
+
+    #[test]
+    fn internals_has_its_own_named_refusal_even_without_sites() {
+        let mut declaration = inject(Kind::Head, "horizon_client::game::Game::tick");
+        declaration.access = Access::Internals;
+        let error = checked_place("internal_mod", &declaration, 0).unwrap_err();
+        assert_eq!(
+            error,
+            "internal_mod: horizon_client::game::Game::tick: internals access is native-only"
+        );
     }
 
     #[test]

@@ -110,20 +110,26 @@ fn real_member() {
         vec![manifest.id.clone()],
         manifest.dependencies.keys().cloned().collect(),
     );
-    let package = WasmPackage {
+    let mut package = WasmPackage {
         manifest,
         module: Package::read_wasm(path).unwrap(),
     };
-    // load checks the layout and calls Hooks::subscribed through the real host boundary.
-    let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     if !mod_points::STAGED {
+        // The point-bearing variant is refused. Use a fresh instance without point
+        // declarations below so ordinary hooks and Parts still exercise the real guest.
+        let point_variant = WasmPackage {
+            manifest: package.manifest.clone(),
+            module: package.module.clone(),
+        };
+        let loaded = load(&std::fs::read(&std).unwrap(), vec![point_variant]);
+        assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
         let refused = loaded
-            .initialize(&[info])
+            .initialize(std::slice::from_ref(&info))
             .expect_err("unstaged game refuses point listener");
         let (_, reason) = refused
             .iter()
             .find(|(id, _)| id == "wasm_fixture")
-            .expect("unstaged game refuses point listener");
+            .expect("named refusal");
         let message = reason.to_string();
         assert!(
             message.contains("wasm_fixture")
@@ -131,8 +137,10 @@ fn real_member() {
                 && message.contains("no point sites"),
             "{message}"
         );
-        return;
+        package.manifest.inject.clear();
     }
+    // The no-points variant uses the same guest code, hook subscriptions and Parts.
+    let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
     loaded
@@ -269,6 +277,9 @@ fn real_member() {
             )]
         );
     });
+    if !mod_points::STAGED {
+        return;
+    }
     mod_points::__private::seal();
     matrix_checks::check();
     let mut args = mod_points::TickArgs::__new();

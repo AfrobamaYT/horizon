@@ -56,15 +56,23 @@ fn real_library_dependency() {
     replaced[0].manifest.wasm = Some(serde_json::from_value(manifest).unwrap());
     let refused = load(&std::fs::read(&std).unwrap(), replaced);
     assert!(refused.refused.iter().any(|(_, r)| matches!(r, horizon_mod_wasm::Refusal::LinkedAgainst { dependency } if dependency == "wasm_test_library")));
-    let loaded = load(&std::fs::read(std).unwrap(), packages);
     if !mod_points::STAGED {
+        let point_variants = packages
+            .iter()
+            .map(|p| WasmPackage {
+                manifest: p.manifest.clone(),
+                module: p.module.clone(),
+            })
+            .collect();
+        let loaded = load(&std::fs::read(&std).unwrap(), point_variants);
+        assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
         let refused = loaded
             .initialize(&infos)
             .expect_err("unstaged game refuses point listener");
         let (_, reason) = refused
             .iter()
             .find(|(id, _)| id == "wasm_test_dependent")
-            .expect("unstaged game refuses point listener");
+            .expect("named refusal");
         let message = reason.to_string();
         assert!(
             message.contains("wasm_test_dependent")
@@ -72,8 +80,12 @@ fn real_library_dependency() {
                 && message.contains("no point sites"),
             "{message}"
         );
-        return;
+        // Fresh no-points variants retain the same library links, statics and Parts.
+        for package in &mut packages {
+            package.manifest.inject.clear();
+        }
     }
+    let loaded = load(&std::fs::read(std).unwrap(), packages);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 3);
     loaded.initialize(&infos).unwrap();
@@ -101,6 +113,9 @@ fn real_library_dependency() {
             "one static, including its address"
         );
     });
+    if !mod_points::STAGED {
+        return;
+    }
     mod_points::__private::seal();
     let mut args = mod_points::TickArgs::__new();
     mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
