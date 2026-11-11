@@ -1,6 +1,9 @@
 //! Cargo owns registry compilation and the final link; the SDK remains binary-only.
 use super::{api, dependencies, internals, prebuilt, registry_plan, registry_rustc};
-use crate::rust_toolchain::Toolchain;
+use crate::{
+    i18n::{tr, trf},
+    rust_toolchain::Toolchain,
+};
 use std::{
     collections::BTreeMap,
     fs,
@@ -71,8 +74,7 @@ pub(super) fn compile(
         }
     }
     let links = sdk.native_links.as_ref().ok_or_else(|| tr("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely").to_string())?;
-    let catalog =
-        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
+    let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;

@@ -331,6 +331,8 @@ pub(super) struct Identity {
     #[serde(default)]
     pub(super) registry_lock: Option<String>,
     #[serde(default)]
+    pub(super) registry_patches: Option<toml::Table>,
+    #[serde(default)]
     pub(super) native_links: Option<Vec<super::registry_inventory::NativeLink>>,
     #[serde(default)]
     facade_crates: std::collections::BTreeSet<String>,
@@ -358,7 +360,18 @@ impl Identity {
 pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
     let path = dir.join(IDENTITY);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    #[derive(serde::Deserialize)]
+    struct Format {
+        #[serde(default)]
+        format_version: u32,
+    }
+    let format: Format =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    match format.format_version {
+        5 => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+        0..=4 => Err(trf("SDK format {version} is too old; install a newer SDK (format 5)", &[("version", &format.format_version.to_string())])),
+        version => Err(trf("SDK format {version} is newer than this launcher's supported format 5; update the launcher", &[("version", &version.to_string())])),
+    }
 }
 
 /// Whether the unpacked game in `dir` is the one asked for: built from `revision` for `host` and

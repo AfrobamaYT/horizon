@@ -55,6 +55,21 @@ impl Plan {
         })
     }
 
+    /// Patches come only from the validated SDK identity, never from a mod manifest.
+    pub fn authorize_game_patches(&mut self, patches: &toml::Table) {
+        let names = patches
+            .values()
+            .flat_map(|registry| {
+                registry
+                    .as_table()
+                    .expect("validated SDK patch registry")
+                    .keys()
+                    .cloned()
+            })
+            .collect();
+        self.allowed.allow_game_patch_edges(&self.game, &names);
+    }
+
     pub fn check_mods(&self, resolved: &RegistryLock) -> Result<(), String> {
         for (id, root, pins) in &self.owned {
             let mut skip_local: std::collections::BTreeSet<String> = self
@@ -69,7 +84,9 @@ impl Plan {
                     .map(|(package, _)| (*package).to_owned()),
             );
             skip_local.insert(super::internals::package(id));
-            resolved.check_mod(id, root, &skip_local, pins)?;
+            let mut owned_pins = self.game.clone();
+            owned_pins.extend(pins)?;
+            resolved.check_mod(id, root, &skip_local, &owned_pins)?;
         }
         Ok(())
     }
@@ -135,6 +152,17 @@ impl Plan {
         fetch.arg("--locked");
         super::run(fetch, "Downloading the mods' pinned crates", |_| {})
     }
+}
+
+/// Only the SDK identity supplies patches; mod manifests cannot inject overrides.
+pub(super) fn apply_patches(directory: &Path, patches: &toml::Table) -> Result<(), String> {
+    let path = directory.join("Cargo.toml");
+    let mut manifest: toml::Table = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())?
+        .parse()
+        .map_err(|e| format!("Cargo.toml: {e}"))?;
+    manifest.insert("patch".into(), patches.clone().into());
+    std::fs::write(path, manifest.to_string()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
