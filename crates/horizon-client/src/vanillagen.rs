@@ -20,6 +20,7 @@ use {
         loot::PackOverlay,
         registry::BlockRegistry,
         worldgen::{
+            biome_source::regions::RegionLayout,
             generator::{
                 GeneratorData, GeneratorWorker, OverworldGenerator, ProtoChunk, SurfaceSample,
             },
@@ -206,11 +207,11 @@ impl VanillaTerrain {
         structures: bool,
     ) -> crate::Result<Self> {
         Self::for_world_with_settings(
-            resources, overrides, seed, preset, dimension, structures, None,
+            resources, overrides, seed, preset, dimension, structures, None, None,
         )
     }
     /// `for_world_with` with the saved dimension's generator and type, below
-    /// any dimension supplied by the world's data packs.
+    /// any dimension supplied by the world's data packs, and its saved biome region layout.
     pub fn for_world_with_settings(
         resources: TerrainResources<'_>,
         overrides: &WorldgenOverrides,
@@ -219,10 +220,11 @@ impl VanillaTerrain {
         dimension: &str,
         structures: bool,
         saved_stem: Option<&serde_json::Value>,
+        regions: Option<Arc<RegionLayout>>,
     ) -> crate::Result<Self> {
         let data: Arc<GeneratorData> = shared_resource_data(resources, overrides)?;
         let generator = OverworldGenerator::for_world_with_settings(
-            data, seed, preset, dimension, structures, saved_stem,
+            data, seed, preset, dimension, structures, saved_stem, regions,
         )?;
         Self::assemble(resources, generator, seed, preset, dimension)
     }
