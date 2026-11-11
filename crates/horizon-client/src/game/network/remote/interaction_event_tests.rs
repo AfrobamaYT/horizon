@@ -58,6 +58,7 @@ struct Controls {
     hands: Option<Vec<Hand>>,
     use_block: TriState,
     use_item: TriState,
+    expect_empty_item_phase: bool,
 }
 
 #[derive(Clone, Default)]
@@ -98,6 +99,9 @@ impl Hooks for Observer {
         }
         assert_eq!(*event.cancellation_result, Answer::TryWithEmptyHand);
         let mut state = self.0.lock().unwrap();
+        if state.expect_empty_item_phase && event.phase == UsePhase::ItemAfterBlock {
+            assert!(event.click.stack.is_none());
+        }
         if let Some(hands) = &mut state.hands {
             hands.push(event.click.hand);
         } else {
@@ -240,6 +244,145 @@ fn use_block(game: &mut Game<'_>, client: bool) -> bool {
         game.guest_use = Some(super::super::GuestUse::OnBlock(Hand::Main));
         game.use_hand(Some(&hit())).unwrap()
     }
+}
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn right_click_block_forced_item_use_reaches_empty_hand_on_both_sides() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "empty_hand_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        for client in [false, true] {
+            with_interaction_game(client, |game| {
+                game.inventory[game.selected] = None;
+                game.forced_hit = Some(hit());
+                let side = if client {
+                    LogicalSide::Client
+                } else {
+                    LogicalSide::Server
+                };
+                // RightClickBlock's TRUE enters useOn even for an empty stack;
+                // Default and FALSE do not. A phase listener supplies the use.
+                for (use_item, used) in [
+                    (TriState::True, true),
+                    (TriState::Default, false),
+                    (TriState::False, false),
+                ] {
+                    *observer.0.lock().unwrap() = Controls {
+                        use_block: TriState::False,
+                        use_item,
+                        item_on_answer: Some(Answer::Consume),
+                        expect_empty_item_phase: true,
+                        ..Controls::default()
+                    };
+                    assert_eq!(use_block(game, client), used);
+                    let expected = if used {
+                        vec![Step::Phase(UsePhase::ItemAfterBlock, side)]
+                    } else {
+                        vec![]
+                    };
+                    assert_eq!(observer.0.lock().unwrap().steps, expected);
+                    assert!(game.inventory[game.selected].is_none());
+                }
+                // Forcing an empty use without a phase answer still passes:
+                // there is no stack-specific Part or vanilla item to invoke.
+                *observer.0.lock().unwrap() = Controls {
+                    use_block: TriState::False,
+                    use_item: TriState::True,
+                    expect_empty_item_phase: true,
+                    ..Controls::default()
+                };
+                assert!(!use_block(game, client));
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Phase(UsePhase::ItemAfterBlock, side)]
+                );
+                // TRUE bypasses the stack/cooldown gate, not adventure's
+                // placement predicate (which an empty hand cannot satisfy).
+                game.set_mode_id(2);
+                *observer.0.lock().unwrap() = Controls {
+                    use_block: TriState::False,
+                    use_item: TriState::True,
+                    item_on_answer: Some(Answer::Consume),
+                    ..Controls::default()
+                };
+                assert!(!use_block(game, client));
+                assert!(observer.0.lock().unwrap().steps.is_empty());
+            });
+        }
+    });
+}
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn right_click_block_explicit_allow_overrides_sneak_skip_on_both_sides() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "sneak_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        for client in [false, true] {
+            with_interaction_game(client, |game| {
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let lever = game
+                    .with_props(
+                        registry.default_state("minecraft:lever").unwrap(),
+                        &[("face", "floor")],
+                    )
+                    .unwrap();
+                game.world.set(0, 63, 0, stone).unwrap();
+                game.forced_hit = Some(hit());
+                game.keys.insert(winit::keyboard::KeyCode::ShiftLeft);
+                if let Some(remote) = game.remote.as_mut() {
+                    remote.last_input |= super::SHIFT_INPUT;
+                }
+                // Either hand being full activates the vanilla secondary-use
+                // skip. TRUE overrides it; Default and FALSE skip the lever.
+                for item_in_main in [true, false] {
+                    game.inventory[game.selected] =
+                        item_in_main.then(|| ItemStack::new("minecraft:stick", 1));
+                    game.offhand = (!item_in_main).then(|| ItemStack::new("minecraft:stick", 1));
+                    for (switch, used) in [
+                        (TriState::True, true),
+                        (TriState::Default, false),
+                        (TriState::False, false),
+                    ] {
+                        game.world.set(0, 64, 0, lever).unwrap();
+                        *observer.0.lock().unwrap() = Controls {
+                            use_block: switch,
+                            use_item: TriState::False,
+                            ..Controls::default()
+                        };
+                        assert_eq!(use_block(game, client), used);
+                        assert_eq!(game.world.block(0, 64, 0) != lever, used);
+                        let side = if client {
+                            LogicalSide::Client
+                        } else {
+                            LogicalSide::Server
+                        };
+                        let mut expected = if used {
+                            vec![Step::Phase(UsePhase::Block, side)]
+                        } else {
+                            vec![]
+                        };
+                        if used && !client {
+                            expected.push(Step::BlockPart);
+                        }
+                        assert_eq!(observer.0.lock().unwrap().steps, expected);
+                    }
+                }
+            });
+        }
+    });
 }
 
 #[test]
