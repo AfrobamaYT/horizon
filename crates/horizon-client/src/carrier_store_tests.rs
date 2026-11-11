@@ -739,3 +739,16 @@ fn first_use_leaves_the_flag_readable_after_vanilla_saves() {
         other => panic!("slots must rule over a lost flag, got {other:?}"),
     }
 }
+
+#[test]
+fn operation_signed_ranges_refuse_before_publication() {
+    let mut operation = sample_operation(1, 1, 0);
+    operation.generation = i32::MAX as u32;
+    operation.op_id = i64::MAX as u64;
+    assert!(encode_operation(&operation).is_ok());
+    operation.generation += 1;
+    assert!(encode_operation(&operation).is_err());
+    operation.generation = 1;
+    operation.op_id += 1;
+    assert!(encode_operation(&operation).is_err());
+}

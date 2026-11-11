@@ -1392,20 +1392,31 @@ fn generations_advance_checked_and_stale_handles_refuse() {
             .begin(OpKind::Disassemble, 81, 1, "minecraft:overworld")
             .is_err()
     );
-    // The re-assembly takes generation 2 — one past the tombstone.
-    assert_eq!(store.next_generation(81).unwrap(), 2);
-    // Overflow: a tombstone at u32::MAX refuses instead of wrapping.
+    // The durable counter also counts the disassembly.
+    assert_eq!(store.next_generation(81).unwrap(), 3);
+    // The last representable operation generation is admissible.
     let mut maxed = fixture.store();
     maxed
-        .begin(OpKind::Assemble, 82, u32::MAX, "minecraft:overworld")
+        .begin(OpKind::Assemble, 82, i32::MAX as u32, "minecraft:overworld")
         .unwrap();
     maxed.commit().unwrap();
-    maxed
-        .begin(OpKind::Disassemble, 82, u32::MAX, "minecraft:overworld")
-        .unwrap();
-    maxed.commit().unwrap();
-    match maxed.next_generation(82) {
-        Err(error) => assert!(error.to_string().contains("generation limit"), "{error}"),
-        Ok(generation) => panic!("u32::MAX must refuse, got {generation}"),
-    }
+    assert!(
+        maxed
+            .next_generation(82)
+            .unwrap_err()
+            .to_string()
+            .contains("generation limit")
+    );
+    let before = maxed.journal().clone();
+    assert!(
+        maxed
+            .begin(
+                OpKind::Assemble,
+                83,
+                i32::MAX as u32 + 1,
+                "minecraft:overworld"
+            )
+            .is_err()
+    );
+    assert_eq!(maxed.journal(), &before);
 }

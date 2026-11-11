@@ -346,15 +346,14 @@ impl Store {
             .filter(|(u, _)| *u == uuid)
             .map(|(_, generation)| *generation)
             .max();
-        match remembered {
-            None => u32::try_from(self.journal.next_op_id)
-                .map_err(|_| StoreIoError("carrier generation limit reached".into())),
-            Some(u32::MAX) => Err(StoreIoError(format!(
-                "carrier {uuid:032x} reached the generation limit"
-            ))),
-            Some(last) => u32::try_from(self.journal.next_op_id.max(u64::from(last) + 1))
-                .map_err(|_| StoreIoError("carrier generation limit reached".into())),
+        let generation = self
+            .journal
+            .next_op_id
+            .max(remembered.map_or(1, |last| u64::from(last) + 1));
+        if generation > i32::MAX as u64 {
+            return Err(StoreIoError("carrier generation limit reached".into()));
         }
+        Ok(generation as u32)
     }
 
     /// Records the operation as in progress and publishes the next slot.
@@ -396,6 +395,18 @@ impl Store {
             _ => {}
         }
         let op_id = self.journal.next_op_id;
+        if generation > i32::MAX as u32 {
+            return Err(StoreIoError("carrier generation limit reached".into()));
+        }
+        if op_id > i64::MAX as u64 {
+            return Err(StoreIoError("operation id exhausted".into()));
+        }
+        let next_op_id = op_id
+            .checked_add(1)
+            .ok_or_else(|| StoreIoError("operation id exhausted".into()))?;
+        self.entry_no
+            .checked_add(1)
+            .ok_or_else(|| StoreIoError("journal entry counter exhausted".into()))?;
         self.journal.in_progress = Some(InProgress {
             op_id,
             kind,
@@ -403,7 +414,7 @@ impl Store {
             generation,
             dimension: dimension.to_string(),
         });
-        self.journal.next_op_id = op_id + 1;
+        self.journal.next_op_id = next_op_id;
         self.write_slot()?;
         Ok(op_id)
     }
@@ -544,12 +555,16 @@ impl Store {
     /// Writes the next record into the slot that does not hold the newest
     /// valid one, durably, and only then adopts it.
     fn write_slot(&mut self) -> Result<(), StoreIoError> {
-        let bytes = encode_slot(self.entry_no + 1, &self.journal, self.capacity)
+        let next_entry = self
+            .entry_no
+            .checked_add(1)
+            .ok_or_else(|| StoreIoError("journal entry counter exhausted".into()))?;
+        let bytes = encode_slot(next_entry, &self.journal, self.capacity)
             .map_err(|e| StoreIoError(e.to_string()))?;
         let slot = 1 - self.last_slot;
         durable::write(&self.data.join(SLOTS[slot]), &bytes)
             .map_err(|e| StoreIoError(e.to_string()))?;
-        self.entry_no += 1;
+        self.entry_no = next_entry;
         self.last_slot = slot;
         Ok(())
     }
@@ -1672,6 +1687,12 @@ fn op_limits() -> Limits {
 /// the compressed file [`MAX_OP_COMPRESSED`], so a transfer that cannot
 /// be stored never starts.
 pub fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError> {
+    if operation.generation > i32::MAX as u32 {
+        return Err(OpError::Malformed("generation exhausted"));
+    }
+    if operation.op_id > i64::MAX as u64 {
+        return Err(OpError::Malformed("operation id exhausted"));
+    }
     if operation.cells.len() > MAX_OP_CELLS {
         return Err(OpError::CellCount {
             count: operation.cells.len(),
