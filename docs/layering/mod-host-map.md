@@ -24,6 +24,7 @@ installed lookup reads stay below it. The unchanged points machinery is the temp
 exception pending #2697; the first #2587 PR retains `deny`, not `forbid`, and is only part of that issue.
 The proposals and generated audit counts below describe the original split, not a claim that the
 current vocabulary contains no process state.
+The checker's canonical-path membership is case-sensitive by design.
 
 ## Strands and their proposals
 
