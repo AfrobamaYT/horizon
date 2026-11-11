@@ -40,13 +40,28 @@ The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visibl
 Native mods are Rust projects that implement the game's typed hook API (`impl Hooks`). Start with
 `cargo horizon-mod new my_mod --template native` ([Trait mods](../../concepts/trait-mods/000-trait-mods-draft.md#trait-mods-draft)).
 Each project has one `horizon-mod.toml`, with exact build pins in `[native]`, and ships as one `.hmod`.
-For the rare case the API does not cover, internals injections use compiled raw slots when available;
-unlisted supported targets use a source rebuild. See [Injections](../../injections.md).
+For the rare case the API does not cover, internals injections use compiled raw slots only;
+unlisted targets are refused. Use [mixins](../../mixins.md) for supported native source edits. See [Injections](../../injections.md).
 An injection is an escape hatch; request a typed hook for the behavior it needs.
 
 Native mods are native code with the player's rights, not sandboxed. The first install shows a trust notice,
 and every build waits behind a red warning; the registry lists one only after a review (its later releases are
 checked by machine). They play in a game of their own, built for the instance they are installed in.
+
+If starting a managed native client directly reports unregistered cache directories, use Play from
+the launcher with the same data directory. Select the intended Horizon instance and installed build,
+or run `horizon-launcher play --instance <instance> --version <tag>`; `horizon-launcher versions
+--installed` lists installed tags. Without `--version`, an instance's pin or the launcher's selection
+may choose another build. A Cargo `target/` executable is not itself an installed version: use the
+published native build for that instance instead. Ordinary Play requires a signed-in account that owns
+Minecraft: Java Edition. For an unsigned developer installation with persisted developer provenance,
+`HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` enables account-free, single-player-only Play if the
+installed game advertises `--developer-single-player` through `--launch-api`; rebuild and reinstall
+older developer games and their native mods. Signed builds and their native descendants still require
+the account. See [launcher commands](../../../../launcher-commands.md) for the offline restrictions.
+Starting the launcher or asking for `--help` alone does not register the
+directories. Standalone developer builds with no launcher registry among the executable's ancestors
+can still be run directly.
 
 The game's Mods screen only lists code mods (it has no switch). A code mod's settings page,
 when it has one, opens from the Config button. The launcher decides which mods are on. A browser install that

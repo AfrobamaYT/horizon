@@ -285,6 +285,8 @@ pub struct PlayerSender {
     /// The connection's bytes on the wire (after compression and encryption), counted by its
     /// network thread: `horizon-report`'s network use per player. None for a test's channel.
     wire: Option<Arc<Counters>>,
+    /// Registry negotiation belongs to this live connection, never a process-wide UUID cache.
+    pub datapack_offer: Option<Arc<[u8]>>,
 }
 #[derive(Clone)]
 enum To {
@@ -317,6 +319,7 @@ impl PlayerSender {
             to: To::Channel(tx),
             wire: None,
             payload_transport: Transport::empty(),
+            datapack_offer: None,
         }
     }
     #[cfg(test)]
@@ -351,6 +354,7 @@ impl PlayerSender {
                 }),
             ),
             wire: None,
+            datapack_offer: None,
         };
         (sender, move || inspect.queued_contents())
     }
@@ -364,6 +368,7 @@ impl PlayerSender {
             to: To::Disabled,
             wire: None,
             payload_transport: Transport::empty(),
+            datapack_offer: None,
         }
     }
     /// The bytes received from and sent to the client on the wire so far.
@@ -1118,6 +1123,7 @@ struct Parts {
     properties: Vec<login::Property>,
     info: ClientInformation,
     brand: String,
+    datapack_offer: Option<Vec<u8>>,
 }
 
 fn login_and_configure(
@@ -1210,6 +1216,7 @@ fn login_and_configure(
     // answering known packs. That reply orders the announcement without a ping.
     let server_mods = horizon_protocol::mod_list::local();
     let mut client_mods = Vec::new();
+    let mut datapack_offer = None;
     let core = KnownPack {
         namespace: CORE_PACK.0.into(),
         id: CORE_PACK.1.into(),
@@ -1268,6 +1275,11 @@ fn login_and_configure(
                         return Ok(None);
                     }
                 }
+            }
+            cfg::Serverbound::CustomPayload(p)
+                if p.channel == crate::datapack_net::OFFER_CHANNEL =>
+            {
+                datapack_offer = Some(p.data);
             }
             cfg::Serverbound::SelectKnownPacks(p) => {
                 let admission = payload_negotiation
@@ -1417,6 +1429,28 @@ fn login_and_configure(
             return Ok(None);
         }
     }
+    // The mods' datapack registries this client has, or the reason it cannot play (#811).
+    match crate::datapack_net::server_step(brand == "horizon", datapack_offer.as_deref()) {
+        crate::datapack_net::Step::Nothing => {}
+        crate::datapack_net::Step::Send(data) => {
+            for data in crate::datapack_net::chunks(&data)? {
+                send(
+                    c,
+                    cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: crate::datapack_net::CHANNEL.into(),
+                        data,
+                    }),
+                )?;
+            }
+        }
+        crate::datapack_net::Step::Refuse(text) => {
+            let reason =
+                horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(text.as_str()));
+            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+            lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
+            return Ok(None);
+        }
+    }
     for packet in sync.registry_packets(known_pack, &shared.config.levels) {
         send(c, cfg::Clientbound::RegistryData(packet))?;
     }
@@ -1480,6 +1514,7 @@ fn login_and_configure(
         properties,
         info,
         brand,
+        datapack_offer,
     }))
 }
 
@@ -1852,6 +1887,7 @@ fn play(
         to: To::Pool(outbox.clone(), watch.clone()),
         wire: Some(c.reader.counters.clone()),
         payload_transport: parts.payload_transport.clone(),
+        datapack_offer: parts.datapack_offer.map(Into::into),
     };
     let required_pack = shared
         .config
@@ -2231,6 +2267,7 @@ impl KeepAliveWatch {
 
 #[cfg(test)]
 mod tests {
+    include!("profession_join_tests.rs");
 
     #[test]
     fn undrained_packets_stop_at_twice_the_inbox() {
@@ -2997,6 +3034,7 @@ mod outgoing_budget_tests {
                 }),
             ),
             wire: None,
+            datapack_offer: None,
         }
     }
     #[test]
@@ -3082,3 +3120,7 @@ mod outgoing_budget_tests {
         assert!(s.held().len() < io_pool::MAX_PENDING / std::mem::size_of::<Vec<u8>>());
     }
 }
+
+#[cfg(test)]
+#[path = "datapack_offer_tests.rs"]
+mod datapack_offer_tests;

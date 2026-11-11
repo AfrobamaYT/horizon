@@ -8,6 +8,7 @@ description = "The runtime for wasm mods: groups packages by their dependencies 
 
 [dependencies]
 horizon-core = { path = "../horizon-core" }
+horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 mod_api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
@@ -27,7 +28,6 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 [dev-dependencies]
 tempfile = "3.27.0"
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
-horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-client-core = { path = "../horizon-client-core" }
@@ -42,6 +42,7 @@ workspace = true
 [features]
 # Test instrumentation only; does not alter Wire layout.
 test-copy-probe = []
+runtime-fixture = []
 listener-fixture = ["mod_points/listener-fixture", "horizon-mod-api-gen/listener-fixture"]
 
 [[test]]

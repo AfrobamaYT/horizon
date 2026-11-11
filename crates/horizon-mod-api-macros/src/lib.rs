@@ -1,8 +1,23 @@
 //! Derive hook subscriptions from a trait implementation.
+mod payload;
 mod point;
 mod wire;
 
+/// Derive a typed payload's value codec from its fields.
+///
+/// `#[payload(crate = ::mod_vocab)]` selects the contract crate for
+/// lower-layer crates. The default is `::mod_api`.
+#[proc_macro_derive(PayloadCodec, attributes(payload))]
+pub fn derive_payload_codec(input: TokenStream) -> TokenStream {
+    payload::expand(syn::parse_macro_input!(input as syn::DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 /// Derive the shared native/wasm owned-value encoding.
+///
+/// `#[wire(crate = ::mod_vocab::wire)]` selects the contract module for
+/// lower-layer crates. The default is `::mod_api::wire`.
 #[proc_macro_derive(Wire, attributes(wire))]
 pub fn derive_wire(input: TokenStream) -> TokenStream {
     wire::expand(syn::parse_macro_input!(input as syn::DeriveInput))

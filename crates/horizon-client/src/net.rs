@@ -1309,6 +1309,7 @@ fn configure(
     payloads.begin_configuration();
     let mut negotiation =
         horizon_protocol::payload_negotiation::Negotiation::new(payloads.local.manifest.clone());
+    crate::datapack_net::clear_received();
     let reply = |p: cfg::Serverbound| -> Result<(), Reason> {
         match writer.lock().unwrap().as_mut() {
             Some(w) => p
@@ -1368,6 +1369,9 @@ fn configure(
                     data: hash.to_vec(),
                 }))?;
             }
+            cfg::Clientbound::CustomPayload(p) if p.channel == crate::datapack_net::CHANNEL => {
+                crate::datapack_net::accept_chunk(&p.data).map_err(Reason::plain)?;
+            }
             cfg::Clientbound::CustomPayload(p) => {
                 let endpoint = crate::raw_payloads::Endpoint::client(
                     writer.clone(),
@@ -1407,6 +1411,13 @@ fn configure(
                             &horizon_protocol::mod_list::local(),
                         ),
                     }))?;
+                    // And the mods' datapack registries it has (#811).
+                    if let Some(data) = crate::datapack_net::offer() {
+                        reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                            channel: crate::datapack_net::OFFER_CHANNEL.into(),
+                            data,
+                        }))?;
+                    }
                 }
                 receive_brand(&p, send);
             }
@@ -1475,6 +1486,7 @@ fn configure(
                         )
                         .map_err(Reason::plain)?;
                 }
+                crate::datapack_net::finish_transfer().map_err(Reason::plain)?;
                 registries.custom_components = content_verified;
                 payloads
                     .finish_configuration_with(|| {

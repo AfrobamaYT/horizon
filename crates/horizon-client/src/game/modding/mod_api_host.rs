@@ -52,7 +52,7 @@ impl Game<'_> {
         for_each_entity!(entity_lists_of!(self), entity => {
             found |= entity.id() == id && !entity.is_removed();
         });
-        found || self.entity_ids_off_walk().any(|e| e == id)
+        found || self.entity_ids_off_walk().any(|e| e == id) || self.level_dragon_part(id).is_some()
     }
 
     /// Object ownership for persistence cleanup, never a level-query membership set.
@@ -133,7 +133,9 @@ impl Game<'_> {
         if !matches!(
             self.server_resident_entity(id.get()),
             horizon_client::join_seq::residency::table::EntityLookup::Found {
-                value: super::commands::Target::Mob(_) | super::commands::Target::Painting(_),
+                value: super::commands::Target::Mob(_)
+                    | super::commands::Target::Painting(_)
+                    | super::commands::Target::DragonPart(_),
                 ..
             }
         ) {
@@ -141,6 +143,12 @@ impl Game<'_> {
         }
         if !self.entity_attachments.contains_key(&id.get()) {
             return Ok(());
+        }
+        // Cleanup owns per-level UUID metadata, while attachment maps are global.
+        // Record the actual part identity so its level alone retires its map.
+        if self.level_dragon_part(id.get()).is_some() {
+            let uuid = self.uuid_for(id.get());
+            self.persist.uuids.insert(id.get(), uuid);
         }
         let level = self
             .level(self.dim.id())

@@ -85,7 +85,7 @@ fn acquire_snapshots(
                     {
                         io::Error::new(
                             io::ErrorKind::NotFound,
-                            "start the launcher once to register this installation",
+                            "this managed installation has unregistered cache directories; use Horizon Launcher Play from the same launcher data directory with the intended instance and installed version (horizon-launcher play --instance <instance> --version <tag>)",
                         )
                     }
                     error => lease_error(error),

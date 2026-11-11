@@ -2029,7 +2029,7 @@ mod tests {
             brain: Brain::Passive,
             anim: Anim::Humanoid { zombie_arms: true },
             sounds: ["", "", ""],
-            step_sound: None,
+            sound_overrides: Default::default(),
             food: Default::default(),
             tempt: Default::default(),
             passenger_attachments: Vec::new(),

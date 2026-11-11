@@ -5,7 +5,9 @@ static ENTITY_PRE_CALLS: AtomicU32 = AtomicU32::new(0);
 static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
+pub mod datapack;
 pub mod game_payload;
+pub mod interaction;
 pub mod matrix;
 pub mod projectile_owner;
 pub mod replace;
@@ -21,6 +23,50 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn right_click_block(
+        &self,
+        host: mod_api::HostSide<'_>,
+        event: &mut mod_api::RightClickBlockEvent<'_>,
+    ) -> mod_api::Flow {
+        interaction::right_click_block(host, event)
+    }
+
+    fn use_item_on_block(
+        &self,
+        host: mod_api::HostSide<'_>,
+        event: &mut mod_api::UseItemOnBlockEvent<'_>,
+    ) -> mod_api::Flow {
+        interaction::use_item_on_block(host, event)
+    }
+
+    fn interaction_key_mapping_triggered(
+        &self,
+        _: &mut dyn mod_api::ClientHost,
+        event: &mut mod_api::InteractionKeyMappingTriggeredEvent,
+    ) -> mod_api::Flow {
+        event.swing_hand = event.attempt == mod_api::InteractionAttempt::Held;
+        if event.hand == mod_api::Hand::Off {
+            mod_api::Flow::Cancel
+        } else {
+            mod_api::Flow::Continue
+        }
+    }
+
+    fn register_json_animation_types(
+        &self,
+        _: &mod_api::RegistrationContext,
+        event: &mut mod_api::RegisterJsonAnimationTypesEvent<'_>,
+    ) {
+        // The guest pushes a plain batch; the host names this mod on each entry.
+        assert!(
+            event.types.is_empty(),
+            "the guest starts from its own batch"
+        );
+        event.types.push(mod_api::JsonAnimationType::Target(
+            mod_api::Identifier::parse("wasm_fixture:pulse").unwrap(),
+        ));
+    }
+
     fn entity_tick_listened(
         &self,
         _: &mut dyn mod_api::ServerHost,
@@ -50,6 +96,16 @@ impl Hooks for Mod {
     fn server_stopped(&self, _: &mut dyn mod_api::ServerHost, _: &mut mod_api::ServerStoppedEvent) {
     }
 
+    fn server_started(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::ServerStartedEvent,
+    ) {
+        if host.is_loaded("datapack_fixture") {
+            datapack::read(host);
+        }
+    }
+
     #[listener(priority = -12, receive_cancelled)]
     fn render_gui_pre(
         &self,
@@ -62,6 +118,17 @@ impl Hooks for Mod {
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
         game_payload::register(registrar);
+        interaction::register(registrar);
+        registrar
+            .declare_datapack_registry(
+                "spell",
+                mod_api::DatapackRegistrySync::ServerOnly,
+                vec![mod_api::DatapackField::required(
+                    "power",
+                    mod_api::DatapackFieldKind::Int { min: 0, max: 100 },
+                )],
+            )
+            .unwrap();
         if cx.mods().get("refuse_registration").is_some() {
             registrar.declare_fluid("before_refusal");
             let kind = registrar

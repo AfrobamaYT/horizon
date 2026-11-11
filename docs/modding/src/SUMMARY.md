@@ -22,12 +22,16 @@
 - [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
 - [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
 - [Design: villager professions and trades](concepts/villager-professions.md)
+- [Villager profession resources and clients](concepts/villager-professions-client.md)
+- [Design: decide, fire, apply](concepts/decide-fire-apply.md)
+- [Design: decide, fire, apply: route inventory](concepts/decide-fire-apply-routes.md)
 
 # How-to
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
 - [Injections](injections.md)
+- [Mixins](mixins.md)
 
 # Reference
 

@@ -92,22 +92,10 @@ impl Game<'_> {
 
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if self.held_out.contains(&entity.id())
-            || !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(entity.epoch())
-        {
-            return None;
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_native_entity_target(entity);
         }
-        let horizon_client::join_seq::residency::table::EntityLookup::Found { location, value } =
-            self.server_resident_entity(entity.id())
-        else {
-            return None;
-        };
-        // Players are server-wide records. Ordinary body operations retain
-        // their existing current-level domain; source membership is global.
-        (matches!(value, Target::Player | Target::Guest(_))
-            || location.owner.dimension == self.dim.key())
-        .then_some(value)
+        self.unscoped_native_entity_target(entity)
     }
     /// What a handle names on a client: the local player, or an entity the
     /// server told this client of (`ClientLevel.getEntity`, whose entities are
@@ -215,29 +203,16 @@ impl Game<'_> {
     /// All lookup members of the active server level, without spatial filtering.
     /// Parts are not lookup members. Refuses remote, stale and parked levels.
     pub(super) fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
-        if !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(level.epoch())
-            || level.dimension() != self.dim.key()
-        {
-            return None;
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_level_all_entities(level);
         }
-        let ids = self
-            .resident_entities
-            .table
-            .borrow_mut()
-            .level_entities(level.dimension());
-        ids.into_iter()
-            .map(|id| {
-                let entity = EntityRef::new(level.epoch(), id);
-                self.native_entity_target(entity).map(|_| entity)
-            })
-            .collect()
+        self.unscoped_level_all_entities(level)
     }
-
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
-    /// Returns None on a client, for a stale handle, or for a parked level:
-    /// its entity handles cannot resolve until the level is in place. The walk
+    /// Returns None for a stale handle or a parked level: its entity handles
+    /// cannot resolve until the level is in place. On a client, see
+    /// `client_entities_in`. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
     /// yet resolve; frames, paintings and other special entities
@@ -251,23 +226,20 @@ impl Game<'_> {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
-        if !self.is_logical_server()
-            || self.native_lifecycle.epoch() != Some(level.epoch())
-            || level.dimension() != self.dim.key()
-        {
+        if self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
         }
         let bounds = Aabb::new(
             Vec3::new(min[0], min[1], min[2]),
             Vec3::new(max[0], max[1], max[2]),
         );
-        let mut ids = Vec::new();
-        for_each_entity!(entity_lists_of!(self), entity => {
-            // The join flush assigns zero IDs later; a handle could alias another entity.
-            if entity.id() != 0 && !entity.is_removed() && bounds.intersects(entity.bounds()) {
-                ids.push(entity.id());
-            }
-        });
+        if !self.is_logical_server() {
+            return self.client_entities_in(level, bounds);
+        }
+        if level.dimension() != self.dim.key() {
+            return None;
+        }
+        let mut ids = self.listed_entities_in(bounds);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.fishing_hooks_here()
@@ -305,6 +277,44 @@ impl Game<'_> {
             ids.into_iter()
                 .map(|id| EntityRef::new(level.epoch(), id))
                 .filter(|handle| self.native_entity_target(*handle).is_some())
+                .collect(),
+        )
+    }
+    /// The entity lists' entities whose boxes meet `bounds`, in list order.
+    fn listed_entities_in(&self, bounds: Aabb) -> Vec<u32> {
+        let mut ids = Vec::new();
+        for_each_entity!(entity_lists_of!(self), entity => {
+            // The join flush assigns zero IDs later; a handle could alias another entity.
+            if entity.id() != 0 && !entity.is_removed() && bounds.intersects(entity.bounds()) {
+                ids.push(entity.id());
+            }
+        });
+        ids
+    }
+    /// `ClientLevel.getEntities` for `level_entities_in`: the entities the server
+    /// tracks to this client in entity-list order, the dragon and then the
+    /// window's own player unless it spectates, then the dragon's parts. Other
+    /// players are left out, as their handles do not resolve on a client. None
+    /// before login or for a level the client does not show.
+    fn client_entities_in(&self, level: LevelRef, bounds: Aabb) -> Option<Vec<EntityRef>> {
+        let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
+        if level.dimension() != self.native_level_key() {
+            return None;
+        }
+        let mut ids = self.listed_entities_in(bounds);
+        self.append_dragon_query_ids(bounds, false, &mut ids);
+        if self.mode_id() != 3
+            && let Some(player) = &self.player
+            && bounds.intersects(player.bounds())
+            && let Ok(id) = u32::try_from(remote.entity_id)
+        {
+            ids.push(id);
+        }
+        self.append_dragon_query_ids(bounds, true, &mut ids);
+        Some(
+            ids.into_iter()
+                .map(|id| EntityRef::new(level.epoch(), id))
+                .filter(|handle| self.native_entity_read_target(*handle).is_some())
                 .collect(),
         )
     }
@@ -839,6 +849,9 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
         .fold(0, |uuid, w| (uuid << 32) | u128::from(*w as u32))
 }
 
+include!("native_entity_refs/tick_item_read.rs");
+include!("native_entity_refs/tick_item_selector.rs");
+
 #[cfg(test)]
 mod ray_tests {
     use super::*;
@@ -913,8 +926,8 @@ pub(super) mod tests {
             std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
                 .canonicalize()
                 .unwrap();
-        let target = std::env::current_dir().unwrap().join("target");
-        std::fs::create_dir_all(&target).unwrap();
+        let scratch_owner = tempfile::tempdir().unwrap();
+        let target = scratch_owner.path();
         for case in cases {
             let scratch = target.join(format!(
                 "be-types-fixture-{}-{}",
@@ -4088,5 +4101,59 @@ pub(super) mod tests {
             game.level_destroy_block(level, [0, 64, 0], true, None, false)
                 .is_none()
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_finds_the_entities_it_tracks_and_its_own_player_in_a_box() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::connection::Pipe;
+        use mod_api::{Host, LevelRef, WorldEpoch};
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EntitiesInTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
+            game.spawn_entity(16, "minecraft:pig", [40.0, 0.0, 0.0], [0.0; 3]);
+            let level = game.level("minecraft:overworld").unwrap();
+            let ids = |host: &dyn Host, level: LevelRef, min, max| {
+                level
+                    .entities_in(host, min, max)
+                    .map(|found| found.into_iter().map(|e| e.id()).collect::<Vec<_>>())
+            };
+            // The tracked pig, then the window's own player; the other pig is far away.
+            assert_eq!(
+                ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                Some(vec![15, 7])
+            );
+            assert_eq!(
+                ids(game, level, [39.0, -1.0, -1.0], [41.0, 2.0, 1.0]),
+                Some(vec![16])
+            );
+            // The pig's box ends at x 2.45.
+            assert_eq!(
+                ids(game, level, [2.5, 0.0, -1.0], [4.0, 1.0, 1.0]),
+                Some(vec![])
+            );
+            game.set_mode_id(3);
+            assert_eq!(
+                ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                Some(vec![15])
+            );
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(ids(game, nether, [-1.0; 3], [3.0; 3]), None);
+            let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
+            assert_eq!(ids(game, stale, [-1.0; 3], [3.0; 3]), None);
+            game.remote.as_mut().unwrap().logged_in = false;
+            assert_eq!(ids(game, level, [-1.0; 3], [3.0; 3]), None);
+        });
     }
 }

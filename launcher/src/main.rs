@@ -58,6 +58,7 @@ mod motion;
 mod multiplayer_page;
 mod native_consent;
 mod native_log_page;
+mod native_registry_consent;
 mod new_instance;
 mod owner_page;
 mod packs_page;
@@ -1015,48 +1016,6 @@ impl Launcher {
             .clone()
     }
 
-    /// Builds the selected instance's native mods, once the player accepted the warning. The
-    /// build stays on the Horizon the instance plays (`native_mods::base_for`), unless the
-    /// warning was Update's: then it moves to that newer Horizon.
-    fn build_native(&mut self) {
-        if self.native_step.is_some() {
-            return;
-        }
-        self.pending_consent = None;
-        self.native_error = None;
-        // This attempt's own log, starting empty: an open panel shows it rather than the last
-        // attempt's (`native_log_page`).
-        self.native_log_reset();
-        let instance = instances::selected();
-        self.native_for = Some(instance.id.clone());
-        let plays = self.version_of(&instance).cloned();
-        let base = native_mods::base_for(plays.as_deref(), &self.installed, false);
-        let Some(base) = base else {
-            let error = tr("Install Horizon first.").to_string();
-            self.native_log_preflight(&error);
-            self.native_error = Some(error);
-            return;
-        };
-        let folder = match self.native_mods_to_build() {
-            Ok((folder, _)) => folder,
-            Err(e) => {
-                self.native_log_preflight(&e);
-                self.native_error = Some(e);
-                return;
-            }
-        };
-        self.native_step = Some(tr("Starting the build").into());
-        self.native_progress = None;
-        self.native_done = None;
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = native_mods::build(&base, &folder, &instance, None, |step| {
-                let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
-            });
-            let _ = tx.send(Msg::Native(result));
-        });
-    }
-
     fn fetch_releases(&mut self) {
         self.releases = Load::Loading;
         let tx = self.tx.clone();
@@ -1306,6 +1265,9 @@ impl Launcher {
                     }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
+                Msg::NativeRegistryConsent(inventory, reply) => {
+                    native_registry_consent::show(window, inventory, reply, cx)
+                }
                 Msg::NativeProgress(step, progress) => {
                     self.native_step = Some(step);
                     self.native_progress = Some(progress);
@@ -5888,3 +5850,5 @@ mod tests {
         assert_eq!(shown, ["0", "7", "999", "1,000", "12,300", "1,234,500"]);
     }
 }
+
+mod native_build;
