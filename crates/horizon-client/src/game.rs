@@ -7476,23 +7476,30 @@ impl Game<'_> {
         }
         drop(block_phase);
         let _item_phase = horizon_client::spans::guard("use_item");
-        let Some(stack) = self.held().cloned() else {
+        let stack = self.held().cloned();
+        let info = stack
+            .as_ref()
+            .and_then(|s| self.items().get(&s.item))
+            .cloned();
+        if stack.is_some() && info.is_none() {
             return Ok(false);
-        };
-        let Some(info) = self.items().get(&stack.item).cloned() else {
-            return Ok(false);
-        };
+        }
         // ServerPlayerGameMode.useItem and useItemOn: an item on cooldown is
         // not used (PASS, so the other hand may still act), unless
-        // RightClickBlock's useItem TRUE forces a block click's useOn.
+        // RightClickBlock's useItem TRUE forces a block click's useOn, even
+        // with an empty hand (the broadcast phase can still handle it).
         let forced = on_block && use_item == TriState::True;
         if !forced
-            && self
-                .cooldowns
-                .is_on_cooldown(&horizon_client::cooldowns::group(
-                    &stack,
-                    info.use_cooldown.as_ref(),
-                ))
+            && stack
+                .as_ref()
+                .zip(info.as_ref())
+                .is_none_or(|(stack, info)| {
+                    self.cooldowns
+                        .is_on_cooldown(&horizon_client::cooldowns::group(
+                            stack,
+                            info.use_cooldown.as_ref(),
+                        ))
+                })
         {
             return Ok(false);
         }
@@ -7511,44 +7518,52 @@ impl Game<'_> {
         // aimed at had its turn, and the item is off cooldown. A guest's
         // UseItemOn reaches only useOn, its UseItem only use.
         let mut claimed = false;
-        if let Some(hit) = block_hit {
-            if let Some(answer) = self.use_item_on_block(
+        if let Some(hit) = block_hit
+            && let Some(answer) = self.use_item_on_block(
                 hit,
                 self.hand,
-                Some(&stack),
+                stack.as_ref(),
                 mod_api::UsePhase::ItemAfterBlock,
-            ) {
-                if answer.consumes_action() {
-                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &before);
-                    if matches!(answer, Answer::Success | Answer::SuccessServer) {
-                        self.swing_arm();
-                    }
-                    return Ok(true);
+)
+        {
+            if answer.consumes_action() {
+                if let Some(stack) = &stack {
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
                 }
-                if answer == Answer::Fail {
-                    self.use_failed = true;
-                    return Ok(true);
+                if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                    self.swing_arm();
                 }
-                if on_block {
-                    return Ok(false);
-                }
-                block_hit = None;
-            } else if mod_api::__private::has_part_hook(mod_api::HookId::UseOn)
-                && let Ok(snapshot) = stack.try_into_api()
-            {
-                let (player, player_entity_id) = self.native_clicker();
-                let (hand, at) = (self.hand, hit.native());
-                self.native_use_on(mod_api::__private::UseOnCall {
-                    stack: &snapshot,
-                    pos: hit.pos,
-                    face: hit.face,
-                    hand,
-                    hit: at,
-                    player,
-                    player_entity_id,
-                    claimed: &mut claimed,
-                });
+                return Ok(true);
             }
+            if answer == Answer::Fail {
+                self.use_failed = true;
+                return Ok(true);
+            }
+            if on_block {
+                return Ok(false);
+            }
+            block_hit = None;
+        }
+        // An empty stack has no item Part or vanilla Item.useOn implementation.
+        let (Some(stack), Some(info)) = (stack, info) else {
+            return Ok(false);
+        };
+        if let Some(hit) = block_hit
+            && mod_api::__private::has_part_hook(mod_api::HookId::UseOn)
+            && let Ok(snapshot) = stack.try_into_api()
+        {
+            let (player, player_entity_id) = self.native_clicker();
+            let (hand, at) = (self.hand, hit.native());
+            self.native_use_on(mod_api::__private::UseOnCall {
+                stack: &snapshot,
+                pos: hit.pos,
+                face: hit.face,
+                hand,
+                hit: at,
+                player,
+                player_entity_id,
+                claimed: &mut claimed,
+            });
         }
         if let Some(used) = self.use_item_fallthrough(&stack, on_block, claimed) {
             return Ok(used);
