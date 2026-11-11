@@ -1880,6 +1880,14 @@ mod tests {
             "{}",
             both.libs[0].1
         );
+        // The copy holds the loop itself, not a call to it: a call-site row inside the loop (the
+        // check mod's selector) finds its one call there.
+        assert_eq!(
+            lib.matches("ticking(pos.0,pos.2)").count(),
+            1,
+            "{}",
+            both.libs[0].1
+        );
         // A helper that is not Rust is refused by name.
         let mut broken = extras.clone();
         broken.loops[0].slots[1].helper = "fn (".into();
