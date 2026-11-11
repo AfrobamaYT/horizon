@@ -72,6 +72,8 @@ pub(super) struct CodeSwitches {
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    pub(super) profession_declarations:
+        Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
