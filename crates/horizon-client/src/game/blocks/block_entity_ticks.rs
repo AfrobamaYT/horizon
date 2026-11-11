@@ -5,6 +5,7 @@
 //! chunks that tick blocks. Sculk, brewing stands and pistons tick in their
 //! own passes.
 use super::Game;
+use crate::game::published_loops::{Attributed, LoopFlow, LoopMod};
 use horizon_client::{
     Result,
     block_entities::{Pos, Ticking},
@@ -15,8 +16,104 @@ use horizon_client::{
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 
+/// What `block_entities.tick` is visiting: the dispatch's own kinds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TickedKind {
+    Hopper,
+    Crafter,
+    Jukebox,
+    Beacon,
+    CreakingHeart,
+    Spawner,
+    TrialSpawner,
+    Vault,
+    Beehive,
+    Furnace,
+    BrewingStand,
+    DaylightDetector,
+    EndGateway,
+    Campfire,
+    Mod,
+    PotentSulfur,
+}
+
+/// The block entity `block_entities.tick` is visiting, as a slot gets it: the loop's own state,
+/// lent under the loop's `&mut self` for one call. Pinned to this build like a mixin's target.
+#[allow(dead_code, reason = "read by `[[native.loop]]` helpers, compiled in a mod build")]
+pub(crate) struct BlockEntityTick<'g, 'a> {
+    /// The game the loop runs on: the level being ticked, `hoppers`, everything the loop has.
+    pub(crate) game: &'g mut Game<'a>,
+    /// The block entity's position.
+    pub(crate) pos: Pos,
+    pub(crate) kind: TickedKind,
+}
+
+#[allow(dead_code, reason = "read by `[[native.loop]]` helpers, compiled in a mod build")]
+impl BlockEntityTick<'_, '_> {
+    /// The visited block entity.
+    pub(crate) fn block_entity(&mut self) -> Option<&mut BlockEntity> {
+        self.game.world.block_entities.get_mut(&self.pos)
+    }
+}
+
+/// A `[[native.loop]]` slot of `block_entities.tick`: `before` runs after vanilla's visit filters,
+/// just before the block entity ticks; `after` just after a tick that happened.
+pub(crate) trait BlockEntityTickSlot {
+    #[inline(always)]
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        let _ = tick;
+        LoopFlow::Continue
+    }
+    #[inline(always)]
+    fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+        let _ = tick;
+    }
+}
+
+/// No mod: the game's own loop.
+impl BlockEntityTickSlot for () {}
+
+/// Two slots in order: `A` first, and `B` only while `A` answers [`LoopFlow::Continue`].
+impl<A: BlockEntityTickSlot, B: BlockEntityTickSlot> BlockEntityTickSlot for (A, B) {
+    #[inline(always)]
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        match self.0.before(tick) {
+            LoopFlow::Continue => self.1.before(tick),
+            answer => answer,
+        }
+    }
+    #[inline(always)]
+    fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+        self.0.after(tick);
+        self.1.after(tick);
+    }
+}
+
+impl<N: LoopMod, T: BlockEntityTickSlot> BlockEntityTickSlot for Attributed<N, T> {
+    #[inline(always)]
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        self.call(|slot| slot.before(tick))
+    }
+    #[inline(always)]
+    fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+        self.call(|slot| slot.after(tick));
+    }
+}
+
 impl Game<'_> {
+    /// The published loop `block_entities.tick` (`published_loops.rs`): with no
+    /// `[[native.loop]]` mod its slot is `()`, and a mod build installs its own copy of this
+    /// function, with the mods' slots, through its replacement cell.
+    #[horizon_mod_api_macros::horizon_loop(name = "block_entities.tick", side = "server")]
     pub(super) fn tick_block_entities(&mut self) -> Result<()> {
+        self.tick_block_entities_with(&mut ())
+    }
+    /// `tick_block_entities` with `slot` asked before and after each block entity's tick. Generic
+    /// over the slot only, so it has no replacement cell of its own: a mod build compiles it.
+    pub(crate) fn tick_block_entities_with<S: BlockEntityTickSlot>(
+        &mut self,
+        slot: &mut S,
+    ) -> Result<()> {
         self.tick_mount_menu();
         self.tick_craft_table();
         self.tick_container_reach();
@@ -45,8 +142,8 @@ impl Game<'_> {
         let tickers = self.world.block_entity_tickers();
         let mut last_chunk = (i32::MIN, i32::MIN);
         let mut last_chunk_ticking = false;
-        for slot in tickers.iter().copied() {
-            let pos = slot.0;
+        for ticker in tickers.iter().copied() {
+            let pos = ticker.0;
             let chunk = (pos.0 >> 4, pos.2 >> 4);
             let chunk_ticking = if chunk == last_chunk {
                 last_chunk_ticking
@@ -60,36 +157,64 @@ impl Game<'_> {
             }
             // Ticks before this one can remove it (`TickingBlockEntity.isRemoved`).
             if self.world.block_entities.is_asleep(&pos)
-                || !self.world.block_entities.is_live(slot)
+                || !self.world.block_entities.is_live(ticker)
                 || !self.border.contains(f64::from(pos.0), f64::from(pos.2))
             {
                 continue;
             }
-            match self.world.block_entities.get(&pos) {
+            let kind = match self.world.block_entities.get(&pos) {
                 Some(BlockEntity::Chest(items)) if items.len() == HOPPER_SLOTS => {
-                    self.tick_hopper(pos)
+                    TickedKind::Hopper
                 }
-                Some(BlockEntity::Crafter(_)) => self.tick_crafter(pos),
-                Some(BlockEntity::Jukebox(_)) => self.tick_jukebox(pos),
-                Some(BlockEntity::Beacon(_)) => self.tick_beacon_at(pos),
-                Some(BlockEntity::CreakingHeart(_)) => self.tick_creaking_heart(pos)?,
-                Some(BlockEntity::Spawner(_)) => {
+                Some(BlockEntity::Crafter(_)) => TickedKind::Crafter,
+                Some(BlockEntity::Jukebox(_)) => TickedKind::Jukebox,
+                Some(BlockEntity::Beacon(_)) => TickedKind::Beacon,
+                Some(BlockEntity::CreakingHeart(_)) => TickedKind::CreakingHeart,
+                Some(BlockEntity::Spawner(_)) => TickedKind::Spawner,
+                Some(BlockEntity::TrialSpawner(_)) => TickedKind::TrialSpawner,
+                Some(BlockEntity::Vault(_)) => TickedKind::Vault,
+                Some(BlockEntity::Beehive(_)) => TickedKind::Beehive,
+                Some(BlockEntity::Furnace(_)) => TickedKind::Furnace,
+                Some(BlockEntity::Brewing(_)) => TickedKind::BrewingStand,
+                Some(BlockEntity::DaylightDetector) => TickedKind::DaylightDetector,
+                Some(BlockEntity::EndGateway(_)) => TickedKind::EndGateway,
+                Some(BlockEntity::Campfire(_)) => TickedKind::Campfire,
+                Some(BlockEntity::Mod(_)) => TickedKind::Mod,
+                Some(BlockEntity::PotentSulfur(_)) => TickedKind::PotentSulfur,
+                _ => continue,
+            };
+            match slot.before(&mut BlockEntityTick {
+                game: self,
+                pos,
+                kind,
+            }) {
+                LoopFlow::Continue => {}
+                LoopFlow::Skip => continue,
+                LoopFlow::Stop => break,
+            }
+            match kind {
+                TickedKind::Hopper => self.tick_hopper(pos),
+                TickedKind::Crafter => self.tick_crafter(pos),
+                TickedKind::Jukebox => self.tick_jukebox(pos),
+                TickedKind::Beacon => self.tick_beacon_at(pos),
+                TickedKind::CreakingHeart => self.tick_creaking_heart(pos)?,
+                TickedKind::Spawner => {
                     self.tick_spawner(pos)?;
                     self.spawner_tick_positions.push(pos);
                 }
-                Some(BlockEntity::TrialSpawner(_)) => {
+                TickedKind::TrialSpawner => {
                     self.tick_trial_spawner(pos)?;
                     self.trial_spawner_tick_positions.push(pos);
                 }
-                Some(BlockEntity::Vault(_)) => self.tick_vault(pos)?,
-                Some(BlockEntity::Beehive(_)) => self.tick_beehive(pos),
-                Some(BlockEntity::Furnace(_)) => self.tick_furnace(pos)?,
-                Some(BlockEntity::Brewing(_)) => self.tick_brewing_stand(pos)?,
-                Some(BlockEntity::DaylightDetector) => self.tick_daylight_detector(pos),
-                Some(BlockEntity::EndGateway(_)) => self.tick_end_gateway(pos),
-                Some(BlockEntity::Campfire(_)) => self.tick_campfire(pos)?,
-                Some(BlockEntity::Mod(_)) => self.tick_mod_block_entity(pos),
-                Some(BlockEntity::PotentSulfur(_)) => {
+                TickedKind::Vault => self.tick_vault(pos)?,
+                TickedKind::Beehive => self.tick_beehive(pos),
+                TickedKind::Furnace => self.tick_furnace(pos)?,
+                TickedKind::BrewingStand => self.tick_brewing_stand(pos)?,
+                TickedKind::DaylightDetector => self.tick_daylight_detector(pos),
+                TickedKind::EndGateway => self.tick_end_gateway(pos),
+                TickedKind::Campfire => self.tick_campfire(pos)?,
+                TickedKind::Mod => self.tick_mod_block_entity(pos),
+                TickedKind::PotentSulfur => {
                     self.tick_potent_sulfur(pos)?;
                     // A window that simulates the world itself is its own
                     // client; a server's clients tick it on their own.
@@ -97,8 +222,12 @@ impl Game<'_> {
                         self.client_tick_potent_sulfur(pos);
                     }
                 }
-                _ => {}
             }
+            slot.after(&mut BlockEntityTick {
+                game: self,
+                pos,
+                kind,
+            });
         }
         // Items move between passes: the columns hold for this one only.
         self.item_columns = None;

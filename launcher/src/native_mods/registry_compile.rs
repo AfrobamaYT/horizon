@@ -186,7 +186,7 @@ pub(super) fn compile(
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
     // crates their helpers call, and compile against the SDK like a mod.
-    let patch = super::patch::prepare(rust, &out.join("fnr"), projects, &sdk)?;
+    let patch = super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk)?;
     if let Some(patch) = &patch {
         for name in &patch.names {
             let dir = patch.dir.join(name);
@@ -198,12 +198,7 @@ pub(super) fn compile(
                     .iter()
                     .find(|project| project.bundle.manifest.id == *id)
                     .expect("a prepared mod is a project");
-                let krate = project
-                    .cargo
-                    .get("lib")
-                    .and_then(|l| l.get("name"))
-                    .and_then(toml::Value::as_str)
-                    .map_or_else(|| project.package.replace('-', "_"), str::to_owned);
+                let krate = project.crate_name();
                 dependencies.insert(
                     krate,
                     toml::toml! { path = (out.join("native-api").join(id).display().to_string()) package = (project.package.clone()) }

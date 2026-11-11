@@ -545,10 +545,7 @@ pub(super) fn compile(
             .and_then(toml::Value::as_str)
             .unwrap_or("2015");
         let lib = project.cargo.get("lib");
-        let krate = lib
-            .and_then(|l| l.get("name"))
-            .and_then(toml::Value::as_str)
-            .map_or_else(|| project.package.replace('-', "_"), str::to_owned);
+        let krate = project.crate_name();
         // Compile an isolated copy of the mod crate.
         let staged = out.join("staged").join(id);
         super::copy_bundle(project.bundle, &staged)?;

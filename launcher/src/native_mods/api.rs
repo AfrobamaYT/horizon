@@ -172,6 +172,15 @@ impl std::fmt::Display for ProjectError {
 impl std::error::Error for ProjectError {}
 
 impl<'a> Project<'a> {
+    /// The mod's crate name: its `[lib] name`, or its package name with `_` for `-`.
+    pub(super) fn crate_name(&self) -> String {
+        self.cargo
+            .get("lib")
+            .and_then(|l| l.get("name"))
+            .and_then(toml::Value::as_str)
+            .map_or_else(|| self.package.replace('-', "_"), str::to_owned)
+    }
+
     pub(super) fn read(bundle: &'a Bundle) -> Result<Self, ProjectError> {
         let mod_id = || bundle.manifest.id.clone();
         let cargo = read(&bundle.dir.join("Cargo.toml")).map_err(|reason| ProjectError::Cargo {
