@@ -115,21 +115,6 @@ impl std::fmt::Display for TransferError {
     }
 }
 
-/// Whether a carrier transfer fence holds any cell a piston move
-/// would push or destroy: the whole move refuses (`GameLevel`'s
-/// `allow_piston_move` seeds its cancellation with this, so a held
-/// cell also skips the piston hooks).
-pub(in crate::game) fn piston_fenced(
-    fences: &horizon_client_render::carrier_fences::Fences,
-    push: &[BlockPos],
-    destroy: &[BlockPos],
-) -> bool {
-    push.iter().chain(destroy.iter()).any(|pos| {
-        let [x, y, z] = [pos.x, pos.y, pos.z];
-        fences.locks_cell(&[x, y, z])
-    })
-}
-
 /// Whether a block entity is passive cargo this slice carries: a
 /// container or a sign, banner, skull or bell — pure data, no ticker.
 /// Ticking machines (furnaces, brewing stands, spawners, sculk,

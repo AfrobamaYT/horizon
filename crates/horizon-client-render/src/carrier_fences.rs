@@ -62,6 +62,21 @@ impl Fences {
         self.broken
     }
 
+    /// Whether any cell a piston move would push or destroy is locked
+    /// by a carrier transfer: the whole move refuses. The piston gate
+    /// seeds its cancellation with this, so a held cell also skips the
+    /// piston hooks (`GameLevel::allow_piston_move`).
+    pub fn holds_move(
+        &self,
+        push: &[horizon_core::position::BlockPos],
+        destroy: &[horizon_core::position::BlockPos],
+    ) -> bool {
+        push.iter().chain(destroy.iter()).any(|pos| {
+            let [x, y, z] = [pos.x, pos.y, pos.z];
+            self.locks_cell(&[x, y, z])
+        })
+    }
+
     /// Marks the transfer broken: fences hold, further transfers refuse.
     pub fn mark_broken(&mut self) {
         self.broken = true;
