@@ -22,6 +22,13 @@ mkdir -p .local "$shared/prepared"
 sha256() { if command -v shasum > /dev/null; then shasum -a 256; else sha256sum; fi; }
 key=${HORIZON_PREPARE_KEY:-$(git ls-files -s crates/horizon-prepare mods/horizon/src/test/java research-lock.json tools/ci/vanilla-data.sh tools/ci/seed_prepared_extras.py tools/prepare_output.py | sha256 | cut -c1-16)}
 prepared="$shared/prepared/$key"
+# .entries stores output names only, not a digest of the preparation that made them.
+# The directory name is the expected lookup key, not independent found-key evidence.
+export HORIZON_DIAGNOSTIC_EXPECTED_KEY="$key"
+export HORIZON_DIAGNOSTIC_CACHE_STATE=missing-entry-list
+if [ -f "$prepared/.entries" ]; then
+  export HORIZON_DIAGNOSTIC_CACHE_STATE=missing-horizon-client
+fi
 report_prepared() {
   echo "prepared cache footprint KiB: $(du -sk "$prepared" | cut -f1)"
 }
