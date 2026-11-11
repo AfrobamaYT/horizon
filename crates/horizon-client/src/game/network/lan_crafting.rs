@@ -108,7 +108,7 @@ pub(super) fn machine_menu(
 }
 
 /// `load_player` back.
-fn store_player(menu: &mut Menu, g: &mut Guest) {
+pub(super) fn store_player(menu: &mut Menu, g: &mut Guest) {
     for i in 0..36 {
         g.inventory[i] = menu.player_item(i).cloned();
     }
@@ -752,7 +752,7 @@ impl Game<'_> {
     }
 
     pub(super) fn guest_recipe_transfer(&mut self, conn: u32, data: &[u8]) {
-        use horizon_protocol::buf::{Reader, Writer};
+        use horizon_protocol::buf::Writer;
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -763,15 +763,9 @@ impl Game<'_> {
         if g.brand != "horizon" || g.spectator() {
             return;
         }
-        let mut reader = Reader::new(data);
-        let (Ok(container), Ok(id)) = (reader.varint(), reader.string(512)) else {
+        let Ok((container, id, all)) = horizon_client::lan::recipes::decode_transfer_request(data)
+        else {
             return;
-        };
-        // A trailing 1 asks for as many sets as the items allow.
-        let all = match reader.remaining() {
-            0 => false,
-            1 => reader.u8() == Ok(1),
-            _ => return,
         };
         let result = if container == 0 && (g.menu.is_some() || g.creative()) {
             Err(TransferError::Unavailable)
@@ -1059,7 +1053,7 @@ impl Game<'_> {
     /// The containers recipe placement into guest `gi`'s mod crafting menu
     /// `t` at `pos` may also take from (`native_recipe_sources`): each block
     /// and its slots, chest-like or a mod's container, none twice, not `pos`.
-    fn lan_recipe_sources(
+    pub(super) fn lan_recipe_sources(
         &mut self,
         gi: usize,
         t: &ModMenuType,

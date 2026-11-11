@@ -126,6 +126,17 @@ Show disposable storage by category as JSON. Builds must be idle.
 
 MCP: `storage`.
 
+## `horizon-launcher native-lock`
+
+Generate the registry-only Cargo.lock for one native mod, without executing mod code.
+
+    horizon-launcher native-lock <FOLDER>
+
+- `FOLDER`
+- `--update-lock`: Explicitly replace an existing lock with newly resolved registry pins
+
+MCP: `native_lock`.
+
 ## `horizon-launcher native-build`
 
 Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod projects against the instance's exact Horizon source revision with the launcher's own Rust, as the version the instance then plays. Not sandboxed: the mods' code runs with your rights.

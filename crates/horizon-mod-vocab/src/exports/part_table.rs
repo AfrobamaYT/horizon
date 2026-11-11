@@ -11,6 +11,8 @@ pub use parts::{
 };
 pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
 mod __private {
+    #[cfg(any(test, feature = "testing"))]
+    pub use crate::parts::install_process_datapack_registry_declarations;
     pub use crate::parts::{
         AttributeDeclaration, BiomeModifierDeclaration, EntityAttributeDeclaration,
         EntityAttributeModification, HookParts, ItemKeyError, KnownIds, PartsRef,

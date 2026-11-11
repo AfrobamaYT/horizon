@@ -13,6 +13,7 @@ struct PreparedRecipe {
     displays: Vec<PreparedDisplay>,
 }
 struct PreparedDisplay {
+    source: u32,
     display: Display,
     results: Vec<ItemStack>,
     text: String,
@@ -33,13 +34,15 @@ impl ModBookPanel<'_> {
                 let displays = recipe
                     .displays
                     .iter()
-                    .filter_map(|display| {
+                    .enumerate()
+                    .filter_map(|(source, display)| {
                         let results = resolver.resolve(result(display));
                         if results.is_empty() {
                             return None;
                         }
                         let text = resolver.search_text(&results).to_lowercase();
                         Some(PreparedDisplay {
+                            source: source as u32,
                             display: display.clone(),
                             results,
                             text,
@@ -79,6 +82,7 @@ impl PreparedBook {
                 .iter()
                 .filter_map(
                     |PreparedDisplay {
+                         source,
                          display,
                          results,
                          text,
@@ -88,20 +92,24 @@ impl PreparedBook {
                             return None;
                         }
                         let craftable = resolver.craftable(&recipe.id, display, ingredients);
-                        (!filtering || craftable).then_some((display, results, craftable))
+                        (!filtering || craftable).then_some((*source, display, results, craftable))
                     },
                 )
                 .collect();
             if alternatives.is_empty() {
                 continue;
             }
-            alternatives.sort_by_key(|(_, _, craftable)| !craftable);
-            let has_craftable = alternatives.iter().any(|(_, _, ready)| *ready);
+            alternatives.sort_by_key(|(_, _, _, craftable)| !craftable);
+            let has_craftable = alternatives.iter().any(|(_, _, _, ready)| *ready);
+            let sources = alternatives
+                .iter()
+                .map(|(source, _, _, _)| *source)
+                .collect();
             let visible = recipes.len() / 20 == page;
             let (entries, overlay) = if visible {
                 alternatives
                     .into_iter()
-                    .map(|(display, results, craftable)| {
+                    .map(|(_, display, results, craftable)| {
                         (
                             results.clone(),
                             OverlayRecipe {
@@ -116,6 +124,7 @@ impl PreparedBook {
             };
             recipes.push(PresentedRecipe {
                 recipe: recipe.id.clone(),
+                sources,
                 button: ButtonView {
                     has_craftable,
                     entries,

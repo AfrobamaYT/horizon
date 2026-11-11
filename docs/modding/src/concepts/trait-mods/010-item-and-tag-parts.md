@@ -1,6 +1,8 @@
 <!-- chapter: Item and tag Parts -->
 <!-- separator: 1 -->
 
+# Item and tag Parts
+
 For an item-specific Part, request its canonical registry key once in `register`:
 `let stick = r.item_key("minecraft:stick"); r.item_part(stick, Sharp);`. Bare names use the
 `minecraft:` namespace. Requests may refer to content declared later; the final item registry refuses
@@ -24,10 +26,25 @@ does) can't see tag parts, and warns once.
 interaction hand of this click (`Hand::Main` or `Hand::Off`), including air clicks
 with identical stacks in both hands. Read it directly when choosing which held stack
 to shrink. `living_used_item_hand` instead answers only during active item use and
-cannot identify an instantaneous click. Returning `Flow::Cancel` claims the use and
-swings that interaction hand without running the item's own use. The field has the
-same meaning on native and wasm and corresponds to NeoForge's
+cannot identify an instantaneous click. The Part runs on both sides with `HostSide`,
+after the global right-click event and before the item's own use, on native and wasm.
+Return `Some(InteractionResult::Success)` to consume and swing on the client,
+`Some(SuccessServer)` to consume and swing on the server, or `Some(Consume)`
+to consume without a swing. `Some(Fail)` skips this item's own use without
+swinging and allows the off-hand sequence to proceed; unlike a block-use Fail,
+it does not end the entire click.
+`None` (the default) lets later Parts answer; if none answers, the item's own use
+runs. `Some(Pass)` stops dispatch to later Parts and continues directly to the
+item's own use.
+`TryWithEmptyHand` belongs to block use and is treated as Pass here.
+A thrown item can return Success on the client and Consume on the server.
+The hand field corresponds to NeoForge's
 `PlayerInteractEvent.RightClickItem.getHand()`.
+
+`Hooks::right_click_item` runs before `Item.use`, including after the same hand's
+unhandled block or entity interaction. A block success or FAIL, or an entity success, stops fallback.
+The server fires it for the separate use-item packet, once for that packet's hand.
+Canceling skips the item Part and vanilla action on native and wasm alike.
 
 ## Item wear
 

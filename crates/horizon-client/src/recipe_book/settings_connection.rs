@@ -1,5 +1,7 @@
 //! Negotiated server boundary: capability, replay state and response budget
 //! belong to one actual player connection, never to a brand or global owner.
+#[path = "settings_placement.rs"]
+mod placement;
 use super::{
     BookFlags, CustomBooks, settings_codec,
     settings_sync::{Authority, Message, RequestBudget},

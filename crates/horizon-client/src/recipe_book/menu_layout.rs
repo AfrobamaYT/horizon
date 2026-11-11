@@ -3,7 +3,7 @@ use super::slot_layout::{CheckedSlotLayout, LayoutError};
 use mod_api::RecipeBookLayout;
 
 /// Content-owned menu metadata, independent of a mod's layout declaration.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, mod_api::Wire)]
 pub struct MenuLayoutMetadata {
     pub slots: u16,
     /// Contiguous square grid: first input, side length and computed result.
@@ -15,9 +15,6 @@ pub fn compile(
     menu: MenuLayoutMetadata,
 ) -> Result<CheckedSlotLayout, LayoutError> {
     let checked = CheckedSlotLayout::new(layout.clone(), menu.slots)?;
-    if matches!(layout, RecipeBookLayout::Crafting { .. }) && menu.crafting.is_none() {
-        return Err(LayoutError::InvalidGrid);
-    }
     if let Some((grid, size, output)) = menu.crafting {
         let RecipeBookLayout::Crafting {
             width,
@@ -40,5 +37,5 @@ pub fn compile(
             return Err(LayoutError::InvalidGrid);
         }
     }
-    Ok(checked)
+    Ok(checked.with_computed_result(menu.crafting.map(|(_, _, result)| result)))
 }

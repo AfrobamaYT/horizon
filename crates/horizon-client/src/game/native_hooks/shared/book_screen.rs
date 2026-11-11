@@ -1,6 +1,8 @@
 use super::*;
 #[path = "book_screen/open.rs"]
 mod open;
+#[path = "book_screen/placement.rs"]
+mod placement;
 
 #[cfg(test)]
 #[path = "book_screen/lifecycle_tests.rs"]

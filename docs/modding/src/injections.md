@@ -348,7 +348,10 @@ each one there is measured first, since a slot on a hot function costs on every 
 A `Game` method that takes `self` has a point named after the method (`tick`). Any other is named by its full path, snake-cased
 without `horizon_client::`: `game_levels_levels_parked_dims` for `Levels::parked_dims`, and for a lower
 crate without `horizon_`: `client_render_chunk_chunk_get`, and `Game::new` is `game_game_new`. `Game` methods'
-points get a host; free and associated functions have none. A method of another type has no API
+points get a host; free and associated functions have none.
+A point name is always one snake-cased form, for engine and mod points alike. Snake-casing is not injective
+(`a::b_c` and `a_b::c` are both `a_b_c`), so uniqueness comes from refusal: the build fails, naming both
+functions, when two points have one name. A method of another type has no API
 record until `mod_api` has a handle for that type; it keeps its internals form.
 
 A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no API
@@ -380,7 +383,8 @@ by the same rules as the game's: every eligible function of the crate, public an
 functions, inherent methods and functions of inline modules (trait impl methods are not points). The
 build compiles a staged copy with a point on each, in a slot table of the mod's own
 (`<crate>::__horizon_points`); the author's source is never edited. A point is named by its path
-from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::fill`.
+from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::fill`. Two functions whose
+paths give one name (`a::b_c` and `a_b::c`) fail the build, naming both; rename one or opt it out.
 A library's crate must be named after its mod id, with `-` as `_` (`chem-lib` builds crate
 `chem_lib`): an addon's manifest names the library by id and each `at` by crate, and on both
 targets the points of a library whose crate is named otherwise are refused.

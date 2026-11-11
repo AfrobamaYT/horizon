@@ -617,7 +617,7 @@ impl Goal for RandomStand {
         stand_if_possible(m);
         // playStandSound: getAmbientStandSound is the ambient sound, plain
         // playSound(sound) at volume and pitch 1.
-        let sound = super::ai::voice_sounds(m)[0];
+        let sound = super::entity_sounds::voices(m)[0];
         let at = [m.position.x, m.position.y, m.position.z];
         cx.events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
     }

@@ -21,6 +21,7 @@ fn registered() -> BTreeSet<String> {
 }
 impl Game<'_> {
     pub(super) fn tick_book_snapshot_retry(&mut self) {
+        self.check_mod_book_placement_timeout();
         self.native_net.to_server = 0;
         if self
             .native_net
@@ -70,6 +71,9 @@ impl Game<'_> {
     }
 
     pub(super) fn reset_book_view(&mut self) {
+        self.native_net.placement.client = Default::default();
+        self.native_net.placement.deadline = None;
+        self.clear_mod_book_placement_screen();
         self.native_net.book_view = Default::default();
         self.native_net.book_request = 0;
         self.native_net.book_ready = false;
@@ -77,19 +81,30 @@ impl Game<'_> {
         self.build_screen();
     }
     pub(super) fn is_book_or_mod_channel(&self, channel: &str) -> bool {
-        channel == CHANNEL || channel == horizon_protocol::mod_net::CHANNEL
+        channel == CHANNEL
+            || channel == horizon_protocol::mod_net::CHANNEL
+            || channel == horizon_client::datapack_net::CHANNEL
     }
-    pub(super) fn remote_book_or_mod_payload(&mut self, channel: &str, data: &[u8]) {
+    pub(super) fn remote_book_or_mod_payload(
+        &mut self,
+        channel: &str,
+        data: &[u8],
+    ) -> horizon_client::Result<()> {
         if channel == CHANNEL {
             self.remote_book_settings(data);
+        } else if channel == horizon_client::datapack_net::CHANNEL {
+            // The server's next generation of the mods' registries: all of it or the connection.
+            horizon_client::datapack_net::accept_chunk(data)?;
         } else {
             self.remote_native_net(data);
         }
+        Ok(())
     }
 
     pub(super) fn clear_guest_book_connection(&mut self, conn: u32) {
         self.guest_combat.remove(&conn);
         self.native_net.book_connections.remove(&conn);
+        self.native_net.placement.servers.remove(&conn);
     }
     pub(super) fn notify_vanilla_book_settings(
         &mut self,
@@ -218,6 +233,13 @@ impl Game<'_> {
             return;
         }
         let connection = self.native_net.book_connections.entry(conn).or_default();
+        if data.first() == Some(&settings_codec::PLACEMENT_TAG) {
+            let frame = connection.receive_placement(data, std::time::Instant::now());
+            if let Some(frame) = frame {
+                self.guest_mod_book_placement(conn, frame);
+            }
+            return;
+        }
         let changed = host
             .hub
             .guests
@@ -265,7 +287,14 @@ impl Game<'_> {
         let Some(message) = settings_codec::decode(data) else {
             return;
         };
+        if let Message::Placement(frame) = message {
+            if self.native_net.book_ready && self.native_net.book_view.ready {
+                self.remote_mod_book_placement(frame);
+            }
+            return;
+        }
         if message == Message::Busy && self.native_net.book_ready {
+            self.clear_mod_book_placement_screen();
             self.native_net.book_view.ready = false;
             self.native_net.book_retry_at.get_or_insert_with(|| {
                 std::time::Instant::now() + std::time::Duration::from_secs(1)
@@ -293,6 +322,7 @@ impl Game<'_> {
         {
             return;
         }
+        let previous_epoch = self.native_net.book_view.epoch;
         if !self.native_net.book_view.receive(message, &registered())
             && !self.native_net.book_view.ready
             && let Some(data) = settings_codec::encode(&Message::Resnapshot)
@@ -302,10 +332,17 @@ impl Game<'_> {
                 data,
             }));
         }
+        if previous_epoch != self.native_net.book_view.epoch {
+            self.native_net.placement.client = Default::default();
+            self.native_net.placement.deadline = None;
+            self.clear_mod_book_placement_screen();
+        }
         // Both accepted settings and readiness loss change the visible panel.
         self.build_screen();
         if self.native_net.book_view.ready {
             self.native_net.book_retry_at = None;
+            self.begin_mod_book_placement();
+            self.ensure_mod_book_catalog();
         }
     }
 }

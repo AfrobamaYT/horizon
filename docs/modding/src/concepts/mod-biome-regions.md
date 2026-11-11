@@ -62,6 +62,37 @@ Not verified for this note: how vanilla's `MultiNoiseBiomeSource` presets are bu
 - Nether, Overworld and the End: should the End be included? Recommendation: Overworld and Nether first, as the issue asks.
 - Where is the saved list stored (level data or a separate file), and how does it round-trip the full saved points and recorded per-world decisions? Recommendation: decide with the world-save owners before any code.
 
+## Implementation boundaries in Horizon
+
+The generator resolves the preset's biome source from the dimension's generator settings in
+[`generator.rs`](../../../../crates/horizon-world/src/worldgen/generator.rs).
+[`BiomeSourceCatalog`](../../../../crates/horizon-world/src/worldgen/biome_source/codec.rs)
+decodes a named multi-noise preset separately from an inline list. Keep both routes intact:
+the region selector belongs around the resolved Overworld or Nether preset, and only when a
+saved layout enables it. Inline points for custom dimensions keep their existing behavior.
+
+Biome selection can change generated blocks. The generator passes biome samples into surface
+material rules and uses `carver_biome` to select a carver list at each origin. An opt-in can
+therefore produce material and carving seams in newly generated chunks. Do not promise a
+biome-color-only transition.
+
+For the save owners to review: store a versioned, Horizon-namespaced world record separate from
+`data/minecraft/world_gen_settings.dat`. Key the full layout and recorded substitutions by
+dimension. Preserve the exact region order, weights and points on read. Reject malformed data
+and missing biome IDs before constructing a generator. An absent record in an existing world
+means vanilla generation until the player opts in. Persist an accepted change before
+generating chunks with the new layout. Pin the selector algorithm and its constants to the
+record version, since changing either would move regions in existing worlds.
+
+For the generator owners to review: use a dedicated seed stream and sample in quart coordinates.
+Choose the weighted region before querying its climate index. Check the total weight for
+overflow, and retain a substituted region's weight and slot so unaffected regions keep their
+boundaries. Use distinct fixtures for the Overworld and Nether, including negative coordinates
+and chunk boundaries. Compare the unmodified preset against the Java oracle and compare the
+region-enabled path with no saved regions against that same baseline. The existing
+[`test_biome_source_parity.py`](../../../../tools/test_biome_source_parity.py) covers fixed,
+checkerboard and End sources; it does not establish seeded multi-noise preset parity.
+
 ## Stages
 
 1. Settle the open questions above, with oracle fixtures for the presets.

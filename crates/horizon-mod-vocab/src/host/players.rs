@@ -529,6 +529,37 @@ pub trait PlayersBackendMut {
         trigger: &Identifier,
         test: Arc<dyn CriterionTest>,
     ) -> Result<(), TriggerCriterionError>;
+    /// Side: server. Fires `default_block_use`, then `any_block_use`, without a tool.
+    /// Evaluates vanilla predicates and rewards in the player's own level; never reads inventory.
+    /// `Ok(())` means reached, even if no criterion matched. Refuses remote clients
+    /// (`NotServer`), stale/offline/displaced players (`PlayerUnavailable`), and
+    /// unloaded positions (`UnloadedChunk`).
+    #[access(WorldOnly)]
+    fn player_trigger_block_use(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+    ) -> Result<(), TriggerCriterionError>;
+    /// Side: server. Fires `item_used_on_block` with `original`, then `any_block_use`
+    /// with `after`, in vanilla order. `original` is copied after a before-block
+    /// PASS and before block/item effects; `after` is that original hand stack
+    /// mutated in place, never a replacement swapped into the hand.
+    /// Neither stack is read from inventory. Consuming right-click/before-block
+    /// cancellation already fires automatic `any_block_use` only; do not call
+    /// this pair helper for it, which would duplicate any and add an inner trigger.
+    /// Invalid stacks return `Stack(StackWriteError)` before either trigger fires.
+    /// Evaluates vanilla predicates and rewards in the player's own level.
+    /// `Ok(())` means reached, even if nothing matched. Refuses remote clients
+    /// (`NotServer`), stale/offline/displaced players (`PlayerUnavailable`), and
+    /// unloaded positions (`UnloadedChunk`).
+    #[access(WorldOnly)]
+    fn player_trigger_item_used_on_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        original: &ItemStack,
+        after: &ItemStack,
+    ) -> Result<(), TriggerCriterionError>;
     /// Side: server.
     /// `Player.setLastDeathLocation`: stores where the player died, or
     /// forgets it for None. The client hears of it with the player's next
