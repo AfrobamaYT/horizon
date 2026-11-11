@@ -69,7 +69,7 @@ use mod_api::GameMode;
 use mod_api::GameTests;
 pub use mod_api::game::{PhantomSpawnResult, Shake, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, ClientAudioOptions,
+    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, CauldronFluidContents, ClientAudioOptions,
     ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
     ClientMiningPrediction, ClientModifiers, ClientReloadListeners, ColorResolvers,
     CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityRef, GameRuleActor,
