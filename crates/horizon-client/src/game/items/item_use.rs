@@ -229,7 +229,10 @@ impl Game<'_> {
     /// the result a mod sees is the client's prediction, `stack` less one
     /// unless creative (the use remainder comes with the server's inventory
     /// update). A mod's replacement is put in the slot until that update.
+    /// `ItemStack.finishUsingItem`'s `applyAfterUseComponentSideEffects` (the
+    /// use cooldown) runs first.
     pub(super) fn remote_use_item_finished(&mut self, slot: usize, stack: &ItemStack) {
+        self.apply_use_cooldown(stack);
         let mut predicted = stack.clone();
         if !self.creative {
             predicted.count = predicted.count.saturating_sub(1);

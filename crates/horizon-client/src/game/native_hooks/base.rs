@@ -3525,11 +3525,8 @@ impl Game<'_> {
     /// `native_living_entity_use_item_start`. `result` arrives with what
     /// `finishUsingItem` left in the hand (the bowl of a stew, none for the
     /// last apple; a mod's own item is kept) and may be replaced. Fired for
-    /// consumables, potions, spyglasses and mods' items. Both sides: on a
-    /// server's client `result` is the client's prediction (the stack less
-    /// one unless creative), and the server's inventory update replaces it.
-    /// On the server it fires for every player of the world (the helpers read
-    /// the acting one).
+    /// consumables, potions, spyglasses and mods' items. Both sides (a server's client sees its prediction);
+    /// on the server for every player of the world (the helpers read the acting one).
     pub(in crate::game) fn native_living_entity_use_item_finish(
         &mut self,
         stack: &ItemStack,
