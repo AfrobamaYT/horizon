@@ -949,7 +949,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 white,
                 false,
             );
-            let prof = super::villager::profession(m.extra.profession.index().unwrap_or(0)).id;
+            let prof = super::villager::profession_id(m.extra.profession.index().unwrap_or(0));
             if !m.is_baby() && prof != "none" {
                 push(
                     &mut v,
@@ -2337,7 +2337,7 @@ fn render_visible(
                 .or_else(|| layer.texture.split_once("/baby/"))
         {
             let profession =
-                super::villager::profession(m.extra.profession.index().unwrap_or(0)).id;
+                super::villager::profession_id(m.extra.profession.index().unwrap_or(0));
             data.villager_hats
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)

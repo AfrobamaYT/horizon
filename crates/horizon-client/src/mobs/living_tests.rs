@@ -158,6 +158,7 @@ fn a_mob_bounces_off_a_bouncy_block_and_not_off_stone() {
             }
         }
         let w = MobWorld {
+            professions: crate::mobs::villager::profession_table(),
             teams: Default::default(),
             world: &world,
             registry,
@@ -275,6 +276,7 @@ fn a_ridden_horse_floats_in_deep_water() {
         }
     }
     let w = MobWorld {
+        professions: crate::mobs::villager::profession_table(),
         teams: Default::default(),
         world: &world,
         registry,
@@ -387,6 +389,7 @@ fn a_falling_mob_lands_on_a_shulker_or_a_held_happy_ghast() {
     let landing = |below: &Mob| -> f64 {
         let others = [below.seen(None)];
         let w = MobWorld {
+            professions: crate::mobs::villager::profession_table(),
             teams: Default::default(),
             world: &world,
             registry,
@@ -580,6 +583,7 @@ fn the_world_border_stops_a_mob() {
         let mut east_edge = [0.0; 2];
         for (i, bordered) in [false, true].into_iter().enumerate() {
             let w = MobWorld {
+                professions: crate::mobs::villager::profession_table(),
                 border: bordered.then_some(&border),
                 ..w.clone()
             };
