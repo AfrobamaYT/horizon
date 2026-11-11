@@ -97,20 +97,11 @@ fn top_return(args: &mut mod_points::GameServerLinksListTopArgs) {
     args.result = Some(value + 1.0);
 }
 
-#[horizon_mod_api_macros::point(name = "game_server_links_list_top", raw, free)]
+#[horizon_mod_api_macros::point(name = "game_server_links_list_top", free)]
 fn fixture_list_top(h: f32, n: usize) -> f32 {
     BODY.fetch_add(1, Ordering::Relaxed);
     h + n as f32
 }
-
-pub struct __GameServerLinksListTopRaw<'r, H, N, R> {
-    pub h: &'r mut H,
-    pub n: &'r mut N,
-    pub result: &'r mut Option<R>,
-}
-pub type __GameServerLinksListTopListener =
-    for<'r> fn(&'r mut __GameServerLinksListTopRaw<'r, f32, usize, f32>);
-pub type __GameServerLinksListTopReturnListener = fn(&mut f32);
 
 static LOOPBACK_HEAD: Loopback = Loopback(0);
 static LOOPBACK_RETURN: Loopback = Loopback(1);
