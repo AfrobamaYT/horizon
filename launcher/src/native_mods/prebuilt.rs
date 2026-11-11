@@ -416,8 +416,8 @@ pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     match format.format_version {
         5 => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
-        0..=4 => Err(format!("SDK format {} is too old; install a newer SDK (format 5)", format.format_version)),
-        version => Err(format!("SDK format {version} is newer than this launcher's supported format 5; update the launcher")),
+        0..=4 => Err(trf("SDK format {version} is too old; install a newer SDK (format 5)", &[("version", &format.format_version.to_string())])),
+        version => Err(trf("SDK format {version} is newer than this launcher's supported format 5; update the launcher", &[("version", &version.to_string())])),
     }
 }
 
