@@ -1262,3 +1262,56 @@ fn setup_interaction_guest(
     game.lan.as_mut().unwrap().hub.guests.push(guest);
     rx
 }
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn item_use_overlap_matrix_on_the_server() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("overlap", Box::new(observer.clone()))].into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(false, |game| {
+            let stone = game.pack.assets.registry.default_state("minecraft:stone").unwrap();
+            game.world.set(0, 64, 0, stone).unwrap();
+            game.forced_hit = Some(hit());
+            for hand in [Hand::Main, Hand::Off] {
+                for held in [false, true] {
+                    for sneak in [false, true] {
+                        for gate in [TriState::True, TriState::Default, TriState::False] {
+                            for first in [Answer::Pass, Answer::TryWithEmptyHand, Answer::Consume] {
+                                for after in [Answer::Success, Answer::Fail, Answer::Pass, Answer::Consume] {
+                                    game.inventory[game.selected] = None;
+                                    game.offhand = None;
+                                    if held {
+                                        let stack = Some(ItemStack::new("minecraft:stick", 1));
+                                        if hand == Hand::Main { game.inventory[game.selected] = stack; } else { game.offhand = stack; }
+                                    }
+                                    if sneak { game.keys.insert(winit::keyboard::KeyCode::ShiftLeft); }
+                                    else { game.keys.remove(&winit::keyboard::KeyCode::ShiftLeft); }
+                                    *observer.0.lock().unwrap() = Controls {
+                                        expected_hand: Some(hand), record_first: true,
+                                        first_answer: Some(first), block_answer: Some(Answer::Pass),
+                                        item_on_answer: Some(after), use_item: gate,
+                                        expect_empty_item_phase: !held, ..Controls::default()
+                                    };
+                                    let stopped = held && gate != TriState::False && first != Answer::Pass;
+                                    let item_phase = !stopped && gate != TriState::False && (held || gate == TriState::True);
+                                    let expected = if stopped { first == Answer::Consume }
+                                        else { item_phase && matches!(after, Answer::Success | Answer::Fail | Answer::Consume) };
+                                    game.guest_use = Some(super::super::GuestUse::OnBlock(hand));
+                                    let swings = game.swings_started;
+                                    let used = game.with_hand(hand, |g| g.use_hand(Some(&hit())).unwrap());
+                                    assert_eq!(used, expected, "{hand:?} held={held} sneak={sneak} {gate:?} {first:?} {after:?}");
+                                    assert_eq!(game.swings_started - swings, u32::from(item_phase && after == Answer::Success));
+                                    let state = observer.0.lock().unwrap();
+                                    assert_eq!(state.steps.contains(&Step::Phase(UsePhase::ItemAfterBlock, LogicalSide::Server)), item_phase);
+                                    assert_eq!(state.steps.contains(&Step::Phase(UsePhase::Block, LogicalSide::Server)), !stopped && !(sneak && held));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+}
