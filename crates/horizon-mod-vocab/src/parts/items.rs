@@ -143,8 +143,6 @@ pub fn item_listens(hook: HookId, id: &str) -> bool {
         .is_some_and(|table| !table.item(|| Some(id)).is_empty())
 }
 
-
-
 /// Registrar operations for items.
 pub trait ItemsRegistrar {
     /// Request an item by registry id, validated after all declarations.
@@ -188,8 +186,6 @@ pub trait ItemsRegistrar {
         appender: Arc<dyn crate::TooltipAppender>,
     );
 }
-
-
 
 /// CapabilityProviders operations for items.
 // hidden: per-kind lookup implementation, exposed for generated provider bindings

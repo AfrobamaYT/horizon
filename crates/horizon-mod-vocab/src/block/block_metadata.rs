@@ -137,5 +137,3 @@ impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
         Ok(BlockStateRecord::new(block, ordinal))
     }
 }
-
-

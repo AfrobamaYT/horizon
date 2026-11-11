@@ -25,8 +25,6 @@ pub(crate) fn resolved_fluids() -> &'static OnceLock<horizon_mod_runtime::regist
     installed().map_or(&EMPTY, |installed| &installed.fluids)
 }
 
-
-
 /// Registrar operations for fluids.
 pub trait FluidsRegistrar {
     /// Request a fluid by canonical registry id, checked when the registry loads.
@@ -43,7 +41,3 @@ pub trait FluidsRegistrar {
     /// Attach `part`, of kind `kind`, to the world fluid `fluid`.
     fn attach_fluid_part(&mut self, fluid: &str, kind: &'static str, part: Arc<dyn FluidPart>);
 }
-
-
-
-

@@ -36,7 +36,3 @@ pub trait CommandArgumentsRegistrar {
     /// `register_command_argument`.
     fn add_command_argument(&mut self, name: &str, argument: Arc<dyn crate::CommandArgumentType>);
 }
-
-
-
-

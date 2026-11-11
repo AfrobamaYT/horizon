@@ -40,8 +40,6 @@ impl dyn Registrar + '_ {
     }
 }
 
-
-
 /// Registrar operations for blocks.
 pub trait BlocksRegistrar {
     /// Request a block by canonical registry id. All mods' declarations are checked at load.
@@ -58,5 +56,3 @@ pub trait BlocksRegistrar {
     /// Attach `part`, of kind `kind`, to every block in tag `tag`.
     fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>);
 }
-
-

@@ -119,4 +119,3 @@ impl SpawnPlacementsRegistrar for PartRegistrar {
         result
     }
 }
-

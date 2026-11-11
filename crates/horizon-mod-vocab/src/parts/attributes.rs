@@ -63,7 +63,3 @@ pub trait AttributesRegistrar {
         sentiment: Sentiment,
     ) -> Result<(), crate::AttributeRegistrationError>;
 }
-
-
-
-

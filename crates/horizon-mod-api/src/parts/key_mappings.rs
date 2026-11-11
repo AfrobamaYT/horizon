@@ -49,4 +49,3 @@ impl KeyMappingsRegistrar for PartRegistrar {
         self.parts.key_mappings.push((self.mod_id, mapping));
     }
 }
-

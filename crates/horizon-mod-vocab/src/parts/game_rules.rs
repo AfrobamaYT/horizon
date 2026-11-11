@@ -1,7 +1,5 @@
 use super::*;
 
-
-
 /// The immutable declarations installed after schema validation.
 // hidden: the game builds engine registries from the installed declaration snapshot.
 #[doc(hidden)]
@@ -21,7 +19,6 @@ pub fn game_rule_bool_slot(key: crate::BoolGameRuleKey) -> Option<u32> {
     installed()?.game_rule_slots.get(key.0 as usize).copied()
 }
 
-
 /// Registrar operations for game rules.
 pub trait GameRulesRegistrar {
     /// Declare a game rule category in a namespace owned by the calling mod's manifest. Invalid,
@@ -39,5 +36,3 @@ pub trait GameRulesRegistrar {
         default: bool,
     ) -> Result<crate::BoolGameRuleKey, crate::GameRuleError>;
 }
-
-

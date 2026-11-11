@@ -63,4 +63,3 @@ impl SettingsRegistrar for PartRegistrar {
         Ok(())
     }
 }
-

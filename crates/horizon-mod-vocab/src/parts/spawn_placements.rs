@@ -17,7 +17,6 @@ pub fn spawn_placement_declarations() -> &'static [SpawnPlacementDeclaration] {
     installed().map_or(&[], |installed| &installed.spawn_placements)
 }
 
-
 /// Registrar operations for spawn placements.
 pub trait SpawnPlacementsRegistrar {
     /// Declare where the mod's entity type `path` may spawn (NeoForge's
@@ -39,5 +38,3 @@ pub trait SpawnPlacementsRegistrar {
         rule: crate::SpawnPlacementRule,
     ) -> Result<(), crate::SpawnPlacementError>;
 }
-
-

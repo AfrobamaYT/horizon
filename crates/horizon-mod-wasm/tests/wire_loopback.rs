@@ -393,6 +393,7 @@ impl mod_api::BlockEntityPart for MachineBlock {
 }
 #[test]
 fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::BlockEntityPart;
     let id = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
         MachineBlock,
@@ -442,6 +443,7 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
 }
 #[test]
 fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
+    mod_api::__private::initialize().unwrap();
     use horizon_core::nbt::Tag;
     install_counter();
     let stack = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 17).unwrap();
@@ -505,6 +507,7 @@ fn static_reply(
 }
 #[test]
 fn static_reply_definitions_are_checked_before_acknowledgement() {
+    mod_api::__private::initialize().unwrap();
     guest::reset_static_strings();
     assert_eq!(
         static_reply(0, 0, None, false),
@@ -573,6 +576,7 @@ fn static_reply_definitions_are_checked_before_acknowledgement() {
 }
 #[test]
 fn static_reply_table_is_bounded() {
+    mod_api::__private::initialize().unwrap();
     guest::reset_static_strings();
     for id in 0..4096 {
         assert_eq!(static_reply(1, id, Some("value"), false).unwrap(), "value");
@@ -583,6 +587,7 @@ fn static_reply_table_is_bounded() {
 }
 #[test]
 fn native_static_reply_resends_until_guest_acknowledges() {
+    mod_api::__private::initialize().unwrap();
     use std::cell::Cell;
     struct World(Cell<usize>);
     impl mod_api::Host for World {}
@@ -630,6 +635,7 @@ fn native_static_reply_resends_until_guest_acknowledges() {
 }
 #[test]
 fn native_static_reply_table_refuses_overflow_without_losing_existing_ids() {
+    mod_api::__private::initialize().unwrap();
     use std::cell::Cell;
     struct World(Cell<&'static str>);
     impl mod_api::Host for World {}
@@ -677,6 +683,7 @@ fn native_static_reply_table_refuses_overflow_without_losing_existing_ids() {
 }
 #[test]
 fn wire_loopback_readonly_private_projection() {
+    mod_api::__private::initialize().unwrap();
     use horizon_core::nbt::Tag;
     struct Client;
     impl mod_api::Host for Client {}
@@ -727,6 +734,7 @@ fn wire_loopback_readonly_private_projection() {
 /// each entry it pushed, after the native one's.
 #[test]
 fn wire_loopback_answered_collect_names_the_guest_mod() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::__private::game::RegistrationContextNew;
     let id = |id: &str| mod_api::Identifier::parse(id).unwrap();
     struct First;
@@ -786,6 +794,7 @@ fn wire_loopback_answered_collect_names_the_guest_mod() {
 
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::EffectTickChange;
     struct World;
     impl mod_api::Host for World {}
@@ -851,6 +860,7 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
 }
 #[test]
 fn wire_loopback_optional_borrowed_render_record() {
+    mod_api::__private::initialize().unwrap();
     struct Client;
     impl mod_api::Host for Client {}
     mod_api::impl_host_areas!(Client);
@@ -905,6 +915,7 @@ fn wire_loopback_optional_borrowed_render_record() {
 }
 #[test]
 fn wire_loopback_optional_borrowed_record() {
+    mod_api::__private::initialize().unwrap();
     struct World;
     impl mod_api::Host for World {}
     mod_api::impl_host_areas!(World);
@@ -934,6 +945,7 @@ fn wire_loopback_optional_borrowed_record() {
 }
 #[test]
 fn wire_loopback_array_of_optional_borrowed_records() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::BlockEntityDrawContext;
     struct Draw(bool);
     impl BlockEntityDrawContext for Draw {
@@ -980,6 +992,7 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::__private::game::BackendRefOf;
     struct World;
     impl mod_api::Host for World {
@@ -1062,6 +1075,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
 }
 #[test]
 fn wire_loopback_nested_tuple_reference_writes_back() {
+    mod_api::__private::initialize().unwrap();
     let module = WasmMod {
         subscribed: &[],
         listeners: &[],
@@ -1118,6 +1132,7 @@ fn install_counter() {
 }
 #[test]
 fn wire_loopback_registration_attaches_subscribed_part() {
+    mod_api::__private::initialize().unwrap();
     install_counter();
     assert!(
         mod_api::__private::block_entity_types()
@@ -1130,6 +1145,7 @@ fn wire_loopback_registration_attaches_subscribed_part() {
 }
 #[test]
 fn wire_loopback_tagged_frame_enum_preserves_side() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::BlockEntityPart;
     install_counter();
     let index = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
@@ -1161,6 +1177,7 @@ fn wire_loopback_tagged_frame_enum_preserves_side() {
 }
 #[test]
 fn wire_loopback_owned_box_handlers_inside_result_and_vec() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::ReloadApply;
     let trace = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut out = Writer::new();
@@ -1211,6 +1228,7 @@ fn wire_loopback_owned_box_handlers_inside_result_and_vec() {
 }
 #[test]
 fn wire_loopback_returned_frame_resource_uses_source_permissions() {
+    mod_api::__private::initialize().unwrap();
     struct Start {
         draws: i64,
     }
@@ -1297,6 +1315,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
 }
 #[test]
 fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeback() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::*;
     struct Table;
     impl CapabilityProviders for Table {}
@@ -1444,6 +1463,7 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
 
 #[test]
 fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
+    mod_api::__private::initialize().unwrap();
     install_counter();
     guest::set_transport(None);
     let panic = std::panic::catch_unwind(|| panic!("native panic after the guest call ended"));
@@ -1452,6 +1472,7 @@ fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
 
 #[test]
 fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
+    mod_api::__private::initialize().unwrap();
     struct Capture(std::sync::Mutex<Vec<String>>);
     impl log::Log for Capture {
         fn enabled(&self, _: &log::Metadata<'_>) -> bool {
@@ -1540,6 +1561,7 @@ fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
 
 #[test]
 fn wire_loopback_builtin_provider_invokes_nested_box_handler() {
+    mod_api::__private::initialize().unwrap();
     use mod_api::{EnergyHandler, ItemCapabilityProvider, ItemProviderOf, ServerHost, Transaction};
     struct Energy(u32);
     impl EnergyHandler for Energy {
@@ -1600,6 +1622,7 @@ fn wire_loopback_builtin_provider_invokes_nested_box_handler() {
 
 #[test]
 fn wire_loopback_bad_import_bytes_are_typed_errors() {
+    mod_api::__private::initialize().unwrap();
     let mut cx = boundary::Cx::default();
     let mut out = Writer::new();
     let id = boundary::import_id("StructureRandom", "next_int_bound").unwrap();
@@ -1611,6 +1634,7 @@ fn wire_loopback_bad_import_bytes_are_typed_errors() {
 }
 #[test]
 fn wire_loopback_owner_thread_guards_access_and_drop() {
+    mod_api::__private::initialize().unwrap();
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Local {
         _local: Rc<()>,
@@ -1653,6 +1677,7 @@ fn wire_loopback_owner_thread_guards_access_and_drop() {
 }
 #[test]
 fn wire_loopback_roundtrip_and_atomic_writeback() {
+    mod_api::__private::initialize().unwrap();
     let module = WasmMod {
         subscribed: &[],
         listeners: &[],
@@ -1718,6 +1743,7 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
 
 #[test]
 fn wire_loopback_resource_codec_restores_context_between_groups() {
+    mod_api::__private::initialize().unwrap();
     fn encode() -> Id {
         let apply: Arc<dyn mod_api::ReloadApply> = <dyn mod_api::ReloadApply>::new(|| {}).into();
         let mut writer = Writer::new();
@@ -1757,6 +1783,7 @@ fn wire_loopback_resource_codec_restores_context_between_groups() {
 
 #[test]
 fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
+    mod_api::__private::initialize().unwrap();
     fn load(id: Id) -> Arc<dyn StructurePiece> {
         let mut bytes = Writer::new();
         bytes.put(&id);
@@ -1795,6 +1822,7 @@ fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
 
 #[test]
 fn listener_metadata_and_cancellation_cross_the_real_guest() {
+    mod_api::__private::initialize().unwrap();
     let module = WasmMod {
         group: 0,
         subscribed: &[],
@@ -1838,6 +1866,7 @@ mod arm_pose_registration;
 
 #[test]
 fn wire_loopback_mob_submit_hidden_parts_write_back() {
+    mod_api::__private::initialize().unwrap();
     struct Client;
     impl mod_api::Host for Client {}
     mod_api::impl_host_areas!(Client);

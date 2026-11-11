@@ -4,9 +4,6 @@ pub(crate) fn installed_controllers() -> &'static [ControllerInfo] {
     installed().map_or(&[], |installed| installed.controllers.as_slice())
 }
 
-
-
-
 /// Registrar operations for tickets.
 pub trait TicketsRegistrar {
     /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
@@ -19,5 +16,3 @@ pub trait TicketsRegistrar {
     /// dropped when it loads.
     fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController;
 }
-
-

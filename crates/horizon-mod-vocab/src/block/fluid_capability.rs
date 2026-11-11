@@ -424,5 +424,3 @@ impl ResourceHandler<FluidResource> for GameBucket {
         }
     }
 }
-
-

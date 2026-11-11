@@ -12,8 +12,6 @@ pub fn setting(mod_id: &str, key: &str) -> Option<&'static crate::SettingSpec> {
         .map(|(_, spec)| spec)
 }
 
-
-
 /// Registrar operations for settings.
 pub trait SettingsRegistrar {
     /// Register a setting shown on the calling mod's page in Options > Mods (NeoForge's
@@ -22,5 +20,3 @@ pub trait SettingsRegistrar {
     /// already, is not registered and comes back as the error.
     fn register_setting(&mut self, setting: crate::SettingSpec) -> Result<(), crate::SettingError>;
 }
-
-
