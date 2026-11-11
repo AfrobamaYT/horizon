@@ -110,7 +110,7 @@ mod tests {
                 "LoadingModList",
                 Tag::List(vec![
                     Tag::compound([("ModId", Tag::Int(7))]),
-                    Tag::compound([]),
+                    Tag::Compound(Default::default()),
                 ]),
             )]),
         )]);
