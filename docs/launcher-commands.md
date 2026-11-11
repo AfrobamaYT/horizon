@@ -94,7 +94,7 @@ Start the client (needs a signed-in Microsoft account that owns Minecraft: Java 
     horizon-launcher play
 
 - `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
-- `--version`: The installed version to play (default: the instance's selected version)
+- `--version`: Installed version to play (default: instance version)
 - `--instance`: The instance to play (its name or id; default: the selected one). A Java instance starts its Minecraft: Java Edition, downloaded with its Java the first time
 - `--world`: Open or create this world (a folder under saves) at once
 - `--creative`: Creative mode for a new world
