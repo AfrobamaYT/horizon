@@ -342,6 +342,71 @@ mod tests {
     }
 
     #[test]
+    fn hostile_shapes_are_refused_without_panicking() {
+        let wasm = format!(
+            "[wasm]\nsha512='{}'\ntoolchain='nightly'\n",
+            "a".repeat(128)
+        );
+        let inject = "[[inject]]\nid='a'\nat='game::tick'\nkind='head'\nwith='run'\n";
+        let shapes = [
+            // a kind that is no string, or an empty one, in either table
+            inject.replace("kind='head'", "kind=3"),
+            inject.replace("kind='head'", "kind=''"),
+            inject.replace("kind='head'", "kind=['head']"),
+            ROW.replace("kind='MODIFY_EXPRESSION_VALUE'", "kind=3"),
+            ROW.replace("kind='MODIFY_EXPRESSION_VALUE'", "kind=''"),
+            // tables where arrays of tables belong, and the reverse
+            "[inject]\nid='a'\nat='game::tick'\nkind='head'\nwith='run'\n".into(),
+            "inject='head'\n".into(),
+            "inject=[1, 'two', []]\n".into(),
+            ROW.replace("[[native.mixin]]", "[native.mixin]"),
+            "[[native]]\ngame='26.3'\n".into(),
+            "[[native.bridge]]\nid=7\n".into(),
+            "[[native.state]]\nid=['a']\n".into(),
+            // keys of the wrong type, blank ids, and ids that are not ASCII
+            ROW.replace("helper='src/longer.rs'", "helper=1"),
+            ROW.replace("helper='src/longer.rs'", "helper={path='src/longer.rs'}"),
+            ROW.replace("target='game::Game::next_autosave'", "target=[]"),
+            ROW.replace("id='autosave'", "id=' '"),
+            ROW.replace("id='autosave'", "id=''"),
+            inject.replace("id='a'", "id=' '"),
+            "[[native.bridge]]\nid=' '\n".into(),
+            "[[native.state]]\nid='\t'\n".into(),
+            ROW.replace("helper='src/longer.rs'", "helper='src/\u{0}.rs\\..'"),
+            // a duplicate key
+            format!("{ROW}kind='HEAD'\n"),
+            format!("{inject}kind='return'\n"),
+        ];
+        for shape in &shapes {
+            for code in [native(), wasm.clone(), String::new()] {
+                assert!(parse(&code, shape).is_err(), "{shape}{code}");
+            }
+        }
+        // Unicode in an id is the tool's to judge, and is carried as written.
+        let manifest = parse(&native(), &ROW.replace("id='autosave'", "id='épée-✓'")).unwrap();
+        assert_eq!(manifest.native.unwrap().mixin[0].id, "épée-✓");
+    }
+
+    #[test]
+    fn the_native_or_wasm_refusal_does_not_mask_another_error() {
+        let wasm = format!(
+            "[wasm]\nsha512='{}'\ntoolchain='nightly'\n",
+            "a".repeat(128)
+        );
+        // The wasm table itself is wrong: that stays the error, whatever `[native]` holds.
+        let broken = wasm.replace("toolchain='nightly'\n", "toolchain=3\n");
+        for code in [broken.clone(), format!("{broken}{}", native())] {
+            let error = parse(&code, ROW).unwrap_err();
+            assert!(!error.contains("not both"), "{error}");
+        }
+        let error = parse(&format!("{broken}{}", native()), ROW).unwrap_err();
+        assert!(error.contains("invalid type"), "{error}");
+        // Not TOML at all.
+        let error = parse(&format!("{wasm}= ="), ROW).unwrap_err();
+        assert!(!error.contains("not both"), "{error}");
+    }
+
+    #[test]
     fn mixins_bridges_states_modules_and_injects_share_one_id_space() {
         let tables = [
             ROW.to_owned(),
