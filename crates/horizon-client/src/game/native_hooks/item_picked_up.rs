@@ -20,6 +20,35 @@ impl Game<'_> {
         self.fire_item_picked_up(player, item, count, can_pickup);
     }
 
+    /// `player` took at least part of a ground stack into their inventory
+    /// (`ItemEntity.playerTouch`, right after `Inventory.add`). `original` is
+    /// the stack as it lay before the pickup and `remaining` what is left on
+    /// the ground, `None` when all of it was taken. It only hears: not called
+    /// when `item_picked_up` refused the pickup or the inventory took nothing.
+    /// Server-side.
+    pub(in crate::game) fn native_item_picked_up_post(
+        &mut self,
+        player: u128,
+        original: &ItemStack,
+        remaining: Option<&ItemStack>,
+    ) {
+        self.fire_item_picked_up_post(player, original, remaining);
+    }
+
+    /// `Inventory.add` of the ground `stack` the acting player picks up:
+    /// returns what did not fit, after `item_picked_up_post` heard a pickup
+    /// that took anything.
+    pub(in crate::game) fn native_pickup_insert(&mut self, stack: &ItemStack) -> Option<ItemStack> {
+        let rest = self.add_stack_to_inventory(stack.clone());
+        if rest.as_ref().is_none_or(|rest| rest.count < stack.count)
+            && mod_api::__private::listened(mod_api::HookId::ItemPickedUpPost)
+        {
+            let player = self.native_acting_id();
+            self.native_item_picked_up_post(player, stack, rest.as_ref());
+        }
+        rest
+    }
+
     /// `item_picked_up` for the acting player touching the ground `stack`:
     /// the mods' answer, `Default` when no mod listens.
     pub(in crate::game) fn native_pickup_answer(&mut self, stack: &ItemStack) -> TriState {

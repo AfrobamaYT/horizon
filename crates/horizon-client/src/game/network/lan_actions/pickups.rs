@@ -69,8 +69,12 @@ impl Game<'_> {
             let before = stack.count;
             let thrower = self.dropped[i].thrower;
             let rest = self
-                .as_guest(conn, |g| g.add_stack_to_inventory(stack))
+                .as_guest(conn, |g| g.native_pickup_insert(&stack))
                 .flatten();
+            // `item_picked_up_post` can remove or change any item entity too.
+            let Some(i) = self.dropped.iter().position(|d| d.id == item_id) else {
+                continue;
+            };
             match rest {
                 None => {
                     let item = self.remove_dropped(i);

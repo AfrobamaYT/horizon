@@ -287,6 +287,17 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 event.draw.set_light(7);
             }
         }
+        fn item_picked_up_post(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::ItemPickedUpPostEvent<'_>,
+        ) {
+            PICKED_UP_POST.set(Some((
+                event.player,
+                event.original.count(),
+                event.remaining.map(|rest| rest.count()),
+            )));
+        }
         fn game_rule_changed(
             &self,
             _: &mut dyn mod_api::ServerHost,
@@ -949,6 +960,37 @@ fn wire_loopback_optional_borrowed_record() {
     }
 }
 #[test]
+fn wire_loopback_item_picked_up_post_carries_the_original_and_the_remainder() {
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
+    let rest = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 2).unwrap();
+    for (remaining, heard) in [(None, None), (Some(&rest), Some(2))] {
+        PICKED_UP_POST.set(None);
+        let mut event = mod_api::ItemPickedUpPostEvent {
+            player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+            original: &original,
+            remaining,
+        };
+        module.item_picked_up_post(&mut World, &mut event);
+        assert_eq!(
+            PICKED_UP_POST.get(),
+            Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, heard))
+        );
+    }
+}
+#[test]
 fn wire_loopback_array_of_optional_borrowed_records() {
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::BlockEntityDrawContext;
@@ -1118,6 +1160,7 @@ thread_local! {
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
+    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(

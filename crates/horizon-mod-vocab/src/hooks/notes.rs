@@ -3058,7 +3058,7 @@ registration path.
 
 - [mod messages](#mod-messages) between a mod's server and client halves, and hearing players and mobs on the
   server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
-  `native_item_toss` (`ItemTossEvent`: a throw; not the items scattered when a player dies; `canceled` makes no item entity and the items are lost) and `native_item_picked_up` (`can_pickup`: `False` leaves the stack on the ground, `True` takes it despite its pickup delay or another player's target). They name a player by UUID.
+  `native_item_toss` (`ItemTossEvent`: a throw; not the items scattered when a player dies; `canceled` makes no item entity and the items are lost) and `native_item_picked_up` (`can_pickup`: `False` leaves the stack on the ground, `True` takes it despite its pickup delay or another player's target), then `native_item_picked_up_post` (`ItemEntityPickupEvent.Post`: the stack before the pickup and what is left on the ground, heard once the inventory took any of it). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
 - [Client asset reload listeners](#client-asset-reload-listeners) read a mod's pack resources with resource-pack overrides, once per reload.

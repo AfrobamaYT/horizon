@@ -5300,7 +5300,7 @@ impl Game<'_> {
                 let before = item.stack.count;
                 let kind = item.stack.item.clone();
                 let thrower = item.thrower;
-                match game.add_stack_to_inventory(item.stack.clone()) {
+                match game.native_pickup_insert(&item.stack) {
                     None => {
                         game.award_stat("picked_up", &kind, before as i32);
                         if let Some(thrower) = thrower {
