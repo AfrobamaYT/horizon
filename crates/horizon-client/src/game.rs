@@ -11696,6 +11696,10 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
+        // Function admission parses commands immediately, including block arguments.
+        // Populate the static command registries on first open, not only in
+        // load_world_state below. Admission synchronizes the candidate pack IDs.
+        self.build_registries();
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
         let root = self.options.resources.clone();
         self.open_world_tables(&stack, &root)?;

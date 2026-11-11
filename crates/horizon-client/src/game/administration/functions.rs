@@ -1390,6 +1390,61 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
+    fn first_world_open_admits_block_function() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let folder = "first-open-block-function";
+            let world = std::env::current_dir().unwrap().join("saves").join(folder);
+            let pack = world.join("datapacks/first_open");
+            let functions = pack.join("data/first_open/function");
+            std::fs::create_dir_all(&functions).unwrap();
+            let f = horizon_core::version::DATA_PACK_FORMAT;
+            std::fs::write(
+                pack.join("pack.mcmeta"),
+                serde_json::json!({"pack":{
+                    "description":"First open regression", "pack_format":f.0,
+                    "min_format":[f.0,f.1], "max_format":[f.0,f.1]
+                }})
+                .to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                functions.join("block.mcfunction"),
+                "execute if block 0 64 0 minecraft:repeater[delay=2] run return 1\n",
+            )
+            .unwrap();
+            std::fs::write(
+                functions.join("invalid.mcfunction"),
+                "setblock 0 64 0 first_open:missing_block\n",
+            )
+            .unwrap();
+            let request = crate::game::world_loading::WorldRequest::new(
+                folder,
+                None,
+                Some(3042),
+                true,
+                None,
+                game.level.rule_registry.clone(),
+            )
+            .unwrap();
+            game.load_world(request).unwrap();
+            assert!(
+                game.fns.store.functions.contains_key("first_open:block"),
+                "first-open admission errors: {:?}",
+                game.fns.store.errors
+            );
+            assert!(!game.fns.store.functions.contains_key("first_open:invalid"));
+            assert!(
+                game.fns
+                    .store
+                    .errors
+                    .iter()
+                    .any(|(id, _)| id == "first_open:invalid")
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn prepared_function_calls_keep_causality_and_fallback_boundaries() {
         use crate::game::native_entity_refs::tests::with_game;
         use horizon_client::motion::PlayerMotion;
