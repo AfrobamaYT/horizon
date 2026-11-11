@@ -37,8 +37,16 @@ fn main() {
         }
         let original = fs::read_to_string(&path).unwrap();
         let original = if let Some((before, after)) = original.split_once(MARKER) {
-            format!("{}{}", before, after.split_once("// End generated retained traversals.").map_or("", |(_,tail)| tail))
-        } else { original };
+            format!(
+                "{}{}",
+                before,
+                after
+                    .split_once("// End generated retained traversals.")
+                    .map_or("", |(_, tail)| tail)
+            )
+        } else {
+            original
+        };
         let original = original.trim_end();
         let file = syn::parse_file(original).unwrap();
         let mut generated = Vec::new();
@@ -46,9 +54,25 @@ fn main() {
             let (name, arms) = match item {
                 Item::Struct(s) if s.generics.params.is_empty() => {
                     let name = s.ident;
-                    let names: Vec<_> = s.fields.iter().enumerate().map(|(i,f)| f.ident.clone().unwrap_or_else(|| format_ident!("field_{i}"))).collect();
-                    let pat = match s.fields { Fields::Named(_) => quote!{{ #(#names),* }}, Fields::Unnamed(_) => quote!{( #(#names),* )}, Fields::Unit => quote!{} };
-                    (name, quote! { let Self #pat = self; 0usize #(.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(#names)))* })
+                    let names: Vec<_> = s
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| {
+                            f.ident
+                                .clone()
+                                .unwrap_or_else(|| format_ident!("field_{i}"))
+                        })
+                        .collect();
+                    let pat = match s.fields {
+                        Fields::Named(_) => quote! {{ #(#names),* }},
+                        Fields::Unnamed(_) => quote! {( #(#names),* )},
+                        Fields::Unit => quote! {},
+                    };
+                    (
+                        name,
+                        quote! { let Self #pat = self; 0usize #(.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(#names)))* },
+                    )
                 }
                 Item::Enum(e) if e.generics.params.is_empty() => {
                     let name = e.ident;
@@ -66,6 +90,13 @@ fn main() {
         }
         let at = original.find("\n#[cfg(test)]").unwrap_or(original.len());
         let (before, after) = original.split_at(at);
-        fs::write(path, format!("{before}\n\n{MARKER}\n{}\n// End generated retained traversals.\n{after}\n", quote! { #(#generated)* })).unwrap();
+        fs::write(
+            path,
+            format!(
+                "{before}\n\n{MARKER}\n{}\n// End generated retained traversals.\n{after}\n",
+                quote! { #(#generated)* }
+            ),
+        )
+        .unwrap();
     }
 }
