@@ -212,6 +212,16 @@ impl Game<'_> {
         }
         let _ = self.reload_datapacks(false, &self.level.enabled_features.clone());
     }
+    pub(super) fn open_world_datapacks(
+        &mut self,
+        enabled_features: &[String],
+    ) -> Result<PackStack, ReloadStageError> {
+        // Function admission parses commands immediately, including block arguments.
+        // Populate static registries on first open; admission synchronizes pack IDs.
+        self.build_registries();
+        self.reload_datapacks(false, enabled_features)
+    }
+
     pub(super) fn reload_datapacks(
         &mut self,
         run_load: bool,
