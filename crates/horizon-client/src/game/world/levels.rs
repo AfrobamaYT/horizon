@@ -82,6 +82,7 @@ pub(super) struct Parked {
     ominous_spawners:
         horizon_client::join_seq::ResidentList<ominous_item_spawner::OminousItemSpawner>,
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
+    general: super::general::GeneralStore,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     pub(super) mobs: horizon_client::join_seq::JoinList<Mob>,
     /// The entity ids of the level's fence knots (`knot_ids`).
@@ -543,6 +544,7 @@ impl Game<'_> {
             rockets: Default::default(),
             ominous_spawners: Default::default(),
             tnts: Default::default(),
+            general: Default::default(),
             hoppers: HashMap::new(),
             mobs: Default::default(),
             knot_ids: HashMap::new(),

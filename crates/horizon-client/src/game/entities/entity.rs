@@ -9,7 +9,7 @@
 
 use super::commands::Target;
 use super::persist::ChunkKey;
-use super::{FallingBlock, Game};
+use super::{FallingBlock, Game, general::GeneralRow};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
 };
@@ -719,6 +719,7 @@ macro_rules! entity_lists {
             Projectile(Projectile) projectiles: creatures.projectiles,
             Rocket(Rocket) rockets: rockets,
             Trident(ThrownTrident) tridents: tridents,
+            General(GeneralRow) general: general.rows,
         }
     };
 }
@@ -2439,6 +2440,7 @@ mod join_order_tests {
                 projectiles: &[],
                 rockets: &self.rockets,
                 tridents: &self.tridents,
+                general: &[],
             }
         }
         fn walk(&self) -> Result<Vec<EntityHandle>, JoinOrderError> {
@@ -2591,6 +2593,7 @@ mod scoped_edit_tests {
             projectiles: Default::default(),
             rockets: Default::default(),
             tridents: Default::default(),
+            general: Default::default(),
         };
         lists
             .boats

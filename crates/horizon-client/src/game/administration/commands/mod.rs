@@ -87,6 +87,8 @@ pub(super) enum Target {
     Spawner(u32),
     /// A simulated lingering, creeper or dragon area-effect cloud.
     Cloud(u32),
+    /// A general entity row, by its entity id (#792).
+    General(u32),
     /// A cast fishing hook (`minecraft:fishing_bobber`), which lives with the
     /// player who cast it. Only a mod's handle names one.
     Hook(u32),
@@ -694,6 +696,8 @@ impl Game<'_> {
                 let p = horizon_client::mobs::leash::knot_state(fence).position;
                 [p.x, p.y, p.z]
             }),
+            // Stage 3's insertion joins live rows; a selector cannot find one yet.
+            Target::General(_) => None,
         }
     }
     pub(super) fn target_type(&self, t: Target) -> String {
@@ -715,6 +719,7 @@ impl Game<'_> {
                 .find(|p| p.id == id)
                 .map_or_else(String::new, |p| p.entity_type().into()),
             Target::Stand(_) => "minecraft:armor_stand".into(),
+            Target::General(_) => String::new(),
             Target::Frame(id) => {
                 if self.item_frames.iter().any(|f| f.id == id && f.glow) {
                     "minecraft:glow_item_frame".into()
@@ -1759,6 +1764,8 @@ impl Game<'_> {
         // PositionMoveRotation.calculateAbsolute clamps pitch before setXRot.
         let rotation = rotation.map(|[yaw, pitch]| [yaw, pitch.clamp(-90.0, 90.0)]);
         match t {
+            // Stage 3's insertion joins live rows; there is nothing to place.
+            Target::General(_) => {}
             Target::Guest(_) => {
                 self.for_player(t, |g| {
                     g.teleport_to_relative(Target::Player, pos, rotation, relative, turn_riders)
@@ -2569,6 +2576,8 @@ impl Game<'_> {
             });
         }
         match t {
+            // Stage 3's insertion joins live rows; there is nothing to kill.
+            Target::General(_) => {}
             Target::Guest(_) => {
                 self.for_player(t, |g| g.kill_target(Target::Player));
             }

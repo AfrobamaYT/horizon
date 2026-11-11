@@ -62,6 +62,7 @@ macro_rules! resident_owners {
             Trident => Trident: tridents,
             Spawner => Spawner: ominous_spawners,
             Cloud => Cloud: breath_clouds,
+            General => General: general.rows,
         }
     };
 }
