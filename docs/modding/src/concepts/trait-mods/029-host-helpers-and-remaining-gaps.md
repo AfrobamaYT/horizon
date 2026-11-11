@@ -86,7 +86,10 @@ The client `render_tooltip_texture` hook (NeoForge's `RenderTooltipEvent.Texture
 ### Tooltip component geometry
 
 `render_tooltip_gather_components` preserves the mixed text/image list, including
-an image inserted immediately after the name. Wrapping splits text in place.
+the built-in bundle image inserted immediately after the name (index 0 when
+there is no text). `TooltipImage.source` selects `TooltipImageSource::Bundle`
+or `ItemPart`, each carrying its stack. Gather listeners can move or remove
+either source; pre sees the resulting list. Wrapping splits text in place.
 The text pass visits the entire list before the image pass starts; both passes
 advance through the same component heights, with 2 extra pixels after the first
 component of an item tooltip. Each image callback receives the box's left edge
