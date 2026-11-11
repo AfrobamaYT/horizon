@@ -77,6 +77,7 @@ fn real_wasm_command_listener_receives_ordered_selector_handles() {
     ];
     mod_api::testing::with_mods(loaded.mods.into(), || {
         mod_api::__private::mark_game_thread();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         let mut world = World;
         let source = CommandSource::Console {
             permission: PermissionLevel::All,

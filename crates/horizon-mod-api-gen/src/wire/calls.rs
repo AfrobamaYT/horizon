@@ -243,6 +243,12 @@ pub(super) fn guest(
         for m in dropped.iter().filter(|m| {
             !exports().contains(&m.owner) && m.via.as_deref().unwrap_or(m.owner) == owner
         }) {
+            // Frame accessors are local proxies, not absent capabilities. Their service
+            // methods cross the wire and the engine owns the phase check there.
+            if super::frame_accessor(m) {
+                writeln!(out, "{}", import_body(types, m, 0, "")).unwrap();
+                continue;
+            }
             // What the API keeps off wasm exists only on a native build of the guest.
             if excused.iter().any(|(o, n)| *o == m.owner && *n == m.name) {
                 out.push_str("#[cfg(not(target_arch = \"wasm32\"))]\n");

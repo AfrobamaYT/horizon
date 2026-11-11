@@ -134,6 +134,7 @@ fn collect_positions_copy_in_and_out_natively_as_in_the_real_guest() {
         .into(),
         || {
             mod_api::__private::mark_game_thread();
+            let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
             lending::check(&mut Quiet);
         },
     );

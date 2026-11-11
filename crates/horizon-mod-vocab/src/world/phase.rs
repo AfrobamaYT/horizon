@@ -219,7 +219,9 @@ pub(crate) fn unprovided(method: &'static str, operation: &'static str, access: 
 }
 
 /// One cell read at the generated API boundary, not a tick scan or registry lookup.
-/// A refused mod call panics so a listener cannot ignore a Result and continue.
+/// Native callers currently panic on refusal. The wasm host dispatcher checks
+/// `access_allowed` before entering these methods and returns a named phase refusal
+/// instead; the guest must never consult its own independent phase state.
 #[inline]
 pub fn check_access(operation: &str, access: LoadAccess) {
     assert!(

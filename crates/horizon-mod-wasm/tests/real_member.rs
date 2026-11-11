@@ -137,6 +137,9 @@ fn real_member() {
                 .any(|kind| kind.id == "wasm_fixture:counter")
         );
         mod_api::__private::mark_game_thread();
+        // This harness now owns a live world, just like the engine thread that
+        // invokes these gameplay hooks. Loading and registration above run in Packages.
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         // Independent expected values cross the actual wasm guest boundary. Game packet
         // and observer behavior must be checked at the higher client layer, not by Quiet.
         for key in [

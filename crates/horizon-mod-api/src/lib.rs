@@ -11,3 +11,18 @@ pub mod wire {
     #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
     pub use wire_guest as guest;
 }
+
+#[cfg(all(test, feature = "wasm-guest"))]
+mod phase_tests {
+    use super::*;
+    use prelude::*;
+    #[test]
+    fn frame_services_do_not_read_guest_phase() {
+        let _phase = __private::PhaseOwner::scope(__private::ModPhase::Packages);
+        let mut guest = wire::guest::Guest;
+        let _: &dyn Messages = guest.messages();
+        let _: &dyn Players = guest.players();
+        let _: &dyn Levels = guest.levels();
+        let _: &mut dyn Commands = guest.commands();
+    }
+}
