@@ -407,7 +407,7 @@ fn run(mut poll: Poll, worker: &Arc<Worker>) {
         }
         for i in inbox.read {
             if let Some(Some(c)) = conns.get_mut(i) {
-                c.read(now);
+                c.memory_ready(now);
                 touched.push(i);
             }
         }
@@ -492,6 +492,11 @@ struct Conn {
     close_at: Option<Instant>,
 }
 impl Conn {
+    /// Pipe readiness, dispatched from the worker's inbox.read notifications.
+    fn memory_ready(&mut self, now: Instant) {
+        self.read(now);
+    }
+
     fn register(
         a: Adopted,
         registry: &Registry,
@@ -1025,3 +1030,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod memory_progress_tests;
