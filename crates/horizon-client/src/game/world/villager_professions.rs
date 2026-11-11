@@ -16,12 +16,16 @@ impl Game<'_> {
             );
             registrar.into_entries()
         });
-        let mut pois = horizon_world::poi::PoiSnapshot::default();
-        for (_, definition) in declarations {
+        let mut poi_types = Vec::new();
+        for (owner, definition) in declarations {
             for workstation in &definition.workstations {
                 let name = workstation.block.to_string();
                 if self.pack.assets.registry.default_state(&name).is_none() {
-                    return Err(format!("unknown workstation block {name}").into());
+                    return Err(format!(
+                        "mod {owner}, profession {}: unknown workstation block {name}",
+                        definition.key.0
+                    )
+                    .into());
                 }
                 let states: Vec<_> = (0..self.pack.assets.registry.len())
                     .filter_map(|index| {
@@ -39,11 +43,19 @@ impl Game<'_> {
                     })
                     .collect();
                 if states.is_empty() {
-                    return Err(format!("workstation {name} selects no valid block states").into());
+                    return Err(format!("mod {owner}, profession {}: workstation {name} selects no valid block states", definition.key.0).into());
                 }
-                pois.add(&workstation.poi.0.to_string(), states)?;
+                poi_types.push((workstation.poi.0.to_string(), states));
             }
         }
+        let pois = horizon_world::poi::PoiSnapshot::prepare(poi_types).map_err(|reason| {
+            let owners = declarations
+                .iter()
+                .map(|(owner, definition)| format!("mod {owner}, profession {}", definition.key.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{owners}: {reason}")
+        })?;
         let mut candidate =
             horizon_client::mobs::villager::ResolvedProfessions::prepare(
                 declarations.clone(),
@@ -64,7 +76,16 @@ impl Game<'_> {
                     }
                 },
             )
-            .map_err(|errors| format!("villager professions refused: {errors:?}"))?;
+            .map_err(|errors| {
+                format!(
+                    "villager professions refused: {}",
+                    errors
+                        .iter()
+                        .map(|error| profession_refusal(error, declarations))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )
+            })?;
         if !declarations.is_empty() {
             candidate.workstation_pois = (0..self.pack.assets.registry.len())
                 .map(|index| {
@@ -108,4 +129,44 @@ impl Game<'_> {
         self.save.install_profession_snapshot(table.clone());
         self.levels.install_profession_save_snapshots(table);
     }
+}
+
+impl Game<'_> {
+    pub(in crate::game) fn with_profession_save_snapshot(
+        &self,
+        save: Arc<SaveDir>,
+    ) -> Arc<SaveDir> {
+        save.install_profession_snapshot(self.stations().professions.clone());
+        save
+    }
+}
+
+fn profession_refusal(
+    error: &mod_api::ProfessionRegistrationError,
+    declarations: &[(String, mod_api::ProfessionDefinition)],
+) -> String {
+    use mod_api::ProfessionRegistrationError as E;
+    let contexts = declarations
+        .iter()
+        .filter(|(_, definition)| match error {
+            E::DuplicateProfession { key, .. }
+            | E::ReservedProfession { key }
+            | E::InvalidTradeLevel { key, .. } => definition.key == *key,
+            E::InvalidWorkstation { key, .. } | E::UnacquirablePoi { key } => definition
+                .workstations
+                .iter()
+                .any(|station| station.poi == *key),
+            E::OverlappingPoi { professions, .. } => professions.contains(&definition.key),
+            E::UnknownPoi { key } => {
+                definition.held_poi.contains(key) || definition.acquirable_poi.contains(key)
+            }
+            E::UnknownTradeSet { key } => definition.trades.iter().any(|(_, trade)| trade == key),
+            E::UnknownItem { key } => definition.requested_items.contains(key),
+            E::UnknownBlock { key } => definition.secondary_blocks.contains(key),
+            E::UnknownSound { key } => definition.work_sound.as_ref() == Some(key),
+            _ => false,
+        })
+        .map(|(owner, definition)| format!("mod {owner}, profession {}", definition.key.0))
+        .collect::<Vec<_>>();
+    format!("{}: {error}", contexts.join(", "))
 }

@@ -278,8 +278,65 @@ fn villager_restored_name_resolves_after_registry_reordering_without_trade_chang
         ProfessionState::Unresolved(_)
     ));
     reordered.resolve_loaded(&mut mob);
-    assert_eq!(reordered.state_index(&mob.extra.profession), Some(16));
+    assert_eq!(reordered.state_index(&mob.extra.profession), Some(15));
     assert_eq!(mob.extra.profession.id(), "test:engineer");
     assert_eq!(mob.extra.profession.index(), None);
     assert_eq!(mob.extra.trade.as_ref().unwrap().offers, offers);
+}
+
+#[test]
+fn villager_profession_slots_are_canonical_across_owner_order() {
+    let a = engineer();
+    let mut b = engineer();
+    b.key = ProfessionKey(Identifier::parse("other:mechanic").unwrap());
+    b.acquirable_poi = vec![PoiKey(Identifier::parse("other:bench").unwrap())];
+    for declarations in [
+        vec![("z".into(), a.clone()), ("a".into(), b.clone())],
+        vec![("a".into(), b), ("z".into(), a)],
+    ] {
+        let table = ResolvedProfessions::prepare(declarations, |_, _| true).unwrap();
+        assert_eq!(table.resolve("other:mechanic"), Some(15));
+        assert_eq!(table.resolve("test:engineer"), Some(16));
+        assert_eq!(table.resolve("minecraft:weaponsmith"), Some(14));
+    }
+}
+
+#[test]
+fn villager_unacquirable_custom_workstation_is_refused() {
+    let mut definition = engineer();
+    definition.acquirable_poi.clear();
+    definition
+        .workstations
+        .push(mod_api::ProfessionWorkstation {
+            poi: PoiKey(Identifier::parse("test:assembler").unwrap()),
+            block: Identifier::parse("test:assembler").unwrap(),
+            properties: vec![],
+        });
+    let errors =
+        ResolvedProfessions::prepare(vec![("test".into(), definition)], |_, _| true).unwrap_err();
+    assert!(errors.iter().any(
+        |error| matches!(error, E::UnacquirablePoi { key } if key.0.to_string() == "test:assembler")
+    ));
+}
+
+#[test]
+fn villager_reports_registered_and_unresolved_names() {
+    use crate::mobs::{
+        Species,
+        villager::{ProfessionState, command_name, reported_profession},
+    };
+    let (mut mob, _) = saved_mob(Species::Villager, "minecraft:villager");
+    for state in [
+        ProfessionState::Registered("test:engineer".into()),
+        ProfessionState::Unresolved("test:engineer".into()),
+    ] {
+        mob.extra.profession = state;
+        assert_eq!(reported_profession(&mob), "test:engineer");
+        assert_eq!(
+            command_name(&mob),
+            crate::text::Text::translate("entity.minecraft.villager.test:engineer", &[])
+        );
+    }
+    mob.extra.profession = ProfessionState::from_index(5);
+    assert_eq!(reported_profession(&mob), "farmer");
 }

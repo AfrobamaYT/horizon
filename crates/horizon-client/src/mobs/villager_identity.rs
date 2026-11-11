@@ -13,7 +13,7 @@ pub fn command_name(mob: &Mob) -> crate::text::Text {
     }
     // Villager.getTypeName returns its registered profession's name.
     if mob.species() == Species::Villager {
-        let profession = profession_id(mob.extra.profession.index().unwrap_or(0));
+        let profession = reported_profession(mob);
         return crate::text::Text::translate(
             &format!("entity.minecraft.villager.{profession}"),
             &[],
@@ -28,4 +28,12 @@ pub fn seen_profession_name(mob: &Mob, is_villager: bool) -> Option<Arc<str>> {
         villager::ProfessionState::Registered(id) if is_villager => Some(id.clone()),
         _ => None,
     }
+}
+
+/// Profession identity for command and agent reports, preserving vanilla bare names.
+pub fn reported_profession(mob: &Mob) -> String {
+    mob.extra.profession.index().map_or_else(
+        || mob.extra.profession.id(),
+        |index| profession_id(index).to_owned(),
+    )
 }

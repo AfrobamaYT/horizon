@@ -26,6 +26,7 @@ pub use professions::{Profession, ResolvedProfessions};
 #[path = "villager_identity.rs"]
 mod identity;
 pub use identity::profession_id;
+pub use identity::reported_profession;
 pub(crate) use identity::{command_name, seen_profession_name};
 
 /// The frozen vanilla-only generation shared by the existing context-free consumers.

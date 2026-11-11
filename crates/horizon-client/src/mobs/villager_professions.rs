@@ -130,11 +130,13 @@ impl ResolvedProfessions {
     /// Resolve a complete candidate without touching the active table. The caller installs
     /// this value together with its POI and trade resources only after all preparation succeeds.
     pub fn prepare(
-        declarations: Vec<(String, mod_api::ProfessionDefinition)>,
+        mut declarations: Vec<(String, mod_api::ProfessionDefinition)>,
         mut exists: impl FnMut(&str, &mod_api::Identifier) -> bool,
     ) -> Result<Self, Vec<mod_api::ProfessionRegistrationError>> {
         use mod_api::ProfessionRegistrationError as E;
         use std::collections::BTreeMap;
+        declarations
+            .sort_by_key(|(owner, definition)| (definition.key.0.to_string(), owner.clone()));
         let mut errors = Vec::new();
         let seed = Self::vanilla();
         let mut owners: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -191,6 +193,15 @@ impl ResolvedProfessions {
                 && !exists("sound", key)
             {
                 errors.push(E::UnknownSound { key: key.clone() });
+            }
+        }
+        for (_, definition) in &declarations {
+            for workstation in &definition.workstations {
+                if !pois.contains_key(&workstation.poi.0.to_string()) {
+                    errors.push(E::UnacquirablePoi {
+                        key: workstation.poi.clone(),
+                    });
+                }
             }
         }
         for (key, mut owners) in owners {
@@ -392,7 +403,7 @@ impl ResolvedProfessions {
             };
         }
         if index == 0 && !held {
-            return poi.is_job();
+            return self.job(poi).is_some();
         }
         let Some(entry) = self.entry(index) else {
             return false;

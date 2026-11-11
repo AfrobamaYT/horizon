@@ -43,6 +43,15 @@ pub struct PoiSnapshot {
     states: BTreeMap<BlockState, PoiIdentity>,
 }
 impl PoiSnapshot {
+    /// Compile all custom types in canonical order before assigning their slots.
+    pub fn prepare(mut types: Vec<(String, Vec<BlockState>)>) -> Result<Self, String> {
+        types.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut snapshot = Self::default();
+        for (name, states) in types {
+            snapshot.add(&name, states)?;
+        }
+        Ok(snapshot)
+    }
     pub fn resolve(&self, name: &str) -> Option<PoiIdentity> {
         PoiType::from_id(name)
             .map(PoiIdentity::Vanilla)
@@ -96,5 +105,39 @@ impl PoiSnapshot {
             self.states.insert(state, identity);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn custom_poi_slots_are_canonical() {
+        for names in [["test:z", "other:a"], ["other:a", "test:z"]] {
+            let snapshot = PoiSnapshot::prepare(
+                names
+                    .into_iter()
+                    .map(|name| {
+                        (
+                            name.into(),
+                            vec![BlockState {
+                                name: name.into(),
+                                properties: Default::default(),
+                            }],
+                        )
+                    })
+                    .collect(),
+            )
+            .unwrap();
+            assert_eq!(snapshot.resolve("other:a"), Some(PoiIdentity::Custom(0)));
+            assert_eq!(snapshot.resolve("test:z"), Some(PoiIdentity::Custom(1)));
+            assert_eq!(
+                snapshot.custom(&BlockState {
+                    name: "test:z".into(),
+                    properties: Default::default()
+                }),
+                Some(PoiIdentity::Custom(1))
+            );
+        }
     }
 }

@@ -169,3 +169,42 @@ fn scan_bounds_are_inclusive() {
         },
     );
 }
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn custom_profession_detects_declared_secondary_sites() {
+    fixture(
+        &[
+            ([1, 63, 0], "minecraft:stone"),
+            ([2, 63, 0], "minecraft:farmland"),
+        ],
+        0,
+        &[],
+        |mob, world| {
+            let id = |s| mod_api::Identifier::parse(s).unwrap();
+            let definition = mod_api::ProfessionDefinition {
+                key: mod_api::ProfessionKey(id("test:engineer")),
+                workstations: vec![],
+                held_poi: vec![],
+                acquirable_poi: vec![],
+                requested_items: vec![],
+                secondary_blocks: vec![id("minecraft:stone")],
+                work_sound: None,
+                trades: vec![],
+            };
+            let table = crate::mobs::villager::ResolvedProfessions::prepare(
+                vec![("test".into(), definition)],
+                |_, _| true,
+            )
+            .unwrap();
+            let mut view = world.clone();
+            view.professions = &table;
+            crate::mobs::villager::set_profession(mob, &table, 15);
+            sense_secondary(mob, &view);
+            assert_eq!(
+                mem(mob).secondary_job_site.value().unwrap(),
+                vec![[1, 63, 0]]
+            );
+        },
+    );
+}

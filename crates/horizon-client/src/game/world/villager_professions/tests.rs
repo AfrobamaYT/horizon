@@ -291,6 +291,9 @@ fn villager_no_mods_world_retains_farmer_composter_and_five_levels() {
 }
 
 fn wasm_engineer() -> mod_api::ModEntry {
+    wasm_profession(definition(), "wasm_engineer")
+}
+fn wasm_profession(value: ProfessionDefinition, owner: &str) -> mod_api::ModEntry {
     use mod_api::wire::Writer;
     fn data(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("\\{byte:02x}")).collect()
@@ -303,7 +306,7 @@ fn wasm_engineer() -> mod_api::ModEntry {
     )]);
     let subscriptions = subscriptions.into_bytes();
     let mut declaration = Writer::new();
-    declaration.put(&definition());
+    declaration.put(&value);
     let declaration = declaration.into_bytes();
     let operation = horizon_mod_wasm::fixture_import_id("VillagerProfessions", "register").unwrap();
     let hook =
@@ -332,7 +335,7 @@ fn wasm_engineer() -> mod_api::ModEntry {
             else i64.const 0 end end))"#,
             subscriptions=data(&subscriptions), declaration=data(&declaration), layout=*mod_api::wire::LAYOUT,
             sub_reply=(2048u64<<32)|subscriptions.len() as u64, length=declaration.len())).unwrap();
-    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'wasm_engineer'\nname = 'Wasm engineer'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = '{owner}'\nname = 'Wasm engineer'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
     let mut loaded = horizon_mod_wasm::load(
         &std,
         vec![horizon_mod_wasm::WasmPackage { manifest, module }],
@@ -592,4 +595,91 @@ fn villager_game_missing_mod_keeps_both_species_unresolved_and_offers_untouched(
             );
         }
     });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn villager_load_world_save_dir_preserves_custom_workstation() {
+    fixture(
+        vec![ModEntry::new(
+            "engineer",
+            Box::new(Engineer {
+                valid: Arc::new(AtomicBool::new(true)),
+                key: "test:engineer",
+            }),
+        )]
+        .into(),
+        |game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            game.world
+                .set(
+                    1,
+                    64,
+                    0,
+                    game.pack
+                        .assets
+                        .registry
+                        .default_state("test:assembler")
+                        .unwrap(),
+                )
+                .unwrap();
+            game.save
+                .tables
+                .get_or_init(|| Arc::new(horizon_client::save::SaveTables::new(&game.pack.assets)));
+            let chunks = vec![game.world.chunks[&(0, 0)].clone()];
+            game.save
+                .save(&chunks, game.pack.assets.registry, world_biomes!(game))
+                .unwrap();
+            let mut region =
+                horizon_world::region::RegionFile::open(game.save.root.join("poi/r.0.0.mca"))
+                    .unwrap();
+            let record = region
+                .read(horizon_core::position::ChunkPos { x: 0, z: 0 })
+                .unwrap()
+                .unwrap();
+            let root = record.nbt(horizon_core::nbt::Limits::saved()).unwrap();
+            let sections = root.tag.get("Sections").unwrap();
+            let records = sections.get("4").unwrap().get("Records").unwrap();
+            let Tag::List(records) = records else {
+                panic!("POI records list")
+            };
+            assert!(records.iter().any(|record| record.get("type") == Some(&Tag::String("test:assembler".into()))));
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn villager_wasm_slots_ignore_declaring_mod_order() {
+    for reverse in [false, true] {
+        let mut mechanic = definition();
+        mechanic.key = ProfessionKey(Identifier::parse("test:mechanic").unwrap());
+        let bench = PoiKey(Identifier::parse("other:bench").unwrap());
+        mechanic.workstations = vec![ProfessionWorkstation {
+            poi: bench.clone(),
+            block: Identifier::parse("minecraft:furnace").unwrap(),
+            properties: vec![],
+        }];
+        mechanic.held_poi = vec![bench.clone()];
+        mechanic.acquirable_poi = vec![bench];
+        let mut mods = vec![
+            wasm_profession(definition(), "z_engineer"),
+            wasm_profession(mechanic, "a_mechanic"),
+        ];
+        if reverse {
+            mods.reverse();
+        }
+        mods.insert(0, ModEntry::new("trade_files", Box::new(TradeFiles)));
+        fixture(mods.into(), |game| {
+            let table = &game.stations().professions;
+            assert_eq!(table.resolve("test:engineer"), Some(15));
+            assert_eq!(table.resolve("test:mechanic"), Some(16));
+            assert_eq!(
+                table.pois.resolve("test:assembler"),
+                Some(horizon_world::poi::PoiIdentity::Custom(1))
+            );
+        });
+    }
 }
