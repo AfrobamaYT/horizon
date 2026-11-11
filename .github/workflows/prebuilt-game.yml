@@ -92,7 +92,7 @@ jobs:
         run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Archive
         run: |
-          tar -czf "$ARCHIVE" -C prebuilt .
+          tar --sort=name --mtime="@0" --owner=0 --group=0 --numeric-owner -cf - -C prebuilt . | gzip -n > "$ARCHIVE"
           echo "$(du -h "$ARCHIVE" | cut -f1) $ARCHIVE" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:

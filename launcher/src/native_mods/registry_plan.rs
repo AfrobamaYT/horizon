@@ -163,6 +163,25 @@ pub(super) fn apply_patches(directory: &Path, patches: &toml::Table) -> Result<(
 mod tests {
     use super::*;
     #[test]
+    fn production_plan_preserves_isolated_game_patch_identity() {
+        let original = "version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n";
+        let plan = Plan::read(original, &[], &[]).unwrap();
+        plan.allowed
+            .check_resolution(
+                &RegistryLock::parse(original).unwrap(),
+                &RegistryLock::default(),
+            )
+            .unwrap();
+        let moved = RegistryLock::parse(&original.replace("0.1.49", "0.1.50")).unwrap();
+        // Both fetch and SDK compilation use allowed against resolved, with an empty game argument.
+        let error = plan
+            .allowed
+            .check_resolution(&moved, &RegistryLock::default())
+            .unwrap_err();
+        assert!(error.contains("allocator-sys"), "{error}");
+    }
+
+    #[test]
     fn cargo_resolves_registry_parent_through_sdk_local_patch_without_compiling() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

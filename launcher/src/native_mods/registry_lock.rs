@@ -403,6 +403,32 @@ mod tests {
     }
 
     #[test]
+    fn isolated_game_patch_version_movement_is_refused() {
+        let game =
+            RegistryLock::parse("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n")
+                .unwrap();
+        let moved =
+            RegistryLock::parse("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.50'\n")
+                .unwrap();
+        let error = game
+            .check_resolution(&moved, &RegistryLock::default())
+            .unwrap_err();
+        assert!(error.contains("allocator-sys"), "{error}");
+    }
+
+    #[test]
+    fn isolated_game_patch_registry_source_movement_is_refused() {
+        let game =
+            RegistryLock::parse("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\n")
+                .unwrap();
+        let moved = RegistryLock::parse(&format!("version=4\n[[package]]\nname='allocator-sys'\nversion='0.1.49'\nsource='{CRATES_IO}'\nchecksum='{}'\n", "a".repeat(64))).unwrap();
+        let error = game
+            .check_resolution(&moved, &RegistryLock::default())
+            .unwrap_err();
+        assert!(error.contains("allocator-sys"), "{error}");
+    }
+
+    #[test]
     fn registry_to_game_owned_local_patch_is_pinned_and_movement_refuses_by_name() {
         let game = RegistryLock::parse(&patched_graph("0.1.49", false)).unwrap();
         game.check_resolution(&game, &RegistryLock::default())

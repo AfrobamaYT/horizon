@@ -253,6 +253,7 @@ def build(out: Path, server: bool) -> None:
         "link_args": link_args,
         "facade_crates": eligible,
         "registry_patches": patches,
+        "patch_files": {name: digest for name, digest in files.items() if name.startswith("patches/")},
         "registry_lock": (staged / "Cargo.lock").read_text(),
         "native_links": native_links(metadata, "horizon-mod-host"),
         "files": files,
@@ -266,11 +267,16 @@ def carry_patches(staged: Path, out: Path) -> dict:
     patches = tomllib.loads((staged / "Cargo.toml").read_text()).get("patch", {})
     for registry in patches.values():
         for spec in registry.values():
-            source = (staged / spec["path"]).resolve()
+            source = staged / spec["path"]
+            if source.is_symlink() or any(path.is_symlink() for path in source.rglob("*")):
+                raise ValueError("game patch contains a symlink")
+            source = source.resolve()
             if not source.is_relative_to(staged.resolve()):
                 raise ValueError("game patch escapes the staged source")
             destination = out / "patches" / source.name
-            shutil.copytree(source, destination)
+            shutil.copytree(source, destination, symlinks=True)
+            if any(path.is_symlink() for path in destination.rglob("*")):
+                raise ValueError("copied game patch contains a symlink")
             spec["path"] = str(destination.relative_to(out))
     # This deliberately is not the game's buildable workspace manifest.
     lines = []
@@ -305,11 +311,20 @@ def extern_args(deps: Path, crate: str) -> list[str]:
 
 
 def check(out: Path) -> None:
-    """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
+    """Only compiler outputs and exactly inventoried patch sources may ship."""
+    identity = json.loads((out / IDENTITY).read_text()) if (out / IDENTITY).is_file() else {}
+    patch_files = identity.get("patch_files", {})
+    links = [path for path in out.rglob("*") if path.is_symlink()]
+    if links:
+        sys.exit(f"prebuilt folder contains symlinks: {links}")
+    for name, digest in patch_files.items():
+        path = out / name
+        if not name.startswith("patches/") or ".." in Path(name).parts or not path.is_file() or sha256(path) != digest:
+            sys.exit(f"prebuilt patch inventory mismatch: {name}")
     stray = [
         path for path in out.rglob("*")
         if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG)))
-        and not path.is_relative_to(out / "patches")
+        and str(path.relative_to(out).as_posix()) not in patch_files
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
