@@ -61,8 +61,17 @@ impl Game<'_> {
                 );
             }
         }
-        if !mismatches.is_empty() {
+        if mismatches
+            .iter()
+            .any(|m| !resolved.iter().any(|r| r.mod_id == m.mod_id))
+        {
             log::warn!("Horizon: changed mods may cause the world to work incorrectly");
+        }
+        if mismatches
+            .iter()
+            .any(|m| resolved.iter().any(|r| r.mod_id == m.mod_id))
+        {
+            log::debug!("Horizon: changed mods may cause the world to work incorrectly");
         }
     }
 }

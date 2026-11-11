@@ -199,7 +199,7 @@ mod tests {
     }
 
     /// `ModMismatchEvent`: a saved mod with another version, or no longer loaded, and nothing
-    /// else: not a mod loaded since, not a version unknown on either side, not a world without
+    /// else: not a mod loaded since, including versions unknown on either side, not a world without
     /// the list.
     #[test]
     fn mod_mismatches_name_changed_and_missing_mods_only() {
@@ -214,6 +214,7 @@ mod tests {
             record("unknown_now", ""),
             record("known_now", "3.0.0"),
             record("added", "1.0.0"),
+            record("overflow", "99999999999999999999999999999999999999999999"),
             record("minecraft", "99"),
             record("downgrade", "3.0.0"),
         ];
@@ -227,6 +228,7 @@ mod tests {
                 record("unknown_now", "1.0.0"),
                 record("known_now", ""),
                 record("gone", "0.5.0"),
+                record("overflow", "1"),
             ]),
             ..Level::default()
         };
@@ -238,6 +240,11 @@ mod tests {
                 mismatch("unknown_now", "1.0.0", Some("")),
                 mismatch("known_now", "", Some("3.0.0")),
                 mismatch("gone", "0.5.0", None),
+                mismatch(
+                    "overflow",
+                    "1",
+                    Some("99999999999999999999999999999999999999999999")
+                ),
             ]
         );
         let unchanged = Level {
