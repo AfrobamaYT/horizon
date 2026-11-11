@@ -43,10 +43,9 @@ pub enum SourceReason {
 impl std::fmt::Display for SourceReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            Self::Injections { mod_id } => trf(
-                "{mod} injects into the game's code, so the game builds from source",
-                &[("mod", mod_id)],
-            ),
+            Self::Injections { mod_id } => {
+                trf("{mod}: mixins compile game code", &[("mod", mod_id)])
+            }
             Self::BuildScript { mod_id } => trf(
                 "{mod} has a build script, so the game builds from source",
                 &[("mod", mod_id)],
@@ -110,20 +109,6 @@ pub(super) fn slot_routes(
         .map(|project| {
             let manifest = &project.bundle.manifest;
             let route = match super::slots::routes(catalog, manifest) {
-                Ok(routes)
-                    if routes.iter().any(|route| {
-                        matches!(
-                            route,
-                            horizon_mod_package::manifest::inject::Route::Source(_)
-                        )
-                    }) =>
-                {
-                    super::Route::Game {
-                        reason: SourceReason::Injections {
-                            mod_id: manifest.id.clone(),
-                        },
-                    }
-                }
                 Ok(_) => super::Route::Prebuilt,
                 Err(error) => super::Route::Invalid {
                     reason: error.to_string(),
@@ -819,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn plans_all_private_sources_and_keeps_named_refusals_invalid() {
+    fn injects_without_slots_are_invalid_and_never_plan_source() {
         use serde_json::json;
         let root = super::super::tests::dir("slot-planning");
         let mut bundles = Vec::new();
@@ -839,10 +824,6 @@ mod tests {
             (
                 "api_refusal",
                 json!({"at":"Example::private","kind":"head","access":"api"}),
-            ),
-            (
-                "expression",
-                json!({"at":"Example::calls","kind":"expression","access":"internals","expr":"64.0","type":"f64","nth":0,"ctx":"context"}),
             ),
         ] {
             let dir = root.join(id);
@@ -877,16 +858,13 @@ mod tests {
                 super::super::Route::Invalid { .. } => "invalid",
             })
             .collect();
-        assert_eq!(
-            classes,
-            ["prebuilt", "source", "source", "invalid", "source"]
-        );
+        assert_eq!(classes, ["prebuilt", "invalid", "invalid", "invalid"]);
         let causes: Vec<_> = routes
             .iter()
             .filter(|(_, route)| matches!(route, super::super::Route::Game { .. }))
             .map(|(id, _)| id.as_str())
             .collect();
-        assert_eq!(causes, ["private_head", "unlisted_call", "expression"]);
+        assert!(causes.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -62,7 +62,7 @@ impl SourceReason {
     /// Short per-mod warning text. Global limitations and retryable failures get no row warning.
     pub fn mod_warning(&self) -> Option<String> {
         Some(match self {
-            Self::Injections { .. } => tr("Injects outside the slots").to_string(),
+            Self::Injections { .. } => tr("Mixins compile game code").to_string(),
             Self::BuildScript { .. } => tr("Has a build script").to_string(),
             Self::Features { .. } => tr("Uses Cargo features").to_string(),
             Self::Host | Self::NoRelease { .. } | Self::Download { .. } => return None,

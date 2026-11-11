@@ -20,25 +20,6 @@ pub(super) struct Site {
     pub output: String,
 }
 
-impl From<horizon_platform::mod_build::api_gen::sites::Site> for Site {
-    fn from(site: horizon_platform::mod_build::api_gen::sites::Site) -> Self {
-        Self {
-            local: site.local,
-            expression: site.expression,
-            name: site.name,
-            target: site.target,
-            call: site.call,
-            ctx: site.ctx,
-            ordinal: site.ordinal,
-            listener: site.listener,
-            once: site.once,
-            record: site.record,
-            output: site.output,
-            private: true,
-        }
-    }
-}
-
 impl Site {
     pub(super) fn constructor(&self) -> String {
         self.export().to_ascii_lowercase()
@@ -102,15 +83,12 @@ pub(super) fn adapter(
             Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original.call(receiver, args); {f}(receiver, value) }}"),
             Kind::WrapCall => f.into(),
             Kind::WrapIf => format!("|receiver, args, original| {{ if {f}(receiver, &args) {{ original.call(receiver, args); }} }}"),
-            Kind::ModifyLocal | Kind::Expression => unreachable!("owned records belong only to source calls"),
             _ => unreachable!("validated call-site injection kind"),
         };
     }
     match kind {
-        Kind::ModifyLocal => format!("|receiver, args, original| {{ {f}(receiver); original(receiver, args) }}"),
         Kind::BeforeCall => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
         Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
-        Kind::Expression => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(value) }}"),
         Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
         Kind::WrapCall => f.into(),
         Kind::WrapIf => format!("|receiver, args, original| {{ if {f}(receiver, &*args) {{ original(receiver, args); }} }}"),

@@ -45,6 +45,16 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
             bundle.native().horizon.clone().into(),
         )])),
     );
+    for (name, rows) in [
+        ("injection", toml::Value::try_from(&bundle.manifest.mixin)),
+        ("bridge", toml::Value::try_from(&bundle.native().bridge)),
+        ("state", toml::Value::try_from(&bundle.native().state)),
+    ] {
+        let rows = rows.map_err(|error| error.to_string())?;
+        if rows.as_array().is_some_and(|rows| !rows.is_empty()) {
+            manifest.insert(name.into(), rows);
+        }
+    }
     if !bundle.native().module.is_empty() {
         manifest.insert(
             "module".into(),
@@ -80,9 +90,10 @@ pub(super) fn copy(bundle: &Bundle, to: &Path) -> Result<(), String> {
 pub(super) fn copy_tool_input(bundle: &Bundle, to: &Path) -> Result<(), String> {
     copy_files(
         to,
-        checked_files(bundle)?
-            .into_iter()
-            .filter(|(name, _)| manifest::source_file(name)),
+        checked_files(bundle)?.into_iter().filter(|(name, _)| {
+            manifest::source_file(name)
+                || bundle.manifest.mixin.iter().any(|row| row.helper == *name)
+        }),
     )
 }
 
@@ -174,6 +185,69 @@ pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
 #[cfg(test)]
 mod mixed_tests {
     use super::*;
+
+    #[test]
+    fn tool_rows_round_trip_and_helper_changes_invalidate_snapshot() {
+        let dir = super::super::tests::dir("tool-rows");
+        super::super::tests::write_bundle(&dir, "tool_rows", "pub fn run() {}");
+        let mut bundle = read(&dir).unwrap().unwrap();
+        assert!(!bundle.needs_mixins());
+        let injection: toml::Value = toml::from_str("id='edit'\ntarget='game::run'\nkind='HEAD'\nhelper='src/helper.rs'\ncancellable=true\npriority=17\nselector='call'\n").unwrap();
+        bundle
+            .manifest
+            .mixin
+            .push(injection.clone().try_into().unwrap());
+        let bridge: toml::Value =
+            toml::from_str("id='bridge'\ntarget='game::Thing'\nextra='unchanged'\n").unwrap();
+        bundle
+            .manifest
+            .native
+            .as_mut()
+            .unwrap()
+            .bridge
+            .push(bridge.clone().try_into().unwrap());
+        let state: toml::Value =
+            toml::from_str("id='state'\ntarget='game::Thing'\ntype='u32'\n").unwrap();
+        bundle
+            .manifest
+            .native
+            .as_mut()
+            .unwrap()
+            .state
+            .push(state.clone().try_into().unwrap());
+        assert!(bundle.needs_mixins());
+        fs::write(dir.join("src/helper.rs"), "let a = 1;").unwrap();
+        // Persist the public manifest for the package boundary used by hashing and copying.
+        fs::write(dir.join(manifest::MANIFEST), {
+            let mut document: toml::Value =
+                toml::from_str(&fs::read_to_string(dir.join(manifest::MANIFEST)).unwrap()).unwrap();
+            document.as_table_mut().unwrap().insert(
+                "mixin".into(),
+                toml::Value::try_from(&bundle.manifest.mixin).unwrap(),
+            );
+            toml::to_string(&document).unwrap()
+        })
+        .unwrap();
+        let key = || {
+            super::super::inject_cache::key(
+                "revision",
+                "mixins",
+                super::super::Profile::Balanced,
+                std::slice::from_ref(&bundle),
+            )
+            .unwrap()
+        };
+        let first = key();
+        fs::write(dir.join("src/helper.rs"), "let a = 2;").unwrap();
+        assert_ne!(first, key());
+        tool_manifest(&bundle).unwrap();
+        let tool: toml::Value =
+            toml::from_str(&fs::read_to_string(dir.join(MANIFEST)).unwrap()).unwrap();
+        assert_eq!(tool["injection"][0], injection);
+        assert_eq!(tool["bridge"][0], bridge);
+        assert_eq!(tool["state"][0], state);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn malformed_layout_retains_identity() {
