@@ -53,7 +53,12 @@ class ClientStopgap(unittest.TestCase):
                 with patch.object(ignored_tests.subprocess, 'run', side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(ignored_tests.run(package, ['suite::case'], number, count), {})
                 command = commands[-1]
-                expected = 8 if selector in ("horizon-client#1of2", "horizon-client#2of2") else 4
+                client_half = selector in ("horizon-client#1of2", "horizon-client#2of2")
+                expected = 8 if client_half else 4
+                self.assertEqual(len(commands), 2 if number is not None else 1)
+                for invocation in commands:
+                    cargo_args = invocation[:invocation.index('--')]
+                    self.assertEqual([arg for arg in cargo_args if arg.startswith('--jobs') or arg == '-j'], ['--jobs=8'] if client_half else [])
                 self.assertEqual([arg for arg in command if arg.startswith('--test-threads=')], [f'--test-threads={expected}'])
                 self.assertIn('--include-ignored', command)
                 self.assertIn('--exact', command)

@@ -99,7 +99,11 @@ def run(package, skip, number=None, count=None):
             # Worldgen must meet its real-time deadlines without disabling test assertions.
             env["CARGO_PROFILE_TEST_OPT_LEVEL"] = "3"
         # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
+        # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
+        client_half = package == "horizon-client" and count == 2 and number in (1, 2)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
+        if client_half:
+            command.append("--jobs=8")
         expected = set()
         timing = os.environ.get("HORIZON_DATA_LEG_TIMING") == "1"
         phase = f"{package}#{number}of{count}" if number is not None else package
@@ -127,8 +131,7 @@ def run(package, skip, number=None, count=None):
             # This marks the existing test command, not an instruction inside a binary.
             print(f"data-leg phase={phase} test-command-start utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} listed={int(number is not None)} compile_list_seconds={time.monotonic() - compile_started:.3f}", flush=True)
         execution_started = time.monotonic()
-        # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
-        threads = 8 if package == "horizon-client" and count == 2 and number in (1, 2) else 4
+        threads = 8 if client_half else 4
         process = subprocess.run(
             [*command, "--", "--include-ignored", "--exact", f"--test-threads={threads}", *skips],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,
