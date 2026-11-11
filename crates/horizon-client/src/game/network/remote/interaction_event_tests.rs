@@ -1506,9 +1506,11 @@ fn a_server_client_fires_use_item_finish_when_the_server_completes_the_use() {
     });
 }
 
-/// Vanilla's client sends creative slot edits only through `CreativeInventoryListener`,
-/// which `CreativeModeInventoryScreen` adds to the inventory menu while it is open: a hand
-/// a finish listener replaced in creative mode is not sent as `SetCreativeModeSlot`.
+/// Finishing a use sends no creative packet in vanilla (`LivingEntity.completeUsingItem`); its
+/// inventory-slot edits go out through `CreativeInventoryListener`, which
+/// `CreativeModeInventoryScreen` listens with only while it is open. (Hotbar loads and creative
+/// drops send their own packets; they are not this path.) So a hand a finish listener replaced
+/// in creative mode is not sent as `SetCreativeModeSlot` by either of this client's senders.
 #[test]
 #[ignore = "requires prepared game resources"]
 fn a_creative_hand_replaced_by_a_finish_listener_is_not_sent_as_a_creative_slot() {
@@ -1521,22 +1523,55 @@ fn a_creative_hand_replaced_by_a_finish_listener_is_not_sent_as_a_creative_slot(
     crate::game::api_values::install_parts(&mods).unwrap();
     mod_api::testing::with_mods(mods, || {
         with_interaction_game(true, |game| {
-            game.creative = true;
-            game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 3));
-            game.remote_synced();
-            game.using = Some((game.selected, 5));
-            *observer.0.lock().unwrap() = Controls {
-                finish_replacement: Some(Some(7)),
-                ..Controls::default()
+            let offhand = super::super::shield::OFFHAND_SLOT;
+            let packets = |observer: &Observer| observer.0.lock().unwrap().creative_slot_packets;
+            // Finish the use of `slot`, a listener setting the result's count to `count`.
+            let finish = |game: &mut Game<'_>, slot: usize, count: u32| {
+                observer.0.lock().unwrap().finish_replacement = Some(Some(count));
+                game.using = Some((slot, 5));
+                game.remote_complete_using();
             };
-            game.remote_complete_using();
-            assert_eq!(game.held().map(|s| s.count), Some(7));
-            game.send_creative_slots();
-            assert_eq!(observer.0.lock().unwrap().creative_slot_packets, 0);
-            // A creative edit of the hand is still sent: one packet.
-            game.inventory[game.selected] = Some(ItemStack::new("minecraft:apple", 5));
-            game.send_creative_slots();
-            assert_eq!(observer.0.lock().unwrap().creative_slot_packets, 1);
+            // Both senders: the per-tick scan and the one a creative click ends with.
+            let sync = |game: &mut Game<'_>| {
+                game.remote_send_state(0);
+                game.send_creative_slots();
+            };
+            game.creative = true;
+            game.selected = 2;
+            game.inventory[2] = Some(ItemStack::new("minecraft:apple", 3));
+            game.offhand = Some(ItemStack::new("minecraft:apple", 2));
+            game.remote_synced();
+            // The main hand.
+            finish(game, 2, 7);
+            assert_eq!(game.inventory[2].as_ref().map(|s| s.count), Some(7));
+            sync(game);
+            assert_eq!(packets(&observer), 0);
+            // The off hand.
+            finish(game, offhand, 9);
+            assert_eq!(game.offhand.as_ref().map(|s| s.count), Some(9));
+            sync(game);
+            assert_eq!(packets(&observer), 0);
+            // The selection moves on before the sync: the slot the use had is still synced.
+            finish(game, 2, 4);
+            game.selected = 5;
+            sync(game);
+            assert_eq!(game.inventory[2].as_ref().map(|s| s.count), Some(4));
+            assert_eq!(packets(&observer), 0);
+            // Two finishes before a sync.
+            game.selected = 2;
+            finish(game, 2, 6);
+            finish(game, 2, 8);
+            sync(game);
+            assert_eq!(packets(&observer), 0);
+            // An edit away and back to the synced value before a sync is no change.
+            game.inventory[2] = Some(ItemStack::new("minecraft:apple", 5));
+            game.inventory[2] = Some(ItemStack::new("minecraft:apple", 8));
+            sync(game);
+            assert_eq!(packets(&observer), 0);
+            // A creative edit of the hand afterwards is still sent: one packet.
+            game.inventory[2] = Some(ItemStack::new("minecraft:apple", 5));
+            sync(game);
+            assert_eq!(packets(&observer), 1);
         });
     });
 }

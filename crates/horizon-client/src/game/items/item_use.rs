@@ -228,10 +228,10 @@ impl Game<'_> {
     /// `completeUsingItem` (`handleEntityEvent(9)`) ran for `stack` in `slot`.
     /// `ItemStack.finishUsingItem` runs first, as on the client: the use
     /// cooldown, then the hand holds `finish_result`. A mod's result is put in
-    /// the slot; the server's inventory update replaces either. It is not a
-    /// creative edit: vanilla sends `SetCreativeModeSlot` only through the
-    /// creative screen's `CreativeInventoryListener`, so the slot counts as
-    /// synced.
+    /// the slot; the server's inventory update replaces either. Finishing a use
+    /// sends no creative packet in vanilla (its inventory-slot edits go out
+    /// through the open creative screen's `CreativeInventoryListener`), so the
+    /// slot counts as synced for this client's creative sync.
     pub(super) fn remote_use_item_finished(
         &mut self,
         slot: usize,
