@@ -285,7 +285,19 @@ fn resource_gated_block_use_order_and_stacks_on_server_and_guest() {
                         guest.offhand = None;
                     })
                     .unwrap();
-                assert!(matches!(g.guest_use_item_on(12, 0, hit, Hand::Main), Ok(true)));
+                let gi = g
+                    .lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .iter()
+                    .position(|guest| guest.conn == 12)
+                    .unwrap();
+                assert!(matches!(
+                    g.guest_use_item_on(12, gi, hit, Hand::Main),
+                    Ok(true)
+                ));
                 g.as_guest(12, |g| assert_eq!(g.held(), Some(&after)))
                     .unwrap();
             } else {
@@ -367,12 +379,27 @@ fn resource_gated_map_on_banner_fires_once_and_toggles_the_real_marker() {
         };
         for marked in [true, false] {
             SEEN.with_borrow_mut(Vec::clear);
-            assert!(matches!(g.guest_use_item_on(12, 0, hit, Hand::Main), Ok(true)));
+            let gi = g
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .position(|guest| guest.conn == 12)
+                .unwrap();
+            assert!(matches!(
+                g.guest_use_item_on(12, gi, hit, Hand::Main),
+                Ok(true)
+            ));
             SEEN.with_borrow(|seen| {
                 assert_eq!(
                     seen,
                     &[
-                        ("minecraft:item_used_on_block".to_owned(), Some(stack.clone())),
+                        (
+                            "minecraft:item_used_on_block".to_owned(),
+                            Some(stack.clone())
+                        ),
                         ("minecraft:any_block_use".to_owned(), Some(stack.clone())),
                     ]
                 );
