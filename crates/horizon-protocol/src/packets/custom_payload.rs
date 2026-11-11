@@ -354,3 +354,20 @@ mod tests {
         assert!(error.0.contains(&format!("limit: {limit}")));
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for CustomPayload {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.channel))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.data))
+    }
+}
+impl crate::retained::OwnedHeap for PayloadTooLarge {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.size))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.limit))
+    }
+}

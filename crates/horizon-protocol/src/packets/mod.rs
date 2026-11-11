@@ -24,7 +24,16 @@ macro_rules! packet_enum {
             /// A packet Horizon does not model: id and raw payload.
             Unknown(i32, Vec<u8>),
         }
+        impl $crate::retained::OwnedHeap for $name {
+            fn owned_heap_bytes(&self) -> usize { match self {
+                $(Self::$variant(value) => $crate::retained::OwnedHeap::owned_heap_bytes(value),)*
+                Self::Unknown(_, bytes) => bytes.capacity(),
+            } }
+        }
         impl $name {
+            /// Retained heap charge; opaque map storage uses conservative std-layout bounds.
+            pub fn owned_heap_bytes(&self) -> usize { $crate::retained::OwnedHeap::owned_heap_bytes(self) }
+
             pub fn id(&self) -> i32 {
                 use $ids as ids;
                 match self {
@@ -127,4 +136,11 @@ pub(crate) fn round_trip<T: Clone + PartialEq + std::fmt::Debug>(
     let id = r.varint().unwrap();
     let back = decode(id, r.rest()).unwrap();
     assert_eq!(back, packet);
+}
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for Empty {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
 }

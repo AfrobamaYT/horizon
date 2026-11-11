@@ -94,3 +94,16 @@ mod tests {
         }
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for UpdateRecipes {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.properties,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.stonecutter,
+            ))
+    }
+}

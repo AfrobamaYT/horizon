@@ -1958,3 +1958,207 @@ mod tests {
         }
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for Nested {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for WrittenBook {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.title))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.title_filtered,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.author))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.generation,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.pages))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.pages_filtered,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.resolved))
+    }
+}
+impl crate::retained::OwnedHeap for Component {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Int(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Unit => 0usize,
+            Self::Bool(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Text(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Nbt(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Ident(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Lore(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Enchantments(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::AttackRange(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Potion {
+                potion,
+                color,
+                rest,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(potion))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(rest)),
+            Self::Profile(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::CustomModelData {
+                floats,
+                flags,
+                strings,
+                colors,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(floats))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(flags))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(strings))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(colors)),
+            Self::TooltipDisplay { hide, hidden } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(hide))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(hidden)),
+            Self::WritableBook { pages, filtered } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(pages))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(filtered)),
+            Self::WrittenBook(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Stacks(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Fireworks { flight, explosions } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(flight))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(explosions)),
+            Self::FireworkExplosion(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::LodestoneTracker { target, tracked } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(target))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(tracked)),
+            Self::Trim { material, pattern } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(material))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(pattern)),
+            Self::TrimDirect { material, pattern } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(material))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(pattern)),
+            Self::StewEffects(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Instrument(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::BannerPatterns(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::PaintingVariant(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Raw(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for FireworkExplosion {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.shape))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.colors))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.fade))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.trail))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.twinkle))
+    }
+}
+impl crate::retained::OwnedHeap for Profile {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.properties,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.skin))
+    }
+}
+impl crate::retained::OwnedHeap for SkinPatch {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.body))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.cape))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.elytra))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.slim))
+    }
+}
+impl crate::retained::OwnedHeap for WirePatch {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.0))
+    }
+}
+impl crate::retained::OwnedHeap for Older {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Pinned => 0usize,
+            Self::Dropped => 0usize,
+            Self::Rewritten(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for Stack {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.item))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.added))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.removed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.wire))
+    }
+}
+impl crate::retained::OwnedHeap for Slot {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for DelimitedSlot {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Template {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Hashed {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.item))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.added))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.removed))
+    }
+}
+impl crate::retained::OwnedHeap for HashedSlot {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}

@@ -132,3 +132,5 @@ mod tests {
         assert!(Serverbound::decode(0, &long[1..]).is_err());
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.

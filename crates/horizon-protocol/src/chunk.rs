@@ -595,3 +595,42 @@ mod tests {
         assert_eq!(storage_get(&packed, 2, 2), 3);
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for Strategy {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Blocks => 0usize,
+            Self::Biomes => 0usize,
+        }
+    }
+}
+impl crate::retained::OwnedHeap for Paletted {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.bits))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.palette))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.data))
+    }
+}
+impl crate::retained::OwnedHeap for Section {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.non_empty,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.fluids))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.states))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.biomes))
+    }
+}
+impl crate::retained::OwnedHeap for Heightmaps {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Layers {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}

@@ -714,6 +714,9 @@ macro_rules! packet {
         pub struct $name {
             $(pub $field: $ty),*
         }
+        impl $crate::retained::OwnedHeap for $name {
+            fn owned_heap_bytes(&self) -> usize { 0usize $(.saturating_add($crate::retained::OwnedHeap::owned_heap_bytes(&self.$field)))* }
+        }
         impl $crate::buf::Codec<$name> for $name {
             #[allow(unused_variables)]
             fn read(r: &mut $crate::buf::Reader) -> $crate::Result<$name> {

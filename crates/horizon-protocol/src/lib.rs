@@ -127,3 +127,6 @@ impl From<std::io::Error> for Error {
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Engine-owned packet allocation accounting.
+pub mod retained;

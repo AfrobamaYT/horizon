@@ -48,3 +48,5 @@ mod tests {
         );
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.

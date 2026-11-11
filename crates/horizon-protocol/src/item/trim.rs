@@ -68,3 +68,26 @@ impl TrimPattern {
         w.bool(self.decal);
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for TrimMaterial {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.palette_id,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.description,
+            ))
+    }
+}
+impl crate::retained::OwnedHeap for TrimPattern {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.asset_id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.description,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.decal))
+    }
+}

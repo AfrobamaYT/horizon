@@ -352,3 +352,59 @@ mod tests {
         assert_eq!(w.data, [2, 1, 1]);
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for ServerLinkKind {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Known(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Custom(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for ServerLink {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.kind))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.link))
+    }
+}
+impl crate::retained::OwnedHeap for ClickPayload {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for ClientInformation {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.language))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.view_distance,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.chat_visibility,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.chat_colors,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.model_customisation,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.main_hand,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.text_filtering,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.allows_listing,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.particle_status,
+            ))
+    }
+}

@@ -3856,3 +3856,475 @@ mod tests {
         );
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for NetCost {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.item))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.components,
+            ))
+    }
+}
+impl crate::retained::OwnedHeap for NetOffer {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.cost_a))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.result))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.cost_b))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.out_of_stock,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.uses))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.max_uses))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.xp))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.special_price,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.price_multiplier,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.demand))
+    }
+}
+impl crate::retained::OwnedHeap for Offers {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for HolderId {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for DialogHolder {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Registry(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Direct(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for PositionPath {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Linear(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Stepped(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for MapPatch {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.start_x))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.start_y))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.width))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.height))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.colors))
+    }
+}
+impl crate::retained::OwnedHeap for MapPatchOpt {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for VecDelta {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Linear(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Stepped(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for MoveEntity {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.delta))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.rotation))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.on_ground,
+            ))
+    }
+}
+impl crate::retained::OwnedHeap for PackedSignature {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Signature {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for FilterMask {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for PlayerInfo {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.uuid))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.properties,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.chat_session,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.game_mode,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.listed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.latency))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.display_name,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.list_order,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.show_hat))
+    }
+}
+impl crate::retained::OwnedHeap for PlayerInfoUpdate {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.actions))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.entries))
+    }
+}
+impl crate::retained::OwnedHeap for Equipment {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SoundHolder {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for NumberFormat {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Blank => 0usize,
+            Self::Styled(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Fixed(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for SetObjective {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.method))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.display))
+    }
+}
+impl crate::retained::OwnedHeap for LevelParticles {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.particle))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.override_limiter,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.always_show,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.pos))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.dist))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.max_speed,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.randomization,
+            ))
+    }
+}
+impl crate::retained::OwnedHeap for ExplosionParticle {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.particle))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.scaling))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.speed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.weight))
+    }
+}
+impl crate::retained::OwnedHeap for Explode {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.center))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.radius))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.block_count,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.knockback,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.particle))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.sound))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.block_particles,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.play_sound,
+            ))
+    }
+}
+impl crate::retained::OwnedHeap for TeamParameters {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.display_name,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.prefix))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.suffix))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.name_tag_visibility,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.collision_rule,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.color))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.options))
+    }
+}
+impl crate::retained::OwnedHeap for SetPlayerTeam {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.method))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.parameters,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.players))
+    }
+}
+impl crate::retained::OwnedHeap for StopSound {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.source))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.sound))
+    }
+}
+impl crate::retained::OwnedHeap for AdvancementDisplay {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.title))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.description,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.icon))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.frame))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.show_toast,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.hidden))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.background,
+            ))
+    }
+}
+impl crate::retained::OwnedHeap for Advancement {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.parent))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.display))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.requirements,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.telemetry,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.x))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.y))
+    }
+}
+impl crate::retained::OwnedHeap for UpdateAdvancements {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.reset))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.added))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.removed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.progress))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.show))
+    }
+}
+impl crate::retained::OwnedHeap for StatList {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for BossAction {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Add {
+                name,
+                progress,
+                color,
+                overlay,
+                darken,
+                music,
+                fog,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(progress))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(overlay))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(darken))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(music))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(fog)),
+            Self::Remove => 0usize,
+            Self::UpdateProgress { progress } => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(progress))
+            }
+            Self::UpdateName { name } => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            }
+            Self::UpdateStyle { color, overlay } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(overlay)),
+            Self::UpdateProperties { darken, music, fog } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(darken))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(music))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(fog)),
+        }
+    }
+}
+impl crate::retained::OwnedHeap for BossEvent {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.action))
+    }
+}
+impl crate::retained::OwnedHeap for WaypointId {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Uuid(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Name(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for WaypointTarget {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Empty => 0usize,
+            Self::Block(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Chunk(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Azimuth(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for TrackedWaypoint {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.operation,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.style))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.color))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.target))
+    }
+}
+impl crate::retained::OwnedHeap for Fixed3 {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for ArgumentSignatures {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for ChangedSlots {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SeenAdvancements {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.action))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.tab))
+    }
+}
+impl crate::retained::OwnedHeap for SetStructureBlock {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.pos))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.update_type,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.mode))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.offset))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.size))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.mirror))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.rotation))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.data))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.ignore_entities,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.strict))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.show_air))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.show_bounding_box,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                &self.integrity,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(&self.seed))
+    }
+}
+impl crate::retained::OwnedHeap for BookPages {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SignSide {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SignLines {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Cursor {
+    fn owned_heap_bytes(&self) -> usize {
+        0usize
+    }
+}

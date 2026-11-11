@@ -91,3 +91,5 @@ mod tests {
         assert!(decode_intention(id, &over[1..], PROXY_HOST_LIMIT).is_err());
     }
 }
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
