@@ -50,6 +50,39 @@ pub(super) enum OffLevel {
     Cart(super::minecarts::Minecart),
 }
 
+/// Formerly resident vehicles kept solely by surviving passenger edges.
+pub(super) enum RemovedVehicle {
+    Boat(super::boats::Boat),
+    Cart(super::minecarts::Minecart),
+}
+
+impl RemovedVehicle {
+    pub(super) fn position(&self) -> Vec3 {
+        match self {
+            Self::Boat(boat) => boat.position,
+            Self::Cart(cart) => cart.position,
+        }
+    }
+
+    pub(super) fn retire_attachment_registration(&self) {
+        match self {
+            Self::Boat(boat) => {
+                boat.attachment_lifetime.retire();
+            }
+            Self::Cart(cart) => {
+                cart.attachment_lifetime.retire();
+            }
+        }
+    }
+
+    pub(super) fn kind(&self) -> String {
+        match self {
+            Self::Boat(boat) => boat.entity_type(),
+            Self::Cart(cart) => cart.kind.id().into(),
+        }
+    }
+}
+
 impl OffLevel {
     pub(super) fn as_mob(&self) -> Option<&Mob> {
         match self {
@@ -134,10 +167,16 @@ pub struct EntityMemory {
     /// Full rejected passenger objects, not resident entities or frozen NBT copies.
     /// Kept with the level while any live object graph still refers to them.
     pub(super) off_level: HashMap<u32, OffLevel>,
+    /// Removed boat/cart objects are never part of level residency.
+    pub(super) removed_vehicles: HashMap<u32, RemovedVehicle>,
     /// Destruction callbacks already consumed for geometry retained after removal.
     score_destroyed: HashSet<u32>,
     /// Mount notifications currently on the callback stack, keyed by object IDs.
     pub(super) mount_notifications: HashSet<(u32, u32, bool)>,
+    /// Deferred native removals already notified their passenger edges.
+    pub(super) notified_vehicle_removals: HashSet<u32>,
+    /// Vehicle destruction is logically visible before its passenger callbacks.
+    pub(super) destroying_vehicles: HashSet<super::commands::Target>,
     /// Synched entity-data entries dirtied by forced writes since the last sync.
     pub(super) forced_meta: HashMap<u32, [u64; 4]>,
     /// Passengers that ride a vehicle, in load order: live entity IDs or unspawned tags.
@@ -1197,7 +1236,10 @@ impl Game<'_> {
         if let Some(object) = self.mob_object_slot(root) {
             return Some(self.mob_object_tree_nbt(object));
         }
-        if self.boat_object(root).is_some() {
+        if self.boats.iter().any(|b| b.id == root)
+            && self
+                .resident_source_target_visible(self.dim.key(), super::commands::Target::Boat(root))
+        {
             let uuid = self.uuid_for(root);
             let b = self.boat_object(root)?;
             let mut tag = b.to_nbt(uuid, self.persist.raw.get(&root));
@@ -1205,7 +1247,12 @@ impl Game<'_> {
             write_attachments(&mut tag, root, &self.entity_attachments);
             return Some(tag);
         }
-        self.cart_object(root)?;
+        if !self.carts.iter().any(|c| c.id == root)
+            || !self
+                .resident_source_target_visible(self.dim.key(), super::commands::Target::Cart(root))
+        {
+            return None;
+        }
         let uuid = self.uuid_for(root);
         let c = self.cart_object(root)?;
         let mut tag = c.to_nbt(uuid, self.persist.raw.get(&root));
@@ -1255,8 +1302,16 @@ impl Game<'_> {
         self.persist.uuids.iter().find_map(|(&id, &found)| {
             (found == uuid
                 && (self.mobs.iter().any(|mob| mob.id == id && !mob.removed)
-                    || self.boats.iter().any(|boat| boat.id == id)
-                    || self.carts.iter().any(|cart| cart.id == id)))
+                    || (self.boats.iter().any(|boat| boat.id == id)
+                        && self.resident_source_target_visible(
+                            self.dim.key(),
+                            super::commands::Target::Boat(id),
+                        ))
+                    || (self.carts.iter().any(|cart| cart.id == id)
+                        && self.resident_source_target_visible(
+                            self.dim.key(),
+                            super::commands::Target::Cart(id),
+                        ))))
             .then_some(id)
         })
     }
@@ -1735,7 +1790,7 @@ impl Game<'_> {
             self.ominous_spawners
                 .retain(|s| !gone(Vec3::new(s.position[0], s.position[1], s.position[2])));
             if self.dragon.as_ref().is_some_and(|d| gone(d.position)) {
-                self.dragon.discard();
+                self.discard_resident_dragon();
             }
             self.carts.retain(|c| {
                 let keep = !gone(c.position) || Some(c.id) == riding;
@@ -1886,6 +1941,16 @@ impl Game<'_> {
             self.save.save_entities_later(chunks)
         }
     }
+    /// Complete a removed vehicle's scoreboard callback at logical removal,
+    /// even when physical removal waits for the native-removal sweep.
+    pub(super) fn score_destroyed_vehicle_once(&mut self, id: u32) {
+        if self.persist.score_destroyed.insert(id)
+            && let Some(uuid) = self.persist.uuids.get(&id)
+        {
+            self.score.board.entity_removed(&uuid_text(*uuid));
+        }
+    }
+
     /// `ServerLevel.EntityCallbacks.onDestroyed` → `Scoreboard.entityRemoved`
     /// for every kind of entity: a mob's body once it is removed, an item
     /// picked up or killed, an expired cloud, a discarded projectile leaves
@@ -1903,6 +1968,13 @@ impl Game<'_> {
                 {
                     self.score.board.entity_removed(&uuid_text(*uuid));
                 }
+            }
+        }
+        for &id in self.persist.removed_vehicles.keys() {
+            if self.persist.score_destroyed.insert(id)
+                && let Some(uuid) = self.persist.uuids.get(&id)
+            {
+                self.score.board.entity_removed(&uuid_text(*uuid));
             }
         }
         let board = &self.score.board;
@@ -1947,8 +2019,8 @@ impl Game<'_> {
         }
     }
     pub(super) fn prune_entity_memory(&mut self) {
-        if !self.persist.off_level.is_empty()
-            && self.persist.off_level.values().any(OffLevel::is_removed)
+        if !self.persist.removed_vehicles.is_empty()
+            || self.persist.off_level.values().any(OffLevel::is_removed)
         {
             // Complete the former resident's destruction before graph GC can
             // forget the UUID retained solely for dismount geometry.
@@ -1956,7 +2028,7 @@ impl Game<'_> {
         }
         // Forget entities that no longer exist.
         let mut alive = self.live_entity_ids();
-        if !self.persist.off_level.is_empty() {
+        if !self.persist.off_level.is_empty() || !self.persist.removed_vehicles.is_empty() {
             self.retain_off_level_objects(&mut alive);
         }
         for id in self.persist.uuids.keys() {

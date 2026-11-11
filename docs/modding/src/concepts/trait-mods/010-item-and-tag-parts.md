@@ -29,6 +29,11 @@ swings that interaction hand without running the item's own use. The field has t
 same meaning on native and wasm and corresponds to NeoForge's
 `PlayerInteractEvent.RightClickItem.getHand()`.
 
+`Hooks::right_click_item` runs before `Item.use`, including after the same hand's
+unhandled block or entity interaction. A block success or FAIL, or an entity success, stops fallback.
+The server fires it for the separate use-item packet, once for that packet's hand.
+Canceling skips the item Part and vanilla action on native and wasm alike.
+
 ## Item wear
 
 `ItemPart::damage_item` is `IItemExtension.damageItem`: the wear a stack of the part's item is about to take

@@ -227,6 +227,14 @@ impl Game<'_> {
             .borrow_mut()
             .level_entities(level.dimension());
         ids.into_iter()
+            .filter(|id| {
+                !self
+                    .persist
+                    .removals
+                    .iter()
+                    .chain(self.persist.destroying_vehicles.iter())
+                    .any(|target| matches!(*target, Target::Boat(n) | Target::Cart(n) if n == *id))
+            })
             .map(|id| {
                 let entity = EntityRef::new(level.epoch(), id);
                 self.native_entity_target(entity).map(|_| entity)
@@ -913,8 +921,8 @@ pub(super) mod tests {
             std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
                 .canonicalize()
                 .unwrap();
-        let target = std::env::current_dir().unwrap().join("target");
-        std::fs::create_dir_all(&target).unwrap();
+        let scratch_owner = tempfile::tempdir().unwrap();
+        let target = scratch_owner.path();
         for case in cases {
             let scratch = target.join(format!(
                 "be-types-fixture-{}-{}",
