@@ -21,7 +21,7 @@
 //! networks that sleep while idle.
 use crate::content::resource::{Ends, move_once};
 use crate::{
-    CapabilityKey, BlockSide, Capability, ITEMS, ItemResource, ResourceHandler, ServerHost,
+    BlockSide, Capability, CapabilityKey, ITEMS, ItemResource, ResourceHandler, ServerHost,
     Transaction,
 };
 use std::marker::PhantomData;
@@ -122,7 +122,9 @@ impl StoragePage {
     /// A page decoded from the wire: none where its limit passes the host's cap or its entries
     /// pass its limit.
     pub(crate) fn from_wire(entries: Vec<(ItemResource, u64)>, limit: u64) -> Option<Self> {
-        let limit = usize::try_from(limit).ok().filter(|&l| (1..=MAX_STORAGE_PAGE).contains(&l))?;
+        let limit = usize::try_from(limit)
+            .ok()
+            .filter(|&l| (1..=MAX_STORAGE_PAGE).contains(&l))?;
         (entries.len() <= limit).then_some(Self { entries, limit })
     }
 }
@@ -132,8 +134,11 @@ impl StoragePage {
 /// as every capability handler is. Amounts are 64-bit: a million items is one call.
 pub trait ItemStorage {
     /// How much of `resource` it holds.
-    fn amount(&self, host: &mut dyn ServerHost, resource: &ItemResource)
-    -> Result<u64, StorageError>;
+    fn amount(
+        &self,
+        host: &mut dyn ServerHost,
+        resource: &ItemResource,
+    ) -> Result<u64, StorageError>;
     /// How much of `resource` an insert now would take: what a router plans by, not a promise
     /// (an insert may still take less).
     fn space_for(
@@ -230,7 +235,9 @@ impl ItemStorage for GameStorage {
         amount: u64,
     ) -> u64 {
         crate::backend_mut_of(host)
-            .map_or(0, |b| b.container_extract_kind(self.0, resource, amount, tx))
+            .map_or(0, |b| {
+                b.container_extract_kind(self.0, resource, amount, tx)
+            })
             .min(amount)
     }
     fn page(
@@ -437,7 +444,11 @@ pub fn transfer_matching(
         let (mut cursor, mut moved_in_pass) = (Some(0), 0);
         while let Some(at) = cursor {
             cursor = from.page(host, at, &mut page)?;
-            for (resource, _) in page.entries().iter().filter(|(resource, _)| filter(resource)) {
+            for (resource, _) in page
+                .entries()
+                .iter()
+                .filter(|(resource, _)| filter(resource))
+            {
                 if moved == max {
                     return Ok(moved);
                 }
@@ -464,7 +475,10 @@ mod tests {
 
     fn host_with(items: &[&str]) -> (FakeHost, Vec<ItemResource>) {
         let mut host = FakeHost::new();
-        let ids: Vec<_> = items.iter().map(|id| Identifier::parse(id).unwrap()).collect();
+        let ids: Vec<_> = items
+            .iter()
+            .map(|id| Identifier::parse(id).unwrap())
+            .collect();
         host.registries.resolve_items(ids.clone()).unwrap();
         for id in items {
             host.registries
@@ -515,7 +529,13 @@ mod tests {
             *self.0.held.borrow_mut().entry(r.clone()).or_default() += went;
             went
         }
-        fn extract(&self, h: &mut dyn ServerHost, _: &Transaction, r: &ItemResource, n: u64) -> u64 {
+        fn extract(
+            &self,
+            h: &mut dyn ServerHost,
+            _: &Transaction,
+            r: &ItemResource,
+            n: u64,
+        ) -> u64 {
             let came = n.min(self.amount(h, r).unwrap());
             *self.0.held.borrow_mut().entry(r.clone()).or_default() -= came;
             came
@@ -527,14 +547,23 @@ mod tests {
             page: &mut StoragePage,
         ) -> Result<Option<u64>, StorageError> {
             page.clear();
-            let entries: Vec<_> = self.0.held.borrow().iter().map(|(r, n)| (r.clone(), *n)).collect();
+            let entries: Vec<_> = self
+                .0
+                .held
+                .borrow()
+                .iter()
+                .map(|(r, n)| (r.clone(), *n))
+                .collect();
             for (resource, amount) in entries.into_iter().cycle().take(self.0.greedy.max(1)) {
                 page.push(resource, amount);
             }
             Ok(None)
         }
     }
-    fn bulk(room: u64, held: &[(&ItemResource, u64)]) -> (std::rc::Rc<Bulk>, Capability<dyn ItemStorage>) {
+    fn bulk(
+        room: u64,
+        held: &[(&ItemResource, u64)],
+    ) -> (std::rc::Rc<Bulk>, Capability<dyn ItemStorage>) {
         let store = std::rc::Rc::new(Bulk {
             held: RefCell::new(held.iter().map(|(r, n)| ((*r).clone(), *n)).collect()),
             room,
@@ -551,7 +580,11 @@ mod tests {
     fn the_game_answers_storage_for_slots_by_kind() {
         let (mut host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
         let (stone, dirt) = (&r[0], &r[1]);
-        chest(&mut host, [0, 64, 0], &[Some((stone, 40)), Some((dirt, 5)), Some((stone, 10)), None]);
+        chest(
+            &mut host,
+            [0, 64, 0],
+            &[Some((stone, 40)), Some((dirt, 5)), Some((stone, 10)), None],
+        );
         let storage = storage_at(&mut host, [0, 64, 0]);
         let host: &mut dyn ServerHost = &mut host;
         assert_eq!(storage.amount(host, stone), Ok(50));
@@ -561,7 +594,11 @@ mod tests {
         let went = host.transaction(|host, tx| Ok::<_, ()>(storage.insert(host, tx, stone, 500)));
         assert_eq!(went, Ok(142), "no more than the room");
         assert_eq!(storage.amount(host, stone), Ok(192));
-        assert_eq!(storage.amount(host, dirt), Ok(5), "the dirt's slot is not touched");
+        assert_eq!(
+            storage.amount(host, dirt),
+            Ok(5),
+            "the dirt's slot is not touched"
+        );
         let came = host.transaction(|host, tx| Ok::<_, ()>(storage.extract(host, tx, stone, 100)));
         assert_eq!(came, Ok(100));
         let mut page = StoragePage::new(10).unwrap();
@@ -587,7 +624,10 @@ mod tests {
     fn a_page_is_the_hosts_size_whatever_a_caller_asks() {
         assert_eq!(StoragePage::new(0).err(), Some(StorageError::ZeroPage));
         assert_eq!(StoragePage::new(1).unwrap().limit(), 1);
-        assert_eq!(StoragePage::new(usize::MAX).unwrap().limit(), MAX_STORAGE_PAGE);
+        assert_eq!(
+            StoragePage::new(usize::MAX).unwrap().limit(),
+            MAX_STORAGE_PAGE
+        );
         // A container larger than a page lists across pages, the cursor a plain value.
         let (mut host, r) = host_with(&["minecraft:stone"]);
         let slots: Vec<_> = (0..300).map(|_| Some((&r[0], 1))).collect();
@@ -595,12 +635,23 @@ mod tests {
         let storage = storage_at(&mut host, [0, 64, 0]);
         let host: &mut dyn ServerHost = &mut host;
         let mut page = StoragePage::new(100_000).unwrap();
-        assert_eq!(storage.page(host, 0, &mut page), Ok(Some(MAX_STORAGE_PAGE as u64)));
+        assert_eq!(
+            storage.page(host, 0, &mut page),
+            Ok(Some(MAX_STORAGE_PAGE as u64))
+        );
         assert_eq!(page.entries().len(), MAX_STORAGE_PAGE);
         let next = storage.page(host, MAX_STORAGE_PAGE as u64, &mut page);
         assert_eq!(next, Ok(None));
-        assert_eq!(page.entries().len(), 300 - MAX_STORAGE_PAGE, "the page was cleared first");
-        assert_eq!(storage.page(host, u64::MAX, &mut page), Ok(None), "past the end: empty");
+        assert_eq!(
+            page.entries().len(),
+            300 - MAX_STORAGE_PAGE,
+            "the page was cleared first"
+        );
+        assert_eq!(
+            storage.page(host, u64::MAX, &mut page),
+            Ok(None),
+            "past the end: empty"
+        );
         assert!(page.entries().is_empty());
     }
 
@@ -631,9 +682,18 @@ mod tests {
         let (_, r) = host_with(&["minecraft:stone"]);
         let entries = vec![(r[0].clone(), 1); 3];
         assert!(StoragePage::from_wire(entries.clone(), 3).is_some());
-        assert!(StoragePage::from_wire(entries.clone(), 2).is_none(), "more entries than its limit");
-        assert!(StoragePage::from_wire(entries, MAX_STORAGE_PAGE as u64 + 1).is_none(), "past the cap");
-        assert!(StoragePage::from_wire(Vec::new(), 0).is_none(), "a zero limit");
+        assert!(
+            StoragePage::from_wire(entries.clone(), 2).is_none(),
+            "more entries than its limit"
+        );
+        assert!(
+            StoragePage::from_wire(entries, MAX_STORAGE_PAGE as u64 + 1).is_none(),
+            "past the cap"
+        );
+        assert!(
+            StoragePage::from_wire(Vec::new(), 0).is_none(),
+            "a zero limit"
+        );
         let mut page = StoragePage::new(4).unwrap();
         page.push(r[0].clone(), 7);
         let mut out = crate::wire::Writer::default();
@@ -658,12 +718,24 @@ mod tests {
             bytes.extend_from_slice(&(MAX_STORAGE_PAGE as u64).to_le_bytes());
             bytes
         };
-        let decode = |bytes: &[u8]| crate::wire::Reader::decode::<StoragePage>(bytes).map(|page| page.entries().len());
-        assert_eq!(decode(&encoded(MAX_STORAGE_PAGE as u32, MAX_STORAGE_PAGE)), Ok(MAX_STORAGE_PAGE));
+        let decode = |bytes: &[u8]| {
+            crate::wire::Reader::decode::<StoragePage>(bytes).map(|page| page.entries().len())
+        };
+        assert_eq!(
+            decode(&encoded(MAX_STORAGE_PAGE as u32, MAX_STORAGE_PAGE)),
+            Ok(MAX_STORAGE_PAGE)
+        );
         // Every entry is there, so only the cap can refuse it.
         let past = MAX_STORAGE_PAGE + 1;
-        assert_eq!(decode(&encoded(past as u32, past)), Err(crate::wire::WireError::Length));
-        assert_eq!(decode(&encoded(u32::MAX, 1)), Err(crate::wire::WireError::Length), "a hostile length");
+        assert_eq!(
+            decode(&encoded(past as u32, past)),
+            Err(crate::wire::WireError::Length)
+        );
+        assert_eq!(
+            decode(&encoded(u32::MAX, 1)),
+            Err(crate::wire::WireError::Length),
+            "a hostile length"
+        );
     }
 
     #[test]
@@ -697,7 +769,11 @@ mod tests {
     #[test]
     fn transfer_matching_moves_only_what_the_filter_takes() {
         let (mut host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
-        chest(&mut host, [0, 64, 0], &[Some((&r[0], 30)), Some((&r[1], 20)), Some((&r[1], 7))]);
+        chest(
+            &mut host,
+            [0, 64, 0],
+            &[Some((&r[0], 30)), Some((&r[1], 20)), Some((&r[1], 7))],
+        );
         let from = storage_at(&mut host, [0, 64, 0]);
         let (into_store, into) = bulk(u64::MAX, &[]);
         let host: &mut dyn ServerHost = &mut host;
@@ -713,7 +789,11 @@ mod tests {
     #[test]
     fn transfers_aborted_and_committed_conserve_every_item() {
         let (mut host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
-        chest(&mut host, [0, 64, 0], &[Some((&r[0], 64)), Some((&r[1], 40)), Some((&r[0], 9))]);
+        chest(
+            &mut host,
+            [0, 64, 0],
+            &[Some((&r[0], 64)), Some((&r[1], 40)), Some((&r[0], 9))],
+        );
         chest(&mut host, [1, 64, 0], &[None, Some((&r[1], 3)), None]);
         let a = storage_at(&mut host, [0, 64, 0]);
         let b = storage_at(&mut host, [1, 64, 0]);
@@ -725,7 +805,11 @@ mod tests {
         };
         let before = total(host);
         for round in 0..40u64 {
-            let (from, to) = if round.is_multiple_of(2) { (&a, &b) } else { (&b, &a) };
+            let (from, to) = if round.is_multiple_of(2) {
+                (&a, &b)
+            } else {
+                (&b, &a)
+            };
             let kind = &r[(round % 3 % 2) as usize];
             let result: Result<u64, StorageError> = host.transaction(|host, tx| {
                 let moved = transfer(host, from, to, kind, round + 1, tx)?;
@@ -743,7 +827,9 @@ mod tests {
     #[test]
     fn a_resource_keys_a_map_by_item_damage_and_components() {
         let (host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
-        let stone = host.item_key(&Identifier::parse("minecraft:stone").unwrap()).unwrap();
+        let stone = host
+            .item_key(&Identifier::parse("minecraft:stone").unwrap())
+            .unwrap();
         let state = std::hash::RandomState::new();
         let hash_with = |resource: &ItemResource| state.hash_one(resource);
         // Equal stacks of different counts are one kind, and hash alike.
@@ -766,7 +852,14 @@ mod tests {
         let named = ItemResource::of(&named);
         assert_ne!(named, r[0]);
         let mut counts: HashMap<ItemResource, u64> = HashMap::new();
-        for resource in [&r[0], &r[1], &ItemResource::of(&worn), &named, &many, &named] {
+        for resource in [
+            &r[0],
+            &r[1],
+            &ItemResource::of(&worn),
+            &named,
+            &many,
+            &named,
+        ] {
             *counts.entry(resource.clone()).or_default() += 1;
         }
         assert_eq!(counts.len(), 4);
