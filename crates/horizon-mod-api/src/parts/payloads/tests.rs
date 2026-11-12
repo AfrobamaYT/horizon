@@ -195,7 +195,7 @@ fn raw_channels_take_several_mods_in_load_order_outside_the_offer() {
         "raw ids are not offered"
     );
     let receivers = payloads.raw_receivers("voicechat:secret");
-    let owners: Vec<_> = receivers.iter().map(|r| r.owner).collect();
+    let owners: Vec<_> = receivers.iter().map(|r| r.owner()).collect();
     assert_eq!(owners, ["first", "second"]);
     assert!(receivers.iter().all(|r| r.thread == HandlerThread::Main));
     assert!(

@@ -137,6 +137,41 @@ announced in `minecraft:register` (less `minecraft:unregister`), in
 configuration and play: at most 128 channels of up to 64 bytes. Raw channels
 are server-side only and take exact ids; a namespace wildcard may follow.
 
+A trait mod declares its raw channels in its own `Hooks::register`, through the
+same registrar as typed payloads; no Part and no manifest entry are needed:
+
+```rust,ignore
+use mod_api::{
+    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar,
+    RegistrationContext,
+};
+use std::sync::Arc;
+
+struct VoiceSecret;
+impl IPayloadHandler for VoiceSecret {
+    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+        let player = context.player().map_err(|e| format!("{e:?}"))?;
+        let host = context.server_host().map_err(|e| format!("{e:?}"))?;
+        // Answer on the same channel; above 1,048,576 bytes this is PayloadTooLarge.
+        let id = PayloadId("voicechat:secret".into());
+        player.send_payload(host, &id, bytes).map_err(|e| format!("{e:?}"))?;
+        Ok(())
+    }
+}
+
+struct MyMod;
+#[mod_api::horizon_mod]
+impl Hooks for MyMod {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+        r.payload_handlers()
+            .registrar("1")
+            .play_raw(PayloadId("voicechat:secret".into()), Some(Arc::new(VoiceSecret)))
+            // Send-only: the mod sends on it but receives nothing.
+            .play_raw(PayloadId("bungeecord:main".into()), None);
+    }
+}
+```
+
 ## Stage 2: the value codec
 
 `crates/horizon-mod-vocab/src/content/payload_codec.rs` holds the pure codec half of stage 2, exported from `mod_api`, and `#[derive(PayloadCodec)]` writes a type's codec from its fields. It is the part that touches neither registration nor delivery, so it stands apart from the raw transport of [#2882](https://github.com/arismoko/horizon/issues/2882). Nothing calls it yet: the typed handler adapter that decodes a received body, and the typed send helper that encodes one, arrive with registration.

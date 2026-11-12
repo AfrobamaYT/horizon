@@ -70,8 +70,9 @@ fn with_vanilla_peer(run: impl FnOnce(Arc<Transport>)) {
             }),
         ),
     ];
-    mod_api::testing::with_mods(mods.into(), || {
-        mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods()).unwrap();
+    mod_platform::testing::with_mods(mods.into(), || {
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
         let transport = Transport::capture(Side::Server).unwrap();
         assert!(
             transport.local.manifest.entries().is_empty(),
@@ -209,9 +210,9 @@ fn a_raw_declaration_colliding_with_a_typed_payload_refuses_load() {
             }),
         ),
     ];
-    mod_api::testing::with_mods(mods.into(), || {
+    mod_platform::testing::with_mods(mods.into(), || {
         let refused =
-            mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
                 .unwrap_err();
         assert!(
             refused.iter().any(|line| line.contains("voicebridge")
