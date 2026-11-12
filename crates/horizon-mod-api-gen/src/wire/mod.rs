@@ -142,6 +142,7 @@ const EXPORTS: &[&str] = &[
     "ParticleProvider",
     "EnchantmentDamageEffect",
     "CommandArgumentType",
+    "EntitySelectorType",
     "GroundStateProvider",
     "PlaceProvider",
     "TooltipAppender",

@@ -141,3 +141,23 @@ server tick, every mod is asked to register again. The server rebuilds the typed
 command dispatcher and sends each player's tree after `player_commands_sent`
 filters it, as vanilla does after `/reload`. Repeated requests before that tick
 coalesce; without a world open to players, nothing is rebuilt.
+
+## Custom selector tokens
+
+Side: server. Register a token such as `@allies` once from `Hooks::register` with
+`r.register_entity_selector("allies", Allies)`, where `Allies` implements
+`EntitySelectorType` (NeoForge's `EntitySelectorManager.register` and
+`IEntitySelectorType`). `base` returns its `SelectorBase`: players only, a limit, a
+`SelectorSort` and the translation key of its completion tooltip. `matches(host, source,
+entity)` is asked for each candidate after the base selection and the `[...]` options,
+before sorting and the limit. Return `false` to drop the candidate; a panic drops it too.
+
+Every entity, entities, player and players argument then accepts `@allies[...]`, in
+vanilla commands and mod commands alike, with the same options and selector permission
+as `@e`. The parser reads the whole word after `@` before vanilla's letter, so `@allies`
+is never `@a`, and an unregistered word still fails with
+`argument.entity.selector.unknown`. A name that is empty, not lowercase letters, digits
+and `_`, one of `p a r s e n`, or already registered by any mod refuses the mods at
+startup. The server and single player complete the token with its tooltip. A client
+connected to another server does not know the token: it can still send the command,
+but its chat box marks the token as unknown.
