@@ -4,6 +4,21 @@ use super::TryIntoEngine;
 mod arm_pose;
 use horizon_mod_package::content as engine;
 
+/// One vocabulary mapping for the content draft and the resolved simulation facts.
+pub(in crate::game) fn push_reaction(
+    value: &mod_api::PushReaction,
+) -> (engine::PushReaction, horizon_world::level::PushReaction) {
+    use engine::PushReaction as Content;
+    use horizon_world::level::PushReaction as World;
+    match value {
+        mod_api::PushReaction::PushPull => (Content::PushPull, World::PushPull),
+        mod_api::PushReaction::Push => (Content::Push, World::Push),
+        mod_api::PushReaction::Popped => (Content::Popped, World::Popped),
+        mod_api::PushReaction::Immoveable => (Content::Immoveable, World::Immoveable),
+        mod_api::PushReaction::IgnoreEntity => (Content::IgnoreEntity, World::IgnoreEntity),
+    }
+}
+
 impl TryIntoEngine<()> for mod_api::BlockProperties {
     type Engine = engine::BlockProperties;
     type Error = String;
@@ -31,13 +46,10 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
                 }
                 mod_api::RenderShape::Invisible => engine::RenderShape::Invisible,
             }),
-            push_reaction: self.push_reaction.as_ref().map(|v| match v {
-                mod_api::PushReaction::PushPull => engine::PushReaction::PushPull,
-                mod_api::PushReaction::Push => engine::PushReaction::Push,
-                mod_api::PushReaction::Popped => engine::PushReaction::Popped,
-                mod_api::PushReaction::Immoveable => engine::PushReaction::Immoveable,
-                mod_api::PushReaction::IgnoreEntity => engine::PushReaction::IgnoreEntity,
-            }),
+            push_reaction: self
+                .push_reaction
+                .as_ref()
+                .map(|value| push_reaction(value).0),
             occludes: self.occludes,
             destroy_overlay: self.destroy_overlay,
         })

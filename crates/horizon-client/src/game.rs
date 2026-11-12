@@ -717,10 +717,7 @@ struct GameLevel<'w> {
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
-    gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
-        [i32; 3],
-        horizon_client::block_entity_anim::EndGateway,
-    >,
+    positions: piston_carry_state::PositionState<'w>,
     border: &'w horizon_core::geometry::border::BorderGeometry,
     world: &'w mut World,
     command_block_transition: Option<command_blocks::CommandBlockTransition>,
@@ -5534,7 +5531,10 @@ impl Game<'_> {
             cake_answer: None,
             api_level: self.level(self.dim.id()),
             command_block_transition: None,
-            gateway_servers: &mut self.be_anims.gateway_servers,
+            positions: piston_carry_state::PositionState {
+                gateways: &mut self.be_anims.gateway_servers,
+                hoppers: &mut self.hoppers,
+            },
             border: self.border.geometry(),
             redstone_experiments: self
                 .level
@@ -10608,7 +10608,7 @@ impl Game<'_> {
                 )
                 .filter(|(block, section_inside)| {
                     let (pos, state) = **block;
-                    self.res.block_entity_render().renders(state)
+                    self.live_block_entity_render(pos, state)
                         && (off_screen(state) || *section_inside || in_view(&pos))
                 })
                 .map(|(block, _)| block)
@@ -10621,7 +10621,7 @@ impl Game<'_> {
                     let listed: HashSet<[i32; 3]> = camera_list.iter().map(|b| b.0).collect();
                     r.shadow_pass_block_entities(camera)
                         .filter(|(pos, state)| {
-                            !listed.contains(pos) && self.res.block_entity_render().renders(*state)
+                            !listed.contains(pos) && self.live_block_entity_render(*pos, *state)
                         })
                         .collect()
                 } else {
@@ -10731,7 +10731,7 @@ impl Game<'_> {
                         |_| false,
                         |_| false,
                     )
-                    .filter(|(block, _)| self.res.block_entity_render().renders(block.1))
+                    .filter(|(block, _)| self.live_block_entity_render(block.0, block.1))
                     .map(|(block, _)| block);
                 (
                     static_block_entities,
