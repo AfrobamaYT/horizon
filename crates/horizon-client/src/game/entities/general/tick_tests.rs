@@ -743,6 +743,77 @@ fn a_canceled_passenger_still_follows_and_his_passengers_tick() {
     });
 }
 
+/// A rider removed in its own Pre — the removal the liveness re-check
+/// exists for: it neither ticks nor walks its descendants, however its Pre
+/// ended. A stack of three covers the depth: the middle rider's own Pre
+/// discards it, and the bottom row hears nothing at all.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_rider_removed_in_its_own_pre_walks_no_descendants() {
+    with_counter(|game, l| {
+        let bottom = record_at("mymod:robot", [8, 8, 8, 8], [0.5, 64.0, 0.5], Vec::new());
+        let middle = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], vec![bottom]);
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![middle]);
+        let ids = row_ids(game);
+        tick(game);
+        l.events.lock().unwrap().clear();
+        // The middle rider's own Pre discards it.
+        l.pre_on.store(ids[1], std::sync::atomic::Ordering::Relaxed);
+        l.pre_victim
+            .store(ids[1], std::sync::atomic::Ordering::Relaxed);
+        tick(game);
+        assert_eq!(
+            *l.events.lock().unwrap(),
+            [
+                (root, "pre"),
+                (root, "tick"),
+                (root, "post"),
+                (ids[1], "pre"),
+            ],
+            "the removed rider neither ticks nor walks its descendants"
+        );
+        assert_eq!(counter(game, ids[1]), 1);
+        assert_eq!(counter(game, ids[2]), 1, "the descendant did not tick");
+        assert_eq!(counter(game, root), 2);
+    });
+}
+
+/// The same removal with the Pre also canceled: the liveness re-check runs
+/// after a canceled Pre too — the cancel skips the rider's tick and Post,
+/// not the check — so a rider that removed itself in its canceled Pre
+/// walks no descendants, and a live one keeps the ruling's follow.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_rider_removed_in_its_own_canceled_pre_walks_no_descendants() {
+    with_counter(|game, l| {
+        let bottom = record_at("mymod:robot", [8, 8, 8, 8], [0.5, 64.0, 0.5], Vec::new());
+        let middle = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], vec![bottom]);
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![middle]);
+        let ids = row_ids(game);
+        tick(game);
+        l.events.lock().unwrap().clear();
+        // The middle rider's own Pre discards it and cancels itself.
+        l.cancel_on
+            .store(ids[1], std::sync::atomic::Ordering::Relaxed);
+        l.pre_on.store(ids[1], std::sync::atomic::Ordering::Relaxed);
+        l.pre_victim
+            .store(ids[1], std::sync::atomic::Ordering::Relaxed);
+        tick(game);
+        assert_eq!(
+            *l.events.lock().unwrap(),
+            [
+                (root, "pre"),
+                (root, "tick"),
+                (root, "post"),
+                (ids[1], "pre"),
+            ]
+        );
+        assert_eq!(counter(game, ids[2]), 1, "the descendant did not tick");
+        assert_eq!(counter(game, root), 2);
+        l.cancel_on.store(0, std::sync::atomic::Ordering::Relaxed);
+    });
+}
+
 /// The zero-callback row, with riders: five hundred two-row trees of a
 /// type no part subscribes to cost the pass one walk and no callback — no
 /// call, no event, no type lookup (the slot resolved without subscribers

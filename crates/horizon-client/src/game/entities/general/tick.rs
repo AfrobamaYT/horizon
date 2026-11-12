@@ -127,10 +127,12 @@ impl Game<'_> {
     /// order of the maintainers' ruling, not a nested one. A canceled
     /// rider's Pre skips only its entity tick and its Post: the rider still
     /// follows its vehicle (the bookkeeping runs), and its own passengers
-    /// still tick. The parent's callbacks are re-checked at every edge
-    /// (`tickPassenger`'s `getVehicle` gate): a rider the callback removed
-    /// or dismounted does not tick in this pass. A rider that joined this
-    /// tick waits for the next pass with its root — a tree joins whole.
+    /// still tick; a rider removed in its own Pre — canceled or not —
+    /// neither ticks nor walks its descendants. The parent's callbacks are
+    /// re-checked at every edge (`tickPassenger`'s `getVehicle` gate): a
+    /// rider the callback removed or dismounted does not tick in this pass.
+    /// A rider that joined this tick waits for the next pass with its root
+    /// — a tree joins whole.
     fn tick_general_riders(
         &mut self,
         vehicle: usize,
@@ -161,14 +163,18 @@ impl Game<'_> {
             }
             let kind = catalog.key(slot);
             let ticks = !round.listening() || self.native_tick_pre_one(round, id, kind);
-            // The bookkeeping runs even for a canceled rider: it still
-            // follows its vehicle (the ruling). A removal the Pre queued
-            // takes the whole step instead.
-            if ticks && !general_row_live(self, index, mount) {
-                round.not_ticked(id);
-                self.tick_general_riders(index, born, catalog, subscribed, epoch, round);
+            // Liveness is re-checked after the Pre whether it was canceled
+            // or not: a rider removed in its own Pre — canceled or not —
+            // neither ticks nor walks its descendants, and a row that no
+            // longer ticks hears no Post.
+            if !general_row_live(self, index, mount) {
+                if ticks {
+                    round.not_ticked(id);
+                }
                 continue;
             }
+            // The bookkeeping runs even for a canceled rider: it still
+            // follows its vehicle (the ruling).
             self.resident_entities.general.rows[index].previous =
                 self.resident_entities.general.rows[index].position;
             if ticks {
