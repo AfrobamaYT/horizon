@@ -21,4 +21,3 @@
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
-

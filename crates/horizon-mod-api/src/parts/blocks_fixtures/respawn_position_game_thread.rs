@@ -41,4 +41,3 @@
     std::thread_local! {
         static FALLING_TICKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }
-

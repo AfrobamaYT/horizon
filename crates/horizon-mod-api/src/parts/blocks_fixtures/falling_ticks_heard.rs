@@ -2,4 +2,3 @@
     pub fn falling_ticks_heard() -> u32 {
         FALLING_TICKS.with(|heard| heard.replace(0))
     }
-
