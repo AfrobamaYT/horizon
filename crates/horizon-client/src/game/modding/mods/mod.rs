@@ -1167,7 +1167,7 @@ fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
             EffectCategory::Harmful => Category::Harmful,
             EffectCategory::Neutral => Category::Neutral,
         };
-        (e.id.clone(), e.color, category)
+        (e.id.clone(), e.color, category, e.sort_order)
     }));
     if !set
         && brewing::mod_effects()
@@ -2926,7 +2926,8 @@ mod tests {
         assert!(brewing::register_mod_effects([(
             "test:effect".to_owned(),
             0,
-            brewing::Category::Neutral
+            brewing::Category::Neutral,
+            None
         )]));
     }
 }
