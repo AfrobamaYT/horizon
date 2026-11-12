@@ -126,3 +126,68 @@ fn add_padding_rejects_zero_and_large_bits() {
     let padded = super::fixes_mid::add_padding(10, 4, &[1, 2, 3]);
     assert!(!padded.is_empty());
 }
+
+const SIGN: &str = "{id: \"minecraft:sign\", x: 1, y: 64, z: 2, Text1: '{\"text\":\"north\"}', Text2: '\"\"', \
+                    Text3: '\"\"', Text4: '\"\"', Color: \"black\", GlowingText: 0b}";
+const VILLAGER: &str = "{id: \"minecraft:villager\", Pos: [0.5d, 64.0d, 0.5d], Profession: 1, Career: 2, \
+                        CareerLevel: 1, Health: 20.0f, Passengers: [{id: \"minecraft:villager\", \
+                        Pos: [0.5d, 66.0d, 0.5d], Profession: 2, Career: 1, CareerLevel: 1, Health: 20.0f}]}";
+
+fn compound(tag: Tag) -> Compound {
+    match tag {
+        Tag::Compound(c) => c,
+        other => panic!("expected a compound, got {other:?}"),
+    }
+}
+
+#[test]
+fn one_block_entity_upgrades_as_the_chunk_loader_upgrades_it() {
+    // A sign of DataVersion 3400: its four text lines become `front_text` in a chunk.
+    let old = 3400;
+    let sign = snbt(SIGN);
+    let mut chunk = Tag::compound([
+        ("DataVersion", Tag::Int(old)),
+        ("Status", dynamic::string("minecraft:full")),
+        ("block_entities", Tag::List(vec![sign.clone()])),
+    ]);
+    update_chunk(&mut chunk, "minecraft:overworld", None);
+    let through_chunk = &dynamic::stream(chunk.get("block_entities"))[0];
+    assert!(through_chunk.get("front_text").is_some());
+    assert!(through_chunk.get("Text1").is_none());
+
+    let alone = upgrade_block_entity(old, compound(sign));
+    assert_eq!(&Tag::Compound(alone), through_chunk);
+}
+
+#[test]
+fn one_entity_and_its_passenger_upgrade_as_the_entity_chunk_loader_upgrades_them() {
+    // Villagers of DataVersion 1900: profession and career become `VillagerData`, the passenger's too.
+    let old = 1900;
+    let villager = snbt(VILLAGER);
+    let mut record = Tag::compound([
+        ("DataVersion", Tag::Int(old)),
+        ("Entities", Tag::List(vec![villager.clone()])),
+    ]);
+    update_region_tag(Ty::EntityChunk, &mut record);
+    let through_chunk = &dynamic::stream(record.get("Entities"))[0];
+    assert!(through_chunk.get("VillagerData").is_some());
+    assert!(through_chunk.get("Profession").is_none());
+    let rider = &dynamic::stream(through_chunk.get("Passengers"))[0];
+    assert!(rider.get("VillagerData").is_some());
+
+    let alone = upgrade_entity(old, compound(villager));
+    assert_eq!(&Tag::Compound(alone), through_chunk);
+}
+
+#[test]
+fn current_and_unknown_data_come_back_unchanged() {
+    let sign = compound(snbt(SIGN));
+    assert_eq!(upgrade_block_entity(CURRENT, sign.clone()), sign);
+    let villager = compound(snbt(VILLAGER));
+    assert_eq!(upgrade_entity(CURRENT, villager.clone()), villager);
+    // A block entity type a 3400 chunk doesn't know is kept as the chunk keeps it.
+    let unknown = compound(snbt(
+        "{id: \"minecraft:no_such_block_entity\", Text1: '\"x\"', x: 0, y: 0, z: 0}",
+    ));
+    assert_eq!(upgrade_block_entity(3400, unknown.clone()), unknown);
+}
