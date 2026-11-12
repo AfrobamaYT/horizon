@@ -53,3 +53,75 @@ fn edit_world_offers_the_installed_regions_only_when_they_differ() {
         }
     );
 }
+
+#[test]
+fn escape_cancels_adoption_and_preserves_the_typed_name_and_record() {
+    let mut f = Fixture::new();
+    f.world("Moor", "Moor");
+    let file = record(&f, "Moor", false);
+    let before = std::fs::read(&file).unwrap();
+    let world = super::super::tests::only_world(&f);
+    f.title.edit_world("Typed name".into(), world);
+    f.click(&lang::get("horizon.biome_regions.adopt.button"));
+    f.title.escape();
+    assert!(matches!(&f.title.mode, Mode::Edit { name, .. } if name == "Typed name"));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn a_failed_adoption_write_keeps_the_record_and_world_closed_until_retry() {
+    let mut f = Fixture::new();
+    f.world("Moor", "Moor");
+    let file = record(&f, "Moor", false);
+    let before = std::fs::read(&file).unwrap();
+    let world = super::super::tests::only_world(&f);
+    assert_eq!(f.title.play(world.clone()), Action::None);
+    f.title.edit_world("Typed name".into(), world.clone());
+    f.click(&lang::get("horizon.biome_regions.adopt.button"));
+    // A directory at the temporary output path forces a real write failure on every OS.
+    let temporary = file.with_file_name("biome_regions.dat_new");
+    std::fs::create_dir(&temporary).unwrap();
+    assert_eq!(
+        f.click(&lang::get("horizon.biome_regions.adopt.confirm")),
+        Action::None
+    );
+    assert!(
+        matches!(&f.title.mode, Mode::Error { message, return_to, .. }
+        if message.starts_with(&lang::get("horizon.biome_regions.save_failed").split("%s").next().unwrap_or_default())
+            && matches!(&**return_to, Mode::AdoptBiomeRegions { .. }))
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    f.title.escape();
+    assert!(matches!(f.title.mode, Mode::AdoptBiomeRegions { .. }));
+    std::fs::remove_dir(&temporary).unwrap();
+    assert_eq!(
+        f.click(&lang::get("horizon.biome_regions.adopt.confirm")),
+        Action::None
+    );
+    assert!(matches!(&f.title.mode, Mode::Edit { name, .. } if name == "Typed name"));
+    assert_ne!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(
+        f.title.play(world),
+        Action::Play {
+            folder: "Moor".into()
+        }
+    );
+}
+
+#[test]
+fn confirm_refuses_a_record_changed_since_the_prompt_was_drawn() {
+    let mut f = Fixture::new();
+    f.world("Moor", "Moor");
+    let file = record(&f, "Moor", false);
+    let world = super::super::tests::only_world(&f);
+    f.title.edit_world("Typed name".into(), world);
+    f.click(&lang::get("horizon.biome_regions.adopt.button"));
+    std::fs::write(&file, b"changed since drawing").unwrap();
+    assert_eq!(
+        f.click(&lang::get("horizon.biome_regions.adopt.confirm")),
+        Action::None
+    );
+    assert!(matches!(&f.title.mode, Mode::Error { return_to, .. }
+        if matches!(&**return_to, Mode::AdoptBiomeRegions { .. })));
+    assert_eq!(std::fs::read(&file).unwrap(), b"changed since drawing");
+}
