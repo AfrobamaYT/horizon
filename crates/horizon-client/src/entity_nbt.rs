@@ -3808,19 +3808,7 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
             ("AbsorptionAmount", Tag::Float(0)),
             ("FallFlying", Tag::Byte(0)),
             ("current_impulse_context_reset_grace_time", Tag::Int(0)),
-            // AttributeMap.pack: the movement_speed instance the stand's first
-            // tick makes (removeFrost), at the registry default.
-            (
-                "attributes",
-                Tag::List(if a.speed_instance {
-                    vec![Tag::compound([
-                        ("id", string(SPEED_ATTRIBUTE)),
-                        ("base", Tag::Double(0.7f64.to_bits())),
-                    ])]
-                } else {
-                    Vec::new()
-                }),
-            ),
+            ("attributes", Tag::List(Vec::new())),
             (
                 "Brain",
                 Tag::compound([("memories", Tag::Compound(Compound::new()))]),
@@ -3829,6 +3817,18 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
             ("Pose", Tag::Compound(Compound::new())),
         ] {
             map.entry(key.into()).or_insert(value);
+        }
+        // `removeFrost`'s first-tick movement_speed, over a saved list without it.
+        if a.speed_instance
+            && let Some(Tag::List(list)) = map.get_mut(&"attributes".into())
+            && !list
+                .iter()
+                .any(|t| text(t.get("id")).as_deref() == Some(SPEED_ATTRIBUTE))
+        {
+            list.push(Tag::compound([
+                ("id", string(SPEED_ATTRIBUTE)),
+                ("base", Tag::Double(0.7f64.to_bits())),
+            ]));
         }
         put_live_attributes(map, &a.live);
     }
