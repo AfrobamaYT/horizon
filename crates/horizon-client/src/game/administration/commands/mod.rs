@@ -4812,6 +4812,7 @@ mod fake_travel_tests {
             assert!(!game.teleport_to_level(Target::Item(9_999), Dim::Nether, [0.0; 3], None));
         });
     }
+
 }
 
 #[cfg(test)]
