@@ -85,6 +85,9 @@ api = "0.2"                  # content mods
 side = "both"
 capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
+
+[properties]                 # optional: values other mods read (reference/manifest.md)
+tier = 3
 ```
 
 The optional fields fill the game's Mods screen, which lists every mod with its icon, name, version, id, license,
@@ -521,6 +524,10 @@ category (`beneficial`, `harmful` or `neutral`) and its RGB colour (0 to `0xFFFF
 { "category": "harmful", "color": 9154528 }
 ```
 
+An optional `sort_order` (an integer) sets where the effect sits among the HUD's icons and the inventory's effect list,
+as NeoForge's `IMobEffectExtension.getSortOrder` does: the lists compare it where vanilla compares the colour, and it
+is the colour when left out. It is fixed per effect, where NeoForge may answer per instance.
+
 It is the effect `<id>:<name>`: `/effect give @s ruby:glow 30` gives it, saves and mobs keep it, and it reaches LAN and
 dedicated server players who run the same mods (its network id follows vanilla's). Its name is the translation
 `effect.<id>.<name>` from the mod's `assets/<id>/lang/`, its icon `assets/<id>/textures/mob_effect/<name>.png` (18x18,
@@ -544,7 +551,8 @@ the thrower (the snowball's 3 to blazes is not copied):
 
 It is the entity type `<id>:<name>`, with its network id after vanilla's. Using its item throws it as a snowball is
 thrown: same speed, spread, sound and cooldown, and one item used outside creative. It flies as a snowball, breaks on
-what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`). Its name is the translation
+what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`), unless a client
+mod registers a renderer for it ([entity renderers](entity-renderers.md)). Its name is the translation
 `entity.<id>.<name>`. It works in single player and on LAN with the same mods. Dedicated servers share that code,
 untested so far. Clients join a server only with the same mods' entity types, as with its blocks. It is saved with its
 chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity-types.json`, with `template` naming

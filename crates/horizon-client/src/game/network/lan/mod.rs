@@ -2669,7 +2669,7 @@ impl Game<'_> {
                         .filter(|g| g.placed)
                         .map(|g| (g.uuid, g.name.clone()))
                     {
-                        self.native_player_logged_in(uuid, &name);
+                        self.announce_login(uuid, &name);
                     }
                 }
                 HostEvent::Left(mut guest) => {
@@ -4095,7 +4095,7 @@ fn describe_event(
 }
 
 /// A client's settings as the mod API names them.
-fn client_info(
+pub(in crate::game) fn client_info(
     i: &horizon_protocol::packets::configuration::ClientInformation,
 ) -> mod_api::ClientInfo {
     mod_api::ClientInfo {
