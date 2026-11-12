@@ -1403,17 +1403,21 @@ fn a_panic_in_a_turn_end_callback_still_restores_the_guest() {
 /// its two players beside, at (3, 64, 5).
 fn summon_stand(game: &mut super::Game<'_>) -> mod_api::EntityRef {
     game.options.dedicated = Some(Vec::new());
-    game.world.chunks.insert(
-        (0, 0),
-        Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-    );
+    game.world
+        .chunks
+        .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
     let (horizon_core::nbt::Tag::Compound(tag), _) =
         horizon_core::nbt::parse_snbt("{NoGravity:1b}").unwrap()
     else {
         unreachable!()
     };
     let id = game
-        .summon(game.dim.id(), "minecraft:armor_stand", [1.5, 70.0, 1.5], tag)
+        .summon(
+            game.dim.id(),
+            "minecraft:armor_stand",
+            [1.5, 70.0, 1.5],
+            tag,
+        )
         .unwrap();
     game.entity(id).unwrap()
 }
@@ -1540,10 +1544,7 @@ fn run_command_answers_false_for_a_bad_line_or_a_stale_handle() {
                 assert!(!entity.run_command(game, line, Owners), "{line:?}");
             }
         }
-        let stale = mod_api::EntityRef::new(
-            mod_api::WorldEpoch::new(a.epoch().get() + 1),
-            a.id(),
-        );
+        let stale = mod_api::EntityRef::new(mod_api::WorldEpoch::new(a.epoch().get() + 1), a.id());
         assert!(!stale.run_command(game, "tick query", Owners));
         assert!(stand.run_command(game, "kill @s", Owners));
         assert!(!stand.run_command(game, "tick query", Owners));

@@ -43,7 +43,10 @@ fn an_item_teleported_into_another_level_arrives_there_still() {
         game.enter_level(crate::game::Dim::Nether).unwrap();
         assert_eq!(game.dropped.len(), 1);
         let item = &game.dropped[0];
-        assert_eq!((&*item.stack.item, item.stack.count), ("minecraft:stick", 3));
+        assert_eq!(
+            (&*item.stack.item, item.stack.count),
+            ("minecraft:stick", 3)
+        );
         assert_eq!(item.position, Vec3::new(1.5, 70.0, 1.5));
         assert_eq!(item.velocity, Vec3::ZERO);
     });

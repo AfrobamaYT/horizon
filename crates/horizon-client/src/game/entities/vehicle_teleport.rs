@@ -376,11 +376,8 @@ impl Game<'_> {
             {
                 return Ok(Some(false));
             }
-            if !game.entity_may_travel(
-                id,
-                destination,
-                super::server_travel::TravelCause::Teleport,
-            ) {
+            if !game.entity_may_travel(id, destination, super::server_travel::TravelCause::Teleport)
+            {
                 return Ok(Some(true));
             }
             // Open the destination before removing the entity.

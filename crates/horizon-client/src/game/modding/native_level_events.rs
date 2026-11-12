@@ -383,7 +383,10 @@ mod tests {
                 game.lan_global_events,
                 [("minecraft:overworld", 1038, [10, 64, -3], 0)]
             );
-            assert!(game.lan_events.is_empty(), "no plain event while the rule is on");
+            assert!(
+                game.lan_events.is_empty(),
+                "no plain event while the rule is on"
+            );
             assert!(
                 !level.global_level_event(game, 2001, [0, 64, 0], -1),
                 "2001 carries a block state"

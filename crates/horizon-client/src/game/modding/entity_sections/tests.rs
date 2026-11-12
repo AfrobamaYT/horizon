@@ -633,7 +633,10 @@ fn an_entity_moved_into_another_level_is_told_once_at_its_next_crossing() {
                 [8.5, 80.0, 8.5],
                 None
             ));
-            assert!(calls.lock().unwrap().is_empty(), "the change of level is not told");
+            assert!(
+                calls.lock().unwrap().is_empty(),
+                "the change of level is not told"
+            );
             game.enter_level(Nether).unwrap();
             let moved = game.dropped[0].id;
             game.teleport_to(Target::Item(moved), [24.5, 80.0, 8.5], None, true);

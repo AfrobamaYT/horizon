@@ -661,7 +661,8 @@ pub trait EntitiesBackendMut {
     /// and are reachable; displaced outer players are neither, as on
     /// `Commands::run_command`.
     #[access(WorldOnly)]
-    fn entity_run_command(&mut self, entity: EntityRef, line: &str, level: PermissionLevel) -> bool;
+    fn entity_run_command(&mut self, entity: EntityRef, line: &str, level: PermissionLevel)
+    -> bool;
     /// Side: server.
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
     /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds

@@ -43,7 +43,10 @@ fn datafix_upgrades_round_trip_the_data_and_the_refusal() {
         out.into_bytes()
     })));
     let mut villager = mod_api::Compound::new();
-    villager.insert("id".into(), mod_api::Tag::String("minecraft:villager".into()));
+    villager.insert(
+        "id".into(),
+        mod_api::Tag::String("minecraft:villager".into()),
+    );
     let mut expected = villager.clone();
     expected.insert("upgraded_from".into(), mod_api::Tag::Int(1900));
     assert_eq!(

@@ -235,7 +235,13 @@ fn end_portal_rotation(into_end: bool, [yaw, pitch]: [f32; 2], spawn: [f32; 2]) 
     [yaw, pitch.clamp(-90.0, 90.0)]
 }
 /// Apply a resolved destination to the entity tree without resetting its cooldown.
-pub(super) fn set_arrival_pose(tag: &mut Tag, at: Vec3, motion: Vec3, [yaw, pitch]: [f32; 2], yaw_turn: f32) {
+pub(super) fn set_arrival_pose(
+    tag: &mut Tag,
+    at: Vec3,
+    motion: Vec3,
+    [yaw, pitch]: [f32; 2],
+    yaw_turn: f32,
+) {
     if let Some(was) = horizon_client::entity_nbt::position(tag) {
         move_passengers(tag, at.subtract(was), yaw_turn);
     }
@@ -1403,7 +1409,9 @@ impl Game<'_> {
                 return;
             };
             // `PositionMoveRotation.of(this)` takes the cart's `getKnownMovement`.
-            let m = super::vehicle_teleport::cart_known_movement(horizon_client::entity_nbt::motion(&tag));
+            let m = super::vehicle_teleport::cart_known_movement(
+                horizon_client::entity_nbt::motion(&tag),
+            );
             if let Tag::Compound(c) = &mut tag {
                 c.insert("Motion".into(), doubles([m.x, m.y, m.z]));
             }

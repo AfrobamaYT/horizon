@@ -28,7 +28,12 @@ fn a_mod_sends_an_item_and_an_arrow_to_another_level_with_their_motion() {
         game.lan_assign_ids();
         let thrower = Some([1, 2, 3, 4]);
         let owner = Some([5, 6, 7, 8]);
-        let item = game.dropped.iter().find(|e| e.thrower == thrower).unwrap().id;
+        let item = game
+            .dropped
+            .iter()
+            .find(|e| e.thrower == thrower)
+            .unwrap()
+            .id;
         let arrow = game
             .creatures
             .projectiles
@@ -42,15 +47,18 @@ fn a_mod_sends_an_item_and_an_arrow_to_another_level_with_their_motion() {
         assert!(game.entity_teleport_to_level(arrow, nether, [4.5, 71.0, -2.5], None));
         assert_eq!(game.dim, Dim::Overworld);
         assert!(!game.dropped.iter().any(|e| e.thrower == thrower));
-        assert!(!game.creatures.projectiles.iter().any(|p| p.owner_uuid == owner));
+        assert!(
+            !game
+                .creatures
+                .projectiles
+                .iter()
+                .any(|p| p.owner_uuid == owner)
+        );
         assert!(!game.entity_teleport_to_level(item, nether, [0.5, 70.0, 0.5], None));
 
         game.enter_level(Dim::Nether).unwrap();
         let e = game.dropped.iter().find(|e| e.thrower == thrower).unwrap();
-        assert_eq!(
-            (&*e.stack.item, e.stack.count),
-            ("minecraft:diamond", 7)
-        );
+        assert_eq!((&*e.stack.item, e.stack.count), ("minecraft:diamond", 7));
         assert_eq!(e.position, Vec3::new(3.5, 70.0, -2.5));
         assert_eq!(e.velocity, Vec3::new(0.1, 0.2, -0.3));
         let p = game
@@ -105,12 +113,7 @@ fn sent_to_the_nether(
     game.summon_with_nbt(kind, [0.5, 80.0, 0.5], nbt).unwrap();
     game.lan_assign_ids();
     let entity = game.entity(id(game).expect("summoned")).unwrap();
-    assert!(game.entity_teleport_to_level(
-        entity,
-        "minecraft:the_nether",
-        [3.5, 70.0, -2.5],
-        None
-    ));
+    assert!(game.entity_teleport_to_level(entity, "minecraft:the_nether", [3.5, 70.0, -2.5], None));
     assert!(id(game).is_none(), "the Overworld still holds it");
     game.enter_level(Dim::Nether).unwrap();
 }
