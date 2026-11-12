@@ -182,13 +182,18 @@ pub struct OwnerTypes {
 /// One module's `use`s.
 #[derive(Default)]
 struct Uses {
-    /// Names brought in by a path that starts at neither `crate`, `self` nor `super`: another
-    /// crate's, as far as this pass reads (a renamed import under its new name).
-    foreign: BTreeSet<String>,
-    /// A name brought in from a module of the crate, with that module. A renamed import is not
-    /// kept: the name written is not the type's.
-    named: BTreeMap<String, String>,
+    /// Each name a `use` brings in, under the name it has here (a renamed import under its new
+    /// one), with where the path takes it from.
+    named: BTreeMap<String, Import>,
     globs: Vec<Glob>,
+}
+
+/// Where a `use` takes a name from: `original` is the name it has there.
+enum Import {
+    /// A module of the crate, written from `crate`, `self` or `super`.
+    Module { from: String, original: String },
+    /// A path written from a bare name, as [`Glob::Bare`].
+    Bare { path: Vec<String>, original: String },
 }
 
 /// A `use …::*`.
@@ -206,10 +211,12 @@ enum Binding {
     Local(String),
     /// Another crate's.
     Foreign,
-    /// Nothing names it, and a glob of another crate may.
-    MaybeForeign,
+    /// A `use` names it and does not lead to a type this pass reads, or a glob of another crate
+    /// may name it.
+    Unresolved,
     /// Two different things by two globs.
     Ambiguous,
+    /// No `use` names it.
     NotFound,
 }
 
@@ -222,31 +229,41 @@ impl OwnerTypes {
                 .map_or(module, |(parent, _)| parent)
                 .to_owned()
         }
-        fn names(tree: &syn::UseTree, out: &mut BTreeSet<String>) {
-            match tree {
-                syn::UseTree::Path(path) => names(&path.tree, out),
-                syn::UseTree::Name(name) => drop(out.insert(name.ident.to_string())),
-                syn::UseTree::Rename(rename) => drop(out.insert(rename.rename.to_string())),
-                syn::UseTree::Group(group) => group.items.iter().for_each(|tree| names(tree, out)),
-                syn::UseTree::Glob(_) => {}
-            }
-        }
-        fn bare_globs(tree: &syn::UseTree, path: &mut Vec<String>, out: &mut Vec<Glob>) {
+        fn bare(tree: &syn::UseTree, path: &mut Vec<String>, uses: &mut Uses) {
+            let import = |path: &[String], original: &syn::Ident| Import::Bare {
+                path: path.to_vec(),
+                original: original.to_string(),
+            };
             match tree {
                 syn::UseTree::Path(next) => {
                     path.push(next.ident.to_string());
-                    bare_globs(&next.tree, path, out);
+                    bare(&next.tree, path, uses);
                     path.pop();
                 }
-                syn::UseTree::Glob(_) => out.push(Glob::Bare(path.clone())),
-                syn::UseTree::Group(group) => group
-                    .items
-                    .iter()
-                    .for_each(|tree| bare_globs(tree, path, out)),
-                syn::UseTree::Name(_) | syn::UseTree::Rename(_) => {}
+                syn::UseTree::Name(name) if name.ident == "self" => {}
+                syn::UseTree::Name(name) => {
+                    uses.named
+                        .insert(name.ident.to_string(), import(path.as_slice(), &name.ident));
+                }
+                syn::UseTree::Rename(rename) => {
+                    uses.named.insert(
+                        rename.rename.to_string(),
+                        import(path.as_slice(), &rename.ident),
+                    );
+                }
+                syn::UseTree::Glob(_) => uses.globs.push(Glob::Bare(path.clone())),
+                syn::UseTree::Group(group) => {
+                    for tree in &group.items {
+                        bare(tree, path, uses);
+                    }
+                }
             }
         }
         fn local(tree: &syn::UseTree, at: &str, uses: &mut Uses) {
+            let import = |original: &syn::Ident| Import::Module {
+                from: at.to_owned(),
+                original: original.to_string(),
+            };
             match tree {
                 syn::UseTree::Path(path) if path.ident == "super" => {
                     local(&path.tree, &parent(at), uses)
@@ -256,12 +273,20 @@ impl OwnerTypes {
                 }
                 syn::UseTree::Name(name) if name.ident == "self" => {}
                 syn::UseTree::Name(name) => {
-                    uses.named.insert(name.ident.to_string(), at.to_owned());
+                    uses.named
+                        .insert(name.ident.to_string(), import(&name.ident));
                 }
-                syn::UseTree::Rename(_) => {}
+                // A module under another name names no type.
+                syn::UseTree::Rename(rename) if rename.ident == "self" => {}
+                syn::UseTree::Rename(rename) => {
+                    uses.named
+                        .insert(rename.rename.to_string(), import(&rename.ident));
+                }
                 syn::UseTree::Glob(_) => uses.globs.push(Glob::Module(at.to_owned())),
                 syn::UseTree::Group(group) => {
-                    group.items.iter().for_each(|tree| local(tree, at, uses))
+                    for tree in &group.items {
+                        local(tree, at, uses);
+                    }
                 }
             }
         }
@@ -290,10 +315,7 @@ impl OwnerTypes {
                         (syn::UseTree::Path(path), Some(from)) => {
                             local(&path.tree, &from, &mut uses)
                         }
-                        (tree, _) => {
-                            names(tree, &mut uses.foreign);
-                            bare_globs(tree, &mut Vec::new(), &mut uses.globs);
-                        }
+                        (tree, _) => bare(tree, &mut Vec::new(), &mut uses),
                     }
                     continue;
                 }
@@ -307,15 +329,14 @@ impl OwnerTypes {
         self.modules.insert(module.to_owned(), uses);
     }
 
-    /// The module a glob written from a bare name brings in: `Ok(None)` for one that brings in
-    /// no type (an enum's variants), `Err(())` for another crate's.
-    fn bare_glob(&self, module: &str, path: &[String]) -> Result<Option<String>, ()> {
+    /// The module a path written from a bare name leads to: `Ok(None)` for one that holds no
+    /// type (an enum's variants), `Err(())` for another crate's.
+    fn bare_module(&self, module: &str, path: &[String]) -> Result<Option<String>, ()> {
         let Some(first) = path.first() else {
             return Err(());
         };
-        let child = format!("{module}::{}", path.join("::"));
         if self.modules.contains_key(&format!("{module}::{first}")) {
-            Ok(Some(child))
+            Ok(Some(format!("{module}::{}", path.join("::"))))
         } else if self
             .types
             .get(first)
@@ -330,10 +351,11 @@ impl OwnerTypes {
         }
     }
 
-    /// What `name` is in `module`: the module's own type; else what a `use` names; else what
-    /// its globs bring in, where two different answers are no answer.
-    fn binding(&self, module: &str, name: &str, seen: &mut BTreeSet<String>) -> Binding {
-        if !seen.insert(module.to_owned()) {
+    /// What `name` is in `module`: the module's own type; else what a `use` names, followed to
+    /// where it leads under the name it has there; else what its globs bring in, where two
+    /// different answers are no answer.
+    fn binding(&self, module: &str, name: &str, seen: &mut BTreeSet<(String, String)>) -> Binding {
+        if !seen.insert((module.to_owned(), name.to_owned())) {
             return Binding::NotFound;
         }
         if self
@@ -346,23 +368,32 @@ impl OwnerTypes {
         let Some(uses) = self.modules.get(module) else {
             return Binding::NotFound;
         };
-        if uses.foreign.contains(name) {
-            return Binding::Foreign;
-        }
-        if let Some(from) = uses.named.get(name) {
-            return self.binding(from, name, seen);
+        if let Some(import) = uses.named.get(name) {
+            let (from, original) = match import {
+                Import::Module { from, original } => (from.clone(), original),
+                Import::Bare { path, original } => match self.bare_module(module, path) {
+                    Ok(Some(from)) => (from, original),
+                    Ok(None) | Err(()) => return Binding::Foreign,
+                },
+            };
+            // The `use` binds the name: where it leads nowhere this pass reads, nothing else
+            // may stand in for it.
+            return match self.binding(&from, original, seen) {
+                Binding::NotFound => Binding::Unresolved,
+                found => found,
+            };
         }
         // One module reached through two globs is one answer: `None` here is another crate's.
         let mut found: BTreeSet<Option<String>> = BTreeSet::new();
-        let mut maybe_foreign = false;
+        let mut unresolved = false;
         for glob in &uses.globs {
             let from = match glob {
                 Glob::Module(from) => from.clone(),
-                Glob::Bare(path) => match self.bare_glob(module, path) {
+                Glob::Bare(path) => match self.bare_module(module, path) {
                     Ok(Some(from)) => from,
                     Ok(None) => continue,
                     Err(()) => {
-                        maybe_foreign = true;
+                        unresolved = true;
                         continue;
                     }
                 },
@@ -370,7 +401,7 @@ impl OwnerTypes {
             match self.binding(&from, name, seen) {
                 Binding::Local(declaring) => drop(found.insert(Some(declaring))),
                 Binding::Foreign => drop(found.insert(None)),
-                Binding::MaybeForeign => maybe_foreign = true,
+                Binding::Unresolved => unresolved = true,
                 Binding::Ambiguous => return Binding::Ambiguous,
                 Binding::NotFound => {}
             }
@@ -380,26 +411,27 @@ impl OwnerTypes {
             (Some(Some(declaring)), None) => Binding::Local(declaring),
             (Some(None), None) => Binding::Foreign,
             (Some(_), Some(_)) => Binding::Ambiguous,
-            (None, _) if maybe_foreign => Binding::MaybeForeign,
+            (None, _) if unresolved => Binding::Unresolved,
             (None, _) => Binding::NotFound,
         }
     }
 
     /// Why `owner`, named by an `impl` in `module`, can't carry an installer. The name must be a
-    /// type of the crate: the one the module declares or its `use`s lead to, or, where no `use`
-    /// that this pass reads names it at all, the crate's only type of that name. A name that a
-    /// `use` may bind to another crate's type is refused, as is one that several modules declare
-    /// with nothing to choose between them.
+    /// type of the crate: the one the module declares or its `use`s lead to, a renamed import
+    /// followed to the type it renames; or, where no `use` names it at all, the crate's only
+    /// type of that name. A name that a `use` binds to another crate's type, or to something
+    /// this pass can't follow, is refused, as is one that several modules declare with nothing
+    /// to choose between them.
     fn exclusion(&self, module: &str, owner: &str) -> Option<&'static str> {
-        let Some(declaring) = self.types.get(owner) else {
-            return Some("foreign trait owner");
-        };
         match self.binding(module, owner, &mut BTreeSet::new()) {
             Binding::Local(_) => None,
-            Binding::Foreign | Binding::MaybeForeign => Some("imported trait owner"),
+            Binding::Foreign | Binding::Unresolved => Some("imported trait owner"),
             Binding::Ambiguous => Some(AMBIGUOUS_OWNER),
-            Binding::NotFound if declaring.len() == 1 => None,
-            Binding::NotFound => Some(AMBIGUOUS_OWNER),
+            Binding::NotFound => match self.types.get(owner).map_or(0, BTreeSet::len) {
+                0 => Some("foreign trait owner"),
+                1 => None,
+                _ => Some(AMBIGUOUS_OWNER),
+            },
         }
     }
 }
@@ -1836,24 +1868,25 @@ mod tests {
         let traits = BTreeSet::from(["LevelAccess".to_owned()]);
         let declares = syn::parse_file("pub struct GameLevel;").unwrap();
         let implements = syn::parse_file(
-            "use super::GameLevel; impl LevelAccess for GameLevel { fn block_state(&self) -> u32 { 0 } }",
+            "impl LevelAccess for GameLevel { fn block_state(&self) -> u32 { 0 } }",
         )
         .unwrap();
         let mut types = OwnerTypes::default();
         types.declare("k::levels", &declares.items);
         types.declare("k::level_access", &implements.items);
+        // The crate's only type of that name.
         assert_eq!(
             targets("k::level_access", &implements, &traits, &types),
             ["k::level_access::<GameLevel as LevelAccess>::block_state"]
         );
-        let Item::Impl(block) = &implements.items[1] else {
+        let Item::Impl(block) = &implements.items[0] else {
             panic!("an impl")
         };
         let foreign = foreign_imports(&implements.items);
         let here = "k::level_access";
         assert_eq!(trait_refusal(here, block, &traits, &types, &foreign), None);
-        // A second module declaring the name, and the `impl`'s `use` names neither of them: a
-        // bare `GameLevel` no longer says which type.
+        // A second module declaring the name, and no `use` in the `impl`'s module names either:
+        // a bare `GameLevel` no longer says which type.
         types.declare("k::other", &declares.items);
         assert!(targets("k::level_access", &implements, &traits, &types).is_empty());
         assert_eq!(
@@ -1896,9 +1929,11 @@ mod tests {
         ] {
             assert_eq!(level_access_targets(&twice, import), KEPT, "{import}");
         }
-        // Renamed, or brought in by two globs that both declare it: nothing says which.
+        // Renamed from a name that is no type there, a name its module does not hold, or brought
+        // in by two globs that both declare it: nothing says which.
         for import in [
             "use super::Level as GameLevel;",
+            "use crate::elsewhere::GameLevel;",
             "use super::*; use super::natural_spawning::*;",
         ] {
             assert!(level_access_targets(&twice, import).is_empty(), "{import}");
@@ -1944,6 +1979,75 @@ mod tests {
             ("k::levels", "struct GameLevel;"),
         ];
         assert_eq!(level_access_targets(&variants, "use super::*;"), KEPT);
+    }
+
+    /// A renamed import is the type it renames: followed when that is a type of the crate,
+    /// refused when it is another crate's or leads nowhere, and never dropped for a type that
+    /// happens to have the new name.
+    #[test]
+    fn a_renamed_import_is_followed_to_the_type_it_renames() {
+        let own = [("k::a", "struct Level;"), ("k::b", "struct GameLevel;")];
+        assert_eq!(
+            level_access_targets(&own, "use crate::a::Level as GameLevel;"),
+            KEPT
+        );
+        for (a, import) in [
+            // `k::a` takes `Level` from another crate, by name and by glob.
+            ("use engine::Level;", "use crate::a::Level as GameLevel;"),
+            ("use engine::*;", "use crate::a::Level as GameLevel;"),
+            // Renamed straight from another crate, in the parent.
+            ("", "use engine::Level as GameLevel;"),
+        ] {
+            let crate_ = [("k::a", a), ("k::b", "struct GameLevel;")];
+            assert!(
+                level_access_targets(&crate_, import).is_empty(),
+                "{a} {import}"
+            );
+        }
+        // Inherited through the parent's glob, the renamed name is still not `k::b`'s type.
+        let inherited = [
+            ("k::game", "use engine::Level as GameLevel;"),
+            ("k::b", "struct GameLevel;"),
+        ];
+        assert!(level_access_targets(&inherited, "use super::*;").is_empty());
+    }
+
+    /// `mod_api`'s `PartRegistrar` shape: the type in a child module, re-exported by its parent
+    /// through a path written from the child's bare name, and the `impl`s in sibling files that
+    /// take the parent's names.
+    #[test]
+    fn a_parents_re_export_of_its_childs_type_reaches_a_sibling() {
+        for re_export in [
+            "pub use shared::GameLevel;",
+            "pub use shared::*;",
+            "pub use self::shared::GameLevel;",
+            "pub use shared::{GameLevel as Level, GameLevel};",
+        ] {
+            let crate_ = [
+                ("k::game::shared", "pub struct GameLevel;"),
+                ("k::game", re_export),
+                ("k::other", "struct GameLevel;"),
+            ];
+            assert_eq!(
+                level_access_targets(&crate_, "use super::*;"),
+                KEPT,
+                "{re_export}"
+            );
+        }
+        // Re-exported under the name: the sibling's `GameLevel` is the child's `Shared`, a type of
+        // the crate, whatever else is called `GameLevel`.
+        let renamed = [
+            ("k::game::shared", "pub struct Shared;"),
+            ("k::game", "pub use shared::Shared as GameLevel;"),
+            ("k::other", "struct GameLevel;"),
+        ];
+        assert_eq!(level_access_targets(&renamed, "use super::*;"), KEPT);
+        // A child the parent does not have is another crate.
+        let foreign = [
+            ("k::game", "pub use engine_shared::GameLevel;"),
+            ("k::other", "struct GameLevel;"),
+        ];
+        assert!(level_access_targets(&foreign, "use super::*;").is_empty());
     }
 
     /// A module's `use`s are its own, whichever of its files writes them.
