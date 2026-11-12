@@ -18,11 +18,11 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
 ```
 
 - `new <path> [--name "Name"]` writes the content template. `--template native` writes
-  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to the newest prebuilt game's commit (or
+  a flat native mod instead: `horizon-mod.toml` with `[native]` pinned to the newest prebuilt game's commit (or
   `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
   and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
-  ([trait mods](../start/writing-hooks.md)). Any other `--template` is refused.
+  ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
@@ -39,7 +39,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
 
 ## Declare content in code
 
-Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned
+Code mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned
 `mod_api::Block` and `mod_api::Item` records. Start with `Block::new(id, template)` or
 `Item::new(id, template)`, passing identifier strings, then set the overrides. These records are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declarations, not live registry entries. The game admits them

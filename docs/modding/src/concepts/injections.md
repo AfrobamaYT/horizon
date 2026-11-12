@@ -1,5 +1,8 @@
 # Injections
 
+![Three ways into the game: hooks and Parts first, then an [[inject]] listener at a point the game publishes,
+then the native route, which compiles against the exact game build.](../images/reaching-the-game.svg)
+
 An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points work on native and wasm, on engine functions.
 
 To change a call or value inside a function, replace its body, or run code inside a hot loop, a native mod

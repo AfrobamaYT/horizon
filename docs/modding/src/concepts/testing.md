@@ -1,4 +1,4 @@
-# Testing a trait mod
+# Testing a mod
 
 Enable the `testing` feature on your `horizon-mod-api` test dependency. Then
 `testing::with_mods` takes an owned `Mods` list and runs a closure with it installed on the current thread.

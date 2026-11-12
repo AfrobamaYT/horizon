@@ -1,4 +1,4 @@
-# Dependencies between trait mods
+# Dependencies between mods
 
 A mod can publish functions and statics from its root crate for another mod to call.
 Declare dependencies in `horizon-mod.toml`, not `Cargo.toml`:

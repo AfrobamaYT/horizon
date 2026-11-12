@@ -1,9 +1,19 @@
-# Hook dispatch and level hosts
+# Hooks and the Host
 
-A linked trait mod implements `mod_api::Hooks`. A hook function is not an injection point, so
+A **hook** is one moment in the game: a tick, a block broken, a player joining. Your mod implements the hooks it
+needs as methods of `mod_api::Hooks`, and the game calls each subscribed mod with the moment's **event** and a
+**host**, its typed view of the game. A moment that belongs to one object is a method of a [Part](parts.md)
+instead, called only for the objects your mod attached it to.
+
+![The game calls every mod that implements a hook, and a Part only for its own objects. Both receive an event and
+reach the game through the Host, its handles, capabilities and attachments.](../images/hooks-parts.svg)
+
+## Dispatch
+
+A hook function is not an injection point, so
 `[[inject]]` never runs inside a hook's dispatch; a `head` injection that cancels the game function
 calling a hook keeps the hook from firing at all. A claimed cancellation reaches only trait listeners that receive cancelled events.
-Otherwise, trait mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
+Otherwise, mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
 they receive cancelled events. For replacement hooks, the first `Some` wins. Collection hooks call every mod.
 Receiverless hooks have no `Host`.
 
@@ -51,9 +61,9 @@ installed. Every cancellable hook's event has a `cancelled` field: a mod without
 `false`, since it is not called once the event is cancelled. A mod that receives cancelled events and sets it back to
 `false` lets the game's behaviour run, and the mods after it are told again. An event the game hands over already
 cancelled reaches only mods that receive cancelled events. `receive_cancelled` on a hook without a cancel does not
-compile, and `#[listener]` is for a trait mod's hooks only: a part is called for its own thing, in no order.
+compile, and `#[listener]` is for a mod's hooks only: a part is called for its own thing, in no order.
 
-Native and wasm trait mods use the same listener ordering and cancellation rules. Wasm subscription records carry the hook name, signed priority, and receive-cancelled flag through the shared-memory Wire boundary at load time. The event's `cancelled` field crosses with its other writable fields.
+Native and wasm mods use the same listener ordering and cancellation rules. Wasm subscription records carry the hook name, signed priority, and receive-cancelled flag through the shared-memory Wire boundary at load time. The event's `cancelled` field crosses with its other writable fields.
 
 ## Events and shared state
 
@@ -79,7 +89,7 @@ number or `bool` a mod may change is a plain field, written back once every mod 
 anything else a mod may change, a game struct or a list, is a `&mut` field. A cancellation or replacement is
 the return value; a collection hook's list is a field (`event.lines`). One event goes through every mod, so each
 sees the changes before it. You cannot construct or exhaustively match an event struct. To exercise a hook, use its dispatch function
-([Testing a trait mod](testing.md)).
+([Testing a mod](testing.md)).
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside

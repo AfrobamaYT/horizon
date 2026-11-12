@@ -1,5 +1,11 @@
 # Load phases and access
 
+A mod's code runs in phases. What a hook may touch depends on the phase it runs in: there is no `Host` while
+the mod registers, and no world until the World phase.
+
+![Each game thread goes through Packages, Registration, Setup, Config and World, in order; a data or asset reload
+enters Reloading and returns to the phase it came from.](../images/load-phases.svg)
+
 Native and wasm hooks share the installed dependency-ordered mod slice, including registration,
 config loading and reload-listener registration. The shared resolver keeps bundle-order ties,
 checks present optional dependencies too, and refuses cycles for both build targets. Content-only

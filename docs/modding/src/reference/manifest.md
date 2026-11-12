@@ -93,7 +93,7 @@ and the key means nothing to them. See [Memory](../how-to/wasm-mods.md#memory).
 Top-level `[dependencies]` declares other mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.
 Content layers load in dependency order. A missing required dependency, incompatible installed version or dependency cycle refuses startup; an absent optional dependency is ignored. Native code dependencies additionally require API packages
-([Dependencies between trait mods](../concepts/dependencies.md)).
+([Dependencies between mods](../concepts/dependencies.md)).
 
 Top-level `[properties]` holds free-form values other mods read: strings, integers, floats and booleans only,
 at most 64 keys and 8 KiB (keys and strings by length, 8 bytes per number, 1 per boolean); a table, an array
@@ -144,7 +144,7 @@ every owner of a shared missing file. The game never downloads jars.
 A code package contains root `Cargo.toml`, optional `build.rs`, `.rs` and `.toml` files under `src/`,
 and root text files named `README*`, `LICENSE*`, `LICENCE*`, `COPYING*` or `NOTICE*`.
 Your root `impl Hooks` uses `#[mod_api::horizon_mod]`; the attribute generates the factory
-([Trait mods](../start/writing-hooks.md)).
+([Writing hooks](../start/writing-hooks.md)).
 
 Folder packaging selects source and resource files, excluding `.git/` and `target/`. It validates selected
 files before copying them. Whole archives are checked, not treated as source folders with ignored extra entries.
