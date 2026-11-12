@@ -35,7 +35,7 @@ impl Hooks for Probe {
 impl ItemPart for Probe {
     fn on_dropped_by_player(
         &self,
-        _: &mut dyn ServerHost,
+        _: &dyn mod_api::Host,
         event: &mut OnDroppedByPlayerEvent<'_>,
     ) -> Flow {
         let mut heard = self.0.lock().unwrap();
@@ -44,7 +44,7 @@ impl ItemPart for Probe {
             .to_owned();
         heard
             .drops
-            .push((event.player, item, event.stack.count(), event.all));
+            .push((event.player.uuid(), item, event.stack.count(), event.all));
         if heard.refuse {
             Flow::Cancel
         } else {
@@ -97,9 +97,27 @@ fn a_part_keeps_the_stack_in_the_slot() {
             probe.0.lock().unwrap().refuse = true;
             hold(game, "minecraft:stick", 5);
             let (_, state) = held(game);
+            let stats = game
+                .as_guest(12, |g| {
+                    (
+                        g.stats.get("dropped", "minecraft:stick"),
+                        g.stats.get("custom", "minecraft:drop"),
+                    )
+                })
+                .unwrap();
             game.guest_drop_held(gi, 12, true);
             assert_eq!(held(game), (Some(5), (state + 1) & 0x7FFF));
             assert_eq!(game.dropped.len(), items);
+            assert_eq!(
+                game.as_guest(12, |g| {
+                    (
+                        g.stats.get("dropped", "minecraft:stick"),
+                        g.stats.get("custom", "minecraft:drop"),
+                    )
+                })
+                .unwrap(),
+                stats
+            );
             {
                 let heard = probe.0.lock().unwrap();
                 assert_eq!(heard.drops, [(12, "minecraft:stick".to_owned(), 5, true)]);

@@ -7,7 +7,7 @@ impl Game<'_> {
     /// leaves the slot. Set `canceled` and the stack stays where it is.
     pub(in crate::game) fn native_on_dropped_by_player(
         &mut self,
-        player: u128,
+        player: PlayerRef,
         stack: &ItemStack,
         all: bool,
         canceled: &mut bool,
@@ -34,7 +34,9 @@ impl Game<'_> {
             return false;
         }
         let stack = stack.clone();
-        let player = self.native_acting_id();
+        let Some(player) = self.native_acting_player() else {
+            return false;
+        };
         let mut canceled = false;
         self.native_on_dropped_by_player(player, &stack, all, &mut canceled);
         canceled
