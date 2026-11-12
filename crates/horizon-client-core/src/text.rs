@@ -477,8 +477,14 @@ impl Text {
     pub fn push(&mut self, other: impl Into<Text>) {
         let mut other = other.into();
         let sibling = other.component();
-        let mut origins = BTreeMap::new();
-        self.copy_origins("", &mut origins);
+        let mut origins = if self.source.is_some() {
+            std::sync::Arc::try_unwrap(std::mem::take(&mut self.origins))
+                .unwrap_or_else(|origins| (*origins).clone())
+        } else {
+            let mut origins = BTreeMap::new();
+            self.copy_origins("", &mut origins);
+            origins
+        };
         let root = match self.source.take() {
             None if self.rendered.spans.is_empty() => std::sync::Arc::new(json!({ "text": "" })),
             None => std::sync::Arc::new(self.component()),
@@ -500,7 +506,12 @@ impl Text {
         } else {
             root
         };
-        if let Value::Object(o) = std::sync::Arc::make_mut(&mut root) {
+        // Shared trees may be deeply nested mod input: clone iteratively, not through Value's
+        // recursive Clone implementation inside Arc::make_mut.
+        if std::sync::Arc::get_mut(&mut root).is_none() {
+            root = std::sync::Arc::new(crate::component::clone_value(&root));
+        }
+        if let Some(Value::Object(o)) = std::sync::Arc::get_mut(&mut root) {
             match o.get_mut("extra") {
                 Some(Value::Array(a)) => {
                     other.copy_origins(&format!("/extra/{}", a.len()), &mut origins);
