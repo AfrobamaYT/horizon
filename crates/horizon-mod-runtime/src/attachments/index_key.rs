@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Clone)]
 pub(super) enum Units<'a> {
     Saved(std::slice::Iter<'a, u16>),
     Named(std::str::EncodeUtf16<'a>),
@@ -47,15 +48,26 @@ impl Eq for dyn Lookup + '_ {}
 impl Hash for dyn Lookup + '_ {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let (namespace, name) = self.units();
-        // Option tags delimit each component even if it contains zero code units.
-        for unit in namespace {
-            Some(unit).hash(state);
+        // Lengths delimit the lossless UTF-16 components. Pack four units per
+        // hasher call rather than hashing an Option discriminant for each unit.
+        // Owned keys and borrowed UTF-8 lookups must use exactly the same stream.
+        for units in [namespace, name] {
+            units.clone().count().hash(state);
+            let mut packed = 0u64;
+            let mut shift = 0;
+            for unit in units {
+                packed |= u64::from(unit) << shift;
+                shift += 16;
+                if shift == 64 {
+                    state.write_u64(packed);
+                    packed = 0;
+                    shift = 0;
+                }
+            }
+            if shift != 0 {
+                state.write_u64(packed);
+            }
         }
-        None::<u16>.hash(state);
-        for unit in name {
-            Some(unit).hash(state);
-        }
-        None::<u16>.hash(state);
     }
 }
 #[derive(Clone)]
