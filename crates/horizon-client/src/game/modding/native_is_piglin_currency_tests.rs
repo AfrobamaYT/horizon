@@ -184,7 +184,7 @@ fn a_part_makes_a_coin_currency_and_refuses_the_gold_ingot() {
 fn a_part_makes_a_coin_currency_and_refuses_the_gold_ingot_isolated() {
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("currency", Box::new(CurrencyMod))].into();
-    mod_api::testing::with_mods(mods.clone(), || {
+    mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
         with_game(|game| {
             field(game);
@@ -381,7 +381,7 @@ fn a_loved_coin_from_the_ground_is_admired_and_bartered_isolated() {
     let root = loved_emerald_root(&scratch);
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("currency", Box::new(CurrencyMod))].into();
-    mod_api::testing::with_mods(mods.clone(), || {
+    mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
         super::native_entity_refs::tests::with_game_at(root, |game| {
             field(game);

@@ -91,7 +91,7 @@ fn a_part_decides_whether_a_worn_piece_counts_as_gold() {
 
 fn a_part_decides_whether_a_worn_piece_counts_as_gold_isolated() {
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("neutral", Box::new(NeutralMod))].into();
-    mod_api::testing::with_mods(mods.clone(), || {
+    mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
         with_game(|game| {
             serving(game, Vec3::new(0.5, 64.0, 0.5));
@@ -214,7 +214,7 @@ fn a_calm_piglin_spares_a_wearer_the_part_answers_for() {
 
 fn a_calm_piglin_spares_a_wearer_the_part_answers_for_isolated() {
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("neutral", Box::new(NeutralMod))].into();
-    mod_api::testing::with_mods(mods.clone(), || {
+    mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
         with_game(|game| {
             assert!(!targets_the_wearer(
