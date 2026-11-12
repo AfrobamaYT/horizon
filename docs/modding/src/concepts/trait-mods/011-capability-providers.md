@@ -17,7 +17,8 @@ Providers add up: `level.capability(host, &ITEMS, pos, side)` (`Level.getCapabil
 registered `_before_game` first, then the game's own (a block entity's slots by side, by the rules hoppers follow,
 and a mod block entity's `block_entity_container`), then the others; within each group the block's providers and
 the block entity type's are one list in registration order, neither kind first, and the first to answer wins. A
-provider that answers none passes the lookup on; handlers are never merged. Against the game's own and against
+provider that answers none passes the lookup on; handlers are never merged. One capability may have at most 65,535 providers for one block or one block entity type: the next
+registration is refused at load, naming the mod, the capability and the target. Against the game's own and against
 another mod's provider at the same priority, don't count on a place: a provider that must be asked first registers
 `_before_game`. It returns a `Capability`, the handler and who answered. A handler holds
 no borrow: each call is given the host, so it may call a

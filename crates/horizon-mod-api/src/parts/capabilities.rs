@@ -75,7 +75,8 @@ impl PartRegistrar {
         {
             self.refused.push(format!(
                 "{me} answered capability {name} for {id}, which already has the most providers \
-                 one block or block entity type may have"
+                 one block or block entity type may have ({})",
+                mod_vocab::__private::parts_installation::max_providers_at()
             ));
             return;
         }

@@ -1944,7 +1944,7 @@ pub(super) mod tests {
         }
         let mods: Mods = vec![ModEntry::new("trash_can", Box::new(TrashCan))].into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
                 let registry = &game.pack.assets.registry;
