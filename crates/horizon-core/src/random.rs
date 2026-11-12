@@ -140,6 +140,7 @@ impl From<(u64, Option<f64>)> for LegacyRandom {
         Self {
             state: state & Self::MASK,
             gaussian,
+            gate: None,
         }
     }
 }

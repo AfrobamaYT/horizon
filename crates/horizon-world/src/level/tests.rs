@@ -45,6 +45,8 @@ pub(crate) struct TestLevel {
     pub day_time: i64,
     pub events: Vec<LevelEvent>,
     pub block_light: HashMap<BlockPos, i32>,
+    /// `getBrightness(SKY, pos)` everywhere; `None` is 15, full daylight.
+    pub sky_light: Option<i32>,
     /// `Level.isClientSide`.
     pub client_side: bool,
     pub cake_answer: Option<bool>,
@@ -113,6 +115,7 @@ impl TestLevel {
             day_time: 0,
             events: Vec::new(),
             block_light: HashMap::new(),
+            sky_light: None,
             client_side: false,
             tick_ready: true,
             block_events_ready: true,
@@ -250,6 +253,9 @@ impl LevelAccess for TestLevel {
     }
     fn block_light(&self, pos: BlockPos) -> i32 {
         self.block_light.get(&pos).copied().unwrap_or(0)
+    }
+    fn sky_light(&self, _pos: BlockPos) -> i32 {
+        self.sky_light.unwrap_or(15)
     }
     fn emit(&mut self, event: LevelEvent) {
         self.events.push(event);
@@ -498,6 +504,87 @@ fn block_observation_follows_successful_commits_only() {
         Observation::Block(pos, stone, b.air())
     );
 }
+
+#[test]
+fn a_level_can_keep_a_lever_as_it_is() {
+    use std::cell::RefCell;
+
+    struct Holder {
+        inner: TestLevel,
+        hold: bool,
+        seen: RefCell<Vec<(BlockPos, i32, i32)>>,
+    }
+    impl LevelAccess for Holder {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.inner.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.inner.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.inner.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.inner.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.inner.game_time()
+        }
+        fn redstone_change(&self, pos: BlockPos, old: i32, new: &mut i32) {
+            self.seen.borrow_mut().push((pos, old, *new));
+            if self.hold {
+                *new = old;
+            }
+        }
+    }
+    let Some(f) = fixture() else { return };
+    let b = &f.behaviours;
+    let mut level = Holder {
+        inner: TestLevel::new(b),
+        hold: true,
+        seen: RefCell::new(Vec::new()),
+    };
+    let mut ticks = Ticks::new(0);
+    let pos = BlockPos::new(0, 80, 0);
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+    for z in [-1, 1] {
+        level.set_raw(BlockPos::new(0, 80, z), stone);
+    }
+    let lever = f.registry.default_state("minecraft:lever").unwrap();
+    level.set_raw(pos, lever);
+    // Held: the pull is heard, and the lever stays off.
+    b.sim(&mut level, &mut ticks).lever_pull(pos, lever);
+    assert_eq!(level.block_state(pos), lever);
+    assert_eq!(level.seen.borrow()[..], [(pos, 0, 15)]);
+    // Let go: the same pull turns it on.
+    level.hold = false;
+    b.sim(&mut level, &mut ticks).lever_pull(pos, lever);
+    let pulled = level.block_state(pos);
+    assert!(b.table.bool(pulled, b.props.powered));
+    assert_eq!(level.seen.borrow().len(), 2);
+}
+
+/// `LevelReader.getMaxLocalRawBrightness`: 15 outside the +-30,000,000 gate,
+/// where no chunk is there to answer, and the raw brightness inside it. With
+/// the sky light at 0 the two answers differ, so the gate is what is measured.
+#[test]
+fn max_local_raw_brightness_is_full_outside_the_gate() {
+    let Some(f) = fixture() else {
+        return;
+    };
+    let b = &f.behaviours;
+    let mut level = TestLevel::new(b);
+    level.sky_light = Some(0);
+    let mut ticks = Ticks::new(0);
+    let sim = b.sim(&mut level, &mut ticks);
+    let at = |x: i32, z: i32| sim.max_local_raw_brightness(BlockPos::new(x, 64, z));
+    // `x >= -30000000 && z >= -30000000 && x < 30000000 && z < 30000000`.
+    assert_eq!((at(-30_000_000, 0), at(29_999_999, 0)), (0, 0));
+    assert_eq!((at(-30_000_001, 0), at(30_000_000, 0)), (15, 15));
+    assert_eq!((at(0, -30_000_000), at(0, 29_999_999)), (0, 0));
+    assert_eq!((at(0, -30_000_001), at(0, 30_000_000)), (15, 15));
+}
+
 #[test]
 fn neighbor_observation_follows_dispatch_order() {
     use std::cell::RefCell;

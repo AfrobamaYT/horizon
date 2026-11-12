@@ -477,7 +477,8 @@ impl Backups {
         if every == "0" || every.is_empty() {
             return Ok(None);
         }
-        let (number, unit) = every.split_at(every.len() - 1);
+        let unit_at = every.char_indices().last().map_or(0, |(i, _)| i);
+        let (number, unit) = every.split_at(unit_at);
         let n: u64 = number.trim().parse().map_err(|_| {
             format!("backups.every is {every:?}: use a number and m, h or d, like \"6h\"")
         })?;
@@ -491,7 +492,10 @@ impl Backups {
                 ));
             }
         };
-        Ok((n > 0).then(|| std::time::Duration::from_secs(n * secs)))
+        let total = n
+            .checked_mul(secs)
+            .ok_or_else(|| format!("backups.every is {every:?}: too long"))?;
+        Ok((n > 0).then(|| std::time::Duration::from_secs(total)))
     }
 }
 
@@ -937,6 +941,9 @@ mod tests {
         );
         assert_eq!(interval("0").unwrap(), None);
         assert!(interval("6 hours").is_err());
+        assert!(interval("6é").is_err());
+        assert!(interval("é").is_err());
+        assert!(interval(&format!("{}d", u64::MAX)).is_err());
     }
 
     #[test]
