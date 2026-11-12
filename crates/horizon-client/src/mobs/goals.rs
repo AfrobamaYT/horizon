@@ -2519,14 +2519,8 @@ impl Goal for Breed {
             let equine = super::equine::breed_offspring(m, &p).map(Box::new);
             let parent_variant =
                 super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
-            let experience = if (equine.is_some() || parent_variant.is_some())
-                && !cx.w.asks_baby_spawn
-                && !super::orb_after_child(m.species())
-            {
-                super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
-            } else {
-                super::BreedExperience::Deferred
-            };
+            let experience =
+                super::breeding::experience(m, cx.w, equine.is_some() || parent_variant.is_some());
             m.extra.in_love = 0;
             m.extra.age = 6000;
             // TurtleBreedGoal.breed: the mother carries an egg, not a baby.

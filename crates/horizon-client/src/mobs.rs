@@ -190,21 +190,8 @@ pub enum Brain {
 pub use anim::Anim;
 pub use species::Species;
 
-pub fn draws_parent_variant(species: Species) -> bool {
-    matches!(
-        species,
-        Species::Pig
-            | Species::Cow
-            | Species::Chicken
-            | Species::Fox
-            | Species::Cat
-            | Species::Wolf
-    )
-}
-
-pub fn orb_after_child(species: Species) -> bool {
-    species == Species::Fox
-}
+mod breeding;
+pub use breeding::{draws_parent_variant, orb_after_child};
 
 /// Per-type behaviour switches derived from vanilla classes and tags.
 #[derive(Clone, Copy, Debug, Default)]
