@@ -296,7 +296,7 @@ impl Game<'_> {
         self.command_source = outer;
         ok
     }
-    pub(super) fn syntax_failure(&mut self, e: &CommandError, command: &str) {
+    pub(in crate::game) fn syntax_failure(&mut self, e: &CommandError, command: &str) {
         self.command_failure(e.message.clone());
         let Some(input) = &e.input else { return };
         let cursor = e.cursor.min(input.len());
@@ -4698,6 +4698,7 @@ mod teleport_player_tests {
     fn command_moves_velocity_per_axis_and_keeps_fall_distance() {
         with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            crate::game::native_entity_refs::tests::bind_local_player(game, 1, 99);
             let player = game.player.as_mut().unwrap();
             player.position = Vec3::new(0.0, 64.0, 0.0);
             player.velocity = Vec3::new(1.0, -2.0, 3.0);
