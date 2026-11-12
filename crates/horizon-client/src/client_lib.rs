@@ -13,6 +13,7 @@ pub mod api_text;
 pub mod arrows;
 pub mod bed_geometry;
 pub mod block_contact;
+pub mod block_sounds;
 pub mod powder_snow;
 #[cfg(test)]
 mod test_resources;
