@@ -613,25 +613,20 @@ impl TryIntoApi for super::spill::BlockItemDrop {
     type Api = mod_api::ItemDrop;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::ItemDrop::new(
+        Ok(self.state.to_api(mod_api::ItemDrop::new(
             self.stack.try_into_api()?,
             self.position,
             self.velocity,
             self.pickup_delay,
-        ))
+        )))
     }
 }
 impl TryIntoEngine for mod_api::ItemDrop {
     type Engine = super::spill::BlockItemDrop;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        Ok(Self::Engine {
-            random: None,
-            stack: self.stack.try_into_engine(items)?,
-            position: self.position,
-            velocity: self.velocity,
-            pickup_delay: self.pickup_delay,
-        })
+        let stack = self.stack.try_into_engine(items)?;
+        Ok(Self::Engine::from_api(self, stack))
     }
 }
 

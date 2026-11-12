@@ -1760,7 +1760,9 @@ impl Game<'_> {
             }
         }
         for item in merged.into_iter().flatten().chain(edited) {
-            self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
+            // A fresh constructor random, as `spawn_item` draws, with the state a hook set.
+            let random = None;
+            self.add_item_drop(super::spill::BlockItemDrop { random, ..item });
         }
     }
 

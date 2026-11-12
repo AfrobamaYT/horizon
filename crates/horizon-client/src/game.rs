@@ -3739,7 +3739,7 @@ impl Game<'_> {
         self.persist.uuids.insert(self.next_entity, random.uuid);
         let (bob, yaw) = (random.bob, random.yaw);
         let velocity = velocity.unwrap_or(random.velocity);
-        self.dropped.push(ItemEntity {
+        self.dropped.push(random.state.apply(ItemEntity {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [yaw, 0.0],
@@ -3752,7 +3752,7 @@ impl Game<'_> {
                 Vec3::new(velocity[0], velocity[1], velocity[2]),
                 bob,
             )
-        });
+        }));
         // ServerLevel.addFreshEntity.
         if self.native_joins_flush(false, self.next_entity) {
             self.native_item_spawn(self.next_entity, &item, count, position);
