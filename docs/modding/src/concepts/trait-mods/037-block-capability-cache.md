@@ -49,7 +49,10 @@ new `LevelRef`s to build new caches with. A parked level finds nothing until it 
 
 #### Invalidating by hand
 
-A provider whose answer changes with none of the above, such as a machine whose sides can be
-configured, calls `invalidate()` on the caches that depend on it. The next `get` looks up again.
-NeoForge's `invalidateCapabilities()` is that call, made by the cache's owner instead of the block
-entity.
+Some answers change with none of the above, such as a machine whose sides can be configured. The
+cache can't see that, and the provider can't reach the caches other mods keep, so the cache's owner
+calls `invalidate()` when it learns of the change, for example from the machine's own state or a
+notice it sends. The next `get` then looks up again. An owner that can't tell when such an answer
+changes shouldn't keep it: it looks the capability up each time instead. NeoForge's
+`invalidateCapabilities()` is broadcast by the block entity to every cache; here each owner
+invalidates its own.

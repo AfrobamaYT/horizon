@@ -7,6 +7,7 @@
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
 mod attack_target;
+mod fall_sound;
 mod interaction_actions;
 mod raw_ingress;
 mod recipe_properties;
@@ -6790,6 +6791,7 @@ impl Game<'_> {
             jump: held(Action::Jump),
             shift: held(Action::Sneak),
             sprint: held(Action::Sprint),
+            sprint_suppressed: false,
             analog: None,
         }
         .with_stick(stick.filter(|_| playing));
@@ -6800,20 +6802,7 @@ impl Game<'_> {
         if self.integrated.is_none() && self.server_address().is_some() {
             keys.analog = None;
         }
-        let [mut strafe, mut forward] = keys.direction();
-        let original = [strafe, forward];
-        self.native_movement_input(&mut forward, &mut strafe, &mut keys.jump, &mut keys.shift);
-        if [strafe, forward] != original {
-            if forward != original[1] {
-                keys.forward = forward > 0.0;
-                keys.backward = forward < 0.0;
-            }
-            if strafe != original[0] {
-                keys.left = strafe > 0.0;
-                keys.right = strafe < 0.0;
-            }
-            keys.analog = Some([strafe, forward]);
-        }
+        let keys = self.mod_movement_keys(keys);
         let input = u8::from(keys.forward)
             | u8::from(keys.backward) << 1
             | u8::from(keys.left) << 2
@@ -7029,21 +7018,7 @@ impl Game<'_> {
                 // client's own level: the fall and honey sounds are heard here
                 // (LocalPlayer.playSound); the server's copy skips this player
                 // (Player.playSound).
-                horizon_client::motion::MotionEvent::Fall(
-                    horizon_client::landing::FallEvent::Sound {
-                        sound,
-                        volume,
-                        pitch,
-                        ..
-                    },
-                ) => {
-                    if let Some(name) = sound
-                        .player_fall_sound()
-                        .or_else(|| sound.honey_landing_sound())
-                    {
-                        self.play_client_player_sound(name, volume, pitch);
-                    }
-                }
+                horizon_client::motion::MotionEvent::Fall(event) => self.block_fall(event),
                 _ => {}
             }
         }
@@ -16502,6 +16477,8 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod movement_input_tests;
 #[cfg(test)]
 #[path = "player_tick_tests.rs"]
 mod player_tick_tests;

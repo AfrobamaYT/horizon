@@ -1392,6 +1392,8 @@ struct Opening {
 pub(super) enum ComponentHarness {
     Dispenser(String),
     Sculk(String),
+    /// The hot-path benchmark (`hot_paths`), which builds its own levels the same way.
+    HotPaths(String),
 }
 
 impl Game<'_> {
@@ -1417,6 +1419,7 @@ impl Game<'_> {
                     match fixture {
                         ComponentHarness::Dispenser(spec) => server.dispense_fixture(&spec),
                         ComponentHarness::Sculk(spec) => server.sculk_fixture(&spec),
+                        ComponentHarness::HotPaths(output) => server.hot_paths(&output),
                     }
                 };
                 run().map_err(|e| e.to_string())

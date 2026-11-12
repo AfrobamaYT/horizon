@@ -809,9 +809,15 @@ pub(super) fn emit<'a>(
                 format!("for {binding} in {each} {{ {} }}", call(&mod_item, "break")),
             ),
             Some((_, lookup)) => (
-                // The parts are looked up first: the key may be moved into the event.
+                // The parts are looked up first: the key may be moved into the event. A worldgen
+                // Part method runs on the worker threads too: it reads the server's published table.
                 format!(
-                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(HookId::{hook_id}, \"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = {}; let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}",
+                    if hook.context == Some(PhaseContext::Worldgen) {
+                        "super::worldgen_parts()".to_owned()
+                    } else {
+                        format!("super::parts(HookId::{hook_id}, \"{name}\")")
+                    }
                 ),
                 format!(
                     "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
@@ -2172,6 +2178,32 @@ fn main() {{
         assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
         assert!(
             compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
+    }
+
+    #[test]
+    fn a_worldgen_part_method_takes_the_worldgen_context_and_reads_the_published_table() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hooks = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .hooks;
+        let compact: String = hooks.chars().filter(|c| !c.is_whitespace()).collect();
+        fn dispatch<'a>(compact: &'a str, name: &str) -> &'a str {
+            let start = compact
+                .find(&format!("fndispatch_{name}("))
+                .unwrap_or_else(|| panic!("no dispatch for {name}"));
+            let body = &compact[start..];
+            &body[..body.find("#[doc(hidden)]").unwrap_or(body.len())]
+        }
+        let method = &compact[compact.find("fnon_tree_grow(").unwrap()..];
+        assert!(method.starts_with("fnon_tree_grow(&self,context:&dynWorldgenHost,"));
+        let worldgen = dispatch(&compact, "on_tree_grow");
+        assert!(worldgen.contains("=super::worldgen_parts();"));
+        assert!(!worldgen.contains("super::parts("));
+        // Every other scoped hook keeps this thread's table, `is_ladder`'s loop context included.
+        assert!(
+            dispatch(&compact, "is_ladder")
+                .contains("=super::parts(HookId::IsLadder,\"is_ladder\");")
         );
     }
 }

@@ -271,6 +271,20 @@ impl crate::prelude::ModStateServerHost for FakeHost {
             (self.players, self.level) = (players, level);
         }
     }
+    fn transaction_lifecycle(&self) -> crate::TransactionLifecycle {
+        // The fake tells the world of nothing at a close, so no close is ever seen running.
+        if self.journal.depth() == 0 {
+            crate::TransactionLifecycle::None
+        } else {
+            crate::TransactionLifecycle::Open
+        }
+    }
+    fn transaction_current(&self) -> Option<crate::Transaction> {
+        self.journal.current()
+    }
+    fn transaction_depth(&self, tx: &crate::Transaction) -> Option<u32> {
+        self.journal.depth_of(tx)
+    }
 }
 impl crate::prelude::ServicesServerHost for FakeHost {
     fn commands(&mut self) -> &mut dyn Commands {
