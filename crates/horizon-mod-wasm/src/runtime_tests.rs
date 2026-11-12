@@ -1943,6 +1943,24 @@ fn a_guest_call_that_answers_nothing_names_why() {
         ),
         "wasm trap: wasm `unreachable` instruction executed"
     );
+    // Allowed by the limit but refused by the system: the reason says so, with the size asked.
+    let mut limits = Limits::new("a+b".into(), 64);
+    assert!(
+        wasmtime::ResourceLimiter::memory_growing(&mut limits, 32 << 20, 48 << 20, None).unwrap()
+    );
+    wasmtime::ResourceLimiter::memory_grow_failed(
+        &mut limits,
+        wasmtime::Error::msg("out of memory"),
+    )
+    .unwrap();
+    assert_eq!(
+        fault_reason(
+            &wasmtime::Error::new(wasmtime::Trap::UnreachableCodeReached),
+            100,
+            &mut limits
+        ),
+        "wasm trap: wasm `unreachable` instruction executed, after memory.grow to 48 MiB was refused by the system below group a+b's limit of 64 MiB"
+    );
     note("its group has stopped after an earlier fault".into());
     assert_eq!(
         take_refusal(),
@@ -1990,7 +2008,7 @@ fn grow_until_refused(memory_mib: u32) -> i32 {
     let pages = grow.call(&mut store, ()).unwrap();
     assert_eq!(
         store.data().limits.refused_growth,
-        Some(((pages as usize) + 1) << 16)
+        Some((((pages as usize) + 1) << 16, false))
     );
     pages
 }
