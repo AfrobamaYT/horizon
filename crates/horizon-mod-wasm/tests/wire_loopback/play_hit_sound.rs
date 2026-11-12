@@ -27,6 +27,8 @@ fn wire_loopback_play_hit_sound_handled_and_default() {
     impl mod_api::ClientHost for Client {}
     mod_api::impl_client_host_areas!(Client);
     install_counter();
+    // The platform phase this scope sets is process-wide state another test may not have installed yet.
+    mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let index = guest::add_handler(vec![guest::view::<dyn mod_api::BlockPart>(Arc::new(Quiet))]);
     let proxy = WasmHandler {

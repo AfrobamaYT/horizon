@@ -545,7 +545,7 @@ impl Game<'_> {
         #[cfg(test)]
         let run_server = mod_api::testing::inherit_mods(run_server);
         let thread = std::thread::Builder::new()
-            .name("Server thread".into())
+            .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
             .stack_size(server_thread_stack())
             .spawn(move || run_server(&()))?;
         let handle = Integrated {
@@ -1377,7 +1377,7 @@ impl Game<'_> {
         options.execution_role = ExecutionRole::IntegratedServer;
         options.dedicated = Some(Vec::new());
         let result = std::thread::Builder::new()
-            .name("Server thread".into())
+            .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
             .stack_size(server_thread_stack())
             .spawn(move || {
                 let run = || -> Result<()> {
@@ -1428,10 +1428,92 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
     }
 }
 
+impl Game<'_> {
+    /// The server thread has already delivered its report: written to disk, or printed
+    /// when it couldn't be written. The flag is set either way, since a dead server must
+    /// not keep the game open. Join through the normal halt path, so a tick-loop crash
+    /// finishes the server's own stop and save first, then exit without returning an
+    /// error that would create another report. A panic inside a posted task happens
+    /// outside the tick loop's catch, so the join doesn't promise a save there.
+    pub(super) fn exit_after_server_crash(&mut self) {
+        // Only the owner ends the process, as in `idle`: a splitscreen guest owns no
+        // server, and exiting from its pass would skip the owner's halt.
+        if self.options.split_guest || !horizon_client::crash::server_crashed() {
+            return;
+        }
+        // A crash while the world is still loading leaves the server in `integrated_starting`.
+        let starting = self
+            .integrated_starting
+            .take()
+            .map(|starting| starting.handle);
+        for mut server in self.integrated.take().into_iter().chain(starting) {
+            if let Err(error) = server.halt() {
+                log::error!("Horizon: crashed integrated server: {error}");
+            }
+        }
+        std::process::exit(101);
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
     use mod_api::prelude::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn posted_native_panic_writes_one_server_report() {
+        let scratch = tempfile::tempdir().unwrap();
+        let home = scratch.path().to_path_buf();
+        let previous = std::panic::take_hook();
+        horizon_client::crash::install(home.clone(), "client");
+        let (tasks, receiver) = channel::<Task>();
+        let mut server = Integrated {
+            flags: Arc::new(Flags::default()),
+            thread: None,
+            tasks,
+            world_name: String::new(),
+            save_folder: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+        };
+        assert!(server.post(|_| {
+            let _guard = horizon_client::crash::enter_native_mod(horizon_client::crash::ModCall {
+                id: "example:posted",
+                hook: "server_tick",
+                part: None,
+            });
+            panic!("posted integrated panic 3494");
+        }));
+        server.thread = Some(
+            std::thread::Builder::new()
+                .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
+                .stack_size(server_thread_stack())
+                .spawn(move || {
+                    crate::game::native_entity_refs::tests::with_game(|game| {
+                        receiver.recv().unwrap()(game);
+                    });
+                })
+                .unwrap(),
+        );
+        assert_eq!(
+            server.halt().unwrap_err().to_string(),
+            "the integrated server panicked"
+        );
+        std::panic::set_hook(previous);
+        let reports: Vec<_> = std::fs::read_dir(home.join("crash-reports"))
+            .unwrap()
+            .map(|p| p.unwrap().path())
+            .collect();
+        assert_eq!(reports.len(), 1);
+        // `MinecraftServer.runServer` saves a server report even under a client install.
+        let file = reports[0].file_name().unwrap().to_string_lossy();
+        assert!(file.ends_with("-server.txt"), "{file}");
+        let text = std::fs::read_to_string(&reports[0]).unwrap();
+        assert!(text.contains("Description: Exception in server tick loop"));
+        assert!(text.contains("Server thread"));
+        assert!(text.contains("posted integrated panic 3494"));
+        assert!(text.contains("in native mod example:posted, hook server_tick"));
+    }
 
     /// The server thread keeps guest headroom, and a larger `RUST_MIN_STACK` still
     /// reaches it (#2430).
@@ -1564,6 +1646,9 @@ pub(super) mod tests {
                 root.clone(),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
+            // Crash shutdown only saves an adopted world whose storage is owned.
+            game.session_lock = Some(horizon_client::save::SessionLock::acquire(&root).unwrap());
+            game.world_adopted = true;
             game.player = Some(
                 horizon_client::motion::PlayerMotion::new(
                     game.motion,
