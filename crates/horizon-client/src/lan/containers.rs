@@ -194,15 +194,16 @@ impl Hub {
         );
     }
 
-    /// `ServerLevel.globalLevelEvent` for an event in the level in place: the
-    /// packet with its global flag for every player on the server
+    /// `ServerLevel.globalLevelEvent` for an event in level `level`: the packet
+    /// with its global flag for every player on the server
     /// (`PlayerList.getPlayers`), each at a position of their own
-    /// (`global_level_event_position`).
-    pub fn global_level_event(&self, kind: i32, pos: [i32; 3], data: i32) {
+    /// (`global_level_event_position`). The level is the event's, not the one in
+    /// place: an event queued during one level's pass may be sent during another's.
+    pub fn global_level_event(&self, level: &str, kind: i32, pos: [i32; 3], data: i32) {
         for g in self.online_players() {
             g.send(&C::LevelEvent(play::LevelEvent {
                 kind,
-                pos: global_level_event_position(pos, g.position, self.here(g)),
+                pos: global_level_event_position(pos, g.position, g.placed_in(level)),
                 data,
                 global: true,
             }));

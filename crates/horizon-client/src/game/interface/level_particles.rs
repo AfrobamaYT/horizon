@@ -335,7 +335,7 @@ impl Game<'_> {
         }
         self.global_level_event_sound(id, pos);
         if self.audio.capture.is_some() {
-            self.lan_global_events.push((id, pos, data));
+            self.lan_global_events.push((self.dim.id(), id, pos, data));
         }
     }
     /// `LevelEventHandler.globalLevelEvent`: the sound two blocks from the

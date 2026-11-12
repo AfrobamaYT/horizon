@@ -106,6 +106,8 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `set_block`, `set_block_property`, `native_play_sound` and
 `native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events).
+Outside a write, a `LevelRef` plays level events, and their global form for every player on the server
+([Playing level events](../../how-to/level-events.md)).
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
 removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
 the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
