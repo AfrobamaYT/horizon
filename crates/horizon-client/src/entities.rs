@@ -2987,6 +2987,7 @@ mod fire_environment_tests {
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
         if !root.join("items.json").exists() {
+            crate::test_fixtures::report_missing();
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
@@ -3181,6 +3182,7 @@ mod destroyed_bundle_environment_tests {
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
         if !root.join("items.json").exists() {
+            crate::test_fixtures::report_missing();
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();

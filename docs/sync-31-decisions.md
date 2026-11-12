@@ -97,6 +97,8 @@ The new wind-charge dedicated-server parity harness additionally requires prepar
 
 #### `crates/horizon-client/src/entities.rs`
 
+- `ordinary_items_burn_but_native_netherite_resists_lava` — requires items.json; missing input is attributed to the calling test.
+- `lava_that_destroys_a_bundle_spills_its_contents` — requires items.json; missing input is attributed to the calling test.
 - `a_dropped_item_on_soul_sand_or_honey_is_slowed_by_the_move`
 - `the_world_border_stops_items_and_experience_orbs`
 - `a_resting_item_skips_move_three_of_four_ticks`
@@ -252,5 +254,7 @@ The new wind-charge dedicated-server parity harness additionally requires prepar
 
 
 ## Verification
+
+The landing-orb unit fixture injects OrbMove and on_ground state: it exercises production landing-event bookkeeping, not the complete collision/fluid-to-landing path. The separate command corpus drives real motion, but was not run locally. Neither fixture presence nor resource-gated early return is runtime evidence.
 
 Rustfmt and compile-only `cargo check --workspace --all-targets` are the allowed local checks. Initial compilation identified erroneous missing-resource attribution on ordinary production branches and duplicate discovery of the new attack-check module. Both were corrected at their owners. Subsequent test compilation exposed stale NBT/Joined/Reason API fixtures and the complete orb-constructor field family; those are corrected without changing assertions or restoring legacy APIs. No local tests, clippy, harnesses or gameplay runs. Independent static review, final integrated zero-warning compile, exact-head CI and final root glance are pending.

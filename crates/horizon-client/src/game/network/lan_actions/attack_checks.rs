@@ -293,12 +293,15 @@ mod tests {
         assert!(hp(&game) < full, "the pig is not hurt: {full} health left");
         attack(&mut game, far_item);
         assert_eq!(disconnects(&rx), vec![], "an item out of reach");
-        game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
-            Some(ItemStack::new("minecraft:iron_spear", 1));
-        game.lan.as_mut().unwrap().hub.guests[0].selected = 0;
+        game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+            guest.inventory[0] = Some(ItemStack::new("minecraft:iron_spear", 1));
+            guest.selected = 0;
+        });
         attack(&mut game, item);
         assert_eq!(disconnects(&rx), vec![], "a spear in hand");
-        game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = None;
+        game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+            guest.inventory[0] = None;
+        });
         for (what, id) in [
             ("an item", item),
             ("an experience orb", orb),
