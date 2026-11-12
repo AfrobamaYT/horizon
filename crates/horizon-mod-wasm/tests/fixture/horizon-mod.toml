@@ -47,3 +47,7 @@ at = "horizon_client::game::commands::wrap_degrees"
 kind = "head"
 with = "turn_angle"
 hash = "fixture"
+
+[wasm]
+sha512 = "4882e4c95d88beca72cac52d533f7f4ddc17d318039c1e5be8387c855aa00279a6317ef1d2cc348be65f746efd84846cc7e63b6d9e1192a922631d3efcd4fbc3"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
