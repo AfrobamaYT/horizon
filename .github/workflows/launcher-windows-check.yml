@@ -43,7 +43,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - name: The pinned Rust (tools/ci/rust-version)
+        id: rust
+        shell: bash
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          # The launcher builds native mods for windows-gnu (rust_toolchain::WINDOWS_X64_TARGET), and
+          # registry_compile's tests emit metadata for it: the image's stable had its std, a fresh pin does not.
+          targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher
@@ -62,7 +71,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - name: The pinned Rust (tools/ci/rust-version)
+        id: rust
+        shell: bash
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
