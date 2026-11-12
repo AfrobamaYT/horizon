@@ -230,3 +230,20 @@ Incoming structure, item and entity code uses the fork's relocated `horizon_core
 The forced-ring ranking helper reads the single authoritative combined `Streaming::forced` set, which includes command and mod tickets, rather than restoring the removed separate mod-forced set. Ranking and queue invalidation use that same combined set. Incoming forced-ring assertions are retained.
 
 Source discovery explicitly excludes the retained upstream `game/creatures` folder; feature-gated declarations own those source files. The extinguish regression is nested under its owning module and uses scoped resource fixtures, preventing duplicate module discovery and resource leaks. Duplicate renderer and remote-item methods from upstream extractions are removed while retaining text-patch invalidation and typed interaction gates.
+
+## Final upstream call-site integration
+
+- Resource-pack drops use `drop_pack_file` from the existing window event path, retaining Create New World handling and adding upstream's resource-pack-screen handling.
+- Portal coordinate scaling uses `DimensionFacts` from the active game dimension context; the orphaned static Dim helper is removed instead of bypassing synced or mod dimension facts.
+- `/execute in` retains the existing validated `Dim::exists` / `Dim::from_id` path, including mod dimensions; the redundant `known_level` helper is not retained.
+- Login/respawn uses `drop_remote_player` to capture carried attributes, then performs the fork's `remove_local_player_body` teardown so hooks, residency and attachments remain correctly invalidated.
+- Remote spear attacks synchronize look and report in-range attacks before action 8, retaining swing and sound behavior.
+- Guest PvP mace hits reuse `pvp_hit_after` and send updated motion immediately before Wind Burst. Existing exhaustion, weapon-hit and sprint-stop behavior remains.
+- PvP glint and lower-fire rendering use their existing helpers rather than duplicate inline implementations.
+- Biome resend batches identical packet bodies across watching guests through the existing validated guest read boundary. The outgoing per-receiver column set and ordering are unchanged.
+- Projectile RNG remains a single owned stream; no duplicate ArrowState stream is restored. UUID allocation and shooting consume that stream, and native launch/rotation fixtures inspect the same stream.
+- New regression fixtures use scoped resource ownership, validated GuestList mutations, typed entity slots and installation-scoped item defaults. Orb air and rocket fall distance serialize through the retained inline typed entity codecs. No assertion was intentionally weakened.
+
+## Verification scope
+
+Only compile-time workspace checks and scoped Rust formatting run locally for this sync. Tests, clippy, parity harnesses and game behavior are not run locally. The retained upstream parallel sources are excluded from compilation and testing. PR readiness uses verify, verify-static, lint, launcher and Windows test; wasm fixture and fn-replace-check are main-only, not PR gates.
