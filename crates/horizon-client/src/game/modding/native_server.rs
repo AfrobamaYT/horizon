@@ -1357,6 +1357,15 @@ impl Game<'_> {
         (self.native_acting_player() == Some(player)).then(String::new)
     }
 
+    /// The plugin channels the player's client announced (`minecraft:register` less
+    /// `minecraft:unregister`), kept by its connection from configuration on.
+    pub(super) fn player_announced_channels(&self, player: PlayerRef) -> Option<Vec<String>> {
+        if let Some(guest) = self.online_player_record(player) {
+            return Some(guest.sender.announced.list());
+        }
+        (self.native_acting_player() == Some(player)).then(Vec::new)
+    }
+
     /// Validate identity without requiring a live body: sending to an online
     /// displaced player still works, as it did through the UUID send path.
     fn message_player_uuid(&self, player: PlayerRef) -> Option<u128> {
