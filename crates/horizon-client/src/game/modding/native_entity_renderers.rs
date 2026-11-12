@@ -35,7 +35,8 @@ pub(super) fn register(renderers: BTreeMap<String, Arc<dyn EntityRenderer>>) -> 
     REGISTERED.set(renderers).is_ok()
 }
 
-/// One type's resolved renderer, and whether it has panicked (then it is asked no more).
+/// One type's resolved renderer, and whether it has panicked (then it is asked no more until the
+/// next resource load resolves the table again).
 pub(in crate::game) struct Resolved {
     renderer: Arc<dyn EntityRenderer>,
     failed: AtomicBool,
@@ -146,7 +147,9 @@ impl Game<'_> {
         if !drew {
             out.truncate(start);
             if !resolved.failed.swap(true, Ordering::Relaxed) {
-                log::warn!("Horizon: an entity renderer panicked; it is asked no more");
+                log::warn!(
+                    "Horizon: an entity renderer panicked; it is asked no more until resources reload"
+                );
             }
         }
         drew

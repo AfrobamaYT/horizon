@@ -61,7 +61,8 @@ scan over the mods.
 - A later registration for a type replaces the earlier one silently, whichever mod made it, as in
   NeoForge, also for a vanilla type.
 - A type the game does not know is logged with its id and left out; nothing panics.
-- A renderer that panics is asked no more, and its type draws as it would without one.
+- A renderer that panics is asked no more until the next resource load (a reload resolves it again),
+  and until then its type draws as it would without one.
 
 ## What draws through registered renderers
 

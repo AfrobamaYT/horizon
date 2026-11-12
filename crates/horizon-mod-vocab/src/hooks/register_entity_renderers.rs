@@ -53,8 +53,8 @@ out; one for a known type whose family does not draw through registered renderer
 and the type keeps its own drawing until its family does. Today the content mods' thrown types (a
 `data/<id>/horizon/entity_type/<name>.json` with the `minecraft:snowball` template) draw through their
 registered renderer; boats, displays, the other projectiles and the mobs come in follow-ups of #860, and
-a mod's general entity types (#792) will register the same way. A renderer that panics is asked no more,
-and its type draws as it would without one."#]
+a mod's general entity types (#792) will register the same way. A renderer that panics is asked no more
+until the next resource load resolves it again, and until then its type draws as it would without one."#]
     #[hook(
         side = "client",
         contract = "listen",

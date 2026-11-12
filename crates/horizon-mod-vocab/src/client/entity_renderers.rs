@@ -40,8 +40,9 @@ pub trait EntityRenderer: Send + Sync + 'static {
     /// turned: turn it by `entity.yaw` and `entity.pitch` as the model needs. `draw` also has
     /// the partial tick, the game time and the entity's light. Asked once a frame for each entity
     /// of the type in view; what it draws replaces the type's own drawing. A frame is drawn
-    /// afresh: `draw.keep()` does nothing here. A renderer that panics is asked no more, and its
-    /// type draws as it would without one.
+    /// afresh: `draw.keep()` does nothing here. A renderer that panics is asked no more until the
+    /// next resource load resolves it again, and until then its type draws as it would without
+    /// one.
     fn submit(&self, entity: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext);
 }
 
