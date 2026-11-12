@@ -1,8 +1,8 @@
 //! The per-tick mob update in vanilla order (`Entity.baseTick`,
 //! `LivingEntity.baseTick/tick/aiStep`, `Mob.serverAiStep`) and the
 //! dispatch to each species family's goals and special behaviour.
-pub use freezing::can_freeze;
 pub(crate) use freezing::in_powder_snow;
+pub use freezing::{can_freeze, wears_gaze_disguise};
 mod feeding;
 mod freezing;
 
