@@ -1,7 +1,5 @@
 # Native mod source revisions
 
-## Native mod source revisions
-
 A native mod targets one exact Horizon source revision: `horizon` in its `horizon-mod.toml` `[native]` section.
 The same section pins `game` and the exact `mixins` commit. Match the mod to the game revision it will run with,
 and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep

@@ -1,7 +1,5 @@
 # Developer acceptance workflow
 
-### Developer acceptance workflow
-
 Use a disposable server folder and fresh homes when developing:
 
 ```sh

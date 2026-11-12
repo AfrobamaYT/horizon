@@ -1,4 +1,12 @@
-# Where each doc lives
+# Writing the modding book
+
+The modding book (`docs/modding`, published at <https://arismoko.github.io/horizon/>) is the manual for mod
+authors: it describes what the game does on main, nothing else. Designs, proposals, plans, trackers and coverage
+ledgers live in [`docs/design/`](design/) (mod API designs in [`docs/design/mod-api/`](design/mod-api/)), and
+notes for people working on Horizon itself in [`docs/mod-api/`](mod-api/). The book build refuses a page whose
+title reads as a design, a plan or a work list.
+
+## Where each doc lives
 
 The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, and does only that job.
 
@@ -44,7 +52,7 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 
 Build the book with `mdbook build docs/modding` and the reference with `cargo doc -p horizon-mod-api --no-deps`.
 
-# What a PR needs to show
+## What a PR needs to show
 
 Code review, CI and your own focused tests are the proof. You don't need to run the game.
 

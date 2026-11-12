@@ -29,9 +29,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 ## Counts
 
-<!-- extension-counts -->
-
-The book build computes this table from the method verdicts below; there is no snapshot to update.
+`python3 tools/neoforge_extension_counts.py` prints the totals table from the method verdicts below;
+there is no snapshot to update.
 
 Of the 60 block methods, 57 exist a second time with the state as receiver, so the state-extension counts are
 the block counts minus three; see [`IBlockStateExtension`](#iblockstateextension). The block follow-up is

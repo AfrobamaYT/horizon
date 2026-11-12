@@ -16,7 +16,7 @@
 
 - [Wire types](how-to/wire-types.md)
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
-- [Design: villager professions and trades](concepts/villager-professions.md)
+- [Villager professions and trades](concepts/villager-professions.md)
 - [Villager profession resources and clients](concepts/villager-professions-client.md)
 
 # How-to
@@ -37,15 +37,7 @@
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
-<!-- The wasm-coverage preprocessor renders this chapter from the generator at its published URL. -->
-- [Wasm boundary coverage]()
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
 <!-- The counterparts preprocessor renders the current declarations at the published URL. -->
 - [NeoForge counterparts]()
-
-# For agents
-
-
-# Contributing
-

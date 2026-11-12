@@ -1,7 +1,5 @@
 # Adding a hook
 
-### Adding a hook
-
 A new hook needs its declaration in the area file of `crates/horizon-mod-vocab/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
