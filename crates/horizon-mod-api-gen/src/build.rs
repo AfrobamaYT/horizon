@@ -328,7 +328,9 @@ pub(super) fn wire_types_from_sources(
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
-    crate::interface_cache::with_cache(out_dir, || generate_points_inner(root, out_dir))
+    crate::interface_cache::with_cache(out_dir, || {
+        crate::source::with_walk_cache(|| generate_points_inner(root, out_dir))
+    })
 }
 
 pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
