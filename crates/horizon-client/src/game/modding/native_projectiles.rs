@@ -169,6 +169,57 @@ impl Game<'_> {
         (id, String::new())
     }
 
+    /// `EntityTeleportEvent.EnderPearl` for `owner`'s pearl that hit `hit`:
+    /// the listeners' `(target, damage, cancel)`, starting from `to` and `damage`.
+    pub(in crate::game) fn native_pearl_teleport(
+        &mut self,
+        owner: mod_api::EntityRef,
+        pearl: u32,
+        from: Vec3,
+        to: Vec3,
+        mut damage: f32,
+        hit: Hit,
+    ) -> ([f64; 3], f32, bool) {
+        let (hit_entity, hit_block, hit_face, hit_at) = self.pearl_hit(hit);
+        let mut target = [to.x, to.y, to.z];
+        let mut cancel = false;
+        self.native_ender_pearl_teleport(mod_api::__private::EnderPearlTeleportCall {
+            owner,
+            pearl,
+            from: [from.x, from.y, from.z],
+            target: &mut target,
+            damage: &mut damage,
+            cancel: &mut cancel,
+            hit_entity,
+            hit_block,
+            hit_face,
+            hit_at,
+        });
+        (target, damage, cancel)
+    }
+
+    /// What a pearl hit (`getHitResult`), as `ender_pearl_teleport` tells it:
+    /// `(hit_entity, hit_block, hit_face, hit_at)`. An entity's block is the
+    /// cell of the hit point and its face `[0, 0, 0]`; a dragon part is the dragon.
+    fn pearl_hit(&self, hit: Hit) -> (Option<u32>, [i32; 3], [i32; 3], [f64; 3]) {
+        match hit {
+            Hit::Block { pos, at, face } => (None, pos, face, [at.x, at.y, at.z]),
+            Hit::Entity { who, at } => {
+                let entity = match who {
+                    Who::Mob(id) => self.native_impact_entity(id).0,
+                    Who::Player => self.own_entity_id() as u32,
+                };
+                let cell = [
+                    at.x.floor() as i32,
+                    at.y.floor() as i32,
+                    at.z.floor() as i32,
+                ];
+                (Some(entity), cell, [0; 3], [at.x, at.y, at.z])
+            }
+            Hit::None => (None, [0; 3], [0; 3], [0.0; 3]),
+        }
+    }
+
     /// `native_projectile_impact` for each of `impacts`: whether the mods
     /// canceled it. A hit on a wind charge is not told.
     fn native_projectile_impacts(&mut self, impacts: &[Impact]) -> Vec<bool> {
@@ -491,6 +542,37 @@ mod nested_spawn_tests {
                 .unwrap();
             assert_eq!(spawned.age, 1);
             assert_eq!(spawned.join, join);
+        });
+    }
+}
+
+#[cfg(test)]
+mod pearl_hit_tests {
+    use super::*;
+
+    /// `ender_pearl_teleport`'s hit fields: a block and its face normal, or an
+    /// entity with the cell of its hit point and no face.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_pearl_tells_the_block_face_or_the_entity_it_hit() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let wall = Hit::Block {
+                pos: [4, 70, -2],
+                at: Vec3::new(4.0, 70.5, -1.5),
+                face: [-1, 0, 0],
+            };
+            assert_eq!(
+                game.pearl_hit(wall),
+                (None, [4, 70, -2], [-1, 0, 0], [4.0, 70.5, -1.5])
+            );
+            let cow = Hit::Entity {
+                who: Who::Mob(42),
+                at: Vec3::new(1.25, 64.5, -0.5),
+            };
+            assert_eq!(
+                game.pearl_hit(cow),
+                (Some(42), [1, 64, -1], [0; 3], [1.25, 64.5, -0.5])
+            );
         });
     }
 }
