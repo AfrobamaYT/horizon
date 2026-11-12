@@ -3866,21 +3866,6 @@ impl Game<'_> {
         }
         self.spawn_item(stack, p, v, 10);
     }
-    /// Player.drop: thrown from the eyes along the view direction.
-    fn drop_held(&mut self, all: bool) {
-        if self.eye_position().is_none() {
-            return;
-        }
-        let spectator = self.spectator();
-        let Some(thrown) = horizon_client::items::take_held_drop(
-            &mut self.inventory[self.selected],
-            all,
-            spectator,
-        ) else {
-            return;
-        };
-        self.player_drop(thrown);
-    }
     /// `Player.drop`: the statistics and a thrown item entity in front of the player.
     pub(super) fn player_drop(&mut self, thrown: ItemStack) -> Option<u32> {
         let eye = self.eye_position()?;
@@ -16868,15 +16853,6 @@ mod destroyed_contents_tests {
 #[cfg(test)]
 #[path = "game/interface/tests/sign_chain_tests.rs"]
 mod sign_chain_tests;
-
-impl Game<'_> {
-    pub(super) fn guest_drop_held(&mut self, gi: usize, conn: u32, all: bool) {
-        self.as_guest(conn, |g| g.drop_held(all));
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.guests.update(gi, |g| g.told_selected());
-        }
-    }
-}
 
 impl Game<'_> {
     pub(super) fn apply_crafter_slot_states(&mut self, menu: &horizon_client::menu::Menu) {
