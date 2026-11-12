@@ -259,6 +259,7 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
                 packages.ids(),
             ),
             directory,
+            crate::entry::runtime_environment::get().clone(),
         ),
     );
     Ok(())

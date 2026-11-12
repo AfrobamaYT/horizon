@@ -12,6 +12,7 @@ pub mod lending;
 pub mod matrix;
 pub mod projectile_owner;
 pub mod replace;
+pub mod runtime_environment;
 pub mod selector_command;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
@@ -150,6 +151,7 @@ impl Hooks for Mod {
         host: &mut dyn mod_api::ServerHost,
         _: &mut mod_api::ServerStartedEvent,
     ) {
+        runtime_environment::started(host);
         if host.is_loaded("datapack_fixture") {
             datapack::read(host);
         }
@@ -166,6 +168,7 @@ impl Hooks for Mod {
     }
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
+        runtime_environment::register(cx);
         game_payload::register(registrar);
         interaction::register(registrar);
         registrar
