@@ -552,8 +552,8 @@ pub(super) fn submit(
             let skin = texture
                 .as_deref()
                 .map(|t| format!("entity/{}", t.strip_prefix("minecraft:").unwrap_or(t)))
-                .map_or(
-                    std::borrow::Cow::Borrowed(skull_texture(renderer, kind)),
+                .map_or_else(
+                    || std::borrow::Cow::Borrowed(skull_texture(renderer, kind)),
                     Into::into,
                 );
             part(
