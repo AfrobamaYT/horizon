@@ -143,11 +143,12 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     slots=2
     if [[ " ${FNR_MODS:-alpha beta} " == *" loop_second "* ]]; then
       slots=3
-      # Two mods' block entities in one world: each mod's slot counted its own and never the other's.
+      # Two mods' block entities in one world: the second mod's slot counted its own too.
       grep -F 'fnr: loop_second own #1: fnr_loop_second:counter' "$scratch/server.log"
-      if grep -E 'fnr: loop count own #[0-9]+: fnr_loop_second:|fnr: loop_second own #[0-9]+: fnr_loop:' "$scratch/server.log"; then
-        echo "a loop slot counted another mod's block entity as its own"; exit 1
-      fi
+    fi
+    # Each slot checks every block entity it took for its own, and never took another mod's.
+    if grep -F 'own FOREIGN at' "$scratch/server.log"; then
+      echo "a loop slot took another mod's block entity for its own"; exit 1
     fi
     # Both slots ran in priority order, the count picked out its mod's counters, the throttle wrote
     # cooldowns, and the entry's HEAD composed.

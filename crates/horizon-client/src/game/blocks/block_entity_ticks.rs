@@ -77,6 +77,17 @@ impl TickedKind {
             _ => return None,
         })
     }
+    /// [`Self::of`], with a mod's block entity's type: its numeric wire ID, kept on the entity
+    /// since it was made (`ModBlockEntity::numeric_id`).
+    #[inline(always)]
+    fn with_type(entity: &BlockEntity) -> Option<(Self, Option<u32>)> {
+        let kind = Self::of(entity)?;
+        let mod_type = match entity {
+            BlockEntity::Mod(entity) => entity.numeric_id(),
+            _ => None,
+        };
+        Some((kind, mod_type))
+    }
 }
 
 /// The block entity `block_entities.tick` is visiting, as a slot gets it: the loop's own state,
@@ -92,6 +103,8 @@ pub(crate) struct BlockEntityTick<'g, 'a> {
     pub(crate) pos: Pos,
     /// What it is, from the block entity the dispatch is about to tick.
     pub(crate) kind: TickedKind,
+    /// A mod's block entity's type, as a numeric wire ID; read through [`OwnBlockEntities`].
+    mod_type: Option<u32>,
 }
 
 #[allow(
@@ -107,10 +120,14 @@ impl BlockEntityTick<'_, '_> {
 
 /// A mod's own block entity types, for a slot of `block_entities.tick` to pick out its mod's block
 /// entities (book: Published loops). Made from the types' ids; the first [`Self::contains`]
-/// resolves them once into a flag for each block state, set where the state's block makes one of
-/// them (`EntityBlock.newBlockEntity`: a mod block's block entity is the type it declares). Each
-/// visit after that reads the visited block and one flag: no string work, no allocation. A mod
-/// with no slot never makes one.
+/// resolves them once into a flag for each numeric wire ID. A mod block entity carries its own
+/// type's numeric wire ID from when it was made, whatever block it stands on, so each visit after
+/// that reads one flag: no string work, no hashing, no allocation. A mod with no slot never makes
+/// one.
+///
+/// Both the flags and the entities' IDs assume the block entity type table is frozen for the
+/// process (`block_entity_types::install` refuses a change; a new table needs a restart), and so are
+/// the block states the types were made valid on; nothing here reads a block state.
 #[allow(
     dead_code,
     reason = "read by `[[native.loop]]` helpers, compiled in a mod build"
@@ -118,8 +135,9 @@ impl BlockEntityTick<'_, '_> {
 pub(crate) struct OwnBlockEntities {
     /// The types' ids, as the mod registered them (`mymod:machine`).
     ids: &'static [&'static str],
-    /// By block state id, whether its block makes one of `ids`; `None` until the first visit.
-    by_state: Option<Box<[bool]>>,
+    /// By numeric wire ID, whether the type is one of `ids`; `None` until a visit finds the game's
+    /// type table.
+    by_numeric_id: Option<Box<[bool]>>,
 }
 
 #[allow(
@@ -127,39 +145,50 @@ pub(crate) struct OwnBlockEntities {
     reason = "read by `[[native.loop]]` helpers, compiled in a mod build"
 )]
 impl OwnBlockEntities {
-    /// The block entity types `ids`, such as `&["mymod:machine"]`; resolved on the first visit.
+    /// The block entity types `ids`, such as `&["mymod:machine"]`; resolved on the first visit,
+    /// which logs a warning for each id the game has no block entity type of. Such an id matches
+    /// nothing.
     pub(crate) const fn new(ids: &'static [&'static str]) -> Self {
         Self {
             ids,
-            by_state: None,
+            by_numeric_id: None,
         }
     }
-    /// Whether the visited block entity is a mod's of one of these types.
+    /// Whether the visited block entity is a mod's of one of these types. Before the type table is
+    /// installed nothing is resolved or kept, and a later visit resolves.
     #[inline]
     pub(crate) fn contains(&mut self, tick: &BlockEntityTick<'_, '_>) -> bool {
-        if tick.kind != TickedKind::Mod {
+        let Some(mod_type) = tick.mod_type else {
             return false;
+        };
+        if self.by_numeric_id.is_none() {
+            self.by_numeric_id = Self::resolve(self.ids);
         }
-        let ids = self.ids;
-        let by_state = self
-            .by_state
-            .get_or_insert_with(|| Self::resolve(ids, tick.game));
-        let (x, y, z) = tick.pos;
-        let state = tick.game.world.block(x, y, z);
-        by_state.get(state.0 as usize).copied().unwrap_or(false)
+        self.by_numeric_id
+            .as_ref()
+            .and_then(|by_numeric_id| by_numeric_id.get(mod_type as usize))
+            .copied()
+            .unwrap_or(false)
     }
-    /// For each block state, whether its block makes one of `ids`.
+    /// For each numeric wire ID, whether it names one of `ids`; `None` while the game has no type
+    /// table, or an empty one.
     #[cold]
-    fn resolve(ids: &[&str], game: &Game<'_>) -> Box<[bool]> {
-        let registry = game.pack.assets.registry;
-        (0..registry.len() as u32)
-            .map(|id| {
-                registry
-                    .state(BlockStateId(id))
-                    .and_then(|state| horizon_client::block_entity_types::type_for(&state.name))
-                    .is_some_and(|kind| ids.contains(&kind))
-            })
-            .collect()
+    fn resolve(ids: &[&str]) -> Option<Box<[bool]>> {
+        let types = horizon_client::block_entity_types::current()?;
+        if types.numeric_id_bound() == 0 {
+            return None;
+        }
+        let mut by_numeric_id = vec![false; types.numeric_id_bound()];
+        for id in ids {
+            match types.numeric_id(id) {
+                Some(numeric_id) => by_numeric_id[numeric_id as usize] = true,
+                None => log::warn!(
+                    "Published loop block_entities.tick: OwnBlockEntities names `{id}`, which is no \
+                     registered block entity type; it matches nothing"
+                ),
+            }
+        }
+        Some(by_numeric_id.into())
     }
 }
 
@@ -180,8 +209,8 @@ pub(crate) trait BlockEntityTickSlot {
     /// Just before the visited block entity ticks. [`LoopFlow::Skip`] leaves it out this tick;
     /// [`LoopFlow::Stop`] ends the pass (what follows the loop, such as shulker box lids, still runs).
     /// After [`LoopFlow::Continue`] from every slot the loop looks again: when the visited block
-    /// entity was removed, or replaced by one of another [`TickedKind`], it does not tick and no
-    /// slot's [`Self::after`] is called for it.
+    /// entity was removed, or replaced by one of another [`TickedKind`] or a mod's of another type,
+    /// it does not tick and no slot's [`Self::after`] is called for it.
     #[inline(always)]
     fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
         let _ = tick;
@@ -339,22 +368,34 @@ impl Game<'_> {
             {
                 continue;
             }
-            let Some(kind) = this.world.block_entities.get(&pos).and_then(TickedKind::of) else {
+            let Some((kind, mod_type)) = this
+                .world
+                .block_entities
+                .get(&pos)
+                .and_then(TickedKind::with_type)
+            else {
                 continue;
             };
             match slot.before(&mut BlockEntityTick {
                 game: this,
                 pos,
                 kind,
+                mod_type,
             }) {
                 LoopFlow::Continue => {}
                 LoopFlow::Skip => continue,
                 LoopFlow::Stop => break,
             }
-            // `before` had the game: the entity it was asked about may be gone or another kind.
+            // `before` had the game: the entity it was asked about may be gone, another kind or a
+            // mod's of another type.
             if S::RECHECK
                 && (!this.world.block_entities.is_live(ticker)
-                    || this.world.block_entities.get(&pos).and_then(TickedKind::of) != Some(kind))
+                    || this
+                        .world
+                        .block_entities
+                        .get(&pos)
+                        .and_then(TickedKind::with_type)
+                        != Some((kind, mod_type)))
             {
                 continue;
             }
@@ -393,6 +434,7 @@ impl Game<'_> {
                 game: this,
                 pos,
                 kind,
+                mod_type,
             });
         }
         // Items move between passes: the columns hold for this one only.
@@ -1198,6 +1240,7 @@ mod slot_guard_tests {
             game: &mut game,
             pos: (8, 64, 8),
             kind: TickedKind::Hopper,
+            mod_type: None,
         };
         let mut slots = <(Attributed<Row, Both>, ())>::make();
         assert_eq!(slots.before(&mut tick), LoopFlow::Continue);
@@ -1448,24 +1491,52 @@ mod own_block_entity_tests {
     use crate::game::published_loops::LoopFlow;
     use horizon_client::block_entities::Pos;
     use horizon_core::geometry::Vec3;
+    use horizon_client::containers::{BlockEntity, ModBlockEntity};
     use mod_api::*;
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
 
     const A: &str = "own_a:machine";
     const B: &str = "own_b:machine";
 
-    /// A mod whose block `self.0` makes its ticking block entity type of the same id.
-    struct Machines(&'static str);
+    /// A mod whose block `block` makes its ticking block entity type of the same id, which is
+    /// also valid on the block `also_on` (`BlockEntityType.validBlocks`, added by this mod).
+    struct Machines {
+        block: &'static str,
+        also_on: Option<&'static str>,
+        keys: OnceLock<(BlockEntityTypeKey, BlockKey)>,
+    }
+    impl Machines {
+        fn new(block: &'static str, also_on: Option<&'static str>) -> Self {
+            Self {
+                block,
+                also_on,
+                keys: OnceLock::new(),
+            }
+        }
+    }
     #[mod_api::__subscriptions]
     impl Hooks for Machines {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            let kind = r.block_entity_type("machine").blocks(&[self.0]).build();
-            r.block_entity_part(&kind, Ticks(self.0)).unwrap();
+            let kind = r.block_entity_type("machine").blocks(&[self.block]).build();
+            r.block_entity_part(&kind, Ticks(self.block)).unwrap();
+            if let Some(other) = self.also_on {
+                let keys = (kind, r.block_key(other));
+                assert_eq!(*self.keys.get_or_init(|| keys), keys);
+            }
         }
         fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
             event
                 .blocks
-                .push(mod_api::Block::new(self.0, "minecraft:stone"));
+                .push(mod_api::Block::new(self.block, "minecraft:stone"));
+        }
+        fn block_entity_type_add_blocks(
+            &self,
+            _: &RegistrationContext,
+            event: &mut BlockEntityTypeAddBlocksEvent<'_>,
+        ) {
+            if let Some(&(kind, block)) = self.keys.get() {
+                event.modify(kind, &[block]);
+            }
         }
     }
     /// Makes block `self.0`'s block entity tick.
@@ -1506,8 +1577,9 @@ mod own_block_entity_tests {
         }
     }
 
-    /// Two mods' block entities and a hopper in one world: each mod's slot is asked about all of
-    /// them and counts only its own.
+    /// Two mods' block entities and a hopper in one world, one of mod B's standing on mod A's block
+    /// (B made its type valid there): each mod's slot is asked about all of them and counts only
+    /// its own entities, whatever block they stand on. An id with no type counts nothing.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
     fn each_slot_counts_only_its_own_mods_block_entities() {
@@ -1520,8 +1592,8 @@ mod own_block_entity_tests {
             return;
         }
         let mods: Mods = vec![
-            ModEntry::new("own_a", Box::new(Machines(A))),
-            ModEntry::new("own_b", Box::new(Machines(B))),
+            ModEntry::new("own_a", Box::new(Machines::new(A, None))),
+            ModEntry::new("own_b", Box::new(Machines::new(B, Some(A)))),
         ]
         .into();
         mod_api::testing::with_mods(mods.clone(), || {
@@ -1557,14 +1629,30 @@ mod own_block_entity_tests {
                             .unwrap()
                     );
                 }
-                let mut slots = (Count::new(&[A]), Count::new(&[B]));
+                // Mod B's entity on mod A's block, as a save that holds it loads it.
+                let d = (9, 64, 1);
+                assert!(horizon_client::block_entity_types::additional_valid(A, B));
+                let state = game.pack.assets.registry.default_state(A).unwrap();
+                game.world.set(d.0, d.1, d.2, state).unwrap();
+                let entity = ModBlockEntity::new(B.into(), Default::default());
+                game.world
+                    .block_entities
+                    .insert(d, BlockEntity::Mod(Box::new(entity)));
+                let mut slots = (
+                    Count::new(&[A]),
+                    (Count::new(&[B]), Count::new(&["own_a:missing"])),
+                );
                 for _ in 0..2 {
                     game.tick_block_entities_with(&mut slots).unwrap();
                 }
-                assert_eq!((slots.0.visited, slots.1.visited), (8, 8));
                 let (a, b, c) = ((1, 64, 1), (3, 64, 1), (5, 64, 1));
-                assert_eq!(slots.0.mine, [a, c, a, c]);
-                assert_eq!(slots.1.mine, [b, b]);
+                let (own_a, (own_b, missing)) = &mut slots;
+                assert_eq!((own_a.visited, own_b.visited, missing.visited), (10, 10, 10));
+                own_a.mine.sort_unstable();
+                own_b.mine.sort_unstable();
+                assert_eq!(own_a.mine, [a, a, c, c]);
+                assert_eq!(own_b.mine, [b, b, d, d]);
+                assert_eq!(missing.mine, []);
             });
         });
     }

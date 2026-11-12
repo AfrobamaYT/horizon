@@ -1,3 +1,6 @@
+/// This mod's counters' block entity type.
+const OWN: &str = "fnr_loop:counter";
+
 /// Counts the visits and ticks it sees, and this mod's counters among them, and always answers
 /// Continue. On its 500th visit it runs the whole loop again from inside it: the nested run is the
 /// game's own, without the slots.
@@ -11,7 +14,7 @@ pub struct Count {
 impl Default for Count {
     fn default() -> Self {
         Self {
-            own: OwnBlockEntities::new(&["fnr_loop:counter"]),
+            own: OwnBlockEntities::new(&[OWN]),
             visited: 0,
             counters: 0,
             ticked: 0,
@@ -35,9 +38,12 @@ impl BlockEntityTickSlot for Count {
         }
         if self.own.contains(tick) {
             self.counters += 1;
-            if self.counters % 200 == 1 {
-                // Read the id only to show it: the check above did no string work.
-                if let Some(BlockEntity::Mod(entity)) = tick.block_entity() {
+            // The check, on every recognition: the slow way, the entity's id must be this mod's.
+            let pos = tick.pos;
+            if let Some(BlockEntity::Mod(entity)) = tick.block_entity() {
+                if entity.id() != OWN {
+                    fnr_loop::note(&format!("count own FOREIGN at {pos:?}: {}", entity.id()));
+                } else if self.counters % 200 == 1 {
                     fnr_loop::note(&format!("count own #{}: {}", self.counters, entity.id()));
                 }
             }
