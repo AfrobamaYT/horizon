@@ -1512,6 +1512,9 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         fn provided(&self, _: ProvidedBy, _: &str) -> bool {
             true
         }
+        fn mods_switched(&self) -> u64 {
+            7
+        }
     }
     struct World;
     impl Host for World {
@@ -1600,6 +1603,11 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         BlockProviderOf::ResourceHandlerItemResource(_)
     ));
     assert_eq!((index, owner, before), (15, "test:plain_block", false));
+    assert_eq!(
+        guest::Guest.mods_switched(),
+        7,
+        "a guest reads the game's count of mod switches, not its own"
+    );
     corrupt.set(true);
     index = 42;
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
