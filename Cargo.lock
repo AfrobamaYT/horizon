@@ -2058,6 +2058,9 @@ dependencies = [
 [[package]]
 name = "horizon-engine-slots"
 version = "0.1.0"
+dependencies = [
+ "horizon-mod-vocab",
+]
 
 [[package]]
 name = "horizon-friends"
