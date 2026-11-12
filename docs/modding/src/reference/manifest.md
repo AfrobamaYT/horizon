@@ -64,12 +64,11 @@ See [Injections](../injections.md) for the fields and point injections, and
 A module has a unique, nonempty `id` (one id space with the injections), a `file` naming the game source
 file that receives it, a `name` that is a Rust module identifier, and a `source` payload file under
 `src/`, holding the module's items without an outer wrapper. An optional `visibility` is exactly
-`"pub"` or `"pub(crate)"`, the default. It is forwarded to horizon-mixins as `[[module]]`; see
-[Mixins](../mixins.md).
+`"pub"` or `"pub(crate)"`, the default. See [Support modules](../support-modules.md).
 
 `[[inject]]` only fills compiled slots and never compiles game code. Native source edits
 use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and upstream
-options. `[[native.bridge]]` provides bridge declarations; `[[native.state]]` is refused. See [Mixins](../mixins.md) for the vocabulary and trust boundary.
+options. `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../native-route.md) for every table, its fields and its refusals.
 
 A wasm mod adds `[wasm]` instead, written by `cargo horizon-mod build --wasm`
 ([Building to `mod.wasm`](../how-to/wasm-mods.md)):
