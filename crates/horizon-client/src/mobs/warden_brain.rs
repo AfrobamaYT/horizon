@@ -808,7 +808,7 @@ impl B {
                 if m.extra.mount.is_none() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 cx.events.push(MobEvent::EjectPassengers {
                     mob: m.id,
                     from: m.position,
@@ -1666,12 +1666,12 @@ mod tests {
             let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
             let mut m = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), at, 0.0);
             warden::register(&mut m);
-            let (mut lr, mut events) = (LegacyRandom::new(0), Vec::new());
+            let (mut fixture, mut events) = (crate::health::TestLevel::new(0), Vec::new());
             let mut b = B::ForceUnmount(Timed::new(60, 60));
             {
                 let mut cx = Bx {
                     w,
-                    lr: &mut lr,
+                    level: &mut fixture.level(),
                     events: &mut events,
                     now: 100,
                 };

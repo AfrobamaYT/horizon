@@ -231,7 +231,7 @@ mod nested_spawn_tests {
 #[cfg(test)]
 mod pickup_tests {
     use super::*;
-    use crate::game::native_machines::tests::server_game;
+    use crate::game::game_tests::tests::server_game;
     use horizon_client::advancements as adv;
     use horizon_client::motion::PlayerMotion;
     use horizon_world::lazy_json::LazyJson;
@@ -268,7 +268,8 @@ mod pickup_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_panda_that_takes_a_thrown_item_credits_the_thrower() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         game.options.dedicated = None;
         game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 100.0, 4.5)).unwrap());
         game.level.player_uuid = Some(THROWER);
@@ -304,7 +305,7 @@ mod pickup_tests {
         let holding = |g: &Game<'_>| {
             g.mobs
                 .iter()
-                .any(|m| m.id == id && m.extra.main_hand.is_some())
+                .any(|m| m.id == id && m.extra.main_hand_id().is_some())
         };
         for _ in 0..20 {
             if holding(&game) {

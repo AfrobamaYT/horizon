@@ -1,5 +1,6 @@
-use crate::game::Game;
+use crate::game::{Game, creatures::SpawnSite, wind::BurstCause};
 use horizon_client::chunk::Chunk;
+use horizon_client::mobs::spawn_rules::Reason;
 use horizon_core::geometry::Vec3;
 use std::sync::Arc;
 
@@ -28,12 +29,22 @@ fn end_game<'a>(resources: &'a mut Option<std::sync::Arc<crate::game::Resources>
 fn a_wind_burst_pushes_the_dragon_without_damage() {
     let mut resources = None;
     let mut game = end_game(&mut resources);
-    game.spawn_dragon_spawned([0.0, 70.0, 0.0])
-        .expect("spawned dragon");
+    game.spawn_dragon_spawned(
+        [0.0, 70.0, 0.0],
+        SpawnSite::Finalizing(Reason::SpawnItemUse),
+    )
+    .expect("spawned dragon");
     game.dragon.as_mut().expect("dragon").velocity = Vec3::ZERO;
 
-    game.wind_burst([0.0, 66.0, 0.0], 5.0, 1.0, false, false)
-        .unwrap();
+    game.wind_burst(
+        [0.0, 66.0, 0.0],
+        5.0,
+        1.0,
+        false,
+        false,
+        BurstCause::default(),
+    )
+    .unwrap();
 
     let dragon = game.dragon.as_ref().expect("dragon");
     assert_eq!(dragon.health, 200.0);
@@ -48,11 +59,21 @@ fn a_wind_burst_pushes_the_dragon_without_damage() {
 fn a_wind_burst_scales_the_dragons_push_by_its_multiplier() {
     let mut resources = None;
     let mut game = end_game(&mut resources);
-    game.spawn_dragon_spawned([0.0, 70.0, 0.0])
-        .expect("spawned dragon");
+    game.spawn_dragon_spawned(
+        [0.0, 70.0, 0.0],
+        SpawnSite::Finalizing(Reason::SpawnItemUse),
+    )
+    .expect("spawned dragon");
     game.dragon.as_mut().expect("dragon").velocity = Vec3::ZERO;
-    game.wind_burst([0.0, 66.0, 0.0], 5.0, 1.22, false, false)
-        .unwrap();
+    game.wind_burst(
+        [0.0, 66.0, 0.0],
+        5.0,
+        1.22,
+        false,
+        false,
+        BurstCause::default(),
+    )
+    .unwrap();
 
     let push = game.dragon.as_ref().expect("dragon").velocity.y;
     assert!(push > 0.0, "Wind Burst did not push the dragon");

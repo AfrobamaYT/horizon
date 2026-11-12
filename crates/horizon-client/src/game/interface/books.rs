@@ -2205,7 +2205,7 @@ mod link_cursor_tests {
             ..Style::default()
         };
         let hover_only = Style {
-            hover: Some(Box::new(Text::literal("tip"))),
+            hover: Some(std::sync::Arc::new(Text::literal("tip"))),
             ..Style::default()
         };
         assert_eq!(link_cursor(&link), Some(Cursor::PointingHand));

@@ -1562,7 +1562,7 @@ mod tests {
                 .clone();
             let mut cube = Mob::new(9123, kind, Vec3::new(8.5, 64.0, 8.5), 0.0);
             cube.silent = silent;
-            cube.extra.body = Some("minecraft:tnt".into());
+            cube.extra.set_body(Some("minecraft:tnt".into()));
             cube.extra.counter2 = 2; // fuse 1: explodes on this tick.
             game.mobs.push(cube);
             game.portals.entities.insert(

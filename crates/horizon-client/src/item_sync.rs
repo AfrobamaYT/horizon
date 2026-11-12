@@ -1618,7 +1618,7 @@ mod tests {
         );
         assert_eq!(
             stack.consumable(None).map(|c| c.animation),
-            Some(horizon_world::consumable::UseAnimation::Drink)
+            Some(UseAnimation::Drink)
         );
         for name in ["none", "unknown_animation"] {
             stack.data_mut().set_other(
@@ -1627,7 +1627,7 @@ mod tests {
             );
             assert_eq!(
                 stack.consumable(None).map(|c| c.animation),
-                Some(horizon_world::consumable::UseAnimation::None)
+                Some(UseAnimation::None)
             );
         }
         stack.data_mut().set_other(
@@ -1676,7 +1676,7 @@ mod tests {
     /// Replacing a saved consumable uses codec defaults, not previous fields or effects.
     #[test]
     fn a_stacks_consumable_takes_the_codecs_defaults() {
-        use horizon_world::consumable::UseAnimation;
+        use horizon_core::use_animation::UseAnimation;
         let mut stack = ItemStack::new("minecraft:honey_bottle", 1);
         assert!(stack.consumable(None).is_none());
         stack.data_mut().set_other(

@@ -343,11 +343,13 @@ pub fn apply_consumption(
     if !consume(w, m, level, events, &decision.stack) {
         return false;
     }
-    let remainder = w
-        .items
-        .and_then(|i| i.items.get(&decision.stack.item))
-        .and_then(|i| i.use_remainder.as_deref())
-        .map(Into::into);
+    let remainder = crate::item_sync::use_remainder(
+        &decision.stack,
+        w.items
+            .and_then(|items| items.items.get(&decision.stack.item))
+            .and_then(|info| info.use_remainder.clone()),
+    )
+    .map(Into::into);
     let position = m.position;
     decision.finish(m, position, remainder)
 }
@@ -514,7 +516,7 @@ fn consume(
     // `user.gameEvent(animation == DRINK ? GameEvent.DRINK : GameEvent.EAT)` at
     // its own position, itself the source.
     events.push(MobEvent::GameEvent {
-        event: if consumable.animation == horizon_world::consumable::UseAnimation::Drink {
+        event: if consumable.animation == horizon_core::use_animation::UseAnimation::Drink {
             "minecraft:drink"
         } else {
             "minecraft:eat"
@@ -1725,6 +1727,41 @@ mod consume_tests {
                         ..
                     }
                 )));
+                // A one-count food leaves the effective remainder, not its prototype's.
+                for (patch, expected) in [
+                    (None, Some("minecraft:bowl")),
+                    (Some("minecraft:use_remainder"), Some("minecraft:diamond")),
+                    (Some("!minecraft:use_remainder"), None),
+                ] {
+                    let mut stack = crate::items::ItemStack::new("minecraft:mushroom_stew", 1);
+                    if let Some(component) = patch {
+                        stack.data_mut().set_other(
+                            component,
+                            Some(
+                                horizon_core::nbt::parse_snbt(
+                                    r#"{id:"minecraft:diamond",count:1}"#,
+                                )
+                                .unwrap()
+                                .0,
+                            ),
+                        );
+                    }
+                    fox.extra.set_main_hand_stack(Some(stack));
+                    fox.extra.ints[TICKS_SINCE_EATEN] = 601;
+                    let decision = decide_consumption(&fox, w).unwrap();
+                    assert!(apply_consumption(
+                        &decision,
+                        w,
+                        &mut fox,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut Vec::new()
+                    ));
+                    assert_eq!(
+                        fox.extra.main_hand_id(),
+                        expected,
+                        "remainder patch: {patch:?}"
+                    );
+                }
             },
         );
     }
@@ -1967,7 +2004,7 @@ mod consume_tests {
                 assert_eq!(*at, [0.5, 64.0, 0.5]);
                 // `Mth.randomBetween`/`triangle(1.0, 0.4)`: 0.6 to 1.4.
                 assert!((0.6..=1.4).contains(pitch), "its pitch is drawn: {pitch}");
-                assert_eq!(m.extra.main_hand, None, "the apple was eaten");
+                assert_eq!(m.extra.main_hand_id(), None, "the apple was eaten");
                 assert_eq!(m.extra.ints[TICKS_SINCE_EATEN], 0);
                 let eat = events.iter().position(
                     |e| matches!(e, MobEvent::GameEvent { event, .. } if *event == "minecraft:eat"),
