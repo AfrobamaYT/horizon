@@ -80,13 +80,22 @@ def main(argv: list[str]) -> int:
         print(f"listing the test binaries failed (cargo exit {listing.returncode})")
         return listing.returncode
     binaries = sorted(test_binaries(listing.stdout), key=lambda b: os.path.getsize(b["executable"]), reverse=True)
-    # As Cargo does for `cargo test`: std and the target's dynamic libraries, and the cargo that ran the build.
+    # As Cargo does for `cargo test`: the toolchain's std and the target's dynamic libraries on the library path
+    # (a proc-macro crate's test binary links std dynamically), and the cargo that ran the build.
     toolchain = [command[1]] if len(command) > 1 and command[1].startswith("+") else []
-    sysroot = subprocess.run(["rustc", *toolchain, "--print", "sysroot"], capture_output=True,
-                             text=True).stdout.strip() if shutil.which("rustc") else ""
+    rustc = Path(shutil.which(command[0]) or "").with_name("rustc")
+    rustc = str(rustc) if rustc.is_file() else shutil.which("rustc")
+    if rustc is None:
+        print("no rustc beside cargo or on PATH: the toolchain's std cannot be put on the library path")
+        return 1
+    sysroot = subprocess.run([rustc, *toolchain, "--print", "sysroot"], capture_output=True, text=True,
+                             check=True).stdout.strip()
+    host = re.search(r"^host: (\S+)$", subprocess.run([rustc, *toolchain, "-vV"], capture_output=True, text=True,
+                                                     check=True).stdout, re.M)[1]
     deps = {str(Path(b["executable"]).parent) for b in binaries}
-    library_path = os.pathsep.join([*sorted(deps), *([f"{sysroot}/lib"] if sysroot else []),
+    library_path = os.pathsep.join([*sorted(deps), f"{sysroot}/lib/rustlib/{host}/lib", f"{sysroot}/lib",
                                     *filter(None, [os.environ.get("LD_LIBRARY_PATH")])])
+    print(f"library path: {library_path}", flush=True)
     extra_env = {"LD_LIBRARY_PATH": library_path, "CARGO": os.environ.get("CARGO", "cargo")}
     print(f"running {len(binaries)} test binaries, {args.jobs} at a time", flush=True)
     failed, started = [], time.monotonic()

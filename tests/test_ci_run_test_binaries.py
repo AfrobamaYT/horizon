@@ -60,6 +60,9 @@ class RunTestBinariesTests(unittest.TestCase):
             cargo = root / "cargo"
             cargo.write_text(f"#!/bin/sh\ncat <<'EOF'\n" + "\n".join(listing) + "\nEOF\n")
             cargo.chmod(0o755)
+            rustc = root / "rustc"
+            rustc.write_text(f'#!/bin/sh\ncase "$1" in --print) echo {root}/sysroot ;; *) echo "host: x86_64-unknown-linux-gnu" ;; esac\n')
+            rustc.chmod(0o755)
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 code = runner.main(["--jobs", "2", "--", str(cargo), "test"])
             output = log.getvalue()
@@ -68,6 +71,8 @@ class RunTestBinariesTests(unittest.TestCase):
             self.assertIn("broken", output)
             self.assertIn("ran 2 test binaries", output)
             self.assertIn("::error::horizon-world lib.rs (failing): exit 101", output)
+            # std's directory beside the toolchain: a proc-macro crate's test binary links it dynamically.
+            self.assertIn(f"{root}/sysroot/lib/rustlib/x86_64-unknown-linux-gnu/lib", output)
 
 
 if __name__ == "__main__":
