@@ -95,6 +95,55 @@ impl Game<'_> {
             items,
         )
     }
+    /// `ServerPlayer.openMenu(provider, extraDataWriter)` for a content mod menu type and no
+    /// block: the type's container slots show empty and their clicks reach the mods, as
+    /// `open_menu`'s do; `extra` and `pos` go first in its `horizon:menu_extra` payload.
+    pub(super) fn player_open_mod_menu(
+        &mut self,
+        player: mod_api::PlayerRef,
+        menu: mod_api::MenuKey,
+        title: Text,
+        extra: Vec<u8>,
+        pos: Option<[i32; 3]>,
+    ) -> Result<Option<i32>, mod_api::OpenMenuError> {
+        use mod_api::OpenMenuError;
+        let id = self.menu_key_id(menu);
+        let kind =
+            horizon_client::containers::mod_menu_type(&id).ok_or(OpenMenuError::NotModMenu)?;
+        if extra.len() > horizon_protocol::menu_extra::MAX_DATA {
+            return Err(OpenMenuError::TooLarge);
+        }
+        // A live handle of a connected player; a fake player has no connection.
+        self.online_player_record(player)
+            .ok_or(OpenMenuError::PlayerUnavailable)?;
+        let conn = self
+            .native_conn(player.uuid())
+            .ok_or(OpenMenuError::PlayerUnavailable)?;
+        let brand = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .map_or("", |g| g.brand.as_str());
+        if !horizon_client::containers::menu_reaches(brand, &id) {
+            return Err(OpenMenuError::PlayerUnavailable);
+        }
+        // The mods may stop the menu, as for a block's.
+        if !self.guest_may_open(conn, &id, pos) {
+            return Ok(None);
+        }
+        // ServerPlayer.openMenu closes the menu that was open.
+        self.guest_close_all(conn);
+        let host = self.lan.as_mut().ok_or(OpenMenuError::PlayerUnavailable)?;
+        Ok(host.hub.open_menu_window(
+            conn,
+            &id,
+            component_nbt(&title.component()),
+            pos.map(|[x, y, z]| (x, y, z)),
+            horizon_client::lan::menu::Slots::Native,
+            vec![None; kind.slots],
+            Some(extra),
+        ))
+    }
     /// Closes the player's native menu (a `native_menu_closed` follows).
     pub(super) fn close_menu(&mut self, uuid: u128) {
         if let Some(conn) = self.native_conn(uuid)

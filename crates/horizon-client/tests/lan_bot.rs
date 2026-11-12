@@ -1279,7 +1279,7 @@ fn menu_extra_data_comes_right_before_its_menu() {
         [(
             menu_extra::Message {
                 window,
-                pos: [3, 70, -5],
+                pos: Some([3, 70, -5]),
                 data: vec![7, 0, 255],
             },
             true

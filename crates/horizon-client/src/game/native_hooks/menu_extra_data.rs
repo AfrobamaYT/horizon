@@ -34,9 +34,8 @@ impl Game<'_> {
     /// What the block's mod wrote for the mod screen that is open
     /// (`native_menu_extra_data` on the server), empty when it wrote nothing;
     /// None when no mod screen is open. @API:menu_extra_data@.
-    /// Not on wasm: it returns a borrowed view of the screen's bytes, which crosses only as a resource.
-    pub(in crate::game) fn screen_extra_data(&self) -> Option<&[u8]> {
+    pub(in crate::game) fn screen_extra_data(&self) -> Option<Vec<u8>> {
         let screen = self.shown_native_screen()?;
-        Some(screen.extra.as_ref().map_or(&[], |e| e.data.as_slice()))
+        Some(screen.extra.as_ref().map_or_else(Vec::new, |e| e.data.clone()))
     }
 }
