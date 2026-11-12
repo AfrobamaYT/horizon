@@ -1,16 +1,16 @@
 # Bridges: `[[native.bridge]]`
 
 A bridge gives your mixin helpers a getter, setter or caller for a field or method they can't see. The
-launcher generates a method on the game type, and your helpers call it like any other method.
+launcher adds a method to the game's struct, and your helpers call it like any other method.
 
-Use one when a [mixin helper](mixins.md#writing-a-helper) needs a private member of a type declared in
-another module. For a value a hook or `[[inject]]` listener already gets, you need no bridge.
+Use one when a [mixin helper](mixins.md#writing-a-helper) needs a field or method that Rust's privacy hides
+from the target's module. For a value a hook or `[[inject]]` listener already gets, you need no bridge.
 
 ## Example
 
 The check mod `fnr_support`, which CI builds, declares a mutable getter for `Game::ticks_until_autosave` and
-uses it from a `HEAD` mixin. The manifest's header is as on [Mixins](mixins.md#example); the
-`[[native.module]]` row is explained on [Support modules](support-modules.md).
+uses it from a `HEAD` mixin. The manifest's header is as on [Mixins](mixins.md#example). The helper also
+calls a [support module](support-modules.md) of the same mod, so the example keeps its row.
 
 ```toml
 [[native.module]]
@@ -53,7 +53,7 @@ So use only letters, digits, `_` and `-` in a bridge id, and keep ids distinct a
 
 | `kind` | Method | `target` | `member` |
 | --- | --- | --- | --- |
-| `GET` | `fn(&self) -> &T` | The struct: `horizon_client::game::Game` | The field's name, or its index in a tuple struct |
+| `GET` | `fn(&self) -> &T` | The struct: `horizon_client::game::Game` | The field's name, or its index in a tuple struct as a string (`"0"`) |
 | `GET_MUT` | `fn(&mut self) -> &mut T` | The struct | The field |
 | `SET` | `fn(&mut self, value: T)` | The struct | The field |
 | `INVOKE` | The method's own signature, renamed | The method, written like a [mixin target](mixins.md#naming-the-target) | leave it out |
@@ -63,7 +63,8 @@ bridge is called as `value.__horizon_mixins_<mod>_<id>(…)`, or `Type::__horizo
 function without `self`. No check mod covers `INVOKE` yet.
 
 Name a field bridge's struct by the module that declares it, without lifetimes (`horizon_client::game::Game`).
-Mixin helpers on game-crate functions can call the method. Your mod's own crate cannot.
+Mixin helpers on game-crate functions can call the method. Your mod's own crate cannot, so
+read the value in a helper and pass it to your crate.
 
 ## Fields
 
@@ -74,9 +75,12 @@ Mixin helpers on game-crate functions can call the method. Your mod's own crate 
 | `target` | yes | The struct (field bridges) or the method (`INVOKE`). |
 | `member` | field bridges | The field. |
 
-The struct or method must be in the game crate, `horizon_client`. A field bridge's struct may be generic over
-lifetimes, not types or consts. An `INVOKE` target's type and method are not generic, and its signature names
-no associated type through `Self`, such as `Self::Error`.
+Limits:
+
+- The struct or method is in the game crate, `horizon_client`.
+- A field bridge's struct may be generic over lifetimes, not types or consts.
+- An `INVOKE` target's type and method are not generic.
+- An `INVOKE` target's signature does not use an associated type through `Self`, such as `Self::Error`.
 
 ## What you will see
 
@@ -95,7 +99,7 @@ Every bridge error reads `E_MIXIN_BRIDGE_TARGET: <mod>:<row>: <why>`.
 | ``a field bridge names its `member` `` | Add `member`. |
 | `<Struct> has no field <member>` | Check the field's name at your commit. |
 | `unknown bridge kind <kind>` | Use `GET`, `GET_MUT`, `SET` or `INVOKE`. |
-| `an invoker's target is a method or associated function of a type` | Point `INVOKE` at a method, not a free function. |
+| `an invoker's target is a method or associated function of a type` | The target is a free function. Point `INVOKE` at a method. |
 | `an invoker's type and method are not generic` | Not possible on this route. |
 
 An `INVOKE` target that names no function gets `E_MIXIN_TARGET_MISSING` or `E_MIXIN_TARGET_AMBIGUOUS`, as on

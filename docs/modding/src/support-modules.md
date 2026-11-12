@@ -39,15 +39,17 @@ helpers call `pub`. The module may call your mod's crate; your mod's crate canno
 | --- | --- | --- |
 | `id` | yes | The row's name, unique in the mod. |
 | `file` | yes | The game source file that receives the module, from the repository root: `crates/horizon-client/src/…`. |
-| `name` | yes | The module's Rust name. Pick one the file does not use; starting it with your mod's id is safe. |
+| `name` | yes | The module's Rust name. Pick one the file does not use, with a prefix of your own, such as `fnr_`. |
 | `source` | yes | Your file under `src/` with the module's items. |
-| `visibility` | no | `"pub(crate)"` (the default) or `"pub"`. |
+| `visibility` | no | The module's visibility: `"pub(crate)"` (the default, enough for your helpers) or `"pub"`. |
 
 ## What you will see
 
 A module builds with the mixins, so the build log's `Function replacement:` line covers it.
 
 ## Errors
+
+The `horizon-mod.toml:` errors come when the manifest is read; the coded ones come at build time.
 
 | Message | Fix |
 | --- | --- |
