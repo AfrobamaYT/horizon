@@ -311,7 +311,11 @@ impl crate::prelude::BlockEntitiesBackend for FakeHost {
 }
 impl crate::prelude::ItemsBackend for FakeHost {
     fn container_kind_amount(&self, at: BlockSide, resource: &crate::ItemResource) -> Option<u64> {
-        let Some(items) = self.level.standing(at.level, at.pos).and_then(|s| s.items.as_ref()) else {
+        let Some(items) = self
+            .level
+            .standing(at.level, at.pos)
+            .and_then(|s| s.items.as_ref())
+        else {
             return Some(0);
         };
         items
@@ -323,7 +327,11 @@ impl crate::prelude::ItemsBackend for FakeHost {
     }
     fn container_kind_space(&self, at: BlockSide, resource: &crate::ItemResource) -> Option<u64> {
         let max_stack = self.max_stack(resource);
-        let Some(items) = self.level.standing(at.level, at.pos).and_then(|s| s.items.as_ref()) else {
+        let Some(items) = self
+            .level
+            .standing(at.level, at.pos)
+            .and_then(|s| s.items.as_ref())
+        else {
             return Some(0);
         };
         (0..items.slots.len()).try_fold(0u64, |total, slot| {
