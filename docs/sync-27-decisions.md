@@ -26,3 +26,14 @@ API-owned explosion payload and its Wire contract, not an engine explosion
 slice exposed through the API. This sync does not add that new capability.
 Existing engine firework rendering already passes the audible flag based on
 rocket silence in `game/entities/fireworks.rs`; that path is retained.
+
+## UUID and NBT lookup: typed coverage, no legacy services
+
+The upstream shared UUID lookup and dimension-plus-numeric-ID NBT helpers are
+not restored. The fork's entity handles carry residency, epoch and level
+identity; reads obey that identity rather than accepting an unscoped ID and
+swapping arbitrary levels behind a shared reference. The relocated typed
+entity tests now cover UUID word ordering, NBT without `id`, refusal outside
+the entity's level, and successful reads after returning to its level. This
+ports the data contract, not the removed contextless service surface. A new
+cross-level UUID query API is outside this sync and is not claimed available.
