@@ -133,9 +133,10 @@ struct Running {
 thread_local! {
     /// Why this thread's last guest call answered nothing, for the caller's typed error.
     static LAST_REFUSAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-    /// A measurement test's budget for non-load calls, in epoch ticks (about 1 ms each).
-    pub(crate) static CALL_BUDGET: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
 }
+/// A test's budget for non-load calls in this process, in epoch ticks (about 1 ms each); 0 keeps
+/// a hook's 100. Process-wide: the calls it covers run on the game's own threads.
+pub(crate) static CALL_BUDGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn note(reason: String) {
     LAST_REFUSAL.with(|last| *last.borrow_mut() = Some(reason));
 }
@@ -673,7 +674,10 @@ impl WasmMod {
                 let budget = if class == CallClass::Load {
                     30_000
                 } else {
-                    CALL_BUDGET.with(std::cell::Cell::get).unwrap_or(100)
+                    match CALL_BUDGET.load(Ordering::Relaxed) {
+                        0 => 100,
+                        budget => budget,
+                    }
                 };
                 store.set_epoch_deadline(budget);
                 store.data_mut().epoch_budget = budget;
