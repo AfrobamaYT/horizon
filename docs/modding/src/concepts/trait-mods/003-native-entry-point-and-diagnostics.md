@@ -30,7 +30,7 @@ after Horizon's own, and `r.crash_header(Arc::new(Banner))` puts `<mod id>: <val
 Both take a `CrashSection`, whose `value()` is asked once when a report is written, not when it was
 registered; `None` leaves the line out of that report. Lines come in registration order, on native and wasm
 mods alike, on the client and the dedicated server. The report asks them on a thread of its own and waits at
-most two seconds for all of them: a line that panics, traps or doesn't answer in time reads `~~ERROR~~`, and the
+most two seconds for the headers and another two for the system-detail sections: a line that panics, traps or doesn't answer in time reads `~~ERROR~~`, and the
 report is still written. The lines of the mod the crash is attributed to are not asked. Each value is kept on one
 line, control characters as spaces, cut to 4096 bytes.
 
