@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use super::test_support::{cpu_count, cpu_hz, cpu_ms_for_samples};
+use super::test_support::{cpu_count, cpu_hz, cpu_ms_for_samples, spin_share_permille};
 use super::*;
 
 const fn at_1khz(unwind: Unwind, ring_samples: usize) -> Config {
@@ -459,14 +459,32 @@ fn a_sleeping_thread_has_wall_samples_that_are_not_running() {
 
 #[test]
 fn a_spinning_thread_has_wall_samples_that_are_running() {
-    let (wall, running, stats) = wall_samples("t-wall-spin", || spin_known(200));
+    let config = Config {
+        wall: true,
+        ..COPY_1K
+    };
+    let (records, stats, share) = sampled("t-wall-spin", config, || {
+        spin_share_permille(200, spin_known)
+    });
+    let wall = records.iter().filter(|r| r.kind == Kind::Wall).count();
+    let running = records
+        .iter()
+        .filter(|r| r.kind == Kind::Wall && r.value == 1)
+        .count();
     assert!(
         (60..=600).contains(&wall),
         "{wall} wall samples in 200 ms at 1 kHz"
     );
+    // Below a third of a CPU the runner is too busy to tell running from waiting.
     assert!(
-        running * 10 >= wall * 8,
-        "{running} of {wall} marked running while spinning"
+        share >= 333,
+        "the spinning thread ran only {share}/1000 of the time"
+    );
+    // Running samples follow the CPU the thread received, give or take a fifth: a sampler that
+    // calls a spinning thread waiting (or labels by anything but its CPU time) falls far below.
+    assert!(
+        running * 1000 >= wall * (share as usize - 200),
+        "{running} of {wall} marked running while spinning, with {share}/1000 of the CPU"
     );
     assert!(
         stats.samples as usize > wall,
