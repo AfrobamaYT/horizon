@@ -1,18 +1,24 @@
 #![cfg(test)]
-//! `block_entity_client_tick` (#3611): a client's copies of a type that declared client ticks
-//! are told once per client tick each, in the ticker list's order, with the data last merged; a
-//! type that didn't declare them is never told; a copy whose column the server forgets is not
-//! told again; and a server, the world's own ticks, never tells any.
+//! `block_entity_client_tick` (#3611), through a client's real frames (`client_tick_steps` after
+//! the frame's `update_world` drain): a client's copies of a type that declared client ticks are
+//! told once per client tick each, between `client_tick_pre`, the level's pre and its post, and
+//! `client_tick_post`, in the ticker list's order, with the data the frame's drain merged; not
+//! while paused or frozen; a type that didn't declare them never; a copy removed or whose column
+//! the server forgets not again; and a server, the world's own ticks, never.
+use super::block_entity_client_tick::CLIENT_SNAPSHOTS_MADE;
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use crate::game::world_loading::WorldRequest;
 use horizon_client::containers::BlockEntity;
 use horizon_core::nbt::{Compound, Tag};
 use mod_api::{
-    BlockEntityClientTickEvent, BlockEntityClientTicksEvent, BlockEntityPart, BlockPart,
-    BlocksEvent, ClientHost, Hooks, Registrar, RegistrationContext,
+    BlockEntityClientTickEvent, BlockEntityClientTicksEvent, BlockEntityDataReceivedEvent,
+    BlockEntityPart, BlockPart, BlocksEvent, ClientHost, ClientTickPostEvent, ClientTickPreEvent,
+    Hooks, HostSide, LevelTickPostEvent, LevelTickPreEvent, Registrar, RegistrationContext,
 };
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 const HUM: &str = "client_tick_probe:hum";
@@ -24,22 +30,35 @@ const QUIET_AT: [i32; 3] = [1605, 64, 1605];
 /// A hum in the next column, which stays.
 const OTHER: [i32; 3] = [1620, 64, 1600];
 
-/// What each call saw: the position, the position its handle reads (a live copy's), its
-/// entity's id, its block state's block and its `rpm`.
-static CALLS: Mutex<Vec<([i32; 3], [i32; 3], String, String, i32)>> = Mutex::new(Vec::new());
+/// What the probe heard, in order: the client tick's and level's brackets, each client tick
+/// (`tick`, its position and `rpm`) and each synced data notice (`data`).
+static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-fn record(host: &dyn ClientHost, event: &BlockEntityClientTickEvent<'_>) {
-    let rpm = match event.entity.nbt.get(&"rpm".into()) {
+fn note(event: String) {
+    EVENTS.lock().unwrap().push(event);
+}
+
+fn take_events() -> Vec<String> {
+    std::mem::take(&mut *EVENTS.lock().unwrap())
+}
+
+fn rpm_of(nbt: &Compound) -> i32 {
+    match nbt.get(&"rpm".into()) {
         Some(Tag::Int(rpm)) => *rpm,
         _ => -1,
-    };
-    let block = event.state.block().id(host);
-    CALLS.lock().unwrap().push((
+    }
+}
+
+/// A client tick's event, once its handle is checked to read its position and its state to be
+/// its block's.
+fn record(host: &dyn ClientHost, event: &BlockEntityClientTickEvent<'_>) {
+    assert_eq!(event.block_entity.position(host), Some(event.pos));
+    // The block and its block entity type share the name here.
+    assert_eq!(event.state.block().id(host), event.entity.id());
+    note(format!(
+        "tick {:?} {}",
         event.pos,
-        event.block_entity.position(host).unwrap_or([0; 3]),
-        event.entity.id().to_owned(),
-        block,
-        rpm,
+        rpm_of(&event.entity.nbt)
     ));
 }
 
@@ -62,6 +81,17 @@ impl BlockEntityPart for Hum {
         event: &mut BlockEntityClientTickEvent<'_>,
     ) {
         record(host, event);
+    }
+    fn block_entity_data_received(
+        &self,
+        host: &dyn ClientHost,
+        event: &mut BlockEntityDataReceivedEvent<'_>,
+    ) {
+        let pos = event.entity.position(host).unwrap();
+        note(format!(
+            "data {pos:?} {}",
+            rpm_of(&event.entity.data(host).unwrap())
+        ));
     }
 }
 
@@ -96,6 +126,22 @@ impl Hooks for Probe {
                 .push(mod_api::Block::new(block, "minecraft:stone"));
         }
     }
+    fn client_tick_pre(&self, _: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
+        note("client_pre".into());
+    }
+    fn client_tick_post(&self, _: &mut dyn ClientHost, _: &mut ClientTickPostEvent) {
+        note("client_post".into());
+    }
+    fn level_tick_pre(&self, host: HostSide<'_>, _: &mut LevelTickPreEvent) {
+        if let HostSide::Client(_) = host {
+            note("level_pre".into());
+        }
+    }
+    fn level_tick_post(&self, host: HostSide<'_>, _: &mut LevelTickPostEvent) {
+        if let HostSide::Client(_) = host {
+            note("level_post".into());
+        }
+    }
 }
 
 fn install() {
@@ -120,38 +166,60 @@ fn rpm(rpm: i32) -> Compound {
     nbt
 }
 
-fn take_calls() -> Vec<([i32; 3], [i32; 3], String, String, i32)> {
-    std::mem::take(&mut *CALLS.lock().unwrap())
+/// One frame: what the server sent is handled (`update_world`, which a frame runs before its
+/// ticks), then `steps` client ticks. Returns what the probe heard and how many snapshots the
+/// frame made.
+fn frame(game: &mut crate::game::Game<'_>, steps: u32) -> (Vec<String>, usize) {
+    let made = CLIENT_SNAPSHOTS_MADE.load(Ordering::Relaxed);
+    game.update_world();
+    game.client_tick_steps(steps, None).unwrap();
+    (
+        take_events(),
+        CLIENT_SNAPSHOTS_MADE.load(Ordering::Relaxed) - made,
+    )
+}
+
+/// The events of one client tick that ticks the level, its client ticks being `ticks`.
+fn ticked(ticks: &[([i32; 3], i32)]) -> Vec<String> {
+    let mut events = vec!["client_pre".to_owned(), "level_pre".to_owned()];
+    events.extend(ticks.iter().map(|(pos, rpm)| format!("tick {pos:?} {rpm}")));
+    events.extend(["level_post".to_owned(), "client_post".to_owned()]);
+    events
 }
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn a_client_ticks_its_declared_copies_until_their_column_goes() {
+fn a_clients_frames_tick_its_declared_copies_until_they_go() {
     use crate::game::execution_role::ExecutionRole;
     use horizon_client::{
         chunk::Chunk,
         containers::{ModBlockEntity, ModBlockEntityFields},
     };
-    use horizon_protocol::connection::Pipe;
+    use horizon_protocol::packets::play;
     if run_fresh_cases(
-        "game::native_hooks::block_entity_client_tick_tests::a_client_ticks_its_declared_copies_until_their_column_goes",
+        "game::native_hooks::block_entity_client_tick_tests::a_clients_frames_tick_its_declared_copies_until_they_go",
         "HORIZON_BLOCK_ENTITY_CLIENT_TICK_CHILD",
         &["game"],
     ) {
         return;
     }
     install();
+    let types = ["client_tick_probe:hum", "client_tick_probe:quiet"];
     with_game_at(prepared_root(), |game| {
         game.options.execution_role = ExecutionRole::Client;
         game.options.dedicated = None;
 
         // Not connected yet: no client level, nothing told.
         game.client_tick_mod_block_entities();
-        assert!(take_calls().is_empty(), "told without a client level");
+        assert!(take_events().is_empty(), "told without a client level");
 
-        let (client, _server) = Pipe::pair();
-        game.connect_local(client, "ClientTickProbe").unwrap();
-        game.remote.as_mut().unwrap().logged_in = true;
+        let (_sent, mut server) = crate::game::remote::tests::connect_menu_test(game);
+        let remote = game.remote.as_mut().unwrap();
+        remote.logged_in = true;
+        Arc::make_mut(&mut remote.builtin).registries.insert(
+            "minecraft:block_entity_type".into(),
+            horizon_protocol::registry::Ids::from_names(types.map(str::to_owned).to_vec()),
+        );
         for (x, z) in [CHUNK, (101, 100)] {
             game.streaming
                 .insert_remote(&mut game.world, Chunk::empty(x, z));
@@ -179,58 +247,65 @@ fn a_client_ticks_its_declared_copies_until_their_column_goes() {
                 .block_entities
                 .insert((x, y, z), BlockEntity::Mod(Box::new(entity)));
         }
+        take_events();
 
-        let hums = |rpms: [i32; 3]| {
-            [HUMS[1], HUMS[0], OTHER]
-                .into_iter()
-                .zip(rpms)
-                .map(|(pos, rpm)| (pos, pos, HUM.to_owned(), HUM.to_owned(), rpm))
-                .collect::<Vec<_>>()
-        };
-        for _ in 0..3 {
-            game.client_tick_mod_block_entities();
-            assert_eq!(
-                take_calls(),
-                hums([10, 30, 40]),
-                "once per tick each, in arrival order, the quiet type never"
-            );
+        // Each declared copy once per tick, in arrival order, inside the level's brackets; the
+        // quiet type never. One snapshot per copy, then none while the copies stay the same.
+        let all = |first| ticked(&[(HUMS[1], 10), (HUMS[0], first), (OTHER, 40)]);
+        assert_eq!(frame(game, 1), (all(30), 3));
+        assert_eq!(frame(game, 2), ([all(30), all(30)].concat(), 0));
+
+        // The server's update reaches the next frame's drain: the notice comes first, and both
+        // of that frame's ticks see the merged data, from one new snapshot.
+        server
+            .send(
+                &play::Clientbound::BlockEntityData(play::BlockEntityData {
+                    pos: HUMS[0],
+                    kind: 0,
+                    tag: Tag::Compound(rpm(31)),
+                })
+                .encode(),
+            )
+            .unwrap();
+        // The frame whose drain (`update_world`) handles it, once the connection has it.
+        let made = CLIENT_SNAPSHOTS_MADE.load(Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while EVENTS.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "the update did not arrive");
+            std::thread::sleep(Duration::from_millis(1));
+            game.update_world();
         }
+        game.client_tick_steps(2, None).unwrap();
+        let data = format!("data {:?} 31", HUMS[0]);
+        assert_eq!(take_events(), [vec![data], all(31), all(31)].concat());
+        assert_eq!(CLIENT_SNAPSHOTS_MADE.load(Ordering::Relaxed) - made, 1);
 
-        // An update merged into a copy reaches its next tick.
-        let [x, y, z] = HUMS[0];
-        let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get_mut(&(x, y, z)) else {
-            panic!("no hum at {x} {y} {z}");
-        };
-        entity.merge_update_tag(&rpm(31));
-        game.client_tick_mod_block_entities();
-        assert_eq!(take_calls(), hums([10, 31, 40]));
+        // Paused, the client tick runs but not the level; frozen, the level runs but not its
+        // block entities.
+        game.pause = true;
+        assert_eq!(
+            frame(game, 1).0,
+            ["client_pre", "client_post"].map(str::to_owned)
+        );
+        game.pause = false;
+        game.clock.set_frozen(true);
+        assert_eq!(frame(game, 1).0, ticked(&[]));
+        game.clock.set_frozen(false);
 
         // A copy removed is not told again; its column's other hum still is.
         let [x, y, z] = HUMS[1];
         game.world.block_entities.remove(&(x, y, z));
-        game.client_tick_mod_block_entities();
-        assert_eq!(
-            take_calls(),
-            vec![
-                (HUMS[0], HUMS[0], HUM.to_owned(), HUM.to_owned(), 31),
-                (OTHER, OTHER, HUM.to_owned(), HUM.to_owned(), 40)
-            ]
-        );
+        assert_eq!(frame(game, 1).0, ticked(&[(HUMS[0], 31), (OTHER, 40)]));
 
         // The server forgets the column: its hums are not told again, the other column's is.
         game.forget_remote_columns(&mut [CHUNK].into_iter().collect(), true);
         for _ in 0..2 {
-            game.client_tick_mod_block_entities();
-            assert_eq!(
-                take_calls(),
-                vec![(OTHER, OTHER, HUM.to_owned(), HUM.to_owned(), 40)]
-            );
+            assert_eq!(frame(game, 1).0, ticked(&[(OTHER, 40)]));
         }
 
         // The level going leaves nothing to tell.
         game.forget_all_remote_columns();
-        game.client_tick_mod_block_entities();
-        assert!(take_calls().is_empty(), "told after the level went");
+        assert_eq!(frame(game, 1).0, ticked(&[]));
     });
 }
 
@@ -296,7 +371,10 @@ fn a_server_never_ticks_a_client_ticker() {
             ),
             "the hum was placed"
         );
-        assert!(take_calls().is_empty(), "a server told a client tick");
+        assert!(
+            !take_events().iter().any(|e| e.starts_with("tick")),
+            "a server told a client tick"
+        );
     });
     let _ = std::fs::remove_dir_all(&saves);
 }

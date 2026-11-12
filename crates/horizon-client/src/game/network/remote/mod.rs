@@ -11848,7 +11848,7 @@ mod level_sound_tests;
 #[cfg(test)]
 mod attachment_query_tests;
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::api_values::TryIntoApi;
 
     #[test]
@@ -12824,7 +12824,7 @@ mod tests {
     /// A client connecting through a local pipe and through configuration, as
     /// the client menu tests drive it: the server end's reader (what the
     /// client sends) and writer.
-    fn connect_menu_test(
+    pub(crate) fn connect_menu_test(
         game: &mut super::Game<'_>,
     ) -> (
         horizon_protocol::connection::ConnReader,

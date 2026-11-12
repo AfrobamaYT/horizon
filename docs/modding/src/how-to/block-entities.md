@@ -132,21 +132,32 @@ server hook told after the chunk's block entities; a client is told of the block
 
 What a running machine does on the client alone (a looping hum, smoke from its chimney, a part eased between
 two server updates) hangs off its client tick, vanilla's client `BlockEntityTicker`. A `BlockEntityPart` opts
-its type in with `block_entity_client_ticks` and is then told `block_entity_client_tick` once per client tick
-for each copy this client holds, while the level runs, in vanilla's ticker order. It is never called on a
-server, and a type that doesn't opt in costs nothing.
+its type in with `block_entity_client_ticks`, asked once for each of its blocks, and is then told
+`block_entity_client_tick` once per client tick for each copy this client holds, while the level runs (not
+paused or frozen), in vanilla's ticker order. A loaded copy ticks whether or not it is drawn: hidden behind a
+wall, out of view or beyond `block_entity_view_distance`, where `block_entity_submit` is not called. It is
+never called on a server, and a type that doesn't opt in costs nothing.
 
-The event has the copy's `pos`, its `block_entity` handle, its block `state` and its `entity` data as the server
-last sent it (`block_entity_update_tag`), read only, and the host is a `ClientHost`. Here a machine whose update
-tag carries `running` starts a looping hum on the first client tick it runs and fades it out when it stops:
+The event has the copy's `pos`, its `block_entity` handle, its block `state` and its `entity` data, read only,
+and the host is a `ClientHost`. The data is what the frame's handling of the server's packets merged into the
+copy (`block_entity_update_tag`, and `block_entity_data_received` told before): a frame handles what has
+arrived, then runs its client ticks, so every tick of one frame sees the same data, and an update that arrives
+during a frame is seen from the next frame's first tick.
+
+Here a machine whose update tag carries `running` starts a looping hum on the first client tick it runs and
+fades it out when it stops:
 
 ```rust,ignore
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
-static HUMS: Mutex<HashMap<[i32; 3], mod_api::SoundRef>> = Mutex::new(HashMap::new());
+/// The hums playing, by the machine they belong to.
+static HUMS: LazyLock<Mutex<HashMap<mod_api::BlockEntityRef, mod_api::SoundRef>>> =
+    LazyLock::new(Default::default);
 
 struct Hum;
+#[mod_api::horizon_part]
+impl mod_api::BlockPart for Hum {}
 #[mod_api::horizon_part]
 impl mod_api::BlockEntityPart for Hum {
     fn block_entity_client_ticks(
@@ -163,38 +174,49 @@ impl mod_api::BlockEntityPart for Hum {
     ) {
         let running = matches!(event.entity.nbt.get(&"running".into()), Some(mod_api::Tag::Byte(1)));
         let mut hums = HUMS.lock().unwrap();
-        match (running, hums.get(&event.pos)) {
+        match (running, hums.get(&event.block_entity).copied()) {
             (true, None) => {
                 let [x, y, z] = event.pos.map(|c| f64::from(c) + 0.5);
                 let play = mod_api::SoundPlay::at("mymod:machine.hum", mod_api::SoundSource::Blocks, [x, y, z])
                     .looping(0);
                 if let Some(sound) = host.play_local_sound(&play, 0) {
-                    hums.insert(event.pos, sound);
+                    hums.insert(event.block_entity, sound);
                 }
             }
             (false, Some(sound)) => {
                 // A fade to 0 stops the sound when it ends.
                 sound.fade(&*host, 0.0, 20);
-                hums.remove(&event.pos);
+                hums.remove(&event.block_entity);
             }
             _ => {}
         }
     }
-    fn on_chunk_unloaded(&self, host: mod_api::HostSide<'_>, event: &mut mod_api::OnChunkUnloadedEvent<'_>) {
-        if let mod_api::HostSide::Client(host) = host
-            && let Some(sound) = HUMS.lock().unwrap().remove(&event.pos)
-        {
-            sound.stop(&*host);
-        }
+}
+
+struct MyMod;
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for MyMod {
+    // A machine removed, replaced or whose chunk unloaded ticks no more, and its handle no
+    // longer reads: its hum stops.
+    fn client_tick_post(&self, host: &mut dyn mod_api::ClientHost, _: &mut mod_api::ClientTickPostEvent) {
+        HUMS.lock().unwrap().retain(|machine, sound| {
+            let here = machine.position(&*host).is_some();
+            if !here {
+                sound.stop(&*host);
+            }
+            here
+        });
     }
 }
 ```
 
-The copy is told in the order it arrived, a chunk's own in its map's order, as vanilla's client ticker list
-gives. One removed, replaced by another type, changed to a block state without a client ticker or whose chunk
-unloads is not told again from that tick on, so stop what it keeps in `on_chunk_unloaded`, as above: a looping
-sound plays on until it is stopped or the player leaves the level. Add particles from the same tick with
-`host.add_particle` ([hook notes](../reference/hook-notes.md#client-ticks-hums-smoke-and-moving-parts)).
+The copies are told in the order they arrived, a chunk's own in its map's order, as vanilla's client ticker
+list gives. One removed, replaced by another type, changed to a block state without a client ticker or whose
+chunk unloads is not told again from that tick on, so a looping sound it started plays on until something else
+stops it: the example stops a hum once its machine's handle no longer reads (removal, replacement and unload
+all end a handle), and a type with states that don't tick would also stop it when the state changes. Leaving
+or changing levels stops every sound. Add particles from the same tick with `host.add_particle`
+([hook notes](../reference/hook-notes.md#client-ticks-hums-smoke-and-moving-parts)).
 
 `player.open_menu(host, entity)` also returns `Result<bool, BlockEntityError>`:
 `Ok(true)` means opened, `Ok(false)` means a non-provider, cancelled open or
