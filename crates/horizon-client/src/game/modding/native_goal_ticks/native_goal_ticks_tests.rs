@@ -233,14 +233,16 @@ fn two_mobs_keep_independent_state_and_random_streams() {
         game.mobs[1].ai.goals.clear();
         mobs::part_goals::attach(&mut game.mobs[0]);
         mobs::part_goals::attach(&mut game.mobs[1]);
+        // Construction already consumed the living entity's yaw draw.
+        // Snapshot at the goal boundary, not before the entity constructor.
+        let mut after_first = game.mobs[0].random.clone();
+        let mut after_second = game.mobs[1].random.clone();
         tick_goals(game, 0);
         tick_goals(game, 1);
         assert_eq!(calls(10), ["can_use", "start", "tick"]);
         assert_eq!(calls(11), ["can_use", "start", "tick"]);
         // Each start drew once from its own mob's generator: the next draws
-        // match fresh copies advanced by one, and the two drew differently.
-        let mut after_first = mobs::entity_random(10, Vec3::new(3.5, 65.0, 3.5));
-        let mut after_second = mobs::entity_random(11, Vec3::new(23.5, 65.0, 23.5));
+        // match the pre-tick copies advanced by one, and the two drew differently.
         let (first_draw, second_draw) = (
             after_first.next_int_bound(1000).unwrap(),
             after_second.next_int_bound(1000).unwrap(),

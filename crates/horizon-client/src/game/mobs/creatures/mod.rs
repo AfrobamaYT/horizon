@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod borrowed_panic_tests;
 mod borrowed_tick;
+mod breeding;
 mod combat_adaptations;
 mod death_tail;
 mod hoglin_target;
@@ -3496,9 +3497,17 @@ impl Game<'_> {
                     partner,
                     equine,
                     parent_variant,
+                    wolf_voice,
                     experience,
                 } => {
-                    let child = self.breed(parent, partner, equine, parent_variant, experience);
+                    let child = self.breed(
+                        parent,
+                        partner,
+                        equine,
+                        parent_variant,
+                        wolf_voice,
+                        experience,
+                    );
                     self.native_entity_breed(parent, partner, child);
                 }
                 MobEvent::LockGaze { mob, partner } => {
@@ -3770,40 +3779,6 @@ impl Game<'_> {
             horizon_client::mobs::BreedExperience::Drawn(None) => {}
         }
     }
-    /// `Animal.finalizeSpawnChildFromBreeding` before the experience orb.
-    fn finalize_breeding(
-        &mut self,
-        parent: &Mob,
-        partner: u32,
-        child: Option<&Mob>,
-        order: OrbOrder,
-    ) {
-        if let Some(cause) = breeding_credit(&mut self.love_cause, parent.id, partner) {
-            let parent_view = self.mob_entity(parent);
-            let partner_view = self
-                .mobs
-                .iter()
-                .find(|m| m.id == partner)
-                .map(|m| self.mob_entity(m))
-                .unwrap_or_else(|| parent_view.clone());
-            let child_view = child.map(|child| self.mob_entity(child));
-            let who = cause.map_or(
-                super::commands::Target::Player,
-                super::commands::Target::Guest,
-            );
-            self.for_player(who, |g| {
-                g.award_custom_stat("animals_bred", 1);
-                g.trigger_bred(&parent_view, &partner_view, child_view.as_ref());
-            });
-        }
-        if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
-            q.extra.age = 6000;
-            q.extra.in_love = 0;
-        }
-        if order == OrbOrder::BeforeChild {
-            self.mob_event_particles(parent.id, 18);
-        }
-    }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
     /// across and 10 up and down get `NeutralMob.playerDied`, when the
     /// `forgive_dead_players` rule is on. A mob's `Who::Player` is the guest
@@ -3870,6 +3845,7 @@ impl Game<'_> {
         partner: u32,
         equine: Option<Box<horizon_client::mobs::equine::Offspring>>,
         parent_variant: Option<bool>,
+        wolf_voice: Option<u8>,
         experience: horizon_client::mobs::BreedExperience,
     ) -> Option<u32> {
         let p = self.mobs.iter().find(|m| m.id == parent).cloned()?;
@@ -4094,7 +4070,7 @@ impl Game<'_> {
                     );
                     child.extra.color = mixed;
                 }
-                child.extra.sound_variant = self.bred_wolf_voice(parent);
+                child.extra.sound_variant = wolf_voice.or_else(|| self.bred_wolf_voice(parent));
                 break 'offspring;
             }
             // Panda.getBreedOffspring: genes from both parents.
@@ -6768,7 +6744,7 @@ impl Game<'_> {
         let mut equip_event: Option<bool> = None;
         let mut consume = false;
         let mut give: Option<&str> = None;
-        let mut sound: Option<&str> = None;
+        let mut sound: Option<(&str, f32, f32)> = None;
         // Sounds played as vanilla plays them: (event, volume, pitch) at the feet.
         let mut eat: Option<(&'static str, f32, f32)> = None;
         let feet = [m.position.x, m.position.y, m.position.z];
@@ -6799,17 +6775,18 @@ impl Game<'_> {
             Species::Cow | Species::Mooshroom if item == "minecraft:bucket" && !m.is_baby() => {
                 give = Some("minecraft:milk_bucket");
                 consume = true;
-                sound = Some("entity.cow.milk");
+                sound = Some(("entity.cow.milk", 1.0, 1.0));
             }
             // Goat.mobInteract: a bucket on an adult gives milk.
             Species::Goat if item == "minecraft:bucket" && !m.is_baby() => {
                 give = Some("minecraft:milk_bucket");
                 consume = true;
-                sound = Some(if m.extra.screaming {
+                let milk = if m.extra.screaming {
                     "entity.goat.screaming.milk"
                 } else {
                     "entity.goat.milk"
-                });
+                };
+                sound = Some((milk, 1.0, 1.0));
             }
             // MushroomCow.mobInteract: a bowl gives back what a flower left as
             // a suspicious stew, or plain stew when it holds no effects.
@@ -6824,7 +6801,7 @@ impl Game<'_> {
                     }
                     None => {
                         give = Some("minecraft:mushroom_stew");
-                        sound = Some("entity.mooshroom.milk");
+                        sound = Some(("entity.mooshroom.milk", 1.0, 1.0));
                     }
                 }
             }
@@ -6868,6 +6845,8 @@ impl Game<'_> {
                 );
                 drops.extend(stacks.into_iter().map(|s| (s.item.to_string(), s.count)));
                 wool = true;
+                let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
+                self.post_game_event("minecraft:shear", feet, ctx);
                 self.damage_held_tool();
             }
             // Entity.interact: shears take a tamed wolf's armor off for its owner.
@@ -7335,16 +7314,15 @@ impl Game<'_> {
             // DYE_USE, PLAYERS, 1, 1), whose player is left out because their
             // client played it; Horizon's own client plays it from the packet,
             // so every player gets it.
-            Some(s @ ("entity.sheep.shear" | "item.dye.use")) => {
+            Some((s @ ("entity.sheep.shear" | "item.dye.use"), volume, pitch)) => {
                 let name = full_id(s);
                 let id = self.mobs[index].id;
-                let sound = LevelSound::new(&name, feet, 1.0, 1.0).in_source(SoundSource::Players);
+                let sound =
+                    LevelSound::new(&name, feet, volume, pitch).in_source(SoundSource::Players);
                 self.play_bound_sound(sound, id, None);
             }
-            Some(s) => {
-                let pitch =
-                    (self.world.random.next_float() - self.world.random.next_float()) * 0.2 + 1.0;
-                self.audio.play(&full_id(s), Some(center), 1.0, pitch);
+            Some((s, volume, pitch)) => {
+                self.audio.play(&full_id(s), Some(feet), volume, pitch);
             }
             None => {}
         }
@@ -10233,8 +10211,13 @@ mod breeding_tests {
     #[ignore = "needs prepared resources"]
     fn wolf_breeding_selects_either_coat_from_the_parent_stream() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            // Different coats, both nextBoolean outcomes, followed by nextInt(7).
-            for (seed, coat, xp, next) in [(42, 1, 6, -1_360_544_799), (4096, 2, 4, -916_162_618)] {
+            // Computed with an independent implementation of the documented java.util.Random
+            // algorithm, not from the game's output.
+            // Java LCG: s0 = (seed ^ 0x5DEECE66D) & (2^48 - 1),
+            // s' = (25214903917*s + 11) mod 2^48. Draw 1 selects the coat;
+            // draw 2 selects one of 7 voices; draw 3 yields 1 + (s >> 17) % 7 XP;
+            // draw 4 is signed(s >> 16). Neither bounded draw rejects these seeds.
+            for (seed, coat, xp, next) in [(42, 1, 7, 205_897_768), (4096, 2, 3, 1_387_017_903)] {
                 let result = tick_breeding(game, "minecraft:wolf", "minecraft:wolf", seed, true);
                 assert_eq!(result.child.extra.variant, coat);
                 assert_eq!(result.experience, BreedExperience::Drawn(Some(xp)));
@@ -10327,6 +10310,7 @@ mod breeding_tests {
                     base + 2,
                     None,
                     None,
+                    None,
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(child, Some(base + 3));
@@ -10405,6 +10389,7 @@ mod breeding_tests {
                     fox_base + 2,
                     None,
                     None,
+                    None,
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(fox_child, Some(fox_base + 3));
@@ -10430,6 +10415,7 @@ mod breeding_tests {
                     base + 2,
                     None,
                     Some(choice),
+                    None,
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(child, None);
@@ -13638,6 +13624,7 @@ mod breeding_heart_tests {
             game.breed(
                 1,
                 2,
+                None,
                 None,
                 None,
                 horizon_client::mobs::BreedExperience::Deferred,

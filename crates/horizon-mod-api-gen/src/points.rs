@@ -441,7 +441,12 @@ impl Scanned {
         // A point is installed through its function's replacement cell: only a replaceable
         // function has one.
         let none = std::collections::BTreeSet::new();
-        let replaceable = crate::replace::targets(&self.module, &self.parsed, &none, &none);
+        let replaceable = crate::replace::targets(
+            &self.module,
+            &self.parsed,
+            &none,
+            &crate::replace::OwnerTypes::default(),
+        );
         for found in &mut out {
             // Only the game's own crate has the conversions a mirror goes through.
             found.mirrors = mirrors(found.sig, &uses, wire, self.package.is_none());
