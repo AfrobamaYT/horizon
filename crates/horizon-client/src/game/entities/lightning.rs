@@ -26,24 +26,24 @@ pub(super) struct Bolt {
     /// The entity id a server's players know it by (0 until it has one).
     pub id: u32,
     pub at: [f64; 3],
-    pub(in crate::game) life: i32,
-    pub(in crate::game) flashes: i32,
-    pub(in crate::game) seed: i64,
+    life: i32,
+    flashes: i32,
+    seed: i64,
     /// The bolt's own random (`Entity.random`): its seed, flashes, flash
     /// timing, fire spots and thunder pitch draw from it, never the level's.
-    pub(in crate::game) random: LegacyRandom,
-    pub(in crate::game) visual_only: bool,
+    random: LegacyRandom,
+    visual_only: bool,
     /// Mooshrooms and copper golems change once per bolt.
-    pub(in crate::game) converted: Vec<u32>,
+    converted: Vec<u32>,
     /// The mobs it has struck (`hitEntities`).
-    pub(in crate::game) hit: Vec<u32>,
+    hit: Vec<u32>,
     /// The dropped items in the strike box (`hitEntities` holds every entity).
-    pub(in crate::game) hit_items: Vec<u32>,
+    hit_items: Vec<u32>,
     /// Items a cushion dropped under it, spared for 20 ticks
     /// (`Cushion.dropItem`: `setInvulnerableTime(20)`).
-    pub(in crate::game) spared: Vec<u32>,
+    spared: Vec<u32>,
     /// Blocks it set on fire (`blocksSetOnFire`).
-    pub(in crate::game) fires: i32,
+    fires: i32,
     /// The player who channelled it (`LightningBolt.cause`): `Some(None)` for
     /// the host, `Some(Some(conn))` for a guest.
     pub cause: Option<Option<u32>>,
@@ -63,6 +63,29 @@ fn thunder_strike_column(ticks: &mut Ticks, cx: i32, cz: i32) -> (i32, i32) {
     let r = ticks.block_random_pos(cx * 16, 0, cz * 16, 15);
     (r.x, r.z)
 }
+
+#[cfg(test)]
+impl Bolt {
+    /// A spent bolt at `at`, for tests that call `thunder_hit` directly.
+    pub(in crate::game) fn struck_at(id: u32, at: [f64; 3]) -> Self {
+        Self {
+            id,
+            at,
+            life: 0,
+            flashes: 0,
+            seed: 0,
+            random: LegacyRandom::new(0),
+            visual_only: false,
+            converted: Vec::new(),
+            hit: Vec::new(),
+            hit_items: Vec::new(),
+            spared: Vec::new(),
+            fires: 0,
+            cause: None,
+        }
+    }
+}
+
 impl Game<'_> {
     /// `ServerChunkCache.tickSpawningChunk`: one `tickThunder` roll per
     /// spawning chunk (within 128 blocks of a player) that is in entity

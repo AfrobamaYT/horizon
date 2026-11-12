@@ -2,7 +2,7 @@
 use crate::game::lightning::Bolt;
 use crate::game::native_entity_refs::tests::with_game;
 use horizon_client::items::ItemStack;
-use horizon_core::{geometry::Vec3, random::LegacyRandom};
+use horizon_core::geometry::Vec3;
 
 #[test]
 #[ignore = "requires prepared resources"]
@@ -19,21 +19,7 @@ fn lightning_items_take_five_damage_per_strike() {
             }
             let survivor = game.dropped[2].id;
             game.dropped[2].health = 10;
-            let mut bolt = Bolt {
-                id: 77,
-                at: [0.5, 64.0, 0.5],
-                life: 0,
-                flashes: 0,
-                seed: 0,
-                random: LegacyRandom::new(0),
-                visual_only: false,
-                converted: Vec::new(),
-                hit: Vec::new(),
-                hit_items: Vec::new(),
-                spared: Vec::new(),
-                fires: 0,
-                cause: None,
-            };
+            let mut bolt = Bolt::struck_at(77, [0.5, 64.0, 0.5]);
             let mut resistant = ItemStack::new("minecraft:stone", 1);
             resistant.data_mut().set_other(
                 "minecraft:damage_resistant",
@@ -101,21 +87,7 @@ fn lightning_item_listener_can_refuse_damage() {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.spawn_item_own(ItemStack::new("minecraft:stone", 1), [0.0, 64.0, 0.0], 10);
-                let mut bolt = Bolt {
-                    id: 77,
-                    at: [0.5, 64.0, 0.5],
-                    life: 0,
-                    flashes: 0,
-                    seed: 0,
-                    random: LegacyRandom::new(0),
-                    visual_only: false,
-                    converted: Vec::new(),
-                    hit: Vec::new(),
-                    hit_items: Vec::new(),
-                    spared: Vec::new(),
-                    fires: 0,
-                    cause: None,
-                };
+                let mut bolt = Bolt::struck_at(77, [0.5, 64.0, 0.5]);
                 game.thunder_hit(&mut bolt);
                 assert_eq!(game.dropped.len(), 1);
                 assert_eq!(game.dropped[0].health, 5);
