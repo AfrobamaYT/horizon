@@ -728,8 +728,10 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
 /// The entry files of mods' datapack registries in `packs`, lowest pack first: each file
 /// `data/<entry namespace>/<registry namespace>/<registry path>/<entry>.json` of a registry
 /// in `registries` (`(namespace, path)` of its key), by that path, each path's versions in
-/// pack order, each with its pack's id. The folders are the mods' own, so the fixed kinds
-/// `DataStore` lists never cover them.
+/// pack order, each with its pack's id. Only the highest accepted version is read into
+/// the returned map. `fallback` permits trying lower versions after a condition refusal;
+/// registered conditions disable fallback so losing callbacks never run. The folders
+/// are the mods' own, so the fixed kinds `DataStore` lists never cover them.
 pub fn registry_files(
     packs: &[&DataPack],
     registries: &[(&str, &str)],
