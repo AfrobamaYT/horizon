@@ -13,6 +13,7 @@ pub(crate) mod package_side;
 pub(crate) mod packets;
 pub(crate) mod payload_codec;
 pub(crate) mod registry_keys;
+pub(crate) mod attached_storage;
 pub(crate) mod resource;
 
 pub(crate) mod professions;

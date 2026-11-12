@@ -17,6 +17,8 @@ mod players;
 #[cfg(test)]
 mod idle_tests;
 #[cfg(test)]
+mod attached_storage_tests;
+#[cfg(test)]
 mod mob_tests;
 #[cfg(test)]
 mod painting_tests;
