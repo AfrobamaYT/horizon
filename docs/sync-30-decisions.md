@@ -36,3 +36,5 @@ Independent static review found no remaining integration blocker after the camer
 ## Verification status
 
 `cargo check --workspace --all-targets` completed successfully with zero warnings before the first push. Touched Rust was formatted. No local tests, clippy, parity harnesses or game runs. Exact-head CI and the root-ordered final static glance remain pending.
+
+Fresh main advanced to `c96494f612b64b87fa66444a30c042f5b57136a8` immediately before the first push; merged once, cleanly. The complete integrated `cargo check --workspace --all-targets` then passed with zero warnings.
