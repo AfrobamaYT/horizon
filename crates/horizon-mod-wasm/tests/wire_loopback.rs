@@ -10,6 +10,8 @@ mod block_entity_on_load;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/biome_region_registration.rs"]
+mod biome_region_registration;
 #[path = "wire_loopback/block_entity_transform.rs"]
 mod block_entity_transform;
 #[path = "wire_loopback/load_conditions.rs"]
@@ -236,6 +238,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             _: &mod_api::RegistrationContext,
         ) {
             arm_pose_registration::check(registrar);
+            biome_region_registration::register(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
             piglin_answers::register(registrar);
@@ -859,6 +862,29 @@ fn wire_loopback_answered_collect_names_the_guest_mod() {
     });
 }
 
+#[test]
+fn wire_loopback_biome_region_declaration_reaches_the_host_bit_exact() {
+    let mods = [mod_api::ModEntry::new(
+        "wire_test",
+        Box::new(WasmMod {
+            group: 0,
+            subscribed: &[],
+            listeners: &[],
+            corrupt: false,
+        }),
+    )];
+    mod_api::__private::install_parts(
+        &mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
+    let declared = mod_api::__private::biome_region_declarations();
+    assert_eq!(declared.len(), 1);
+    assert_eq!(declared[0].mod_id, "wire_test");
+    assert_eq!(declared[0].id, "wire_test:ember_marsh");
+    assert_eq!(declared[0].region, biome_region_registration::region());
+}
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     mod_api::__private::initialize().unwrap();
