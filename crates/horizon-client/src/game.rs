@@ -121,7 +121,6 @@ use loading_window::{
 use self::api_values::TryIntoApi;
 pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
 use horizon_client::actions::Action as Mapping;
-use horizon_client::held::Source;
 use horizon_client::spans::{startup, time as span};
 use horizon_client::{
     Result,
@@ -165,6 +164,7 @@ use horizon_client::{
     vanillagen::VanillaTerrain,
     world::World,
 };
+use horizon_client::{fast_hash::FxHashMap, held::Source};
 use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
     geometry::{Aabb, Direction},
@@ -2137,7 +2137,7 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: HashMap<u32, horizon_mod_runtime::attachments::Attachments>,
+    entity_attachments: FxHashMap<u32, horizon_mod_runtime::attachments::Attachments>,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
