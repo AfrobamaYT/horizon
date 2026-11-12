@@ -11,6 +11,9 @@ pub(crate) struct CapabilityPart<P> {
     pub(crate) type_name: Arc<str>,
     /// Asked ahead of the game's own provider.
     pub(crate) before_game: bool,
+    /// Its place among every mod's registrations, which orders a block's providers and those of
+    /// the block entity type standing there as one list.
+    pub(crate) order: usize,
     pub(crate) provider: P,
 }
 
@@ -38,6 +41,34 @@ pub(crate) fn next<P: Clone>(
     index: &mut u32,
 ) -> Option<(P, &'static str, bool)> {
     next_provider(table.get(name)?.get(id)?, index)
+}
+
+/// The next enabled provider of two lists asked as one, `first` and `second` (a block entity
+/// type's and a block's): those asked ahead of the game, then the others, each group in
+/// registration order across both lists. `index` counts the registrations visited, as
+/// [`next_provider`]'s does; the merge is walked again from the start each call, as a position
+/// has a few providers at most.
+pub(crate) fn next_merged<P: Clone>(
+    first: &[CapabilityPart<P>],
+    second: &[CapabilityPart<P>],
+    index: &mut u32,
+) -> Option<(P, &'static str, bool)> {
+    // Each list is already in this order: those ahead of the game first, by registration.
+    let rank = |part: &CapabilityPart<P>| (!part.before_game, part.order);
+    let (mut first, mut second) = (first.iter().peekable(), second.iter().peekable());
+    let merged = std::iter::from_fn(|| match (first.peek(), second.peek()) {
+        (Some(a), Some(b)) if rank(b) < rank(a) => second.next(),
+        (Some(_), _) => first.next(),
+        (None, _) => second.next(),
+    })
+    .skip(*index as usize);
+    for part in merged {
+        *index += 1;
+        if crate::mod_index_on(part.mod_index) {
+            return Some((part.provider.clone(), part.mod_id, part.before_game));
+        }
+    }
+    None
 }
 
 /// A provider by its handler type: one case for each handler type `mod_api`'s keys name
@@ -82,15 +113,15 @@ pub(crate) fn answered<T: ?Sized>(
 /// providers and the game's); the first to answer wins. `get` takes a provider of this
 /// capability's handler type out of its case: a provider of a mod's own type the asker isn't
 /// linked with is passed over.
-pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized, C: Default>(
+pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized>(
     host: &mut dyn ServerHost,
-    next: impl Fn(&mut C) -> Option<(O, &'static str, bool)>,
+    next: impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
     get: impl Fn(&O) -> Option<&Arc<P>>,
     call: impl Fn(&P, &mut dyn ServerHost) -> Option<Box<T>>,
     game: impl FnOnce(&mut dyn ServerHost) -> bool,
 ) -> Answer<T> {
     let mut game = Some(game);
-    let mut index = C::default();
+    let mut index = 0;
     while let Some((provider, owner, before_game)) = next(&mut index) {
         if !before_game
             && let Some(game) = game.take()
@@ -109,46 +140,6 @@ pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized, C: Default>(
         true => Answer::Game,
         false => Answer::Nobody,
     }
-}
-
-/// Where a lookup is in a position's two lists of providers: those of the block entity type
-/// standing there, and those of the block.
-#[derive(Default)]
-pub(crate) struct PositionCursor {
-    entity: u32,
-    block: u32,
-    /// Past the providers asked ahead of the game.
-    rest: bool,
-}
-
-/// The next of a position's providers (`entity`'s, the block entity type's, and `block`'s, the
-/// block's, each a registration cursor as `ask_providers` takes): those asked ahead of the game,
-/// the block entity type's then the block's, then the others in the same order.
-pub(crate) fn next_at_position<O>(
-    cursor: &mut PositionCursor,
-    entity: impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
-    block: impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
-) -> Option<(O, &'static str, bool)> {
-    /// `next`'s provider if it is asked ahead of the game, leaving `index` where it was if not.
-    fn ahead<O>(
-        next: &impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
-        index: &mut u32,
-    ) -> Option<(O, &'static str, bool)> {
-        let mut peek = *index;
-        let found = next(&mut peek).filter(|(_, _, before_game)| *before_game)?;
-        *index = peek;
-        Some(found)
-    }
-    if !cursor.rest {
-        if let Some(found) = ahead(&entity, &mut cursor.entity) {
-            return Some(found);
-        }
-        if let Some(found) = ahead(&block, &mut cursor.block) {
-            return Some(found);
-        }
-        cursor.rest = true;
-    }
-    entity(&mut cursor.entity).or_else(|| block(&mut cursor.block))
 }
 
 /// CapabilityProviders operations for capabilities.

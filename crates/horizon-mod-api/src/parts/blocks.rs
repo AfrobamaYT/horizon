@@ -992,6 +992,7 @@ impl BlocksRegistrar for PartRegistrar {
         };
         self.capability(
             |p| &mut p.block_capabilities,
+            Some(|p| &p.capabilities),
             name,
             ProviderTarget::Id(&id),
             before_game,

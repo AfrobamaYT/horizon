@@ -514,6 +514,15 @@ pub mod tests {
             r.item_capability_before_game(&ITEM_ITEMS, "test:outer", |_, place| {
                 Some(Box::new(deep_places::Wrap(place.clone())))
             });
+            // The `test:ordered` block's first providers, registered ahead of its block entity
+            // type's: one after the game answering at x = 5, one ahead of it at x = 12.
+            let ordered_block = r.block_key("test:ordered");
+            r.block_capability(&ITEMS, &ordered_block, |_, at, _, _| {
+                (at.pos[0] == 5).then(|| Box::new(Marked(7)) as _)
+            });
+            r.block_capability_before_game(&ITEMS, &ordered_block, |_, at, _, _| {
+                (at.pos[0] == 12).then(|| Box::new(Marked(8)) as _)
+            });
             // `test:ordered`: one provider that declines, two that answer, and one ahead of the
             // game that answers only at x = 9.
             let ordered = r.block_entity_type_key("test:ordered");
@@ -564,13 +573,13 @@ pub mod tests {
             r.block_capability(&ITEMS, &void_bin, |_, _, _, entity| {
                 entity.is_none().then(|| Box::new(VoidBin) as _)
             });
-            // The `test:ordered` block, beside its block entity type's providers: one ahead of
-            // the game answering at x = 6 and x = 11, and one after it answering anywhere.
-            let ordered = r.block_key("test:ordered");
-            r.block_capability_before_game(&ITEMS, &ordered, |_, at, _, _| {
+            // The `test:ordered` block's later providers, registered after its block entity
+            // type's: one ahead of the game answering at x = 6 and x = 11, and one after it
+            // answering anywhere.
+            r.block_capability_before_game(&ITEMS, &ordered_block, |_, at, _, _| {
                 matches!(at.pos[0], 6 | 11).then(|| Box::new(Marked(5)) as _)
             });
-            r.block_capability(&ITEMS, &ordered, |_, _, _, _| Some(Box::new(Marked(6))));
+            r.block_capability(&ITEMS, &ordered_block, |_, _, _, _| Some(Box::new(Marked(6))));
         }
     }
 

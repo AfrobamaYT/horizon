@@ -14,11 +14,12 @@ the position and side, the block state there and the block entity, if one stands
 `r.block_capability_before_game` goes ahead of the game. A block that has a block entity may be answered both ways.
 
 Providers add up: `level.capability(host, &ITEMS, pos, side)` (`Level.getCapability`, on a `LevelRef`) asks those
-registered `_before_game` first, the block entity type's then the block's, then the game's own (a block entity's
-slots by side, by the rules hoppers follow, and a mod block entity's `block_entity_container`), then the others in
-the same order, each kind in registration order, and the first to answer wins. That order is the fork's choice,
-the game first and `_before_game` to go ahead of it: NeoForge 26.3's javadoc doesn't state one between mods'
-providers and the game's. It returns a `Capability`, the handler and who answered. A handler holds
+registered `_before_game` first, then the game's own (a block entity's slots by side, by the rules hoppers follow,
+and a mod block entity's `block_entity_container`), then the others; within each group the block's providers and
+the block entity type's are one list in registration order, neither kind first, and the first to answer wins. A
+provider that answers none passes the lookup on; handlers are never merged. Against the game's own and against
+another mod's provider at the same priority, don't count on a place: a provider that must be asked first registers
+`_before_game`. It returns a `Capability`, the handler and who answered. A handler holds
 no borrow: each call is given the host, so it may call a
 neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. A provider
 is given the block entity and side, so the handler it makes knows where its contents live. Item handlers are

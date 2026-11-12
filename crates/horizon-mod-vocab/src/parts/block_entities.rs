@@ -74,24 +74,27 @@ pub fn block_providers<T: ?Sized + 'static>(
     at: BlockSide,
 ) -> Option<BlockProviders<T>> {
     let keys = &installed()?.keys;
-    let entity = keys
-        .capabilities
-        .get(key.name)
-        .and_then(|by_kind| {
-            by_kind.get(crate::content::registry_keys::block_entity_type_name(
-                at.kind(host)?,
-            )?)
-        })
-        .map_or(&[][..], Vec::as_slice);
-    let block = keys
-        .block_capabilities
-        .get(key.name)
-        .and_then(|by_block| {
-            by_block.get(crate::content::registry_keys::block_id(
-                at.level.block(host, at.pos)?,
-            )?)
-        })
-        .map_or(&[][..], Vec::as_slice);
+    // Each table checked for the capability first, so a lookup no mod answers reads nothing at
+    // the position.
+    let entity = match keys.capabilities.contains_key(key.name) {
+        true => providers_at(
+            &keys.capabilities,
+            key.name,
+            at.kind(host)
+                .and_then(crate::content::registry_keys::block_entity_type_name),
+        ),
+        false => &[],
+    };
+    let block = match keys.block_capabilities.contains_key(key.name) {
+        true => providers_at(
+            &keys.block_capabilities,
+            key.name,
+            at.level
+                .block(host, at.pos)
+                .and_then(crate::content::registry_keys::block_id),
+        ),
+        false => &[],
+    };
     if entity.is_empty() && block.is_empty() {
         return None;
     }
@@ -121,13 +124,7 @@ impl<T: ?Sized + 'static> BlockProviders<T> {
         let at = self.at;
         let answer = ask_providers(
             host,
-            |cursor| {
-                next_at_position(
-                    cursor,
-                    |index| next_provider(self.entity, index),
-                    |index| next_provider(self.block, index),
-                )
-            },
+            |index| next_merged(self.entity, self.block, index),
             BlockProviderOf::get::<T>,
             |provider, host| provider.provide(host, at),
             |_| game,
@@ -231,31 +228,4 @@ pub trait BlockEntitiesRegistrar {
         before_game: bool,
         provider: BlockProviderOf,
     );
-}
-
-/// CapabilityProviders operations for block entities.
-// hidden: per-kind lookup implementation, exposed for generated provider bindings
-#[doc(hidden)]
-pub trait BlockEntitiesCapabilityProviders {
-    /// The next enabled provider of block entity capability `name` for block entity type `kind`,
-    /// with its mod and whether it is asked ahead of the game. `index` starts at zero and advances
-    /// past every visited registration, including disabled ones.
-    fn block_entity_provider(
-        &self,
-        name: &str,
-        kind: crate::BlockEntityTypeKey,
-        index: &mut u32,
-    ) -> Option<(BlockProviderOf, &'static str, bool)>;
-}
-
-impl BlockEntitiesCapabilityProviders for InstalledProviders {
-    fn block_entity_provider(
-        &self,
-        name: &str,
-        kind: crate::BlockEntityTypeKey,
-        index: &mut u32,
-    ) -> Option<(BlockProviderOf, &'static str, bool)> {
-        let kind = crate::content::registry_keys::block_entity_type_name(kind)?;
-        next(&installed()?.keys.capabilities, name, kind, index)
-    }
 }
