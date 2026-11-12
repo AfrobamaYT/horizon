@@ -6735,7 +6735,7 @@ impl Game<'_> {
         let mut equip_event: Option<bool> = None;
         let mut consume = false;
         let mut give: Option<&str> = None;
-        let mut sound: Option<&str> = None;
+        let mut sound: Option<(&str, f32, f32)> = None;
         // Sounds played as vanilla plays them: (event, volume, pitch) at the feet.
         let mut eat: Option<(&'static str, f32, f32)> = None;
         let feet = [m.position.x, m.position.y, m.position.z];
@@ -6766,17 +6766,18 @@ impl Game<'_> {
             Species::Cow | Species::Mooshroom if item == "minecraft:bucket" && !m.is_baby() => {
                 give = Some("minecraft:milk_bucket");
                 consume = true;
-                sound = Some("entity.cow.milk");
+                sound = Some(("entity.cow.milk", 1.0, 1.0));
             }
             // Goat.mobInteract: a bucket on an adult gives milk.
             Species::Goat if item == "minecraft:bucket" && !m.is_baby() => {
                 give = Some("minecraft:milk_bucket");
                 consume = true;
-                sound = Some(if m.extra.screaming {
+                let milk = if m.extra.screaming {
                     "entity.goat.screaming.milk"
                 } else {
                     "entity.goat.milk"
-                });
+                };
+                sound = Some((milk, 1.0, 1.0));
             }
             // MushroomCow.mobInteract: a bowl gives back what a flower left as
             // a suspicious stew, or plain stew when it holds no effects.
@@ -6791,7 +6792,7 @@ impl Game<'_> {
                     }
                     None => {
                         give = Some("minecraft:mushroom_stew");
-                        sound = Some("entity.mooshroom.milk");
+                        sound = Some(("entity.mooshroom.milk", 1.0, 1.0));
                     }
                 }
             }
@@ -7302,16 +7303,15 @@ impl Game<'_> {
             // DYE_USE, PLAYERS, 1, 1), whose player is left out because their
             // client played it; Horizon's own client plays it from the packet,
             // so every player gets it.
-            Some(s @ ("entity.sheep.shear" | "item.dye.use")) => {
+            Some((s @ ("entity.sheep.shear" | "item.dye.use"), volume, pitch)) => {
                 let name = full_id(s);
                 let id = self.mobs[index].id;
-                let sound = LevelSound::new(&name, feet, 1.0, 1.0).in_source(SoundSource::Players);
+                let sound =
+                    LevelSound::new(&name, feet, volume, pitch).in_source(SoundSource::Players);
                 self.play_bound_sound(sound, id, None);
             }
-            Some(s) => {
-                let pitch =
-                    (self.world.random.next_float() - self.world.random.next_float()) * 0.2 + 1.0;
-                self.audio.play(&full_id(s), Some(center), 1.0, pitch);
+            Some((s, volume, pitch)) => {
+                self.audio.play(&full_id(s), Some(feet), volume, pitch);
             }
             None => {}
         }
