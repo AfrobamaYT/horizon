@@ -106,20 +106,20 @@ pub fn installer(trait_name: Option<&syn::Ident>, name: &syn::Ident) -> syn::Ide
 /// crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's contract with that crate, and often
 /// a hot path.
 pub fn replaceable_trait<'a>(
-    scope: &Scope,
+    module: &str,
     block: &'a syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
     foreign: &BTreeSet<String>,
 ) -> Option<&'a syn::Ident> {
     let (_, path, _) = block.trait_.as_ref()?;
-    trait_exclusion(scope, block, traits, types, foreign)
+    trait_exclusion(module, block, traits, types, foreign)
         .is_none()
         .then(|| &path.segments.last().expect("a trait path has a name").ident)
 }
 
 fn trait_exclusion(
-    scope: &Scope,
+    module: &str,
     block: &syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
@@ -134,7 +134,7 @@ fn trait_exclusion(
         return Some("path-written trait owner");
     };
     let owner = owner.ident.to_string();
-    let undeclared = types.exclusion(scope, &owner);
+    let undeclared = types.exclusion(module, &owner);
     [
         (negative.is_some(), "negative trait impl"),
         (block.unsafety.is_some(), "unsafe trait impl"),
@@ -150,13 +150,13 @@ fn trait_exclusion(
 /// Why a mixin's target in the trait implementation `block` has no installer, for the refusal;
 /// `None` when it has one.
 pub(crate) fn trait_refusal(
-    scope: &Scope,
+    module: &str,
     block: &syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
     foreign: &BTreeSet<String>,
 ) -> Option<String> {
-    let reason = trait_exclusion(scope, block, traits, types, foreign)?;
+    let reason = trait_exclusion(module, block, traits, types, foreign)?;
     Some(if reason == AMBIGUOUS_OWNER {
         format!(
             "its trait implementation has no replacement installer: owner type name `{}` is ambiguous in the crate: more than one module declares it, and the `impl`'s module neither declares it nor imports it from one of them",
@@ -169,14 +169,103 @@ pub(crate) fn trait_refusal(
 
 const AMBIGUOUS_OWNER: &str = "ambiguous trait owner";
 
-/// The types a crate declares, each with the modules that declare it: a trait implementation's
-/// owner is one of them, in whatever file the `impl` is.
+/// What a crate's source says about the names of its types: each type with the modules that
+/// declare it, and each module's `use`s, gathered over every file of the module. The staging pass
+/// and the patch generator fill it from the same files, so both give a trait implementation's
+/// owner the same answer, in whatever file the `impl` is.
 #[derive(Default)]
-pub struct OwnerTypes(BTreeMap<String, BTreeSet<String>>);
+pub struct OwnerTypes {
+    types: BTreeMap<String, BTreeSet<String>>,
+    modules: BTreeMap<String, Uses>,
+}
+
+/// One module's `use`s.
+#[derive(Default)]
+struct Uses {
+    /// Names brought in by a path that starts at neither `crate`, `self` nor `super`: another
+    /// crate's, as far as this pass reads (a renamed import under its new name).
+    foreign: BTreeSet<String>,
+    /// A name brought in from a module of the crate, with that module. A renamed import is not
+    /// kept: the name written is not the type's.
+    named: BTreeMap<String, String>,
+    globs: Vec<Glob>,
+}
+
+/// A `use …::*`.
+enum Glob {
+    /// Of a module of the crate, written from `crate`, `self` or `super`.
+    Module(String),
+    /// Written from a bare name: a child module, an enum's variants, the crate under its own
+    /// name, or another crate. Which one is known once every module is read.
+    Bare(Vec<String>),
+}
+
+/// What a name is in a module, as far as its `use`s say.
+enum Binding {
+    /// The type the module `0` declares.
+    Local(String),
+    /// Another crate's.
+    Foreign,
+    /// Nothing names it, and a glob of another crate may.
+    MaybeForeign,
+    /// Two different things by two globs.
+    Ambiguous,
+    NotFound,
+}
 
 impl OwnerTypes {
-    /// Adds the structs, enums and unions `items` declare in `module`, inline modules included.
+    /// Adds what `items`, a file of `module`, declare and import, inline modules included.
     pub fn declare(&mut self, module: &str, items: &[Item]) {
+        fn parent(module: &str) -> String {
+            module
+                .rsplit_once("::")
+                .map_or(module, |(parent, _)| parent)
+                .to_owned()
+        }
+        fn names(tree: &syn::UseTree, out: &mut BTreeSet<String>) {
+            match tree {
+                syn::UseTree::Path(path) => names(&path.tree, out),
+                syn::UseTree::Name(name) => drop(out.insert(name.ident.to_string())),
+                syn::UseTree::Rename(rename) => drop(out.insert(rename.rename.to_string())),
+                syn::UseTree::Group(group) => group.items.iter().for_each(|tree| names(tree, out)),
+                syn::UseTree::Glob(_) => {}
+            }
+        }
+        fn bare_globs(tree: &syn::UseTree, path: &mut Vec<String>, out: &mut Vec<Glob>) {
+            match tree {
+                syn::UseTree::Path(next) => {
+                    path.push(next.ident.to_string());
+                    bare_globs(&next.tree, path, out);
+                    path.pop();
+                }
+                syn::UseTree::Glob(_) => out.push(Glob::Bare(path.clone())),
+                syn::UseTree::Group(group) => group
+                    .items
+                    .iter()
+                    .for_each(|tree| bare_globs(tree, path, out)),
+                syn::UseTree::Name(_) | syn::UseTree::Rename(_) => {}
+            }
+        }
+        fn local(tree: &syn::UseTree, at: &str, uses: &mut Uses) {
+            match tree {
+                syn::UseTree::Path(path) if path.ident == "super" => {
+                    local(&path.tree, &parent(at), uses)
+                }
+                syn::UseTree::Path(path) => {
+                    local(&path.tree, &format!("{at}::{}", path.ident), uses)
+                }
+                syn::UseTree::Name(name) if name.ident == "self" => {}
+                syn::UseTree::Name(name) => {
+                    uses.named.insert(name.ident.to_string(), at.to_owned());
+                }
+                syn::UseTree::Rename(_) => {}
+                syn::UseTree::Glob(_) => uses.globs.push(Glob::Module(at.to_owned())),
+                syn::UseTree::Group(group) => {
+                    group.items.iter().for_each(|tree| local(tree, at, uses))
+                }
+            }
+        }
+        let mut uses = self.modules.remove(module).unwrap_or_default();
         for item in items {
             let name = match item {
                 Item::Struct(item) => &item.ident,
@@ -188,97 +277,130 @@ impl OwnerTypes {
                     }
                     continue;
                 }
+                Item::Use(item) => {
+                    let from = match &item.tree {
+                        syn::UseTree::Path(path) if path.ident == "crate" => {
+                            Some(module.split("::").next().unwrap_or(module).to_owned())
+                        }
+                        syn::UseTree::Path(path) if path.ident == "self" => Some(module.to_owned()),
+                        syn::UseTree::Path(path) if path.ident == "super" => Some(parent(module)),
+                        _ => None,
+                    };
+                    match (&item.tree, from) {
+                        (syn::UseTree::Path(path), Some(from)) => {
+                            local(&path.tree, &from, &mut uses)
+                        }
+                        (tree, _) => {
+                            names(tree, &mut uses.foreign);
+                            bare_globs(tree, &mut Vec::new(), &mut uses.globs);
+                        }
+                    }
+                    continue;
+                }
                 _ => continue,
             };
-            self.0
+            self.types
                 .entry(name.to_string())
                 .or_default()
                 .insert(module.to_owned());
         }
+        self.modules.insert(module.to_owned(), uses);
     }
 
-    /// Why `owner`, named by an `impl` in `scope`, can't carry an installer. The name is the
-    /// type the `impl`'s own module declares; else the one a `use` of that module brings in from
-    /// a module of the crate, by name before by glob; else the crate's only type of that name.
-    /// Several modules declaring it with none of those to choose is ambiguous.
-    fn exclusion(&self, scope: &Scope, owner: &str) -> Option<&'static str> {
-        let Some(modules) = self.0.get(owner) else {
-            return Some("foreign trait owner");
+    /// The module a glob written from a bare name brings in: `Ok(None)` for one that brings in
+    /// no type (an enum's variants), `Err(())` for another crate's.
+    fn bare_glob(&self, module: &str, path: &[String]) -> Result<Option<String>, ()> {
+        let Some(first) = path.first() else {
+            return Err(());
         };
-        let named = scope
-            .named
-            .get(owner)
-            .is_some_and(|from| modules.contains(from));
-        let by_glob = scope
-            .globs
-            .iter()
-            .filter(|from| modules.contains(*from))
-            .count()
-            == 1;
-        let settled = modules.contains(&scope.module)
-            || named
-            || (!scope.named.contains_key(owner) && by_glob)
-            || modules.len() == 1;
-        (!settled).then_some(AMBIGUOUS_OWNER)
-    }
-}
-
-/// Where an `impl` is, for its owner's name: its module, and what that module's `use`s bring in
-/// from modules of its own crate (paths that start at `crate`, `self` or `super`).
-pub struct Scope {
-    module: String,
-    /// A name a `use` brings in, with the module the path names it in. A renamed import is not
-    /// kept: the name written is not the type's.
-    named: BTreeMap<String, String>,
-    /// The modules a `use …::*` brings in whole.
-    globs: Vec<String>,
-}
-
-impl Scope {
-    pub fn new(module: &str, items: &[Item]) -> Self {
-        fn parent(module: &str) -> String {
-            module
-                .rsplit_once("::")
-                .map_or(module, |(parent, _)| parent)
-                .to_owned()
+        let child = format!("{module}::{}", path.join("::"));
+        if self.modules.contains_key(&format!("{module}::{first}")) {
+            Ok(Some(child))
+        } else if self
+            .types
+            .get(first)
+            .is_some_and(|modules| modules.contains(module))
+        {
+            Ok(None)
+        } else if module.split("::").next() == Some(first.as_str()) {
+            // The crate under its own name.
+            Ok(Some(path.join("::")))
+        } else {
+            Err(())
         }
-        fn walk(tree: &syn::UseTree, at: &str, scope: &mut Scope) {
-            match tree {
-                syn::UseTree::Path(path) if path.ident == "super" => {
-                    walk(&path.tree, &parent(at), scope)
-                }
-                syn::UseTree::Path(path) => {
-                    walk(&path.tree, &format!("{at}::{}", path.ident), scope)
-                }
-                syn::UseTree::Name(name) => {
-                    scope.named.insert(name.ident.to_string(), at.to_owned());
-                }
-                syn::UseTree::Rename(_) => {}
-                syn::UseTree::Glob(_) => scope.globs.push(at.to_owned()),
-                syn::UseTree::Group(group) => {
-                    group.items.iter().for_each(|tree| walk(tree, at, scope))
-                }
+    }
+
+    /// What `name` is in `module`: the module's own type; else what a `use` names; else what
+    /// its globs bring in, where two different answers are no answer.
+    fn binding(&self, module: &str, name: &str, seen: &mut BTreeSet<String>) -> Binding {
+        if !seen.insert(module.to_owned()) {
+            return Binding::NotFound;
+        }
+        if self
+            .types
+            .get(name)
+            .is_some_and(|modules| modules.contains(module))
+        {
+            return Binding::Local(module.to_owned());
+        }
+        let Some(uses) = self.modules.get(module) else {
+            return Binding::NotFound;
+        };
+        if uses.foreign.contains(name) {
+            return Binding::Foreign;
+        }
+        if let Some(from) = uses.named.get(name) {
+            return self.binding(from, name, seen);
+        }
+        // One module reached through two globs is one answer: `None` here is another crate's.
+        let mut found: BTreeSet<Option<String>> = BTreeSet::new();
+        let mut maybe_foreign = false;
+        for glob in &uses.globs {
+            let from = match glob {
+                Glob::Module(from) => from.clone(),
+                Glob::Bare(path) => match self.bare_glob(module, path) {
+                    Ok(Some(from)) => from,
+                    Ok(None) => continue,
+                    Err(()) => {
+                        maybe_foreign = true;
+                        continue;
+                    }
+                },
+            };
+            match self.binding(&from, name, seen) {
+                Binding::Local(declaring) => drop(found.insert(Some(declaring))),
+                Binding::Foreign => drop(found.insert(None)),
+                Binding::MaybeForeign => maybe_foreign = true,
+                Binding::Ambiguous => return Binding::Ambiguous,
+                Binding::NotFound => {}
             }
         }
-        let mut scope = Self {
-            module: module.to_owned(),
-            named: BTreeMap::new(),
-            globs: Vec::new(),
-        };
-        for item in items {
-            let Item::Use(item) = item else { continue };
-            let syn::UseTree::Path(path) = &item.tree else {
-                continue;
-            };
-            let from = match path.ident.to_string().as_str() {
-                "crate" => module.split("::").next().unwrap_or(module).to_owned(),
-                "self" => module.to_owned(),
-                "super" => parent(module),
-                _ => continue,
-            };
-            walk(&path.tree, &from, &mut scope);
+        let mut found = found.into_iter();
+        match (found.next(), found.next()) {
+            (Some(Some(declaring)), None) => Binding::Local(declaring),
+            (Some(None), None) => Binding::Foreign,
+            (Some(_), Some(_)) => Binding::Ambiguous,
+            (None, _) if maybe_foreign => Binding::MaybeForeign,
+            (None, _) => Binding::NotFound,
         }
-        scope
+    }
+
+    /// Why `owner`, named by an `impl` in `module`, can't carry an installer. The name must be a
+    /// type of the crate: the one the module declares or its `use`s lead to, or, where no `use`
+    /// that this pass reads names it at all, the crate's only type of that name. A name that a
+    /// `use` may bind to another crate's type is refused, as is one that several modules declare
+    /// with nothing to choose between them.
+    fn exclusion(&self, module: &str, owner: &str) -> Option<&'static str> {
+        let Some(declaring) = self.types.get(owner) else {
+            return Some("foreign trait owner");
+        };
+        match self.binding(module, owner, &mut BTreeSet::new()) {
+            Binding::Local(_) => None,
+            Binding::Foreign | Binding::MaybeForeign => Some("imported trait owner"),
+            Binding::Ambiguous => Some(AMBIGUOUS_OWNER),
+            Binding::NotFound if declaring.len() == 1 => None,
+            Binding::NotFound => Some(AMBIGUOUS_OWNER),
+        }
     }
 }
 
@@ -534,7 +656,6 @@ fn functions<'a>(
     out: &mut Vec<Found<'a>>,
 ) {
     let foreign = foreign_imports(items);
-    let scope = Scope::new(module, items);
     for item in items {
         match item {
             Item::Mod(inline) if !source::gated(&inline.attrs) => {
@@ -568,7 +689,7 @@ fn functions<'a>(
                     && lifetimes_only(&block.generics)
                     && matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) =>
             {
-                let trait_name = replaceable_trait(&scope, block, traits, types, &foreign);
+                let trait_name = replaceable_trait(module, block, traits, types, &foreign);
                 if block.trait_.is_some() && trait_name.is_none() {
                     continue;
                 }
@@ -618,7 +739,6 @@ fn inventory(
         *counts.entry(reason).or_default() += 1;
     }
     let foreign = foreign_imports(items);
-    let scope = Scope::new(module, items);
     for item in items {
         match item {
             Item::Mod(inline) => {
@@ -647,7 +767,7 @@ fn inventory(
                     } else if !matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) {
                         Some("non-path/qualified impl owner")
                     } else {
-                        trait_exclusion(&scope, block, traits, types, &foreign)
+                        trait_exclusion(module, block, traits, types, &foreign)
                     }
                 });
                 for member in &block.items {
@@ -1730,57 +1850,111 @@ mod tests {
             panic!("an impl")
         };
         let foreign = foreign_imports(&implements.items);
-        let here = Scope::new("k::level_access", &implements.items);
-        assert_eq!(trait_refusal(&here, block, &traits, &types, &foreign), None);
+        let here = "k::level_access";
+        assert_eq!(trait_refusal(here, block, &traits, &types, &foreign), None);
         // A second module declaring the name, and the `impl`'s `use` names neither of them: a
         // bare `GameLevel` no longer says which type.
         types.declare("k::other", &declares.items);
         assert!(targets("k::level_access", &implements, &traits, &types).is_empty());
         assert_eq!(
-            trait_refusal(&here, block, &traits, &types, &foreign).unwrap(),
+            trait_refusal(here, block, &traits, &types, &foreign).unwrap(),
             "its trait implementation has no replacement installer: owner type name `GameLevel` is ambiguous in the crate: more than one module declares it, and the `impl`'s module neither declares it nor imports it from one of them"
         );
     }
+
+    /// The targets of `impl LevelAccess for GameLevel` in `k::game::level_access`, a child of
+    /// `k::game`, whose file starts with `import`; each of `others` is a module and its file.
+    fn level_access_targets(others: &[(&str, &str)], import: &str) -> Vec<String> {
+        let traits = BTreeSet::from(["LevelAccess".to_owned()]);
+        let mut types = OwnerTypes::default();
+        for (module, text) in others {
+            types.declare(module, &syn::parse_file(text).unwrap().items);
+        }
+        let file = syn::parse_file(&format!(
+            "{import} impl LevelAccess for GameLevel {{ fn block_state(&self) -> u32 {{ 0 }} }}"
+        ))
+        .unwrap();
+        types.declare("k::game::level_access", &file.items);
+        targets("k::game::level_access", &file, &traits, &types)
+    }
+
+    const KEPT: [&str; 1] = ["k::game::level_access::<GameLevel as LevelAccess>::block_state"];
 
     /// The game's own shape: `GameLevel` in the `game` module and in another one, the `impl`
     /// in a child of `game` that takes its parent's names.
     #[test]
     fn a_use_of_the_declaring_module_settles_a_name_two_modules_declare() {
-        let traits = BTreeSet::from(["LevelAccess".to_owned()]);
-        let declares = syn::parse_file("struct GameLevel;").unwrap();
-        let mut types = OwnerTypes::default();
-        types.declare("k::game", &declares.items);
-        types.declare("k::game::natural_spawning", &declares.items);
+        let twice = [
+            ("k::game", "struct GameLevel;"),
+            ("k::game::natural_spawning", "struct GameLevel;"),
+        ];
         for import in [
             "use super::*;",
             "use super::GameLevel;",
             "use crate::game::{GameLevel, Other};",
             "use crate::game::natural_spawning::GameLevel;",
         ] {
-            let file = syn::parse_file(&format!(
-                "{import} impl LevelAccess for GameLevel {{ fn block_state(&self) -> u32 {{ 0 }} }}"
-            ))
-            .unwrap();
-            assert_eq!(
-                targets("k::game::level_access", &file, &traits, &types),
-                ["k::game::level_access::<GameLevel as LevelAccess>::block_state"],
-                "{import}"
-            );
+            assert_eq!(level_access_targets(&twice, import), KEPT, "{import}");
         }
         // Renamed, or brought in by two globs that both declare it: nothing says which.
         for import in [
             "use super::Level as GameLevel;",
             "use super::*; use super::natural_spawning::*;",
         ] {
-            let file = syn::parse_file(&format!(
-                "{import} impl LevelAccess for GameLevel {{ fn block_state(&self) -> u32 {{ 0 }} }}"
-            ))
-            .unwrap();
+            assert!(level_access_targets(&twice, import).is_empty(), "{import}");
+        }
+        // One module reached through two globs is one answer.
+        let through = [
+            (
+                "k::game",
+                "struct GameLevel; mod other { struct GameLevel; }",
+            ),
+            ("k::game::prelude", "use super::*;"),
+        ];
+        assert_eq!(
+            level_access_targets(&through, "use super::*; use super::prelude::*;"),
+            KEPT
+        );
+    }
+
+    /// A name the parent takes from another crate reaches the child through its glob: the
+    /// crate's own type of that name, declared elsewhere, is not what the `impl` names.
+    #[test]
+    fn a_foreign_name_inherited_through_a_glob_is_refused() {
+        for parent in [
+            "use engine::GameLevel;",
+            "use engine::Level as GameLevel;",
+            "use engine::*;",
+        ] {
+            let crate_ = [("k::game", parent), ("k::levels", "struct GameLevel;")];
             assert!(
-                targets("k::game::level_access", &file, &traits, &types).is_empty(),
-                "{import}"
+                level_access_targets(&crate_, "use super::*;").is_empty(),
+                "{parent}"
             );
         }
+        // The same glob beside the parent's own type: the type is the parent's.
+        let own = [("k::game", "use engine::*; struct GameLevel;")];
+        assert_eq!(level_access_targets(&own, "use super::*;"), KEPT);
+        // A glob of an enum's variants, or of a child module, brings in no other crate's name.
+        let variants = [
+            (
+                "k::game",
+                "enum Kind { A } use Kind::*; mod child {} use child::*;",
+            ),
+            ("k::levels", "struct GameLevel;"),
+        ];
+        assert_eq!(level_access_targets(&variants, "use super::*;"), KEPT);
+    }
+
+    /// A module's `use`s are its own, whichever of its files writes them.
+    #[test]
+    fn a_use_in_a_sibling_file_of_the_module_settles_the_name() {
+        let crate_ = [
+            ("k::a", "struct GameLevel;"),
+            ("k::b", "struct GameLevel;"),
+            ("k::game::level_access", "use crate::a::GameLevel;"),
+        ];
+        assert_eq!(level_access_targets(&crate_, ""), KEPT);
     }
 
     #[test]
