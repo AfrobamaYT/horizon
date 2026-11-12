@@ -1637,7 +1637,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes"]
     fn both_server_roles_record_regions_before_world_generation() {
-        crate::game::Game::initialize_mod_runtime_for_tests();
+        mod_platform::__private::initialize().unwrap();
         use super::super::native_entity_refs::tests::with_game_role;
         use execution_role::ExecutionRole::{DedicatedServer, IntegratedServer};
         struct Regions;
