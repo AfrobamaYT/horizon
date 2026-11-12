@@ -55,3 +55,16 @@ pub fn cached_answer(
         .map_err(|e| e.to_string())?;
     Ok((answer, source == crate::module_cache::Source::Cached))
 }
+
+/// Invoke a synthetic fixture's load hook with the production load deadline.
+/// Overflow proofs must not race the shorter per-tick epoch deadline.
+pub fn call_load(module: &WasmMod) -> Option<()> {
+    module.call(
+        runtime::CallClass::Load,
+        crate::boundary::Frame::default(),
+        0,
+        None,
+        |_| {},
+        |reader| reader.take(),
+    )
+}

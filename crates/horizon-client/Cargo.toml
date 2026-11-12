@@ -16,6 +16,7 @@ horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 winresource = "0.1"
 
 [dependencies]
+horizon-guest-stack = { path = "../horizon-guest-stack" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-hooks = { path = "../horizon-hooks" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
