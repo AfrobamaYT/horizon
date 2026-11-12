@@ -2250,3 +2250,5 @@ mod chunk_queries;
 
 #[path = "wire_loopback/play_hit_sound.rs"]
 mod play_hit_sound;
+#[path = "wire_loopback/client_fireworks.rs"]
+mod client_fireworks;
