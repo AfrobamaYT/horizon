@@ -26,14 +26,14 @@ class StageToolTests(unittest.TestCase):
             manifest.parent.mkdir(parents=True)
             manifest.write_text("[package]\nname = 'fixture'\n")
             target = root / "output"
-            tool = root / "horizon-stage"
+            tool = root / "unused" / ".." / "horizon-stage"
             calls = []
 
             def capture(command, **kwargs):
                 calls.append(command)
                 if command[0] == "git":
                     return "tracked.rs\0crates/horizon-mod-wasm/Cargo.toml\0"
-                self.assertEqual(command, [str(tool), str(target / "stage"),
+                self.assertEqual(command, [str(tool.resolve()), str(target / "stage"),
                                           str(target / "stage/points.json"),
                                           str(target / "stage/internals.json"), "fixture-api"])
                 self.assertEqual(kwargs["cwd"], target / "stage")
@@ -49,7 +49,7 @@ class StageToolTests(unittest.TestCase):
                 prebuilt_game.stage(target, stage_tool=tool)
                 # A second call must replace the mutated stage with fresh tracked source.
                 prebuilt_game.stage(target, stage_tool=tool)
-            self.assertEqual([call[0] for call in calls], ["git", str(tool), "git", str(tool)])
+            self.assertEqual([call[0] for call in calls], ["git", str(tool.resolve()), "git", str(tool.resolve())])
             self.assertEqual((source / "tracked.rs").read_text(), "original")
 
 
