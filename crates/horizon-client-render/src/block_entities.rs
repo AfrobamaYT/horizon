@@ -411,7 +411,9 @@ impl BlockEntities {
         &mut self,
         pos: Pos,
     ) -> Option<&mut horizon_mod_runtime::attachments::Attachments> {
-        if !self.map.contains_key(&pos) && !self.out.contains_key(&pos) {
+        // Identity survives a temporary take and retires on removal or an
+        // abandoned-lease sweep, exactly like attachment ownership.
+        if !self.generations.contains_key(&pos) {
             return None;
         }
         let map = self.attachments.entry(pos).or_default();
