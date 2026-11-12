@@ -206,8 +206,18 @@ mod tests {
     fn heard() -> Vec<&'static str> {
         std::mem::take(&mut *HEARD.lock().unwrap_or_else(PoisonError::into_inner))
     }
-    /// Answers nothing, recording that it was asked as `self.0`.
-    struct Listening(&'static str);
+    /// Answers nothing, recording that it was asked as `"key"` or `"tag"`.
+    struct Listening;
+    /// A second part type: a tag part of the same type as a key part on the block is dropped as
+    /// attached twice.
+    struct TagListening;
+    fn listen(name: &'static str) -> Option<Option<BlockState>> {
+        HEARD
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(name);
+        None
+    }
     #[mod_api::horizon_part]
     impl BlockPart for Listening {
         fn on_tree_grow(
@@ -215,11 +225,17 @@ mod tests {
             _: &dyn WorldgenHost,
             _: &mut OnTreeGrowEvent<'_>,
         ) -> Option<Option<BlockState>> {
-            HEARD
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(self.0);
-            None
+            listen("key")
+        }
+    }
+    #[mod_api::horizon_part]
+    impl BlockPart for TagListening {
+        fn on_tree_grow(
+            &self,
+            _: &dyn WorldgenHost,
+            _: &mut OnTreeGrowEvent<'_>,
+        ) -> Option<Option<BlockState>> {
+            listen("tag")
         }
     }
     struct KeyAndTag;
@@ -227,8 +243,8 @@ mod tests {
     impl Hooks for KeyAndTag {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
             let grass = r.block_key("minecraft:grass_block");
-            r.block_part(grass, Listening("key"));
-            r.block_part_tag("minecraft:dirt", Listening("tag"));
+            r.block_part(grass, Listening);
+            r.block_part_tag("minecraft:dirt", TagListening);
         }
     }
 
