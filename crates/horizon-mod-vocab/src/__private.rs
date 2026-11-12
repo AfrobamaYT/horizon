@@ -5,10 +5,6 @@ use crate::*;
 #[path = "__private/registry_installation.rs"]
 mod registry_installation;
 
-/// The game's profiler control and reports, not a mod-facing API contract.
-#[path = "profiler.rs"]
-pub mod profiler;
-
 /// Switch an installed mod's dispatches on or off, returning whether it was found.
 pub fn set_mod_enabled(id: &str, on: bool) -> bool {
     crate::set_mod_enabled(id, on)
@@ -38,6 +34,11 @@ pub fn install(mods: Mods) {
 /// Whether an installed mod subscribes to `hook`.
 pub fn listened(hook: HookId) -> bool {
     crate::listened(hook)
+}
+
+/// Whether at least one enabled mod subscribes to `hook`, visiting only its subscribers.
+pub fn enabled_listened(hook: HookId) -> bool {
+    crate::runtime::enabled_listened(hook)
 }
 
 /// A read backend wrapper for a host the game builds narrowed: the mob tick's
@@ -280,6 +281,16 @@ pub mod game {
                 entity: self.entity,
                 uuid: self.uuid,
             }
+        }
+    }
+
+    pub fn original_player_ref(token: u64) -> OriginalPlayerRef {
+        OriginalPlayerRef { token }
+    }
+    impl Fields for OriginalPlayerRef {
+        type Fields<'a> = u64;
+        fn fields(&self) -> u64 {
+            self.token
         }
     }
 

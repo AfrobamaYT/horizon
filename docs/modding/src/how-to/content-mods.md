@@ -5,7 +5,7 @@ Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-own
 `Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
-A block's `item` defaults to false in code. Each mod receives its own declaration
+A block's `item` defaults to true, in code as in a file: `Block::with_item(false)` gives it none. Each mod receives its own declaration
 batch. New identifiers from code—including block entity types and other registrar
 declarations—may use any namespace owned by that mod's manifest. Bare names use
 the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
@@ -13,8 +13,10 @@ refuses registration with a diagnostic naming both the mod and namespace. This
 is identical for native and wasm mods. Attaching a Part to an existing vanilla or
 foreign block or item is a reference, not a new declaration, and remains allowed.
 
-Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
+Code declarations carry component patches as `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
+Repeated component IDs, including a set and removal of the same ID, are refused; `lore` and `minecraft:lore`
+count as the same ID, and an ID may not start with the removal prefix `!`.
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
 
@@ -51,7 +53,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
   and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
-  ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
+  ([trait mods](../concepts/trait-mods.md#writing-a-trait-mod)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; it does not compile code. Code requires both `Cargo.toml` and `[native]`; inconsistent
@@ -83,6 +85,9 @@ api = "0.2"                  # content mods
 side = "both"
 capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
+
+[properties]                 # optional: values other mods read (reference/manifest.md)
+tier = 3
 ```
 
 The optional fields fill the game's Mods screen, which lists every mod with its icon, name, version, id, license,
@@ -215,6 +220,17 @@ Unset or `true` preserves the template's ability to occlude, using the declared 
 is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay
 vanilla's. Unset or `true`, the crack is drawn. It stands where a mod once had a mixin on
 `LevelRenderer.renderBlockDestroyAnimation`, which has no NeoForge event.
+
+`dynamic_light: true` makes a block's light depend on where it is, not only on its state
+(`IBlockExtension.hasDynamicLightEmission`): a lamp that glows only on a powered rail, a crystal brighter deeper
+down. Its parts answer `BlockPart::light_emission` with the light a cell emits, and `light` (or `state_light`) is
+what a cell emits without an answer. The game asks on the thread that owns the level, the server's and each
+client's, as a chunk holding the block comes in and as an edit sets it, and keeps the answer until the cell's state
+changes; the light engine never asks on its own. A part whose answer reads more than the state (the block below
+it) calls `LevelRef::check_light(host, pos)` when that changes (`LevelLightEngine.checkBlock`): the server asks
+again and relights, and clients ask their own parts again as its light update reaches them. The flag is per block,
+as it sits on the block's row: every state of the block is asked, so a block with only some states that vary pays
+the ask for all of them. Light that depends only on the state needs no part: use `light` or `state_light`.
 
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
@@ -508,6 +524,10 @@ category (`beneficial`, `harmful` or `neutral`) and its RGB colour (0 to `0xFFFF
 { "category": "harmful", "color": 9154528 }
 ```
 
+An optional `sort_order` (an integer) sets where the effect sits among the HUD's icons and the inventory's effect list,
+as NeoForge's `IMobEffectExtension.getSortOrder` does: the lists compare it where vanilla compares the colour, and it
+is the colour when left out. It is fixed per effect, where NeoForge may answer per instance.
+
 It is the effect `<id>:<name>`: `/effect give @s ruby:glow 30` gives it, saves and mobs keep it, and it reaches LAN and
 dedicated server players who run the same mods (its network id follows vanilla's). Its name is the translation
 `effect.<id>.<name>` from the mod's `assets/<id>/lang/`, its icon `assets/<id>/textures/mob_effect/<name>.png` (18x18,
@@ -531,7 +551,8 @@ the thrower (the snowball's 3 to blazes is not copied):
 
 It is the entity type `<id>:<name>`, with its network id after vanilla's. Using its item throws it as a snowball is
 thrown: same speed, spread, sound and cooldown, and one item used outside creative. It flies as a snowball, breaks on
-what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`). Its name is the translation
+what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`), unless a client
+mod registers a renderer for it ([entity renderers](entity-renderers.md)). Its name is the translation
 `entity.<id>.<name>`. It works in single player and on LAN with the same mods. Dedicated servers share that code,
 untested so far. Clients join a server only with the same mods' entity types, as with its blocks. It is saved with its
 chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity-types.json`, with `template` naming
@@ -667,8 +688,9 @@ container's faces and `inputs`, so leave result slots out of `inputs`. The data 
 mod's own screen (`native_screen`); without one it closes again. Clients join a server only with the same mods' menu
 types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Its
 clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
-mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook notes](../reference/hook-notes.md#menu-slot-rules)).
-Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
+mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook notes](../reference/hook-notes.md#menu-slot-rules))
+and how far away the menu stays open with `native_menu_still_valid` ([hook notes](../reference/hook-notes.md#keeping-a-block-menu-open)).
+Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing, opening with extra
 data, and client prediction of its clicks.
 
 ##### Lending ingredients and linking containers
@@ -894,9 +916,19 @@ order, declarations in registration order). An id outside the mod's namespace or
 id, an empty list, a name that is not namespaced, an unknown generation step, a spawner of weight 0 or with its
 smallest group above its largest, a spawn cost that is not finite, a climate number that is not finite, a colour above
 0xFFFFFF and a temperature modifier other than `none` or `frozen` refuse the mods at startup, naming the mod.
-Declared modifiers are
-read by the API today; the game does not apply them until it feeds them through the content loader (tracked on
-arismoko/horizon#2732).
+Declared modifiers apply when the world loads, through the same content loader as file modifiers, to both the
+generator and the game's biome table, including when no data pack is enabled.
+
+A modifier changes a biome that already generates. To add a mod's own biomes to the Overworld or the Nether, a code mod
+declares a **biome region** instead: `Registrar::declare_biome_region(path, region)` takes a `BiomeRegion` (its
+`dimension`, `minecraft:overworld` or `minecraft:nether`; a `weight` from 1 to 1000 against vanilla's 10; and its
+`points`, the same `BiomePoint`s as a mod dimension's). An area belongs to one region, and the region's own points
+choose the biome there. A malformed or repeated id, an id outside the mod's namespace, another dimension, a weight
+outside 1 to 1000, no points or an invalid point refuse the mods at startup, naming the mod. A new world records the
+declared regions in `data/horizon/biome_regions.dat`, and from then on that record decides: a changed or added region
+reaches an existing world only when its owner opts in, and a world whose region's mod is missing asks before it opens
+(a dedicated server reads `[biome_regions] missing = "refuse" | "vanilla"` in `server.toml`). The full contract is in
+[the design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-biome-regions.md).
 
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
@@ -906,8 +938,8 @@ naming a biome, biome tag, feature, feature tag, entity type or entity type tag 
 naming the mod and file; the mods still load. A malformed modifier of a type
 that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
 content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
-doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
-it too.
+doesn't read a mod's `placed_feature` tags yet). Modifiers are reapplied after the world's data packs, so a pack
+that replaces a biome keeps the mods' changes too.
 
 **A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
 The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
@@ -963,3 +995,13 @@ otherwise it draws no model. Pack layers bind independently. An unknown type,
 explicit refusal, invalid model, out-of-range state, duplicate state or answer
 with no picks rejects the whole layer with a diagnostic, leaving lower layers
 available. Vanilla `variants` and `multipart` remain available for ordinary files.
+
+## Per-state light
+
+Blocks in JSON and code can set `state_light`, which overrides `properties.light`.
+Use `properties` for an ordered list of state property names, `values` for
+comma-separated value tuples mapped to emission (0 to 15), and `default` for
+unmatched states. Without a default, every state must match a tuple.
+For example, `"state_light":{"properties":["lit"],"values":{"true":15},"default":0}`
+makes a lamp dark when unlit and emit 15 when lit. Code uses `mod_api::StateLight`
+with the same `properties`, `values` and `default` fields on `Block::state_light`.

@@ -63,10 +63,80 @@ class IgnoredTests(unittest.TestCase):
         self.assertCountEqual(seen, names)
         self.assertIn(f"{names[0]}: failed, and isn't a known failure", log.getvalue())
 
+    def test_a_test_needing_a_harness_input_is_refused_by_name_without_it(self):
+        inputs = {("example", "needs_input"): "HORIZON_EXAMPLE_INPUT"}
+        with patch.dict(os.environ), patch.object(ignored_tests, "known_failures", return_value={}), \
+                patch.object(ignored_tests, "harness_inputs", return_value=inputs), \
+                patch.object(ignored_tests, "run", return_value={"other": True}) as execute, \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            os.environ.pop("HORIZON_EXAMPLE_INPUT", None)
+            self.assertEqual(ignored_tests.main(["example"]), 0)
+        self.assertEqual(execute.call_args.args, ("example", ["needs_input"]))
+        self.assertIn("example needs_input: refused, needs HORIZON_EXAMPLE_INPUT; run by the parity harness\n",
+                      log.getvalue())
+
+    def test_a_test_needing_a_harness_input_runs_and_must_pass_with_it(self):
+        inputs = {("example", "needs_input"): "HORIZON_EXAMPLE_INPUT"}
+        with patch.dict(os.environ, {"HORIZON_EXAMPLE_INPUT": "/input"}), \
+                patch.object(ignored_tests, "known_failures", return_value={}), \
+                patch.object(ignored_tests, "harness_inputs", return_value=inputs), \
+                patch.object(ignored_tests, "run", return_value={"needs_input": False}) as execute, \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.main(["example"]), 1)
+        self.assertEqual(execute.call_args.args, ("example", []))
+        self.assertNotIn("refused", log.getvalue())
+        self.assertIn("example needs_input: failed, and isn't a known failure", log.getvalue())
+
+    def test_needs_entries_name_a_variable_and_are_not_known_failures(self):
+        inputs = ignored_tests.harness_inputs()
+        self.assertTrue(inputs)
+        for (package, test), variable in inputs.items():
+            self.assertRegex(variable, r"^[A-Z][A-Z0-9_]*$")
+            self.assertNotIn((package, test), ignored_tests.known_failures())
+
     def test_explicit_client_lib_selection_is_not_split_again(self):
         with patch.object(ignored_tests, "known_failures", return_value={}), patch.object(ignored_tests, "run", return_value={}) as execute:
             self.assertEqual(ignored_tests.main(["horizon-client-lib#2of3"]), 0)
         self.assertEqual(execute.call_args.args, ("horizon-client-lib", [], 2, 3))
+
+    def test_a_parent_that_crashes_after_its_childs_same_count_summary_did_not_complete(self):
+        # A fixture reruns its own test in a child, which reports FAILED and a one-test summary;
+        # the parent then aborts before its own summary. The child's summary has the parent's count.
+        output = target(1, "test fixture::case ... FAILED\n", summary(failed=1))
+        output += ("error: test failed, to rerun pass `-p example --lib`\n\nCaused by:\n"
+                   "  process didn't exit successfully: `target/debug/deps/example` (signal: 6, SIGABRT: process abort signal)\n")
+        result, log = self.run_output(output, 101)
+        self.assertIsNone(result)
+        self.assertIn("example: a test process crashed (cargo exit 101)", log)
+        with patch.object(ignored_tests, "known_failures", return_value={("example", "fixture::case"): None}), \
+                patch.object(ignored_tests, "harness_inputs", return_value={}), \
+                patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 101, output)), \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.main(["example"]), 1)
+        self.assertIn("example: the test run did not complete", log.getvalue())
+
+    def test_a_target_completes_on_its_own_summary_after_a_childs(self):
+        # The child's one-test summary comes first; the parent's two-test summary closes the target.
+        output = target(2, "test fixture::case ... ok\n" + summary(passed=1) + "test fixture::case ... ok\ntest other ... ok\n",
+                        summary(passed=2))
+        result, log = self.run_output(output)
+        self.assertEqual(result, {"fixture::case": True, "other": True})
+        self.assertIn("example: test result: ok. 2 passed", log)
+        self.assertNotIn("example: test result: ok. 1 passed", log)
+
+    def test_a_target_whose_last_summary_is_a_childs_did_not_complete(self):
+        # The parent started two tests; only the child's one-test summary follows.
+        result, log = self.run_output(target(2, "test fixture::case ... ok\n", summary(passed=1)), 101)
+        self.assertIsNone(result)
+        self.assertIn("test target did not finish", log)
+
+    def test_a_failed_target_exiting_101_is_not_a_crash(self):
+        output = target(1, "test bad ... FAILED\n", summary(failed=1))
+        output += ("error: test failed, to rerun pass `-p example --lib`\n\nCaused by:\n"
+                   "  process didn't exit successfully: `target/debug/deps/example` (exit status: 101)\n")
+        result, log = self.run_output(output, 101)
+        self.assertEqual(result, {"bad": False})
+        self.assertNotIn("crashed", log)
 
     def test_unexplained_nonzero_status(self):
         result, _ = self.run_output(target(1, "test good ... ok\n", summary(passed=1)), 101)
@@ -204,19 +274,127 @@ class Legs(unittest.TestCase):
             self.assertIsNone(ignored_tests.run("example", [], 1, 2))
         self.assertIn(owned[1], log.getvalue())
 
+    def test_interleaved_listed_result_is_recovered_without_payload(self):
+        name = leg_names()[1][0]
+        for status in ("ok", "FAILED"):
+            with self.subTest(status=status):
+                def fake(command, **_):
+                    text = (f"{name}: test\n" if "--list" in command else
+                            target(1, f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... {status}\n",
+                                   summary(passed=int(status == "ok"), failed=int(status == "FAILED"))))
+                    return subprocess.CompletedProcess(command, 0 if "--list" in command or status == "ok" else 101, text)
+                with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertEqual(ignored_tests.run("example", [], 1, 2), {name: status == "ok"})
+                self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+
+    def test_prefixed_first_marker_with_trailing_unlisted_record(self):
+        name = leg_names()[1][0]
+        record = f"PRIVATE_PAYLOAD test {name} ... ok test other ... ok\n"
+        def fake(command, **_):
+            text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+            return subprocess.CompletedProcess(command, 0, text)
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.run("example", [], 1, 2), {name: True})
+        self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+
+    def test_multiple_distinct_listed_records_on_one_line(self):
+        first, second = leg_names()[1][:2]
+        record = f"test {first} ... ok test {second} - should panic ... ok\n"
+        def fake(command, **_):
+            text = (f"{first}: test\n{second}: test\n" if "--list" in command else
+                    target(2, record, summary(passed=2)))
+            return subprocess.CompletedProcess(command, 0, text)
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run("example", [], 1, 2), {first: True, second: True})
+
+    def test_slow_notices_are_not_results_even_when_interleaved(self):
+        name = "join_seq::visibility::tests::unbound_passes_block_until_restore_consumption_and_unwind"
+        notice = f"test {name} has been running for over 60 seconds"
+        expected = {name}
+        for text in (
+            f"{notice}\ntest {name} ... ok",
+            f"test fixture_peer ... {notice}\ntest {name} ... ok",
+            f"{notice} test {name} ... ok",
+        ):
+            with self.subTest(text=text):
+                records = [record for line in text.splitlines()
+                           for record in ignored_tests.listed_result_records(line, expected, len(name))]
+                self.assertEqual(records, [(name, "ok")])
+        for text in (notice, f"failures: {name}", f"test fixture_peer ... {notice}"):
+            with self.subTest(text=text):
+                self.assertEqual(list(ignored_tests.listed_result_records(text, expected, len(name))), [])
+
+    def test_ambiguous_listed_results_fail_closed(self):
+        name = leg_names()[1][0]
+        for record in (
+                f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n",
+                f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n",
+                f"test {name} ... ok\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n"):
+            with self.subTest(record=record.count("\n")):
+                def fake(command, **_):
+                    text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+                    return subprocess.CompletedProcess(command, 0, text)
+                with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertIsNone(ignored_tests.run("example", [], 1, 2))
+                self.assertIn(f"{name}; category=ambiguous-result", log.getvalue())
+                self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+                self.assertNotIn("EXTRA", log.getvalue())
+
+    def test_a_test_that_reruns_itself_completes_and_fails_if_any_of_its_records_failed(self):
+        # A fixture that reruns its own test executable prints the child's record beside the parent's.
+        name = leg_names()[1][0]
+        for record, passed in (
+                (f"test {name} ... ok\ntest {name} ... ok\n", True),
+                (f"test {name} ... ok\n\x1b[0mPRIVATE_PAYLOAD test {name} ... FAILED\n", False),
+                (f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok test {name} ... ok\n", True),
+                (f"test {name} ... FAILED\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok\n", False)):
+            with self.subTest(passed=passed, record=record.count("\n")):
+                def fake(command, **_):
+                    text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+                    return subprocess.CompletedProcess(command, 0, text)
+                with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertEqual(ignored_tests.run("example", [], 1, 2)[name], passed)
+                self.assertIn("example: 1 listed tests reported more than one result", log.getvalue())
+                self.assertNotIn("category=", log.getvalue())
+                self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+
+    def test_recovery_requires_exact_listed_identity_and_complete_status(self):
+        name = leg_names()[1][0]
+        for record in (
+                f"test fixture_peer ... PRIVATE_PAYLOAD test {name}_different ... ok\n",
+                f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ...\nok\n",
+                f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ignored\n",
+                "test fixture_peer ... PRIVATE_PAYLOAD\n"):
+            with self.subTest(record_kind=record.endswith("ignored\n")):
+                def fake(command, **_):
+                    text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+                    return subprocess.CompletedProcess(command, 0, text)
+                with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertIsNone(ignored_tests.run("example", [], 1, 2))
+                self.assertIn("category=missing-result", log.getvalue())
+                self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+
+    def test_complete_prefixed_records_are_recovered_without_payload(self):
+        name = leg_names()[1][0]
+        for prefix in ("PRIVATE_PAYLOAD ", "\x1b[0mPRIVATE_PAYLOAD ",
+                       f"\x1b[0m{'P' * 503}", f"\x1b[0m{'P' * 504}"):
+            def fake(command, **_):
+                text = (f"{name}: test\n" if "--list" in command else
+                        target(1, f"{prefix}test {name} ... ok\n", summary(passed=1)))
+                return subprocess.CompletedProcess(command, 0, text)
+            with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertEqual(ignored_tests.run("example", [], 1, 2), {name: True})
+            self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
+            self.assertNotIn("\x1b", log.getvalue())
+            self.assertNotIn("framing=", log.getvalue())
+
     def test_missing_identity_framing_is_safe_and_still_fails(self):
         name = leg_names()[1][0]
         # Expected counts are independent fixture facts, not classifier output.
         cases = [
-            (f"\x1b[0mPRIVATE_PAYLOAD test {name} ... ok\n", "ansi-prefix", 1, 1, 0, 0),
-            (f"test other ... ok PRIVATE_PAYLOAD test {name} ... ok\n", "interleaved-record", 1, 0, 1, 0),
             (f"PRIVATE_PAYLOAD test {name} ...\nok\n", "split-status", 1, 0, 0, 1),
             ("test different ... ok PRIVATE_PAYLOAD\n", "absent-intact-identity", 0, 0, 0, 0),
-            (f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "unclassified-candidate", 1, 0, 0, 0),
-            # Complete ANSI sequence exactly inside the 512-character prefix.
-            (f"\x1b[0m{'P' * 503}test {name} ... ok\n", "ansi-prefix", 1, 1, 0, 0),
-            # One character farther away: ESC falls outside that window.
-            (f"\x1b[0m{'P' * 504}test {name} ... ok\n", "unclassified-candidate", 1, 0, 0, 0),
+            (f"PRIVATE_PAYLOAD test {name} ... UNKNOWN\n", "unclassified-candidate", 1, 0, 0, 0),
         ]
         for record, framing, candidates, ansi, interleaved, split in cases:
             with self.subTest(framing=framing):

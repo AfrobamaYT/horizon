@@ -678,7 +678,7 @@ fn direct_game_owns_install_resources_and_home_until_process_exit() {
         fs::create_dir(path).unwrap();
     }
     fs::write(install.join(".installed"), b"").unwrap();
-    let registry = Registry::with_release(&data, Release::Close).unwrap();
+    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     let directories: Vec<_> = [&install, &resources, &home]
         .into_iter()
         .map(|p| open_directory(p).unwrap())

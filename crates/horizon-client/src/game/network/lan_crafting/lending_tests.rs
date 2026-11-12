@@ -38,7 +38,7 @@ impl mod_api::Hooks for Lender {
 }
 
 fn lending(sources: Vec<[i32; 3]>, calls: Arc<AtomicUsize>, run: impl FnOnce()) {
-    mod_api::testing::with_mods(
+    mod_platform::testing::with_mods(
         vec![mod_api::ModEntry::new(
             "lender",
             Box::new(Lender { sources, calls }),
@@ -147,6 +147,7 @@ fn setup(game: &mut Game<'_>) -> &'static ModMenuType {
         mod_type: Some(t),
         craft: None,
         links: vec![],
+        asks_still_valid: false,
     });
     game.lan.as_mut().unwrap().hub.guests.push(guest);
     t
@@ -293,7 +294,7 @@ fn menu_links_expose_chest_contents_in_the_answering_tick() {
             .unwrap()
             .links
             .as_ptr();
-        mod_api::testing::with_mods(vec![].into(), || {
+        mod_platform::testing::with_mods(vec![].into(), || {
             #[cfg(not(any(feature = "system-allocator", feature = "alloc-census")))]
             {
                 let (_, control) = horizon_threads::allocation_count::measure(|| {

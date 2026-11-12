@@ -2,11 +2,11 @@
 
 > Horizon is Minecraft: Java Edition 26.3 in Rust. A mod is one `.hmod`: content (assets/ and data/), plus an optional Rust crate built native or to mod.wasm against the `mod_api` crate (`horizon-mod-api`).
 
-Prefer a hook or Part method; otherwise a compiled-slot `[[inject]]` with `access = "api"` and a `with` function. Use `access = "internals"` with top-level fingerprinted declarations only when the API shape cannot express it; injects never compile game code. Missing slots are refused on native too. Use [[native.mixin]] for supported native source edits, or request the slot. Mixins are trusted code compiled into the game. Every injection is a hook request. NeoForge 26.3 names, no `on_` prefix, `&mut` events, writes take `host`.
+Prefer a hook or Part method; otherwise use an API `[[inject]]` on native or wasm. Native code needing game internals uses `[[native.mixin]]`; `[[inject]]` has no `access` key; a row that still has one is refused by name.
 
 ## Rules
 
-- [Rules for agents](agents.md): the rules in order and the manifest fields.
+- [Rules for agents](https://github.com/arismoko/horizon/blob/main/docs/mod-api/agent-rules.md): the rules in order and the manifest fields.
 - [Injections](injections.md): the decision ladder, convertible injections, the hook-request template, ordering.
 
 ## Guide
@@ -30,7 +30,7 @@ The preprocessor needs only Python 3 and runs automatically in local and CI buil
 
 ## Reference
 
-- [NeoForge extension coverage](reference/neoforge-extensions.md): every public method of NeoForge 26.3's block, item, entity, block-entity and fluid extension interfaces, and what Horizon has for it.
+- [NeoForge extension coverage](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/neoforge-extensions.md): every public method of NeoForge 26.3's block, item, entity, block-entity and fluid extension interfaces, and what Horizon has for it.
 - [The manifest and the package](reference/manifest.md)
 - [The registry index](reference/registry-index.md)
 - [Hook notes](reference/hook-notes.md)

@@ -83,7 +83,7 @@ the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods kee
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
-The trait has every hook declared under `crates/horizon-mod-vocab/src/hooks/` ([Adding a hook](027-adding-a-hook.md#adding-a-hook)).
+The trait has every hook declared under `crates/horizon-mod-vocab/src/hooks/` ([Adding a hook](https://github.com/arismoko/horizon/blob/main/docs/mod-api/adding-a-hook.md#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
 `state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`
@@ -116,13 +116,7 @@ an invalid state, or the state the block already has. It never loads a chunk. Th
 the tick queue; mods do not pass it back to these helpers.
 Frame drawing through `DrawContext`, `BlockEntityDrawContext` and `WorldDrawContext` stays
 in `mod_api`. Raw GPU access is native-only, unstable and outside that API, in
-`mod_render::render` (`horizon-mod-render`). Register its listed frame functions through
-`[[inject]]` with `access = "internals"` and `kind = "head"`; the ordinary listener registry
-owns ordering and disabling. `render_needs` collects requests; `world_drawn` runs before
-the hand and HUD, and `hand_drawn` runs after the hand, on the render thread.
-
-| Removed path or registration | Current route |
-| --- | --- |
-| `mod_api::render` raw GPU types | `mod_render::render` (native escape hatch) |
-| `RenderHooks` / `Hooks::render` | `[[inject]]` internals listeners on the three listed frame functions |
-| API draw contexts | Unchanged; use these for API-typed drawing |
+`mod_render::render` (`horizon-mod-render`). Replace its frame functions with native HEAD mixins compiled against the prebuilt game.
+`render_needs` collects requests; `world_drawn` runs before the hand and HUD, and
+`hand_drawn` runs after the hand, on the render thread. API draw contexts remain
+unchanged; use them for API-typed drawing.

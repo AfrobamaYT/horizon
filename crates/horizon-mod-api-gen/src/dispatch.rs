@@ -304,7 +304,16 @@ pub(super) fn emit<'a>(
                     "& ItemStack" => {
                         format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
                     }
+                    "BlockEntityTypeKey" if table == "block_entity" => format!(
+                        "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
+                    ),
                     "& str" => format!("{table}(|| Some({key}))"),
+                    "BlockEntityRef" if table == "block_entity" => {
+                        let host = &host.as_ref().ok_or("block entity handle needs a Host")?.0;
+                        format!(
+                            "block_entity_kind(|| {key}.kind({host}).and_then(super::content::registry_keys::block_entity_type_name))"
+                        )
+                    }
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
                         format!("block_entity_kind(|| Some({key}.id()))")
@@ -531,7 +540,7 @@ pub(super) fn emit<'a>(
                     ty.to_token_stream()
                         .to_string()
                         .split(|c: char| !c.is_alphanumeric())
-                        .any(|word| matches!(word, "BlockState" | "LandingWrite"))
+                        .any(|word| matches!(word, "BlockState" | "LandingWrite" | "InsideWrite"))
                 });
             if block_carrier {
                 let engine: Vec<_> = carried
@@ -548,6 +557,9 @@ pub(super) fn emit<'a>(
                                     }
                                     "LandingWrite" => {
                                         *ty = syn::parse_quote!(horizon_world::level::LandingWrite)
+                                    }
+                                    "InsideWrite" => {
+                                        *ty = syn::parse_quote!(horizon_world::level::InsideWrite)
                                     }
                                     _ => syn::visit_mut::visit_type_mut(self, ty),
                                 }
@@ -691,7 +703,7 @@ pub(super) fn emit<'a>(
                 "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
             (Contract::Collect, Some(out)) if matches!(name, "blocks" | "items") => method_source.push_str(&format!(
-                "///\n/// Each mod receives its own empty `{event}.{out}` batch. Declared identifiers must\n/// belong to that mod's manifest-owned namespaces; unowned identifiers refuse registration.\n"
+                "///\n/// Each mod receives its own empty `{event}.{out}` batch. A bare name, in an identifier or\n/// in `block_item`, `pick_item`, `wall_block`, `base_block`, `crafting_remainder` or `Item::block`,\n/// is that mod's own; declared identifiers must belong to\n/// that mod's manifest-owned namespaces, and unowned identifiers refuse registration.\n"
             )),
             (Contract::Collect, Some(out)) if answered => method_source.push_str(&format!(
                 "///\n/// Each mod receives its own empty `{event}.{out}` batch; every entry it adds is recorded\n/// as that mod's.\n"
@@ -775,20 +787,20 @@ pub(super) fn emit<'a>(
             None if matches!(name, "blocks" | "items") => (
                 String::new(),
                 format!(
-                    "for (mod_id, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ let mut local = Vec::new(); {{ let mut {event} = {event_type} {{ {name}: &mut local }}; {mod_item}.{name}(context, &mut {event}); }} for declaration in &mut local {{ match super::parts::owned_declaration_id(mod_id, &declaration.id) {{ Ok(id) => declaration.id = id, Err(reason) => context.refuse_declaration(reason), }} }} {event}.{name}.extend(local); }}"
+                    "for (mod_id, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ let mut local = Vec::new(); {{ let mut {event} = {event_type} {{ {name}: &mut local }}; {mod_item}.{name}(context, &mut {event}); }} for declaration in &mut local {{ if let Err(reason) = super::parts::own_declaration(mod_id, declaration) {{ context.refuse_declaration(reason); }} }} {event}.{name}.extend(local); }}"
                 ),
             ),
             None if name == "setting_changed" => (
                 String::new(),
                 format!(
-                    "for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let (_entered, {mod_item}) = super::enter_listener(owner, \"{name}\"); {} }}",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let {mod_item} = {entered}.enter(owner, \"{name}\"); {} }} }}",
                     call(&mod_item, "break"),
                 ),
             ),
             None if mod_cancel => (
                 String::new(),
                 format!(
-                    "for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let ({entered}, {mod_item}) = super::enter_listener({mod_entry}, \"{name}\"); if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} *{o} = {event}.cancelled;",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let {mod_item} = {entered}.enter({mod_entry}, \"{name}\"); if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} }} *{o} = {event}.cancelled;",
                     o = out.unwrap()
                 ),
             ),
@@ -797,9 +809,15 @@ pub(super) fn emit<'a>(
                 format!("for {binding} in {each} {{ {} }}", call(&mod_item, "break")),
             ),
             Some((_, lookup)) => (
-                // The parts are looked up first: the key may be moved into the event.
+                // The parts are looked up first: the key may be moved into the event. A worldgen
+                // Part method runs on the worker threads too: it reads the server's published table.
                 format!(
-                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(HookId::{hook_id}, \"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = {}; let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}",
+                    if hook.context == Some(PhaseContext::Worldgen) {
+                        "super::worldgen_parts()".to_owned()
+                    } else {
+                        format!("super::parts(HookId::{hook_id}, \"{name}\")")
+                    }
                 ),
                 format!(
                     "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
@@ -895,7 +913,7 @@ fn stack_crossing_routed(
         "LootContext",
         "ParticleOptions",
     ];
-    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite"];
+    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite", "InsideWrite"];
     const INFALLIBLE_VALUES: &[&str] = &["GuiDraw", "Text"];
     fn contains_boundary(ty: &Type, names: &[&str]) -> bool {
         use syn::visit::Visit;
@@ -1852,7 +1870,13 @@ struct Owner {{ id: &'static str }}
 static OWNERS: [Owner; 2] = [Owner {{ id: "a" }}, Owner {{ id: "b" }}];
 fn listened(_: generated::HookId) -> bool {{ true }}
 fn listening(_: generated::HookId) -> impl Iterator<Item=(bool, &'static Owner)> {{ OWNERS.iter().map(|m| (false, m)) }}
-fn enter_listener<'a>(owner: &'a Owner, _: &str) -> ((), &'a Owner) {{ ((), owner) }}
+mod runtime {{
+    pub struct ListenerScope;
+    impl ListenerScope {{
+        pub fn new() -> Self {{ Self }}
+        pub fn enter<'a>(&mut self, owner: &'a super::Owner, _: &str) -> &'a super::Owner {{ owner }}
+    }}
+}}
 impl Owner {{ fn setting_changed(&self, _: &mut dyn generated::ClientHost, _: &mut generated::SettingChangedEvent<'_>) {{ if self.id == "a" {{ A.fetch_add(1, Ordering::Relaxed); }} else {{ B.fetch_add(1, Ordering::Relaxed); }} }} }}
 mod generated {{
 pub trait ClientHost {{}}
@@ -2154,6 +2178,32 @@ fn main() {{
         assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
         assert!(
             compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
+    }
+
+    #[test]
+    fn a_worldgen_part_method_takes_the_worldgen_context_and_reads_the_published_table() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hooks = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .hooks;
+        let compact: String = hooks.chars().filter(|c| !c.is_whitespace()).collect();
+        fn dispatch<'a>(compact: &'a str, name: &str) -> &'a str {
+            let start = compact
+                .find(&format!("fndispatch_{name}("))
+                .unwrap_or_else(|| panic!("no dispatch for {name}"));
+            let body = &compact[start..];
+            &body[..body.find("#[doc(hidden)]").unwrap_or(body.len())]
+        }
+        let method = &compact[compact.find("fnon_tree_grow(").unwrap()..];
+        assert!(method.starts_with("fnon_tree_grow(&self,context:&dynWorldgenHost,"));
+        let worldgen = dispatch(&compact, "on_tree_grow");
+        assert!(worldgen.contains("=super::worldgen_parts();"));
+        assert!(!worldgen.contains("super::parts("));
+        // Every other scoped hook keeps this thread's table, `is_ladder`'s loop context included.
+        assert!(
+            dispatch(&compact, "is_ladder")
+                .contains("=super::parts(HookId::IsLadder,\"is_ladder\");")
         );
     }
 }

@@ -36,6 +36,8 @@ the game by the launcher ([Native mods](native-mods.md)), or to `mod.wasm`, whic
 the same mod API runs with no rebuild. Only the build step differs: the hooks, Parts,
 `[dependencies]` and the manifest mean the same for both.
 
+The example counts ticks with the `server_tick` hook, so it also works on plain game builds.
+
 ```rust,ignore
 {{#include ../../examples/wasm-hello/src/lib.rs:mod}}
 ```
@@ -109,7 +111,7 @@ together.
 
 The state is 32 words, zeroed, exported by the std member as `horizon_group_state`: the handler table, the cache budget, and
 29 slots for eviction callbacks. A member's allocator is `mod_api`'s `#[global_allocator]` on wasm32. When an allocation
-fails because the group's memory (256 MiB) is full, it calls every callback registered with
+fails because the group's memory is full (see [Memory](#memory)), it calls every callback registered with
 `mod_api::wire::guest::register_eviction(fn())` once and retries once; if that frees nothing the allocation fails as
 usual (`try_reserve` returns an error, an infallible allocation ends the call with a trap). Register a callback to
 give back what a cache can rebuild. It must free memory and must not allocate. Registering the same function twice is
@@ -159,9 +161,7 @@ owner enable flag and stop behavior as native listeners. Mixins remain native-on
 
 A point's record is a copy of every parameter as an API value, `&mut` parameters copied back
 after the listener, exactly as for a native listener; a point with a parameter that has no API type
-yet refuses an `api` listener at registration, naming it. `access = "internals"` (raw records,
-call kinds, support modules) is native-only: a `mod.wasm` declaring `[[internals]]` or an internals
-injection is refused at load with "internals access is native-only".
+yet refuses an `api` listener at registration, naming it. The removed `access` key on `[[inject]]` is refused by name on both targets. Native code needing game internals uses `[[native.mixin]]`; wasm cannot declare `[[internals]]` or native transformations.
 
 ## ABI reference
 
@@ -229,6 +229,19 @@ and named on the Mods page.
 The game limits execution time, memory and table usage. A trap or limit hit disables the affected
 group. APIs marked `Not on wasm` in their Rust documentation cannot be used by wasm mods.
 
+### Memory
+
+A group's members share one linear memory: their heaps, stacks and static data together. Its limit is
+1 GiB, or the largest `wasm_memory_mib` a member's `horizon-mod.toml` declares (1 to 4096 MiB, wasm32's 4 GiB),
+so a library declares what it and its addons need. The limit is a ceiling, not memory taken: the group
+uses what it grows to. Past the limit, or past what the system gives, `memory.grow` answers -1 inside the
+guest and the call goes on; Rust's allocator then reports the failure as usual (`try_reserve` returns an
+error; an infallible allocation ends the call with a trap and the log names the group and its limit).
+
+Each instance caps every group with `wasm.memory_cap_mib:<MiB>` in `horizon-mods.txt`, beside `options.txt`:
+4096 unless the player lowers it. A group whose members declare more than the cap is refused at load, and
+the Mods page names the group, what it declares and the cap.
+
 ## Compiled module cache
 
 The game caches compiled wasm modules in `<game_dir>/.horizon-cache/wasm/`, keyed by the
@@ -252,6 +265,30 @@ refused. On Windows, persistent caching is disabled until owner, DACL and inheri
 can be verified for the cache folder and opened entries. Modules compile from wasm instead,
 with one warning explaining the fallback. The player's account is the trust boundary.
 
+At startup, the game removes regular `.cwasm` files from other engine configurations or
+Wasmtime versions, along with malformed and old-format cache names. It never follows symlinks
+for cleanup. Current-engine entries have a 1 GiB startup budget: when their combined size
+exceeds it, entries are removed oldest first by modification time until within the budget.
+Current entries are not removed just because they are old. Entries written during this launch
+are retained until a later startup. The proposed budget allows 30 copies of the largest
+measured compiled module (34,039,320 bytes) plus headroom; the 30-module allowance awaits
+maintainer confirmation and does not represent a measured pack.
+
 A failed check logs the reason once per launch. Unavailable, corrupt or incompatible entries
 fall back to compiling the wasm. Writes replace entries atomically without changing files that
 running modules have mapped. Deleting the cache is always safe: the next launch rebuilds it.
+
+## Guest stack
+
+Every wasm mod has the same 128 MiB guest stack limit; manifests cannot change it.
+At the reporter's measured ceiling of about 1.8 KB per frame, this covers about
+70,000 plain frames (Java's deepest reported case was about 59,000). Frame sizes
+vary with compiled code. Guest overflow still traps and names the mod.
+Guest-entering threads reserve another 8 MiB for host frames. Linux raises the
+main stack limit and re-execs before initialization, or refuses startup with
+`GuestStackUnavailable` when the hard limit is too low. Windows and macOS use
+executable linker stack reservations. These reserve address space; resident
+memory grows as stack pages are touched.
+
+Wasm runtime tests reserve their guest stack through a shared test helper;
+local `cargo test` and CI need no `RUST_MIN_STACK` setting.

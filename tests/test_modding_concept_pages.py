@@ -59,6 +59,17 @@ class ConceptPages(unittest.TestCase):
         self.assertEqual(result["sections"][2]["Chapter"]["path"], "concepts/alpha.md")
         self.assertEqual(result["sections"][5]["Chapter"]["sub_items"][1]["Chapter"]["number"], [4, 2])
 
+    def test_registered_load_conditions_page_is_discovered_without_summary_entry(self):
+        root = Path(__file__).resolve().parents[1] / "docs/modding/src"
+        page = "concepts/load-conditions.md"
+        self.assertNotIn(f"]({page})", (root / "SUMMARY.md").read_text())
+        (self.src / page).write_text((root / page).read_text())
+        book = pages.expand(copy.deepcopy(self.book), self.src)
+        found = [c for c in pages.chapters(book["sections"]) if c["path"] == page]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["name"], "Registered data load conditions")
+        self.assertIn("A namespace is owned only", found[0]["content"])
+
     def test_equal_titles_use_filename_order_not_directory_iteration_order(self):
         for name in ("zeta", "alpha"):
             (self.src / f"concepts/{name}.md").write_text("# Same title\n")
@@ -74,6 +85,11 @@ class ConceptPages(unittest.TestCase):
     def test_discovered_page_links_are_checked(self):
         (self.src / "how-to/broken.md").write_text("# Broken\n\n[gone](missing.md)\n")
         with self.assertRaisesRegex(AssertionError, "how-to/broken.md: missing link target"):
+            pages.expand(copy.deepcopy(self.book), self.src)
+
+    def test_design_page_dropped_into_concepts_fails(self):
+        (self.src / "concepts/next.md").write_text("# Design: what comes next\n\nA proposal.\n")
+        with self.assertRaisesRegex(AssertionError, "concepts/next.md: .* docs/design/"):
             pages.expand(copy.deepcopy(self.book), self.src)
 
     def test_page_outside_the_discovered_folders_must_be_listed(self):
