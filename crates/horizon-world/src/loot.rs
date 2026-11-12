@@ -328,8 +328,8 @@ pub struct LootData {
     items: HashMap<String, ItemFacts>,
     /// Enchantments in registry (identifier) order.
     enchantments: Vec<Enchantment>,
-    /// Raw tag files by (registry, tag id).
-    tags: HashMap<(String, String), Vec<Value>>,
+    /// Tag files' layers by (registry, tag id).
+    tags: HashMap<(String, String), crate::tag_layers::TagLayers>,
     /// Smelting recipes in recipe id order: (ingredient, result, result count).
     smelting: Vec<(Value, String, i32)>,
 }
@@ -894,12 +894,12 @@ impl LootData {
                 if !overlay.conditions.allows_tag(&value, registry, &name) {
                     continue;
                 }
-                let values = value["values"].as_array().cloned().unwrap_or_default();
-                tags.insert((registry.to_owned(), name), values);
+                let layers = crate::tag_layers::TagLayers::from_file(&value);
+                tags.insert((registry.to_owned(), name), layers);
             }
             // The packs' entries join the game's own, in pack order; a
-            // `replace` file drops what the lower sources put in
-            // (`TagLoader.load` walks the resource stack the same way).
+            // `replace` file drops what the lower sources put in and `remove`
+            // takes entries out (`TagLoader.load` walks the stack the same way).
             for (id, files) in overlay.tag_kind(registry) {
                 for bytes in files {
                     let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
@@ -909,10 +909,7 @@ impl LootData {
                         continue;
                     }
                     let slot = tags.entry((registry.to_owned(), id.clone())).or_default();
-                    if v["replace"].as_bool() == Some(true) {
-                        slot.clear();
-                    }
-                    slot.extend(v["values"].as_array().cloned().unwrap_or_default());
+                    slot.push(&v);
                 }
             }
         }
@@ -2374,7 +2371,9 @@ mod namespace_tests {
         let loot = LootData::load(&root, &off, &defaults).unwrap();
         assert_eq!(
             loot.tags[&("item".into(), "demo:food".into())],
-            vec![serde_json::json!("minecraft:bread")]
+            crate::tag_layers::TagLayers::from_file(
+                &serde_json::json!({"values": ["minecraft:bread"]})
+            )
         );
         assert!(
             !loot

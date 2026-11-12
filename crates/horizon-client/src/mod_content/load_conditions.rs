@@ -15,10 +15,20 @@ pub(super) fn tag_conditions_hold(
     Ok(allowed)
 }
 
-/// A tag file's accepted values with `more` appended (no repeats).
+/// A tag file's `key` list (`values`, `remove`); empty where it has none.
+pub(super) fn tag_list<'a>(tag: &'a J, key: &str) -> &'a [J] {
+    match tag.get(key) {
+        Some(J::Arr(list)) => list,
+        _ => &[],
+    }
+}
+
+/// A tag file's accepted values with `more` appended (no repeats), and
+/// `remove` after its own `remove` entries (NeoForge's tag `remove` list).
 pub(super) fn merge_tag(
     text: Option<&str>,
     more: &[J],
+    remove: &[J],
     what: &str,
     conditions: &horizon_world::conditions::LoadConditions,
 ) -> Result<String> {
@@ -39,7 +49,66 @@ pub(super) fn merge_tag(
             values.push(v.clone());
         }
     }
+    if !remove.is_empty() {
+        let mut list = tag_list(&doc, "remove").to_vec();
+        list.extend(remove.iter().cloned());
+        doc.set("remove", J::Arr(list));
+    }
     Ok(serde_json::to_string_pretty(&doc)?)
+}
+
+/// What the mods do to one tag file, in load order (a data pack's
+/// TagLoader): each adds its values, and one that replaces the tag first
+/// drops vanilla's entries and the mods' before it.
+#[derive(Default)]
+pub(super) struct TagMerge {
+    /// A mod replaced the tag: vanilla's entries are left out.
+    pub(super) replaced: bool,
+    /// The mods whose values are in `values`.
+    pub(super) mods: Vec<String>,
+    pub(super) values: Vec<J>,
+    /// The mods' `remove` entries since the last replace, in load order.
+    pub(super) remove: Vec<J>,
+}
+
+impl TagMerge {
+    /// Adds one mod's tag file. A replace that drops entries (vanilla's in a
+    /// `shared` tag, one not in the mod's namespaces, or other mods') warns.
+    pub(super) fn add(
+        &mut self,
+        id: &str,
+        file: &str,
+        replace: bool,
+        shared: bool,
+        values: &[J],
+    ) -> Option<String> {
+        let mut warning = None;
+        if replace {
+            let mut dropped: Vec<String> = Vec::new();
+            if shared && !self.replaced {
+                dropped.push("vanilla's entries".into());
+            }
+            if !self.mods.is_empty() {
+                dropped.push(format!("those of {}", self.mods.join(", ")));
+            }
+            if !dropped.is_empty() {
+                warning = Some(format!(
+                    "mod {id} replaces {file}: {} are left out, as a data pack's replace \
+                     does; the mods after it in load order still add to it",
+                    dropped.join(" and ")
+                ));
+            }
+            self.replaced = true;
+            self.mods.clear();
+            self.values.clear();
+            self.remove.clear();
+        }
+        if !self.mods.iter().any(|m| m == id) {
+            self.mods.push(id.to_owned());
+        }
+        self.values.extend(values.iter().cloned());
+        warning
+    }
 }
 
 /// Build generated tables using the owning load's registered condition snapshot.
@@ -149,6 +218,9 @@ pub fn build_with_conditions(
                     let shared = !m.content.namespaces.iter().any(|n| n == ns);
                     let merge = tags.entry(file.clone()).or_default();
                     warnings.extend(merge.add(&m.id, &file, replace, shared, values));
+                    merge
+                        .remove
+                        .extend(tag_list(&doc, "remove").iter().cloned());
                 } else if !file.starts_with(&declarations) {
                     if structures::is_modifier(&file) {
                         let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
@@ -197,7 +269,14 @@ pub fn build_with_conditions(
             .filter(|_| !merge.replaced);
         overlay.write(
             file,
-            merge_tag(vanilla.as_deref(), &merge.values, file, conditions)?.as_bytes(),
+            merge_tag(
+                vanilla.as_deref(),
+                &merge.values,
+                &merge.remove,
+                file,
+                conditions,
+            )?
+            .as_bytes(),
         )?;
         // data/<ns>/tags/block/<path>.json is the block tag <ns>:<path>.
         let Some((ns, path)) = file
@@ -213,7 +292,13 @@ pub fn build_with_conditions(
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(text.as_deref(), &merge.values, name, conditions)?;
+            let merged = merge_tag(
+                text.as_deref(),
+                &merge.values,
+                &merge.remove,
+                name,
+                conditions,
+            )?;
             doc.set(&id, J::Str(merged));
         }
     }
@@ -238,7 +323,13 @@ pub fn build_with_conditions(
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(text.as_deref(), &merge.values, BIOME_TAGS, conditions)?;
+            let merged = merge_tag(
+                text.as_deref(),
+                &merge.values,
+                &merge.remove,
+                BIOME_TAGS,
+                conditions,
+            )?;
             doc.set(&id, J::Str(merged));
         }
         overlay.write(BIOME_TAGS, &serde_json::to_vec(&doc)?)?;

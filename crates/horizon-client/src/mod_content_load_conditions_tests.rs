@@ -96,6 +96,7 @@ fn conditional_base_tag_does_not_gate_later_accepted_layers() {
             &merge_tag(
                 Some(base),
                 &more,
+                &[],
                 "conditional",
                 &horizon_world::conditions::LoadConditions::new(if enabled {
                     vec!["code_only"]
@@ -129,6 +130,7 @@ fn tags_merge_without_repeats() {
         &merge_tag(
             Some(vanilla),
             &more,
+            &[],
             "t",
             &horizon_world::conditions::LoadConditions::vanilla(),
         )
@@ -179,4 +181,32 @@ fn failed_condition_build_removes_generated_staging() {
     );
     assert!(!out.exists());
     assert!(!scratch.path().join("candidate-tables").exists());
+}
+
+#[test]
+fn removals_follow_the_tag_file_and_a_replace_drops_them() {
+    let vanilla =
+        r#"{"values": ["minecraft:stone", "minecraft:dirt"], "remove": ["minecraft:sand"]}"#;
+    let ids = |ids: &[&str]| -> Vec<J> { ids.iter().map(|i| J::Str((*i).into())).collect() };
+    let merged: serde_json::Value = serde_json::from_str(
+        &merge_tag(
+            Some(vanilla),
+            &ids(&["test:ruby"]),
+            &ids(&["minecraft:dirt"]),
+            "t",
+            &LoadConditions::vanilla(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        merged["remove"],
+        serde_json::json!(["minecraft:sand", "minecraft:dirt"])
+    );
+    let file = "data/minecraft/tags/item/things.json";
+    let mut merge = TagMerge::default();
+    merge.add("a", file, false, true, &ids(&["a:x"]));
+    merge.remove.extend(ids(&["minecraft:dirt"]));
+    merge.add("b", file, true, true, &ids(&["b:y"]));
+    assert!(merge.remove.is_empty());
 }

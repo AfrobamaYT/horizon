@@ -574,6 +574,9 @@ impl Registry<'_> {
             .get(tag)
             .ok_or_else(|| format!("unknown {} tag #{tag}", self.what))?;
         let doc: Value = serde_json::from_str(text).map_err(|e| format!("#{tag}: {e}"))?;
+        let mut own = Vec::new();
+        let out_all = out;
+        let out = &mut own;
         for v in doc["values"].as_array().into_iter().flatten() {
             let (id, required) = match v {
                 Value::String(s) => (s.as_str(), true),
@@ -592,6 +595,24 @@ impl Registry<'_> {
                 None => {}
             }
         }
+        // NeoForge's `remove` list, after the values: optional, so an
+        // unknown id or tag takes nothing out.
+        for v in doc["remove"].as_array().into_iter().flatten() {
+            let Some(id) = horizon_world::tag_layers::entry_id(v) else {
+                continue;
+            };
+            let mut removed = Vec::new();
+            match id.strip_prefix('#') {
+                Some(inner) if self.tags.contains_key(&full(inner)) => {
+                    let mut seen = BTreeSet::from([tag.to_owned()]);
+                    self.expand(&full(inner), &mut removed, &mut seen)?;
+                }
+                Some(_) => continue,
+                None => removed.push(full(id)),
+            }
+            own.retain(|e| !removed.contains(e));
+        }
+        extend(out_all, own);
         Ok(())
     }
 }

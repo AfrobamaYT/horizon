@@ -47,20 +47,30 @@ impl TagEntry {
 pub struct TagFile {
     pub entries: Vec<TagEntry>,
     pub replace: bool,
+    /// NeoForge's `TagFile.remove`: entries taken out after this file's `entries`.
+    pub remove: Vec<TagEntry>,
 }
 impl TagFile {
     pub fn from_json(json: &str) -> Result<Self, DecodeError> {
         let object: Object = serde_json::from_str(json)?;
-        let values: Vec<Box<RawValue>> = serde_json::from_str(required(&object, "values")?.get())?;
-        let entries = values
-            .iter()
-            .map(|v| TagEntry::from_json(v.get()))
-            .collect::<Result<_, _>>()?;
+        let list = |raw: &RawValue| -> Result<Vec<TagEntry>, DecodeError> {
+            let values: Vec<Box<RawValue>> = serde_json::from_str(raw.get())?;
+            values
+                .iter()
+                .map(|v| TagEntry::from_json(v.get()))
+                .collect()
+        };
+        let entries = list(required(&object, "values")?)?;
         let replace = optional(&object, "replace")
             .map(|v| serde_json::from_str(v.get()))
             .transpose()?
             .unwrap_or(false);
-        Ok(Self { entries, replace })
+        let remove = optional(&object, "remove").map(list).transpose()?;
+        Ok(Self {
+            entries,
+            replace,
+            remove: remove.unwrap_or_default(),
+        })
     }
 }
 // Identifier.CODEC permits the empty path as well as an omitted namespace.
@@ -83,6 +93,8 @@ pub(crate) fn identifier(name: &str) -> Result<String, DecodeError> {
 pub struct TagEntryWithSource {
     pub entry: TagEntry,
     pub source: String,
+    /// A `remove` entry (NeoForge's `TagLoader.EntryWithSource.remove`).
+    pub remove: bool,
 }
 #[derive(Clone, Debug, Default)]
 pub struct TagDefinitions {
@@ -127,6 +139,16 @@ impl TagDefinitions {
         entries.extend(file.entries.into_iter().map(|entry| TagEntryWithSource {
             entry,
             source: source.into(),
+            remove: false,
+        }));
+        // Removals are optional: a missing id or tag removes nothing.
+        entries.extend(file.remove.into_iter().map(|entry| TagEntryWithSource {
+            entry: TagEntry {
+                required: false,
+                ..entry
+            },
+            source: source.into(),
+            remove: true,
         }));
         Ok(())
     }
@@ -201,17 +223,13 @@ impl TagDefinitions {
                 if entry.tag {
                     if let Some(children) = result.tags.get(&entry.id) {
                         for value in children {
-                            if seen.insert(value.clone()) {
-                                values.push(value.clone());
-                            }
+                            apply(&mut values, &mut seen, value, sourced.remove);
                         }
                     } else if entry.required {
                         missing.push(sourced.clone());
                     }
                 } else if let Some(value) = lookup(&entry.id, entry.required) {
-                    if seen.insert(value.clone()) {
-                        values.push(value);
-                    }
+                    apply(&mut values, &mut seen, &value, sourced.remove);
                 } else if entry.required {
                     missing.push(sourced.clone());
                 }
@@ -223,6 +241,17 @@ impl TagDefinitions {
             }
         }
         Ok(result)
+    }
+}
+/// One entry's value into a tag being built: added at the end, or removed
+/// (`values::add` or NeoForge's `values::remove` on the tag's ordered set).
+fn apply<T: Clone + Ord>(values: &mut Vec<T>, seen: &mut BTreeSet<T>, value: &T, remove: bool) {
+    if !remove {
+        if seen.insert(value.clone()) {
+            values.push(value.clone());
+        }
+    } else if seen.remove(value) {
+        values.retain(|v| v != value);
     }
 }
 fn reaches(
@@ -334,6 +363,26 @@ mod tests {
             .unwrap();
         let built = definitions.build(|id, _| Some(id.to_owned())).unwrap();
         assert_eq!(built.tags["minecraft:a"], vec!["minecraft:three"]);
+    }
+    #[test]
+    fn a_higher_packs_remove_takes_entries_and_tag_members_out() {
+        let mut definitions = TagDefinitions::default();
+        for (name, source, json) in [
+            ("things", "a", r##"{"values":["stone","dirt","#other"]}"##),
+            ("other", "a", r##"{"values":["sand"]}"##),
+            (
+                "things",
+                "b",
+                r##"{"values":[],"remove":["dirt","#other",{"id":"absent","required":true}]}"##,
+            ),
+        ] {
+            definitions.apply_json(name, source, json).unwrap();
+        }
+        let built = definitions
+            .build(|id, _| (!id.ends_with("absent")).then(|| id.to_owned()))
+            .unwrap();
+        assert_eq!(built.tags["minecraft:things"], vec!["minecraft:stone"]);
+        assert!(built.missing.is_empty());
     }
     #[test]
     fn required_edges_precede_optional_edges_and_missing_tags_do_not_poison_siblings() {
