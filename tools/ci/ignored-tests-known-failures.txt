@@ -54,7 +54,6 @@ horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::siz
 horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::sized_hdr_clear_respects_byte_budget horizon-rust/horizon#9303 flaky
 
 # Client failures exposed after enforcing target completion (#2137).
-horizon-client game::persist::summon_uuid_conflict_tests::summon_skips_a_uuid_taken_earlier_in_the_same_tree #2175
 horizon-client game::explosion::tests::explosion_items_parity_fixture #2177 harness
 horizon-client game::native_live_holder_tests::thousand_live_block_entity_ticks #2177 harness
 horizon-client game::remote_vehicles::tests::steering_mount_control_matches_vanilla #2177 harness
@@ -67,6 +66,3 @@ horizon-client game::levels::tests::features_write_a_full_neighbour_only_through
 horizon-client game::levels::tests::an_old_chunk_saves_the_heights_its_new_neighbour_calculated #2474
 # #2474 dependency: external constructed 1.20.4 save with its partial ring removed; no committed recipe or CI provisioning.
 horizon-client game::levels::tests::the_overworld_cache_holds_the_edge_chunks_calculated_heights #2474
-
-# #2505 dependency: canonical ignored-test runner lacks HORIZON_FISHING_RESOURCES and HORIZON_FISHING_REFERENCE; remove when real oracle inputs are provisioned there.
-horizon-client game::fishing::tests::fishing_retrieve_reference #2505
