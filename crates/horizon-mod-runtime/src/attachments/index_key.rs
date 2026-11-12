@@ -13,12 +13,14 @@ pub(super) enum Units<'a> {
 }
 impl Iterator for Units<'_> {
     type Item = u16;
+    #[inline]
     fn next(&mut self) -> Option<u16> {
         match self {
             Self::Saved(it) => it.next().copied(),
             Self::Named(it) => it.next(),
         }
     }
+    #[inline]
     fn count(self) -> usize {
         match self {
             Self::Saved(it) => it.len(),
@@ -62,6 +64,7 @@ impl PartialEq for dyn Lookup + '_ {
 }
 impl Eq for dyn Lookup + '_ {}
 impl Hash for dyn Lookup + '_ {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         let (namespace, name) = self.units();
         // Lengths delimit the lossless UTF-16 components. Pack four units per
