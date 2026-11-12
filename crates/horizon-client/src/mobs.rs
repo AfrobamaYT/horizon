@@ -1748,11 +1748,11 @@ pub enum MobEvent {
         mob: u32,
         at: [f64; 3],
     },
-    /// `LivingEntity.baseTick`'s drowning damage: entity event 67, the
-    /// clients' `makeDrownParticles`.
+    /// `LivingEntity.baseTick`'s drowning: entity event 67 for 8 `bubbles`, else that many particles.
     Drown {
         mob: u32,
         at: [f64; 3],
+        bubbles: i32,
     },
     /// PowderSnowBlock.entityInside's snowflake with vanilla's sampled velocity.
     PowderSnowParticle {

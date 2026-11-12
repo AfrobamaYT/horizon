@@ -4705,7 +4705,7 @@ pub(crate) mod tests {
                 "minecraft:zombie",
                 &mut drowning,
                 &mut damage,
-                8,
+                &mut 8,
                 &mut cancel_drown,
             );
             (amount, cancel, can_breathe, consume, drowning, damage)

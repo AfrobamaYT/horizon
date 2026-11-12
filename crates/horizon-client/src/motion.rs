@@ -403,9 +403,9 @@ pub enum MotionEvent {
         sound: bool,
         particles: bool,
     },
-    /// Entity event 67 (`LivingEntity.makeDrownParticles`): eight bubbles
-    /// around a drowning player.
-    Drown,
+    /// Entity event 67 (`LivingEntity.makeDrownParticles`): the bubbles
+    /// around a drowning player (8, or the count a mod set).
+    Drown(i32),
 }
 #[derive(Clone)]
 pub struct PlayerMotion {
