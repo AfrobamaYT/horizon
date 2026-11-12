@@ -5033,6 +5033,7 @@ mod tests {
                 [0.0; 3],
                 vec![FireworkExplosion::default(); 4],
                 [0.0; 3],
+                true,
             );
             engine.elder_guardian();
             assert_eq!(engine.group_count(), 0);
@@ -5070,6 +5071,7 @@ mod tests {
                     [0.0; 3],
                     vec![FireworkExplosion::default()],
                     [0.0; 3],
+                    true,
                 );
                 engine.elder_guardian();
                 if admitted {
@@ -5121,6 +5123,7 @@ mod tests {
                             [0.0; 3],
                             vec![FireworkExplosion::default()],
                             [0.0; 3],
+                            true,
                         ),
                         _ => unreachable!(),
                     }
