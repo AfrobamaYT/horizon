@@ -700,7 +700,6 @@ enum GuestUse {
     /// an entity again from the view.
     Entity(Hand, InteractTarget),
 }
-
 /// The entity an interact packet names and where its client clicked it (the
 /// packet's location, measured from the entity's position): what
 /// `ServerGamePacketListenerImpl.handleInteract` takes from
@@ -1663,7 +1662,7 @@ impl LevelAccess for GameLevel<'_> {
         {
             return signal;
         }
-        machines::container_signal(self.world, self.behaviours, self.items, self.registry, pos)
+        machines::container_signal(self, pos)
     }
     fn item_frame_analog_output(&self, pos: BlockPos, facing: Direction) -> Option<i32> {
         let mut frames = self
@@ -1682,10 +1681,17 @@ impl LevelAccess for GameLevel<'_> {
     fn block_entity_signal(
         &self,
         pos: BlockPos,
-        _state: BlockStateId,
+        state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
-        native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
+        native_level_signals::block_entity_signal(
+            self.world,
+            self.registry,
+            self.items,
+            self.lid_openers,
+            pos,
+            state,
+        )
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
@@ -2936,6 +2942,8 @@ struct Game<'a> {
     tickets: horizon_client::ticket_levels::ChunkTickets,
     random_tick_sections: horizon_client::random_tick_sections::RandomTickSections,
     level_events: Vec<LevelEvent>,
+    /// Falling models by state and selected-model address list; cleared on pack/atlas replacement.
+    falling_vertices: RefCell<HashMap<BlockStateId, Vec<(Vec<usize>, Vec<Vertex>)>>>,
     falling: horizon_client::join_seq::JoinList<FallingBlock, false>,
     /// Blocks the server shows for a moment (`ClientboundAddTransientBlockPacket`).
     transient_blocks: transient_blocks::TransientBlocks,
@@ -3177,9 +3185,9 @@ struct Game<'a> {
     water_plane_memo: std::cell::Cell<Option<f32>>,
     /// The camera's block and the second `water_plane` last scanned at.
     water_plane_scan: std::cell::Cell<Option<([i32; 3], i64)>>,
-    /// The mobs' box reach while the boats and minecarts tick, with the mob count it was
-    /// worked out for (`vehicle_mob_reach`).
-    vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
+    /// What the boats' and minecarts' ticks know about the mobs: their box reach
+    /// (`vehicle_mob_reach`) and a grid of their boxes (`mobs_meeting`).
+    vehicle_mobs: boat_passengers::VehicleMobs,
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
@@ -4750,6 +4758,16 @@ impl Game<'_> {
     ) -> [f64; 3] {
         self.add_item_entity(stack, position, None, pickup_delay)
     }
+    /// The dispenser constructs default motion before replacing it with the throw.
+    pub(super) fn spawn_item_thrown(
+        &mut self,
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: [f64; 3],
+    ) {
+        let random = spill::prepare_item_random(None);
+        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random));
+    }
     fn add_item_entity(
         &mut self,
         stack: ItemStack,
@@ -5358,18 +5376,11 @@ impl Game<'_> {
             horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
         );
     }
-    /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
-    /// becomes an item entity where that item lay (`new ItemEntity(level, x,
-    /// y, z, stack)`), nudged by 0.2 less 0.1 per axis and pickable at once.
+    /// `ItemUtils.onContainerDestroyed`: spilled stacks use their own constructor
+    /// motion (0.2 up and ±0.1 sideways), leaving the level random untouched.
     fn spawn_destroyed_contents(&mut self, destroyed: Vec<(ItemStack, Vec3)>) {
         for (stack, at) in destroyed {
-            let r = &mut self.world.random;
-            let motion = [
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-            ];
-            self.spawn_item(stack, [at.x, at.y, at.z], motion, 0);
+            self.spawn_item_own(stack, [at.x, at.y, at.z], 0);
         }
     }
     /// Run vanilla block behaviour against the world through `LevelAccess`.
@@ -6668,6 +6679,13 @@ impl Game<'_> {
         }
         if on_ground {
             self.falling_block_impact(f);
+            if f.fall_distance > 0.0 {
+                self.post_landing_event(
+                    f.position,
+                    horizon_client::falling_block::bounds(f.position),
+                    false,
+                );
+            }
             f.fall_distance = 0.0;
         }
         // applyEffectsFromBlocks: WebBlock.entityInside makes it stuck
@@ -6887,8 +6905,8 @@ impl Game<'_> {
             self.loot_block_entity(pos, &facts.name)
         };
         if let Some(entity) = self.world.block_entities.get(&key).cloned() {
-            let name = self.world.block_names.get(&key).cloned();
-            self.pending.record(pos, &entity, &facts.name, name);
+            self.pending
+                .record_from(&self.world, pos, &entity, &facts.name);
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -7252,26 +7270,8 @@ impl Game<'_> {
                     respawn_anchor::AnchorUse::Pass => anchor_passed = true,
                     respawn_anchor::AnchorUse::Other => {}
                 }
-                // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the underside passes, so the next sign chains below instead of
-                // opening the editor, unless the side has click commands to run (`shouldTryToChainAnotherHangingSign`).
-                chains_sign = hit.face == [0, -1, 0]
-                // `instanceof HangingSignItem`, independent of the item's name.
-                && held.as_ref().is_some_and(|s| {
-                    self.res.behaviours().item_binding(&s.item)
-                        .is_some_and(|i| i.kind == horizon_world::level::ItemKind::HangingSign)
-                })
-                && self
-                    .res
-                    .facts()
-                    .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-                    .has_class("CeilingHangingSignBlock")
-                && matches!(
-                    self.world
-                        .block_entities
-                        .get(&(hit.pos[0], hit.pos[1], hit.pos[2])),
-                    Some(BlockEntity::Sign(_))
-                )
-                && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
+                // Hanging signs chain on ceiling undersides and wall edges unless click commands run.
+                chains_sign = self.chains_hanging_sign(hit.pos, hit.face, held.as_ref());
             }
             if block_answer.is_none() {
                 use horizon_world::level::UseBranch::ItemOn;
@@ -10878,14 +10878,7 @@ impl Game<'_> {
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             let start = out.len();
             self.mark_motion(start, Self::MOTION_OBJECT | u64::from(f.id));
-            self.block_model_vertices(
-                f.state,
-                horizon_core::random::position_seed(f.start_pos),
-                glam::Mat4::from_translation(o),
-                packed,
-                false,
-                &mut out,
-            );
+            self.falling_model_vertices(f.state, f.start_pos, o, packed, &mut out);
             let tint = horizon_client::mobs::render::abgr(tint);
             for vertex in &mut out[start..] {
                 vertex.color = horizon_client::hud_layout::multiply(vertex.color, tint);
@@ -12779,10 +12772,7 @@ impl Game<'_> {
             }
             if let Some(kind) = mob {
                 if let Some(id) = self.spawn_mob_at(kind, (target[0], target[1], target[2]), true) {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        horizon_client::entity_nbt::apply_item_components(m, stack);
-                    }
-                    self.mob_placed(id)?;
+                    self.mob_placed(id, stack)?;
                 }
                 self.post_block_game_event(
                     "minecraft:entity_place",
@@ -13863,6 +13853,7 @@ impl Game<'_> {
             None,
             self.settings.horizon.api,
             self.settings.horizon.translucent_batching,
+            self.settings.vsync,
             &self.settings.horizon,
             shader_packs::picked_pack_shape(&self.settings),
             display,
@@ -16368,6 +16359,7 @@ impl<'a> Game<'a> {
             tickets: Default::default(),
             random_tick_sections: Default::default(),
             level_events: Vec::new(),
+            falling_vertices: Default::default(),
             falling: Default::default(),
             transient_blocks: Default::default(),
             paintings: Default::default(),
@@ -16514,7 +16506,7 @@ impl<'a> Game<'a> {
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),
-            vehicle_mob_reach: Default::default(),
+            vehicle_mobs: Default::default(),
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
@@ -17385,7 +17377,7 @@ pub(crate) fn run_with(
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    if let Some(error) = missing_resources(&vanilla_root) {
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.
@@ -18052,3 +18044,102 @@ impl Game<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod destroyed_contents_tests {
+    use super::game_tests::tests::server_game;
+    use super::*;
+    use horizon_client::items::ItemStack;
+    use horizon_core::random::RandomSource;
+
+    /// The motion of each spilled stack, in the order the spill made them.
+    fn spilled_motions(game: &Game<'_>) -> Vec<[f64; 3]> {
+        game.dropped
+            .iter()
+            .map(|item| [item.velocity.x, item.velocity.y, item.velocity.z])
+            .collect()
+    }
+
+    /// `ItemUtils.onContainerDestroyed` makes each stack with
+    /// `new ItemEntity(level, x, y, z, stack)`, whose motion is 0.2 up and
+    /// ±0.1 sideways from the *item's* random (ItemEntity.java:61-66), and
+    /// draws nothing from the level's. Every destroyed container funnels here:
+    /// lava, fire and cactus in the item's environment tick, an explosion, and
+    /// the damage command.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn spilled_stacks_rise_from_their_own_randoms() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        let at = Vec3::new(8.5, 70.0, 8.5);
+        let stacks = ["minecraft:stone", "minecraft:dirt", "minecraft:glass"]
+            .into_iter()
+            .map(|id| (ItemStack::new(id, 1), at))
+            .collect();
+        let mut level = game.world.random.clone();
+        game.spawn_destroyed_contents(stacks);
+        let motions = spilled_motions(&game);
+        assert_eq!(motions.len(), 3);
+        for motion in &motions {
+            assert_eq!(motion[1], 0.2, "the four-argument constructor rises 0.2");
+            assert!((-0.1..0.1).contains(&motion[0]), "{motion:?}");
+            assert!((-0.1..0.1).contains(&motion[2]), "{motion:?}");
+        }
+        // Three stacks, three different sideways motions: each drew its own.
+        assert_ne!(motions[0], motions[1]);
+        assert_ne!(motions[1], motions[2]);
+        assert_ne!(motions[0], motions[2]);
+        // The spill leaves the level's random alone.
+        assert_eq!(game.world.random.next_double(), level.next_double());
+        assert_eq!(game.world.random.next_double(), level.next_double());
+    }
+
+    /// The damage command is one of those callers: killing a shulker box item
+    /// spills its contents with the same upward motion.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_damaged_shulker_box_spills_its_stacks_upward() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+        let feet = Vec3::new(8.5, 70.0, 8.5);
+        game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
+        game.update_chunk_tickets();
+        let boxed = horizon_client::item_data::parse_stack(
+            r#"{id:"minecraft:shulker_box",count:1,components:{"minecraft:container":[
+                {slot:0,item:{id:"minecraft:stone",count:2}},
+                {slot:4,item:{id:"minecraft:dirt",count:1}},
+                {slot:8,item:{id:"minecraft:glass",count:3}}]}}"#,
+        )
+        .unwrap()
+        .unwrap();
+        game.spawn_item(boxed, [8.5, 70.0, 8.5], [0.0; 3], 0);
+        assert_eq!(game.dropped.len(), 1);
+        assert!(game.run_command("damage @e[type=minecraft:item,limit=1] 100 minecraft:generic"));
+        let mut spilled: Vec<_> = game
+            .dropped
+            .iter()
+            .map(|item| (item.stack.item.to_string(), item.stack.count))
+            .collect();
+        spilled.sort();
+        assert_eq!(
+            spilled,
+            [
+                ("minecraft:dirt".to_owned(), 1),
+                ("minecraft:glass".to_owned(), 3),
+                ("minecraft:stone".to_owned(), 2)
+            ]
+        );
+        for item in &game.dropped {
+            assert_eq!(item.velocity.y, 0.2, "{item:?}");
+        }
+    }
+}
+#[cfg(test)]
+#[path = "game/interface/tests/sign_chain_tests.rs"]
+mod sign_chain_tests;

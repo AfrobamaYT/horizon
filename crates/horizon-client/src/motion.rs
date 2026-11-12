@@ -6696,4 +6696,59 @@ mod tests {
             assert_eq!(player.velocity.y, want, "client_side={client_side}");
         }
     }
+    /// `LocalPlayer.isSuppressingSlidingDownLadder` is `!abilities.flying && super...()`, where
+    /// `LivingEntity`'s is `isShiftKeyDown()`: a flying player on the client keeps sliding down a
+    /// ladder whether it sneaks or not. The server's player (`ServerPlayer` has no override) only
+    /// looks at the sneak.
+    #[test]
+    fn a_flying_client_does_not_stop_sliding_down_a_ladder_by_sneaking() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        // (client_side, flying, sneaking, suppressing)
+        for (client_side, flying, sneaking, want) in [
+            (true, false, true, true),
+            (true, false, false, false),
+            (true, true, true, false),
+            (true, true, false, false),
+            (false, false, true, true),
+            (false, true, true, true),
+            (false, true, false, false),
+        ] {
+            let mut scene = World::test_scene(&assets, &render, 2).unwrap();
+            let mut player = PlayerMotion::new(&resources, Vec3::new(0.5, 64.0, 0.5)).unwrap();
+            player.client_side = client_side;
+            player.flying = flying;
+            player.shift_key_down = sneaking;
+            let mut w = MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+                health: &resources.health,
+            };
+            assert_eq!(
+                w.suppressing_ladder_slide().unwrap(),
+                want,
+                "client_side={client_side} flying={flying} sneaking={sneaking}"
+            );
+        }
+    }
 }
