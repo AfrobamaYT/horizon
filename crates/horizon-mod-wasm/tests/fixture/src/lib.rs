@@ -31,6 +31,22 @@ impl Hooks for Mod {
         movement::movement_input(event);
     }
 
+    fn tick_target_millis(
+        &self,
+        host: &dyn mod_api::ClientHost,
+        event: &mut mod_api::TickTargetMillisEvent,
+    ) {
+        let profile = host.math_profile();
+        assert_eq!(profile, host.math_profile());
+        event.millis = match profile {
+            mod_api::MathProfile::LibmRounding => 1.0,
+            mod_api::MathProfile::CorrectlyRounded => 2.0,
+            mod_api::MathProfile::Aarch64Fma => 3.0,
+            mod_api::MathProfile::StrictMath => 4.0,
+            _ => panic!("fixture does not support the new math profile"),
+        };
+    }
+
     fn server_tick(
         &self,
         host: &mut dyn mod_api::ServerHost,
