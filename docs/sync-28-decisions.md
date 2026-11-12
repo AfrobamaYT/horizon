@@ -264,3 +264,21 @@ Merge frozen main `a51728c35f8` once, retaining #3087 raw custom play-payload tr
 ## CI verify and remaining gameplay lint repairs
 
 Read verify's five named failures and lint's three gameplay errors on `c14c002fb04`. Correct item-frame rotation decoding to narrow to signed byte before remainder; refuse client-copy mob damage before typed invulnerability observation; pass furnace output's remaining stack to the subsequent onTake notice without changing crafting result behavior. Align the orb fixture's Air with the existing 32767 assertion and initialize saved consumable components through StackData's typed setter. Assertions and expected values remain unchanged. Remove the orphan minecart doc line, collapse the cart attack condition without changing short-circuit order, and move the dedicated crash-stop implementation before its test module.
+
+## Polytone admission and retained-test sweep
+
+The pending-particle enum adaptation accidentally kept fork construction-time counting beside upstream's newer admission tests: physics candidates that might never join consumed a type limit, pending candidates incorrectly participated in exclusion-radius checks, and the ordinary-particle admission branch omitted upstream's per-type limit recheck. Restore upstream `polytone_joins` and call it from ordinary admission. At construction, only pending particles without spawn checks count toward limits; exclusion radius considers only live particles. Existing test expectations are unchanged.
+
+The static pattern sweep compares conflict-file upstream test inventories and changed implementations across particles, other rendering, gameplay/client-library, and engine/item/world/protocol/server areas. It preserves deliberate typed API, resource-source and mod-layout divergences rather than replacing them wholesale. A successful all-target compile does not establish test success. The failed verify stopped at the rendering library; later workspace binaries, ignored content-root tests and docs remain for CI.
+
+By root order, the one permitted CI change in this repair is adding `--no-fail-fast` to the existing runtime, documentation, launcher and Windows Cargo test commands, with their two pinned command strings updated. The edit is byte-identical to the corresponding commands in #3509; its separate compile-only timing step is not carried. No other workflow lines change.
+
+The conversion sweep found one deliberate divergence from upstream: retain vanilla-correct absorption conversion, clamping copied absorption to the target maximum before restarting copied effects (fork commits `e4921353d7` and `e5c7b781a5`). Vanilla 26.3 `ConversionType.convertCommon` calls the target setter before copying effects; `LivingEntity.setAbsorptionAmount` clamps to the target maximum. The incoming preservation fixture now grants the target maximum absorption 3.0, retaining its original preservation assertion and existing zero-clamp/effect-restart regressions. No conversion production behavior changes.
+
+## Sync 27 repair
+
+The Allay healing regression still used the former `extra.ints[3]` pickup-cooldown storage. Its fixture now uses `set_pickup_cooldown`/`pickup_cooldown`, retaining healing, age, duplication, note-block cooldown and NoAI assertions. The typed optional memory deliberately distinguishes absent from present zero. Gameplay is unchanged.
+
+The villager witness regression is an oracle-harness step, not a standalone slow-shard test: it requires `HORIZON_REPUTATION_ORACLE`. Register it with the existing `harness` convention using the verified driver `tools/test_villager_witness_parity.py`, which generates and supplies the oracle. The Rust test still requires that oracle; no skip-if-missing behavior is added.
+
+The HDR near-black dither failure remains unresolved statically. Its test, shader and active GPU gating match upstream; no fork behavior difference or justified software-renderer exclusion was found. Preserve tolerance, shader and gating, and add the measured mean, expected range, target PQ code and input grey to the assertion message so a recurrence supplies the missing evidence. This is diagnostic-only, not a claimed HDR fix.

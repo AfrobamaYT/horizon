@@ -235,8 +235,8 @@ mod tests {
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));
         });
     }
-    /// `ConversionType.convertCommon` copies `getAbsorptionAmount`, so the
-    /// golden hearts an apple left on a zombie survive its turn into a drowned.
+    /// `ConversionType.convertCommon` copies absorption through the target's
+    /// setter, so it survives when the target's max absorption permits it.
     #[test]
     fn a_converting_mob_keeps_its_absorption() {
         with_test_world(&[], |_, types| {
@@ -251,6 +251,10 @@ mod tests {
             let mut z = mob(1, "minecraft:zombie");
             z.absorption = 3.0;
             let mut d = mob(2, "minecraft:drowned");
+            // LivingEntity.setAbsorptionAmount clamps to the new mob's maximum
+            // before effects are copied. An unmodified drowned has maximum 0.
+            Arc::make_mut(&mut Arc::make_mut(&mut d.kind).attributes)
+                .insert("minecraft:max_absorption".into(), 3.0);
             single(&z, &mut d, Params::KEEP_ALL);
             assert_eq!(d.absorption, 3.0, "the absorption crosses the conversion");
         });

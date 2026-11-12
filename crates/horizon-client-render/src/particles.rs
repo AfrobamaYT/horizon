@@ -3708,7 +3708,7 @@ impl ParticleEngine {
                     }
                 }
                 PendingParticle::Ordinary(mut p) => {
-                    if p.spawn_check && !polytone::unobstructed(level, p.bb) {
+                    if !self.polytone_joins(&p, level) {
                         continue;
                     }
                     if p.pre_tick {

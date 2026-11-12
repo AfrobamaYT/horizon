@@ -6557,7 +6557,7 @@ mod allay_healing_tests {
                     mob.persistent = true;
                     mob.health = initial;
                     mob.extra.ints[2] = 37;
-                    mob.extra.ints[3] = 41;
+                    super::super::allay::set_pickup_cooldown(&mut mob, Some(41));
                     mob.extra.egg_time = 30;
                     assert_eq!(mob.attrs.max_health, 20.0);
                     assert_eq!(mob.age, 0);
@@ -6575,7 +6575,10 @@ mod allay_healing_tests {
                         assert_eq!(mob.extra.egg_time, 30 - elapsed as i32);
                         let skipped = if no_ai { 0 } else { elapsed as i32 };
                         assert_eq!(mob.extra.ints[2], 37 - skipped);
-                        assert_eq!(mob.extra.ints[3], 41 - skipped);
+                        assert_eq!(
+                            super::super::allay::pickup_cooldown(&mob),
+                            Some(41 - skipped)
+                        );
                     }
                 }
             }
