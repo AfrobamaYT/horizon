@@ -33,7 +33,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `IBlockExtension` | 60 | 15 | 17 | 28 | 0 |
 | `IBlockStateExtension` | 57 | 14 | 16 | 27 | 0 |
-| `IItemExtension` | 46 | 12 | 13 | 21 | 0 |
+| `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
@@ -147,8 +147,8 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `onDroppedByPlayer(stack, player)` | Partial | `item_toss` (`hooks/item_toss.rs`) | Global `ItemTossEvent`, cancellable; the item is not a Part attachment. |
 | `getHighlightTip(stack, name)` | Missing | — | No highlight-name hook. |
 | `onItemUseFirst(stack, context)` | Covered | `ItemPart::on_item_use_first` (`hooks/on_item_use_first.rs`) | Runs after `use_item_on_block` let it through, before the block's own use. |
-| `isPiglinCurrency(stack)` | Missing | — | Piglin barter currency is a hard-coded item tag. |
-| `makesPiglinsNeutral(stack, entity)` | Missing | — | Piglin neutrality is a hard-coded item/tag rule. |
+| `isPiglinCurrency(stack)` | Covered | `ItemPart::is_piglin_currency` (`hooks/is_piglin_currency.rs`) | Starts from vanilla's answer, which is the item `minecraft:gold_ingot` (`PiglinAi.BARTERING_ITEM`; 26.3 has no currency tag), and is asked where vanilla asks: a piglin wanting a stack on the ground, an adult taking one from the hand (and the client's prediction of that click), and the end of the admiring, where currency is bartered or lost to a hit. A ground stack is admired only when it is also `#piglin_loved`. Both sides. [#3226](https://github.com/arismoko/horizon/issues/3226). |
+| `makesPiglinsNeutral(stack, entity)` | Covered | `ItemPart::makes_piglins_neutral` (`hooks/makes_piglins_neutral.rs`) | Starts from `#minecraft:piglin_safe_armor` (which content mods can already add to) for each stack in a player's armour slots, with the wearer, and may make a piece count or refuse a tagged one. Server-side. [#3226](https://github.com/arismoko/horizon/issues/3226). |
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
 | `getXpRepairRatio(stack)` | Covered | `ItemPart::xp_repair_ratio` (`hooks/xp_repair_ratio.rs`) | Asked in Mending's repair (`ExperienceOrb.repairPlayerItems`) for the picked item, with the ratio arriving as its `minecraft:repair_with_xp` repair per point. Server-side, read-only `Host`. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |
@@ -159,7 +159,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `createEntity(level, entity, stack)` | Missing | — | Same. |
 | `onEntityItemUpdate(stack, itemEntity)` | Missing | — | No per-item dropped-entity tick. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
-| `canEquip(stack, slot, entity)` | Partial | `equippable.allowed_entities`, `entity_capability::goes_in_slot` | Component data decides slot and allowed entities; no per-stack code predicate. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `canEquip(stack, slot, entity)` | Covered | `ItemPart::can_equip` (`hooks/can_equip.rs`) | Starts as the stack's own `equippable` component's answer (slot and `allowed_entities`); the part sets it either way, with a read-only `Host` and the entity as a `LivingRef`. Asked for the player's armour slots (both menus), a dispenser's equip and a mob's pickup. A wasm mod is given a copy of the stack on each call (#3549 tracks the prepared path). |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
 | `onEntitySwing(stack, entity, hand)` | Covered | `ItemPart::on_entity_swing` (`hooks/item_attack.rs`) | Runs where `LivingEntity.swing` starts, on both sides; a cancel starts no swing (no animation, no packet). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
@@ -305,7 +305,7 @@ their rows have landed or become partial since and should be narrowed when they 
   `onTreeGrow` is `on_tree_grow`; `getToolModifiedState` is `tool_modified_state` before
   `block_tool_modification`; `onDestroyedByPlayer` is `on_destroyed_by_player`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
+  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo` (all Partial or Missing above).

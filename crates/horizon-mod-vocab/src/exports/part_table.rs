@@ -1,11 +1,11 @@
 mod parts;
 pub use parts::limits as general_entity_limits;
 pub use parts::{
-    Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
+    Attached, BlockCapabilityProvider, BlockProvider, BlockProviderOf, BlockProviders,
     CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,
     EntityProviders, GeneralEntityCategory, GeneralEntityRegistrationError, GeneralSavePolicy,
     ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts, ProvidedBy,
-    Registrar, block_entity_providers, entity_providers, has_entity_providers,
+    Registrar, block_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use parts::{
     InstalledProviders, answered, ask_providers, has_part_hook, parts, worldgen_parts,
