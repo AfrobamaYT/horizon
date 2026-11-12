@@ -71,6 +71,7 @@ impl PlayerMotion {
             dimensions: crate::pose::Pose::Standing.dimensions(1.0),
             size_answer: None,
             scale: 1.0,
+            silent: false,
             swimming: false,
             is_passenger: false,
             fire_ticks: -20,

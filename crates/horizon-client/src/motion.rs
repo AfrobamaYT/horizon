@@ -413,6 +413,9 @@ pub struct PlayerMotion {
     /// body seeds it from its initial identity/position without drawing from the
     /// level. It lives with this body (including guest turns), not player NBT.
     pub random: horizon_core::random::EntityRandom,
+    /// Vanilla `Entity.isSilent`; players currently have no persisted Silent flag.
+    /// Defaults to false, including guest bodies, until player entity data supports it.
+    pub silent: bool,
     pub swimming: bool,
     /// `Entity.isPassenger()`: this body rides a vehicle. `Entity.updateSwimming`
     /// needs it false, so the server's copy of a guest who boards a boat while

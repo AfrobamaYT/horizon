@@ -718,6 +718,32 @@ impl Game<'_> {
                         host.hub.entity_event(id, event as i8);
                     }
                 }
+                MotionEvent::Fall(horizon_client::landing::FallEvent::BlockFallSound {
+                    position,
+                    state,
+                }) => {
+                    let entity = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.hub.guest(conn))
+                        .map(|g| (g.entity_id as u32, "minecraft:player"));
+                    let sound = self.block_sound_type(
+                        [position.x, position.y, position.z],
+                        state,
+                        entity,
+                        mod_api::BlockSoundCause::Fall,
+                    );
+                    self.audio.play_unshared(
+                        &sound.fall,
+                        Some(at),
+                        sound.volume * 0.5,
+                        sound.pitch * 0.75,
+                    );
+                    self.send_level_sound(
+                        LevelSound::new(&sound.fall, at, sound.volume * 0.5, sound.pitch * 0.75),
+                        Some(conn),
+                    );
+                }
                 MotionEvent::Fall(event) => {
                     let player = self
                         .lan
@@ -816,3 +842,7 @@ impl Game<'_> {
 #[cfg(test)]
 #[path = "tests/building_cache.rs"]
 mod building_cache_tests;
+
+#[cfg(test)]
+#[path = "tests/fall_sound_tests.rs"]
+mod fall_sound_tests;
