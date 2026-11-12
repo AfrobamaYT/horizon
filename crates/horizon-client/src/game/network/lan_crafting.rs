@@ -268,10 +268,10 @@ impl Game<'_> {
         if !item_crafted.is_empty() {
             self.as_guest(conn, |g| {
                 let player = g.native_acting_id();
-                for (recipe, stack) in &item_crafted {
+                for (recipe, stack, inputs) in &item_crafted {
                     // ItemStack.onCraftedBy awards Stats.ITEM_CRAFTED.
                     g.award_stat("crafted", &stack.item, stack.count as i32);
-                    g.native_item_crafted(player, recipe, stack);
+                    g.native_item_crafted(player, recipe, stack, inputs);
                 }
             });
         }
