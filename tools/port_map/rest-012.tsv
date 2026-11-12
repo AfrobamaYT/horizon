@@ -32,7 +32,7 @@ ClientboundBossEventPacket.createUpdateNamePacket	inline	crates/horizon-client/s
 ClientboundBossEventPacket.createUpdateStylePacket	inline	crates/horizon-client/src/game/interface/bossbars.rs::Game::diff_boss_events	UpdateStyle when the colour or the overlay differ
 ClientboundBossEventPacket.createUpdatePropertiesPacket	inline	crates/horizon-client/src/game/interface/bossbars.rs::Game::diff_boss_events	UpdateProperties when darken, boss music or fog differ
 ClientboundBossEventPacket.encodeProperties	port	crates/horizon-protocol/src/packets/play.rs::boss_flags	the three flag bits (darken, music, fog)
-ClientboundBossEventPacket.AddOperation.dispatch	port	crates/horizon-client/src/boss_overlay.rs::BossOverlay::apply	
+ClientboundBossEventPacket.AddOperation.dispatch	port	crates/horizon-client/src/boss_overlay.rs::BossOverlay::apply
 ClientboundChunksBiomesPacket.ChunkBiomeData.calculateChunkSize	inline	crates/horizon-protocol/src/packets/play.rs::ChunkBiomeData::from_biomes	the buffer grows as each section's container is written, so no size is computed or prefixed on the wire
 ClientboundChunksBiomesPacket.ChunkBiomeData.extractChunkData	port	crates/horizon-protocol/src/packets/play.rs::ChunkBiomeData::from_biomes	the column's sections' biome containers written one after another into the buffer
 ClientboundCommandSuggestionsPacket.toSuggestions	port	crates/horizon-client/src/game/network/remote/mod.rs::Game::handle_command_suggestions	start, length and tooltip become the suggestion range
@@ -109,8 +109,8 @@ ServerboundSetStructureBlockPacket.write	port	crates/horizon-protocol/src/packet
 VecDelta.Stepped.hasDeltaX	skip:other		no callers in vanilla
 VecDelta.Stepped.hasDeltaZ	skip:other		no callers in vanilla
 VecDelta.Stepped.tryEncode	missing		minor: the LAN host sends only linear deltas (send_changes); no stepped path is encoded
-VecDelta.Linear.decode	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	MoveEntity arms: the delta applied to the tracked position (VecDelta::end)
-VecDelta.Stepped.decode	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	MoveEntity arms: each step applied to the previous step's position, with its ticks
+VecDelta.Linear.decode	inline	crates/horizon-client/src/game/network/remote/mod.rs::Game::handle_packet	MoveEntity arms: the delta applied to the tracked position (VecDelta::end)
+VecDelta.Stepped.decode	inline	crates/horizon-client/src/game/network/remote/mod.rs::Game::handle_packet	MoveEntity arms: each step applied to the previous step's position, with its ticks
 VecDeltaCodec.isDeltaTooBig	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	the i16 range check on each delta
 VecDeltaCodec.tryEncode	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	gap: minor: linear positions only; stepped paths are not encoded
 ClientIntent.byId	missing		minor: an unknown handshake intent is not rejected; the intent stays a raw number in handshake.rs
