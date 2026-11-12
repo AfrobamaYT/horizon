@@ -3,7 +3,7 @@
 # sync-baseline: 501446443c3d5107aa3878187eff6896a801d62c
 crates/horizon-client-render/src/gfx.rs 13332
 crates/horizon-client/src/game/entities/minecarts.rs 3379
-crates/horizon-client/src/game/mobs/creatures/mod.rs 9079
+crates/horizon-client/src/game/mobs/creatures/mod.rs 9073
 crates/horizon-client/src/mobs/goals.rs 3224
 crates/horizon-client/src/title/tests.rs 3044
 crates/horizon-items/src/items.rs 3015
