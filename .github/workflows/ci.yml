@@ -89,6 +89,10 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA"}
+      - name: Big files don't grow
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+        run: python3 tools/check_file_size.py ${BASE:+--base "$BASE"}
       - name: Check the mod API type boundary (including negative control)
         run: python3 tools/ci/check_api_boundary.py --source-only
       - name: Test offline research tooling
