@@ -53,7 +53,11 @@ impl Game<'_> {
             5 => self.offhand.clone(),
             i => self.armor[i].clone(),
         };
-        if let Some(stack) = stack {
+        // `ItemStack.hurtAndBreak` skips a stack that isn't `isDamageableItem` (no `damage`
+        // component, say), though it may still glide.
+        if let Some(stack) = stack
+            && horizon_client::stations::is_damageable(self.res.items(), &stack)
+        {
             let loss = self.wear(&stack, points);
             let target = match slot {
                 4 => &mut self.inventory[self.selected],
