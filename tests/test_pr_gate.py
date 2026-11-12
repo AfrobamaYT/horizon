@@ -79,6 +79,13 @@ class WorkflowTests(unittest.TestCase):
             if "head.repo.full_name" in body:
                 self.fail(f"{name} decides trust itself instead of needs.changes.outputs.trusted")
 
+    def test_a_contributors_cheap_checks_run_on_githubs_runners(self):
+        # format and verify-static are all a fork pull request gets; a paid pool's balance must not fail them.
+        self.assertIn("runs-on: ubuntu-latest\n", self.job("format"))
+        static = self.job("verify-static")
+        self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
+        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)
+
     def test_other_pull_request_workflows_skip_what_compiles_for_forks(self):
         for workflow, jobs in (("launcher-windows-check.yml", ("test", "runtime-leases")),
                                ("cargo-horizon-mod.yml", ("build",)), ("modding-book.yml", ("book",))):
