@@ -1,19 +1,16 @@
 # Sync 27 integration decisions
 
-## CTM sprite deduplication: refused at the protected boundary
+## CTM sprite deduplication: integrated with an authorized exception
 
-The upstream change preloads CTM rules in `assets.rs`, calls
-`Sprites::keep_apart` before model textures are inserted, and passes the loaded
-rules into `ConnectedTextures::load`. The fork's protected `assets.rs` inserts
-model textures before calling that loader. At that point sprite layers have
-already been interned; changing only `connected.rs` cannot undo the prior
-coalescing without remapping every model's layer indices. Changing `load`'s
-signature alone would also break its protected caller.
+The sync takes upstream's two additive `assets.rs` hunks: load CTM rules and
+protect matched sprites before models insert their textures, then pass those
+rules into `ConnectedTextures::load`. The connected loader exposes
+`matched_sprites` and accepts the already loaded rules. This makes the incoming
+`Sprites::keep_apart` implementation active in production.
 
-This sync therefore retains the fork's existing CTM loader and does not claim
-upstream's deduplication behavior. A correct integration needs authorization to
-change the assets construction order, or a separately designed layer remapping
-pass. The installation-scoped interner boundary remains unchanged.
+This is an authorized exception to keeping `assets.rs` identical to main. Its
+installation-scoped interner code is untouched: only these two additive CTM
+hunks differ from the fork base. `registry.rs` remains identical to main.
 
 ## Contextless fireworks service: refused
 
