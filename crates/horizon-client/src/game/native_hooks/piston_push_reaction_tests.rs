@@ -247,140 +247,148 @@ fn piston_push_reaction_parts_cache_reload_and_replay() {
         }),
     )]
     .into();
-    mod_api::__private::install(mods.clone());
-    crate::game::api_values::install_parts(&mods).unwrap();
-    let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
-    with_game_role(
-        root.prepared().to_path_buf(),
-        if client {
-            ExecutionRole::Client
-        } else {
-            ExecutionRole::IntegratedServer
-        },
-        |game| {
-            let registry = game.pack.assets.registry;
-            let a = state(registry, "test:lock", &[("locked", "false")]);
-            let z = state(registry, "test:lock", &[("locked", "true")]);
-            assert_eq!(
-                game.res.behaviours().piston_reaction(a),
-                if parts {
-                    EngineReaction::Immoveable
-                } else {
-                    EngineReaction::PushPull
-                }
-            );
-            exercise(
-                game.res.behaviours(),
-                registry,
-                a,
-                client,
-                !parts,
-                false,
-                true,
-            );
-            exercise(
-                game.res.behaviours(),
-                registry,
-                z,
-                client,
-                true,
-                false,
-                true,
-            );
-            let fixed = registry.default_state("test:fixed").unwrap();
-            exercise(
-                game.res.behaviours(),
-                registry,
-                fixed,
-                client,
-                parts,
-                false,
-                true,
-            );
-            if parts {
-                let chest = registry.default_state("minecraft:chest").unwrap();
-                exercise(
-                    game.res.behaviours(),
-                    registry,
-                    chest,
-                    client,
-                    false,
-                    false,
-                    false,
-                );
-                let bedrock = registry.default_state("minecraft:bedrock").unwrap();
-                // Every reaction loses to the hardness refusal, including popped.
-                for reaction in 0..5 {
-                    unbreakable.store(reaction, Ordering::Relaxed);
-                    game.resolve_parts().unwrap();
-                    exercise(
-                        game.res.behaviours(),
-                        registry,
-                        bedrock,
-                        client,
-                        false,
-                        false,
-                        false,
-                    );
-                }
-            }
-            // Removing the last subscriber must clear its immovable override on both sides.
-            if parts {
-                unbreakable.store(0, Ordering::Relaxed);
+    mod_platform::testing::with_mods(mods.clone(), || {
+        crate::game::api_values::install_parts(&mods).unwrap();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
+        with_game_role(
+            root.prepared().to_path_buf(),
+            if client {
+                ExecutionRole::Client
+            } else {
+                ExecutionRole::IntegratedServer
+            },
+            |game| {
+                let registry = game.pack.assets.registry;
+                let a = state(registry, "test:lock", &[("locked", "false")]);
+                let z = state(registry, "test:lock", &[("locked", "true")]);
                 assert_eq!(
                     game.res.behaviours().piston_reaction(a),
-                    EngineReaction::Immoveable
-                );
-                let empty: Mods = Vec::new().into();
-                // A reload retains registry metadata; only the active subscriber set changes.
-                mod_api::__private::install(empty);
-                game.resolve_parts().unwrap();
-                assert!(!mod_api::__private::has_scoped_hook(
-                    HookId::PistonPushReaction
-                ));
-                assert_eq!(
-                    game.res.behaviours().piston_reaction(a),
-                    EngineReaction::PushPull
+                    if parts {
+                        EngineReaction::Immoveable
+                    } else {
+                        EngineReaction::PushPull
+                    }
                 );
                 exercise(
                     game.res.behaviours(),
                     registry,
                     a,
                     client,
+                    !parts,
+                    false,
+                    true,
+                );
+                exercise(
+                    game.res.behaviours(),
+                    registry,
+                    z,
+                    client,
                     true,
                     false,
                     true,
                 );
-            }
-            // Reinstall the actual resolved parts as reload does. None restores properties.
-            enabled.store(false, Ordering::Relaxed);
-            game.resolve_parts().unwrap();
-            assert_eq!(
-                game.res.behaviours().piston_reaction(a),
-                EngineReaction::PushPull
-            );
-            for (name, moved, popped) in [
-                ("minecraft:stone", true, false),
-                ("minecraft:obsidian", false, false),
-                ("minecraft:red_bed", false, true),
-                ("test:lock", true, false),
-                ("test:fixed", false, false),
-                ("minecraft:chest", false, false),
-            ] {
-                let block = registry.default_state(name).unwrap();
+                let fixed = registry.default_state("test:fixed").unwrap();
                 exercise(
                     game.res.behaviours(),
                     registry,
-                    block,
+                    fixed,
                     client,
-                    moved,
-                    popped,
+                    parts,
+                    false,
                     true,
                 );
-            }
-        },
-    );
+                if parts {
+                    let chest = registry.default_state("minecraft:chest").unwrap();
+                    exercise(
+                        game.res.behaviours(),
+                        registry,
+                        chest,
+                        client,
+                        false,
+                        false,
+                        false,
+                    );
+                    let bedrock = registry.default_state("minecraft:bedrock").unwrap();
+                    // Every reaction loses to the hardness refusal, including popped.
+                    for reaction in 0..5 {
+                        unbreakable.store(reaction, Ordering::Relaxed);
+                        game.resolve_parts().unwrap();
+                        exercise(
+                            game.res.behaviours(),
+                            registry,
+                            bedrock,
+                            client,
+                            false,
+                            false,
+                            false,
+                        );
+                    }
+                }
+                // Removing the last subscriber must clear its immovable override on both sides.
+                if parts {
+                    unbreakable.store(0, Ordering::Relaxed);
+                    assert_eq!(
+                        game.res.behaviours().piston_reaction(a),
+                        EngineReaction::Immoveable
+                    );
+                }
+                // A reload retains registry metadata; only the active subscriber set changes.
+                let after: Mods = if parts {
+                    Vec::new().into()
+                } else {
+                    mods.clone()
+                };
+                mod_platform::testing::with_mods(after, || {
+                    if parts {
+                        game.resolve_parts().unwrap();
+                        assert!(!mod_api::__private::has_scoped_hook(
+                            HookId::PistonPushReaction
+                        ));
+                        assert_eq!(
+                            game.res.behaviours().piston_reaction(a),
+                            EngineReaction::PushPull
+                        );
+                        exercise(
+                            game.res.behaviours(),
+                            registry,
+                            a,
+                            client,
+                            true,
+                            false,
+                            true,
+                        );
+                    }
+                    // Reinstall the actual resolved parts as reload does. None restores properties.
+                    enabled.store(false, Ordering::Relaxed);
+                    game.resolve_parts().unwrap();
+                    assert_eq!(
+                        game.res.behaviours().piston_reaction(a),
+                        EngineReaction::PushPull
+                    );
+                    for (name, moved, popped) in [
+                        ("minecraft:stone", true, false),
+                        ("minecraft:obsidian", false, false),
+                        ("minecraft:red_bed", false, true),
+                        ("test:lock", true, false),
+                        ("test:fixed", false, false),
+                        ("minecraft:chest", false, false),
+                    ] {
+                        let block = registry.default_state(name).unwrap();
+                        exercise(
+                            game.res.behaviours(),
+                            registry,
+                            block,
+                            client,
+                            moved,
+                            popped,
+                            true,
+                        );
+                    }
+                });
+            },
+        );
+    });
 }
 
 struct PayloadPart {
