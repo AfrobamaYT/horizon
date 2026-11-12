@@ -1174,6 +1174,43 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn typed_uuid_and_nbt_reads_follow_the_entity_level() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let words = [7, 0, 0, 3];
+            let uuid = (7u128 << 96) | 3;
+            assert!(game.run_command(
+                "execute in minecraft:the_nether run summon cow 8.5 70 8.5 {UUID:[I;7,0,0,3],NoAI:1b}"
+            ));
+            let original = game.dim;
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let id = *game
+                .persist
+                .uuids
+                .iter()
+                .find(|(_, value)| **value == words)
+                .unwrap()
+                .0;
+            let entity = game.entity(id).unwrap();
+            assert_eq!(game.entity_uuid(entity), Some(uuid));
+            let nbt = game.entity_nbt(entity).unwrap();
+            assert_eq!(
+                nbt.get(&"NoAI".into()),
+                Some(&horizon_core::nbt::Tag::Byte(1))
+            );
+            assert!(!nbt.contains_key(&"id".into()));
+            game.enter_command_level(original).unwrap();
+            assert_eq!(game.entity_nbt(entity), None);
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(game.entity_uuid(entity), Some(uuid));
+            assert_eq!(game.entity_nbt(entity), Some(nbt));
+            game.enter_command_level(original).unwrap();
+            assert_eq!(game.dim, original);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_part_allows_weak_power_in_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::position::BlockPos;
