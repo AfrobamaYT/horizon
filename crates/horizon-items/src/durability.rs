@@ -37,8 +37,8 @@ mod tests {
     use super::*;
     use crate::item_data::{command_components, decode_components, encode_components_with_items};
     use crate::item_nbt::{item_from_nbt, item_to_nbt};
+    use horizon_core::nbt::Tag;
     use horizon_world::loot::PackOverlay;
-    use horizon_world::nbt::Tag;
     use std::fs;
 
     /// A normally non-durable item type becomes damageable when the stack

@@ -1536,7 +1536,7 @@ mod tests {
     /// `shake` as `& 255`, so `-1b` is 255 ticks and saves as `-1b` again.
     #[test]
     fn a_trident_keeps_a_negative_life_and_shake_across_a_reload() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let registry = stone_registry();
         let tag = Tag::compound([
             ("Pos", Tag::List(vec![Tag::Double(0); 3])),

@@ -571,8 +571,8 @@ fn finish_ram(m: &mut Mob, events: &mut Vec<MobEvent>) {
 /// `Goat.addAdditionalSaveData` and the `GoatAi` brain memory Horizon writes
 /// with it: the screaming flag, the missing horns and the long jump cooldown
 /// (`LONG_JUMP_COOLDOWN_TICKS`, an integer memory in the brain).
-pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn write_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     map.insert(
         "IsScreamingGoat".into(),
         Tag::Byte(i8::from(m.extra.screaming)),
@@ -611,7 +611,7 @@ pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
 
 /// `Goat.readAdditionalSaveData` and `Brain.Packed`'s memory: the three own
 /// fields and the ticks left of the long jump cooldown.
-pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
+pub fn read_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
     m.extra.screaming = crate::entity_nbt::flag(tag, "IsScreamingGoat");
     let horn = |key| crate::save::number(tag.get(key)).is_some_and(|v| v == 0);
     m.extra.lost_horns = [horn("HasLeftHorn"), horn("HasRightHorn")];
@@ -627,7 +627,7 @@ pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
 mod long_jump_save_tests {
     use super::*;
     use crate::entity_nbt::{mob_from_nbt, mob_to_nbt};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use std::sync::Arc;
 
     fn goat() -> Mob {

@@ -1152,14 +1152,14 @@ fn stack_modifiers(
     if data.is_some_and(|d| d.other("!minecraft:attribute_modifiers").is_some()) {
         return Vec::new();
     }
-    if let Some(horizon_world::nbt::Tag::List(entries)) =
+    if let Some(horizon_core::nbt::Tag::List(entries)) =
         data.and_then(|d| d.other("minecraft:attribute_modifiers"))
     {
         return entries
             .iter()
             .filter_map(|entry| {
                 let string = |key: &str| match entry.get(key) {
-                    Some(horizon_world::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
+                    Some(horizon_core::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
                     _ => None,
                 };
                 Some((
@@ -2611,25 +2611,25 @@ mod stack_modifier_tests {
     #[test]
     fn tooltip_attributes_come_from_the_stack() {
         let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
-        let attack = horizon_world::nbt::Tag::compound([
+        let attack = horizon_core::nbt::Tag::compound([
             (
                 "type",
-                horizon_world::nbt::Tag::String("minecraft:attack_damage".into()),
+                horizon_core::nbt::Tag::String("minecraft:attack_damage".into()),
             ),
             (
                 "id",
-                horizon_world::nbt::Tag::String("minecraft:test".into()),
+                horizon_core::nbt::Tag::String("minecraft:test".into()),
             ),
-            ("amount", horizon_world::nbt::Tag::Double(5.0f64.to_bits())),
+            ("amount", horizon_core::nbt::Tag::Double(5.0f64.to_bits())),
             (
                 "operation",
-                horizon_world::nbt::Tag::String("add_value".into()),
+                horizon_core::nbt::Tag::String("add_value".into()),
             ),
-            ("slot", horizon_world::nbt::Tag::String("mainhand".into())),
+            ("slot", horizon_core::nbt::Tag::String("mainhand".into())),
         ]);
         sword.data_mut().set_other(
             "minecraft:attribute_modifiers",
-            Some(horizon_world::nbt::Tag::List(vec![attack])),
+            Some(horizon_core::nbt::Tag::List(vec![attack])),
         );
         let modifiers = stack_modifiers(&sword, None);
         assert_eq!(modifiers.len(), 1);
@@ -2637,9 +2637,9 @@ mod stack_modifier_tests {
         assert_eq!(modifiers[0].2, 5.0);
         sword.data_mut().set_other(
             "!minecraft:attribute_modifiers",
-            Some(horizon_world::nbt::Tag::compound(Vec::<(
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
                 &str,
-                horizon_world::nbt::Tag,
+                horizon_core::nbt::Tag,
             )>::new())),
         );
         assert!(stack_modifiers(&sword, None).is_empty());

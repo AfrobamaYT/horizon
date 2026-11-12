@@ -240,3 +240,11 @@ Additional edited/moved destinations: parallel.rs and horizon-client/Cargo.toml 
 - Frame projectile regression module and existing camel reload assertions retained. Parallel-only structural tests inside the retained upstream sources are not compiled/tested, as stated above.
 
 These are STATIC assessments, not pass claims. Coordinator compile and CI remain required. No unresolved design ruling remains after root ruling 2; excluded parallel execution is an explicitly tracked divergence, not claimed shipped capability.
+
+## Rollup 46 main integration
+
+Merge current main `b96005b7c9115c9061fa996e00b5b029a7fc0efc` before publishing. The two inventory conflicts keep main's Menu/State/touch structure while preserving upstream quick-move result accounting and viewer-aware recipe transfers. Craft results report the crafted copy minus leftover; merchant results report the moved stack. Transfer snapshots and drop truncation read State, and mutations call touch. Test callers pass the existing viewer argument explicitly.
+
+## Native hook declarations
+
+The incoming native_hooks.rs change dereferences the new level RNG wrapper inside an obsolete contextless service. The fork removed that service; no hook declaration or capability is added back. Existing typed host and RNG contracts remain. Wire, derive, hook catalog and the parts vocabulary layout are unchanged by this sync.

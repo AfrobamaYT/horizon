@@ -4303,7 +4303,7 @@ mod tests {
         let load = |fields: &str| {
             let snbt =
                 format!("{{Pos:[0d,0d,0d],Item:{{id:\"minecraft:stone\",count:1}},{fields}}}");
-            let tag = horizon_world::nbt::parse_snbt(&snbt).unwrap().0;
+            let tag = horizon_core::nbt::parse_snbt(&snbt).unwrap().0;
             let item = super::item_entity_from_nbt(&tag, 1, 0.0).unwrap();
             (item.age, item.pickup_delay)
         };
@@ -4323,7 +4323,7 @@ mod tests {
         let fire = |fields: &str| {
             let snbt =
                 format!("{{Pos:[0d,0d,0d],Item:{{id:\"minecraft:stone\",count:1}},{fields}}}");
-            let tag = horizon_world::nbt::parse_snbt(&snbt).unwrap().0;
+            let tag = horizon_core::nbt::parse_snbt(&snbt).unwrap().0;
             super::item_entity_from_nbt(&tag, 1, 0.0)
                 .unwrap()
                 .fire_ticks
@@ -4333,7 +4333,7 @@ mod tests {
             [-25536, 60, 0]
         );
         // They save as the shorts vanilla writes.
-        let tag = horizon_world::nbt::parse_snbt(
+        let tag = horizon_core::nbt::parse_snbt(
             "{Pos:[0d,0d,0d],Item:{id:\"minecraft:stone\",count:1},Age:32768,PickupDelay:98303}",
         )
         .unwrap()
