@@ -3686,7 +3686,8 @@ mod cart_push_tests {
             game.carts[target].velocity
         }
 
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         // Cart 2 moves east, into cart 1's box; yaw 0 faces east, along the push.
         game.carts.push(Minecart::new(
             1,
@@ -3746,7 +3747,8 @@ mod cart_push_tests {
         use crate::game::commands::Target;
         use horizon_client::{mobs::Mob, scoreboard::CollisionRule};
 
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let kind = game.res.mob_types().get("minecraft:cow").cloned().unwrap();
         let mut cart = Minecart::new(2, CartKind::Rideable, Vec3::new(8.5, 64.0, 8.5));
         cart.velocity = Vec3::new(0.2, 0.0, 0.0);
