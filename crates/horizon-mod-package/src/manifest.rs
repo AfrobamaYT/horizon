@@ -396,6 +396,28 @@ impl Manifest {
                     ));
                 }
             }
+            // A bridge's id becomes part of its accessor's name: `-` reads as `_`, and case is
+            // dropped, so the id is that alphabet and no two ids may give one name.
+            let mut accessors = std::collections::HashMap::new();
+            for bridge in &native.bridge {
+                let id = &bridge.id;
+                if !id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                {
+                    return Err(format!(
+                        "{MANIFEST}: E_MIXIN_INVALID: {}:{id}: invalid id; a bridge id is ASCII letters, digits, `_` and `-`",
+                        m.id
+                    ));
+                }
+                if let Some(other) = accessors.insert(id.replace('-', "_").to_ascii_lowercase(), id)
+                {
+                    return Err(format!(
+                        "{MANIFEST}: E_MIXIN_INVALID: {}:{id}: invalid id; it gives the same accessor name as bridge `{other}`",
+                        m.id
+                    ));
+                }
+            }
             for module in &native.module {
                 if module.id.trim().is_empty() || !ids.insert(&module.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate module id"));

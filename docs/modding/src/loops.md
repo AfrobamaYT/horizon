@@ -156,6 +156,8 @@ The cursor's `game` is the whole game, so a slot can add, remove or replace bloc
   <id>::<Type>`. That `Game` never runs the slots again: if something catches the panic and the `Game` goes on,
   it runs the loop without slots and logs once: `Published loop block_entities.tick: a mod's slot panicked;
   it runs without its mods' slots`. The slots already made are dropped, each attributed to its own mod.
+  The attribution is in the log line, and a dedicated server's crash report carries it; single player
+  writes no crash report for it today ([#3494](https://github.com/arismoko/horizon/issues/3494)).
 - Each mod's slot is dropped on its own. If one mod's `Drop` panics, the others are still dropped and the
   process does not abort.
 

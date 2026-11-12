@@ -1811,6 +1811,7 @@ dependencies = [
  "horizon-core",
  "horizon-cosmetics",
  "horizon-dualsense",
+ "horizon-engine-slots",
  "horizon-friends",
  "horizon-game-discovery",
  "horizon-hdr",
@@ -1820,8 +1821,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-points",
- "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-mod-wasm",
  "horizon-narrator",
@@ -1971,7 +1970,6 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-narrator",
  "horizon-optifine",
@@ -2055,6 +2053,10 @@ dependencies = [
  "hidapi",
  "log",
 ]
+
+[[package]]
+name = "horizon-engine-slots"
+version = "0.1.0"
 
 [[package]]
 name = "horizon-friends"
@@ -2234,8 +2236,11 @@ name = "horizon-mod-host"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-engine-slots",
  "horizon-mod-api",
  "horizon-mod-package",
+ "horizon-mod-points",
+ "horizon-mod-render",
  "horizon-mod-wasm",
  "log",
  "serde_json",
@@ -2299,6 +2304,7 @@ dependencies = [
 name = "horizon-mod-points"
 version = "0.1.0"
 dependencies = [
+ "horizon-engine-slots",
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
@@ -2314,6 +2320,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam",
+ "horizon-client-render",
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
