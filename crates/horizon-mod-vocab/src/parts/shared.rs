@@ -238,7 +238,7 @@ pub fn publish_worldgen_parts(parts: Option<Parts>) {
 /// published, no part answers. One atomic load; the table's handle is fetched again only when the
 /// server published since, and never inside a feature, which keeps the table it started with.
 pub fn worldgen_parts() -> PartsRef {
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     WORLDGEN_TABLE.with_borrow_mut(|table| {
         if !IN_FEATURE.get() || table.is_none() {
