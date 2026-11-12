@@ -223,8 +223,9 @@ what a cell emits without an answer. The game asks on the thread that owns the l
 client's, as a chunk holding the block comes in and as an edit sets it, and keeps the answer until the cell's state
 changes; the light engine never asks on its own. A part whose answer reads more than the state (the block below
 it) calls `LevelRef::check_light(host, pos)` when that changes (`LevelLightEngine.checkBlock`): the server asks
-again and relights, and clients ask their own parts again as its light update reaches them. Light that depends
-only on the state needs no part: use `light` or `state_light`.
+again and relights, and clients ask their own parts again as its light update reaches them. The flag is per block,
+as it sits on the block's row: every state of the block is asked, so a block with only some states that vary pays
+the ask for all of them. Light that depends only on the state needs no part: use `light` or `state_light`.
 
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
