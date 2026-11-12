@@ -49,6 +49,7 @@ mod item_particles;
 mod raw_inbox;
 mod spawn_info;
 use advancements::AdvancementOwners;
+use chat::yellow_names;
 use raw_inbox::{PacketDrain, yield_raw};
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
@@ -631,15 +632,6 @@ impl Hub {
             None => yellow_names("multiplayer.player.joined", vec![display]),
         }
     }
-}
-
-/// A yellow translation of player names (`multiplayer.player.joined`).
-fn yellow_names(key: &str, names: Vec<Tag>) -> Tag {
-    Tag::compound([
-        ("translate", string(key)),
-        ("with", Tag::List(names)),
-        ("color", string("yellow")),
-    ])
 }
 
 /// An entity type's registry id, remembered once looked up.
@@ -1995,6 +1987,7 @@ impl Hub {
         self.mod_commands.1
     }
     /// Server mods' commands changed: every player gets their tree again.
+    #[horizon_mod_api_macros::replaceable]
     pub fn set_mod_commands(&mut self, key: u64, commands: serde_json::Value) {
         if self.store_mod_commands(key, commands) {
             for i in 0..self.guests.len() {
@@ -6473,6 +6466,74 @@ mod tests {
         hub.guests.update(0, |g| g.sneaking = false);
         hub.sync_player_state(0);
         assert_eq!(shared_flags_sent(&rx), [0]);
+    }
+
+    /// A mod menu whose part keeps it open (`menu_still_valid`) still closes
+    /// when its player changes level or respawns: those close it without
+    /// asking `stillValid` (`ServerPlayer.closeContainer`).
+    #[test]
+    fn a_menu_kept_open_by_its_part_closes_on_level_change_and_respawn() {
+        let mod_type: &'static crate::containers::ModMenuType =
+            Box::leak(Box::new(crate::containers::ModMenuType {
+                id: "test:kept",
+                slots: 27,
+                data_slots: 0,
+                results: vec![],
+                links: None,
+                crafting: None,
+            }));
+        let (mut hub, _rx) = hub_with_a_guest();
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let k = (0, 64, 40);
+        world
+            .block_entities
+            .insert(k, crate::containers::BlockEntity::Chest(vec![None; 27]));
+        let mut next_entity = 2;
+        let border = crate::worldborder::WorldBorder::default();
+        let ctx = TickCtx {
+            sea_level: 63,
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            spawn_angle: [0.0; 2],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        let open = |hub: &mut Hub| {
+            hub.guests.update(0, |g| {
+                g.menu = Some(super::super::menu::Menu {
+                    window: 1,
+                    kind: 2,
+                    pos: Some(k),
+                    slots: super::super::menu::Slots::Block(k),
+                    size: 27,
+                    state: 0,
+                    sent: Vec::new(),
+                    drag: None,
+                    sent_data: Vec::new(),
+                    hidden: Vec::new(),
+                    mod_type: Some(mod_type),
+                    registry_id: "test:kept".into(),
+                    craft: None,
+                    links: Vec::new(),
+                    asks_still_valid: true,
+                });
+            });
+        };
+        open(&mut hub);
+        hub.change_level(0, [100.5, 49.0, 0.5], 0.0, None, false, 0, &ctx);
+        assert!(hub.guests[0].menu.is_none());
+        open(&mut hub);
+        hub.respawn(0, [0.5, 64.0, 0.5], None, &ctx);
+        assert!(hub.guests[0].menu.is_none());
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: a client that says it stands

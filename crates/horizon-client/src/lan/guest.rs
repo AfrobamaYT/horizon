@@ -979,13 +979,16 @@ impl Guest {
     /// `Player.isWithinBlockInteractionRange(pos, buffer)` for the guest:
     /// its block interaction range is 4.5, 5 in creative.
     pub fn within_block_range(&self, pos: [i32; 3], buffer: f64) -> bool {
-        let eye = [
+        let range = if self.creative() { 5.0 } else { 4.5 };
+        within_block_range(self.eye(), range + buffer, pos)
+    }
+    /// Where the guest's eyes are: its feet raised by its pose's eye height.
+    pub fn eye(&self) -> [f64; 3] {
+        [
             self.position[0],
             self.position[1] + self.eye_height(),
             self.position[2],
-        ];
-        let range = if self.creative() { 5.0 } else { 4.5 };
-        within_block_range(eye, range + buffer, pos)
+        ]
     }
     /// `Player.isWithinBlockInteractionRange(pos, 1.0)`, which the server
     /// checks a block action against (ServerPlayerGameMode.handleBlockBreakAction,

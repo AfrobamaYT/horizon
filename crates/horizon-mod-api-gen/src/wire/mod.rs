@@ -265,6 +265,7 @@ pub(super) struct Method {
     /// The area trait that declares it, when it is a part of `owner` (`host::items::ItemsHost`).
     pub(super) via: Option<String>,
     pub(super) name: String,
+    pub(super) access: Option<String>,
     /// `Some(mutable)` for a `self` receiver.
     pub(super) receiver: Option<bool>,
     pub(super) params: Vec<(String, Ty)>,
@@ -568,6 +569,13 @@ fn method(
         owner,
         via: None,
         name: sig.ident.to_string(),
+        access: function
+            .attrs
+            .iter()
+            .find(|a| a.path().is_ident("access"))
+            .map(|a| a.parse_args::<syn::Ident>().map(|i| i.to_string()))
+            .transpose()
+            .map_err(|e| e.to_string())?,
         receiver,
         params,
         ret,

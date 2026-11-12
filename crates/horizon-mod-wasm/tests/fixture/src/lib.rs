@@ -25,6 +25,16 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn server_tick(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::ServerTickEvent<'_>,
+    ) {
+        host.messages()
+            .broadcast(mod_api::Text::literal("wasm tick phase regression"))
+            .unwrap();
+    }
+
     fn right_click_block(
         &self,
         host: mod_api::HostSide<'_>,

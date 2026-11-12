@@ -489,6 +489,7 @@ impl Session {
         writer.prepare_packet(encoded.data)
     }
     /// The frozen receiving turn, retaining every input credit through its actor.
+    #[horizon_mod_api_macros::replaceable]
     pub fn poll(&self) -> Vec<ingress::OwnedReceipt<Event>> {
         self.events.take_turn()
     }
@@ -1581,6 +1582,7 @@ fn fill_known_entries(r: &mut cfg::RegistryData, resources: &Path) {
     }
 }
 
+#[horizon_mod_api_macros::replaceable]
 fn receive_brand(payload: &cfg::CustomPayload, send: &ingress::Producer<Event>) {
     if payload.channel == "minecraft:brand"
         && let Ok(brand) = horizon_protocol::buf::Reader::new(&payload.data).string(32767)
