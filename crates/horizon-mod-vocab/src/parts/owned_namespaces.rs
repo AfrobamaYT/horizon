@@ -8,7 +8,8 @@ pub fn owns_namespace(owner: &str, namespace: &str) -> bool {
 }
 
 /// `name` with its namespace: a bare name is in mod `owner`'s own, for a declared id and
-/// for each name a declaration references alike.
+/// for the block and item references a declaration names (`block_item`, `pick_item`,
+/// `wall_block`, `base_block`, `crafting_remainder`, `Item::block`) alike.
 pub fn qualified(owner: &str, name: &str) -> String {
     if name.contains(':') {
         name.to_owned()

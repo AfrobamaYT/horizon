@@ -703,7 +703,7 @@ pub(super) fn emit<'a>(
                 "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
             (Contract::Collect, Some(out)) if matches!(name, "blocks" | "items") => method_source.push_str(&format!(
-                "///\n/// Each mod receives its own empty `{event}.{out}` batch. A bare name, in an identifier or\n/// in a reference to other content, is that mod's own; declared identifiers must belong to\n/// that mod's manifest-owned namespaces, and unowned identifiers refuse registration.\n"
+                "///\n/// Each mod receives its own empty `{event}.{out}` batch. A bare name, in an identifier or\n/// in `block_item`, `pick_item`, `wall_block`, `base_block`, `crafting_remainder` or `Item::block`,\n/// is that mod's own; declared identifiers must belong to\n/// that mod's manifest-owned namespaces, and unowned identifiers refuse registration.\n"
             )),
             (Contract::Collect, Some(out)) if answered => method_source.push_str(&format!(
                 "///\n/// Each mod receives its own empty `{event}.{out}` batch; every entry it adds is recorded\n/// as that mod's.\n"
