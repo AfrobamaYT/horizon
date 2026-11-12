@@ -102,10 +102,19 @@ jobs:
           FNR_MODS="alpha beta one ten fdshape support registry lower loop" tools/ci/fn_replace_check.sh \
             "$launcher" "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/check" 2>&1 | tee "$FNR_SCRATCH/fnr-check.log"
           grep -F 'Function replacement:' "$FNR_SCRATCH/fnr-check.log" >> "$GITHUB_STEP_SUMMARY"
+      # On its own: with no mod filling the loop, a mixin on the loop's function is compiled for the
+      # empty slot. Beside the `loop` mod it would be compiled for that mod's slots instead.
+      - name: A mixin on a published loop's function, no slot filled (build and link)
+        run: |
+          launcher="${CARGO_TARGET_DIR:-launcher/target}/release/horizon-launcher"
+          FNR_KEEP=1 FNR_MODS="loop_generic_head" tools/ci/fn_replace_check.sh \
+            "$launcher" "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/check"
       - name: Refusals by name
         run: |
           launcher="${CARGO_TARGET_DIR:-launcher/target}/release/horizon-launcher"
-          for set in "alpha overwrite2" refused refused_state loop_refused; do
+          # Each set, then every code it must be refused with.
+          while read -r set codes; do
+            set=${set//+/ }
             log="$FNR_SCRATCH/refusal-${set// /_}.log"
             if FNR_KEEP=1 FNR_MODS="$set" tools/ci/fn_replace_check.sh "$launcher" "$FNR_SCRATCH/prebuilt" \
               "$FNR_SCRATCH/check" > "$log" 2>&1; then
@@ -113,8 +122,15 @@ jobs:
               exit 1
             fi
             grep -E 'E_[A-Z_]+' "$log" | head -5 | tee -a "$GITHUB_STEP_SUMMARY"
-            grep -qE 'E_[A-Z_]+' "$log" || { echo "$set failed without a named refusal"; tail -40 "$log"; exit 1; }
-          done
+            for code in $codes; do
+              grep -qF "$code: " "$log" || { echo "$set was not refused with $code"; tail -40 "$log"; exit 1; }
+            done
+          done <<'SETS'
+          alpha+overwrite2 E_OVERWRITE_CONFLICT
+          refused E_MIXIN_TARGET_MISSING E_MIXIN_NOT_REPLACEABLE
+          refused_state E_MIXIN_STATE_LAYOUT
+          loop_refused E_LOOP_UNKNOWN E_LOOP_ENTRY_REPLACED
+          SETS
       - name: Clean private scratch
         if: always()
         run: |
