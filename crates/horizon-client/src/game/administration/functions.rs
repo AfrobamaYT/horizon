@@ -237,7 +237,7 @@ impl Game<'_> {
             )
         })?;
         let next_root = self
-            .stage_enabled_inventory()
+            .stage_condition_inventory()
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         let resources = next_root
             .as_ref()
@@ -259,7 +259,7 @@ impl Game<'_> {
             enabled_features,
             &additional,
         );
-        let prepared = self.prepare_server_reload(&stack, &resources)?;
+        let prepared = self.begin_condition_reload(&stack, &resources)?;
         let context = self
             .prepare_loop_context(&resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
@@ -1306,7 +1306,7 @@ impl Game<'_> {
         );
         stack.enabled =
             datapack::selected_ids(stack.packs.iter().map(Arc::as_ref), &self.fns.enabled);
-        let prepared = match self.prepare_server_reload(&stack, &self.options.resources) {
+        let prepared = match self.prepare_pack_condition_reload(&stack) {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.fns.enabled = previous_enabled;

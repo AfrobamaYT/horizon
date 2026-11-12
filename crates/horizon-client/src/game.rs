@@ -2183,14 +2183,7 @@ struct PreparedParts {
     parts: Option<mod_api::Parts>,
     cauldrons: Arc<cauldron_interactions::Table>,
 }
-struct PreparedWorldReload {
-    structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns,
-    tables: Option<WorldTables>,
-    health: horizon_client::health::HealthResources,
-    parts: PreparedParts,
-    wire: Option<Arc<horizon_client::lan::data::SyncData>>,
-    datapack_registries: Option<mod_api::DatapackRegistrySet>,
-}
+use condition_reload_state::PreparedWorldReload;
 
 impl WorldTables {
     /// The registries [`WorldTables::pack_tags`] holds.
