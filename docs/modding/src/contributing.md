@@ -62,8 +62,9 @@ reference.
 
 A new or changed catalog point is proven by the wasm fixture: real wasm mods (`crates/horizon-mod-wasm/tests/fixture`,
 `library-fixture` and `groups`) built with `cargo horizon-mod build --wasm` and loaded by the real loader. The
-`wasm-mods` CI job does all of it on a PR that touches `crates/cargo-horizon-mod/`, a `crates/horizon-mod-*` crate or
-`Cargo.lock`, once the PR is ready for review (drafts skip it). That job is the answer; you don't need a local build.
+`wasm-mods` CI job does all of it on every push to main, once per commit, and on manual dispatch; it does not run on
+pull requests. A maintainer dispatches it on a PR branch that changes what it builds. That job is the answer; you don't
+need a local build.
 
 To run it yourself, on Linux or Windows, follow the steps of `.github/workflows/wasm-mods.yml` from the repository
 root; the tool installs its pinned toolchain through rustup. One wasm compile of `horizon-mod-points` takes about
