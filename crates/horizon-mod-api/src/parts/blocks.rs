@@ -709,14 +709,14 @@ pub mod tests {
                     f64::from(p.y) + 2.0,
                     f64::from(p.z) + 0.5,
                 ];
-                event.position = Some((at, 10.0, 20.0));
+                *event.position = Some((at, 10.0, 20.0));
             }
         }
         struct Bed;
         #[mod_api::horizon_part]
         impl BlockPart for Bed {
             fn respawn_position(&self, _: &dyn Host, event: &mut RespawnPositionEvent<'_>) {
-                event.position = None;
+                *event.position = None;
             }
         }
         struct RespawnMod;

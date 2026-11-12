@@ -554,7 +554,7 @@ impl Game<'_> {
                 let facing = self.bed_forward(state);
                 let stand = self.bed_stand_up(c.pos, facing, c.yaw);
                 let found = stand.map(|p| (p, look_at_yaw(p, c.pos), 0.0));
-                return Ok(self.respawn_position(state, c, found));
+                return Ok(self.part_respawn_position(state, c, found));
             }
             let [x, y, z] = c.pos;
             let free = c.forced
@@ -562,10 +562,11 @@ impl Game<'_> {
                 && self.possible_to_respawn_in(state)
                 && self.possible_to_respawn_in(self.world.block(x, y + 1, z));
             let at = Vec3::new(f64::from(x) + 0.5, f64::from(y) + 0.1, f64::from(z) + 0.5);
-            return Ok(self.respawn_position(state, c, free.then_some((at, c.yaw, c.pitch))));
+            return Ok(self.part_respawn_position(state, c, free.then_some((at, c.yaw, c.pitch))));
         }
         let stand = self.anchor_stand_up(c.pos);
-        let stand = self.respawn_position(state, c, stand.map(|p| (p, look_at_yaw(p, c.pos), 0.0)));
+        let stand =
+            self.part_respawn_position(state, c, stand.map(|p| (p, look_at_yaw(p, c.pos), 0.0)));
         if !c.forced
             && consume
             && stand.is_some()
@@ -578,7 +579,7 @@ impl Game<'_> {
     /// `IBlockStateExtension.getRespawnPosition` of the respawn point `state` of `c`: `found`
     /// (position, yaw, pitch), unless a part of the state answers; an answer with a non-finite
     /// value keeps `found`.
-    fn respawn_position(
+    fn part_respawn_position(
         &self,
         state: BlockStateId,
         c: RespawnConfig,
