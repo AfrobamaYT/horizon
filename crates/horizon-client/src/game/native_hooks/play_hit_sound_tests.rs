@@ -35,7 +35,7 @@ fn play_hit_sound_helper_and_eight_mining_ticks() {
         } else {
             Vec::new()
         };
-        mod_api::testing::with_mods(mods.into(), || {
+        mod_platform::testing::with_mods(mods.into(), || {
             with_game(|game| {
                 let scratch = tempfile::tempdir().unwrap();
                 game.world_root = scratch.path().to_path_buf();

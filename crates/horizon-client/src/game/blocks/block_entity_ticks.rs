@@ -1597,7 +1597,7 @@ mod own_block_entity_tests {
             ModEntry::new("own_b", Box::new(Machines::new(B, Some(A)))),
         ]
         .into();
-        mod_api::testing::with_mods(mods.clone(), || {
+        mod_platform::testing::with_mods(mods.clone(), || {
             crate::game::api_values::install_parts(&mods).unwrap();
             mod_api::__private::mark_game_thread();
             let base =
