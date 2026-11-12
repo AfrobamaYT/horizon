@@ -235,6 +235,7 @@ mod terrain_model;
 pub(crate) mod test_gpu;
 mod weather;
 mod world_text;
+use cull::occlusion_culling_requested;
 use entity_batch::EntityBatch;
 pub use entity_batch::{
     ADDITIVE_PARTICLE_OVERLAY, DISSOLVE_OVERLAY, DRAGON_RAYS_OVERLAY, ENERGY_SWIRL_OVERLAY,
@@ -282,15 +283,6 @@ fn outline_vertices_into(edges: &[[f64; 6]], camera: glam::DVec3, out: &mut Vec<
             .iter()
             .map(|e| std::array::from_fn(|i| (e[i] - camera[i % 3]) as f32)),
     );
-}
-
-/// Whether the renderer should initialize its occlusion culling pass (`cull`).
-///
-/// Software adapters spend more time running the culling pass than drawing
-/// the sections it removes. Keep the pass available for explicit A/B checks,
-/// while leaving hardware adapters on the existing default.
-fn occlusion_culling_requested(info: &wgpu::AdapterInfo, env: Option<&str>) -> bool {
-    env != Some("0") && (env.is_some() || info.device_type != wgpu::DeviceType::Cpu)
 }
 
 /// `DrawableGizmoPrimitives.getGroup`: a line whose ARGB alpha is 255 joins the
@@ -388,7 +380,7 @@ pub mod mod_pipelines;
 mod native_material;
 mod native_pack;
 mod native_post;
-pub use mod_render::render as native_render;
+use crate::render_slots as native_render;
 mod native_shadow;
 mod native_sky;
 mod occlusion;
@@ -1300,6 +1292,8 @@ pub struct Renderer {
     /// Sections upload their solid quads in the compact layout (`mesher::packed`): the solid
     /// passes read the arena themselves (`flat`) and no shader pack reads it as vertices.
     packed_quads: bool,
+    /// The compact layout is allowed (`HORIZON_PACKED_QUADS`, `set_packed_layout`).
+    packed_on: bool,
     /// The visibility buffer for flat frames' solid terrain (`visbuffer`,
     /// `HORIZON_VISBUFFER=1`).
     visbuf: Option<visbuffer::Visbuffer>,
@@ -1682,7 +1676,7 @@ pub struct Renderer {
     shadow_seen_scratch: crate::fast_hash::FxHashSet<SectionKey>,
     /// Shadow translucent section draws, retained between frames.
     shadow_translucent_scratch: Vec<(u64, [u32; 5], (u32, Option<u32>))>,
-    /// Lava's sprite layers, which a pack's solid terrain draws (`pack_atlas::terrain_parts`).
+    /// Lava's sprite layers, which a pack's solid terrain draws (`pack_atlas::game_terrain`).
     pack_lava_layers: Vec<u16>,
     pub hud: HudRenderer,
     /// Vanilla's menu background blur, made on first use.
@@ -1759,9 +1753,9 @@ fn requested_split() -> Option<u32> {
         .and_then(|v| v.parse().ok())
         .filter(|&n| (1..=SPRITE_SPLIT).contains(&n))
 }
-fn adapter_requested_split(info: &wgpu::AdapterInfo, requested: Option<u32>) -> Option<u32> {
-    // Metal can fail to sample large mipmapped array textures despite advertising the layer limit.
-    requested.or_else(|| (info.backend == wgpu::Backend::Metal).then_some(512))
+fn adapter_requested_split(info: &wgpu::AdapterInfo, asked: Option<u32>, n: u32) -> Option<u32> {
+    // Metal can fail on big mipmapped arrays (#8471): 512 layers each, more only for n > 8 x 512.
+    asked.or((info.backend == wgpu::Backend::Metal).then(|| n.div_ceil(SPRITE_ARRAYS).max(512)))
 }
 /// The split the CPU mip chains are cut by before the adapter is known.
 fn sprite_split() -> u32 {
@@ -2289,7 +2283,7 @@ fn check_layers(adapter: &wgpu::Adapter, layers: u32) -> Result<u32> {
     Ok(layer_split(
         adapter.limits().max_texture_array_layers,
         info.backend == wgpu::Backend::Gl,
-        adapter_requested_split(&info, requested_split()),
+        adapter_requested_split(&info, requested_split(), layers),
         layers,
     )?)
 }
@@ -3057,10 +3051,8 @@ impl Renderer {
         // Computed once: the sprite arrays, the shaders' constants and the
         // shader pack atlas all cut the sprites by it.
         let split = check_layers(&adapter, layers)?;
-        if split < sprite_split() {
-            log::info!("Horizon: {split} block textures per array (the GPU's limit)");
-        }
         let info = adapter.get_info();
+        surface_setup::log_sprite_split(&info, split, layers);
         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
         let size = window.inner_size();
         let max_side = device.limits().max_texture_dimension_2d;
@@ -5036,8 +5028,8 @@ impl Renderer {
             }
             None => (solid, solid_opaque, solid_cutout, solid_mirror),
         };
-        // The solid quads in the compact layout, while no shader pack reads the arena
-        // (`follow_packed_layout`).
+        // The solid quads in the compact layout where every pass reads it; the first world
+        // frames settle it for the picked pack (`follow_packed_layout`).
         let packed_quads = flat.is_some() && !shader_pack && packed_wanted();
         packed::pack_quads(packed_quads);
         let visbuf = flat
@@ -5199,6 +5191,7 @@ impl Renderer {
             translucent_mark,
             flat_on: flat.is_some(),
             packed_quads,
+            packed_on: packed_wanted(),
             cull_on: cull.is_some(),
             sides_on: true,
             gpu_culling: None,
@@ -5585,6 +5578,7 @@ impl Renderer {
     }
     /// LevelRenderer.submitBlockOutline: the buffer holds `edges` per stroke, the black
     /// secondary stroke first when high contrast is on.
+    #[horizon_mod_api_macros::replaceable]
     fn draw_outline(&self, pass: &mut wgpu::RenderPass<'_>, edges: u32, high_contrast: bool) {
         pass.set_vertex_buffer(0, self.outline.slice(..));
         // Both strokes are LINES: a pack's rendertype_lines draws them.
@@ -5639,6 +5633,7 @@ impl Renderer {
     }
     /// Hand the window surface over to the renderer that replaces this one on
     /// the same device (it takes `spare_surface`).
+    #[horizon_mod_api_macros::replaceable]
     pub fn release_surface(&mut self) {
         self.frame_gen.stop();
         self.queue.wait();
@@ -6842,13 +6837,17 @@ impl Renderer {
             flat.set_translucent_page_vertices(arena.page_vertices());
         }
     }
-    /// Uploads solid quads in the compact layout (`packed_quads`) while no shader pack runs:
-    /// a pack's terrain and shadow programs, and Horizon's own packs' stages, read the
-    /// arena's vertices as `TerrainVertex`es. Leaving it drops every section and far tile
-    /// for the game to mesh again, as `follow_translucent_layout` does.
+    /// Uploads solid quads in the compact layout (`packed_quads`) unless a pack reads the
+    /// arena's vertices as `TerrainVertex`es: Horizon's own packs' stages, and a `shaders/`
+    /// pack's terrain and shadow programs outside flat draws (flat ones unpack the records,
+    /// `pack_atlas::PULL_FLAT`). Leaving it drops every section and far tile for the game to
+    /// mesh again, as `follow_translucent_layout` does.
     fn follow_packed_layout(&mut self) {
         let pack = self.pack_post.as_ref().and_then(|p| p.1.as_ref()).is_some();
-        let want = self.flat.is_some() && !pack && self.native.is_none() && packed_wanted();
+        let want = self.flat.is_some()
+            && (!pack || self.pack_terrain_flat)
+            && self.native.is_none()
+            && self.packed_on;
         if want == self.packed_quads {
             return;
         }
@@ -6859,6 +6858,10 @@ impl Renderer {
             let waiting = self.hold.take_all();
             self.place_held(waiting);
         }
+        log::info!(
+            "Horizon: compact solid terrain {}",
+            if want { "on" } else { "off" }
+        );
         self.packed_quads = want;
         packed::pack_quads(want);
         let laid_out = self.sections.values().any(|s| s.packed)
@@ -6867,6 +6870,17 @@ impl Renderer {
             self.sections_dropped = true;
             self.clear_sections(self.layout);
         }
+    }
+    /// Allows the compact layout of solid quads or not, for A/B checks: every section and far
+    /// tile is meshed again in the layout that follows. Replies whether sections now use it.
+    pub fn set_packed_layout(&mut self, on: bool) -> bool {
+        if on != self.packed_on {
+            self.packed_on = on;
+            self.follow_packed_layout();
+            self.sections_dropped = true;
+            self.clear_sections(self.layout);
+        }
+        self.packed_quads
     }
     /// Whether every section and far tile was dropped since the last call, to be
     /// laid out again (`follow_translucent_layout`): the game meshes them again,
@@ -7310,7 +7324,8 @@ impl Renderer {
                     .as_ref()
                     .map_or([1, 1], |t| [t.width(), t.height()]),
                 terrain: self.pack_atlas.as_ref().map(|_| pack_post::Geometry {
-                    buffers: if flat { &buffers[..1] } else { &buffers },
+                    // Flat terrain programs pull their vertices (`pack_atlas::PULL_FLAT`).
+                    buffers: if flat { &[] } else { &buffers },
                     table: self.flat.as_ref().filter(|_| flat).map(|f| &f.draw_layout),
                     depth_write: true,
                     atlas: None,
@@ -7480,7 +7495,8 @@ impl Renderer {
                 lightmap,
                 gui_size,
                 terrain: terrain.then(|| pack_post::Geometry {
-                    buffers: if flat { &buffers[..1] } else { &buffers },
+                    // Flat terrain programs pull their vertices (`pack_atlas::PULL_FLAT`).
+                    buffers: if flat { &[] } else { &buffers },
                     table: table.as_ref(),
                     depth_write: true,
                     atlas: None,
@@ -7645,15 +7661,12 @@ impl Renderer {
                 );
                 horizon_shaders::GeometryInputs {
                     inputs,
-                    pull: pack_atlas::PULL.to_owned(),
+                    // Flat terrain inputs pull their own vertex (`PULL_FLAT`, `gl_VertexIndex` → `hz_vertex_index`).
+                    pull: String::new(),
                     index: "hz_indices[@]".to_owned(),
                 }
             });
         horizon_shaders::GameInputs {
-            terrain_parts: terrain
-                .as_ref()
-                .map(|t| pack_atlas::terrain_parts(t, &self.pack_lava_layers)),
-            terrain,
             terrain_geometry,
             entity_geometry: Some(pack_entities::geometry_inputs()),
             sky: Some(pack_sky::inputs()),
@@ -7663,6 +7676,7 @@ impl Renderer {
             weather: Some(pack_weather::inputs()),
             lines: Some(pack_lines::inputs()),
             hand: Some(pack_hand::inputs()),
+            ..pack_atlas::game_terrain(terrain, &self.pack_lava_layers)
         }
     }
 
@@ -8072,6 +8086,7 @@ impl Renderer {
             );
         }
     }
+    #[horizon_mod_api_macros::replaceable]
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
         // A lost device cannot accept uploads either. Leave recovery to the
         // owner instead of submitting atlas patches to the invalid device.
@@ -11982,36 +11997,32 @@ impl Renderer {
                 Some((_, depth)) => (depth, self.world_post.size().unwrap_or(size)),
                 None => (&self.depth, size),
             };
-            native_render::world_drawn(&mut native_render::WorldDrawn::from(
-                mod_render::render::built::WorldDrawn {
-                    device: &self.device,
-                    queue: &self.queue,
-                    encoder: &mut encoder,
-                    color: &target_texture,
-                    color_view: &view_target,
-                    color_format: self.output.frame.overlay_format,
-                    size,
-                    depth,
-                    depth_size,
-                    view_proj,
-                    jittered,
-                    camera: frame.camera,
-                    entities: frame.entities,
-                    spans: frame.entity_spans,
-                    motion: frame.entity_motion,
-                    atlas: self.hud.atlas_texture.as_ref(),
-                    quad_indices: &self.indices,
-                    block_sprites: native_render::BlockSpriteArrays::from(
-                        mod_render::render::built::BlockSpriteArrays {
-                            views: &self.sprite_views,
-                            split: self.sprite_split,
-                            size: self.sprite_textures[0].width(),
-                            nearest: &self.sprite_nearest,
-                            filtered: &self.sprite_sampler,
-                        },
-                    ),
+            native_render::world_drawn(&mut native_render::WorldDrawn {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut encoder,
+                color: &target_texture,
+                color_view: &view_target,
+                color_format: self.output.frame.overlay_format,
+                size,
+                depth,
+                depth_size,
+                view_proj,
+                jittered,
+                camera: frame.camera,
+                entities: frame.entities,
+                spans: frame.entity_spans,
+                motion: frame.entity_motion,
+                atlas: self.hud.atlas_texture.as_ref(),
+                quad_indices: &self.indices,
+                block_sprites: native_render::BlockSpriteArrays {
+                    views: &self.sprite_views,
+                    split: self.sprite_split,
+                    size: self.sprite_textures[0].width(),
+                    nearest: &self.sprite_nearest,
+                    filtered: &self.sprite_sampler,
                 },
-            ));
+            });
         }
         // A 0.2 pack in SDR: its picture finishes on 8 bits before the hand, the camera overlays
         // and the HUD draw over it (`overlay_format`).
@@ -12394,22 +12405,20 @@ impl Renderer {
         }
         // A native mod's turn after the hand, on the real frame only.
         if overlay.real && !frame.title {
-            native_render::hand_drawn(&mut native_render::HandDrawn::from(
-                mod_render::render::built::HandDrawn {
-                    device: &self.device,
-                    queue: &self.queue,
-                    encoder: &mut *encoder,
-                    color: target_texture,
-                    color_view: view_target,
-                    color_format: self.output.frame.overlay_format,
-                    size: [self.config.width, self.config.height],
-                    hand: if overlay.hand_drawn { frame.hand } else { &[] },
-                    view_proj: overlay.hand_view_proj,
-                    camera: frame.camera,
-                    atlas: self.hud.atlas_texture.as_ref(),
-                    quad_indices: &self.indices,
-                },
-            ));
+            native_render::hand_drawn(&mut native_render::HandDrawn {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut *encoder,
+                color: target_texture,
+                color_view: view_target,
+                color_format: self.output.frame.overlay_format,
+                size: [self.config.width, self.config.height],
+                hand: if overlay.hand_drawn { frame.hand } else { &[] },
+                view_proj: overlay.hand_view_proj,
+                camera: frame.camera,
+                atlas: self.hud.atlas_texture.as_ref(),
+                quad_indices: &self.indices,
+            });
         }
         // GameRenderer.render: LevelRenderer.blitEntityOutline after the level and the hand.
         self.entity_outline.draw(
@@ -15069,11 +15078,21 @@ mod sprite_upload_tests {
             limit_bucket: None,
         };
         info.backend = wgpu::Backend::Metal;
-        assert_eq!(adapter_requested_split(&info, None), Some(512));
-        assert_eq!(adapter_requested_split(&info, Some(1024)), Some(1024));
+        assert_eq!(adapter_requested_split(&info, None, 1200), Some(512));
+        assert_eq!(
+            adapter_requested_split(&info, None, 512 * SPRITE_ARRAYS),
+            Some(512)
+        );
+        assert_eq!(adapter_requested_split(&info, Some(1024), 1200), Some(1024));
+        // More sprites than the arrays hold at 512: the arrays grow, up to the GPU's layers.
+        let split = adapter_requested_split(&info, None, 10_271);
+        assert_eq!(split, Some(1284));
+        assert_eq!(layer_split(2048, false, split, 10_271), Ok(1284));
+        let split = adapter_requested_split(&info, None, 2048 * SPRITE_ARRAYS + 1);
+        assert!(layer_split(2048, false, split, 2048 * SPRITE_ARRAYS + 1).is_err());
 
         info.backend = wgpu::Backend::Vulkan;
-        assert_eq!(adapter_requested_split(&info, None), None);
+        assert_eq!(adapter_requested_split(&info, None, 10_271), None);
     }
 
     #[test]

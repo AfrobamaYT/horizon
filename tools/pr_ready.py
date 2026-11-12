@@ -46,8 +46,8 @@ FLEET_SHARED = Path.home() / "code" / "horizon-parity" / "shared-local" / "parit
 if "PARITY_SHARED" not in os.environ and not (ROOT / ".local" / "minecraft").exists() and FLEET_SHARED.is_dir():
     # A fleet worktree without vanilla data still knows each harness's dependencies.
     os.environ["PARITY_SHARED"] = str(FLEET_SHARED)
-from tools import parity, release_train  # noqa: E402
-from tools.ci import listed_calls, rust_changes  # noqa: E402
+from tools import parity, process_tree, release_train  # noqa: E402
+from tools.ci import rust_changes  # noqa: E402
 
 RBUILD = Path.home() / "fleet" / "rbuild"
 # What rbuild's login shell needs on each fleet machine before cargo (it adds sccache itself). The ThinkPad no
@@ -82,7 +82,7 @@ MOD_API_INPUTS = ("crates/horizon-mod-vocab/src/hooks/",)
 # own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
 DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"
 DISPATCH_TEST_INPUTS = ("crates/horizon-mod-api-gen/", "crates/horizon-mod-api-macros/",
-                        "crates/horizon-mod-point-shape/", "crates/horizon-mod-api/",
+                        "crates/horizon-mod-api/",
                         "crates/horizon-mod-vocab/", *MOD_API_INPUTS)
 MOD_REGISTRY = "crates/horizon-mod-registry/Cargo.toml"
 
@@ -346,6 +346,10 @@ CONTENT_ROOT = ("crates/horizon-client/src/mod_content", "crates/horizon-client-
                 "crates/horizon-mod-package/", "crates/horizon-assets/")
 CONTENT_ROOT_TESTS = "cargo test --locked -p horizon-client-lib --lib mod_content::tests:: -- --ignored"
 
+# holder::tests spawns target/<profile>/examples/holder_actor beside its test binary.
+# --tests does not build that executable; use the same explicit prerequisite as CI.
+HOLDER_ACTOR = "cargo build --locked -p horizon-mod-package --features runtime-process --example holder_actor"
+
 
 def plan(args, base, changed, crates_of, libraries, dependencies):
     """The checks for these changed files, in the order they run."""
@@ -380,6 +384,9 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
         Step("Python tests", "python3 -m unittest discover -s tests", where="here", summary=unittest_passed),
         Step("rustfmt", "cargo fmt --all -- --check", skip=None if rust else no_rust),
         Step("clippy", clippy, skip=None if rust else no_rust),
+        Step("holder actor", HOLDER_ACTOR,
+             skip=None if crates is None or "horizon-mod-package" in crates or launcher
+             else "holder tests untouched"),
         Step("tests" + (": workspace" if crates is None else f": {', '.join(crates)}" if crates else ""),
              f"cargo test --locked {selection}{mod_features(crates)} --tests",
              skip=test_skip, summary=tests_passed),
@@ -412,8 +419,6 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
                           ("launcher tests", "cargo test --locked --lib --bins $features")]:
         steps.append(Step(name, f"cd launcher && {LAUNCHER_FEATURES}\nin_shell {shlex.quote(command)}", skip=launcher_skip,
                           summary=tests_passed if name == "launcher tests" else None))
-    steps.append(Step("listed call loader proof", "python3 tools/ci/listed_calls.py --force",
-                      skip=None if listed_calls.applies(changed) else "listed call machinery untouched"))
     harness = Step("Parity", summary=parity_summary)
     affected = affected_here(changed)
     local_data = (ROOT / ".local" / "minecraft").exists() and (ROOT / ".local" / "horizon-client").exists()
@@ -497,7 +502,8 @@ def run_script(steps, host, verbose):
 
 
 def run_windows(steps, verbose, environment=None):
-    """Run local checks directly on Windows without requiring a Unix shell."""
+    """Run local checks directly on Windows without requiring a Unix shell. Each runs in its own job
+    (tools/process_tree.py): what a check starts, a harness's game say, ends with it, or with this process."""
     for step in steps:
         command = shlex.split(step.command)
         cwd = ROOT
@@ -546,13 +552,21 @@ def run_windows(steps, verbose, environment=None):
         print(f"  {step.name}...", file=sys.stderr, flush=True)
         started = time.monotonic()
         try:
-            with subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
-                                  stderr=subprocess.STDOUT, text=True, errors="replace") as process:
+            with process_tree.popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, errors="replace") as process:
+                def release(process):
+                    # The check's exit ends what it left running, which would otherwise hold the output open.
+                    process.wait()
+                    process_tree.ended(process)
+                # A daemon: interrupted, this process exits at once, and its jobs end the checks with it.
+                reaper = threading.Thread(target=release, args=(process,), daemon=True)
+                reaper.start()
                 for line in process.stdout:
                     step.output += line
                     if verbose:
                         print("    " + line, end="", file=sys.stderr)
-                status = process.wait()
+                reaper.join()
+                status = process.returncode
             step.status = "pass" if status == 0 else "fail"
         except OSError as error:
             step.status, step.detail = "fail", str(error)

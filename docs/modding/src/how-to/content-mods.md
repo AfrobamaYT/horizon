@@ -13,8 +13,10 @@ refuses registration with a diagnostic naming both the mod and namespace. This
 is identical for native and wasm mods. Attaching a Part to an existing vanilla or
 foreign block or item is a reference, not a new declaration, and remains allowed.
 
-Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
+Code declarations carry component patches as `Vec<(String, Option<Tag>)>`:
 `Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
+Repeated component IDs, including a set and removal of the same ID, are refused; `lore` and `minecraft:lore`
+count as the same ID, and an ID may not start with the removal prefix `!`.
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
 
@@ -215,6 +217,17 @@ Unset or `true` preserves the template's ability to occlude, using the declared 
 is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay
 vanilla's. Unset or `true`, the crack is drawn. It stands where a mod once had a mixin on
 `LevelRenderer.renderBlockDestroyAnimation`, which has no NeoForge event.
+
+`dynamic_light: true` makes a block's light depend on where it is, not only on its state
+(`IBlockExtension.hasDynamicLightEmission`): a lamp that glows only on a powered rail, a crystal brighter deeper
+down. Its parts answer `BlockPart::light_emission` with the light a cell emits, and `light` (or `state_light`) is
+what a cell emits without an answer. The game asks on the thread that owns the level, the server's and each
+client's, as a chunk holding the block comes in and as an edit sets it, and keeps the answer until the cell's state
+changes; the light engine never asks on its own. A part whose answer reads more than the state (the block below
+it) calls `LevelRef::check_light(host, pos)` when that changes (`LevelLightEngine.checkBlock`): the server asks
+again and relights, and clients ask their own parts again as its light update reaches them. The flag is per block,
+as it sits on the block's row: every state of the block is asked, so a block with only some states that vary pays
+the ask for all of them. Light that depends only on the state needs no part: use `light` or `state_light`.
 
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
@@ -963,3 +976,13 @@ otherwise it draws no model. Pack layers bind independently. An unknown type,
 explicit refusal, invalid model, out-of-range state, duplicate state or answer
 with no picks rejects the whole layer with a diagnostic, leaving lower layers
 available. Vanilla `variants` and `multipart` remain available for ordinary files.
+
+## Per-state light
+
+Blocks in JSON and code can set `state_light`, which overrides `properties.light`.
+Use `properties` for an ordered list of state property names, `values` for
+comma-separated value tuples mapped to emission (0 to 15), and `default` for
+unmatched states. Without a default, every state must match a tuple.
+For example, `"state_light":{"properties":["lit"],"values":{"true":15},"default":0}`
+makes a lamp dark when unlit and emit 15 when lit. Code uses `mod_api::StateLight`
+with the same `properties`, `values` and `default` fields on `Block::state_light`.

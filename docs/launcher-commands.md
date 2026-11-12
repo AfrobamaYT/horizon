@@ -155,9 +155,9 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
 - `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--version`: The installed version whose game files the build reuses, and whose commit it builds on when no mod pins one (default: the one the instance plays, so a rebuild stays on its Horizon)
-- `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
+- `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (rebuilds the mods for that pinned SDK)
 - `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
-- `--profile` (optimized, balanced, developer): This instance's build mode: optimized, balanced or developer. An explicit choice is remembered; otherwise the automatic picker uses a matching prebuilt SDK when possible.
+- `--profile` (optimized): Native mods use the pinned SDK's optimized compilation settings. The game is never rebuilt by a mod build
 
 MCP: none: the player's switch.
 

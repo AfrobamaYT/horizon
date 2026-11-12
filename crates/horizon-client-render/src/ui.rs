@@ -816,6 +816,7 @@ pub fn slider_value(x: f32, w: f32, cx: f32) -> f32 {
 }
 /// Screen.renderMenuBackground: in a world the translucent dark texture,
 /// otherwise the dirt-like menu texture, tiled at 32 pixels.
+#[horizon_mod_api_macros::replaceable]
 pub fn menu_background(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
@@ -1419,7 +1420,7 @@ pub fn append_field(
         batch.text(atlas, value, x, y, color, shadow);
         cursor_x += HudBatch::text_width(atlas, value) + 1.0;
     }
-    let insert = char_len(value) >= max_chars;
+    let insert = utf16_len(value) >= max_chars;
     if insert {
         cursor_x -= 1.0;
     }
@@ -1439,7 +1440,7 @@ pub fn append_field(
 // The editing core's helpers, shared with mods' text fields (`mod_api::client::widgets`).
 use mod_api::client::widgets::byte_index;
 pub use mod_api::client::widgets::{
-    char_len, java_whitespace, multiline_word_position, word_position,
+    char_len, java_whitespace, multiline_word_position, utf16_len, utf16_prefix, word_position,
 };
 /// `EditBox.deleteWords(dir)` for an append-only field, whose caret is at the
 /// end: removes the word in that direction. True when the value changed.
@@ -1543,7 +1544,9 @@ impl EditBox {
         self.edit.set_value(value);
         self.moved();
     }
-    /// EditBox.insertText: replace the selection, respecting the maximum length.
+    /// EditBox.insertText: replace the selection, respecting the maximum
+    /// length. The limit is in UTF-16 code units, as Java's `String.length()`
+    /// counts them.
     pub fn insert_text(&mut self, text: &str) {
         if !self.editable {
             return;
@@ -1812,8 +1815,10 @@ impl EditBox {
             batch.text_styled(atlas, &t, draw_x, ty, color, true);
             draw_x += atlas.font.width_text(&t) + 1.0;
         }
+        // EditBox.extractWidgetRenderState: `value.length() >= maxLength`
+        // is Java's length, so the caret turns into a bar at the unit count.
         let insert =
-            self.cursor < char_len(&self.value) || char_len(&self.value) >= self.max_length;
+            self.cursor < char_len(&self.value) || utf16_len(&self.value) >= self.max_length;
         let mut cursor_x = draw_x;
         if !on_screen {
             cursor_x = if rel_cursor > 0 { tx + self.width } else { tx };
@@ -2682,6 +2687,31 @@ mod tests {
                 (box_, [0.5, 0.0, 0.75, 0.25])
             ]
         );
+    }
+
+    /// `EditBox.maxLength` counts Java `String.length()`: UTF-16 code units.
+    /// A pasted emoji takes two of them and is never split (vanilla's
+    /// `Character.isHighSurrogate` guard drops the half it would keep).
+    #[test]
+    fn an_edit_box_maximum_counts_utf16_units() {
+        assert_eq!(utf16_len("ab😀"), 4);
+        assert_eq!(utf16_prefix("ab😀", 3), "ab");
+        assert_eq!(utf16_prefix("ab😀", 4), "ab😀");
+        let mut edit = EditBox::new(0.0, 0.0, 200.0, 20.0);
+        edit.max_length = 3;
+        edit.insert_text("ab😀");
+        assert_eq!(edit.value, "ab", "three units: a, b and one of the emoji's");
+        edit.set_value("");
+        edit.max_length = 4;
+        edit.insert_text("ab😀");
+        assert_eq!(edit.value, "ab😀", "four units, both of the emoji's");
+        // The selection's own units give their room back: with "ab"
+        // selected there are two units left, enough for the emoji, not
+        // for the emoji and the x.
+        edit.set_cursor(0, false);
+        edit.set_cursor(2, true);
+        edit.insert_text("😀x");
+        assert_eq!(edit.value, "😀😀");
     }
 
     /// `EditBox.setInvertHighlightedTextColor`: a selection inverts its text

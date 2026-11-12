@@ -208,7 +208,7 @@ impl Game<'_> {
             play.score_recorded = Default::default();
         }
         let attachments = std::mem::replace(
-            &mut self.player_attachments,
+            &mut self.player_state.attachments,
             std::mem::take(host.hub.guests.attachments_mut(conn).unwrap()),
         );
         self.sculk.swap_player(&mut play.sculk);
@@ -837,7 +837,7 @@ impl Game<'_> {
             .filter(|id| Some(*id) != guest_vehicle);
         let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
             let mut teleport = None;
-            g.attachments = std::mem::replace(&mut self.player_attachments, attachments);
+            g.attachments = std::mem::replace(&mut self.player_state.attachments, attachments);
             let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
             if guest_vehicle.is_none() {
                 g.vehicle_good = None;

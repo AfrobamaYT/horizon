@@ -507,7 +507,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
- "horizon-mod-point-shape",
  "horizon-mod-wasm",
  "horizon-port-pack",
  "libc",
@@ -1812,6 +1811,7 @@ dependencies = [
  "horizon-core",
  "horizon-cosmetics",
  "horizon-dualsense",
+ "horizon-engine-slots",
  "horizon-friends",
  "horizon-game-discovery",
  "horizon-hdr",
@@ -1821,8 +1821,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-points",
- "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-mod-wasm",
  "horizon-narrator",
@@ -1877,6 +1875,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "horizon-client-core",
+ "horizon-mod-api-macros",
  "horizon-theme",
  "png",
  "winit",
@@ -1910,8 +1909,10 @@ dependencies = [
  "horizon-items",
  "horizon-mcp",
  "horizon-mod-api",
+ "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-runtime",
+ "horizon-mod-wasm",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1970,7 +1971,6 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mod-package",
- "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-narrator",
  "horizon-optifine",
@@ -2053,6 +2053,13 @@ dependencies = [
  "cpal",
  "hidapi",
  "log",
+]
+
+[[package]]
+name = "horizon-engine-slots"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-vocab",
 ]
 
 [[package]]
@@ -2222,7 +2229,10 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-host",
  "horizon-mod-package",
+ "horizon-mod-wasm",
  "log",
+ "tempfile",
+ "wat",
 ]
 
 [[package]]
@@ -2230,8 +2240,11 @@ name = "horizon-mod-host"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-engine-slots",
  "horizon-mod-api",
  "horizon-mod-package",
+ "horizon-mod-points",
+ "horizon-mod-render",
  "horizon-mod-wasm",
  "log",
  "serde_json",
@@ -2295,6 +2308,7 @@ dependencies = [
 name = "horizon-mod-points"
 version = "0.1.0"
 dependencies = [
+ "horizon-engine-slots",
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
@@ -2310,9 +2324,10 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam",
+ "horizon-client-render",
  "horizon-mod-api",
  "horizon-mod-api-gen",
- "horizon-mod-points",
+ "horizon-mod-api-macros",
  "wgpu",
 ]
 
@@ -2353,6 +2368,7 @@ dependencies = [
  "horizon-mod-point-emit",
  "horizon-mod-points",
  "horizon-mod-runtime",
+ "horizon-world",
  "log",
  "rustix 1.1.5",
  "serde_json",
@@ -2480,6 +2496,7 @@ dependencies = [
  "getrandom 0.3.4",
  "horizon-core",
  "horizon-mod-runtime",
+ "horizon-threads",
  "horizon-world",
  "ipconfig",
  "log",
@@ -2539,11 +2556,13 @@ name = "horizon-server-files"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.3.4",
  "horizon-core",
  "horizon-protocol",
  "horizon-world",
  "log",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

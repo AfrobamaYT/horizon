@@ -81,6 +81,8 @@ pub enum Holder {
     BlockEntity([i32; 3]),
     Chunk([i32; 2]),
     Level,
+    /// A detached player's map, available only during its clone hook.
+    OriginalPlayer(u64),
 }
 
 /// Whether borrowing a map may create publication authority for a new value.
@@ -241,6 +243,9 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
             policy,
             write,
         } = form;
+        if matches!(holder, Holder::OriginalPlayer(_)) {
+            return Err(AttachmentError::MissingHolder);
+        }
         Attachments::store(
             self.attachments(holder, AttachmentAccess::Store)?,
             namespace,
@@ -261,6 +266,9 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         name: &str,
         sync: bool,
     ) -> Result<(), AttachmentError> {
+        if matches!(holder, Holder::OriginalPlayer(_)) {
+            return Err(AttachmentError::MissingHolder);
+        }
         Attachments::discard(
             self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,
@@ -333,7 +341,8 @@ pub struct AttachmentSync {
 }
 
 impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
-    /// Read a value, inserting its default if absent; see `get_existing`.
+    /// Read a value, inserting its default if absent except on an original-player snapshot;
+    /// see `get_existing`.
     pub fn get<S: AttachmentStore + ?Sized>(
         &self,
         store: &mut S,
@@ -343,7 +352,9 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
             return Ok(value);
         }
         let value = (self.default)();
-        self.keep(store, holder, value.clone(), AttachmentWrite::Default)?;
+        if !matches!(holder, Holder::OriginalPlayer(_)) {
+            self.keep(store, holder, value.clone(), AttachmentWrite::Default)?;
+        }
         Ok(value)
     }
     /// Whether a holder carries a value, like NeoForge's `hasData`; never inserts the default.
@@ -372,7 +383,9 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
             return Ok(None);
         };
         let value = self.decode(&saved)?;
-        self.keep(store, holder, value.clone(), AttachmentWrite::Decoded)?;
+        if !matches!(holder, Holder::OriginalPlayer(_)) {
+            self.keep(store, holder, value.clone(), AttachmentWrite::Decoded)?;
+        }
         Ok(Some(value))
     }
     /// Replace a value on an existing holder. A key already decoded as a different type is
@@ -1707,6 +1720,49 @@ mod tests {
         map.apply_sync(change("synced", None));
         assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(7));
     }
+    #[test]
+    fn original_player_reads_never_store_defaults_or_decoded_values() {
+        struct One(Attachments);
+        impl AttachmentHost for One {
+            fn attachments(
+                &mut self,
+                _: Holder,
+                _: AttachmentAccess,
+            ) -> Result<&mut Attachments, AttachmentError> {
+                Ok(&mut self.0)
+            }
+        }
+        let mut host = One(Attachments::default());
+        let holder = Holder::OriginalPlayer(1);
+        assert_eq!(COUNTER.get(&mut host, holder), Ok(0));
+        assert_eq!(COUNTER.has(&mut host, holder), Ok(false));
+        assert_eq!(COUNTER.get_existing(&mut host, holder), Ok(None));
+        for write in [
+            AttachmentWrite::Set,
+            AttachmentWrite::Default,
+            AttachmentWrite::Decoded,
+        ] {
+            assert_eq!(
+                AttachmentStore::store(
+                    &mut host,
+                    holder,
+                    "test",
+                    "counter",
+                    Arc::new(9i32),
+                    AttachmentForm {
+                        encoded: None,
+                        policy: COUNTER.policy(),
+                        write,
+                    }
+                ),
+                Err(AttachmentError::MissingHolder),
+            );
+        }
+        host.0.apply_sync(change("counter", Some(42)));
+        assert_eq!(COUNTER.get_existing(&mut host, holder), Ok(Some(42)));
+        assert_eq!(COUNTER.get_existing(&mut host, holder), Ok(Some(42)));
+    }
+
     #[test]
     fn sync_data_reports_the_current_value() {
         struct One(Attachments);

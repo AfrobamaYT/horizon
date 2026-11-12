@@ -157,11 +157,8 @@ impl Hub {
         };
         if ac.config.runs(Check::Prediction) {
             self.guests.update(i, |g| {
-                let (input, sprinting) = (g.input, g.anticheat.sprinting);
-                g.anticheat
-                    .record
-                    .get_or_insert_default()
-                    .tick_end(input, sprinting);
+                let (input, sprinting) = (g.input, g.client_sprinting);
+                g.record.get_or_insert_default().tick_end(input, sprinting);
             });
         }
         if !ac.config.runs(Check::Timer) {
@@ -256,10 +253,7 @@ impl Hub {
     ) {
         if self.recording() {
             self.guests.update(i, |g| {
-                g.anticheat
-                    .record
-                    .get_or_insert_default()
-                    .moved(pos, rot, flags);
+                g.record.get_or_insert_default().moved(pos, rot, flags);
             });
         }
     }
@@ -271,8 +265,7 @@ impl Hub {
         if self.recording() {
             self.guests.update(i, |g| {
                 // Ids are server ticks, cut to 32 bits.
-                g.anticheat
-                    .record
+                g.record
                     .get_or_insert_default()
                     .pong(u64::from(id as u32), ticks);
             });
@@ -294,7 +287,7 @@ impl Hub {
                     .get_mut()
                     .unwrap_or_else(std::sync::PoisonError::into_inner),
             );
-            if let Some(record) = g.anticheat.record.as_deref_mut() {
+            if let Some(record) = g.record.as_deref_mut() {
                 for change in changes {
                     record.changed(ticks, change);
                 }
