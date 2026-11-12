@@ -1643,7 +1643,15 @@ impl Game<'_> {
         }
         // The root of the stack is the first entity spawned.
         let id = before + 1;
-        if self.mobs.iter().any(|m| m.id == id) {
+        if self
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .any(|row| row.id == id)
+        {
+            Some(Target::General(id))
+        } else if self.mobs.iter().any(|m| m.id == id) {
             Some(Target::Mob(id))
         } else if self.dropped.iter().any(|e| e.id == id) {
             Some(Target::Item(id))

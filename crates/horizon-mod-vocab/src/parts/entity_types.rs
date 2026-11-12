@@ -3,7 +3,8 @@ use super::*;
 /// The design's provisional bounds for general entity types (#792), declared
 /// once so the registrar, the codecs and the tests quote the same numbers.
 /// The payload bound applies to mod-owned payload bytes only, never to a
-/// record of a vanilla type.
+/// record of a vanilla type. The quarantine bounds (provisional, no vanilla
+/// analogue) cap what stage 3 preserves of a missing mod's records.
 // exhaustive: the design's limits are one block; no further constants join it
 pub mod limits {
     /// The most payload bytes one general entity record may carry. A payload
@@ -16,6 +17,16 @@ pub mod limits {
     pub const MAX_NESTING: u32 = 32;
     /// The deepest chain of passengers a general entity tree may carry.
     pub const MAX_PASSENGER_DEPTH: u32 = 16;
+    /// The largest record a missing mod's quarantined general entity may
+    /// occupy, as its encoded NBT size. A larger record is skipped with a
+    /// warning rather than preserved. Provisional, no vanilla analogue:
+    /// vanilla deletes unknown-mod entities outright, and Horizon's quarantine
+    /// is a #792 stage-3 choice pending Ari's decision on the issue.
+    pub const QUARANTINE_RECORD_LIMIT: u64 = 69_632;
+    /// The most quarantined general entity records one chunk may carry. The
+    /// next one is skipped with a warning. Provisional, no vanilla analogue:
+    /// vanilla has no quarantine to bound.
+    pub const QUARANTINE_CHUNK_LIMIT: usize = 256;
 }
 
 /// A general entity type's spawn category (#792's design supplies category at
