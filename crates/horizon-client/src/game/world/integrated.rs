@@ -1429,17 +1429,29 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
 }
 
 impl Game<'_> {
-    /// The report is already saved on the server. Join through the normal halt path
-    /// before exiting, without returning an error that would create another report.
+    /// The server thread has already delivered its report: written to disk, or printed
+    /// when it couldn't be written. The flag is set either way, since a dead server must
+    /// not keep the game open. Join through the normal halt path, so a tick-loop crash
+    /// finishes the server's own stop and save first, then exit without returning an
+    /// error that would create another report. A panic inside a posted task happens
+    /// outside the tick loop's catch, so the join doesn't promise a save there.
     pub(super) fn exit_after_server_crash(&mut self) {
-        if horizon_client::crash::server_crashed() {
-            if let Some(mut server) = self.integrated.take()
-                && let Err(error) = server.halt()
-            {
+        // Only the owner ends the process, as in `idle`: a splitscreen guest owns no
+        // server, and exiting from its pass would skip the owner's halt.
+        if self.options.split_guest || !horizon_client::crash::server_crashed() {
+            return;
+        }
+        // A crash while the world is still loading leaves the server in `integrated_starting`.
+        let starting = self
+            .integrated_starting
+            .take()
+            .map(|starting| starting.handle);
+        for mut server in self.integrated.take().into_iter().chain(starting) {
+            if let Err(error) = server.halt() {
                 log::error!("Horizon: crashed integrated server: {error}");
             }
-            std::process::exit(101);
         }
+        std::process::exit(101);
     }
 }
 

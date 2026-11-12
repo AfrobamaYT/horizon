@@ -1706,7 +1706,6 @@ impl Game<'_> {
                         }
                         self.frames += 1;
                         self.fps_frames += 1;
-                        self.exit_after_server_crash();
                         horizon_client::crash::debug_crash_tick();
                         if self.fps_at.elapsed() >= Duration::from_secs(1) {
                             self.fps = self.fps_frames as f32 / self.fps_at.elapsed().as_secs_f32();
@@ -1989,6 +1988,9 @@ impl ApplicationHandler for Game<'_> {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Every event-loop pass, drawn or not: a window that stops redrawing (a lost
+        // device, an occluded window) must still end after a server crash.
+        self.exit_after_server_crash();
         self.idle(event_loop);
     }
     /// The application is ending. On macOS, Quit (Cmd+Q) ends it through
