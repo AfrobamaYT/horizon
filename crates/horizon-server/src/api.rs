@@ -1377,7 +1377,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::fs::write(
-            engine::control_path(&dir),
+            horizon_server_launch::control_path(&dir),
             json!({"port": port, "token": "t"}).to_string(),
         )
         .unwrap();
