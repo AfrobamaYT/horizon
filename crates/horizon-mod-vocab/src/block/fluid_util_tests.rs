@@ -203,3 +203,23 @@ fn a_stale_player_cannot_transfer_from_a_replacement_players_hand() {
     assert_eq!(hand(&host), Some(stack("minecraft:water_bucket", 1)));
     assert!(host.sounds.is_empty() && host.game_events.is_empty());
 }
+
+#[test]
+fn a_player_in_another_level_cannot_transfer_to_the_tank() {
+    let mut host = host("minecraft:water_bucket", 1);
+    let overworld = host.level("minecraft:overworld").unwrap();
+    let nether = crate::LevelRef::new(overworld.epoch(), crate::DimensionKey::NETHER);
+    host.join(PLAYER, PLAYER_ENTITY).level = nether;
+    let player = host.player(PLAYER).unwrap();
+    assert!(!fluid_util::interact_with_fluid_handler(
+        &mut host,
+        player,
+        Hand::Main,
+        overworld,
+        TANK,
+        None,
+    ));
+    assert_eq!(held(&host), None);
+    assert_eq!(hand(&host), Some(stack("minecraft:water_bucket", 1)));
+    assert!(host.sounds.is_empty() && host.game_events.is_empty());
+}

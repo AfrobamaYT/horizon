@@ -41,6 +41,9 @@ pub fn interact_with_fluid_handler(
     pos: [i32; 3],
     side: Option<Direction>,
 ) -> bool {
+    if player.level(host) != Some(level) {
+        return false;
+    }
     let Some(handler) = level.capability(host, &FLUIDS, pos, side) else {
         return false;
     };
