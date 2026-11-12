@@ -1306,6 +1306,8 @@ fn receive_application(
             );
             Ok(None)
         }
+        // Raw channels are server-side: a client's table has none.
+        crate::raw_payloads::Classified::Raw(_) => Ok(None),
     }
 }
 

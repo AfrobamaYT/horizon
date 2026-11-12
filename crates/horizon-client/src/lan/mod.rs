@@ -7,6 +7,7 @@
 //! network pays nothing.
 pub mod abilities;
 mod advancements;
+pub mod announced_channels;
 pub mod config_payloads;
 pub use advancements::ServerAdvancements;
 pub mod anticheat;
