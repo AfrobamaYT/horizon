@@ -162,7 +162,11 @@ pub fn apply_saved(attributes: &mut Live, saved: Option<&Tag>) -> Result<()> {
         };
         let definition = attributes.catalog().attribute(key.attribute()).definition;
         let packed = Packed {
-            base: loaded_base(key.name(), definition, float(entry.get("base")).unwrap_or(0.0)),
+            base: loaded_base(
+                key.name(),
+                definition,
+                float(entry.get("base")).unwrap_or(0.0),
+            ),
             modifiers,
         };
         let Some(handle) = attributes
@@ -568,7 +572,9 @@ mod tests {
         let key = widened.key(id).unwrap();
         let handle = widened.get_instance(Some(key)).unwrap().unwrap();
         widened
-            .edit(&handle, |value, observer| value.set_base_value(5000.0, observer))
+            .edit(&handle, |value, observer| {
+                value.set_base_value(5000.0, observer)
+            })
             .unwrap();
         let saved = Tag::List(pack(&widened, true));
         let mut reloaded = player(id, 1e6);

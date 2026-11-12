@@ -16,10 +16,11 @@ mod __private {
     #[cfg(any(test, feature = "testing"))]
     pub use crate::parts::tests as part_tests;
     pub use crate::parts::{
-        AttributeBoundsWidening, AttributeDeclaration, BiomeModifierDeclaration, BiomeRegionDeclaration,
-        EntityAttributeDeclaration, EntityAttributeModification, GeneralEntityTypeDeclaration,
-        HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, SpawnPlacementDeclaration,
-        TooltipAppenderPart, attribute_bounds_widenings, attribute_declarations, biome_modifier_declarations,
+        AttributeBoundsWidening, AttributeDeclaration, BiomeModifierDeclaration,
+        BiomeRegionDeclaration, EntityAttributeDeclaration, EntityAttributeModification,
+        GeneralEntityTypeDeclaration, HookParts, ItemKeyError, KnownIds, PartsRef,
+        ResolvePartsError, SpawnPlacementDeclaration, TooltipAppenderPart,
+        attribute_bounds_widenings, attribute_declarations, biome_modifier_declarations,
         biome_region_declarations, block_entity_transform, block_entity_transforms,
         block_entity_types, block_key_listens, clear_game_parts, datapack_registry_declarations,
         declared_world_fluids, entity_attribute_declarations, entity_attribute_modifications,

@@ -66,7 +66,10 @@ impl fmt::Display for WidenBoundsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownAttribute { mod_id, id } => {
-                write!(f, "mod {mod_id} widens the bounds of {id}, which no attribute has")
+                write!(
+                    f,
+                    "mod {mod_id} widens the bounds of {id}, which no attribute has"
+                )
             }
             Self::DefaultOutside { mod_id, id } => write!(
                 f,
