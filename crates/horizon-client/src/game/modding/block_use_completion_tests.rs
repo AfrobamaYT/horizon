@@ -470,137 +470,144 @@ fn block_use_original_shrink_and_damage_values() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn block_use_listener_replacements_keep_original_on_both_routes() {
-    struct Replace(Arc<AtomicUsize>);
-    #[mod_api::__subscriptions]
-    impl mod_api::Hooks for Replace {
-        fn right_click_block(
-            &self,
-            host: mod_api::HostSide,
-            event: &mut mod_api::RightClickBlockEvent<'_>,
-        ) -> mod_api::Flow {
-            let mode = self.0.load(Ordering::SeqCst);
-            if matches!(mode, 2 | 3 | 5) {
-                return block_use_wasm_replace(
-                    host,
-                    event,
-                    if mode == 5 { 1 } else { mode % 2 },
-                    mode == 5,
-                );
-            }
-            if let mod_api::HostSide::Server(host) = host {
-                let item = if self.0.load(Ordering::SeqCst) == 0 {
-                    "minecraft:diamond"
-                } else {
-                    "minecraft:glowstone"
-                };
-                let player = host.player(event.click.player).unwrap();
-                let living = host.living(player.entity()).unwrap();
-                living
-                    .set_hand_item(
-                        host,
-                        Hand::Main,
-                        Some(ItemStack::new(item, 19).try_into_api().unwrap()),
-                    )
-                    .unwrap();
-            }
-            if mode == 4 {
-                return mod_api::Flow::Continue;
-            }
-            *event.cancellation_result = mod_api::InteractionResult::Consume;
-            mod_api::Flow::Cancel
-        }
-    }
-    let mode = Arc::new(AtomicUsize::new(0));
-    mod_platform::__private::install(Arc::from([mod_api::ModEntry::new(
-        "replace-original",
-        Box::new(Replace(mode.clone())),
-    )]));
-    let _recording = Recording::start();
-    crate::game::native_guest_turn_tests::with_guests(|g| {
-        g.build_registries();
-        g.world
-            .chunks
-            .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
-        let hit = Hit {
-            pos: [3, 64, 4],
-            face: [0, 1, 0],
-            point: [3.5, 65.0, 4.5],
-            inside: false,
-        };
-        for replacement in [0, 1, 2, 3, 4, 5] {
-            mode.store(replacement, Ordering::SeqCst);
-            for packet in [false, true] {
-                let anchor = g
-                    .pack
-                    .assets
-                    .registry
-                    .default_state("minecraft:respawn_anchor")
-                    .unwrap();
-                g.world.set(3, 64, 4, anchor).unwrap();
-                g.lan
-                    .as_mut()
-                    .unwrap()
-                    .hub
-                    .update_guest(12, |guest| {
-                        guest.inventory[guest.selected] =
-                            Some(ItemStack::new("minecraft:glowstone", 5));
-                        guest.offhand = None;
-                    })
-                    .unwrap();
-                SEEN.with_borrow_mut(Vec::clear);
-                if packet {
-                    let gi = g
-                        .lan
-                        .as_ref()
-                        .unwrap()
-                        .hub
-                        .guests
-                        .iter()
-                        .position(|guest| guest.conn == 12)
-                        .unwrap();
-                    assert!(g.guest_use_item_on(12, gi, hit, Hand::Main).is_ok());
-                } else {
-                    g.as_guest(12, |g| {
-                        g.forced_hit = Some(hit);
-                        g.use_hand(Some(&hit)).unwrap();
-                        g.forced_hit = None;
-                    })
-                    .unwrap();
-                }
-                g.as_guest(12, |g| {
-                    let expected_item = if replacement < 4 && replacement % 2 == 0 {
-                        "minecraft:diamond"
-                    } else {
-                        "minecraft:glowstone"
-                    };
-                    assert_eq!(
-                        g.held(),
-                        Some(&ItemStack::new(
-                            expected_item,
-                            if replacement >= 4 { 18 } else { 19 }
-                        ))
-                    );
-                })
-                .unwrap();
-                assert_eq!(
-                    counts(),
-                    if replacement >= 4 {
-                        [0, 1, 1]
-                    } else {
-                        [0, 0, 1]
+    // Instantiate and invoke the real wasm guest on the production-sized stack.
+    horizon_guest_stack::builder()
+        .spawn(|| {
+            struct Replace(Arc<AtomicUsize>);
+            #[mod_api::__subscriptions]
+            impl mod_api::Hooks for Replace {
+                fn right_click_block(
+                    &self,
+                    host: mod_api::HostSide,
+                    event: &mut mod_api::RightClickBlockEvent<'_>,
+                ) -> mod_api::Flow {
+                    let mode = self.0.load(Ordering::SeqCst);
+                    if matches!(mode, 2 | 3 | 5) {
+                        return block_use_wasm_replace(
+                            host,
+                            event,
+                            if mode == 5 { 1 } else { mode % 2 },
+                            mode == 5,
+                        );
                     }
-                );
-                assert_eq!(
-                    any_block_use_stacks(),
-                    [ItemStack::new(
-                        "minecraft:glowstone",
-                        if replacement >= 4 { 4 } else { 5 }
-                    )],
-                    "replacement={replacement}, packet={packet}"
-                );
+                    if let mod_api::HostSide::Server(host) = host {
+                        let item = if self.0.load(Ordering::SeqCst) == 0 {
+                            "minecraft:diamond"
+                        } else {
+                            "minecraft:glowstone"
+                        };
+                        let player = host.player(event.click.player).unwrap();
+                        let living = host.living(player.entity()).unwrap();
+                        living
+                            .set_hand_item(
+                                host,
+                                Hand::Main,
+                                Some(ItemStack::new(item, 19).try_into_api().unwrap()),
+                            )
+                            .unwrap();
+                    }
+                    if mode == 4 {
+                        return mod_api::Flow::Continue;
+                    }
+                    *event.cancellation_result = mod_api::InteractionResult::Consume;
+                    mod_api::Flow::Cancel
+                }
             }
-        }
-    });
+            let mode = Arc::new(AtomicUsize::new(0));
+            mod_platform::__private::install(Arc::from([mod_api::ModEntry::new(
+                "replace-original",
+                Box::new(Replace(mode.clone())),
+            )]));
+            let _recording = Recording::start();
+            crate::game::native_guest_turn_tests::with_guests(|g| {
+                g.build_registries();
+                g.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                let hit = Hit {
+                    pos: [3, 64, 4],
+                    face: [0, 1, 0],
+                    point: [3.5, 65.0, 4.5],
+                    inside: false,
+                };
+                for replacement in [0, 1, 2, 3, 4, 5] {
+                    mode.store(replacement, Ordering::SeqCst);
+                    for packet in [false, true] {
+                        let anchor = g
+                            .pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:respawn_anchor")
+                            .unwrap();
+                        g.world.set(3, 64, 4, anchor).unwrap();
+                        g.lan
+                            .as_mut()
+                            .unwrap()
+                            .hub
+                            .update_guest(12, |guest| {
+                                guest.inventory[guest.selected] =
+                                    Some(ItemStack::new("minecraft:glowstone", 5));
+                                guest.offhand = None;
+                            })
+                            .unwrap();
+                        SEEN.with_borrow_mut(Vec::clear);
+                        if packet {
+                            let gi = g
+                                .lan
+                                .as_ref()
+                                .unwrap()
+                                .hub
+                                .guests
+                                .iter()
+                                .position(|guest| guest.conn == 12)
+                                .unwrap();
+                            assert!(g.guest_use_item_on(12, gi, hit, Hand::Main).is_ok());
+                        } else {
+                            g.as_guest(12, |g| {
+                                g.forced_hit = Some(hit);
+                                g.use_hand(Some(&hit)).unwrap();
+                                g.forced_hit = None;
+                            })
+                            .unwrap();
+                        }
+                        g.as_guest(12, |g| {
+                            let expected_item = if replacement < 4 && replacement % 2 == 0 {
+                                "minecraft:diamond"
+                            } else {
+                                "minecraft:glowstone"
+                            };
+                            assert_eq!(
+                                g.held(),
+                                Some(&ItemStack::new(
+                                    expected_item,
+                                    if replacement >= 4 { 18 } else { 19 }
+                                ))
+                            );
+                        })
+                        .unwrap();
+                        assert_eq!(
+                            counts(),
+                            if replacement >= 4 {
+                                [0, 1, 1]
+                            } else {
+                                [0, 0, 1]
+                            }
+                        );
+                        assert_eq!(
+                            any_block_use_stacks(),
+                            [ItemStack::new(
+                                "minecraft:glowstone",
+                                if replacement >= 4 { 4 } else { 5 }
+                            )],
+                            "replacement={replacement}, packet={packet}"
+                        );
+                    }
+                }
+            });
+        })
+        .unwrap()
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
 }
 
 #[test]
