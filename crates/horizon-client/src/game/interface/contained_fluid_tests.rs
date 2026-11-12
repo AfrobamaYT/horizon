@@ -43,7 +43,11 @@ impl Hooks for Canister {
         record_key(&WATER, r.fluid_key("minecraft:water"));
         record_key(&SLUDGE, r.declare_fluid("sludge"));
         // Attached to vanilla items too, which must never ask it.
-        for item in ["tank:canister", "minecraft:water_bucket", "minecraft:bucket"] {
+        for item in [
+            "tank:canister",
+            "minecraft:water_bucket",
+            "minecraft:bucket",
+        ] {
             let key = r.item_key(item);
             r.item_part(key, self.clone());
         }
@@ -193,9 +197,15 @@ fn a_mod_container_draws_the_fluid_its_part_reports_isolated() {
             // keeps vanilla's answer and the empty bucket stays empty.
             answer(Answer::Water);
             assert_eq!(drawn(game, "minecraft:bucket").len(), 1);
-            assert_eq!(drawn(game, "minecraft:water_bucket")[1].content, water_still);
+            assert_eq!(
+                drawn(game, "minecraft:water_bucket")[1].content,
+                water_still
+            );
             let asked = part.asked.lock().unwrap().clone();
-            assert!(asked.iter().all(|item| item == "tank:canister"), "{asked:?}");
+            assert!(
+                asked.iter().all(|item| item == "tank:canister"),
+                "{asked:?}"
+            );
             assert_eq!(asked.len(), 4);
         });
     });
