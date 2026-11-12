@@ -905,6 +905,8 @@ pub mod tests {
                 "test:other",
                 "test:connector",
                 "test:press",
+                "test:void_bin",
+                "test:ordered",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(
@@ -940,6 +942,8 @@ pub mod tests {
                 "test:connector",
                 "test:press",
                 "minecraft:granite",
+                "test:void_bin",
+                "test:ordered",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(
@@ -1287,5 +1291,40 @@ impl BlocksRegistrar for PartRegistrar {
     fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
         let part = self.tagged(kind, tag, part);
         self.tags.blocks.extend(part);
+    }
+
+    fn provide_block_capability(
+        &mut self,
+        name: &'static str,
+        block: &crate::BlockKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    ) {
+        let slot = mod_vocab::__private::parts_installation::block_key_slot(*block);
+        let id = self
+            .registry_keys
+            .borrow()
+            .blocks
+            .id(slot)
+            .map(str::to_owned);
+        let Some(id) = id else {
+            self.refused.push(format!(
+                "mod {}: invalid block key slot {slot}",
+                self.mod_id
+            ));
+            return;
+        };
+        self.capability(
+            |p| &mut p.block_capabilities,
+            Some(|p| &p.capabilities),
+            name,
+            ProviderTarget::Id(&id),
+            before_game,
+            {
+                let handler =
+                    mod_vocab::__private::parts_installation::block_provider_handler(&provider);
+                (provider, handler)
+            },
+        );
     }
 }
