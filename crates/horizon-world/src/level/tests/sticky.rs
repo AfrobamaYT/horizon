@@ -212,7 +212,7 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
     let slime = state(f, "slime_block");
     let stone = state(f, "stone");
     let air = f.behaviours.air();
-    for refuse in [false, true] {
+    for (refuse, sticky_stone) in [(false, false), (true, false), (false, true)] {
         let make = || StickyLevel {
             inner: TestLevel::new(&f.behaviours),
             slime: HashSet::new(),
@@ -226,6 +226,10 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
         if refuse {
             server.refused.insert((slime, stone));
         }
+        if sticky_stone {
+            server.sticky.insert(stone);
+        }
+        let pushed = if sticky_stone { stone } else { slime };
         let piston = f
             .registry
             .resolve(&BlockState {
@@ -236,7 +240,7 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
         for level in [&mut server, &mut client] {
             for (pos, block) in [
                 (BlockPos::new(0, 1, 0), piston),
-                (BlockPos::new(1, 1, 0), slime),
+                (BlockPos::new(1, 1, 0), pushed),
                 (BlockPos::new(1, 2, 0), stone),
                 (BlockPos::new(-1, 1, 0), state(f, "redstone_block")),
             ] {
@@ -260,11 +264,12 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
             0,
             Direction::East as i32
         ));
-        assert!(
+        assert_eq!(
             client_ticks
                 .moving_pistons
                 .iter()
-                .any(|(p, _)| *p == BlockPos::new(2, 2, 0))
+                .any(|(p, _)| *p == BlockPos::new(2, 2, 0)),
+            !sticky_stone,
         );
         for level in [&mut server, &mut client] {
             level.inner.time += 1;
@@ -287,7 +292,19 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
                 flags::UPDATE_CLIENTS,
             );
         }
+        server.updates.clear();
         for _ in 0..10 {
+            // Continue ordinary next-tick delivery, including the server's landing
+            // updates for blocks that the client's vanilla replay never moved.
+            for pos in std::mem::take(&mut server.updates) {
+                f.behaviours.set_block(
+                    &mut client,
+                    &mut client_ticks,
+                    pos,
+                    server.block_state(pos),
+                    flags::UPDATE_CLIENTS,
+                );
+            }
             server.inner.time += 1;
             client.inner.time += 1;
             f.behaviours

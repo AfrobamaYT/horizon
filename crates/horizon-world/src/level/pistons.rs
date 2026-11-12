@@ -108,8 +108,8 @@ impl JavaKey for PosKey {
 }
 
 struct Resolver {
-    vanilla_stick: bool,
-    changed_stick: std::cell::Cell<bool>,
+    vanilla_parts: bool,
+    part_changed: std::cell::Cell<bool>,
     piston_pos: BlockPos,
     extending: bool,
     start: BlockPos,
@@ -370,30 +370,44 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             .unwrap_or(!has_entity)
     }
     /// `IBlockExtension.isSlimeBlock`: vanilla's slime block, or what a part says.
-    fn is_slime(&self, state: BlockStateId) -> bool {
-        self.level
-            .adjust_is_slime_block(state, self.b.is_block(state, self.b.named.slime_block))
+    fn is_slime(&self, r: &Resolver, state: BlockStateId) -> bool {
+        let vanilla = self.b.is_block(state, self.b.named.slime_block);
+        if r.vanilla_parts {
+            return vanilla;
+        }
+        let adjusted = self.level.adjust_is_slime_block(state, vanilla);
+        if adjusted != vanilla {
+            r.part_changed.set(true);
+        }
+        adjusted
     }
     /// `PistonStructureResolver.isSticky` (`IBlockExtension.isStickyBlock`): vanilla's slime
     /// and honey blocks, or what a part says.
-    fn is_sticky(&self, state: BlockStateId) -> bool {
+    fn is_sticky(&self, r: &Resolver, state: BlockStateId) -> bool {
         let vanilla = self.b.is_block(state, self.b.named.slime_block)
             || self.b.is_block(state, self.b.named.honey_block);
-        self.level.adjust_is_sticky_block(state, vanilla)
+        if r.vanilla_parts {
+            return vanilla;
+        }
+        let adjusted = self.level.adjust_is_sticky_block(state, vanilla);
+        if adjusted != vanilla {
+            r.part_changed.set(true);
+        }
+        adjusted
     }
     /// `IBlockExtension.canStickTo`: slime and honey never hold on to each other, and
     /// otherwise a block sticks to its neighbour when either of them is sticky.
     fn sticks_to(&self, r: &Resolver, state: BlockStateId, other: BlockStateId) -> bool {
         let honey = self.b.named.honey_block;
-        let slime_beside_honey = (self.b.is_block(state, honey) && self.is_slime(other))
-            || (self.is_slime(state) && self.b.is_block(other, honey));
-        let vanilla = !slime_beside_honey && (self.is_sticky(state) || self.is_sticky(other));
-        if r.vanilla_stick {
+        let slime_beside_honey = (self.b.is_block(state, honey) && self.is_slime(r, other))
+            || (self.is_slime(r, state) && self.b.is_block(other, honey));
+        let vanilla = !slime_beside_honey && (self.is_sticky(r, state) || self.is_sticky(r, other));
+        if r.vanilla_parts {
             return vanilla;
         }
         let adjusted = self.level.adjust_can_stick_to(state, other, vanilla);
         if adjusted != vanilla {
-            r.changed_stick.set(true);
+            r.part_changed.set(true);
         }
         adjusted
     }
@@ -416,11 +430,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         piston_pos: BlockPos,
         direction: Direction,
         extending: bool,
-        vanilla_stick: bool,
+        vanilla_parts: bool,
     ) -> Option<Resolver> {
         let mut r = Resolver {
-            vanilla_stick,
-            changed_stick: std::cell::Cell::new(false),
+            vanilla_parts,
+            part_changed: std::cell::Cell::new(false),
             piston_pos,
             extending,
             start: if extending {
@@ -456,7 +470,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let mut i = 0;
         while i < r.to_push.len() {
             let pos = r.to_push[i];
-            if self.is_sticky(self.state(pos)) && !self.add_branching_blocks(&mut r, pos) {
+            if self.is_sticky(&r, self.state(pos)) && !self.add_branching_blocks(&mut r, pos) {
                 return None;
             }
             i += 1;
@@ -478,7 +492,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if count + r.to_push.len() > 12 {
             return false;
         }
-        while self.is_sticky(next) {
+        while self.is_sticky(r, next) {
             let pos = rel_n(start, r.push_direction.opposite(), count as i32);
             let previous = next;
             next = self.state(pos);
@@ -513,7 +527,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 self.reorder_at_collision(r, added, collision);
                 for j in 0..=collision + added {
                     let block_pos = r.to_push[j];
-                    if self.is_sticky(self.state(block_pos))
+                    if self.is_sticky(r, self.state(block_pos))
                         && !self.add_branching_blocks(r, block_pos)
                     {
                         return false;
@@ -598,10 +612,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         else {
             return Some(false);
         };
-        // Only a changed part answer pays for a second resolution. Include entire
+        // Only a changed sticky, slime, or adhesion answer pays for a second resolution. Include entire
         // structures: a refused neighbour may itself pull a line or sticky branch.
         // These marks join the event's block log, delivered on the next tick.
-        let correct_replay = resolved.changed_stick.get() && !self.level.is_client_side();
+        let correct_replay = resolved.part_changed.get() && !self.level.is_client_side();
         let replay = if correct_replay {
             self.piston_resolve_stick(piston_pos, direction, extending, true)
         } else {
