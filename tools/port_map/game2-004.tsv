@@ -38,7 +38,7 @@ Piglin.customServerAiStep	port	crates/horizon-client/src/mobs/piglin.rs::ai_step
 Piglin.finishConversion	port	crates/horizon-client/src/mobs/piglin.rs::ai_step	the conversion cancels the admire and drops the admired item; the rest of a piglin's carried inventory is still not scattered
 Piglin.hurtServer	inline	crates/horizon-client/src/mobs/piglin.rs::celebrate	gap: player: a hit by a player does not stop an admiring piglin or start its admiring-disabled wait; babies do not flee the attacker
 Piglin.canUseNonMeleeWeapon	port	crates/horizon-client/src/game/mobs/piglins.rs::Game::piglin_wanted	gap: minor: checks the preferred-weapons tag only, not the usable-crossbow tag or the kinetic weapon component
-Piglin.holdInOffHand	port	crates/horizon-client/src/game/mobs/piglins.rs::Game::start_admiring	equips the item (drop chance 2.0 as setItemSlotAndDropWhenKilled) and makes the piglin persistent unless it is the barter item
+Piglin.holdInOffHand	port	crates/horizon-client/src/mobs/piglin.rs::hold_in_offhand	equips the item (drop chance 2.0 as setItemSlotAndDropWhenKilled) and makes the piglin persistent unless it is the barter item
 Piglin.wantsToPickUp	port	crates/horizon-client/src/game/mobs/piglins.rs::Game::piglin_wants	gap: minor: does not check the admiring-disabled wait after a hit by a player
 Piglin.startRiding	port	crates/horizon-client/src/mobs/riders.rs::start_riding	the boarding tests (not the vehicle it is on, not one it carries, the boarding cooldown, a free vehicle) plus the `Piglin` case: a baby piglin on a hoglin goes on top of the up-to-three piglins already there
 Piglin.getTopPassenger	port	crates/horizon-client/src/mobs/riders.rs::top_passenger	the top of the passenger chain, capped at four passengers on a hoglin

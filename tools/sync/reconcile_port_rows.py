@@ -38,6 +38,19 @@ for name in FILES:
             current[key] = incoming
         elif old is not None and len(old) == len(own) == len(incoming):
             current[key] = [u if f == b else f for b, f, u in zip(old, own, incoming)]
+    # Overlapping source-cell edits need semantic relocation decisions: the
+    # minecart NBT methods remain in the fork's minecarts.rs; these others moved.
+    relocations = {
+        'ClientLevel.removeEntity': 'crates/horizon-client/src/game/network/remote_removal.rs::Game::remove_entity',
+        'ClientLevel.EntityCallbacks.onTrackingEnd': 'crates/horizon-client/src/game/network/remote_removal.rs::Game::remove_entity',
+        'ClientPacketListener.handleRemoveEntities': 'crates/horizon-client/src/game/network/remote_removal.rs::Game::remove_entity',
+        'WorldOptionsScreen.updatePortControlsState': 'crates/horizon-client/src/game/network/lan_screen.rs::WorldOptions::update_port_controls',
+        'Piglin.holdInOffHand': 'crates/horizon-client/src/mobs/piglin.rs::hold_in_offhand',
+        'AnvilScreen.subInit': 'crates/horizon-client/src/game/blocks/stations/anvil.rs::rename_box',
+    }
+    for key, target in relocations.items():
+        if key in current:
+            current[key][2] = target
     # Resolve moved source files by unique basename, never invent a target.
     for row in current.values():
         if len(row) < 3 or not row[2]:
