@@ -98,6 +98,8 @@ pub struct Env<'a> {
     /// The side and settings of the resource generation this menu runs in: the
     /// one source of its side, and what a hook inside a menu loop is given.
     pub loop_context: &'a LoopContext,
+    /// `IItemExtension.canEquip` for the armour slots, lent by the game (none keeps the data's).
+    pub can_equip: Option<&'a dyn crate::mobs::equip::CanEquip>,
     pub items: &'a Items,
     pub recipes: &'a Recipes,
     pub brewing: &'a Brewing,
@@ -1638,11 +1640,7 @@ impl Menu {
         match self.state.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
             Role::Armor(eq) => Self::armor_may_place(env, eq, stack),
-            // LivingEntity.isEquippableInSlot: the stack's equippable slot,
-            // and the mount among its allowed entities.
-            Role::MountEquip(slot) => Self::equippable(env, stack).is_some_and(|e| {
-                e.slot == slot && self.state.mount.as_deref().is_some_and(|m| e.allows(m))
-            }),
+            Role::MountEquip(slot) => self.mount_may_place(env, slot, stack),
             Role::Shulker => fits_inside_container_items(stack),
             Role::Mod | Role::ModResult => self.state.slots[s].role == Role::Mod,
             Role::Hidden => false,
@@ -2508,7 +2506,7 @@ enum Equip {
 
 impl Menu {
     fn equip(env: &Env, stack: &ItemStack) -> Equip {
-        match Self::equippable(env, stack).map(|e| e.slot).as_deref() {
+        match crate::mobs::equip::equippable(env.items, stack).map(|e| e.slot) {
             Some("feet") => Equip::Armor(0),
             Some("legs") => Equip::Armor(1),
             Some("chest") => Equip::Armor(2),
@@ -3408,6 +3406,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let mut menu = Menu::new(kind);
@@ -3555,6 +3554,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let mut fuel = ItemStack::new("minecraft:stone", 2);
@@ -3602,6 +3602,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         for (input, payment) in [
@@ -3820,6 +3821,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         });
     }
@@ -4347,8 +4349,6 @@ pub(crate) mod tests {
         static JUMPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         static STILL_VALID_ASKED: std::sync::atomic::AtomicUsize =
             std::sync::atomic::AtomicUsize::new(0);
-        static EQUIPS: std::sync::Mutex<Vec<(String, u32, String)>> =
-            std::sync::Mutex::new(Vec::new());
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
                 menu_slot_rules: |context, menu, slot, _, may_place, max_stack| {
@@ -4372,15 +4372,6 @@ pub(crate) mod tests {
                 },
                 item_stacked_on_other: |context, _, canceled| {
                     *canceled = context.setting("rules_mod", "stack").is_some();
-                },
-                can_equip: |context, _, slot, entity, kind, can_equip| {
-                    if context.setting("rules_mod", "stack").is_some() {
-                        EQUIPS
-                            .lock()
-                            .unwrap()
-                            .push((slot.to_owned(), entity, kind.to_owned()));
-                        *can_equip = !*can_equip;
-                    }
                 },
                 living_heal: |context, _, amount, cancel| {
                     if context.setting("rules_mod", "stack").is_some() {
@@ -4807,41 +4798,6 @@ pub(crate) mod tests {
             false
         ));
         assert_eq!(asked(), 2);
-        // The equip predicate reads it too: the inventory menu's head slot asks it for the
-        // player (entity 41), and a part turns the component's answer round either way.
-        let head_slot_takes = |context: &LoopContext, slot: &str| {
-            let stone = equippable::tests::equippable(vec![(
-                "slot",
-                horizon_core::nbt::Tag::String(slot.into()),
-            )])
-            .unwrap();
-            let mut takes = false;
-            bare_env_in(context, |env| {
-                takes = Menu::new(Kind::Inventory).may_place(env, 5, &stone);
-            });
-            takes
-        };
-        assert!(head_slot_takes(&before, "head"));
-        assert!(!head_slot_takes(&before, "feet"));
-        assert!(EQUIPS.lock().unwrap().is_empty());
-        assert!(!head_slot_takes(&after, "head"));
-        assert!(head_slot_takes(&after, "feet"));
-        let player = ("head".to_owned(), 41, "minecraft:player".to_owned());
-        assert_eq!(*EQUIPS.lock().unwrap(), [player.clone(), player]);
-        // The server's own menu for a guest asks it for the guest, on a click and on a
-        // shift-click, which moves nothing when it refuses.
-        assert_eq!(
-            crate::lan::menu::tests::helmet_goes_on(&before),
-            (true, true, 2)
-        );
-        EQUIPS.lock().unwrap().clear();
-        assert_eq!(
-            crate::lan::menu::tests::helmet_goes_on(&after),
-            (false, false, 2)
-        );
-        let guest = ("head".to_owned(), 2, "minecraft:player".to_owned());
-        assert!(EQUIPS.lock().unwrap().iter().all(|asked| *asked == guest));
-        assert!(!EQUIPS.lock().unwrap().is_empty());
         std::fs::remove_dir_all(&settings).unwrap();
     }
 
@@ -4880,6 +4836,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         // Both a pick-up onto the cursor and a shift-click into the inventory.
@@ -4969,6 +4926,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let menu = &mut Menu::new(mod_menu());
@@ -5374,6 +5332,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
 
@@ -5428,6 +5387,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: true,
+            can_equip: None,
             known_recipes: Some(&known),
         };
 
@@ -5482,6 +5442,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: true,
+            can_equip: None,
             known_recipes: Some(&known),
         };
 
@@ -5540,6 +5501,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: true,
+            can_equip: None,
             known_recipes: Some(&known),
         };
 
@@ -5588,6 +5550,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);

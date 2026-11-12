@@ -11,6 +11,7 @@ use crate::{
     containers::BlockEntity,
     enchant::Enchantments,
     items::{ItemStack, Items},
+    mobs::equip::equippable_in_slot,
     world::World,
 };
 use horizon_world::native_load_context::LoopContext;
@@ -24,12 +25,10 @@ pub trait Rules {
     /// The enchantment definitions: what keeps worn armour on (`PREVENT_ARMOR_CHANGE`).
     fn enchantments(&self) -> &Enchantments;
     fn max_stack(&self, item: &str) -> u32;
-    /// The armor slot (0 head .. 3 feet) an item can be worn in.
-    fn armor_index(&self, item: &str) -> Option<usize>;
-    /// `ItemStack.getEquipmentSlot`: the `minecraft:equippable` component's
-    /// slot ("head", "chest", "legs", "feet", "mainhand", "offhand").
-    fn equip_slot(&self, item: &str) -> Option<&str> {
-        self.items().get(item)?.equip_slot.as_deref()
+    /// `IItemExtension.canEquip` for the guest's armour slots, decided by the game before the
+    /// click; none keeps the `equippable` component's answer.
+    fn can_equip(&self) -> Option<&dyn crate::mobs::equip::CanEquip> {
+        None
     }
     /// `Slot.mayPickup`: whether the stack in menu slot `slot` may be taken
     /// out. A block container's slots and the player's own allow it; a mod's
@@ -521,16 +520,14 @@ impl View<'_> {
     }
     fn vanilla_may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         if self.container.is_none() && (5..=8).contains(&i) {
-            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the guest.
-            let data = rules.armor_index(&stack.item) == Some(i - 5);
-            return crate::mobs::equip::can_equip(
-                self.loop_context,
-                stack,
-                ARMOR_SLOTS[i - 5],
-                self.guest.entity_id as u32,
-                "minecraft:player",
-                data,
-            );
+            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the guest, the stack's
+            // `equippable` component and then the parts of its item.
+            let (slot, player) = (ARMOR_SLOTS[i - 5], "minecraft:player");
+            let tags = &rules.enchantments().entity_tags;
+            let data = equippable_in_slot(rules.items(), tags, stack, slot, player);
+            return rules.can_equip().map_or(data, |parts| {
+                parts.can_equip(stack, slot, self.guest.entity_id as u32, player, data)
+            });
         }
         !(self.shulker
             && self.container.as_ref().is_some_and(|c| i < c.len())
@@ -819,8 +816,10 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
         // main ones. The off hand is in this arm too, so armour worn there
         // is put on like any other (InventoryMenu.quickMoveStack asks for
         // the item's equipment slot before it looks at the clicked index).
-        let armor = rules
-            .armor_index(&stack.item)
+        let worn = crate::mobs::equip::equippable(rules.items(), &stack).map(|e| e.slot);
+        let armor = ARMOR_SLOTS
+            .iter()
+            .position(|slot| worn == Some(*slot))
             .filter(|a| view.get(5 + a).is_none());
         if let Some(a) = armor {
             // `moveItemStackTo` asks `ArmorSlot.mayPlace`: a refusal moves nothing, and the
@@ -839,7 +838,7 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             } else {
                 Some(stack)
             }
-        } else if rules.equip_slot(&stack.item) == Some("offhand") && view.get(45).is_none() {
+        } else if worn == Some("offhand") && view.get(45).is_none() {
             // A shield or a totem goes to the empty off hand before the
             // hotbar (InventoryMenu.quickMoveStack's OFFHAND branch).
             let max = view.slot_max(45, &stack, rules);
@@ -1450,6 +1449,7 @@ fn quick_craft(
 pub(crate) mod tests {
     use super::*;
     use crate::lan::{Joined, PlayerSender};
+    use horizon_core::nbt::Tag;
 
     /// The test enchantments: Curse of Binding, and a data pack's `test:clinging` with its
     /// `prevent_armor_change` effect.
@@ -1472,9 +1472,6 @@ pub(crate) mod tests {
         }
         fn max_stack(&self, item: &str) -> u32 {
             self.0.get(item).map_or(64, |i| i.max_stack)
-        }
-        fn armor_index(&self, _: &str) -> Option<usize> {
-            None
         }
     }
 
@@ -1715,9 +1712,6 @@ pub(crate) mod tests {
             }
             fn max_stack(&self, item: &str) -> u32 {
                 self.items.get(item).map_or(64, |i| i.max_stack)
-            }
-            fn armor_index(&self, _: &str) -> Option<usize> {
-                None
             }
             fn may_pickup(&self, slot: usize, _: &ItemStack) -> bool {
                 slot != 1
@@ -2264,9 +2258,6 @@ pub(crate) mod tests {
         fn max_stack(&self, _: &str) -> u32 {
             64
         }
-        fn armor_index(&self, _: &str) -> Option<usize> {
-            None
-        }
     }
 
     #[test]
@@ -2457,23 +2448,14 @@ pub(crate) mod tests {
         }
     }
 
-    struct EquipRules;
-    impl Rules for EquipRules {
-        fn items(&self) -> &Items {
-            unreachable!("a quick move reads no item catalog");
-        }
-        fn enchantments(&self) -> &Enchantments {
-            enchantments()
-        }
-        fn max_stack(&self, _: &str) -> u32 {
-            64
-        }
-        fn armor_index(&self, _: &str) -> Option<usize> {
-            None
-        }
-        fn equip_slot(&self, item: &str) -> Option<&str> {
-            (item == "minecraft:shield").then_some("offhand")
-        }
+    /// `item` with an `equippable` component for `slot`, which an empty catalog then wears.
+    fn worn(item: &str, slot: &str) -> ItemStack {
+        let mut stack = ItemStack::new(item, 1);
+        let component = Tag::compound([("slot", Tag::String(slot.into()))]);
+        stack
+            .data_mut()
+            .set_other("minecraft:equippable", Some(component));
+        stack
     }
 
     /// A shift-click in the inventory menu puts a shield in the empty off-hand
@@ -2483,7 +2465,7 @@ pub(crate) mod tests {
     /// goes to the hotbar.
     #[test]
     fn inventory_quick_move_equips_an_off_hand_item() {
-        let rules = EquipRules;
+        let rules = ItemRules(Items::for_tests(Default::default()));
         let mut g = guest();
         let mut drag = None;
         let mut view = View {
@@ -2497,7 +2479,7 @@ pub(crate) mod tests {
             ),
         };
         // Menu slot 9 is the first main-inventory slot, 45 the off hand.
-        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        view.guest.inventory[9] = Some(worn("minecraft:shield", "offhand"));
         click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
         assert_eq!(
             view.get(45).as_ref().map(|s| &*s.item),
@@ -2506,7 +2488,7 @@ pub(crate) mod tests {
         assert!(view.get(9).is_none());
         assert!(view.get(36).is_none());
         // The off hand is taken: the next shield goes to the hotbar instead.
-        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        view.guest.inventory[9] = Some(worn("minecraft:shield", "offhand"));
         click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
         assert_eq!(
             view.get(36).as_ref().map(|s| &*s.item),
@@ -2547,9 +2529,6 @@ pub(crate) mod tests {
         }
         fn max_stack(&self, _: &str) -> u32 {
             64
-        }
-        fn armor_index(&self, item: &str) -> Option<usize> {
-            (item == "minecraft:diamond_chestplate").then_some(1)
         }
         fn may_pickup(&self, slot: usize, _: &ItemStack) -> bool {
             !self.refuse.contains(&slot)
@@ -2758,10 +2737,11 @@ pub(crate) mod tests {
         }
     }
 
-    struct ArmorRules;
-    impl Rules for ArmorRules {
+    /// Rules over the item catalog `0`, lending `1` as the game's decided `can_equip`.
+    struct PartRules<'a>(Items, Option<&'a dyn crate::mobs::equip::CanEquip>);
+    impl Rules for PartRules<'_> {
         fn items(&self) -> &Items {
-            unreachable!("a quick move reads no item catalog");
+            &self.0
         }
         fn enchantments(&self) -> &Enchantments {
             enchantments()
@@ -2769,55 +2749,126 @@ pub(crate) mod tests {
         fn max_stack(&self, _: &str) -> u32 {
             64
         }
-        fn armor_index(&self, item: &str) -> Option<usize> {
-            (item == "minecraft:iron_helmet").then_some(0)
-        }
-        fn equip_slot(&self, _: &str) -> Option<&str> {
-            None
+        fn can_equip(&self) -> Option<&dyn crate::mobs::equip::CanEquip> {
+            self.1
         }
     }
 
-    /// Whether a guest's click puts an iron helmet from the cursor on, and whether a shift-click
-    /// from the hotbar wears it, in the head slot `ArmorSlot.mayPlace` guards, with the hooks
-    /// asked inside `context`. Together with the guest's entity id.
-    pub(crate) fn helmet_goes_on(context: &LoopContext) -> (bool, bool, i32) {
-        /// An empty item catalog, where only an iron helmet is armour (for the head).
-        struct HelmetRules(Items);
-        impl Rules for HelmetRules {
-            fn items(&self) -> &Items {
-                &self.0
-            }
-            fn enchantments(&self) -> &Enchantments {
-                enchantments()
-            }
-            fn max_stack(&self, _: &str) -> u32 {
-                64
-            }
-            fn armor_index(&self, item: &str) -> Option<usize> {
-                (item == "minecraft:iron_helmet").then_some(0)
+    /// Where `stack` ends up in a guest's inventory menu: the armour slots (5 head .. 8 feet) a
+    /// click from the cursor puts it in, each tried on its own, and every slot holding anything
+    /// after a shift-click of it from the first hotbar slot (36), `usize::MAX` for the cursor.
+    fn worn_by_guest(rules: &dyn Rules, stack: &ItemStack) -> (Vec<usize>, Vec<usize>) {
+        let context = crate::test_resources::loop_context(
+            horizon_world::native_load_context::LoopSide::Server,
+        );
+        let mut clicked = Vec::new();
+        for slot in 5..=8_usize {
+            let mut g = guest();
+            let mut view = View {
+                guest: &mut g,
+                container: None,
+                shulker: false,
+                container_limits: Vec::new(),
+                hidden: &[],
+                loop_context: &context,
+            };
+            view.guest.carried = Some(stack.clone());
+            click(&mut view, &mut None, slot as i32, 0, input::PICKUP, rules);
+            if view.get(slot).as_ref() == Some(stack) {
+                clicked.push(slot);
             }
         }
-        let rules = HelmetRules(Items::for_tests(Default::default()));
         let mut g = guest();
-        let entity = g.entity_id;
-        let mut drag = None;
         let mut view = View {
             guest: &mut g,
             container: None,
             shulker: false,
             container_limits: Vec::new(),
             hidden: &[],
-            loop_context: context,
+            loop_context: &context,
         };
-        let helmet = ItemStack::new("minecraft:iron_helmet", 1);
-        view.guest.carried = Some(helmet.clone());
-        click(&mut view, &mut drag, 5, 0, input::PICKUP, &rules);
-        let clicked = view.get(5).is_some();
-        view.set(5, None);
-        view.guest.carried = None;
-        view.set(36, Some(helmet));
-        click(&mut view, &mut drag, 36, 0, input::QUICK_MOVE, &rules);
-        (clicked, view.get(5).is_some(), entity)
+        view.set(36, Some(stack.clone()));
+        click(&mut view, &mut None, 36, 0, input::QUICK_MOVE, rules);
+        let mut held: Vec<usize> = (0..46).filter(|s| view.get(*s).is_some()).collect();
+        if view.guest.carried.is_some() {
+            held.push(usize::MAX);
+        }
+        (clicked, held)
+    }
+
+    /// `ArmorSlot.mayPlace` for a guest reads the stack's own `equippable` (#2669): an iron
+    /// helmet goes on the head; with its component removed it is no armour, and a shift-click
+    /// fills the inventory; an override for the feet puts it there; an `allowed_entities` without
+    /// the player, or an explicitly empty one, keeps it off, and a shift-click then moves nothing
+    /// at all (`moveItemStackTo` refused). Data only: no part answers.
+    #[test]
+    fn guest_armour_slots_read_the_stacks_own_equippable() {
+        let Some(ItemRules(items)) = rules() else {
+            return;
+        };
+        let rules = PartRules(items, None);
+        let helmet = |component: Option<Vec<(&str, Tag)>>| {
+            let mut helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            let (id, value) = match component {
+                Some(fields) => ("minecraft:equippable", Tag::compound(fields)),
+                None => ("!minecraft:equippable", Tag::Compound(Default::default())),
+            };
+            helmet.data_mut().set_other(id, Some(value));
+            helmet
+        };
+        let slot = |name: &str| ("slot", Tag::String(name.into()));
+        let allowed = |list: Vec<Tag>| ("allowed_entities", Tag::List(list));
+        let plain = ItemStack::new("minecraft:iron_helmet", 1);
+        assert_eq!(worn_by_guest(&rules, &plain), (vec![5], vec![5]));
+        assert_eq!(worn_by_guest(&rules, &helmet(None)), (vec![], vec![9]));
+        let feet = helmet(Some(vec![slot("feet")]));
+        assert_eq!(worn_by_guest(&rules, &feet), (vec![8], vec![8]));
+        let zombie = vec![Tag::String("zombie".into())];
+        let zombie = helmet(Some(vec![slot("head"), allowed(zombie)]));
+        assert_eq!(worn_by_guest(&rules, &zombie), (vec![], vec![36]));
+        let nobody = helmet(Some(vec![slot("head"), allowed(Vec::new())]));
+        assert_eq!(worn_by_guest(&rules, &nobody), (vec![], vec![36]));
+        let player = vec![Tag::String("player".into())];
+        let player = helmet(Some(vec![slot("head"), allowed(player)]));
+        assert_eq!(worn_by_guest(&rules, &player), (vec![5], vec![5]));
+    }
+
+    /// What a lent `CanEquip` was asked, answering the opposite of the data.
+    #[derive(Default)]
+    struct Contrary(std::cell::RefCell<Vec<(String, u32, String, bool)>>);
+    impl crate::mobs::equip::CanEquip for Contrary {
+        fn can_equip(&self, _: &ItemStack, slot: &str, id: u32, kind: &str, data: bool) -> bool {
+            (self.0.borrow_mut()).push((slot.to_owned(), id, kind.to_owned(), data));
+            !data
+        }
+    }
+
+    /// A guest's armour slots ask the `can_equip` the game decided for the click, for the
+    /// guest's entity with the component's answer, and take its answer either way: the parts
+    /// refuse the head slot to a helmet and give it the other three, and shift-clicked it stays
+    /// in its hotbar slot with nothing moved anywhere else.
+    #[test]
+    fn guest_armour_slots_ask_the_decided_can_equip() {
+        let parts = Contrary::default();
+        let rules = PartRules(Items::for_tests(Default::default()), Some(&parts));
+        let helmet = worn("minecraft:iron_helmet", "head");
+        assert_eq!(worn_by_guest(&rules, &helmet), (vec![6, 7, 8], vec![36]));
+        let entity = guest().entity_id as u32;
+        let asked =
+            |slot: &str, data| (slot.to_owned(), entity, "minecraft:player".to_owned(), data);
+        // A click may ask a slot more than once; each ask is the same.
+        let mut seen = parts.0.take();
+        seen.dedup();
+        assert_eq!(
+            seen,
+            [
+                asked("head", true),
+                asked("chest", false),
+                asked("legs", false),
+                asked("feet", false),
+                asked("head", true),
+            ]
+        );
     }
 
     /// A shift-click from the off-hand slot wears the armour it holds:
@@ -2827,7 +2878,7 @@ pub(crate) mod tests {
     /// hand, the stack fills the main inventory before the hotbar.
     #[test]
     fn inventory_quick_move_wears_armor_from_the_off_hand() {
-        let rules = ArmorRules;
+        let rules = ItemRules(Items::for_tests(Default::default()));
         let mut g = guest();
         let mut drag = None;
         let mut view = View {
@@ -2841,7 +2892,7 @@ pub(crate) mod tests {
             ),
         };
         // Menu slot 45 is the off hand; 5 to 8 are the armour slots, head first.
-        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        view.guest.offhand = Some(worn("minecraft:iron_helmet", "head"));
         click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
         assert_eq!(
             view.get(5).as_ref().map(|s| &*s.item),
@@ -2850,7 +2901,7 @@ pub(crate) mod tests {
         assert!(view.get(45).is_none());
         assert!(view.get(9).is_none());
         // The helmet slot is taken: the next helmet goes to the inventory.
-        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        view.guest.offhand = Some(worn("minecraft:iron_helmet", "head"));
         click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
         assert_eq!(
             view.get(9).as_ref().map(|s| &*s.item),
@@ -2912,9 +2963,6 @@ pub(crate) mod tests {
             }
             fn max_stack(&self, item: &str) -> u32 {
                 if item == "minecraft:snowball" { 16 } else { 64 }
-            }
-            fn armor_index(&self, _: &str) -> Option<usize> {
-                None
             }
         }
         let rules = SmallRules;

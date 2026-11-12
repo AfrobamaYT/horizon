@@ -167,6 +167,7 @@ impl Game<'_> {
             trade: None,
             maps: None,
             limited_crafting: self.limited_crafting(),
+            can_equip: None,
             known_recipes: Some(&self.level.recipe_book),
         }
     }
@@ -208,6 +209,7 @@ impl Game<'_> {
             loop_context: &self.loop_context,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             limited_crafting: host.hub.limited_crafting,
+            can_equip: None,
             known_recipes: Some(&host.hub.guests[gi].recipe_book),
             ..self.menu_env()
         };
@@ -913,6 +915,7 @@ impl Game<'_> {
             player_entity_id: Some(host.hub.guests[gi].entity_id),
             loop_context: &self.loop_context,
             limited_crafting: host.hub.limited_crafting,
+            can_equip: None,
             known_recipes: Some(&host.hub.guests[gi].recipe_book),
             ..self.menu_env()
         };

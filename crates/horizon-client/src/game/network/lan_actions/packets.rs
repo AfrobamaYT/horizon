@@ -1,4 +1,5 @@
 use super::*;
+use horizon_client::mobs::equip::Decided;
 
 impl Game<'_> {
     /// DedicatedServer.isUnderSpawnProtection: no operators, an operator or a
@@ -703,7 +704,12 @@ impl Game<'_> {
                 }
             }
             S::ContainerClick(p) => {
-                let rules = ItemRules(world_items!(self), &world_stations!(self).enchantments);
+                let decided = self.guest_click_can_equip(gi, &p);
+                let rules = ItemRules(
+                    world_items!(self),
+                    &world_stations!(self).enchantments,
+                    &decided,
+                );
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
@@ -1072,6 +1078,31 @@ impl Game<'_> {
             }
             _ => {}
         }
+    }
+
+    /// The decide of `ArmorSlot.mayPlace` for guest `gi`'s click `p` in its inventory menu, which
+    /// runs on the guest's state with the game out of reach: `can_equip` for each stack the click
+    /// may put in an armour slot (the cursor's, the clicked slot's, and a number key's), asked
+    /// before the click with the game as the read-only `Host`.
+    fn guest_click_can_equip(&self, gi: usize, p: &play::ContainerClick) -> Decided {
+        let Some(g) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else {
+            return Decided::default();
+        };
+        if p.container != 0 || !mod_api::__private::has_part_hook(mod_api::HookId::CanEquip) {
+            return Decided::default();
+        }
+        let clicked = usize::try_from(p.slot)
+            .ok()
+            .and_then(|slot| g.menu_slot(slot));
+        let swapped = match (p.input, usize::try_from(p.button)) {
+            (horizon_client::lan::menu::input::SWAP, Ok(40)) => g.offhand.clone(),
+            (horizon_client::lan::menu::input::SWAP, Ok(key)) => {
+                g.inventory.get(key).cloned().flatten()
+            }
+            _ => None,
+        };
+        let stacks = [g.carried.as_ref(), clicked.as_ref(), swapped.as_ref()];
+        self.decide_can_equip(g.entity_id as u32, stacks.into_iter().flatten())
     }
 
     /// `ServerLevel.getEntity(id)`'s `Entity.saveWithoutId`: the player or

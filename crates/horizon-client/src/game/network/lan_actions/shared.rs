@@ -285,6 +285,7 @@ impl GuestPlay {
 struct ItemRules<'a>(
     &'a horizon_client::items::Items,
     &'a horizon_client::enchant::Enchantments,
+    &'a horizon_client::mobs::equip::Decided,
 );
 impl Rules for ItemRules<'_> {
     fn items(&self) -> &horizon_client::items::Items {
@@ -296,14 +297,8 @@ impl Rules for ItemRules<'_> {
     fn max_stack(&self, item: &str) -> u32 {
         self.0.get(item).map_or(64, |i| i.max_stack)
     }
-    fn armor_index(&self, item: &str) -> Option<usize> {
-        match self.0.get(item)?.equip_slot.as_deref()? {
-            "head" => Some(0),
-            "chest" => Some(1),
-            "legs" => Some(2),
-            "feet" => Some(3),
-            _ => None,
-        }
+    fn can_equip(&self) -> Option<&dyn horizon_client::mobs::equip::CanEquip> {
+        Some(self.2)
     }
 }
 
