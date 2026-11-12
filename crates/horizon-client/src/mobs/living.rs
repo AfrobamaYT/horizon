@@ -444,14 +444,14 @@ impl Mob {
         let dh = (new_h - old_h).max(0.0) + 1.0e-6;
         let at = |allowed: Aabb, size_y: f64| free_position(w, allowed, center, new_w, size_y);
         if let Some(p) = at(Aabb::of_size(center, Vec3::new(dw, dh, dw)), new_h) {
-            self.position = Vec3::new(p.x, p.y - new_h / 2.0, p.z);
+            teleports::set_pos(self, Vec3::new(p.x, p.y - new_h / 2.0, p.z));
             return;
         }
         if new_w > old_w
             && new_h > old_h
             && let Some(p) = at(Aabb::of_size(center, Vec3::new(dw, 1.0e-6, dw)), old_h)
         {
-            self.position = Vec3::new(p.x, p.y - old_h / 2.0 + 1.0e-6, p.z);
+            teleports::set_pos(self, Vec3::new(p.x, p.y - old_h / 2.0 + 1.0e-6, p.z));
         }
     }
     fn no_physics(&self) -> bool {
@@ -2425,8 +2425,7 @@ pub fn random_teleport(
         return false;
     }
     // Entity.teleportTo -> snapTo: the old position moves too, the motion stays.
-    m.position = Vec3::new(x, ny, z);
-    m.previous = m.position;
+    teleports::snap_to(m, Vec3::new(x, ny, z));
     m.ai.nav.stop();
     // `randomTeleport(..., true)` broadcasts entity event 46.
     events.push(MobEvent::EntityEvent {
@@ -3701,6 +3700,7 @@ mod tests {
 #[cfg(test)]
 #[path = "living/size_answer_tests.rs"]
 mod size_answer_tests;
+pub mod teleports;
 
 #[cfg(test)]
 mod farmland_event_tests {

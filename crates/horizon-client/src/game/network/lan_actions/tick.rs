@@ -385,6 +385,10 @@ impl Game<'_> {
             return;
         };
         let g = self.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+        // Each move the player sent put it somewhere (`handleMovePlayer`'s `setPos`).
+        let (id, end) = (g.entity_id as u32, g.position);
+        self.entity_section_walked(id, end, moves.iter().map(|m| m.0));
+        let g = self.lan.as_ref().unwrap().hub.guest(conn).unwrap();
         if g.spectator() {
             // ServerPlayer.doTick runs the player's whole tick for a spectator
             // too, unless its box touches an unloaded chunk
