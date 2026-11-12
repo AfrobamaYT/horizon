@@ -68,7 +68,7 @@ fn keeper() -> (Arc<Mutex<Kept>>, mod_api::Mods) {
 }
 
 /// F3+T: the reload stages on a worker and applies here.
-fn reload(game: &mut super::Game<'_>) {
+pub(in crate::game) fn reload(game: &mut super::Game<'_>) {
     game.spawn_pack_reload(ReloadKind::Selection).unwrap();
     let started = std::time::Instant::now();
     while game.pack_reload.is_some() {

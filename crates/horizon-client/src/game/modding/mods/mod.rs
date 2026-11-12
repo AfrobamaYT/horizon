@@ -515,13 +515,15 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     Game::native_register_block_state_models(&RegistrationContext::new(), &mut definitions);
     horizon_client_render::mod_block_state_models::register(definitions);
 }
-/// The client presentation registrations, resolved once before the first level opens: the
-/// dimension transition screens and the entity spectator shaders.
+/// The client presentation registrations, kept once at start, before resources load: the
+/// dimension transition screens, the entity spectator shaders, the render pipelines and the entity
+/// renderers.
 pub(super) fn register_client_presentations(role: ExecutionRole) {
     register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
     register_render_pipelines(role);
+    register_entity_renderers(role);
 }
 
 /// Resolve client dimension-transition registrations once, before the first level opens.
@@ -602,6 +604,16 @@ fn add_section_geometry(role: ExecutionRole) {
     let mut registry = mod_api::SectionGeometryRegistry::default();
     Game::native_add_section_geometry(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_section_geometry(registry.into_renderers());
+}
+/// The native mods' entity renderers (`native_register_entity_renderers`), kept once at start,
+/// before resources load; every resource load resolves each type's renderer.
+pub(super) fn register_entity_renderers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::EntityRendererRegistry::default();
+    Game::native_register_entity_renderers(&RegistrationContext::new(), &mut registry);
+    super::native_entity_renderers::register(registry.into_renderers());
 }
 /// The native mods' particle providers (`native_register_particle_providers`) and render groups
 /// (`native_register_particle_groups`), kept once at start, before resources load; every particle

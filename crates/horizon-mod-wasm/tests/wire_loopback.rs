@@ -14,6 +14,8 @@ mod boundary {
 mod biome_region_registration;
 #[path = "wire_loopback/block_entity_transform.rs"]
 mod block_entity_transform;
+#[path = "wire_loopback/entity_renderers.rs"]
+mod entity_renderers;
 #[path = "wire_loopback/load_conditions.rs"]
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
@@ -235,6 +237,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event: &mut mod_api::RegisterLoadConditionsEvent<'_>,
         ) {
             load_conditions::register(event.conditions);
+        }
+        fn register_entity_renderers(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterEntityRenderersEvent<'_>,
+        ) {
+            entity_renderers::register(event.renderers);
         }
         fn register(
             &self,
