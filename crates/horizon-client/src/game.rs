@@ -1696,7 +1696,13 @@ impl LevelAccess for GameLevel<'_> {
         {
             return test_blocks::own_signal(self.registry, state, block.powered);
         }
-        native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
+        native_level_signals::block_entity_signal(
+            self.world,
+            self.registry,
+            self.items,
+            self.lid_openers,
+            pos,
+        )
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
