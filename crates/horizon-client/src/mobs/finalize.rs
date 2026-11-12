@@ -1443,7 +1443,13 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         let d = self.level.spawn_data();
         let e = d.enchantments;
         let pool = e.tag("minecraft:on_mob_spawn_equipment");
-        let picked = e.select(d.items, self.random, id, cost, pool);
+        let picked = e.select(
+            d.items,
+            self.random,
+            &item_stack(m, slot).unwrap_or_else(|| crate::items::ItemStack::new(id, 1)),
+            cost,
+            pool,
+        );
         for (enchantment, level) in picked {
             gear::upgrade(m, gear_slot(slot), &enchantment, level);
         }
