@@ -982,6 +982,7 @@ impl Game<'_> {
             self.spawn_item(stack, center, v, 10);
         }
         self.show_breaking_particles(at, f64::from(width), f64::from(height));
+        self.stand_game_event("minecraft:entity_die", at, by);
         true
     }
     /// `Entity.gameEvent(event, attributedTo)` for a stand at `at`: the
@@ -1077,6 +1078,7 @@ impl Game<'_> {
                 in_water,
                 Some(self.border.geometry()),
                 &nearby,
+                &self.loop_context,
             ) {
                 // LivingEntity.aiStep: `travel` first, then the blocks' push.
                 a.tick_settle(medium, step);
