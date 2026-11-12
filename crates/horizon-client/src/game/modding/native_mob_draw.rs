@@ -104,29 +104,25 @@ impl Game<'_> {
         self.native_player_render_listened(&mut listened);
         listened
     }
-    /// Whether the draw keeps `mob`'s humanoid posed parts for the mods' layers
-    /// this frame: while a mod listens to `mob_layer` (`listened`, asked once a
-    /// frame), or when a layer was added to its type or player model (one
-    /// lookup, none when no layer was added at all).
-    pub(super) fn mod_parts_wanted(&self, mob: &Mob, listened: bool) -> bool {
-        listened || super::native_entity_layers::has_layers(mob)
-    }
     /// The mods' layers over `mob` (`who` set for a player), drawn after the
-    /// vanilla model and its layers: the layers added to its type or player
-    /// model (`register_entity_layers`), then `native_mob_layer`. `parts` are
-    /// the humanoid parts as the vanilla draw posed them this frame, kept by it.
+    /// vanilla model and its layers: `layers`, the ones added to its type or
+    /// player model (`register_entity_layers`, looked up once for the mob by
+    /// `mod_layers`, whose answer also decided whether the draw kept its parts),
+    /// then `native_mob_layer`. `parts` are the humanoid parts as the vanilla
+    /// draw posed them this frame, kept by it.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn mod_layer_geometry(
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
         parts: Option<mod_api::PosedParts>,
+        layers: Option<super::native_entity_layers::Layers>,
         partial: f32,
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
-        if let Some(layers) = super::native_entity_layers::layers_of(mob) {
+        if let Some(layers) = layers {
             let parts = parts.as_ref();
             self.registered_layer_geometry(mob, &layers, parts, partial, camera, light, out);
         }

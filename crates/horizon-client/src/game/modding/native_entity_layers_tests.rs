@@ -201,7 +201,8 @@ fn mob(game: &Game<'_>, kind: &str, slim: bool) -> Mob {
 fn layer_frame(game: &Game<'_>, kind: &str, slim: bool) -> Vec<Vertex> {
     let mut out = Vec::new();
     let mob = mob(game, kind, slim);
-    game.mod_layer_geometry(&mob, None, None, 1.0, CAMERA, LIGHT, &mut out);
+    let layers = game.mod_layers(&mob);
+    game.mod_layer_geometry(&mob, None, None, layers, 1.0, CAMERA, LIGHT, &mut out);
     out
 }
 
@@ -287,28 +288,30 @@ fn a_living_type_draws_its_layers_in_the_order_they_were_added() {
     );
 }
 
+/// The one lookup a mob gets a frame finds its own type's or player model's layers and nothing for a
+/// type without: what decides whether the draw keeps its posed parts, and what draws over it.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn only_a_type_with_layers_keeps_its_posed_parts() {
+fn a_mob_looks_up_only_its_own_types_or_models_layers() {
     in_scene(
-        "only_a_type_with_layers_keeps_its_posed_parts",
+        "a_mob_looks_up_only_its_own_types_or_models_layers",
         |game, _| {
-            let zombie = mob(game, "minecraft:zombie", false);
-            let cow = mob(game, "minecraft:cow", false);
-            assert!(
-                game.mod_parts_wanted(&zombie, false),
-                "the zombie has layers"
+            let count = |kind: &str, slim: bool| {
+                game.mod_layers(&mob(game, kind, slim))
+                    .map(|layers| layers.len())
+            };
+            assert_eq!(count("minecraft:zombie", false), Some(2));
+            assert_eq!(
+                count("minecraft:cow", false),
+                None,
+                "no parts kept, nothing drawn"
             );
-            assert!(!game.mod_parts_wanted(&cow, false), "the cow has none");
-            assert!(
-                game.mod_parts_wanted(&cow, true),
-                "a `mob_layer` listener wants every mob's"
+            assert_eq!(
+                count("minecraft:player", false),
+                Some(1),
+                "the wide model's"
             );
-            let player = mob(game, "minecraft:player", true);
-            assert!(
-                game.mod_parts_wanted(&player, false),
-                "the slim model has a layer"
-            );
+            assert_eq!(count("minecraft:player", true), Some(1), "the slim model's");
         },
     );
 }

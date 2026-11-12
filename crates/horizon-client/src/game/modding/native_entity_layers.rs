@@ -176,26 +176,19 @@ impl LayerTable {
     }
 }
 
-/// The layers the last load resolved for `mob` (a player's model's for a player): none, after a
-/// single check, when no mod added a layer.
-pub(in crate::game) fn layers_of(mob: &Mob) -> Option<Layers> {
-    if !ANY.load(Ordering::Relaxed) {
-        return None;
-    }
-    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
-    table.as_ref()?.of(mob).cloned()
-}
-
-/// Whether the last load resolved layers for `mob`: one lookup, none when no mod added a layer.
-pub(in crate::game) fn has_layers(mob: &Mob) -> bool {
-    if !ANY.load(Ordering::Relaxed) {
-        return false;
-    }
-    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
-    table.as_ref().is_some_and(|table| table.of(mob).is_some())
-}
-
 impl Game<'_> {
+    /// The layers the last load resolved for `mob` (a player's model's for a player), looked up
+    /// once per mob a frame: the answer both decides whether the draw keeps the mob's posed parts
+    /// and is what `mod_layer_geometry` draws. With no layer added at all it is none after one
+    /// flag check, with no lock and no lookup.
+    pub(in crate::game) fn mod_layers(&self, mob: &Mob) -> Option<Layers> {
+        if !ANY.load(Ordering::Relaxed) {
+            return None;
+        }
+        let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+        table.as_ref()?.of(mob).cloned()
+    }
+
     /// Asks the mods for their layers on the renderers this load built (`rows` its entity types,
     /// `mod_renderers` the registered renderers) and resolves them.
     pub(super) fn resolve_entity_layers(

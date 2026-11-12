@@ -822,7 +822,7 @@ impl Game<'_> {
             return;
         }
         // The mods' layers' posed parts, kept from the draw below while they want them.
-        let mut parts = None;
+        let (mut parts, layers) = (None, self.mod_layers(m));
         let listened = self.mob_render_listened();
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
@@ -838,7 +838,7 @@ impl Game<'_> {
                 self.res.mob_data(),
                 &self.player_armor_layers(),
                 hidden,
-                self.mod_parts_wanted(m, listened).then_some(&mut parts),
+                (listened || layers.is_some()).then_some(&mut parts),
                 out,
             );
         } else {
@@ -850,7 +850,7 @@ impl Game<'_> {
                 packed,
                 self.res.mob_data(),
                 &self.player_armor_layers(),
-                self.mod_parts_wanted(m, listened).then_some(&mut parts),
+                (listened || layers.is_some()).then_some(&mut parts),
                 out,
             );
         }
@@ -879,7 +879,16 @@ impl Game<'_> {
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
             // Mods' layers (`register_entity_layers`, `native_mob_layer`), over vanilla's.
-            self.mod_layer_geometry(m, Some(who), parts, alpha as f32, camera, packed, out);
+            self.mod_layer_geometry(
+                m,
+                Some(who),
+                parts,
+                layers,
+                alpha as f32,
+                camera,
+                packed,
+                out,
+            );
         }
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         let vanilla = self
