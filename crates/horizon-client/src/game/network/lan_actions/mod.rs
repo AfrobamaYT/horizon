@@ -40,5 +40,3 @@ use winit::keyboard::KeyCode;
 
 include!(concat!(env!("OUT_DIR"), "/lan_action_modules.rs"));
 include!("shared.rs");
-
-mod guest_body;
