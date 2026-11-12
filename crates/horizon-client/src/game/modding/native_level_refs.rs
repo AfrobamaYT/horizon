@@ -1896,7 +1896,7 @@ mod tests {
     }
     /// A game whose mods are `Machines` and `Other`, with their controllers registered.
     fn with_machines(test: impl FnOnce(&mut super::super::Game<'_>)) {
-        testing::with_mods(mods(), || with_chunk_streaming(test));
+        mod_platform::testing::with_mods(mods(), || with_chunk_streaming(test));
     }
 
     #[test]
@@ -2271,7 +2271,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn validation_runs_when_a_parked_level_opens_and_not_without_a_listener() {
-        testing::with_mods(mods(), || {
+        mod_platform::testing::with_mods(mods(), || {
             with_game(|game| {
                 let other = if game.dim == Dim::Nether {
                     Dim::End
@@ -2309,7 +2309,7 @@ mod tests {
             }
         }
         let mods: mod_api::Mods = vec![ModEntry::new("idle", Box::new(Idle))].into();
-        testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let tickets = vec![saved("idle:quarry", [1, 64, 1], (7, 7))];
                 game.streaming.load_forced(Default::default(), tickets);
