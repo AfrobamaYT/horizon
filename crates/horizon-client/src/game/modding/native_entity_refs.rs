@@ -1915,7 +1915,7 @@ pub(super) mod tests {
         use horizon_client::chunk::Chunk;
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::sticky_game_thread();
+        mod_platform::__private::part_tests::sticky_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1962,7 +1962,7 @@ pub(super) mod tests {
         use horizon_client::block_contact::{Contact, bounce_restitution};
         use horizon_core::position::BlockPos;
 
-        let heard = mod_api::__private::part_tests::restitution_game_thread();
+        let heard = mod_platform::__private::part_tests::restitution_game_thread();
         crate::game::native_hooks::install_block_contact_hooks();
         with_game(|game| {
             game.world.chunks.insert(
