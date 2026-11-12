@@ -16,6 +16,8 @@ mod biome_region_registration;
 mod block_entity_transform;
 #[path = "wire_loopback/entity_renderers.rs"]
 mod entity_renderers;
+#[path = "wire_loopback/crash_sections.rs"]
+mod crash_sections;
 #[path = "wire_loopback/load_conditions.rs"]
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
@@ -256,6 +258,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             use_item_hand::register(registrar);
             piglin_answers::register(registrar);
             block_entity_transform::register(registrar);
+            crash_sections::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
