@@ -18,14 +18,20 @@ use std::{
     },
 };
 
-/// A load's entity types: a boat, a zombie, the player and a mod's living type.
+/// A load's entity types: a boat, a zombie, an armour stand, the player and a mod's living type.
 fn rows() -> EntityTypeRows {
     EntityTypeRows::parse(
         br#"{"minecraft:oak_boat": {"width": 1.375},
              "minecraft:zombie": {"attributes": {}},
+             "minecraft:armor_stand": {"attributes": {}},
              "minecraft:player": {"attributes": {}},
              "ruby:golem": {"template": "minecraft:zombie", "attributes": {}}}"#,
     )
+}
+
+/// The living types drawn as mobs, where layers run: not the armour stand.
+fn routed(id: &str) -> bool {
+    ["minecraft:zombie", "ruby:golem"].contains(&id)
 }
 
 /// Draws one stone quad a block wide, `height` blocks above the entity's feet; refuses its first
@@ -89,10 +95,19 @@ fn the_event_tells_the_renderers_this_load_built() {
     }
     renderers.insert("ruby:golem".into(), Arc::new(Nothing));
     renderers.insert("nope:ghost".into(), Arc::new(Nothing));
-    let event = LayerRegistration::new(&rows, &renderers);
+    let event = LayerRegistration::new(&rows, &renderers, &routed);
     assert_eq!(
         event.entity_types(),
-        ["minecraft:oak_boat", "minecraft:zombie", "ruby:golem"]
+        [
+            "minecraft:armor_stand",
+            "minecraft:oak_boat",
+            "minecraft:zombie",
+            "ruby:golem"
+        ]
+    );
+    assert!(
+        event.is_living("minecraft:armor_stand"),
+        "living, whatever its route"
     );
     assert!(event.is_living("minecraft:zombie"));
     assert!(event.is_living("ruby:golem"));
@@ -112,7 +127,7 @@ fn the_event_tells_the_renderers_this_load_built() {
 fn a_target_that_is_no_living_entity_type_is_refused_by_name() {
     let rows = rows();
     let renderers = BTreeMap::new();
-    let mut event = LayerRegistration::new(&rows, &renderers);
+    let mut event = LayerRegistration::new(&rows, &renderers, &routed);
     let mut add = |target: &str| event.add(LayerTarget::Entity(target.into()), Raised::new(1.0));
     assert_eq!(
         add("minecraft:oak_boat"),
@@ -125,6 +140,10 @@ fn a_target_that_is_no_living_entity_type_is_refused_by_name() {
     assert_eq!(
         add("minecraft:player"),
         Err("the entity layer for minecraft:player is refused: a player takes layers through its model (wide or slim)".into())
+    );
+    assert_eq!(
+        add("minecraft:armor_stand"),
+        Err("the entity layer for minecraft:armor_stand is refused: it draws through a route of its own, which does not run layers yet".into())
     );
     assert_eq!(add("minecraft:zombie"), Ok(()));
     assert_eq!(add("ruby:golem"), Ok(()), "a mod's living type");
@@ -164,9 +183,8 @@ fn quads(out: &[Vertex]) -> Vec<f32> {
         .collect()
 }
 
-/// The mods' layers one frame draws over a mob of `kind` (a player of the slim model when
-/// `slim`), standing at [`FEET`].
-fn layer_frame(game: &Game<'_>, kind: &str, slim: bool) -> Vec<Vertex> {
+/// A mob of `kind` (a player of the slim model when `slim`), standing at [`FEET`].
+fn mob(game: &Game<'_>, kind: &str, slim: bool) -> Mob {
     let kind = if kind == "minecraft:player" {
         game.res.player_type().clone().unwrap()
     } else {
@@ -175,7 +193,14 @@ fn layer_frame(game: &Game<'_>, kind: &str, slim: bool) -> Vec<Vertex> {
     let at = horizon_core::geometry::Vec3::new(FEET[0], FEET[1], FEET[2]);
     let mut mob = Mob::new(90, kind, at, 0.0);
     mob.slim = slim;
+    mob
+}
+
+/// The mods' layers one frame draws over a mob of `kind` (a player of the slim model when
+/// `slim`).
+fn layer_frame(game: &Game<'_>, kind: &str, slim: bool) -> Vec<Vertex> {
     let mut out = Vec::new();
+    let mob = mob(game, kind, slim);
     game.mod_layer_geometry(&mob, None, None, 1.0, CAMERA, LIGHT, &mut out);
     out
 }
@@ -257,6 +282,32 @@ fn a_living_type_draws_its_layers_in_the_order_they_were_added() {
             assert!(
                 layer_frame(game, "minecraft:cow", false).is_empty(),
                 "a type with none"
+            );
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn only_a_type_with_layers_keeps_its_posed_parts() {
+    in_scene(
+        "only_a_type_with_layers_keeps_its_posed_parts",
+        |game, _| {
+            let zombie = mob(game, "minecraft:zombie", false);
+            let cow = mob(game, "minecraft:cow", false);
+            assert!(
+                game.mod_parts_wanted(&zombie, false),
+                "the zombie has layers"
+            );
+            assert!(!game.mod_parts_wanted(&cow, false), "the cow has none");
+            assert!(
+                game.mod_parts_wanted(&cow, true),
+                "a `mob_layer` listener wants every mob's"
+            );
+            let player = mob(game, "minecraft:player", true);
+            assert!(
+                game.mod_parts_wanted(&player, false),
+                "the slim model has a layer"
             );
         },
     );

@@ -46,6 +46,8 @@ static TABLE: RwLock<Option<LayerTable>> = RwLock::new(None);
 pub(super) struct LayerRegistration<'a> {
     rows: &'a EntityTypeRows,
     mod_renderers: &'a BTreeMap<String, Arc<dyn EntityRenderer>>,
+    /// Whether a living type draws where layers run (as a mob).
+    routed: &'a dyn Fn(&str) -> bool,
     entity: BTreeMap<String, Vec<Arc<dyn EntityRenderLayer>>>,
     wide: Vec<Arc<dyn EntityRenderLayer>>,
     slim: Vec<Arc<dyn EntityRenderLayer>>,
@@ -55,10 +57,12 @@ impl<'a> LayerRegistration<'a> {
     pub(super) fn new(
         rows: &'a EntityTypeRows,
         mod_renderers: &'a BTreeMap<String, Arc<dyn EntityRenderer>>,
+        routed: &'a dyn Fn(&str) -> bool,
     ) -> Self {
         Self {
             rows,
             mod_renderers,
+            routed,
             entity: BTreeMap::new(),
             wide: Vec::new(),
             slim: Vec::new(),
@@ -73,6 +77,8 @@ impl<'a> LayerRegistration<'a> {
             Some("it is no entity type")
         } else if !self.rows.is_living(id) {
             Some("its renderer is not a living entity's, and only those take layers")
+        } else if !(self.routed)(id) {
+            Some("it draws through a route of its own, which does not run layers yet")
         } else {
             None
         }
@@ -133,8 +139,7 @@ pub(super) struct LayerTable {
 
 impl LayerTable {
     /// The table for what `registration` collected, with `mob_types` the types the game draws as
-    /// mobs. A living type that isn't one of them (the armour stand, the ender dragon) keeps its
-    /// layers out of the table until its own draw reads them.
+    /// mobs (the only living types `add` accepts).
     pub(super) fn resolve(
         registration: LayerRegistration<'_>,
         mob_types: &HashMap<String, Arc<MobType>>,
@@ -171,19 +176,23 @@ impl LayerTable {
     }
 }
 
-/// Whether the last load resolved any layer.
-pub(in crate::game) fn any_layer() -> bool {
-    ANY.load(Ordering::Relaxed)
-}
-
 /// The layers the last load resolved for `mob` (a player's model's for a player): none, after a
 /// single check, when no mod added a layer.
 pub(in crate::game) fn layers_of(mob: &Mob) -> Option<Layers> {
-    if !any_layer() {
+    if !ANY.load(Ordering::Relaxed) {
         return None;
     }
     let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
     table.as_ref()?.of(mob).cloned()
+}
+
+/// Whether the last load resolved layers for `mob`: one lookup, none when no mod added a layer.
+pub(in crate::game) fn has_layers(mob: &Mob) -> bool {
+    if !ANY.load(Ordering::Relaxed) {
+        return false;
+    }
+    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+    table.as_ref().is_some_and(|table| table.of(mob).is_some())
 }
 
 impl Game<'_> {
@@ -194,9 +203,11 @@ impl Game<'_> {
         rows: &EntityTypeRows,
         mod_renderers: &BTreeMap<String, Arc<dyn EntityRenderer>>,
     ) {
-        let mut registration = LayerRegistration::new(rows, mod_renderers);
+        let mob_types = self.res.mob_types();
+        let routed = |id: &str| mob_types.contains_key(id);
+        let mut registration = LayerRegistration::new(rows, mod_renderers, &routed);
         Self::native_register_entity_layers(&RegistrationContext::new(), &mut registration);
-        let table = LayerTable::resolve(registration, self.res.mob_types());
+        let table = LayerTable::resolve(registration, mob_types);
         let any = !table.is_empty();
         *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
         ANY.store(any, Ordering::Relaxed);

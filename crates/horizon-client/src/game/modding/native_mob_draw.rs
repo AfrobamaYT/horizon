@@ -104,10 +104,12 @@ impl Game<'_> {
         self.native_player_render_listened(&mut listened);
         listened
     }
-    /// Whether the draw keeps a humanoid model's posed parts for the mods'
-    /// layers this frame: while a mod listens to `mob_layer` or added a layer.
-    pub(super) fn mod_layer_parts_wanted(&self) -> bool {
-        self.mob_render_listened() || super::native_entity_layers::any_layer()
+    /// Whether the draw keeps `mob`'s humanoid posed parts for the mods' layers
+    /// this frame: while a mod listens to `mob_layer` (`listened`, asked once a
+    /// frame), or when a layer was added to its type or player model (one
+    /// lookup, none when no layer was added at all).
+    pub(super) fn mod_parts_wanted(&self, mob: &Mob, listened: bool) -> bool {
+        listened || super::native_entity_layers::has_layers(mob)
     }
     /// The mods' layers over `mob` (`who` set for a player), drawn after the
     /// vanilla model and its layers: the layers added to its type or player

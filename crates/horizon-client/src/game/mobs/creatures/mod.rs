@@ -7891,7 +7891,7 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         self.rendered_mobs.set(0);
-        let (skinning, listened) = (self.skinning(), self.mod_layer_parts_wanted());
+        let (skinning, listened) = (self.skinning(), self.mob_render_listened());
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -8070,7 +8070,7 @@ impl Game<'_> {
                     packed,
                     self.res.mob_data(),
                     hidden,
-                    listened.then_some(&mut parts),
+                    self.mod_parts_wanted(mob, listened).then_some(&mut parts),
                     out,
                     &mut skin,
                 );
@@ -8085,7 +8085,7 @@ impl Game<'_> {
                         packed,
                         self.res.mob_data(),
                         &armor,
-                        listened.then_some(&mut parts),
+                        self.mod_parts_wanted(mob, listened).then_some(&mut parts),
                         out,
                     );
                 } else {
@@ -8098,7 +8098,7 @@ impl Game<'_> {
                         self.res.mob_data(),
                         &armor,
                         hidden,
-                        listened.then_some(&mut parts),
+                        self.mod_parts_wanted(mob, listened).then_some(&mut parts),
                         out,
                     );
                 }

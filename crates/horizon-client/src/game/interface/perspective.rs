@@ -823,7 +823,7 @@ impl Game<'_> {
         }
         // The mods' layers' posed parts, kept from the draw below while they want them.
         let mut parts = None;
-        let listened = self.mod_layer_parts_wanted();
+        let listened = self.mob_render_listened();
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
         // translucent_body marks the body OIT for the ghostly look. Only first
@@ -838,7 +838,7 @@ impl Game<'_> {
                 self.res.mob_data(),
                 &self.player_armor_layers(),
                 hidden,
-                listened.then_some(&mut parts),
+                self.mod_parts_wanted(m, listened).then_some(&mut parts),
                 out,
             );
         } else {
@@ -850,7 +850,7 @@ impl Game<'_> {
                 packed,
                 self.res.mob_data(),
                 &self.player_armor_layers(),
-                listened.then_some(&mut parts),
+                self.mod_parts_wanted(m, listened).then_some(&mut parts),
                 out,
             );
         }

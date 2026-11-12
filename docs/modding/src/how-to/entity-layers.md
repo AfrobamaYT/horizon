@@ -71,9 +71,10 @@ carry over, so add them each time. The event also tells what renderers this load
 | `has_mod_renderer(type)` | whether a mod registered the type's renderer ([entity renderers](entity-renderers.md)) |
 
 - A layer attaches only to a living renderer, a mod's own included. `add` refuses a target that is no
-  entity type, a type whose renderer isn't a living one (a boat, a display, a projectile), and
-  `minecraft:player`, whose layers go to a player model: the `Err` names the target, and the game logs
-  it too.
+  entity type, a type whose renderer isn't a living one (a boat, a display, a projectile),
+  `minecraft:player`, whose layers go to a player model, and a living type that draws through a route
+  of its own which doesn't run layers yet (the armour stand, the ender dragon): the `Err` names the
+  target, and the game logs it too.
 - Several mods may add to one target: the layers draw in the order they were added, after the
   entity's model and its vanilla layers.
 - `submit` returns `Ok(())` to keep what it drew. A layer that returns an `Err`, panics, or (in a wasm
@@ -84,10 +85,12 @@ carry over, so add them each time. The event also tells what renderers this load
 
 The game resolves each target's layers when they are added, so a frame finds an entity's layers with
 no lookup by name and no scan over the mods; with no layer at all, it checks one flag per entity and
-builds nothing. Today the layers draw on the mobs (vanilla's and the content mods' living types) and on
-the players, this window's own in third person included. The armour stand and the ender dragon have
-draws of their own; they take layers in a follow-up of #860, and a layer added to them now is kept and
-drawn once they do.
+builds nothing. A humanoid model's posed parts are kept from its draw only for a type or player model
+that has a layer (or while a `mob_layer` listener exists), so a layer on one type costs the other mobs
+nothing. The layers draw on the mobs (vanilla's and the content mods' living types) and on the players,
+this window's own in third person included. The armour stand and the ender dragon have draws of their
+own that don't run layers yet, so `add` refuses them; a follow-up of #860 makes those draws run layers
+and lifts the refusal.
 
 `mob_layer` is a different moment: it is asked for every mob and player in view each frame, after
 their layers (NeoForge's `RenderLivingEvent.Post`), for a mod that draws over every entity rather than

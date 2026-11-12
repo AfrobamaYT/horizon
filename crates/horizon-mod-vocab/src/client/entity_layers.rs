@@ -76,9 +76,11 @@ pub trait EntityLayers {
     /// it being the game's own.
     fn has_mod_renderer(&self, entity_type: &str) -> bool;
     /// `addLayer`: `layer` draws over every entity of `target`, after the layers added to it
-    /// before, whichever mod added them. A target that is no living entity type (not an entity
-    /// type, a type whose renderer isn't a living one, or `minecraft:player`, whose layers go to
-    /// a player model) is refused: the `Err` names it, and the game logs it too.
+    /// before, whichever mod added them. A target that can't take layers is refused: not an entity
+    /// type, a type whose renderer isn't a living one, `minecraft:player` (whose layers go to a
+    /// player model), and a living type that draws through a route of its own that doesn't run
+    /// layers yet (the armour stand, the ender dragon). The `Err` names it, and the game logs it
+    /// too.
     fn add(&mut self, target: LayerTarget, layer: Arc<dyn EntityRenderLayer>)
     -> Result<(), String>;
 }
