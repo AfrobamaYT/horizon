@@ -1691,6 +1691,11 @@ impl LevelAccess for GameLevel<'_> {
         state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
+        if let Some(BlockEntity::TestBlock(block)) =
+            self.world.block_entities.get(&(pos.x, pos.y, pos.z))
+        {
+            return test_blocks::own_signal(self.registry, state, block.powered);
+        }
         native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
