@@ -8371,6 +8371,11 @@ impl Game<'_> {
             self.native_leaves_flush();
             horizon_client::spans::time("recheck_golem_openers", || self.recheck_golem_openers());
             self.tick_mod_container_viewers();
+            // The mobile kinds' entities that joined before the earliest
+            // general row still to tick go first, in join order; then the
+            // general rows (#792), then the mobile kinds' remainder.
+            self.ordered_before(ordered_tick::Batch::General)?;
+            horizon_client::spans::time("tick_general", || self.tick_general())?;
             // Orbs, primed TNT and falling blocks still to tick, in join order.
             self.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, false)?;
             horizon_client::spans::time("tick_experience", || self.tick_experience());

@@ -476,6 +476,11 @@ impl GeneralTypeCatalog {
         self.by_key.get(type_key).copied()
     }
 
+    /// How many types the registry froze; every slot is below this.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     /// The type key a slot belongs to.
     pub fn key(&self, slot: usize) -> &str {
         &self.entries[slot].id
@@ -1019,6 +1024,9 @@ impl Entity for GeneralRow {
 fn chunk_of(at: Vec3) -> ChunkKey {
     ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4)
 }
+
+#[path = "general/tick.rs"]
+mod tick;
 
 #[cfg(test)]
 #[path = "general/save_load_tests.rs"]
