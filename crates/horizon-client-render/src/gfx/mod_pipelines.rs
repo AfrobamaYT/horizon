@@ -227,6 +227,14 @@ impl ModPipelines {
     /// refuses is the error, by id, and leaves this renderer and `set` as they were; an optional
     /// one is logged once, draws nothing and resolves invalid.
     fn build(&mut self, device: &wgpu::Device, set: &Pipelines) -> Result<(), String> {
+        self.build_with(set, |this, built| this.pipeline(device, built))
+    }
+
+    fn build_with(
+        &mut self,
+        set: &Pipelines,
+        compile: impl Fn(&Self, &Built) -> Result<wgpu::RenderPipeline, String>,
+    ) -> Result<(), String> {
         if set.generation() == self.generation {
             return Ok(());
         }
@@ -237,7 +245,7 @@ impl ModPipelines {
             .enumerate()
             .map(|(slot, built)| {
                 let built = built.as_ref()?;
-                self.pipeline(device, built)
+                compile(self, built)
                     .map_err(|error| refused.push((slot, built, error)))
                     .ok()
             })
@@ -598,6 +606,72 @@ mod tests {
         assert!(set.invalidate(0));
         assert_eq!(set.resolve(&id), Err(mod_api::RenderPipelineError::Invalid));
         assert_eq!(set.slot(handle), Err(mod_api::RenderPipelineError::Invalid));
+    }
+
+    #[test]
+    fn optional_gpu_refusal_is_published_only_once() {
+        let Some((device, _)) = device() else {
+            return;
+        };
+        let set = load(
+            41,
+            &[(PASS, PipelineBlend::Translucent, WorldDepth::Tested)],
+        );
+        let id = Identifier::parse("test:p0").unwrap();
+        let handle = set.resolve(&id).unwrap();
+        let mut renderer = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        renderer
+            .build_with(&set, |_, _| Err("injected refusal".into()))
+            .unwrap();
+        assert_eq!(renderer.generation, 41);
+        assert!(renderer.pipelines[0].is_none());
+        assert_eq!(set.slot(handle), Err(mod_api::RenderPipelineError::Invalid));
+        assert!(!set.invalidate(0));
+        renderer
+            .build_with(&set, |_, _| panic!("already compiled"))
+            .unwrap();
+    }
+
+    #[test]
+    fn required_gpu_failure_does_not_publish_and_mixed_success_does() {
+        let Some((device, _)) = device() else {
+            return;
+        };
+        let set = load(
+            41,
+            &[(PASS, PipelineBlend::Translucent, WorldDepth::Tested)],
+        );
+        let mut renderer = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        renderer.build(&device, &set).unwrap();
+        let shaders = [
+            (PASS, PipelineBlend::Translucent, WorldDepth::Tested),
+            (PASS, PipelineBlend::Translucent, WorldDepth::Tested),
+        ];
+        let mut registered: Vec<_> = (0..shaders.len())
+            .map(|slot| {
+                let id = Identifier::parse(&format!("test:p{slot}")).unwrap();
+                RenderPipeline::new(id.clone(), id, shaders[slot].1, shaders[slot].2).optional()
+            })
+            .collect();
+        registered[0].optional = false;
+        let next = Pipelines::build(&registered, 42, |_| Ok(PASS.to_owned())).unwrap();
+        let id = Identifier::parse("test:p0").unwrap();
+        let handle = next.resolve(&id).unwrap();
+        let error = renderer
+            .build_with(&next, |_, _| Err("injected refusal".into()))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "required render pipeline test:p0 from mod  refused by the GPU: injected refusal"
+        );
+        assert_eq!(renderer.generation, 41);
+        assert_eq!(renderer.pipelines.len(), 1);
+        assert_eq!(next.slot(handle), Ok(0));
+        assert!(next.resolve(&Identifier::parse("test:p1").unwrap()).is_ok());
+        renderer.build(&device, &next).unwrap();
+        assert_eq!(renderer.generation, 42);
+        assert_eq!(renderer.pipelines.len(), 2);
+        assert!(renderer.pipelines.iter().all(Option::is_some));
     }
 
     #[test]
