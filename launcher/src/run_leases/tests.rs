@@ -116,6 +116,7 @@ fn stop_terminates_the_routed_game_not_only_its_holder() {
 }
 #[cfg(unix)]
 fn routed_lifetime(stop: bool) {
+    crate::test_support::assert_holder_capability();
     let root = tempfile::tempdir().unwrap();
     let data = root.path().canonicalize().unwrap();
     let install = data.join("install");

@@ -16,7 +16,10 @@ use std::{
 };
 pub const ENV: &str = "HORIZON_RUNTIME_HOLDER";
 pub const ENTRY: &str = "HORIZON_RUNTIME_ENTRY";
-pub const CAPABILITY: [u8; 26] = *b"horizon-private-holder-v2;";
+// Keep the scanner's wire bytes contiguous even when release optimization lowers
+// comparisons to several immediate constants (notably on Apple Silicon).
+#[used]
+pub static CAPABILITY: [u8; 26] = *b"horizon-private-holder-v2;";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Tree {
@@ -240,6 +243,9 @@ fn run(encoded: OsString, claims: &mut Option<Acquired>) -> io::Result<ExitStatu
 }
 /// Does nothing for ordinary startup. Private startup can never reach the normal game path.
 pub fn enter() {
+    // An address escaping through an opaque operation retains the actual static,
+    // including under linker dead stripping. Every shipping holder calls enter().
+    std::hint::black_box(&CAPABILITY);
     let Some(encoded) = std::env::var_os(ENV) else {
         return;
     };

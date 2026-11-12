@@ -5543,6 +5543,7 @@ fn menus() -> Vec<Menu> {
 }
 
 fn main() {
+    horizon_mod_package::holder::enter();
     if let Some(code) = native_mods::internals_rustc_wrapper() {
         std::process::exit(code);
     }

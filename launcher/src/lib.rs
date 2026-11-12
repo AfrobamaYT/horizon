@@ -73,3 +73,6 @@ pub mod storage;
 pub mod cache_cleanup;
 
 pub mod bug_report;
+
+#[cfg(test)]
+mod test_support;
