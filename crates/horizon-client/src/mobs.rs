@@ -4107,7 +4107,7 @@ impl Mob {
         // `Entity.<init>`'s order: `defineSynchedData`, then the yaw.
         if mob.species() == Species::ZombieVillager {
             mob.extra.profession = villager::ProfessionState::from_index(
-                zombie_villager::constructor_profession(&mob),
+                mob.random.next_int_bound(15).unwrap_or(0) as u8,
             );
         }
         let _yaw = mob.random.next_float();
