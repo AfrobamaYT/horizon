@@ -927,13 +927,7 @@ impl Game<'_> {
             }
             (Species::Pig, "minecraft:zombified_piglin") => {
                 let old = self.mobs.iter_mut().find(|m| m.id == from.id)?;
-                let spear = old.random.next_int_bound(20).unwrap_or(1) == 0;
-                mob.extra.set_main_hand(Some(if spear {
-                    "minecraft:golden_spear".into()
-                } else {
-                    "minecraft:golden_sword".into()
-                }));
-                mob.persistent = true;
+                horizon_client::mobs::conversion::pig_thunder_hit(old, &mut mob);
             }
             (Species::Hoglin, "minecraft:zoglin")
             | (Species::Piglin | Species::PiglinBrute, "minecraft:zombified_piglin") => {
@@ -2173,7 +2167,7 @@ impl Game<'_> {
         // The UUID its own random made, unless it already has one (a client
         // copy's from the spawn packet).
         if let Some(uuid) = p.uuid.take() {
-            self.persist.uuids.entry(p.id).or_insert(uuid);
+            self.persist.uuids.get_or_insert_with(p.id, || uuid);
         }
         // Projectile.setOwner: the acting player's or the mob's UUID, which
         // its save keeps even once the owner is gone.
@@ -2473,10 +2467,9 @@ impl Game<'_> {
                     self.post_game_event(event, at, ctx);
                 }
                 // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's
-                // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, the
-                // shulker's lid (Shulker.setRawPeekAmount), an evoker's vexes
-                // (ENTITY_PLACE), Enderman.teleport's TELEPORT,
-                // LivingEntity.onEquipItem's EQUIP/UNEQUIP.
+                // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, a fox's
+                // DRINK, the shulker's lid, an evoker's vexes (ENTITY_PLACE),
+                // Enderman.teleport's TELEPORT, onEquipItem's EQUIP/UNEQUIP.
                 MobEvent::GameEvent {
                     event, at, source, ..
                 } if matches!(
@@ -2484,6 +2477,7 @@ impl Game<'_> {
                     "minecraft:entity_action"
                         | "minecraft:prime_fuse"
                         | "minecraft:eat"
+                        | "minecraft:drink"
                         | "minecraft:container_open"
                         | "minecraft:container_close"
                         | "minecraft:entity_place"
@@ -2698,6 +2692,13 @@ impl Game<'_> {
                     });
                     self.combat.explosion_source = source_mob;
                     self.combat.explosion_source_named = noted;
+                    let portal_proof = species == Species::SulfurCube
+                        && source_mob.is_some_and(|id| {
+                            self.portals
+                                .entities
+                                .get(&id)
+                                .is_some_and(|p| p.cooldown > 0)
+                        });
                     self.combat.explosion_cause = match species {
                         Species::Creeper => Some("minecraft:creeper"),
                         Species::Wither => Some("minecraft:wither"),
@@ -2727,9 +2728,12 @@ impl Game<'_> {
                         Species::Creeper | Species::Wither => self.with_hive_emptying_blast(|g| {
                             g.explode(source_mob, at, radius, source)
                         }),
-                        Species::SulfurCube => {
-                            self.explode_sulfur_cube(source_mob, at, radius, source)
-                        }
+                        Species::SulfurCube => self.explode_sulfur_cube(
+                            source_mob,
+                            at,
+                            radius,
+                            source.with_portal_proof(portal_proof),
+                        ),
                         _ => self.explode(source_mob, at, radius, source),
                     };
                     self.combat.explosion_source = None;
@@ -5975,7 +5979,7 @@ impl Game<'_> {
                         if let Some(id) = self.spawn_mob_raw("minecraft:chicken", atp, true)
                             && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
                         {
-                            c.extra.age = -24000;
+                            (c.extra.age, c.extra.variant) = (-24000, p.egg_variant.unwrap_or(0));
                         }
                     }
                 }
@@ -7570,12 +7574,12 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref() else {
             return Ok(false);
         };
-        // Projectile.shootFromRotation adds getKnownMovement: what the thrower
-        // last moved, not a velocity the server kept for a guest.
+        // Projectile.shootFromRotation adds getKnownMovement: what the thrower last moved.
         let on_ground = p.ground.on_ground;
         let velocity = self.known_player_movement();
         let start = Vec3::new(eye[0], eye[1] - 0.1, eye[2]);
         let mut proj = Projectile::new(kind.clone(), start, Some(Who::Player));
+        proj.set_egg_item(stack);
         proj.shoot_from_rotation(self.pitch, self.yaw, 0.0, 1.5, 1.0, velocity, on_ground);
         self.spawn_projectile(proj, stack);
         // SnowballItem.use / EggItem.use / EnderpearlItem.use: awardStat(ITEM_USED).

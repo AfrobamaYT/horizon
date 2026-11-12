@@ -763,10 +763,14 @@ pub(crate) fn stage_with_manifest(
         out.push_str(&source[from..]);
         fs::write(&file.path, out).map_err(|e| format!("{}: {e}", file.path.display()))?;
         staged.files += 1;
-        if staged.points != points_before
-            && let Some(package) = &file.package
-        {
-            packages.insert(package.clone());
+        // The game crate names the points' table only in a staged copy, so its normal manifest
+        // carries no dependency on it: the pass adds one, as it does for a marked lower crate.
+        if staged.points != points_before {
+            packages.insert(
+                file.package
+                    .clone()
+                    .unwrap_or_else(|| root.join("crates/horizon-client")),
+            );
         }
     }
     dependencies(root, packages)?;
@@ -830,7 +834,7 @@ pub(crate) fn dependencies(
 
 /// `lock` with `added` in the dependency list of the package `name`, kept in the lock file's
 /// sorted order; none when the lock file has no entry for it.
-fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
+pub(crate) fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
     let header = format!("[[package]]\nname = \"{name}\"\n");
     let start = lock.find(&header)?;
     let end = lock[start + header.len()..]
@@ -1521,7 +1525,7 @@ name = 'horizon-mod-api-gen'
         put(
             "Cargo.lock",
             // CRLF, as a Windows checkout writes it.
-            &"version = 4\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n"
+            &"version = 4\n\n[[package]]\nname = \"horizon-client\"\nversion = \"0.1.0\"\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n"
                 .replace('\n', "\r\n"),
         );
         put(
@@ -1667,6 +1671,15 @@ name = 'horizon-mod-api-gen'
         assert!(!mesher.contains("point("), "{mesher}");
         let manifest = std::fs::read_to_string(render.join("Cargo.toml")).unwrap();
         assert!(!manifest.contains("horizon-mod-points"), "{manifest}");
+        // The game crate's points name the table: the staged copy gives it the dependency.
+        let client =
+            std::fs::read_to_string(root.join("crates/horizon-client/Cargo.toml")).unwrap();
+        assert!(client.contains("horizon-mod-points"), "{client}");
+        let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+        assert!(
+            lock.contains("name = \"horizon-client\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api\",\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n]"),
+            "{lock}"
+        );
         // A second pass finds the attribute and refuses: the source tree never carries one.
         assert!(
             stage_with(&root, &WireTypes::new())

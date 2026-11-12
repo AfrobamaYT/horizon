@@ -20,6 +20,7 @@ use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+use horizon_world::level::Ticks;
 
 pub(super) struct Bolt {
     /// The entity id a server's players know it by (0 until it has one).
@@ -55,6 +56,13 @@ fn in_viewer_box(bolt: [f64; 3], p: [f64; 3]) -> bool {
         && p[1] >= bolt[1] - 15.0
         && p[1] <= bolt[1] + 21.0
 }
+
+/// `ServerLevel.tickThunder` -> `Level.getBlockRandomPos(minX, 0, minZ, 15)`:
+/// picks the strike column from the level's separate `randValue` LCG.
+fn thunder_strike_column(ticks: &mut Ticks, cx: i32, cz: i32) -> (i32, i32) {
+    let r = ticks.block_random_pos(cx * 16, 0, cz * 16, 15);
+    (r.x, r.z)
+}
 impl Game<'_> {
     /// `ServerChunkCache.tickSpawningChunk`: one `tickThunder` roll per
     /// spawning chunk (within 128 blocks of a player) that is in entity
@@ -80,8 +88,7 @@ impl Game<'_> {
                 continue;
             }
             // getBlockRandomPos(minX, 0, minZ, 15)
-            let r = self.world.random.next_int();
-            let (x, z) = (cx * 16 + (r & 15), cz * 16 + (r >> 16 & 15));
+            let (x, z) = thunder_strike_column(&mut self.block_ticks, cx, cz);
             let Some(pos) = self.lightning_target(x, z) else {
                 continue;
             };
@@ -1175,6 +1182,21 @@ mod tests {
         });
     }
 
+    /// `ServerLevel.tickThunder` picks its strike column from `Level.randValue`
+    /// (`Ticks::block_random_pos`), using bits `2..=5` for X and `10..=13` for Z
+    /// rather than drawing from `Level.random`.
+    #[test]
+    fn thunder_strike_column_uses_block_random_pos_lcg_bits() {
+        let mut ticks = Ticks::new(12345);
+        let mut expected_lcg = 12345i32;
+        for (cx, cz) in [(0, 0), (-3, 5), (12, -8)] {
+            expected_lcg = expected_lcg.wrapping_mul(3).wrapping_add(1_013_904_223);
+            let r = expected_lcg >> 2;
+            let expected = (cx * 16 + (r & 15), cz * 16 + ((r >> 8) & 15));
+            assert_eq!(thunder_strike_column(&mut ticks, cx, cz), expected);
+        }
+    }
+
     /// `Pig.thunderHit`: striking a pig with lightning converts it to a zombified
     /// piglin while preserving age (#7510).
     #[test]
@@ -1248,9 +1270,12 @@ mod tests {
         };
         for (pig, baby) in [(&adult_pig, false), (&baby_pig, true)] {
             let mut zombified = Mob::new(2, Arc::new(kind.clone()), Vec3::ZERO, 0.0);
-            horizon_client::mobs::conversion::single(pig, &mut zombified, params);
+            let mut pig = pig.clone();
+            horizon_client::mobs::conversion::single(&pig, &mut zombified, params);
+            horizon_client::mobs::conversion::pig_thunder_hit(&mut pig, &mut zombified);
             assert_eq!(zombified.is_baby(), baby);
             assert_eq!(zombified.yaw, 45.0);
+            assert!(zombified.persistent);
         }
     }
 

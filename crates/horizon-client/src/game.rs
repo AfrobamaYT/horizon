@@ -1654,8 +1654,8 @@ impl LevelAccess for GameLevel<'_> {
                 signal
             };
         }
-        if let Some(signal) = books::lectern_signal(self.world, pos) {
-            return signal * i32::from(books::has_book_state(self.registry, state));
+        if let Some(signal) = books::lectern_signal(self.world, self.registry, state, pos) {
+            return signal;
         }
         if let Some(signal) =
             machines::shelf_signal(self.world, self.registry, state, pos, direction)
@@ -7274,6 +7274,7 @@ impl Game<'_> {
                     .with_level(|b, _, _| b.cake_candle_state(state, item.as_deref()).is_some());
                 let pots_flower = self
                     .with_level(|b, _, _| b.potted_flower_state(state, item.as_deref()).is_some());
+                let sign_consumes = self.sign_consumes_click(hit.pos);
                 use horizon_world::level::{InteractionResult, UseBranch};
                 let item_result = match block_answer {
                     Some(answer) => native_hooks::block_use_result(answer),
@@ -7377,7 +7378,11 @@ impl Game<'_> {
                         _ => {}
                     }
                 }
-                if result.consumes_action() {
+                let sign_passes = empty_template_ran
+                    && branch == UseBranch::WithoutItem
+                    && self.res.facts().get(state).sign_form().is_some()
+                    && !sign_consumes;
+                if result.consumes_action() && !sign_passes {
                     // ServerPlayerGameMode.useItemOn: ITEM_USED_ON_BLOCK with the stack before the use, or DEFAULT_BLOCK_USE.
                     match branch {
                         horizon_world::level::UseBranch::ItemOn => {
@@ -7720,6 +7725,8 @@ impl Game<'_> {
             return Ok(true);
         };
         let target = [pos.x, pos.y, pos.z];
+        let game_master = self.can_use_game_master_blocks();
+        let state = self.lectern_placed(target, state, &stack, game_master)?;
         let state = self.apply_item_block_state(target, state, &stack)?;
         let key = (target[0], target[1], target[2]);
         if !self.world.block_entities.stateful_entity(state.0)
@@ -7728,7 +7735,6 @@ impl Game<'_> {
             self.world.block_entities.insert(key, entity);
         }
         if self.world.block_entities.get(&key).is_some() {
-            let game_master = self.can_use_game_master_blocks();
             self.apply_placed_item(target, &stack, game_master);
             // Block.setPlacedBy.
             match self.world.block_entities.get(&key) {
@@ -18106,3 +18112,7 @@ mod crumbling_sprite_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "game/interface/tests/sign_use_tests.rs"]
+mod sign_use_tests;

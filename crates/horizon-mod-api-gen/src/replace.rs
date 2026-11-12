@@ -685,7 +685,7 @@ pub struct Staged {
 }
 
 /// The library name of the package at `package`: its `[lib]` name, or its own with underscores.
-fn library_name(package: &Path) -> Result<String, String> {
+pub(crate) fn library_name(package: &Path) -> Result<String, String> {
     let manifest = package.join("Cargo.toml");
     let text = fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
     let cargo: toml::Table =
@@ -711,6 +711,8 @@ struct Crate {
     files: Vec<GameFile>,
     /// Whether only its marked functions are replaceable.
     marked_only: bool,
+    /// Its package folder.
+    package: PathBuf,
 }
 
 /// The staging pass: in the staged copy at `root`, in place, gives every replaceable function its
@@ -721,11 +723,13 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     let list = marked(root)?;
     let mut used = vec![false; list.len()];
     let client = root.join("crates/horizon-client/src");
+    let game = root.join("crates/horizon-client");
     let mut crates = vec![Crate {
         name: "horizon_client".into(),
         lib: client.join("lib.rs"),
         files: source::game_files(&client, true)?,
         marked_only: false,
+        package: game.clone(),
     }];
     let lower: BTreeSet<&str> = list
         .iter()
@@ -738,11 +742,18 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             ));
         }
         let (package, lib) = source::crate_root(root, name)?;
+        // The game crate arms every marked crate: one built on the game crate would be a cycle.
+        if built_on(&package, &game)? {
+            return Err(format!(
+                "{name}: it is built on horizon-client, so the game crate can't arm its replaceable functions; a crate with #[horizon_mod_api_macros::replaceable] must sit below the game crate"
+            ));
+        }
         crates.push(Crate {
             name: library_name(&package)?,
             lib,
             files: source::crate_files(root, name)?,
             marked_only: true,
+            package,
         });
     }
     let mut staged = Staged::default();
@@ -843,7 +854,128 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             "{origin}: {path}: no free function or inherent method every build compiles that can be replaced"
         ));
     }
+    let below: Vec<&Path> = crates
+        .iter()
+        .filter(|krate| krate.marked_only)
+        .map(|krate| krate.package.as_path())
+        .collect();
+    arm_dependencies(root, &game, &below)?;
     Ok(staged)
+}
+
+/// `path` with its `..` and `.` resolved, as written: the staged copy has no links to follow.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A package's manifest, parsed.
+fn manifest(package: &Path) -> Result<toml::Table, String> {
+    let path = package.join("Cargo.toml");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Whether `package` is built on `game` through its path dependencies (normal and build ones).
+fn built_on(package: &Path, game: &Path) -> Result<bool, String> {
+    let game = lexical(game);
+    let mut pending = vec![lexical(package)];
+    let mut seen = BTreeSet::new();
+    while let Some(next) = pending.pop() {
+        if !seen.insert(next.clone()) {
+            continue;
+        }
+        let cargo = manifest(&next)?;
+        for kind in ["dependencies", "build-dependencies"] {
+            let Some(table) = cargo.get(kind).and_then(toml::Value::as_table) else {
+                continue;
+            };
+            for dependency in table.values() {
+                if let Some(path) = dependency.get("path").and_then(toml::Value::as_str) {
+                    let folder = lexical(&next.join(path));
+                    if folder == game {
+                        return Ok(true);
+                    }
+                    pending.push(folder);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Give the staged game crate a path dependency on each crate it arms, in its manifest and its
+/// lock entry: its source manifest needn't name a crate it reaches only through slots.
+fn arm_dependencies(root: &Path, game: &Path, armed: &[&Path]) -> Result<(), String> {
+    if armed.is_empty() {
+        return Ok(());
+    }
+    let mut cargo = manifest(game)?;
+    let game_name = cargo
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| format!("{}: no package name", game.display()))?
+        .to_owned();
+    let dependencies = cargo
+        .entry("dependencies")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or("[dependencies] is not a table")?;
+    let mut added = Vec::new();
+    for package in armed {
+        let name = manifest(package)?
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| format!("{}: no package name", package.display()))?
+            .to_owned();
+        // Kept under whatever name the game crate already gives it.
+        let present = dependencies.iter().any(|(key, dependency)| {
+            *key == name
+                || dependency.get("package").and_then(toml::Value::as_str) == Some(name.as_str())
+        });
+        if present {
+            continue;
+        }
+        let folder = package
+            .file_name()
+            .ok_or_else(|| format!("{}: no folder name", package.display()))?
+            .to_string_lossy()
+            .into_owned();
+        dependencies.insert(
+            name.clone(),
+            toml::Value::Table(toml::Table::from_iter([(
+                "path".to_owned(),
+                format!("../{folder}").into(),
+            )])),
+        );
+        added.push(name);
+    }
+    if added.is_empty() {
+        return Ok(());
+    }
+    let lock_path = root.join("Cargo.lock");
+    // A Windows checkout has CRLF line endings; Cargo reads either, and the entries match on LF.
+    let lock = fs::read_to_string(&lock_path)
+        .map_err(|e| format!("{}: {e}", lock_path.display()))?
+        .replace("\r\n", "\n");
+    let added: Vec<&str> = added.iter().map(String::as_str).collect();
+    let lock = crate::points::locked_with(&lock, &game_name, &added)
+        .ok_or_else(|| format!("Cargo.lock has no entry for {game_name}"))?;
+    let path = game.join("Cargo.toml");
+    fs::write(&path, toml::to_string(&cargo).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    fs::write(&lock_path, lock).map_err(|e| format!("{}: {e}", lock_path.display()))
 }
 
 /// `text` with the head check, reader and installer of each of `found`, numbering their cells
@@ -1486,6 +1618,10 @@ mod tests {
             "crates/horizon-low/src/lib.rs",
             "#[horizon_mod_api_macros::replaceable] pub fn drawn() {}\npub fn unlisted() {}\n",
         );
+        write(
+            "Cargo.lock",
+            "version = 4\n\n[[package]]\nname = \"horizon-client\"\nversion = \"0.1.0\"\n\n[[package]]\nname = \"horizon-low\"\nversion = \"0.1.0\"\n",
+        );
 
         let staged = stage(root.path()).unwrap();
         assert_eq!(
@@ -1506,6 +1642,21 @@ mod tests {
         );
         assert!(low.contains("pub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; 1]"));
         syn::parse_file(&low).unwrap();
+        // The game crate arms the marked crate, so the staged copy depends on it.
+        assert!(lib.contains("::horizon_low::__fnr_arm();"), "{lib}");
+        let client: toml::Table = toml::from_str(
+            &fs::read_to_string(root.path().join("crates/horizon-client/Cargo.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            client["dependencies"]["horizon-low"]["path"].as_str(),
+            Some("../horizon-low")
+        );
+        let lock = fs::read_to_string(root.path().join("Cargo.lock")).unwrap();
+        assert!(
+            lock.contains("name = \"horizon-client\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-low\",\n]"),
+            "{lock}"
+        );
 
         write(
             "crates/horizon-low/src/lib.rs",
@@ -1515,6 +1666,45 @@ mod tests {
         assert!(
             error.contains("#[horizon_mod_api_macros::replaceable] on horizon_low::missing"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn a_marked_crate_built_on_the_game_crate_is_refused_by_name() {
+        let root = tempfile::tempdir().unwrap();
+        let write = |path: &str, text: &str| {
+            let path = root.path().join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        write(
+            "crates/horizon-client/Cargo.toml",
+            "[package]\nname = 'horizon-client'\n",
+        );
+        write("crates/horizon-client/src/lib.rs", "mod game;\n");
+        write("crates/horizon-client/src/game.rs", "");
+        // Through a crate in between, as a cycle usually hides.
+        write(
+            "crates/horizon-high/Cargo.toml",
+            "[package]\nname = 'horizon-high'\n[dependencies]\nhorizon-mid = { path = '../horizon-mid' }\n",
+        );
+        write(
+            "crates/horizon-mid/Cargo.toml",
+            "[package]\nname = 'horizon-mid'\n[build-dependencies]\nhorizon-client = { path = '../horizon-client' }\n",
+        );
+        write(
+            "crates/horizon-high/src/lib.rs",
+            "#[horizon_mod_api_macros::replaceable] pub fn drawn() {}\n",
+        );
+        let error = stage(root.path()).unwrap_err();
+        assert!(
+            error.starts_with("horizon_high: it is built on horizon-client"),
+            "{error}"
+        );
+        // Left untouched: the refusal comes before any edit.
+        assert_eq!(
+            fs::read_to_string(root.path().join("crates/horizon-high/src/lib.rs")).unwrap(),
+            "#[horizon_mod_api_macros::replaceable] pub fn drawn() {}\n"
         );
     }
 }

@@ -2502,7 +2502,7 @@ fn mob_from_nbt_at(
         m.extra.counter = number(tag.get("still_timeout")).unwrap_or(0) as i32;
     }
     if m.species() == crate::mobs::Species::Shulker {
-        m.extra.variant3 = (number(tag.get("AttachFace")).unwrap_or(0) % 6).unsigned_abs() as u8;
+        m.extra.variant3 = (number(tag.get("AttachFace")).unwrap_or(0) as i8 % 6).unsigned_abs();
         m.extra.counter = number(tag.get("Peek")).map_or(0, |v| v as i8 as i32);
         m.extra.color = number(tag.get("Color")).map_or(16, |v| v as i8 as u8);
         m.anim.v[0] = m.extra.counter as f32 * 0.01;
@@ -4400,6 +4400,30 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// `Shulker` reads `AttachFace` as a byte before
+    /// `Direction.from3DDataValue` (`abs(data % 6)`): an int is narrowed
+    /// first, so 258 is byte 2, not 258 % 6 = 0, and 250 is byte -6, face 0.
+    #[test]
+    fn a_shulkers_attach_face_is_narrowed_to_a_byte_first() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:shulker".into();
+        ty.species = crate::mobs::Species::Shulker;
+        let types = [("minecraft:shulker".into(), kind)].into();
+        let face = |saved: Tag| {
+            let raw = Tag::compound([
+                ("id", string("minecraft:shulker")),
+                ("Pos", doubles(&[4.5, 220.0, 4.5])),
+                ("AttachFace", saved),
+            ]);
+            mob_from_nbt(&raw, &types, 1, None).unwrap().extra.variant3
+        };
+        assert_eq!(face(Tag::Byte(3)), 3);
+        assert_eq!(face(Tag::Byte(-2)), 2);
+        assert_eq!(face(Tag::Int(258)), 2);
+        assert_eq!(face(Tag::Int(250)), 0);
+    }
     use super::*;
     use crate::items::ItemStack;
 
@@ -6087,24 +6111,7 @@ mod tests {
     fn entities_without_fire_save_zero_and_a_mob_saves_its_speed_instance() {
         // Entity.remainingFireTicks starts at 0; LivingEntity.removeFrost makes
         // the movement_speed instance AttributeMap.pack then saves.
-        let orb = ExperienceOrb {
-            attachment_lifetime: Default::default(),
-            rotation: [0.0, 0.0],
-            join: Default::default(),
-            air: 300,
-            no_gravity: false,
-            id: 0,
-            position: Vec3::ZERO,
-            previous: Vec3::ZERO,
-            velocity: Vec3::ZERO,
-            value: 1,
-            age: 0,
-            on_ground: false,
-            count: 1,
-            ticks: 0,
-            health: 5,
-            following: None,
-        };
+        let orb = orbs_from_nbt(&Tag::compound([("Pos", doubles(&[0.0; 3]))])).remove(0);
         let tag = orb_to_nbt(&orb, [0; 4]);
         assert_eq!(tag.get("Fire"), Some(&Tag::Short(0)));
         // A stand summoned this tick has no instance yet; its first tick makes
@@ -6204,24 +6211,14 @@ mod tests {
     }
     #[test]
     fn orbs_keep_their_count() {
-        let o = ExperienceOrb {
-            attachment_lifetime: Default::default(),
-            rotation: [0.0, 0.0],
-            join: Default::default(),
-            air: 32767,
-            no_gravity: false,
-            id: 0,
-            position: Vec3::new(1.0, 2.0, 3.0),
-            previous: Vec3::ZERO,
-            velocity: Vec3::ZERO,
-            value: 7,
-            age: 3,
-            on_ground: false,
-            count: 3,
-            ticks: 0,
-            health: 5,
-            following: None,
-        };
+        let at = ("Pos", doubles(&[1.0, 2.0, 3.0]));
+        let loaded = [at, ("Value", Tag::Short(7)), ("Age", Tag::Short(3))];
+        let o = orbs_from_nbt(&Tag::compound(
+            loaded
+                .into_iter()
+                .chain([("Count", Tag::Int(3)), ("Air", Tag::Short(32767))]),
+        ))
+        .remove(0);
         let tag = orb_to_nbt(&o, [0; 4]);
         let back = orbs_from_nbt(&tag);
         assert_eq!(back.len(), 1);
