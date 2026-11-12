@@ -3113,6 +3113,49 @@ impl PendingPushes {
         self.by_mob.entry(id).or_default().push(v);
     }
 }
+#[cfg(test)]
+mod pending_push_tests {
+    use super::PendingPushes;
+    use horizon_core::geometry::Vec3;
+
+    /// Each mob's pushes, in the order they apply.
+    fn per_mob(p: &PendingPushes) -> std::collections::BTreeMap<u32, Vec<[f64; 3]>> {
+        let mut out = std::collections::BTreeMap::<u32, Vec<[f64; 3]>>::new();
+        for (id, v) in &p.list {
+            out.entry(*id).or_default().push([v.x, v.y, v.z]);
+        }
+        for (id, list) in &p.by_mob {
+            out.entry(*id)
+                .or_default()
+                .extend(list.iter().map(|v| [v.x, v.y, v.z]));
+        }
+        out
+    }
+
+    /// Two lists of pushes, the second appended to the first, apply as one list of them all in
+    /// that order, on either side of the switch from one list to a list per mob.
+    #[test]
+    fn appended_pushes_apply_in_order() {
+        let pushes: Vec<(u32, Vec3)> = (0..200u32)
+            .map(|k| (k * 7 % 11, Vec3::new(f64::from(k), 0.0, -f64::from(k))))
+            .collect();
+        let mut all = PendingPushes::default();
+        for &(id, v) in &pushes {
+            all.push(id, v);
+        }
+        for split in [0, 30, 64, 70, 150, 200] {
+            let (mut first, mut second) = (PendingPushes::default(), PendingPushes::default());
+            for &(id, v) in &pushes[..split] {
+                first.push(id, v);
+            }
+            for &(id, v) in &pushes[split..] {
+                second.push(id, v);
+            }
+            first.append(second);
+            assert_eq!(per_mob(&first), per_mob(&all), "split at {split}");
+        }
+    }
+}
 /// `ServerLevel.sendBlockUpdated`: for each write that changed a block's collision
 /// shape, a mob whose path runs near it re-paths (`PathNavigation.shouldRecomputePath`).
 /// The writes whose shape changed are found once per tick ([`collision_changes`]).

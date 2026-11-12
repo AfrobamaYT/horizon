@@ -1851,6 +1851,23 @@ fn extinguish_if_wet(m: &mut Mob, w: &MobWorld, was_on_fire: bool, events: &mut 
     }
 }
 
+/// `LivingEntity.canBreatheUnderWater`: the `can_breathe_under_water` tag, which
+/// `MobType.flags.breathes_water` holds, and the two overrides — a baby happy ghast
+/// and a sulfur cube with a block in its body breathe under water too.
+fn can_breathe_under_water(m: &Mob) -> bool {
+    m.kind.flags.breathes_water
+        || m.species() == Species::HappyGhast && m.is_baby()
+        || m.species() == Species::SulfurCube && crate::mobs::sulfur_cube::has_body(m)
+}
+
+/// `IronGolem.decreaseAirSupply` hands back the air it is given (`iload_1;
+/// ireturn`), so a golem under water is in `baseTick`'s drowning branch with a
+/// consume of 0: it never loses a bubble, never reaches the -20 that hurts, and
+/// never refills either, though the tag does not list its type.
+fn keeps_its_air(m: &Mob) -> bool {
+    m.species() == Species::IronGolem
+}
+
 /// Entity.baseTick + LivingEntity.baseTick + Mob.baseTick.
 fn base_tick(
     m: &mut Mob,
@@ -1977,11 +1994,11 @@ fn base_tick(
             let water_breathing = m.has_effect("minecraft:water_breathing")
                 || m.has_effect("minecraft:conduit_power");
             let nautilus = m.has_effect("minecraft:breath_of_the_nautilus");
-            let drowns = submerged && !m.kind.flags.breathes_water && !water_breathing && !nautilus;
+            let drowns = submerged && !can_breathe_under_water(m) && !water_breathing && !nautilus;
             let held = submerged && nautilus && !water_breathing;
             let vanilla = Breath {
                 can_breathe: !drowns,
-                consume: 1,
+                consume: if keeps_its_air(m) { 0 } else { 1 },
                 refill: if drowns || held { 0 } else { 4 },
             };
             let breath = breathe(w.loop_context, m.id, &m.kind.id, vanilla);
@@ -3553,6 +3570,14 @@ pub fn walk_target_value(m: &Mob, w: &MobWorld, p: [i32; 3]) -> f32 {
     {
         return 10.0;
     }
+    // Enderman.getWalkTargetValue, Pillager's and Warden's: every position scores
+    // the same, so their strolls pick one of the ten at random.
+    if matches!(
+        m.species(),
+        Species::Enderman | Species::Pillager | Species::Warden
+    ) {
+        return 0.0;
+    }
     if m.hostile()
         && !matches!(
             m.species(),
@@ -3560,6 +3585,15 @@ pub fn walk_target_value(m: &Mob, w: &MobWorld, p: [i32; 3]) -> f32 {
         )
     {
         return -light();
+    }
+    // MushroomCow.getWalkTargetValue replaces Animal's: mycelium is the best
+    // ground and any other is scored by the light, grass or not.
+    if m.species() == Species::Mooshroom {
+        return if w.block_name(p[0], p[1] - 1, p[2]) == "minecraft:mycelium" {
+            10.0
+        } else {
+            light()
+        };
     }
     if m.kind.flags.animal {
         if w.block_name(p[0], p[1] - 1, p[2]) == "minecraft:grass_block" {
@@ -6637,6 +6671,64 @@ mod air_tests {
         out
     }
 
+    /// `LivingEntity.canBreatheUnderWater` on the drown path: the
+    /// `can_breathe_under_water` tag (a guardian and a copper golem are in it, an
+    /// iron golem is not), with the baby happy ghast and the sulfur cube holding a
+    /// block on top of it and the golem's own `decreaseAirSupply` holding its air.
+    /// 300 ticks take the air from 300 to 0 and 20 more deal the drown's 2.
+    #[test]
+    fn the_types_the_jar_lists_breathe_under_water() {
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+            );
+            let water = registry.default_state("minecraft:water").unwrap();
+            for x in 0..=4 {
+                for z in 0..=4 {
+                    for y in 0..=8 {
+                        world.set(x, y, z, water).unwrap();
+                    }
+                }
+            }
+        };
+        let ran = crate::mobs::world::with_built_test_world(&[], build, |w, types| {
+            let drowned = |id: &str, baby: bool, body: Option<&str>| {
+                let kind = std::sync::Arc::new(types.types[id].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(2.5, 3.0, 2.5), 0.0);
+                if baby {
+                    m.extra.age = -24000;
+                }
+                m.extra.set_body(body.map(Into::into));
+                let start = m.health;
+                let mut events = Vec::new();
+                let mut test_level = crate::health::TestLevel::new(0);
+                for _ in 0..320 {
+                    base_tick(&mut m, w, &mut test_level.level(), &mut events);
+                }
+                (start - m.health, m.air)
+            };
+            // The tag itself, from the shipped data: the golems differ.
+            assert!(types.types["minecraft:copper_golem"].flags.breathes_water);
+            assert!(!types.types["minecraft:iron_golem"].flags.breathes_water);
+            assert_eq!(drowned("minecraft:guardian", false, None), (0.0, 300));
+            assert_eq!(drowned("minecraft:copper_golem", false, None), (0.0, 300));
+            // Not in the tag, and still no drowning damage: its decreaseAirSupply
+            // is the identity, so its air stays at 300 and it never refills.
+            assert_eq!(drowned("minecraft:iron_golem", false, None), (0.0, 300));
+            assert_eq!(drowned("minecraft:happy_ghast", false, None), (2.0, 0));
+            assert_eq!(drowned("minecraft:happy_ghast", true, None), (0.0, 300));
+            assert_eq!(drowned("minecraft:sulfur_cube", false, None), (2.0, 0));
+            assert_eq!(
+                drowned("minecraft:sulfur_cube", false, Some("minecraft:stone")),
+                (0.0, 300)
+            );
+        });
+        // Without the extracted vanilla data the world cannot be built.
+        let _ = ran;
+    }
+
     /// `Dolphin.handleAirSupply` is empty and the dolphin isn't in
     /// `#can_breathe_under_water`: under water it loses a breath a tick from
     /// its 4800, as `LivingEntity.baseTick` takes it, so it must surface.
@@ -7425,5 +7517,82 @@ mod baby_speed_tests {
         let mut adult = baby(Species::Zombie, "minecraft:zombie");
         finalize::set_baby(&mut adult, false);
         assert_eq!(speed_bonus(&adult), 1.0);
+    }
+}
+
+#[cfg(test)]
+mod walk_target_tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// `PathfinderMob.getWalkTargetValue` and its overrides, at three positions
+    /// that differ only in the block below. A cow scores grass 10 and mycelium by
+    /// the light; a mushroom cow, whose own override replaces Animal's, mycelium
+    /// 10 and grass by the light; a monster the negated light; and an enderman, a
+    /// pillager and a warden the same 0 everywhere.
+    #[test]
+    fn a_stroll_scores_its_ground_the_way_the_jar_does() {
+        let ran = crate::mobs::world::with_built_test_world(
+            &[],
+            |world, registry| {
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let grass = registry.default_state("minecraft:grass_block").unwrap();
+                let mycelium = registry.default_state("minecraft:mycelium").unwrap();
+                for cx in -1..1 {
+                    for cz in -1..1 {
+                        world
+                            .chunks
+                            .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                    }
+                }
+                for x in -4..4 {
+                    for z in -4..4 {
+                        world.set(x, 63, z, stone).unwrap();
+                    }
+                }
+                world.set(-2, 63, 0, grass).unwrap();
+                world.set(0, 63, 0, stone).unwrap();
+                world.set(2, 63, 0, mycelium).unwrap();
+            },
+            |w, types| {
+                let value = |id: &str, x: i32| {
+                    let kind = Arc::new(types.types[id].clone());
+                    let m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+                    walk_target_value(&m, w, [x, 64, 0])
+                };
+                // The light term of the middle position, which the report quotes.
+                let light = w.brightness(0, 64, 0) - 0.5;
+                // A cow: grass 10, mycelium and stone by the light.
+                assert_eq!(value("minecraft:cow", -2), 10.0, "cow on grass");
+                assert_eq!(value("minecraft:cow", 0), light, "cow on stone");
+                assert_eq!(value("minecraft:cow", 2), light, "cow on mycelium");
+                // A mushroom cow: mycelium 10, grass by the light, not 10.
+                assert_eq!(
+                    value("minecraft:mooshroom", 2),
+                    10.0,
+                    "mooshroom on mycelium"
+                );
+                assert_eq!(
+                    value("minecraft:mooshroom", -2),
+                    light,
+                    "mooshroom on grass"
+                );
+                // A monster: the negated light, on grass like anywhere else.
+                assert_eq!(value("minecraft:zombie", -2), -light, "zombie");
+                // The three that score every position the same.
+                for flat in [
+                    "minecraft:enderman",
+                    "minecraft:pillager",
+                    "minecraft:warden",
+                ] {
+                    assert_eq!(value(flat, -2), 0.0, "{flat} on grass");
+                    assert_eq!(value(flat, 0), 0.0, "{flat} on stone");
+                    assert_eq!(value(flat, 2), 0.0, "{flat} on mycelium");
+                }
+            },
+        );
+        // Without the extracted vanilla data the world cannot be built.
+        let _ = ran;
     }
 }

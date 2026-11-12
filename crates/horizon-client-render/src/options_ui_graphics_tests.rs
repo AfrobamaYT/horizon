@@ -219,3 +219,20 @@ fn the_chat_delay_slider_says_its_delay() {
     s.file.set("chatDelay", crate::options_file::V::Double(0.0));
     assert_eq!(chat_delay_label(&s).plain(), "options.chat.delay_none");
 }
+
+#[test]
+fn the_graphics_preset_slider_uses_floor_stops() {
+    assert_eq!(preset_from_slider(0.0), 0);
+    assert_eq!(preset_from_slider(0.24), 0);
+    assert_eq!(preset_from_slider(0.25), 1);
+    assert_eq!(preset_from_slider(0.49), 1);
+    assert_eq!(preset_from_slider(0.5), 2);
+    assert_eq!(preset_from_slider(0.74), 2);
+    assert_eq!(preset_from_slider(0.75), 3);
+    assert_eq!(preset_from_slider(1.0), 3);
+    let mut s = Settings::default();
+    set_slider(Opt::Preset, &mut s, 0.2);
+    assert_eq!(s.graphics_preset, "fast");
+    set_slider(Opt::Preset, &mut s, 0.8);
+    assert_eq!(s.graphics_preset, "custom");
+}
