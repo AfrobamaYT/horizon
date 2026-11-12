@@ -56,7 +56,9 @@ fn a_panic_in_the_games_answer_keeps_its_message_and_a_mods_panic_reaches_the_ga
         }
         Vec::new()
     })));
-    let refused = std::panic::catch_unwind(|| guest::host(7, Writer::new())).unwrap_err();
+    let refused = std::panic::catch_unwind(|| guest::host(7, Writer::new()))
+        .err()
+        .expect("the game's answer must panic");
     assert_eq!(
         refused.downcast_ref::<String>().map(String::as_str),
         Some("the game refused call 7")
