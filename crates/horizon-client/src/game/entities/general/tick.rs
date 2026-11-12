@@ -16,8 +16,8 @@
 //! from the join-order walk.
 
 use super::super::Game;
-use super::{GeneralRows, GeneralTypeCatalog, general_type_catalog};
-use horizon_client::join_seq::{JoinSeq, RestoreOrder};
+use super::{GeneralTypeCatalog, general_type_catalog};
+use horizon_client::join_seq::JoinSeq;
 use mod_api::EntityRef;
 
 impl Game<'_> {
@@ -43,23 +43,24 @@ impl Game<'_> {
         let epoch = self.native_lifecycle.epoch();
         let entity_ticking = self.entity_ticking_area();
         let mut round = self.native_tick_round();
-        // The whole list out for the pass (a family's own walk, as the mobs'):
-        // what joins meanwhile lands in the fresh bound buffer, numbered at
-        // or above `born`, and ticks from the next pass.
-        let mut taken = self.resident_entities.general.rows.lift();
-        let original = taken.len();
+        // The walk stays on the live list, as the ordered run's does: a
+        // lifted pass would take every row's residency slot, and a part's
+        // writes reach its row through that slot. What joins during the pass
+        // lands at or above `born`, ticks from the next pass, and never
+        // reaches this loop's rows.
+        let total = self.resident_entities.general.rows.len();
         // Each vehicle's riders by mount link, in join order: a rider's place
         // in the storage is not its place in its vehicle's subtree. A tree
         // without riders collects nothing here.
         let mut riders: Vec<(u32, usize)> = Vec::new();
-        for (index, row) in taken.iter().enumerate() {
+        for (index, row) in self.resident_entities.general.rows.iter().enumerate() {
             if let Some(vehicle) = row.mount {
                 riders.push((vehicle, index));
             }
         }
-        for index in 0..original {
+        for index in 0..total {
             let (id, slot, join, mount, at) = {
-                let row = &taken[index];
+                let row = &self.resident_entities.general.rows[index];
                 (row.id, row.type_slot, row.join, row.mount, row.position)
             };
             // A rider ticks inside its vehicle's tick (`tickNonPassenger`
@@ -75,7 +76,8 @@ impl Game<'_> {
             // `Entity.commonTick`'s setOldPosAndRot: the row's previous
             // position is its current one. The rest of the common tick
             // (tick counting, invulnerable time) has no row field yet.
-            taken[index].previous = taken[index].position;
+            self.resident_entities.general.rows[index].previous =
+                self.resident_entities.general.rows[index].position;
             let kind = catalog.key(slot);
             let ticks = !round.listening() || self.native_tick_pre_one(&mut round, id, kind);
             if ticks {
@@ -84,26 +86,12 @@ impl Game<'_> {
                 {
                     self.dispatch_general_tick(kind, epoch, id);
                 }
-                self.tick_general_riders(
-                    &mut taken,
-                    id,
-                    born,
-                    catalog,
-                    &subscribed,
-                    epoch,
-                    &riders,
-                );
+                self.tick_general_riders(id, born, catalog, &subscribed, epoch, &riders);
             }
             if round.listening() {
                 self.native_tick_post_one(&round, id, kind);
             }
         }
-        // Survivors keep their join numbers and their order; what spawned
-        // during the pass joined above them and stays behind them.
-        self.resident_entities
-            .general
-            .rows
-            .restore(taken, RestoreOrder::SurvivorsFirst);
         Ok(())
     }
 
@@ -115,7 +103,6 @@ impl Game<'_> {
     /// pass with its root — a tree joins whole.
     fn tick_general_riders(
         &mut self,
-        taken: &mut GeneralRows,
         vehicle: u32,
         born: JoinSeq,
         catalog: &GeneralTypeCatalog,
@@ -128,19 +115,20 @@ impl Game<'_> {
                 continue;
             }
             let (id, slot, join) = {
-                let row = &taken[index];
+                let row = &self.resident_entities.general.rows[index];
                 (row.id, row.type_slot, row.join)
             };
             if join >= born {
                 continue;
             }
-            taken[index].previous = taken[index].position;
+            self.resident_entities.general.rows[index].previous =
+                self.resident_entities.general.rows[index].position;
             if subscribed.get(slot).copied().unwrap_or(false)
                 && let Some(epoch) = epoch
             {
                 self.dispatch_general_tick(catalog.key(slot), epoch, id);
             }
-            self.tick_general_riders(taken, id, born, catalog, subscribed, epoch, riders);
+            self.tick_general_riders(id, born, catalog, subscribed, epoch, riders);
         }
     }
 
