@@ -15,7 +15,7 @@ use crate::{
 /// A tank block calls it from its `use_item_on` part and answers a success when it is true:
 ///
 /// ```no_run
-/// use mod_api::{Answer, BlockPart, ServerHost, UseItemOnEvent, fluid_util};
+/// use mod_api::{BlockPart, Direction, InteractionResult, ServerHost, UseItemOnEvent, fluid_util};
 /// struct Tank;
 /// #[mod_api::horizon_part]
 /// impl BlockPart for Tank {
@@ -23,13 +23,13 @@ use crate::{
 ///         &self,
 ///         host: &mut dyn ServerHost,
 ///         event: &mut UseItemOnEvent<'_>,
-///     ) -> Option<Answer> {
+///     ) -> Option<InteractionResult> {
 ///         let click = event.click;
 ///         let player = host.player(click.player)?;
 ///         let level = player.level(host)?;
-///         let side = Some(click.hit.face);
+///         let side = Direction::ALL.into_iter().find(|d| d.normal() == click.hit.face);
 ///         fluid_util::interact_with_fluid_handler(host, player, click.hand, level, click.pos, side)
-///             .then_some(Answer::Success)
+///             .then_some(InteractionResult::Success)
 ///     }
 /// }
 /// ```
