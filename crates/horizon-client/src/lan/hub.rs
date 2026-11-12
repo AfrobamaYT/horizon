@@ -10,6 +10,7 @@ use super::{
     chunks::ChunkEncoder,
     data::SyncData,
     entity::{Entities, EntityState},
+    equipment_cache,
     guest::{Guest, InboxItem, SentEffect, stack_to_network},
 };
 use crate::{
@@ -239,7 +240,7 @@ pub enum HostEvent {
         text: String,
         /// The hit's number in the filter's window.
         count: u32,
-        action: horizon_chat_filter::Action,
+        action: horizon_server_files::chat_guard::Action,
     },
     /// A server log warning (ServerGamePacketListenerImpl's LOGGER.warn).
     Warn(String),
@@ -372,7 +373,7 @@ pub struct Hub {
     /// The anticheat, when `server.toml` turns it on (dedicated servers).
     pub anticheat: Option<Box<super::anticheat::Anticheat>>,
     /// The chat filter, when `server.toml` turns it on (dedicated servers).
-    pub chat_filter: Option<Box<horizon_chat_filter::Guard>>,
+    pub chat_filter: Option<Box<dyn horizon_server_files::chat_guard::ChatGuard>>,
     /// The far ring, when `server.toml`'s `max_view_distance` turns it on (dedicated servers).
     pub far: Option<super::far::Far>,
     /// The `immediate_respawn` game rule, as the players were last told.
@@ -693,10 +694,10 @@ fn requeue_ring(
 }
 
 /// A player's next chunks (`Hub::next_batch`), with their places in its queues: the view's, then
-/// the far ring's (none: the save has none to send).
+/// the far ring's. Missing saved columns stay queued for a later retry.
 struct Batch<'w> {
     near: Vec<(usize, &'w Chunk)>,
-    far: Vec<(usize, Option<Column<'w>>)>,
+    far: Vec<(usize, Column<'w>)>,
 }
 
 /// A far chunk to send: the level's own while it holds it, else what the save's readers made.
@@ -2787,6 +2788,7 @@ impl Hub {
         // Each column once, however many players it goes to, with the
         // number of batches that take it.
         let mut columns = Columns::default();
+        let mut far_bodies = crate::fast_hash::FxHashMap::default();
         let batches: Vec<_> = batches
             .into_iter()
             .map(|(i, batch)| {
@@ -2797,12 +2799,17 @@ impl Hub {
                     .unzip();
                 let mut far = Vec::new();
                 for (idx, column) in batch.far {
-                    far.push((idx, column.is_some()));
-                    match column {
-                        Some(Column::Level(chunk)) => bodies.push(Body::Level(columns.add(chunk))),
-                        Some(Column::Saved(body)) => bodies.push(Body::Saved(body)),
-                        None => {}
-                    }
+                    far.push(idx);
+                    let body = match column {
+                        Column::Level(chunk) => far_bodies
+                            .entry((chunk.x, chunk.z))
+                            .or_insert_with(|| {
+                                Arc::<[u8]>::from(self.encoder.body_far(chunk, world))
+                            })
+                            .clone(),
+                        Column::Saved(body) => body,
+                    };
+                    bodies.push(Body::Saved(body));
                 }
                 (i, taken, far, bodies)
             })
@@ -2866,13 +2873,13 @@ impl Hub {
                         seen.iter().map(|&(x, z)| Holder::Chunk([x, z])),
                     );
                 }
-                // A far chunk the save doesn't have leaves the queue unsent.
-                seen.extend(far.into_iter().rev().filter_map(|(idx, sent)| {
+                g.far_cursor -= far.iter().filter(|&&idx| idx < g.far_cursor).count();
+                seen.extend(far.into_iter().rev().map(|idx| {
                     let key = g.far_queue.remove(idx);
-                    if sent && self.sync_attachments && g.brand == "horizon" {
+                    if self.sync_attachments && g.brand == "horizon" {
                         g.far_sent_chunks.insert(key);
                     }
-                    sent.then_some(key)
+                    key
                 }));
                 g.sent_chunks.extend(seen);
             });
@@ -2934,6 +2941,7 @@ impl Hub {
                     self.chunk_watches.push(g, ChunkWatchKind::Watch, key);
                 }
             }
+            g.far_cursor = 0;
             requeue(&mut g.chunk_queue, &g.sent_chunks, (cx, cz), r);
             if reach > r {
                 requeue_ring(&mut g.far_queue, &g.sent_chunks, (cx, cz), r, reach);
@@ -2994,36 +3002,49 @@ impl Hub {
             .take(near_take)
             .collect();
         let mut far = Vec::new();
+        let mut cursor = g.far_cursor;
         if let (Some(ring), Some((cx, cz))) = (self.far.as_mut(), g.center) {
             // What the view left of the vanilla quota. A first-view burst can take more than that.
             let mut left = budget.saturating_sub(near.len());
-            for (idx, &(x, z)) in g.far_queue.iter().enumerate().take(super::far::LOOKS) {
+            let len = g.far_queue.len();
+            let start = g.far_cursor % len.max(1);
+            let mut looked = 0;
+            for offset in 0..len.min(super::far::LOOKS) {
                 if left == 0 {
                     break;
                 }
+                let idx = (start + offset) % len;
+                let (x, z) = g.far_queue[idx];
+                looked += 1;
                 if !tracked(cx, cz, ring.limit(), x, z) {
                     continue;
                 }
                 let column = match world.chunks.get(&(x, z)) {
-                    Some(c) if ready(c) => Some(Column::Level(c)),
-                    Some(_) => continue,
-                    None => match ring.saved(x, z) {
-                        super::far::Saved::Body(body) => Some(Column::Saved(body)),
-                        super::far::Saved::Missing => None,
-                        super::far::Saved::Waiting => continue,
+                    // Far columns carry all their own saved light layers. They need no
+                    // neighbour views, including at the edge of the level's loading buffer.
+                    Some(c) if c.lit => Column::Level(c),
+                    _ => match ring.saved(x, z) {
+                        super::far::Saved::Body(body) => Column::Saved(body),
+                        super::far::Saved::Missing | super::far::Saved::Waiting => {
+                            continue;
+                        }
                     },
                 };
-                left -= usize::from(column.is_some());
+                left -= 1;
                 far.push((idx, column));
             }
+            cursor = (start + looked) % len.max(1);
+            // Removal after sending runs backwards through the queue, even when the scan wrapped.
+            far.sort_unstable_by_key(|(idx, _)| *idx);
         }
         // `update_chunks` subtracts the batch. Covering the near columns keeps that from going
         // negative, so the next tick's `.min(chunks_per_tick)` cap holds again.
-        if burst {
-            self.guests.update(i, |g| {
+        self.guests.update(i, |g| {
+            g.far_cursor = cursor;
+            if burst {
                 g.batch_quota = g.batch_quota.max(near.len() as f32);
-            });
-        }
+            }
+        });
         (!near.is_empty() || !far.is_empty()).then_some(Batch { near, far })
     }
 
@@ -3040,14 +3061,15 @@ impl Hub {
             .iter()
             .filter_map(|key| Some((*key, self.encoder.biome_data(world.chunks.get(key)?))))
             .collect();
-        for g in self.guests.simulation_iter().filter(|g| self.watches(g)) {
-            let chunks: Vec<_> = data
-                .iter()
-                .filter(|(key, _)| g.sent_chunks.contains(key))
-                .map(|(_, d)| d.clone())
-                .collect();
-            if !chunks.is_empty() {
-                g.send(&C::ChunksBiomes(play::ChunksBiomes { chunks }));
+        let watching: Vec<_> = self
+            .guests
+            .simulation_iter()
+            .filter(|g| self.watches(g))
+            .collect();
+        let bodies = super::biome_resend::bodies(watching.iter().map(|g| &g.sent_chunks), &data);
+        for (g, body) in watching.into_iter().zip(bodies) {
+            if let Some(body) = body {
+                g.send_chunks_biomes_body(body);
             }
         }
     }
@@ -3244,19 +3266,10 @@ impl Hub {
                 self.guests[i].sender.send(body.clone());
             }
             if recording {
+                let bounds = super::prediction::bounds(&positions);
                 for &i in &viewers {
                     self.guests.update(i, |g| {
-                        let Some(record) = g.record.as_deref_mut() else {
-                            return;
-                        };
-                        let slack = super::prediction::slack(std::array::from_fn(|i| {
-                            g.position[i] - g.previous_position[i]
-                        }));
-                        for &(x, y, z) in &positions {
-                            if super::prediction::near(g.position, [x, y, z], slack) {
-                                record.changed_near(self.ticks, [x, y, z]);
-                            }
-                        }
+                        super::prediction::note_changes(g, self.ticks, bounds, &positions);
                     });
                 }
             }
@@ -3381,6 +3394,11 @@ impl Hub {
         }
         let (particles, ambient) = crate::effects::effect_particles(effects);
         self.particle_meta(&particles, ambient)
+    }
+
+    /// The synchronized registry tables, available to helper threads.
+    pub fn sync_data(&self) -> &SyncData {
+        &self.sync
     }
 
     /// DATA_EFFECT_PARTICLES and DATA_EFFECT_AMBIENCE_ID for `particles` and
@@ -3510,21 +3528,20 @@ impl Hub {
         }
     }
 
-    /// `LivingEntity.collectEquipmentChanges`: what a player holds and wears,
-    /// walking `EquipmentSlot.VALUES`, body and saddle included. `slots` is
-    /// indexed by the slot's ordinal, which is its wire slot; empty slots are
-    /// left out (the tracker sends a slot that empties as empty).
-    fn equipment_of(
-        &mut self,
-        slots: [&Option<ItemStack>; 8],
-    ) -> Vec<(u8, Option<horizon_protocol::item::Stack>)> {
-        let mut out = Vec::new();
-        for (slot, item) in (0u8..).zip(slots) {
-            if item.is_some() {
-                out.push((slot, self.stack(item)));
+    /// Convert only equipment whose full typed source changed, including body and saddle.
+    fn guest_equipment(&mut self, i: usize) -> Vec<(u8, Option<horizon_protocol::item::Stack>)> {
+        for index in 0..equipment_cache::SLOTS {
+            let g = &self.guests[i];
+            let source = equipment_source(g, index);
+            if !g.equipment_cache.is_stale(index, source) {
+                continue;
             }
+            let source = source.cloned();
+            let converted = self.stack(&source);
+            self.guests
+                .update(i, |g| g.equipment_cache.store(index, source, converted));
         }
-        out
+        self.guests[i].equipment_cache.equipment()
     }
 
     /// Whether an entity is tracked by the current dimension's level.
@@ -3592,21 +3609,7 @@ impl Hub {
         let guest_states: Vec<_> = placed
             .into_iter()
             .map(|i| {
-                use horizon_items::equipment::{BODY, SADDLE};
-                let (main, off, armor, body, saddle) = {
-                    let g = &self.guests[i];
-                    (
-                        g.inventory.get(g.selected).cloned().flatten(),
-                        g.offhand.clone(),
-                        g.armor.clone(),
-                        g.equipment[BODY].clone(),
-                        g.equipment[SADDLE].clone(),
-                    )
-                };
-                // Armor is kept head..feet; the slots run feet, legs, chest, head.
-                let equipment = self.equipment_of([
-                    &main, &off, &armor[3], &armor[2], &armor[1], &armor[0], &body, &saddle,
-                ]);
+                let equipment = self.guest_equipment(i);
                 let g = &self.guests[i];
                 let mut state = self.player_state(
                     g.entity_id,
@@ -3977,6 +3980,9 @@ impl Hub {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
         for i in 0..self.guests.len() {
+            // Converted under the old registries, even if advancements are not loaded.
+            self.guests
+                .update(i, |g| g.equipment_cache = Default::default());
             // PlayerAdvancements.reload: isFirstPacket again, the progress
             // read against the new tree; a player whose advancements were
             // never loaded does that on their first tick.
@@ -4340,6 +4346,10 @@ impl Hub {
                 S::AcceptTeleportation(p) => {
                     let recording = self.recording();
                     let g = &self.guests[i];
+                    if p.id == g.teleport_counter && g.awaiting_teleport.is_none() {
+                        self.kick(conn, invalid_movement());
+                        continue;
+                    }
                     if let Some((id, at)) = g.awaiting_teleport
                         && id == p.id
                     {
@@ -4860,7 +4870,7 @@ impl Hub {
             at[1] + f64::from(d.height) + 0.0625,
             at[2] + half,
         ];
-        no_blocks_in(world, lo, hi)
+        no_blocks_in(world, lo, hi, &self.encoder)
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: the blocks just under the
@@ -5389,6 +5399,7 @@ impl Hub {
             self.guests.update(i, |g| {
                 g.landing = true;
                 g.awaiting_teleport = None;
+                g.teleport_counter = (g.teleport_counter + 1) & 0x7FFF_FFFF;
             });
         } else {
             self.resend_teleport(i, None);
@@ -5478,14 +5489,14 @@ const PLAYER_GRAVITY: f64 = 0.08;
 
 /// `ServerGamePacketListenerImpl.getMaximumFlyingTicks`: 80 ticks, more where
 /// gravity is weaker, none at all (never kicked) without gravity.
-/// `ServerGamePacketListenerImpl.noBlocksAround` over a box: every block from `lo` to `hi` is air, in
-/// loaded chunks (a chunk not loaded yet is not known to be air: nothing floats there).
-pub fn no_blocks_in(world: &World, lo: [f64; 3], hi: [f64; 3]) -> bool {
+/// `ServerGamePacketListenerImpl.noBlocksAround` over a box: every block from `lo` to `hi` is
+/// `isAir()` (`air`'s state table), in loaded chunks (a chunk not loaded yet is not known to be air).
+pub fn no_blocks_in(world: &World, lo: [f64; 3], hi: [f64; 3], air: &ChunkEncoder) -> bool {
     let cell = |v: f64| v.floor() as i32;
     (cell(lo[0])..=cell(hi[0])).all(|x| {
         (cell(lo[2])..=cell(hi[2])).all(|z| {
             world.loaded(x, z)
-                && (cell(lo[1])..=cell(hi[1])).all(|y| world.is_air(world.block(x, y, z)))
+                && (cell(lo[1])..=cell(hi[1])).all(|y| air.is_air(world.block(x, y, z).0))
         })
     })
 }
@@ -5584,8 +5595,23 @@ fn listed_properties(
     }
 }
 
+/// The source in wire slot order: hands, armor feet..head, body, saddle.
+fn equipment_source(g: &Guest, index: usize) -> Option<&ItemStack> {
+    match index {
+        0 => g.inventory.get(g.selected)?.as_ref(),
+        1 => g.offhand.as_ref(),
+        2..=5 => g.armor[5 - index].as_ref(),
+        6 => g.equipment[horizon_items::equipment::BODY].as_ref(),
+        7 => g.equipment[horizon_items::equipment::SADDLE].as_ref(),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    mod cave_air_tests;
+    #[path = "../far_tests.rs"]
+    mod far_tests;
     mod ordered_inbox_tests;
     mod sound_tests;
     use super::*;
@@ -6728,6 +6754,73 @@ mod tests {
         assert_eq!(update.entries[0].uuid, 1);
     }
 
+    /// Exercise the compiled conversion path, including full component equality,
+    /// selection, removals and registry reload invalidation.
+    #[test]
+    fn equipment_is_converted_again_only_when_a_stack_changes() {
+        use horizon_items::equipment::{BODY, SADDLE};
+        let (mut hub, _rx) = hub_with_a_guest();
+        hub.guests.update(0, |g| {
+            g.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
+            g.selected = 0;
+            g.offhand = Some(ItemStack::new("minecraft:shield", 1));
+            g.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
+            g.equipment[BODY] = Some(ItemStack::new("minecraft:white_carpet", 1));
+            g.equipment[SADDLE] = Some(ItemStack::new("minecraft:saddle", 1));
+        });
+        let first = hub.guest_equipment(0);
+        assert_eq!(
+            first.iter().map(|(slot, _)| *slot).collect::<Vec<_>>(),
+            [0, 1, 5, 6, 7]
+        );
+        for _ in 0..3 {
+            assert_eq!(hub.guest_equipment(0), first);
+            for slot in 0..equipment_cache::SLOTS {
+                assert!(
+                    !hub.guests[0]
+                        .equipment_cache
+                        .is_stale(slot, equipment_source(&hub.guests[0], slot))
+                );
+            }
+        }
+        hub.guests
+            .update(0, |g| g.inventory[0].as_mut().unwrap().count = 3);
+        let changed = hub.guest_equipment(0);
+        assert_ne!(changed, first);
+        let mut component_stack = ItemStack::new("minecraft:stone", 3);
+        let mut data = crate::item_data::StackData::default();
+        data.repair_cost = 7;
+        component_stack.extra = Some(Box::new(data));
+        hub.guests
+            .update(0, |g| g.inventory[0] = Some(component_stack.clone()));
+        assert!(
+            hub.guests[0]
+                .equipment_cache
+                .is_stale(0, Some(&component_stack))
+        );
+        let expected = hub.stack(&Some(component_stack));
+        assert_eq!(hub.guest_equipment(0)[0], (0, expected));
+        hub.guests.update(0, |g| {
+            g.selected = 1;
+            g.offhand = None;
+            g.equipment[BODY] = None;
+            g.equipment[SADDLE] = None;
+        });
+        let cleared = hub.guest_equipment(0);
+        assert_eq!(
+            cleared.iter().map(|(slot, _)| *slot).collect::<Vec<_>>(),
+            [5]
+        );
+        assert!(!hub.guests[0].equipment_cache.is_stale(1, None));
+        hub.reload_resources(hub.sync.clone(), &mut Default::default());
+        assert!(
+            hub.guests[0]
+                .equipment_cache
+                .is_stale(5, hub.guests[0].armor[0].as_ref())
+        );
+        assert_eq!(hub.guest_equipment(0), cleared);
+    }
+
     /// `LivingEntity.collectEquipmentChanges` walks every `EquipmentSlot`: a
     /// player's body (wire slot 6) and saddle (7) reach the players who see
     /// them, with the hands and armor.
@@ -7830,7 +7923,7 @@ mod tests {
         assert!(hub.chunk_watches.is_empty() && hub.guests[0].watched.is_empty());
 
         let mods = vec![mod_api::ModEntry::new("watch", Box::new(Watcher))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             let (mut hub, _rx) = hub_with_a_guest();
             {
                 let value = 2;
@@ -8038,5 +8131,42 @@ mod tests {
             hub.next_batch(0, &world, None).is_none(),
             "an empty queue sends nothing"
         );
+    }
+    /// `ServerGamePacketListenerImpl.handleAcceptTeleportPacket`: an accept whose id is
+    /// the last teleport's (`awaitingTeleport`) while none is awaited any more
+    /// (`awaitingPositionFromClient` is null) disconnects with
+    /// `multiplayer.disconnect.invalid_player_movement`; an accept of any other id is
+    /// ignored, and the first accept of the awaited one moves the player as before.
+    #[test]
+    fn a_second_accept_of_the_same_teleport_disconnects() {
+        let (mut hub, _rx) = hub_with_a_guest();
+        let mut world = floor_at(0);
+        let accept = |id: i32| {
+            S::AcceptTeleportation(play::AcceptTeleportation {
+                id,
+                x: 5.0,
+                y: 70.0,
+                z: 5.0,
+                yaw: 0.0,
+                pitch: 0.0,
+            })
+        };
+        hub.teleport(0, Some([5.0, 70.0, 5.0]));
+        let id = hub.guests[0].teleport_counter;
+        assert!(hub.guests[0].awaiting_teleport.is_some());
+        // An id nobody sent is ignored while one is awaited.
+        tick_packet(&mut hub, &mut world, accept(id + 1));
+        assert!(hub.guests[0].awaiting_teleport.is_some());
+        assert!(hub.guests[0].left_reason.is_empty());
+        // The awaited one is accepted once.
+        tick_packet(&mut hub, &mut world, accept(id));
+        assert!(hub.guests[0].awaiting_teleport.is_none());
+        assert!(hub.guests[0].left_reason.is_empty());
+        // Another id with nothing awaited is ignored.
+        tick_packet(&mut hub, &mut world, accept(id + 1));
+        assert!(hub.guests[0].left_reason.is_empty());
+        // The same id again, with nothing awaited: disconnected.
+        tick_packet(&mut hub, &mut world, accept(id));
+        assert!(!hub.guests[0].left_reason.is_empty());
     }
 }

@@ -2788,6 +2788,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-guest-stack"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "horizon-hooks"
 version = "0.1.0"
 
@@ -2972,6 +2979,7 @@ name = "horizon-platform"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "horizon-guest-stack",
  "horizon-hooks",
  "horizon-mod-api-gen",
  "horizon-mod-point-shape",

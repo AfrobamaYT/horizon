@@ -280,10 +280,10 @@ impl Game<'_> {
         let table = self.resident_entities.table.get_mut();
         table.reset();
         let journal = table.producer();
-        self.bind_resident_owners(&journal, self.dim.key());
+        self.bind_resident_owners(&journal, self.dim.key(), self.is_logical_server());
         self.bind_specialized_resident_owners(&journal);
         for (dim, parked) in &mut self.levels.parked {
-            parked.bind_resident_owners(&journal, dim.key());
+            parked.bind_resident_owners(&journal, dim.key(), true);
         }
     }
 }
@@ -1050,8 +1050,11 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_pre(level);
             }
-            self.update_dedicated_streaming();
-            self.update_world();
+            horizon_client::spans::time("dedicated_streaming", || {
+                self.update_dedicated_streaming();
+            });
+            horizon_client::spans::time("update_world", || self.update_world());
+            let tick_span = horizon_client::spans::guard("level_tick");
             result = horizon_client::block_contact::in_level(
                 (self.serving.is_some() || self.options.dedicated.is_some()).then_some(dim.id()),
                 || {
@@ -1068,6 +1071,7 @@ impl Game<'_> {
                     }
                 },
             );
+            drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {
                 break;
@@ -1075,10 +1079,11 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_post(level);
             }
-            self.publish_server_debug(dim);
+            horizon_client::spans::time("server_debug", || self.publish_server_debug(dim));
             // An entity that crossed into a level that already ticked this
             // server tick is in it when the tick ends (`addDuringTeleport`).
             if running == Some(true) {
+                let _span = horizon_client::spans::guard("late_portal_arrivals");
                 let mut moved = false;
                 for &earlier in &order[..k] {
                     if !self.arrival_chunks(earlier).is_empty() && self.enter_level(earlier).is_ok()
@@ -1333,9 +1338,9 @@ impl Game<'_> {
         }
         let journal = self.resident_entities.table.borrow().producer();
         if dim == self.dim {
-            self.bind_resident_owners(&journal, dim.key());
+            self.bind_resident_owners(&journal, dim.key(), true);
         } else if let Some(parked) = self.levels.parked.get_mut(&dim) {
-            parked.bind_resident_owners(&journal, dim.key());
+            parked.bind_resident_owners(&journal, dim.key(), true);
         }
         self.bind_dimension_attachments(dim);
         self.levels.heard_open.push(dim);

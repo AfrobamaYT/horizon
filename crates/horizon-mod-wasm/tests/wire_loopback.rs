@@ -2079,6 +2079,47 @@ fn wrong_phase_fallible_call_returns_unavailable_to_guest() {
 }
 
 #[test]
+fn wire_loopback_entity_by_uuid_returns_a_handle_or_absence() {
+    use mod_api::{EntityRef, EntityUuid, ServerHost, WorldEpoch};
+
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl ServerHost for World {}
+    mod_api::impl_server_host_areas!(World, except(entities));
+    impl mod_api::prelude::EntitiesServerHost for World {
+        fn entity_by_uuid(&self, uuid: EntityUuid) -> Option<EntityRef> {
+            (uuid.0 == 0xfedc_ba98_7654_3210_0123_4567_89ab_cdef)
+                .then(|| EntityRef::new(WorldEpoch::new(4), 19))
+        }
+    }
+
+    let mut frame = boundary::Frame::default();
+    frame.set_server_host(&World);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let cx = std::cell::RefCell::new(cx);
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, &mut *cx.borrow_mut(), bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+
+    let host: &dyn ServerHost = &guest::Guest;
+    let found = host.entity_by_uuid(EntityUuid(0xfedc_ba98_7654_3210_0123_4567_89ab_cdef));
+    let missing = host.entity_by_uuid(EntityUuid(u128::MAX));
+    guest::set_transport(None);
+    assert_eq!(
+        found.map(|entity| (entity.epoch().get(), entity.id())),
+        Some((4, 19))
+    );
+    assert_eq!(missing, None);
+}
+
+#[test]
 fn world_phase_messages_round_trip_returns_filter_decision() {
     mod_api::__private::initialize().unwrap();
     struct World;
@@ -2219,3 +2260,8 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
 }
 #[path = "wire_loopback/chunk_queries.rs"]
 mod chunk_queries;
+
+#[path = "wire_loopback/client_fireworks.rs"]
+mod client_fireworks;
+#[path = "wire_loopback/play_hit_sound.rs"]
+mod play_hit_sound;

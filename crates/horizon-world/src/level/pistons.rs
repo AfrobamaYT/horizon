@@ -74,7 +74,7 @@ pub(crate) fn dropped_state(
 }
 
 /// `BlockEventData`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockEventData {
     pub pos: BlockPos,
     pub block: BlockId,
@@ -131,13 +131,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         param_a: i32,
         param_b: i32,
     ) {
-        self.ticks.queue_block_event(BlockEventData {
+        let event = BlockEventData {
             pos,
             block,
             param_a,
             param_b,
             note_override: None,
-        });
+        };
+        self.ticks.queue_block_event(event);
     }
     /// `BlockState.triggerEvent`.
     fn trigger_event(&mut self, state: BlockStateId, pos: BlockPos, a: i32, b: i32) -> bool {
@@ -843,8 +844,7 @@ impl Behaviours {
     /// Call once per tick after scheduled and random ticks.
     pub fn run_block_events<L: LevelAccess + ?Sized>(&self, level: &mut L, ticks: &mut Ticks) {
         let mut reschedule = Vec::new();
-        while !ticks.block_events.is_empty() {
-            let event = ticks.block_events.remove(0);
+        while let Some(event) = ticks.pop_block_event() {
             if !level.should_tick_blocks_at(event.pos.chunk()) {
                 reschedule.push(event);
                 continue;
@@ -954,8 +954,7 @@ impl Behaviours {
     /// (`PistonBaseBlock.checkIfExtend` in a neighbour update): a client
     /// runs them as they come (`ClientLevel.blockEvent`), not in a tick pass.
     fn client_drain_block_events<L: LevelAccess + ?Sized>(&self, level: &mut L, ticks: &mut Ticks) {
-        while let Some(event) = ticks.block_events.first().copied() {
-            ticks.block_events.remove(0);
+        while let Some(event) = ticks.pop_block_event() {
             let mut sim = self.sim(level, ticks);
             let state = sim.state(event.pos);
             if self.block(state) == event.block

@@ -249,8 +249,8 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertNotIn("Swatinem/rust-cache", static)
         self.assertNotIn("runner-packages.txt", static)
         self.assertIn("cargo +stable build $JOBS --profile test -p horizon-mod-package --features runtime-process --example holder_actor", runtime)
-        self.assertIn("cargo +stable test $JOBS --profile test --workspace --lib --bins --tests", runtime)
-        self.assertIn("cargo +stable test $JOBS --profile test --workspace --doc", runtime)
+        self.assertIn("python3 tools/ci/run_test_binaries.py --jobs 3 -- cargo +stable test $JOBS --profile test --workspace --lib --bins --tests", runtime)
+        self.assertIn("cargo +stable test $JOBS --no-fail-fast --profile test --workspace --doc", runtime)
         tools = static.split("- name: Install Rust tools for isolated tooling fixtures\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("if: needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'", tools)
         self.assertIn("--component rustfmt --component clippy", tools)
