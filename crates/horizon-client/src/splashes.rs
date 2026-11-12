@@ -77,7 +77,10 @@ mod tests {
             },
         )]);
         files.extend(others.iter().map(|(name, text)| {
-            ((*name).to_owned(), Resource::bytes(text.as_bytes().to_vec()))
+            (
+                (*name).to_owned(),
+                Resource::bytes(text.as_bytes().to_vec()),
+            )
         }));
         (vanilla, ResourceSource::indexed(files))
     }
@@ -86,7 +89,10 @@ mod tests {
     fn a_content_mods_lines_follow_vanillas() {
         let (vanilla, stack) = stack(
             None,
-            &[("assets/testmod/texts/splashes.txt", "First mod line!\nSecond mod line!\n")],
+            &[(
+                "assets/testmod/texts/splashes.txt",
+                "First mod line!\nSecond mod line!\n",
+            )],
         );
         let pool = pool(&stack, vanilla.path(), true);
         let picks: Vec<_> = (0..3)

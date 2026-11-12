@@ -158,12 +158,12 @@ pub mod server_packs;
 pub mod shadows;
 pub mod spear;
 pub mod spectator_menu;
+pub mod splashes;
 pub mod sprint;
 pub mod stand_up;
 pub mod stations;
 pub mod stopwatches;
 pub mod structure_blocks;
-pub mod splashes;
 pub mod studio;
 pub mod telemetry;
 #[cfg(test)]
