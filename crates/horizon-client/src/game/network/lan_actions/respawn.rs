@@ -133,13 +133,13 @@ impl Game<'_> {
                 progress: g.xp_progress,
                 total: g.xp_total,
             };
-            let keep_inventory = self.ui.rules.bool_at(
-                horizon_client::gamerules::vanilla::KEEP_INVENTORY,
-            ) || g.game_mode == SPECTATOR;
+            let keep_inventory = self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                || g.game_mode == SPECTATOR;
             xp.respawn(keep_inventory);
-            if !keep_inventory {
-                g.effects = Default::default();
-            }
+            g.effects = Default::default();
             (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
             // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
             // the new player not yet placed.
