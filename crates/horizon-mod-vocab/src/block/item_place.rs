@@ -433,7 +433,7 @@ impl ItemPlace {
             ItemPlace::InfiniteMaterials { player, inner } => {
                 let infinite = host
                     .player(*player)
-                    .and_then(|player| host.player_has_infinite_materials(player));
+                    .and_then(|player| player.has_infinite_materials(host));
                 if infinite != Some(true) {
                     return inner.moved(host, tx, resource, amount, insert, spills);
                 }
@@ -445,7 +445,7 @@ impl ItemPlace {
                 }
                 let had = host
                     .player(*player)
-                    .and_then(|player| host.player_inventory(player))
+                    .and_then(|player| player.inventory(host))
                     .is_some_and(|items| items.iter().any(|held| resource.matches(held)));
                 if !had && let Some(player) = host.player(*player) {
                     // shortcut: a full inventory keeps none, where vanilla drops the one; drop
