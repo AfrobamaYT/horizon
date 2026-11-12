@@ -65,13 +65,14 @@ fn run(distance: f64, expected: usize) {
                         let mut r = horizon_protocol::buf::Reader::new(&body);
                         let id = r.varint().unwrap();
                         match C::decode(id, r.rest()).unwrap() {
-                            C::Sound(s) if s.sound == target => Some((s.volume, s.pitch)),
+                            C::Sound(s) if s.sound == target => Some((s.source, s.volume, s.pitch)),
                             _ => None,
                         }
                     })
                     .collect::<Vec<_>>()
             };
-            assert_eq!(sounds(other), vec![(0.5, 0.75); expected]);
+            // Source 7 is `SoundSource.PLAYERS`.
+            assert_eq!(sounds(other), vec![(7, 0.5, 0.75); expected]);
             assert!(sounds(own).is_empty(), "landing guest must be excluded");
         })
     });

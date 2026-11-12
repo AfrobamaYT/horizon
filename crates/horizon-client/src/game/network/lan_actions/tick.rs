@@ -746,7 +746,9 @@ impl Game<'_> {
                         sound.pitch * 0.75,
                     );
                     self.send_level_sound(
-                        LevelSound::new(&sound.fall, at, sound.volume * 0.5, sound.pitch * 0.75),
+                        // `Player.playSound` plays in the players' source.
+                        LevelSound::new(&sound.fall, at, sound.volume * 0.5, sound.pitch * 0.75)
+                            .in_source(mod_api::SoundSource::Players),
                         Some(conn),
                     );
                 }
