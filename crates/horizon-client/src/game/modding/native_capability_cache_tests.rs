@@ -10,6 +10,7 @@ use mod_api::{
     BlockCapabilityCache, CapabilityKey, Hooks, HostTransaction, ITEMS, ItemResource, Registrar,
     ResourceHandler, ServerHost, Transaction,
 };
+use super::Dim;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -17,12 +18,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const COUNTED: CapabilityKey<dyn ResourceHandler<ItemResource>> =
     CapabilityKey::new("cache_bench:counted");
 static ASKED: AtomicUsize = AtomicUsize::new(0);
+/// How many slots the provider's next handler has: a provider whose answer changes with nothing
+/// the cache sees.
+static SLOTS: AtomicUsize = AtomicUsize::new(0);
 
-/// A handler with nothing in it: the test only counts lookups.
-struct Empty;
+/// A handler with nothing in it, of the size the provider was set to when it answered.
+struct Empty(usize);
 impl ResourceHandler<ItemResource> for Empty {
     fn size(&self, _: &mut dyn ServerHost) -> usize {
-        0
+        self.0
     }
     fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
         None
@@ -48,7 +52,7 @@ impl Hooks for CacheBench {
         let kind = r.block_entity_type("holder").blocks(&[]).build();
         r.block_entity_capability(&COUNTED, &kind, |_, _| {
             ASKED.fetch_add(1, Ordering::Relaxed);
-            Some(Box::new(Empty))
+            Some(Box::new(Empty(SLOTS.load(Ordering::Relaxed))))
         });
     }
 }
@@ -97,6 +101,12 @@ fn ask(game: &mut super::Game<'_>, cache: &mut BlockCapabilityCache<dyn Resource
     (found, ASKED.load(Ordering::Relaxed))
 }
 
+/// The size of the handler the cache lends, if it lends one.
+fn slots(game: &mut super::Game<'_>, cache: &mut BlockCapabilityCache<dyn ResourceHandler<ItemResource>>) -> Option<usize> {
+    let handler = cache.get(game)?;
+    Some(handler.size(game))
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
 fn a_cache_asks_once_while_nothing_changes_and_again_when_invalidated() {
@@ -105,12 +115,53 @@ fn a_cache_asks_once_while_nothing_changes_and_again_when_invalidated() {
         |game, level| {
             let mut cache = cache(level);
             let start = ASKED.load(Ordering::Relaxed);
+            SLOTS.store(1, Ordering::Relaxed);
             for _ in 0..100 {
                 assert_eq!(ask(game, &mut cache), (true, start + 1), "kept: asked once");
             }
+            // The provider would answer differently now, but nothing the cache sees changed.
+            SLOTS.store(2, Ordering::Relaxed);
+            assert_eq!(slots(game, &mut cache), Some(1), "the kept answer");
             cache.invalidate();
-            assert_eq!(ask(game, &mut cache), (true, start + 2), "the provider's own invalidate");
+            assert_eq!(slots(game, &mut cache), Some(2), "the provider's own invalidate");
             assert_eq!(ask(game, &mut cache), (true, start + 2));
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+fn a_cache_lends_nothing_while_its_level_is_parked_and_asks_again_once_back() {
+    with_cache_mod(
+        "game::native_capability_cache_tests::a_cache_lends_nothing_while_its_level_is_parked_and_asks_again_once_back",
+        |game, level| {
+            let mut cache = cache(level);
+            let start = ask(game, &mut cache).1;
+            game.enter_level(Dim::Nether).unwrap();
+            assert!(!level.in_place(&*game), "the overworld is parked");
+            assert!(
+                game.block_entity(level, [POS.0, POS.1, POS.2]).is_some(),
+                "a parked level's block entities still read"
+            );
+            assert_eq!(ask(game, &mut cache), (false, start), "parked: as a fresh lookup finds");
+            game.enter_level(Dim::Overworld).unwrap();
+            assert_eq!(ask(game, &mut cache), (true, start + 1), "in place again: asked again");
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+fn a_cache_first_asked_while_its_level_is_parked_asks_again_once_in_place() {
+    with_cache_mod(
+        "game::native_capability_cache_tests::a_cache_first_asked_while_its_level_is_parked_asks_again_once_in_place",
+        |game, level| {
+            let mut cache = cache(level);
+            let start = ASKED.load(Ordering::Relaxed);
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(ask(game, &mut cache), (false, start), "parked: no provider is asked");
+            game.enter_level(Dim::Overworld).unwrap();
+            assert_eq!(ask(game, &mut cache), (true, start + 1), "the same entity and state, now in place");
         },
     );
 }
@@ -231,6 +282,15 @@ fn moves_through_kept_handlers_conserve_every_item_when_some_abort() {
                     .sum::<u64>()
             };
             let before = count(game);
+            // Where each cache's kept handler lives: an aborted move must not make it look again.
+            let kept = |cache: &mut BlockCapabilityCache<dyn ResourceHandler<ItemResource>>, game: &mut super::Game<'_>| {
+                cache.get(game).map(|handler| &**handler as *const dyn ResourceHandler<ItemResource> as *const ())
+            };
+            let kept_before = (kept(&mut from, game), kept(&mut to, game));
+            let entities = |game: &super::Game<'_>| {
+                [[3, 64, 1], [5, 64, 1]].map(|pos| game.block_entity(level, pos))
+            };
+            let entities_before = entities(game);
             let (mut moved, mut aborted) = (0, 0);
             for round in 0..300u32 {
                 // Each cache lends its own handler; the game is free for the move.
@@ -247,6 +307,8 @@ fn moves_through_kept_handlers_conserve_every_item_when_some_abort() {
                     Err(_) => {}
                 }
                 assert_eq!(count(game), before, "round {round}");
+                assert_eq!(entities(game), entities_before, "round {round}: the same block entities");
+                assert_eq!((kept(&mut from, game), kept(&mut to, game)), kept_before, "round {round}: kept, not looked up again");
             }
             assert!(moved > 0 && aborted > 0);
         },
