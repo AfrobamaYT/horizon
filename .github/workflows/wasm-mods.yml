@@ -1,31 +1,20 @@
 name: wasm-mods
+# Main pushes and manual dispatch only, never pull requests (owner, 2026-11-12): root dispatches it on a PR
+# branch that changes what it builds.
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'crates/cargo-horizon-mod/**'
-      - 'crates/horizon-mod-*/**'
-      - '.github/workflows/wasm-mods.yml'
-      - 'tools/generate_wire_enum_goldens.py'
-      - 'tools/capture_wire_enum_layouts.py'
-      - 'tools/fixtures/wire_enum_layouts.json'
-      - 'tools/fixtures/wire_enum_baseline_identities.json'
-      - 'tests/test_wire_enum_goldens.py'
-      - 'Cargo.lock'
   workflow_dispatch:
 permissions:
   contents: read
-# Finish running main checks; keep only the newest pending push. Obsolete PR runs still cancel.
+# One run per commit, never cancelled: a newer main push must not replace a queued run, or the earlier
+# head is never proven.
 concurrency:
-  group: wasm-mods-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: wasm-mods-${{ github.sha }}
+  cancel-in-progress: false
 jobs:
   fixture:
-    # Drafts skip it: the shared runners go to ready PRs (CI rule, 2026-11-08).
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'dyna-large' }}
+    runs-on: dyna-large
     timeout-minutes: 120
     env:
       CARGO_INCREMENTAL: 0
