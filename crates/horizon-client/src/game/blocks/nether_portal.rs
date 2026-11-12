@@ -28,7 +28,7 @@ use {
 };
 
 /// `Player.getDimensionChangingDelay`.
-pub(in crate::game) const PLAYER_DELAY: i32 = 10;
+pub(super) const PLAYER_DELAY: i32 = 10;
 /// `VehicleEntity.getDimensionChangingDelay`: boats and minecarts.
 const VEHICLE_DELAY: i32 = 10;
 /// `Projectile.getDimensionChangingDelay`.
@@ -36,17 +36,17 @@ const PROJECTILE_DELAY: i32 = 2;
 
 /// Where in its portal a traveller stood, and where its exit is to be found.
 #[derive(Clone, Copy, Debug)]
-pub(in crate::game) struct Plan {
-    pub(in crate::game) dim: Dim,
+pub(super) struct Plan {
+    pub(super) dim: Dim,
     /// The border-clamped, scaled position (`approximateExitPos`).
-    pub(in crate::game) approximate: BlockPos,
+    pub(super) approximate: BlockPos,
     entry_x_axis: bool,
     offset: Vec3,
     width: f32,
     height: f32,
     /// Through an End portal: `approximate` is the End's spawn point, or the
     /// Overworld's shared spawn.
-    pub(in crate::game) end: bool,
+    pub(super) end: bool,
 }
 
 impl Plan {
@@ -88,18 +88,18 @@ struct Arrival {
 
 /// The nether portal state of the world (`Game::portals`).
 #[derive(Default)]
-pub(in crate::game) struct Portals {
+pub(super) struct Portals {
     /// The player's.
-    pub(in crate::game) player: PortalState,
+    pub(super) player: PortalState,
     /// `LocalPlayer.portalProcess.isInsidePortalThisTick`.
     client_inside: bool,
     /// Whether the last tick's `handlePortalTransitionEffect` found the
     /// player inside a nether portal: it closes any screen opened meanwhile.
     client_was_inside: bool,
     /// Items and mobs, by entity id.
-    pub(in crate::game) entities: HashMap<u32, PortalState>,
+    pub(super) entities: HashMap<u32, PortalState>,
     /// Positions before this tick's moves, by entity id.
-    pub(in crate::game) before: FxHashMap<u32, Vec3>,
+    pub(super) before: FxHashMap<u32, Vec3>,
     arrivals: Vec<Arrival>,
     /// The vehicles server players ride that went through a portal this
     /// tick, in their level, with their entry: they carry their riders
@@ -107,19 +107,19 @@ pub(in crate::game) struct Portals {
     carrying: Vec<(Dim, u32, BlockPos)>,
     /// What a carrying minecart moved by when its portal was handled, at the
     /// start of its tick: its motion is what crosses (`arrive_vehicle`).
-    pub(in crate::game) carried_motion: HashMap<u32, Vec3>,
+    pub(super) carried_motion: HashMap<u32, Vec3>,
     /// The cooldown a carrying vehicle left with. Vanilla's copy arrives in
     /// the same tick (`Entity.restoreFrom`), so the source level ticking
     /// while the destination loads must not run it down.
-    pub(in crate::game) carried_cooldown: HashMap<u32, i32>,
+    pub(super) carried_cooldown: HashMap<u32, i32>,
     /// Where a carrying vehicle stood then: its plan is taken from there
     /// (`vehicle_plan`), as vanilla's is, not from where its rider's own tick
     /// has moved it on to since.
-    pub(in crate::game) carried_at: HashMap<u32, Vec3>,
+    pub(super) carried_at: HashMap<u32, Vec3>,
     loaded: bool,
     dirty: bool,
     /// Per-chunk portal palette masks, kept across ticks (portal_sections).
-    pub(in crate::game) sections: horizon_client::portal_sections::PortalSections,
+    pub(super) sections: horizon_client::portal_sections::PortalSections,
 }
 
 fn rotate_y(v: Vec3, degrees: f32) -> Vec3 {
@@ -133,7 +133,7 @@ fn rotate_y(v: Vec3, degrees: f32) -> Vec3 {
 }
 /// Whether a projectile is an arrow, which goes through a portal like the
 /// other entities.
-pub(in crate::game) fn is_arrow(p: &horizon_client::projectiles::Projectile) -> bool {
+pub(super) fn is_arrow(p: &horizon_client::projectiles::Projectile) -> bool {
     matches!(
         p.kind,
         horizon_client::projectiles::ProjectileKind::Arrow { .. }
@@ -142,7 +142,7 @@ pub(in crate::game) fn is_arrow(p: &horizon_client::projectiles::Projectile) -> 
 /// The projectiles besides arrows that a portal sends on: the thrown items
 /// and fireballs a chunk saves. A pearl has its own rules (it keeps its owner's
 /// dimension) and a wind charge is not saved, so both stay.
-pub(in crate::game) fn is_portal_projectile(p: &horizon_client::projectiles::Projectile) -> bool {
+pub(super) fn is_portal_projectile(p: &horizon_client::projectiles::Projectile) -> bool {
     use horizon_client::projectiles::ProjectileKind;
     !is_arrow(p)
         && !matches!(
@@ -154,7 +154,7 @@ pub(in crate::game) fn is_portal_projectile(p: &horizon_client::projectiles::Pro
         && horizon_client::entity_nbt::saved_with_chunk(p)
 }
 /// Width and height of a projectile that goes through a portal.
-pub(in crate::game) fn projectile_box(p: &horizon_client::projectiles::Projectile) -> (f32, f32) {
+pub(super) fn projectile_box(p: &horizon_client::projectiles::Projectile) -> (f32, f32) {
     if is_arrow(p) {
         (
             horizon_client::arrows::WIDTH,
@@ -314,7 +314,7 @@ fn preserve_arrival_cooldown(tag: &mut Tag) {
 
 impl Game<'_> {
     /// The world border's extent.
-    pub(in crate::game) fn border_bounds(&self) -> BorderBounds {
+    pub(super) fn border_bounds(&self) -> BorderBounds {
         self.border_bounds_of(self.dim)
     }
     /// The extent of `dim`'s own border (`ServerLevel.getWorldBorder`), the level in place or a
@@ -334,7 +334,7 @@ impl Game<'_> {
         }
     }
     /// `ServerLevel.isAllowedToEnterPortal`.
-    pub(in crate::game) fn may_enter(&self, target: Dim) -> bool {
+    pub(super) fn may_enter(&self, target: Dim) -> bool {
         target != Dim::Nether
             || self
                 .ui
@@ -344,7 +344,7 @@ impl Game<'_> {
     /// The plan of an entity of `width` by `height` at `at` going through the
     /// portal at `entry` (`getDimensionTransitionFromExit` and the scaled,
     /// clamped exit of `getPortalDestination`).
-    pub(in crate::game) fn portal_plan(
+    pub(super) fn portal_plan(
         &self,
         entry: BlockPos,
         at: Vec3,
@@ -530,7 +530,7 @@ impl Game<'_> {
     }
     /// The exit portal of `plan` in the loaded dimension: the closest one
     /// within reach, else one built by `PortalForcer.createPortal`.
-    pub(in crate::game) fn nether_exit_portal(&mut self, plan: &Plan) -> Option<FoundRectangle> {
+    pub(super) fn nether_exit_portal(&mut self, plan: &Plan) -> Option<FoundRectangle> {
         let to_nether = plan.dim == Dim::Nether;
         let border = self.border_bounds();
         if let Some((found, rectangle)) = self.find_exit_portal(plan) {
@@ -561,7 +561,7 @@ impl Game<'_> {
         created
     }
     /// `ChunkPos.containing`: the chunk a position is in.
-    pub(in crate::game) fn chunk_of(at: Vec3) -> (i32, i32) {
+    pub(super) fn chunk_of(at: Vec3) -> (i32, i32) {
         ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4)
     }
     /// `Entity.placePortalTicket`: a `TicketType.PORTAL` ticket of radius 3
@@ -569,14 +569,14 @@ impl Game<'_> {
     /// ticks with no player in it (the entity that just came through ticks
     /// there, and goes back through the portal when its cooldown ends).
     /// Only a server holds levels with tickets of their own.
-    pub(in crate::game) fn place_portal_ticket(&mut self, chunk: (i32, i32)) {
+    pub(super) fn place_portal_ticket(&mut self, chunk: (i32, i32)) {
         if !self.options.execution_role.is_client() {
             self.tickets.add_portal(chunk);
         }
     }
     /// `NetherPortalBlock.createDimensionTransition`: the arrival position
     /// and the yaw turned by.
-    pub(in crate::game) fn arrival(&self, plan: &Plan, exit: FoundRectangle) -> (Vec3, f32) {
+    pub(super) fn arrival(&self, plan: &Plan, exit: FoundRectangle) -> (Vec3, f32) {
         let b = self.res.behaviours();
         let corner = exit.min_corner;
         let exit_x_axis = b
@@ -604,7 +604,7 @@ impl Game<'_> {
     /// then `LocalPlayer.handlePortalTransitionEffect` closes it in the same
     /// tick while the player stands in a nether portal, so it is never drawn.
     /// The fading effect after leaving the portal closes nothing.
-    pub(in crate::game) fn in_portal_transition(&self) -> bool {
+    pub(super) fn in_portal_transition(&self) -> bool {
         self.portals.client_was_inside
     }
 
@@ -612,7 +612,7 @@ impl Game<'_> {
     /// passenger), then only the client's `setAsInsidePortal`, which drives
     /// the confusion effect (`client_portal_effect`). On a server's client
     /// `portals.player` holds only the LocalPlayer's `portalCooldown`.
-    pub(in crate::game) fn client_inside_nether_portal(&mut self) {
+    pub(super) fn client_inside_nether_portal(&mut self) {
         if !self.player_can_use_portal() {
             return;
         }
@@ -625,7 +625,7 @@ impl Game<'_> {
     /// Where to wait for the destination of `plan` to load, once its level
     /// is open: the portal its points of interest lead to, or the
     /// approximate exit.
-    pub(in crate::game) fn arrival_centre(&self, plan: &Plan) -> Vec3 {
+    pub(super) fn arrival_centre(&self, plan: &Plan) -> Vec3 {
         let to_nether = plan.dim == Dim::Nether;
         let portals = self.portal_blocks(plan.approximate, if to_nether { 16 } else { 128 });
         let (min_section, max_section) = if to_nether { (0, 15) } else { (-4, 19) };
@@ -649,7 +649,7 @@ impl Game<'_> {
     /// effect grows this tick. Entering a portal closes screens other than
     /// the chat and death screens and plays `block.portal.trigger` when the
     /// effect starts from nothing.
-    pub(in crate::game) fn client_portal_effect(&mut self) -> bool {
+    pub(super) fn client_portal_effect(&mut self) -> bool {
         let inside = std::mem::take(&mut self.portals.client_inside);
         self.portals.client_was_inside = inside;
         if !inside {
@@ -681,13 +681,13 @@ impl Game<'_> {
     /// Positions before the entities move this tick, and `Entity.handlePortal`
     /// at the start of their tick: an item or mob that stayed in a portal
     /// goes through (transition time 0) and waits for its dimension.
-    pub(in crate::game) fn handle_entity_portals(&mut self) {
+    pub(super) fn handle_entity_portals(&mut self) {
         self.handle_portals(false, false);
     }
     /// `Entity.handlePortal` of the boats and minecarts, which `tick_boats`
     /// and `tick_carts` move: it runs before them, from the position they
     /// ended the last tick at, as the start of a vehicle's own tick does.
-    pub(in crate::game) fn handle_vehicle_portals(&mut self) {
+    pub(super) fn handle_vehicle_portals(&mut self) {
         self.handle_portals(true, false);
     }
     fn handle_portals(&mut self, vehicles: bool, after_move: bool) {
@@ -781,7 +781,7 @@ impl Game<'_> {
     }
     /// `Entity.load`: the saved `PortalCooldown` (an entity that just came
     /// through stands in its exit portal for 300 ticks without going back).
-    pub(in crate::game) fn restore_portal_cooldown(&mut self, id: u32, tag: &Tag) {
+    pub(super) fn restore_portal_cooldown(&mut self, id: u32, tag: &Tag) {
         if let Some(cooldown) = tag
             .get("PortalCooldown")
             .and_then(horizon_client::nbt_path::int_value)
@@ -808,7 +808,7 @@ impl Game<'_> {
     }
     /// `Entity.saveWithoutId`: the modeled non-arrow projectile codecs
     /// share the live cooldown between command reads and chunk writes.
-    pub(in crate::game) fn save_projectile_portal_cooldown(
+    pub(super) fn save_projectile_portal_cooldown(
         &self,
         projectile: &horizon_client::projectiles::Projectile,
         tag: &mut Tag,
@@ -856,7 +856,7 @@ impl Game<'_> {
     }
     /// `Entity.setAsInsidePortal` on an entity that is still on its portal
     /// cooldown, whatever the portal: the cooldown restarts and it stays.
-    pub(in crate::game) fn restart_portal_cooldown(&mut self, id: u32) -> bool {
+    pub(super) fn restart_portal_cooldown(&mut self, id: u32) -> bool {
         if self
             .portals
             .entities
@@ -871,7 +871,7 @@ impl Game<'_> {
     }
     /// `Entity.setPortalCooldown`: assign the passenger-dependent delay,
     /// leaving the existing portal process intact.
-    pub(in crate::game) fn set_portal_cooldown(&mut self, id: u32) {
+    pub(super) fn set_portal_cooldown(&mut self, id: u32) {
         let delay = self.dimension_changing_delay(id);
         self.portals.entities.entry(id).or_default().cooldown = delay;
     }
@@ -881,7 +881,7 @@ impl Game<'_> {
     /// the player in place and the guest arm of the `LivingRef` read answer
     /// — a parity fix: the client's own entry used to skip the sleep half
     /// (vanilla `LivingEntity.canUsePortal` checks it).
-    pub(in crate::game) fn can_use_portal_of(
+    pub(super) fn can_use_portal_of(
         &self,
         p: &horizon_client::motion::PlayerMotion,
         riding: bool,
@@ -891,7 +891,7 @@ impl Game<'_> {
     }
     /// [`can_use_portal_of`](Self::can_use_portal_of) for the player of
     /// this game.
-    pub(in crate::game) fn player_can_use_portal(&self) -> bool {
+    pub(super) fn player_can_use_portal(&self) -> bool {
         self.player
             .as_ref()
             .is_some_and(|p| self.can_use_portal_of(p, self.riding.is_some(), p.sleeping))
@@ -899,20 +899,20 @@ impl Game<'_> {
     /// `canUsePortal(false)` of a mob: what the mob itself decides
     /// (`mobs::mob_can_use_portal`), riding nothing, not asleep, and not
     /// carrying the players this side does.
-    pub(in crate::game) fn mob_portal_eligible(&self, m: &horizon_client::mobs::Mob) -> bool {
+    pub(super) fn mob_portal_eligible(&self, m: &horizon_client::mobs::Mob) -> bool {
         horizon_client::mobs::mob_can_use_portal(m)
             && m.extra.mount.is_none()
             && self.riding != Some(m.id)
             && (!self.guest_rides(m.id) || self.carries_riders())
     }
     /// `Entity.canUsePortal(false)` for a primed TNT: it carries no mob.
-    pub(in crate::game) fn tnt_can_use_portal(&self, id: u32) -> bool {
+    pub(super) fn tnt_can_use_portal(&self, id: u32) -> bool {
         // Id 0: not tracked yet, nothing to key its portal state by.
         id != 0 && !self.mobs.iter().any(|m| m.extra.mount == Some(id))
     }
     /// `canUsePortal(false)` of a boat or minecart: it is nobody's passenger;
     /// the mobs riding it, and on a server the players, cross with it.
-    pub(in crate::game) fn vehicle_can_use_portal(&self, id: u32) -> bool {
+    pub(super) fn vehicle_can_use_portal(&self, id: u32) -> bool {
         // The window's player is moved by its own trip, not by the vehicle's.
         if self.riding == Some(id) {
             return false;
@@ -928,7 +928,7 @@ impl Game<'_> {
     }
     /// The vehicles that went through a portal in `dim` with server players
     /// on them.
-    pub(in crate::game) fn take_carrying(&mut self, dim: Dim) -> Vec<(u32, BlockPos)> {
+    pub(super) fn take_carrying(&mut self, dim: Dim) -> Vec<(u32, BlockPos)> {
         let (here, other) = std::mem::take(&mut self.portals.carrying)
             .into_iter()
             .partition(|(d, ..)| *d == dim);
@@ -939,7 +939,7 @@ impl Game<'_> {
     /// position and size (`getPortalDestination(level, vehicle)`). A boat or
     /// minecart, like a mob, lands in the middle of the exit portal's depth
     /// (`AbstractBoat` and `AbstractMinecart.getRelativePortalPosition`).
-    pub(in crate::game) fn vehicle_plan(&self, id: u32, entry: BlockPos) -> Option<Plan> {
+    pub(super) fn vehicle_plan(&self, id: u32, entry: BlockPos) -> Option<Plan> {
         let at = |own: Vec3| self.portals.carried_at.get(&id).copied().unwrap_or(own);
         if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
             return Some(self.entity_plan(entry, at(m.position), m.width(), m.height(), true));
@@ -959,7 +959,7 @@ impl Game<'_> {
     /// for the items, mobs, empty boats and minecarts, and arrows that moved
     /// this tick: the portal blocks their box swept through (an End portal's
     /// transition time is 0 too).
-    pub(in crate::game) fn find_entity_portals(&mut self) {
+    pub(super) fn find_entity_portals(&mut self) {
         self.find_portals(None);
         // AbstractArrow, ThrowableProjectile and AbstractHurtingProjectile apply
         // block effects before calling Entity.tick, so their refreshed cooldown
@@ -970,7 +970,7 @@ impl Game<'_> {
     /// moved them: a ridden vehicle moves with its rider, after the other
     /// entities were swept, so without this pass its portal is found a tick
     /// late, from where it has already moved on to.
-    pub(in crate::game) fn find_ridden_vehicle_portals(&mut self, ridden: &[u32]) {
+    pub(super) fn find_ridden_vehicle_portals(&mut self, ridden: &[u32]) {
         if !ridden.is_empty() {
             self.find_portals(Some(ridden));
         }
@@ -1416,7 +1416,7 @@ impl Game<'_> {
     /// streaming `extra` areas that light them: vanilla's portal ticket
     /// (`Entity.teleport` adds `TicketType.PORTAL` at the destination) keeps
     /// the area loaded without a player.
-    pub(in crate::game) fn arrival_chunks(&self, dim: Dim) -> Vec<(i32, i32)> {
+    pub(super) fn arrival_chunks(&self, dim: Dim) -> Vec<(i32, i32)> {
         self.portals
             .arrivals
             .iter()
@@ -1429,7 +1429,7 @@ impl Game<'_> {
     /// from an earlier level this server tick moves in its new level the same
     /// tick, and one that crossed from a later level stands there until the
     /// next. Only the portal arrivals join; the chunks' entities wait.
-    pub(in crate::game) fn land_portal_arrivals(&mut self) {
+    pub(super) fn land_portal_arrivals(&mut self) {
         if self.remote.is_some() || self.portals.arrivals.is_empty() {
             return;
         }
@@ -1442,7 +1442,7 @@ impl Game<'_> {
     /// Entities waiting for the loaded dimension whose exit area is loaded:
     /// their exit portal (found or built) or End destination, position,
     /// turned yaw and motion, and portal cooldown; they join the world with the chunk entities.
-    pub(in crate::game) fn resolve_arrivals(&mut self) {
+    pub(super) fn resolve_arrivals(&mut self) {
         if self.remote.is_some() {
             return;
         }
@@ -1594,7 +1594,7 @@ impl Game<'_> {
             .join("horizon_portal_arrivals.dat")
     }
     /// The waiting entities of the open world (read once).
-    pub(in crate::game) fn load_portal_arrivals(&mut self) {
+    pub(super) fn load_portal_arrivals(&mut self) {
         if self.portals.loaded || self.remote.is_some() {
             return;
         }
@@ -1610,7 +1610,7 @@ impl Game<'_> {
             .extend(list.iter().filter_map(arrival_from_tag));
     }
     /// Write the waiting entities when they changed.
-    pub(in crate::game) fn save_portal_arrivals(&mut self) {
+    pub(super) fn save_portal_arrivals(&mut self) {
         if !self.portals.dirty || self.remote.is_some() {
             return;
         }

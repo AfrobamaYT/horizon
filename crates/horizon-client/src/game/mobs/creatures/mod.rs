@@ -65,12 +65,12 @@ fn arrow_miss(dodged: bool) -> EntityHit {
         EntityHit::Refused
     }
 }
-pub(in crate::game) type SpawnReason = horizon_client::mobs::spawn_rules::Reason;
+pub(super) type SpawnReason = horizon_client::mobs::spawn_rules::Reason;
 
 /// Whether vanilla calls `finalizeSpawn` for a mob a spawn site makes, and with
 /// which reason. The reason is vanilla's `EntitySpawnReason` at that site.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::game) enum SpawnSite {
+pub(super) enum SpawnSite {
     /// Vanilla calls `finalizeSpawn` with this reason: `finalize_spawn` is told.
     Finalizing(SpawnReason),
     /// Vanilla creates the mob without `finalizeSpawn` (a breeding, a block's or
@@ -81,7 +81,7 @@ pub(in crate::game) enum SpawnSite {
 
 /// What a spawn site does with a mob after `finalize_spawn` was heard.
 #[derive(Debug, PartialEq)]
-pub(in crate::game) enum Finalized {
+pub(super) enum Finalized {
     /// Finalized as vanilla does; the site goes on to the class's follow-ups.
     Done,
     /// A mod skipped finalization: the mob spawns uninitialised.
@@ -96,19 +96,19 @@ pub(in crate::game) use death_source::death_hurt_source;
 pub(in crate::game) use death_weapon::AcceptedWeapon;
 
 /// A dying entity whose items drop (`LivingDropsEvent`).
-pub(in crate::game) struct DyingDrops<'a> {
-    pub(in crate::game) entity: u32,
-    pub(in crate::game) kind: &'a str,
+pub(super) struct DyingDrops<'a> {
+    pub(super) entity: u32,
+    pub(super) kind: &'a str,
     /// The UUID of a dying player.
-    pub(in crate::game) player: Option<u128>,
+    pub(super) player: Option<u128>,
     /// The killing blow; none when no mod listens.
-    pub(in crate::game) source: Option<HurtSource<'a>>,
+    pub(super) source: Option<HurtSource<'a>>,
     /// Whether a player hurt it within 100 ticks.
-    pub(in crate::game) recently_hit: bool,
+    pub(super) recently_hit: bool,
 }
 
 /// A sound a native mod queued, sent when the host is free.
-pub(in crate::game) struct NativeSound {
+pub(super) struct NativeSound {
     pub dimension: &'static str,
     pub sound: String,
     pub at: [f64; 3],
@@ -164,12 +164,12 @@ struct PendingMobBatch {
 }
 
 /// Remove the current action before dispatch; retain only the unentered tail on unwind.
-pub(in crate::game) struct RemainingActions<'a, T> {
+pub(super) struct RemainingActions<'a, T> {
     remaining: std::vec::IntoIter<T>,
     target: &'a mut Vec<T>,
 }
 impl<'a, T> RemainingActions<'a, T> {
-    pub(in crate::game) fn new(target: &'a mut Vec<T>) -> Self {
+    pub(super) fn new(target: &'a mut Vec<T>) -> Self {
         Self {
             remaining: std::mem::take(target).into_iter(),
             target,
@@ -191,7 +191,7 @@ impl<T> Drop for RemainingActions<'_, T> {
 
 /// Mob-system state owned by the game.
 #[derive(Default)]
-pub(in crate::game) struct Creatures {
+pub(super) struct Creatures {
     pub projectiles: horizon_client::join_seq::JoinList<Projectile, false>,
     /// The entities a family tells the mods ticked, kept between ticks
     /// (game/modding/native_ticks.rs).
@@ -244,7 +244,7 @@ pub(in crate::game) struct Creatures {
     /// Particles from a guest's turn, waiting for it to end.
     pub lan_particles: Vec<super::lan_particles::QueuedParticle>,
 }
-pub(in crate::game) struct ProjWorld<'a, 'w> {
+pub(super) struct ProjWorld<'a, 'w> {
     pub w: &'a MobWorld<'w>,
     pub targets: Vec<(Who, Aabb)>,
     /// The world border's [minX, minZ, maxX, maxZ], which stops the ray as a
@@ -260,7 +260,7 @@ pub(in crate::game) struct ProjWorld<'a, 'w> {
 const PICKABLE_PROJECTILE_IDS: u32 = super::dragon::SPECIAL - 0x10000;
 
 /// The index of the projectile a `pickable_projectile_hitboxes` id stands for.
-pub(in crate::game) fn pickable_projectile_hit(id: u32) -> Option<usize> {
+pub(super) fn pickable_projectile_hit(id: u32) -> Option<usize> {
     (PICKABLE_PROJECTILE_IDS..super::dragon::SPECIAL)
         .contains(&id)
         .then(|| (id - PICKABLE_PROJECTILE_IDS) as usize)
@@ -350,7 +350,7 @@ fn flame_geometry(
         ss += 1;
     }
 }
-pub(in crate::game) fn seen(m: &Mob, player: Option<[i32; 4]>) -> Seen {
+pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>) -> Seen {
     m.seen(player)
 }
 /// Whether a mob a packet named may take the click: `mob_hit` skips a mob in
@@ -358,7 +358,7 @@ pub(in crate::game) fn seen(m: &Mob, player: Option<[i32; 4]>) -> Seen {
 /// vehicle) and the camera entity the pick starts from, so a packet that names
 /// one of those does nothing rather than reaching the feed, shear, leash or
 /// name paths the pick path refuses.
-pub(in crate::game) fn named_mob_pickable(
+pub(super) fn named_mob_pickable(
     alive: bool,
     id: u32,
     riding: Option<u32>,
@@ -369,25 +369,25 @@ pub(in crate::game) fn named_mob_pickable(
 
 /// What an entity drew on the GPU path: the skin frame's mark before its draws, and their
 /// camera-relative bounds (`cull_skinned`).
-pub(in crate::game) type Skinned = Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>;
+pub(super) type Skinned = Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>;
 
 /// What a block's `onProjectileHit` reads of the projectile that struck it:
 /// a thrown projectile ([`ProjectileHitter::of`]) or a fishing bobber
 /// (`FishingHook.onHitBlock` calls `Projectile.onHitBlock` too).
 #[derive(Clone, Copy, Debug)]
-pub(in crate::game) struct ProjectileHitter {
+pub(super) struct ProjectileHitter {
     /// `Projectile.getOwner`.
-    pub(in crate::game) owner: Option<Who>,
+    pub(super) owner: Option<Who>,
     /// On a server, the guest (by connection) who owns it.
-    pub(in crate::game) guest: Option<u32>,
+    pub(super) guest: Option<u32>,
     /// An `AbstractArrow` (a target block resets after 20 ticks, not 8).
-    pub(in crate::game) arrow: bool,
+    pub(super) arrow: bool,
     /// Its entity type, for `target_hit`'s projectile predicate.
-    pub(in crate::game) kind: &'static str,
-    pub(in crate::game) position: Vec3,
+    pub(super) kind: &'static str,
+    pub(super) position: Vec3,
 }
 impl ProjectileHitter {
-    pub(in crate::game) fn of(p: &Projectile) -> Self {
+    pub(super) fn of(p: &Projectile) -> Self {
         Self {
             owner: p.owner,
             guest: p.guest,
@@ -409,7 +409,7 @@ impl Game<'_> {
     /// [`Self::player_view`], so a tick that lends no guest's view names its
     /// player (#1077). None where the view stands for nobody: no player of
     /// the game's own, a fake one, or a guest's turn acting in its place.
-    pub(in crate::game) fn player_identity(&self) -> Option<([i32; 4], u32)> {
+    pub(super) fn player_identity(&self) -> Option<([i32; 4], u32)> {
         if self.lan_acting_fake || self.lan_acting_uuid.is_some() || self.player.is_none() {
             return None;
         }
@@ -429,7 +429,7 @@ impl Game<'_> {
             }
         }
     }
-    pub(in crate::game) fn player_view(&self) -> Option<PlayerView> {
+    pub(super) fn player_view(&self) -> Option<PlayerView> {
         if self.lan_acting_fake {
             return None;
         }
@@ -510,7 +510,7 @@ impl Game<'_> {
         })
     }
     /// Biome facts at a position for finalizeSpawn and variant rules.
-    pub(in crate::game) fn biome_facts(&self, x: i32, y: i32, z: i32) -> BiomeFacts {
+    pub(super) fn biome_facts(&self, x: i32, y: i32, z: i32) -> BiomeFacts {
         let Some(chunk) = self.world.chunks.get(&(x >> 4, z >> 4)) else {
             return BiomeFacts::default();
         };
@@ -549,7 +549,7 @@ impl Game<'_> {
         }
     }
     /// Create a mob of `kind` at a position, finalized like a natural spawn.
-    pub(in crate::game) fn spawn_mob(
+    pub(super) fn spawn_mob(
         &mut self,
         kind: &str,
         at: [f64; 3],
@@ -561,7 +561,7 @@ impl Game<'_> {
     }
     /// Create a mob of `kind` at a position without `finalizeSpawn`'s rolls,
     /// matching vanilla `EntityType.create(level, reason)`.
-    pub(in crate::game) fn spawn_mob_raw(
+    pub(super) fn spawn_mob_raw(
         &mut self,
         kind: &str,
         at: [f64; 3],
@@ -573,7 +573,7 @@ impl Game<'_> {
     /// never calls `Mob.setPersistenceRequired` for it, so the mob is not
     /// persistent: the despawn rule holds it like any other mob, and only
     /// its NBT can make it persistent.
-    pub(in crate::game) fn spawn_mob_spawned(
+    pub(super) fn spawn_mob_spawned(
         &mut self,
         kind: &str,
         at: [f64; 3],
@@ -876,7 +876,7 @@ impl Game<'_> {
     /// mob's riders move onto it. A zombie that comes out of it rolls
     /// `Zombie.handleAttributes(special, CONVERSION)` (the
     /// `postConversionStep` of its `ConversionTracker`).
-    pub(in crate::game) fn convert_to(
+    pub(super) fn convert_to(
         &mut self,
         from: &Mob,
         kind: &str,
@@ -961,7 +961,7 @@ impl Game<'_> {
         Some(id)
     }
     /// Default position for a summon command (3 blocks in front of the player).
-    pub(in crate::game) fn default_summon_position(&self) -> Result<[f64; 3]> {
+    pub(super) fn default_summon_position(&self) -> Result<[f64; 3]> {
         let p = self.player.as_ref().ok_or("no player yet")?;
         let d = view_vector(self.yaw, 0.0);
         Ok([
@@ -971,7 +971,7 @@ impl Game<'_> {
         ])
     }
     /// The `summon` command: spawn a mob in front of the player or at a position.
-    pub(in crate::game) fn summon_command_mob(
+    pub(super) fn summon_command_mob(
         &mut self,
         kind: &str,
         at: Option<[f64; 3]>,
@@ -994,11 +994,11 @@ impl Game<'_> {
         Ok(id)
     }
     /// The `mobs` command: nearby mobs with position, health and running goals.
-    pub(in crate::game) fn control_mobs(&self, radius: f64) -> serde_json::Value {
+    pub(super) fn control_mobs(&self, radius: f64) -> serde_json::Value {
         let center = self.player.as_ref().map_or(Vec3::ZERO, |p| p.position);
         self.control_mobs_at(radius, center)
     }
-    pub(in crate::game) fn control_mobs_at(&self, radius: f64, center: Vec3) -> serde_json::Value {
+    pub(super) fn control_mobs_at(&self, radius: f64, center: Vec3) -> serde_json::Value {
         let list: Vec<serde_json::Value> = self
             .mobs
             .iter()
@@ -1068,7 +1068,7 @@ impl Game<'_> {
         serde_json::json!({ "count": self.mobs.len(), "near": list, "projectiles": self.creatures.projectiles.len() })
     }
     /// Highest motion-blocking (no leaves) block + 1 (Heightmap MOTION_BLOCKING_NO_LEAVES).
-    pub(in crate::game) fn motion_top(&self, x: i32, z: i32) -> i32 {
+    pub(super) fn motion_top(&self, x: i32, z: i32) -> i32 {
         let top = if self.dim == Dim::Nether { 127 } else { 319 };
         for y in (self.world.bottom_y()..=top).rev() {
             let f = self.res.facts().get(self.world.block(x, y, z));
@@ -1079,7 +1079,7 @@ impl Game<'_> {
         self.world.bottom_y()
     }
     /// What the generator finalizes this level's structure mobs with.
-    pub(in crate::game) fn share_spawn_conditions(&self) {
+    pub(super) fn share_spawn_conditions(&self) {
         if let Some(terrain) = self.end.locator() {
             terrain.set_spawn_conditions(self.difficulty_id() as u8, self.world.day_time);
         }
@@ -1088,7 +1088,7 @@ impl Game<'_> {
     /// the mobs the game spawns where vanilla calls `finalizeSpawn`. The class's
     /// follow-ups (raider flags and the like) are part of `finalizeSpawn`, so a
     /// site skips them on [`Finalized::Skipped`].
-    pub(in crate::game) fn finalize_with(
+    pub(super) fn finalize_with(
         &mut self,
         mob: &mut Mob,
         reason: SpawnReason,
@@ -1106,7 +1106,7 @@ impl Game<'_> {
     /// through its lend and change the pack's `group`, which finalization then
     /// reads. The decision and the difficulty the spawn finalizes with come
     /// back together.
-    pub(in crate::game) fn finalize_spawn_event(
+    pub(super) fn finalize_spawn_event(
         &self,
         mob: &mut Mob,
         reason: SpawnReason,
@@ -1125,7 +1125,7 @@ impl Game<'_> {
     /// (`EntityPart::spawn_cluster_size`), asked with `mob` lent as it stands before it joins the
     /// level: the first part in dispatch order to answer wins, and none answering leaves vanilla's
     /// `vanilla` to the spawner. A type with no part costs one table lookup. Server-side.
-    pub(in crate::game) fn spawn_cluster_size(
+    pub(super) fn spawn_cluster_size(
         &self,
         mob: &mut Mob,
         reason: SpawnReason,
@@ -1159,7 +1159,7 @@ impl Game<'_> {
     /// The shared finalization decision for a mob type the game keeps apart
     /// from mobs (the dragon), before the entity joins the level: its lend has
     /// a kind and a position and no mob.
-    pub(in crate::game) fn finalize_spawn_at(
+    pub(super) fn finalize_spawn_at(
         &self,
         kind: &str,
         at: [f64; 3],
@@ -1220,12 +1220,12 @@ impl Game<'_> {
         (Finalized::Done, heard.into())
     }
     /// `ServerLevel.getCurrentDifficultyAt` in the level in place.
-    pub(in crate::game) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {
+    pub(super) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {
         local_difficulty_in(&self.world, at)
     }
     /// Generation's animals for the chunks generated since, once lit: chunk
     /// generation places them whether the level ticks or not.
-    pub(in crate::game) fn spawn_fresh_chunks(&mut self) {
+    pub(super) fn spawn_fresh_chunks(&mut self) {
         if !self.world.chunks.has_fresh() {
             return;
         }
@@ -1245,7 +1245,7 @@ impl Game<'_> {
         }
     }
     /// Advance every mob one tick, then apply their events.
-    pub(in crate::game) fn tick_creatures(&mut self) -> Result<()> {
+    pub(super) fn tick_creatures(&mut self) -> Result<()> {
         // Hurts dealt since the last creature tick (explosions, commands, the
         // systems after it) teleport an enderman before it ticks, not in its AI step.
         self.settle_hurt_teleports()?;
@@ -1272,13 +1272,13 @@ impl Game<'_> {
     }
     /// `DistanceManager.inEntityTickingRange` in an entity-ticking chunk
     /// (block coordinates), from every player's tickets (`update_chunk_tickets`).
-    pub(in crate::game) fn entity_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
+    pub(super) fn entity_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
         self.tickets
             .entity_ticking_area(&self.world.chunks, self.remote.is_none())
     }
     /// The entity phase of `tick_creatures`: every mob's tick, deaths, and the
     /// projectiles and effects that follow from them.
-    pub(in crate::game) fn tick_creature_entities(&mut self) -> Result<()> {
+    pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
         let blocked = self.mobs_below_off_level();
@@ -1592,7 +1592,7 @@ impl Game<'_> {
         Ok(())
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
-    pub(in crate::game) fn death_poof(&mut self, at: [f64; 3], width: f64, height: f64) {
+    pub(super) fn death_poof(&mut self, at: [f64; 3], width: f64, height: f64) {
         let options = horizon_client::particles::ParticleOptions::simple(
             horizon_client::particles::ParticleType::Poof,
         );
@@ -1627,7 +1627,7 @@ impl Game<'_> {
         cancel
     }
     /// LivingEntity.die / dropAllDeathLoot.
-    pub(in crate::game) fn mob_died(&mut self, m: &Mob) {
+    pub(super) fn mob_died(&mut self, m: &Mob) {
         // The killing blow for the drop hooks, before the player's hit is forgotten.
         let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
         let killer = self
@@ -1862,7 +1862,7 @@ impl Game<'_> {
     /// connection `conn` (None once they left), else the player in place
     /// (None on a server, which has none of its own).
     /// The entity id of the player `killer_uuid` names for `conn`.
-    pub(in crate::game) fn player_entity_id_by_connection(&self, conn: Option<u32>) -> Option<i32> {
+    pub(super) fn player_entity_id_by_connection(&self, conn: Option<u32>) -> Option<i32> {
         match conn {
             Some(conn) if self.lan_acting != Some(conn) => {
                 Some(self.lan.as_ref()?.hub.guest(conn)?.entity_id)
@@ -1889,7 +1889,7 @@ impl Game<'_> {
     }
     /// `LivingEntity.dropExperience`: the experience a dying mob or player is worth once
     /// the mods have had their say; 0 when they cancel it.
-    pub(in crate::game) fn living_experience_drop(
+    pub(super) fn living_experience_drop(
         &mut self,
         entity: u32,
         kind: &str,
@@ -1911,7 +1911,7 @@ impl Game<'_> {
     /// Adds the items a dying entity dropped to the level, each at its own
     /// position. With mods, they first hear the list (`native_living_drops`):
     /// edited or canceled.
-    pub(in crate::game) fn drop_death_items(
+    pub(super) fn drop_death_items(
         &mut self,
         dying: &DyingDrops<'_>,
         stacks: Vec<(ItemStack, [f64; 3])>,
@@ -2072,7 +2072,7 @@ impl Game<'_> {
     /// so the kill drops experience and player-only loot and the owner, when
     /// in the world, gets the credit (`getKillCredit`); a tame wolf without an
     /// owner clears it. A player's own hits are recorded where they land.
-    pub(in crate::game) fn resolve_player_responsible(&mut self, victim: u32, source: Damage) {
+    pub(super) fn resolve_player_responsible(&mut self, victim: u32, source: Damage) {
         let Some(Who::Mob(attacker)) = source.attacker else {
             return;
         };
@@ -2097,7 +2097,7 @@ impl Game<'_> {
         };
     }
     /// Remember the acting player for a mob's `lastHurtByPlayer`.
-    pub(in crate::game) fn remember_mob_player_credit(&mut self, victim: u32) {
+    pub(super) fn remember_mob_player_credit(&mut self, victim: u32) {
         if let Some(uuid) = self.player_uuid_of(self.lan_acting) {
             self.last_hurt_by_player.insert(
                 victim,
@@ -2108,7 +2108,7 @@ impl Game<'_> {
 
     /// Resolve `EntityReference.getEntity` across levels. None inside means
     /// the player in place; Some is a guest connection.
-    pub(in crate::game) fn resolve_player_credit(
+    pub(super) fn resolve_player_credit(
         &self,
         credit: super::combat::PlayerCredit,
     ) -> Option<Option<u32>> {
@@ -2211,7 +2211,7 @@ impl Game<'_> {
     /// `MushroomCow.shear`'s `sendParticles(EXPLOSION, x, getY(0.5), z, 1, 0, 0, 0, 0)`:
     /// one puff over a sheared mooshroom, half its `height` up, shown here and to
     /// the players within range.
-    pub(in crate::game) fn mooshroom_shear_puff(&mut self, at: [f64; 3], height: f64) {
+    pub(super) fn mooshroom_shear_puff(&mut self, at: [f64; 3], height: f64) {
         let at = [at[0], at[1] + 0.5 * height, at[2]];
         let options = ParticleOptions::simple(ParticleType::Explosion);
         self.particles
@@ -2221,7 +2221,7 @@ impl Game<'_> {
     /// `Entity.sendBubbleColumnParticles` at the top of the column block `pos`: two
     /// splashes and two bubbles over it, which the level random places, shown here
     /// and to the players within range.
-    pub(in crate::game) fn bubble_column_particles(&mut self, pos: BlockPos) {
+    pub(super) fn bubble_column_particles(&mut self, pos: BlockPos) {
         for _ in 0..2 {
             let r = &mut self.world.random;
             let splash = [
@@ -2273,13 +2273,13 @@ impl Game<'_> {
         self.may_destroy(id, &kind, pos)
     }
     /// Asks the mods whether the entity `id` of type `kind` may destroy the block at `pos`.
-    pub(in crate::game) fn may_destroy(&mut self, id: u32, kind: &str, pos: [i32; 3]) -> bool {
+    pub(super) fn may_destroy(&mut self, id: u32, kind: &str, pos: [i32; 3]) -> bool {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let mut cancel = false;
         self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
         !cancel
     }
-    pub(in crate::game) fn handle_mob_events(&mut self, mut events: Vec<MobEvent>) -> Result<()> {
+    pub(super) fn handle_mob_events(&mut self, mut events: Vec<MobEvent>) -> Result<()> {
         self.handle_mob_events_reusable(&mut events)
     }
 
@@ -3650,7 +3650,7 @@ impl Game<'_> {
     /// `TurtleEggBlock.decreaseEggs` after an entity's step or landing won its
     /// roll (`destroyEgg`): the break sound and the remaining eggs (a stack of
     /// one is destroyed after it).
-    pub(in crate::game) fn crack_turtle_egg(&mut self, pos: [i32; 3]) -> Result<()> {
+    pub(super) fn crack_turtle_egg(&mut self, pos: [i32; 3]) -> Result<()> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let eggs = self
             .pack
@@ -3675,7 +3675,7 @@ impl Game<'_> {
     /// `TurtleEggBlock.randomTick` at the last hatch stage: one baby turtle
     /// per egg, a day from grown, with the egg as its home (the sound, the
     /// crumbs and the block's removal came from the level).
-    pub(in crate::game) fn hatch_turtles(
+    pub(super) fn hatch_turtles(
         &mut self,
         pos: [i32; 3],
         state: horizon_world::registry::BlockStateId,
@@ -4217,7 +4217,7 @@ impl Game<'_> {
     /// `hurtServer` on the player. `from` is the source's position (none: no
     /// direction), `known`: the causing mob when it is given (`/damage`),
     /// else the melee attacker is the mob nearest to `from`.
-    pub(in crate::game) fn hurt_player_from(
+    pub(super) fn hurt_player_from(
         &mut self,
         amount: f32,
         from: Option<[f64; 3]>,
@@ -4432,7 +4432,7 @@ impl Game<'_> {
     /// isn't peaceful, `getBeeInteractionEffect` (Wither, 40 ticks) unless the
     /// player is invulnerable to wither damage (creative, spectator). A
     /// server's player gets it from the server.
-    pub(in crate::game) fn wither_rose_contact(&mut self) {
+    pub(super) fn wither_rose_contact(&mut self) {
         if self.remote.is_some() || self.ui.difficulty == 0 {
             return;
         }
@@ -4452,7 +4452,7 @@ impl Game<'_> {
     /// `Player.aiStep` touching arrows in its box grown by (1, 0.5, 1):
     /// `AbstractArrow.playerTouch`, then `Player.take`'s pickup sound at the
     /// arrow (`ClientPacketListener.handleTakeItemEntity`).
-    pub(in crate::game) fn touch_arrows(&mut self) {
+    pub(super) fn touch_arrows(&mut self) {
         use horizon_client::arrows::Touch;
         let Some(p) = self.player.as_ref() else {
             return;
@@ -4519,7 +4519,7 @@ impl Game<'_> {
         }
     }
 
-    pub(in crate::game) fn tick_projectiles(&mut self) -> Result<()> {
+    pub(super) fn tick_projectiles(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();
@@ -4924,7 +4924,7 @@ impl Game<'_> {
     /// `EnchantmentHelper.doPostAttackEffects` after the player's shot `p`
     /// (its `direct` entity, a hit of `damage_type`) hurt the mob `who`: the
     /// victim's own post-attack enchantments answer the player (Thorns).
-    pub(in crate::game) fn shot_post_attack(
+    pub(super) fn shot_post_attack(
         &mut self,
         p: &Projectile,
         who: Who,
@@ -5002,7 +5002,7 @@ impl Game<'_> {
     }
     /// `BellBlock.onProjectileHit`: a projectile that strikes the bell proper
     /// rings it, and a player's shot counts as the player's ring.
-    pub(in crate::game) fn bell_projectile_hit(
+    pub(super) fn bell_projectile_hit(
         &mut self,
         p: &ProjectileHitter,
         pos: [i32; 3],
@@ -5024,7 +5024,7 @@ impl Game<'_> {
     }
     /// `AmethystBlock.onProjectileHit`: a projectile that strikes an amethyst
     /// block rings `block.amethyst_block.chime` there, pitched by the level random.
-    pub(in crate::game) fn amethyst_projectile_hit(&mut self, pos: [i32; 3]) {
+    pub(super) fn amethyst_projectile_hit(&mut self, pos: [i32; 3]) {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         if &*self.res.facts().get(state).name != "minecraft:amethyst_block" {
             return;
@@ -5206,7 +5206,7 @@ impl Game<'_> {
     /// What a projectile can hit: the mobs, the player, the dragon's parts and
     /// the End crystals (under reserved ids, game/mobs/dragon.rs).
     /// The boats and minecarts a projectile can strike.
-    pub(in crate::game) fn vehicle_targets(&self) -> Vec<(Who, Aabb)> {
+    pub(super) fn vehicle_targets(&self) -> Vec<(Who, Aabb)> {
         let mut targets: Vec<(Who, Aabb)> = self
             .boats
             .iter()
@@ -5215,7 +5215,7 @@ impl Game<'_> {
         targets.extend(self.carts.iter().map(|c| (Who::Mob(c.id), c.bounds())));
         targets
     }
-    pub(in crate::game) fn projectile_targets(&self) -> Vec<(Who, Aabb)> {
+    pub(super) fn projectile_targets(&self) -> Vec<(Who, Aabb)> {
         let mut targets: Vec<(Who, Aabb)> = self
             .mobs
             .iter()
@@ -5237,11 +5237,11 @@ impl Game<'_> {
         targets.extend(self.vehicle_targets());
         targets
     }
-    pub(in crate::game) fn arrow_rain(&self) -> impl Fn(BlockPos) -> bool + '_ {
+    pub(super) fn arrow_rain(&self) -> impl Fn(BlockPos) -> bool + '_ {
         move |p: BlockPos| self.raining_at(p)
     }
     /// The level as arrows see it.
-    pub(in crate::game) fn arrow_scene<'s>(
+    pub(super) fn arrow_scene<'s>(
         &'s self,
         rain: &'s dyn Fn(BlockPos) -> bool,
     ) -> horizon_client::arrows::ArrowScene<'s, 's> {
@@ -5268,7 +5268,7 @@ impl Game<'_> {
         }
     }
     /// Dispatch with the projectile's actual owner context, including a guest shooter.
-    pub(in crate::game) fn projectile_shoot_event(
+    pub(super) fn projectile_shoot_event(
         &mut self,
         owner: Option<Who>,
         guest: Option<u32>,
@@ -5386,7 +5386,7 @@ impl Game<'_> {
     }
 
     /// A projectile's hit, landed in the attack of its owner.
-    pub(in crate::game) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+    pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         let mut attack = self.attack_of_who(p.owner);
         attack.projectile = Some(p.id as i32);
         let result = self.with_attack(attack, |g| g.projectile_hit_landed(p, hit));
@@ -6374,7 +6374,7 @@ impl Game<'_> {
     /// `Snowball`/`ThrownEgg.handleEntityEvent(3)`: eight crumbs of the
     /// thrown item where it broke, at rest for a snowball, scattered by the
     /// client entity's random (the particle engine's here) for an egg.
-    pub(in crate::game) fn item_burst(&mut self, at: [f64; 3], item: &str) {
+    pub(super) fn item_burst(&mut self, at: [f64; 3], item: &str) {
         let options = self.item_particle(&horizon_client::items::ItemStack::new(item, 1));
         let egg = item == "minecraft:egg";
         for _ in 0..8 {
@@ -6395,7 +6395,7 @@ impl Game<'_> {
     /// the golden dandelion check (`canUseGoldenDandelion`, which a tadpole
     /// calls with `isBaby` true). A panda that is scared or on its back and an
     /// armadillo in its shell answer in their own `mobInteract` first.
-    pub(in crate::game) fn age_lock_takes(&self, m: &Mob, item: &str) -> bool {
+    pub(super) fn age_lock_takes(&self, m: &Mob, item: &str) -> bool {
         let species = m.species();
         let baby = if species == Species::Tadpole {
             true
@@ -6423,7 +6423,7 @@ impl Game<'_> {
     /// age lock (a tadpole's or an ageable mob's own `setAgeLockedData`) and is
     /// used up; a locked mob stays (`setPersistenceRequired`), and the lock's
     /// use or unuse sound plays at its block for everyone near.
-    pub(in crate::game) fn set_age_locked(&mut self, index: usize) {
+    pub(super) fn set_age_locked(&mut self, index: usize) {
         let m = &mut self.mobs[index];
         if m.species() == Species::Tadpole {
             horizon_client::mobs::aquatic::set_age_locked_data(m);
@@ -6491,7 +6491,7 @@ impl Game<'_> {
     /// Right click on a mob (Mob.interact / mobInteract), on the mob under the
     /// crosshair or on the one a guest's interact packet named: returns true
     /// when consumed.
-    pub(in crate::game) fn interact_mob(&mut self, target: Option<InteractTarget>) -> Result<bool> {
+    pub(super) fn interact_mob(&mut self, target: Option<InteractTarget>) -> Result<bool> {
         let Some(index) = self.mob_interaction_target(target) else {
             return Ok(false);
         };
@@ -7530,11 +7530,11 @@ impl Game<'_> {
         true
     }
     /// `ItemStack.hurtAndBreak(1, ...)` on the held tool: Unbreaking, break sound and stat.
-    pub(in crate::game) fn damage_held_tool(&mut self) {
+    pub(super) fn damage_held_tool(&mut self) {
         self.damage_held(1);
     }
     /// Throwables and spawn eggs (SnowballItem/EggItem/EnderpearlItem/SpawnEggItem.use).
-    pub(in crate::game) fn throw_item(&mut self, stack: &ItemStack) -> Result<bool> {
+    pub(super) fn throw_item(&mut self, stack: &ItemStack) -> Result<bool> {
         let item = &*stack.item;
         let kind = match item {
             "minecraft:snowball" => ProjectileKind::Snowball,
@@ -7658,7 +7658,7 @@ impl Game<'_> {
         true
     }
     /// `SpawnEggItem.use`: the SOURCE_ONLY ray must hit a liquid block.
-    pub(in crate::game) fn spawn_egg_fluid_hit(&self) -> Option<super::Hit> {
+    pub(super) fn spawn_egg_fluid_hit(&self) -> Option<super::Hit> {
         let hit = self.bucket_hit()?;
         matches!(
             &*self.block_name(hit.pos),
@@ -7667,7 +7667,7 @@ impl Game<'_> {
         .then_some(hit)
     }
     /// Shared peaceful-mode eligibility for spawn eggs.
-    pub(in crate::game) fn spawn_egg_allowed(&self, item: &str) -> bool {
+    pub(super) fn spawn_egg_allowed(&self, item: &str) -> bool {
         let kind = item.trim_end_matches("_spawn_egg");
         self.ui.difficulty != 0
             || self
@@ -7759,7 +7759,7 @@ impl Game<'_> {
     /// the mob it spawned, once the guards let it through, as
     /// `TypedEntityData.loadInto`: the mob's own compound, the data merged over
     /// it, loaded back into the same mob (`/data merge entity`'s loader).
-    pub(in crate::game) fn apply_spawn_egg_entity_data(&mut self, id: u32, stack: &ItemStack) {
+    pub(super) fn apply_spawn_egg_entity_data(&mut self, id: u32, stack: &ItemStack) {
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return;
         };
@@ -7801,7 +7801,7 @@ impl Game<'_> {
     /// `Guardian.aiStep` on a client: two bubbles a tick trailing a guardian
     /// that swims along, and bubbles up the beam to its target. The server
     /// never draws them, so the mob's own random stays untouched.
-    pub(in crate::game) fn guardian_bubbles(&mut self) {
+    pub(super) fn guardian_bubbles(&mut self) {
         use horizon_client::mobs::guardian;
         use horizon_client::particles::{ParticleOptions, ParticleType};
         let mut swimming = Vec::new();
@@ -7856,7 +7856,7 @@ impl Game<'_> {
     /// The renderer's models for the GPU path (`mobs::skin`) this frame, if it
     /// poses entities: a new frame of draws, the store restarted when the
     /// renderer's no longer matches. Once per frame, before any entity draws.
-    pub(in crate::game) fn begin_skinning(&self) {
+    pub(super) fn begin_skinning(&self) {
         let renderer = self.renderer.as_ref().filter(|r| r.skins_entities());
         match renderer.and_then(|r| r.skinned_models()) {
             Some(stored) => {
@@ -7872,7 +7872,7 @@ impl Game<'_> {
     }
 
     /// Whether this frame's models can be posed on the GPU (`begin_skinning`).
-    pub(in crate::game) fn skinning(&self) -> bool {
+    pub(super) fn skinning(&self) -> bool {
         self.renderer
             .as_ref()
             .is_some_and(|r| r.skins_entities() && r.skinned_models().is_some())
@@ -7881,7 +7881,7 @@ impl Game<'_> {
     /// Culls one entity's vertices from `entity_start`, counting what it drew
     /// on the GPU path by the corners of `skinned`'s bounds; a culled entity's
     /// posed draws since `skinned`'s mark are taken back.
-    pub(in crate::game) fn cull_skinned(
+    pub(super) fn cull_skinned(
         &self,
         out: &mut Vec<Vertex>,
         entity_start: usize,
@@ -8300,7 +8300,7 @@ impl Game<'_> {
         self.projectile_geometry(camera, alpha, live, out);
     }
 
-    pub(in crate::game) fn pickup_arrow_geometry(
+    pub(super) fn pickup_arrow_geometry(
         &self,
         camera: glam::DVec3,
         alpha: f64,
@@ -8639,13 +8639,13 @@ fn bucketable(species: Species) -> Option<(&'static str, &'static str)> {
 /// The damage type id of a mob's damage source (`DamageSources.explosion`: a
 /// blast with a causing entity is `player_explosion` whoever it is, an
 /// exploding creeper too).
-pub(in crate::game) fn source_damage_type(d: Damage) -> &'static str {
+pub(super) fn source_damage_type(d: Damage) -> &'static str {
     damage_type(d.kind, d.attacker.is_some())
 }
 /// Whether the causing entity deals `kind` itself, so it is the source's
 /// direct entity too: a melee hit (`DamageSources.mobAttack`, `playerAttack`,
 /// a mace's or a spear's), a sting, a sonic boom, thorns.
-pub(in crate::game) fn melee(kind: horizon_client::mobs::DamageKind) -> bool {
+pub(super) fn melee(kind: horizon_client::mobs::DamageKind) -> bool {
     use horizon_client::mobs::DamageKind as K;
     matches!(
         kind,
@@ -8745,7 +8745,7 @@ fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
     }
 }
 /// A generated loot stack as a Horizon item stack.
-pub(in crate::game) fn from_loot(stack: &horizon_world::loot::LootStack) -> ItemStack {
+pub(super) fn from_loot(stack: &horizon_world::loot::LootStack) -> ItemStack {
     let mut item = ItemStack {
         item: Arc::from(stack.item.as_str()),
         count: stack.count.max(1) as u32,
@@ -8773,7 +8773,7 @@ impl Game<'_> {
     /// The rest of `NetherPortalBlock.randomTick` after a won roll: with a
     /// player close enough for spawning, a zombified piglin spawns on the block
     /// under the portal column when it is a valid spawn.
-    pub(in crate::game) fn portal_spawn(&mut self, pos: [i32; 3]) {
+    pub(super) fn portal_spawn(&mut self, pos: [i32; 3]) {
         // ChunkMap.anyPlayerCloseEnoughForSpawning: a non-spectator within 128
         // blocks of the chunk centre.
         let centre = [
@@ -8898,7 +8898,7 @@ impl Game<'_> {
     /// `EventHooks.canEntityGrief(level, entity)`: the `mob_griefing` rule,
     /// which a mod may change for `entity` (`EntityMobGriefingEvent`). No
     /// entity: the rule alone, as NeoForge.
-    pub(in crate::game) fn can_entity_grief(&self, entity: Option<u32>) -> bool {
+    pub(super) fn can_entity_grief(&self, entity: Option<u32>) -> bool {
         let rule = self
             .ui
             .rules
@@ -8925,12 +8925,12 @@ impl Game<'_> {
     /// Whether a mod may answer `can_entity_grief` differently from the rule:
     /// the sites that skip their whole work while griefing is off skip it only
     /// when no mod listens.
-    pub(in crate::game) fn grief_hooked(&self) -> bool {
+    pub(super) fn grief_hooked(&self) -> bool {
         self.native_authoritative()
             && mod_api::__private::listened(mod_api::HookId::EntityMobGriefing)
     }
     /// [`Self::can_entity_grief`] for `entity`, with the rule already read.
-    pub(in crate::game) fn entity_grief(&self, entity: u32, rule: bool) -> bool {
+    pub(super) fn entity_grief(&self, entity: u32, rule: bool) -> bool {
         if !self.grief_hooked() {
             return rule;
         }

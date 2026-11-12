@@ -49,13 +49,13 @@ struct ExplosionDropPiece {
 
 /// `Level.clip` with `ClipContext.Block.COLLIDER`, no fluids and the
 /// collision context of the entity whose exposure is measured.
-pub(in crate::game) struct ClipData<'a, 'r> {
+pub(super) struct ClipData<'a, 'r> {
     pub facts: &'a horizon_client::blocks::BlockFacts,
     pub behaviours: &'a horizon_world::level::Behaviours,
     pub tables: &'a horizon_client::mesher::MeshTables,
     pub registry: &'r horizon_world::registry::BlockRegistry,
 }
-pub(in crate::game) struct ColliderRays<'a, 'r> {
+pub(super) struct ColliderRays<'a, 'r> {
     pub scene: SceneCollisions<'a, 'r>,
     pub context: CollisionContext<'static>,
     pub clip_data: Option<ClipData<'a, 'r>>,
@@ -146,7 +146,7 @@ impl JavaKey for Key {
 
 /// `Explosion.BlockInteraction` for the explosions Horizon produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::game) enum BlockInteraction {
+pub(super) enum BlockInteraction {
     Keep,
     Destroy,
     DestroyWithDecay,
@@ -154,17 +154,17 @@ pub(in crate::game) enum BlockInteraction {
 
 /// Properties of the direct entity passed to `ServerLevel.explode`.
 #[derive(Clone, Copy, Default)]
-pub(in crate::game) struct ExplosionSource {
+pub(super) struct ExplosionSource {
     silent: bool,
     /// The entity that exploded and its kind (`Explosion.getDirectSourceEntity`), when known.
     entity: Option<(u32, &'static str)>,
 }
 impl ExplosionSource {
-    pub(in crate::game) fn with_silence(mut self, silent: bool) -> Self {
+    pub(super) fn with_silence(mut self, silent: bool) -> Self {
         self.silent = silent;
         self
     }
-    pub(in crate::game) fn with_entity(mut self, id: u32, kind: &'static str) -> Self {
+    pub(super) fn with_entity(mut self, id: u32, kind: &'static str) -> Self {
         self.entity = Some((id, kind));
         self
     }
@@ -172,7 +172,7 @@ impl ExplosionSource {
 
 /// `ServerExplosion.hurtEntities`: an entity is hurt when its position is
 /// within the blast's diameter of the centre.
-pub(in crate::game) fn blast_reaches(center: [f64; 3], diameter: f64, at: [f64; 3]) -> bool {
+pub(super) fn blast_reaches(center: [f64; 3], diameter: f64, at: [f64; 3]) -> bool {
     let d =
         ((at[0] - center[0]).powi(2) + (at[1] - center[1]).powi(2) + (at[2] - center[2]).powi(2))
             .sqrt();
@@ -194,7 +194,7 @@ fn items_ignore_explosion(mob_griefing: bool, interaction: BlockInteraction) -> 
 /// `ignoreExplosion`; no wind charge goes through `server_explode`), and one a
 /// mob causes does no harm (`BlockAttachedEntity.hurtServer` and
 /// `ArmorStand.hurtServer`: `source.getEntity() instanceof Mob`).
-pub(in crate::game) fn blast_spares_decorations(
+pub(super) fn blast_spares_decorations(
     mob_griefing: bool,
     interaction: BlockInteraction,
     by_mob: bool,
@@ -281,13 +281,13 @@ thread_local! {
     /// Client-side randomness (explosion sound pitch), separate from the level random.
     static CLIENT_RANDOM: std::cell::RefCell<LegacyRandom> = std::cell::RefCell::new(LegacyRandom::new(0x5eed));
 }
-pub(in crate::game) fn client_float() -> f32 {
+pub(super) fn client_float() -> f32 {
     CLIENT_RANDOM.with(|r| r.borrow_mut().next_float())
 }
 
 impl Game<'_> {
     /// `blast_cause` for the blast going off now.
-    pub(in crate::game) fn blast_attacker(&self) -> Option<(u32, Text)> {
+    pub(super) fn blast_attacker(&self) -> Option<(u32, Text)> {
         // `Explosion.getIndirectSourceEntity`: a primed TNT's owner names the
         // blast before any mob does, which makes the damage type
         // `minecraft:player_explosion` (`server_explode` asks this).
@@ -929,7 +929,7 @@ impl Game<'_> {
     }
     /// `ServerExplosion.getIndirectSourceEntity`: the causing living entity,
     /// including a TNT igniter or the player who broke an end crystal.
-    pub(in crate::game) fn explosion_kill_credit(&self) -> Option<super::commands::Target> {
+    pub(super) fn explosion_kill_credit(&self) -> Option<super::commands::Target> {
         use super::commands::Target;
         // A primed TNT's owner (a player) names the blast before any mob does.
         if self.combat.blast_owner.is_some() {
@@ -946,7 +946,7 @@ impl Game<'_> {
     }
     /// `blast_spares_decorations` for the blast going off now: its causing
     /// mob (`blast_attacker`) is the source's entity.
-    pub(in crate::game) fn blast_spares_decorations(&self, interaction: BlockInteraction) -> bool {
+    pub(super) fn blast_spares_decorations(&self, interaction: BlockInteraction) -> bool {
         let by_mob = self.blast_attacker().is_some();
         blast_spares_decorations(
             self.ui
@@ -958,7 +958,7 @@ impl Game<'_> {
         )
     }
     /// `Entity.isInWater` for an entity box: `updateFluidInteraction` over the box.
-    pub(in crate::game) fn bounds_in_water(&self, bounds: horizon_core::geometry::Aabb) -> bool {
+    pub(super) fn bounds_in_water(&self, bounds: horizon_core::geometry::Aabb) -> bool {
         self.mob_world_base(&[])
             .fluids(bounds, bounds.max_position().y)
             .in_water
@@ -1068,7 +1068,7 @@ impl Game<'_> {
     }
     /// `ServerLevel.getDestroyType`: a drop decay rule picks between decaying
     /// and plain destruction.
-    pub(in crate::game) fn destroy_type(
+    pub(super) fn destroy_type(
         &self,
         rule: horizon_client::gamerules::RuleIndex,
     ) -> BlockInteraction {
@@ -1092,7 +1092,7 @@ impl Game<'_> {
     }
     /// `Level.explode` on the server: positions, entities, blocks, fire; then
     /// the client's explosion sound.
-    pub(in crate::game) fn server_explode(
+    pub(super) fn server_explode(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1109,7 +1109,7 @@ impl Game<'_> {
     }
     /// `ServerLevel.explode`: only the direct source's `isSilent` suppresses
     /// the sound; terrain, entity damage and the visual packet are unchanged.
-    pub(in crate::game) fn server_explode_from(
+    pub(super) fn server_explode_from(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1125,7 +1125,7 @@ impl Game<'_> {
     }
     /// `server_explode` with the damage type the player takes and a block
     /// whose explosion resistance the damage calculator overrides.
-    pub(in crate::game) fn server_explode_as(
+    pub(super) fn server_explode_as(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1249,7 +1249,7 @@ impl Game<'_> {
     /// `InfestedBlock.spawnAfterBreak` without a tool that prevents it: while
     /// blocks drop, its silverfish (`spawnInfestation`) comes out at the
     /// bottom centre of the block, with its spawn animation.
-    pub(in crate::game) fn spawn_infestation(&mut self, pos: [i32; 3]) {
+    pub(super) fn spawn_infestation(&mut self, pos: [i32; 3]) {
         if !self
             .ui
             .rules
@@ -1478,7 +1478,7 @@ impl Game<'_> {
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
     /// rule picks decay).
-    pub(in crate::game) fn explode(
+    pub(super) fn explode(
         &mut self,
         source: Option<u32>,
         center: [f64; 3],
@@ -1488,7 +1488,7 @@ impl Game<'_> {
         self.explode_with(source, center, radius, false, blast)
     }
     /// `ServerLevel.explode` with `ExplosionInteraction.MOB` and the caller's fire flag.
-    pub(in crate::game) fn explode_mob(
+    pub(super) fn explode_mob(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1499,7 +1499,7 @@ impl Game<'_> {
     }
     /// `SulfurCube.tickFuse`: `ExplosionInteraction.TNT` (the
     /// tnt_explosion_drop_decay rule) with mobGriefing, `NONE` without.
-    pub(in crate::game) fn explode_sulfur_cube(
+    pub(super) fn explode_sulfur_cube(
         &mut self,
         source: Option<u32>,
         center: [f64; 3],
@@ -1518,7 +1518,7 @@ impl Game<'_> {
 #[cfg(test)]
 impl Game<'_> {
     /// Exercise the real explosion entity walk on an empty, headless world.
-    pub(in crate::game) fn run_explosion_items_fixture(
+    pub(super) fn run_explosion_items_fixture(
         &mut self,
         directory: &std::path::Path,
     ) -> Result<()> {
