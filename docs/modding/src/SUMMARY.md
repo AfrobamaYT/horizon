@@ -14,7 +14,6 @@
      List a page here only to place it first or to show it in a part outside its folder. Aggregate
      chapters keep their published anchors; their child chapters are discovered too. -->
 
-- [Registered data load conditions](concepts/load-conditions.md)
 - [Wire types](how-to/wire-types.md)
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)

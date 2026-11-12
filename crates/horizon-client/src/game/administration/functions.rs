@@ -237,7 +237,7 @@ impl Game<'_> {
             )
         })?;
         let next_root = self
-            .stage_enabled_inventory()
+            .stage_condition_inventory()
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         let resources = next_root
             .as_ref()

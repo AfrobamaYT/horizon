@@ -96,3 +96,42 @@ fn loaded_mod_ids_alone_do_not_own_condition_namespaces() {
     }
     assert_eq!(conditions.warnings().len(), 1);
 }
+
+#[test]
+fn no_mod_conditions_do_not_construct_file_context_for_known_nodes() {
+    let conditions = LoadConditions::new([]);
+    for (node, expected) in [
+        (json!({"type":"neoforge:true"}), true),
+        (
+            json!({"type":"neoforge:mod_loaded","modid":"absent"}),
+            false,
+        ),
+        (
+            json!({"type":"neoforge:not","value":{"type":"neoforge:mod_loaded","modid":"absent"}}),
+            true,
+        ),
+    ] {
+        assert_eq!(
+            conditions.allows_context(&json!({"neoforge:conditions":[node]}), || panic!(
+                "fast path formatted a file context"
+            )),
+            expected
+        );
+    }
+}
+#[test]
+fn concurrent_registered_readers_evaluate_each_entry_once() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let conditions = registered(count.clone());
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                assert!(conditions.allows_file(
+                    &json!({"neoforge:conditions":[{"type":"testmod:flag","value":true}]}),
+                    "concurrent.json"
+                ))
+            });
+        }
+    });
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}

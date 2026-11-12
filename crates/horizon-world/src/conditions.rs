@@ -76,118 +76,133 @@ impl LoadConditions {
         self
     }
 
+    /// Whether this candidate has any registered condition handlers.
+    pub fn has_registered(&self) -> bool {
+        self.registered.is_some()
+    }
+
     /// Unknown condition kinds retain the built-in fail-closed behavior.
     pub fn allows(&self, file: &Value) -> bool {
         self.allows_file(file, "data file")
     }
 
-    /// Evaluate a namespaced resource, recording its canonical data-file path on error.
+    /// Evaluate a resource, constructing its path only for registered handlers or warnings.
     pub fn allows_id(&self, file: &Value, kind: &str, id: &str) -> bool {
-        if file.get("neoforge:conditions").is_none() {
-            return true;
-        }
-        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-        self.allows_file(file, &format!("data/{namespace}/{kind}/{path}.json"))
+        self.allows_context(file, || {
+            let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+            format!("data/{namespace}/{kind}/{path}.json")
+        })
     }
 
-    /// Evaluate a tag layer, formatting its file context only when mods registered handlers.
+    /// Evaluate one tag layer.
     pub fn allows_tag(&self, file: &Value, registry: &str, id: &str) -> bool {
-        if file.get("neoforge:conditions").is_none() {
-            return true;
-        }
-        self.allows_id(file, &format!("tags/{registry}"), id)
+        self.allows_context(file, || {
+            let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+            format!("data/{namespace}/tags/{registry}/{path}.json")
+        })
     }
 
     /// Evaluate a resource whose namespace and path are stored separately.
     pub fn allows_parts(&self, file: &Value, kind: &str, namespace: &str, path: &str) -> bool {
-        if file.get("neoforge:conditions").is_none() {
-            return true;
-        }
-        self.allows_id(file, kind, &format!("{namespace}:{path}"))
+        self.allows_context(file, || format!("data/{namespace}/{kind}/{path}.json"))
     }
 
-    /// Evaluate a prepared folder's resource without formatting paths in the no-mod case.
+    /// Evaluate a folder resource without joining paths in the no-mod fast path.
     pub fn allows_path(&self, file: &Value, directory: &std::path::Path, name: &str) -> bool {
-        if file.get("neoforge:conditions").is_none() {
-            return true;
-        }
-        self.allows_file(
-            file,
-            &directory.join(format!("{name}.json")).display().to_string(),
-        )
+        self.allows_context(file, || {
+            directory.join(format!("{name}.json")).display().to_string()
+        })
     }
 
-    /// Evaluate once per file and condition payload in this candidate generation.
-    /// Callback errors and owned typos refuse publication; foreign unknowns drop
-    /// the file and produce one warning containing its distinct unknown names.
+    /// Evaluate once per entry and payload, outside the diagnostics mutex.
     pub fn allows_file(&self, file: &Value, path: &str) -> bool {
-        let path = path
-            .rfind("/data/")
-            .map_or(path, |index| &path[index + 1..]);
+        self.allows_context(file, || path.to_owned())
+    }
+
+    fn allows_context(&self, file: &Value, context: impl FnOnce() -> String) -> bool {
         let Some(payload) = file.get("neoforge:conditions") else {
             return true;
         };
-        if self.registered.is_none() {
-            let mut unknown = BTreeSet::new();
-            let answer = evaluate(
-                file,
-                &|id| self.mod_loaded(id),
-                &|_, _| None,
-                &BTreeMap::new(),
-                &mut unknown,
-            )
+        let loaded = |id: &str| self.mod_loaded(id);
+        let Some(registered) = &self.registered else {
+            // The ordinary path uses only borrowed nodes and a boolean. No path,
+            // argument copy, name set, cache key or diagnostics lock is needed.
+            let mut unknown = false;
+            let answer = evaluate(file, &loaded, &|_, _| None, &BTreeMap::new(), &mut |_| {
+                unknown = true
+            })
             .expect("empty lookup cannot fail");
-            if !unknown.is_empty() {
-                let Some(state) = self.diagnostics.0.as_ref() else {
-                    log::warn!(
-                        "{path}: unknown load conditions [{}]; file left out",
-                        unknown.into_iter().collect::<Vec<_>>().join(", ")
-                    );
-                    return answer;
-                };
-                let mut state = state.lock().unwrap();
-                if !state.warnings.contains_key(path) {
-                    let names = unknown.into_iter().collect::<Vec<_>>().join(", ");
-                    let warning =
-                        format!("{path}: unknown load conditions [{names}]; file left out");
-                    log::warn!("{warning}");
-                    state.warnings.insert(path.to_owned(), warning);
-                }
+            if !unknown {
+                return answer;
             }
+            let mut names = BTreeSet::new();
+            let _ = evaluate(file, &loaded, &|_, _| None, &BTreeMap::new(), &mut |name| {
+                names.insert(name.to_owned());
+            });
+            self.warn_unknown(&context(), names);
             return answer;
-        }
+        };
+        let path = context();
+        let path = path
+            .rfind("/data/")
+            .map_or(path.as_str(), |index| &path[index + 1..]);
         let state = self
             .diagnostics
             .0
             .as_ref()
             .expect("owning candidate diagnostics");
-        let key = (path.to_owned(), payload.to_string());
-        let mut state = state.lock().unwrap();
-        if let Some(answer) = state.cache.get(&key) {
-            return *answer;
-        }
-        let empty = BTreeMap::new();
-        let (lookup, owned): (&ConditionLookup, _) = match &self.registered {
-            Some(registered) => (&*registered.0.lookup, &registered.0.owned),
-            None => (&|_, _| None, &empty),
-        };
-        let mut unknown = BTreeSet::new();
-        let result = evaluate(file, &|id| self.mod_loaded(id), lookup, owned, &mut unknown);
-        if !unknown.is_empty() && !state.warnings.contains_key(path) {
-            let names = unknown.into_iter().collect::<Vec<_>>().join(", ");
-            let warning = format!("{path}: unknown load conditions [{names}]; file left out");
-            log::warn!("{warning}");
-            state.warnings.insert(path.to_owned(), warning);
-        }
-        let allowed = match result {
-            Ok(answer) => answer,
-            Err(error) => {
-                state.errors.push(format!("{path}: {error}"));
-                false
+        let cell = state
+            .lock()
+            .unwrap()
+            .cache
+            .entry((path.to_owned(), payload.to_string()))
+            .or_default()
+            .clone();
+        *cell.get_or_init(|| {
+            let mut unknown = BTreeSet::new();
+            let result = evaluate(
+                file,
+                &loaded,
+                &*registered.0.lookup,
+                &registered.0.owned,
+                &mut |name| {
+                    unknown.insert(name.to_owned());
+                },
+            );
+            if !unknown.is_empty() {
+                self.warn_unknown(path, unknown);
             }
+            match result {
+                Ok(answer) => answer,
+                Err(error) => {
+                    state
+                        .lock()
+                        .unwrap()
+                        .errors
+                        .push(format!("{path}: {error}"));
+                    false
+                }
+            }
+        })
+    }
+
+    fn warn_unknown(&self, path: &str, names: BTreeSet<String>) {
+        let warning = || {
+            format!(
+                "{path}: unknown load conditions [{}]; file left out",
+                names.into_iter().collect::<Vec<_>>().join(", ")
+            )
         };
-        state.cache.insert(key, allowed);
-        allowed
+        if let Some(state) = &self.diagnostics.0 {
+            let mut state = state.lock().unwrap();
+            if !state.warnings.contains_key(path) {
+                let warning = warning();
+                log::warn!("{warning}");
+                state.warnings.insert(path.to_owned(), warning);
+            }
+        } else {
+            log::warn!("{}", warning());
+        }
     }
 
     /// Named warnings emitted by this candidate, one per file.
@@ -213,7 +228,7 @@ impl LoadConditions {
 
 #[derive(Debug, Default)]
 struct CandidateDiagnostics {
-    cache: BTreeMap<(String, String), bool>,
+    cache: BTreeMap<(String, String), std::sync::Arc<std::sync::OnceLock<bool>>>,
     warnings: BTreeMap<String, String>,
     errors: Vec<String>,
 }
@@ -285,7 +300,7 @@ pub fn conditions_hold_with_lookup(
     lookup: &ConditionLookup,
     owned: &BTreeMap<String, String>,
 ) -> Result<bool, String> {
-    evaluate(v, loaded, lookup, owned, &mut BTreeSet::new())
+    evaluate(v, loaded, lookup, owned, &mut |_| {})
 }
 
 fn evaluate(
@@ -293,14 +308,14 @@ fn evaluate(
     loaded: &ModLoaded,
     lookup: &ConditionLookup,
     owned: &BTreeMap<String, String>,
-    unknown: &mut BTreeSet<String>,
+    unknown: &mut dyn FnMut(&str),
 ) -> Result<bool, String> {
     fn hold(
         c: &Value,
         loaded: &ModLoaded,
         lookup: &ConditionLookup,
         owned: &BTreeMap<String, String>,
-        unknown: &mut BTreeSet<String>,
+        unknown: &mut dyn FnMut(&str),
     ) -> Result<Option<bool>, String> {
         Ok(match c["type"].as_str() {
             Some("neoforge:mod_loaded") => Some(c["modid"].as_str().is_some_and(loaded)),
@@ -334,7 +349,7 @@ fn evaluate(
                             "unknown condition {name} in namespace registered by mod {owner}"
                         ));
                     }
-                    unknown.insert(name.to_owned());
+                    unknown(name);
                     None
                 }
             },

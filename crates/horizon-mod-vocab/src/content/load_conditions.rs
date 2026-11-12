@@ -33,8 +33,8 @@ impl From<(Identifier, String)> for ConditionError {
 /// to omit the entry, or an error to keep the previous usable generation.
 /// Registering a condition owns its namespace: unknown names there refuse the
 /// reload. Unknown names elsewhere omit the file with one named warning.
-/// A returned error refuses the candidate reload. Panics follow the runtime's
-/// normal callback trap policy; handlers must not mutate published data.
+/// A returned error or native panic refuses the candidate reload, naming the
+/// file, condition and owner. Handlers must not mutate published data.
 pub trait LoadCondition: Send + Sync + 'static {
     /// Evaluate the typed JSON arguments for one entry.
     fn test(&self, args: &serde_json::Value) -> Result<bool, ConditionError>;

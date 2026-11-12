@@ -6,11 +6,17 @@ use mod_api::{
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-struct Flag(Arc<AtomicUsize>);
+struct Flag(Arc<AtomicUsize>, Arc<AtomicUsize>);
 impl LoadCondition for Flag {
     fn test(&self, args: &Value) -> std::result::Result<bool, ConditionError> {
         assert!(args.get("type").is_none());
         self.0.fetch_add(1, Ordering::SeqCst);
+        if args["value"] == "content" {
+            return Ok(self.1.load(Ordering::SeqCst) == 0);
+        }
+        if args["value"] == "panic" {
+            panic!("fixture panic");
+        }
         args["value"].as_bool().ok_or_else(|| ConditionError {
             message: "value must be a boolean".into(),
         })
@@ -31,7 +37,7 @@ impl Hooks for Registrant {
             .conditions
             .register(
                 Identifier::parse("testmod:flag").unwrap(),
-                Flag(self.count.clone()),
+                Flag(self.count.clone(), self.mode.clone()),
             )
             .unwrap();
     }
@@ -43,11 +49,20 @@ impl Hooks for Registrant {
         let yes = match self.mode.load(Ordering::SeqCst) {
             1 => json!({"type":"testmod:nope"}),
             2 => json!({"type":"testmod:flag","value":"bad"}),
+            3 => json!({"type":"testmod:flag","value":"panic"}),
             _ => json!({"type":"testmod:flag","value":true}),
         };
         for (name, condition) in [
             ("enabled", yes),
             ("disabled", json!({"type":"testmod:flag","value":false})),
+            (
+                "not_false",
+                json!({"type":"neoforge:not","value":{"type":"testmod:flag","value":false}}),
+            ),
+            (
+                "not_true",
+                json!({"type":"neoforge:not","value":{"type":"testmod:flag","value":true}}),
+            ),
             (
                 "nested",
                 json!({"type":"neoforge:and","values":[{"type":"neoforge:true"},{"type":"neoforge:or","values":[{"type":"testmod:flag","value":true}]}]}),
@@ -91,7 +106,18 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                 )
                 .unwrap();
                 request.save_root = scratch.path().join("save");
+                let module = scratch.path().join("content");
+                std::fs::create_dir_all(module.join("data/testmod/tags/block")).unwrap();
+                std::fs::write(module.join("horizon-mod.toml"), "id='testmod'\nname='Conditions fixture'\nversion='1'\napi='0.2'\nside='both'\ncapabilities=['registries']\n").unwrap();
+                std::fs::write(module.join("data/testmod/tags/block/flag.json"), r#"{"neoforge:conditions":[{"type":"testmod:flag","value":"content"}],"values":["minecraft:stone"]}"#).unwrap();
+                game.mods.selected = vec![horizon_mod_package::selection::SelectedPackage {
+                    package: horizon_mod_package::Package::read(&module).unwrap(),
+                    path: module.clone(),
+                }]
+                .into();
+                game.mods.dev.push(module);
                 game.load_world(request).unwrap();
+                assert!(game.items().block_tags["testmod:flag"].contains("minecraft:stone"));
                 assert!(game.recipes().recipe("testmod:enabled").is_some());
                 assert!(game.recipes().recipe("testmod:disabled").is_none());
                 assert!(game.recipes().recipe("testmod:nested").is_some());
@@ -99,15 +125,34 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     count.store(0, Ordering::SeqCst);
                     game.reload_datapacks(true, &game.level.enabled_features.clone())
                         .unwrap();
-                    assert_eq!(count.load(Ordering::SeqCst), 3);
+                    assert_eq!(count.load(Ordering::SeqCst), 6);
+                    assert!(game.recipes().recipe("testmod:not_false").is_some());
+                    assert!(game.recipes().recipe("testmod:not_true").is_none());
+                    assert!(game.recipes().recipe("testmod:nested").is_some());
                 }
+                mode.store(4, Ordering::SeqCst);
+                count.store(0, Ordering::SeqCst);
+                game.reload_datapacks(true, &game.level.enabled_features.clone())
+                    .unwrap();
+                assert_eq!(count.load(Ordering::SeqCst), 6);
+                assert!(
+                    !game
+                        .items()
+                        .block_tags
+                        .get("testmod:flag")
+                        .is_some_and(|tag| tag.contains("minecraft:stone"))
+                );
                 let old: Vec<_> = game
                     .recipes()
                     .crafting
                     .iter()
                     .map(|(id, _)| id.clone())
                     .collect();
-                for (bad, expected) in [(1, "testmod:nope"), (2, "value must be a boolean")] {
+                for (bad, expected) in [
+                    (1, "testmod:nope"),
+                    (2, "value must be a boolean"),
+                    (3, "handler panicked"),
+                ] {
                     mode.store(bad, Ordering::SeqCst);
                     let error = format!(
                         "{:?}",
@@ -120,7 +165,10 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                         "{error}"
                     );
                     assert!(error.contains(expected), "{error}");
-                    if bad == 1 {
+                    if bad != 1 {
+                        assert!(error.contains("testmod:flag"), "{error}");
+                    }
+                    if bad == 1 || bad == 3 {
                         assert!(error.contains("mod testmod"), "{error}");
                     }
                     assert_eq!(
@@ -133,6 +181,10 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     );
                     assert!(game.recipes().recipe("testmod:enabled").is_some());
                 }
+                mode.store(0, Ordering::SeqCst);
+                game.reload_datapacks(true, &game.level.enabled_features.clone())
+                    .unwrap();
+                assert!(game.recipes().recipe("testmod:enabled").is_some());
             });
         },
     );
@@ -147,7 +199,7 @@ impl Hooks for Duplicate {
     ) {
         let _ = event.conditions.register(
             Identifier::parse("testmod:flag").unwrap(),
-            Flag(Arc::default()),
+            Flag(Arc::default(), Arc::default()),
         );
     }
 }

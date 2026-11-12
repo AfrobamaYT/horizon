@@ -37,8 +37,9 @@ codec. Native and WebAssembly registrants cross the same generated route.
 Handlers run in the server's candidate data reload, before the entries become
 visible. Results are retained for each entry and condition payload in that
 candidate, so repeated readers do not call the handler again. A new reload
-reevaluates the entry. Handlers must not mutate live data. A callback panic or
-wasm trap follows the runtime's normal failure policy.
+reevaluates the entry. Handlers must not mutate live data. A native handler
+panic becomes a named reload error ("handler panicked"), keeping the previous
+usable data. A wasm trap follows the runtime's normal failure policy.
 
 `true` loads the entry; `false` omits it, without exposing a lower pack's
 version. A callback error refuses the reload and names the file. The previous

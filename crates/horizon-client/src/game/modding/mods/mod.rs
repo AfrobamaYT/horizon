@@ -812,7 +812,9 @@ pub(super) fn content_overlay(
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
-    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache, &inventory)?;
+    let prepared = super::load_conditions::content_root_with_conditions(
+        root, jar_store, &mods, &cache, &inventory, sources,
+    )?;
     let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     let _ = sources.content_base.set(original_base);
     Ok(ContentOverlay {
@@ -1393,7 +1395,7 @@ impl Game<'_> {
         }
     }
 
-    /// Stage a fresh root only when live code admission changes the inventory.
+    /// Stage a fresh root when admission changes or registered conditions need reevaluation.
     /// The caller publishes it after every server reload listener prepared.
     pub(super) fn stage_enabled_inventory(
         &self,
@@ -1402,7 +1404,7 @@ impl Game<'_> {
         let next = self
             .mods
             .enabled_inventory(|id| previous.client_ids().any(|loaded| loaded == id));
-        if previous == next {
+        if previous == next && !self.condition_root_needs_reload() {
             return Ok(None);
         }
         let base = self
