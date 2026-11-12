@@ -384,6 +384,11 @@ impl Session {
         let thread = horizon_guest_stack::builder()
             .name("horizon-net".into())
             .spawn(move || {
+                debug_assert_eq!(
+                    horizon_guest_stack::check_current(),
+                    Ok(()),
+                    "a guest-capable thread must start on the guest stack"
+                );
                 horizon_threads::favour_current();
                 let result = captured_payloads.map_err(Reason::plain).and_then(|_| {
                     run(
@@ -417,6 +422,14 @@ impl Session {
                     reason: why.text,
                     key: why.key,
                     from_server,
+                });
+            })
+            .inspect_err(|error| {
+                // No reader runs to report the end: say it here, or the session waits forever.
+                let _ = payload_events.send(Event::Disconnected {
+                    reason: format!("network thread: {error}"),
+                    key: None,
+                    from_server: false,
                 });
             })
             .ok();

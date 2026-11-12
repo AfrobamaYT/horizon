@@ -325,7 +325,14 @@ fn start(threads: usize) -> std::io::Result<Pool> {
         // Payload handlers of wasm mods run on these threads (the server's network root).
         horizon_guest_stack::builder()
             .name(format!("horizon-net-{n}"))
-            .spawn(move || run(poll, &mine))?;
+            .spawn(move || {
+                debug_assert_eq!(
+                    horizon_guest_stack::check_current(),
+                    Ok(()),
+                    "a guest-capable thread must start on the guest stack"
+                );
+                run(poll, &mine)
+            })?;
         workers.push(worker);
     }
     Ok(Pool { workers })

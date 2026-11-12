@@ -836,9 +836,15 @@ impl Lan {
     pub fn connect_local(&self) -> io::Result<horizon_protocol::connection::Pipe> {
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let shared = self.shared.clone();
-        std::thread::Builder::new()
+        // Configuration payload handlers of wasm mods run on this thread.
+        horizon_guest_stack::builder()
             .name("horizon-local-conn".into())
             .spawn(move || {
+                debug_assert_eq!(
+                    horizon_guest_stack::check_current(),
+                    Ok(()),
+                    "a guest-capable thread must start on the guest stack"
+                );
                 if let Err(e) = conn::serve_local(server, shared)
                     && std::env::var_os("HORIZON_NET_DEBUG").is_some()
                 {
@@ -1058,9 +1064,15 @@ fn accept_loop(listener: TcpListener, shared: Arc<Shared>, stop: &AtomicBool) {
                     continue;
                 };
                 shared.wait(&counted, &stream);
-                let _ = std::thread::Builder::new()
+                // Configuration payload handlers of wasm mods run on this thread.
+                let _ = horizon_guest_stack::builder()
                     .name("horizon-lan-conn".into())
                     .spawn(move || {
+                        debug_assert_eq!(
+                            horizon_guest_stack::check_current(),
+                            Ok(()),
+                            "a guest-capable thread must start on the guest stack"
+                        );
                         WAITING.set(Some(counted.2));
                         handle(stream, addr, counted);
                     });

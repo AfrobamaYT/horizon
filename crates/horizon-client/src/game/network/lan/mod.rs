@@ -397,9 +397,15 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
     }
     let root = item_data.root().to_owned();
     let item_data = Arc::clone(item_data);
-    std::thread::Builder::new()
+    // Loading recipes asks mods' ingredient and recipe property set hooks, wasm mods included.
+    horizon_guest_stack::builder()
         .name("Server data preload".into())
         .spawn(move || {
+            debug_assert_eq!(
+                horizon_guest_stack::check_current(),
+                Ok(()),
+                "a guest-capable thread must start on the guest stack"
+            );
             let none = horizon_world::loot::PackOverlay::NONE;
             SyncData::load(
                 item_data.root(),
