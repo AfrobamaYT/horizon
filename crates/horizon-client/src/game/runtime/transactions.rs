@@ -345,7 +345,7 @@ impl Game<'_> {
         // end the root's phase early. The guard puts it back on a panic too, so a listener
         // that panics leaves the phase as it was.
         let outer = self.transactions.closing.replace(closing);
-        let mut guard = ClosingPhase { game: self, outer };
+        let guard = ClosingPhase { game: self, outer };
         guard.game.close_level(level, commit);
     }
     /// What closing `level` does, with the closing phase already set.
