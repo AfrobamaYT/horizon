@@ -371,6 +371,10 @@ impl BlockEntitiesRegistrar for PartRegistrar {
             }
         };
         let key = self.block_entity_type_key(&id);
+        let blocks = blocks
+            .iter()
+            .map(|block| mod_vocab::__private::qualified(self.mod_id, block))
+            .collect();
         self.block_entity_types
             .push(mod_vocab::__private::parts_installation::block_entity_declaration(id, blocks));
         key

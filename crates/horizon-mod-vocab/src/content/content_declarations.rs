@@ -182,12 +182,14 @@ pub struct Block {
     /// The sound event a fence gate plays closing (`WoodType.fenceGateClose`).
     pub close_sound: Option<String>,
     /// The item this block is, for pick-block and `Block.asItem`, when
-    /// it is not a block item of its own: an item of this mod or a vanilla
-    /// one, checked to exist when the content loads. Needs `item` false.
+    /// it is not a block item of its own: an item of this mod (a bare name is
+    /// this mod's) or a vanilla one (`minecraft:<path>`), checked to exist when
+    /// the content loads. Needs `item` false.
     pub block_item: Option<String>,
     /// The item pick-block takes from this block (`getCloneItemStack`), when it is not
-    /// the block's item: a mature crop picks its seed. An item of this mod or a vanilla
-    /// one, checked to exist when the content loads. Absent is the block's item.
+    /// the block's item: a mature crop picks its seed. An item of this mod (a bare name is
+    /// this mod's) or a vanilla one (`minecraft:<path>`), checked to exist when the content
+    /// loads. Absent is the block's item.
     pub pick_item: Option<String>,
     /// Its item's component patch: `Some(tag)` sets a component, `None` removes it.
     /// Component names do not include the removal prefix `!`; repeated IDs are refused.
@@ -204,16 +206,17 @@ pub struct Block {
     /// The template's when unset.
     pub wood_type: Option<String>,
     /// The block a standing or ceiling sign's item places on a wall
-    /// (`StandingAndWallBlockItem.wallBlock`): one of this mod's blocks, whose
-    /// template is the matching wall sign and which has no item. The
-    /// template's when unset.
+    /// (`StandingAndWallBlockItem.wallBlock`): one of this mod's blocks (a bare
+    /// name is this mod's), whose template is the matching wall sign and which
+    /// has no item. The template's when unset.
     pub wall_block: Option<String>,
     /// A sign's new text colour (`SignBlockEntity.createDefaultSignText`): a `DyeColor` name,
     /// black when unset. Applies to a sign when it is placed, front and back.
     pub sign_text_color: Option<String>,
     /// Whether a new sign's text glows, false when unset.
     pub sign_text_glow: Option<bool>,
-    /// The block farmland turns into; the template's base when unset.
+    /// The block farmland turns into: one of this mod's (a bare name is this mod's) or a
+    /// vanilla one (`minecraft:<path>`); the template's base when unset.
     pub base_block: Option<String>,
 }
 
@@ -251,9 +254,10 @@ pub struct Item {
     /// Component names are namespaced identifiers, without a removal prefix `!`; repeated IDs are refused.
     pub components: Vec<(String, Option<crate::Tag>)>,
     /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
-    /// a vanilla item or one of the mod's own.
+    /// a vanilla item (`minecraft:<path>`) or one of the mod's own (a bare name is the mod's).
     pub crafting_remainder: Option<String>,
-    /// The block placed by this item, if any.
+    /// The block placed by this item, if any: one of this mod's (a bare name is this mod's)
+    /// or a vanilla one (`minecraft:<path>`).
     pub block: Option<String>,
     /// The arm pose a humanoid takes holding it, in place of vanilla's (`ArmPose`).
     pub arm_pose: Option<ArmPose>,
