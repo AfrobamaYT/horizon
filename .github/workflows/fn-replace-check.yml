@@ -30,7 +30,8 @@ jobs:
         env:
           ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
           LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
-          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          # Only main pushes and dispatches run this workflow, both from this repository.
+          SAME_REPO: true
           EVENT: ${{ github.event_name }}
         run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
   fn-replace-check:
