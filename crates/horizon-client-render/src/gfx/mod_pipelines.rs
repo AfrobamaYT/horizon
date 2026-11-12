@@ -263,6 +263,11 @@ impl ModPipelines {
                 log::warn!("Horizon: {}", gpu_refusal(built, &error));
             }
         }
+        for (slot, pipeline) in pipelines.iter().enumerate() {
+            if pipeline.is_some() {
+                set.revalidate(slot);
+            }
+        }
         self.generation = set.generation();
         self.pipelines = pipelines;
         Ok(())
@@ -630,6 +635,29 @@ mod tests {
         renderer
             .build_with(&set, |_, _| panic!("already compiled"))
             .unwrap();
+    }
+
+    #[test]
+    fn a_later_successful_build_makes_a_refused_slot_usable_again() {
+        let Some((device, _)) = device() else {
+            return;
+        };
+        let set = load(
+            41,
+            &[(PASS, PipelineBlend::Translucent, WorldDepth::Tested)],
+        );
+        let id = Identifier::parse("test:p0").unwrap();
+        let handle = set.resolve(&id).unwrap();
+        let mut refusing = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        refusing
+            .build_with(&set, |_, _| Err("injected refusal".into()))
+            .unwrap();
+        assert_eq!(set.slot(handle), Err(mod_api::RenderPipelineError::Invalid));
+        let mut recovered = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        recovered.build(&device, &set).unwrap();
+        assert!(recovered.pipelines[0].is_some());
+        assert_eq!(set.slot(handle), Ok(0));
+        assert!(set.resolve(&id).is_ok());
     }
 
     #[test]

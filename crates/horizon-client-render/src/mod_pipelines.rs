@@ -185,6 +185,14 @@ impl Pipelines {
         fresh
     }
 
+    /// Makes `slot` usable again: a renderer that built it took the refusal of another over.
+    pub(crate) fn revalidate(&self, slot: usize) {
+        self.invalid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|&invalid| invalid != slot);
+    }
+
     /// The load this set belongs to: a renderer holding another builds its pipelines again.
     pub fn generation(&self) -> u64 {
         self.generation
