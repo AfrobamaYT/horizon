@@ -50,7 +50,7 @@ pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
     let Some(p) = w.selected_player() else {
         return false;
     };
-    if !p.alive || p.head.as_deref() == Some("minecraft:carved_pumpkin") {
+    if !p.alive || super::ai::wears_gaze_disguise(p.head.as_deref(), w) {
         return false;
     }
     let look = p.look;
