@@ -1765,7 +1765,7 @@ fn a_server_client_keeps_a_bundle_use_until_the_server_completes_it() {
     )]
     .into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         with_interaction_game(true, |game| {
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:bundle", 1));
             // The use starts at tick 0, which records the item in use.

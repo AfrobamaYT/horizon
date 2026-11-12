@@ -29,7 +29,7 @@ fn bundle_completes_on_tick_200() {
         Box::new(Listener(calls.clone())),
     )]
     .into();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         with_game("minecraft:bundle", |game| {
             game.held_mut().as_mut().unwrap().data_mut().bundle_contents = vec![
                 ItemStack::new("minecraft:stone", 1),
