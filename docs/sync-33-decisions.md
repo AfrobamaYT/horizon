@@ -17,6 +17,7 @@ No local tests, clippy, harnesses or game runs are permitted for this sync. Only
 - `crates/horizon-client/Cargo.toml`: incoming allocator feature propagation and allocation counting; retain fork Windows prebuilt allocator documentation and mod test edges.
 - `Cargo.lock` and `launcher/Cargo.lock`: preserve the fork's locked registry versions, resolve incoming additional packages, and keep the newly introduced protobuf packages at upstream's exact `0.14.4` versions. No pre-existing locked registry package/version is removed. Both `object` versions coexist where the profiler and fork native machinery require different versions.
 - Automatic manifest merges retain the three new perf workspace members and their library/platform/official edges without removing mod dependencies.
+- The launcher drops its direct `horizon-bench` dependency; `launcher/src/perf.rs` uses `horizon_platform::bench`, taking upstream's own dependency and import changes.
 
 ## Workflow divergence
 
@@ -50,7 +51,7 @@ Each row names the exact conflicted path, including retired paths that remain de
 | `crates/horizon-client-render/src/hud.rs` | Fork Mods icon fallback retained; add upstream Horizon mark alongside controller art. |
 | `crates/horizon-client-render/src/streaming.rs` | Fork resumable planning, ownership and scratch reuse retained; port queue census and timing laps into corresponding phases. |
 | `crates/horizon-client/Cargo.toml` | Incoming system-allocator forwarding and alloc-count feature; retain fork dependencies and allocator notes. |
-| `crates/horizon-client/assets/horizon/lang/en_us.json` | Union translation keys without duplicates; upstream values win shared keys. |
+| `crates/horizon-client/assets/horizon/lang/en_us.json` | Retain 48 incoming additions; restore the two deliberately different fork values from `9f9e2e4af39`: Open Mods Folder and the tooltip without a nonexistent toggle. Whole-file shared-key/history audit found no other changed shared values. |
 | `crates/horizon-client/src/client_lib.rs` | Union fork module declarations with incoming perf modules and mark_sprite export. |
 | `crates/horizon-client/src/entry.rs` | Fork typed launch context retained; incoming profiler startup is adapted at the typed launch boundary, not by restoring string argument parsing. |
 | `crates/horizon-client/src/game.rs` | Fork generated module discovery, points and typed ownership retained; integrate upstream profile state, GPU timing, work attribution and benchmark fields. |
@@ -130,6 +131,8 @@ The first compile-only pass exposed a Text mutation error; canonical `map_styles
 
 The packet tally APIs and storage stay deleted: their only upstream consumer was the retired `native_diagnostics` callback, not server_perf. The profiler continues to capture connected byte traffic and queue metrics without inventing a packet observation API. Connectionless fake actors have zero connection queue metrics and do not count as online participants or operator lookup targets. They remain entities where their typed owner admits them.
 
-Server gauges sum typed collection lengths without building registry-name maps. One shared counting view covers active and parked families, while start snapshots build richer registry counts. Client and server entity gauges use the same all-family meaning. Tick timing discards between-tick span events and captures only events inside the measured tick, preserving the upstream `TickDetail` contract. The retired native timing hook does not justify including outside work in capture or slow-ring records.
+Server gauges sum typed collection lengths without building registry-name maps. One shared counting view covers active and parked families, while start snapshots build richer registry counts. Client and server entity gauges use the same all-family meaning. **Upstream bug taken:** `tick_profile.rs` keeps upstream's deep clone of `MobType` and address-keyed sampled rows. This is deliberately unchanged in the sync; the lane lead tracks the correction separately.
+
+Tick timing discards between-tick span events and captures only events inside the measured tick, preserving the upstream `TickDetail` contract. The retired native timing hook does not justify including outside work in capture or slow-ring records.
 
 The final integrated head `003849ebaf`, including fresh rollup 52 main, passed `CARGO_INCREMENTAL=0 cargo check --workspace --all-targets --keep-going -j 4` with zero compiler errors and zero warnings. All test targets were checked for compilation only; no tests, clippy, harnesses or game runs were executed. Producer classification and reader wasm-name coverage were added but not run locally. CI and resource-backed ignored runtime results remain separate evidence and are not claimed here.
