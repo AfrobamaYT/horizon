@@ -12,7 +12,7 @@ reach the game through the Host, its handles, capabilities and attachments.](../
 
 A hook function is not an injection point, so
 `[[inject]]` never runs inside a hook's dispatch; a `head` injection that cancels the game function
-calling a hook keeps the hook from firing at all. A claimed cancellation reaches only trait listeners that receive cancelled events.
+calling a hook keeps the hook from firing at all. A claimed cancellation reaches only listeners that receive cancelled events.
 Otherwise, mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
 they receive cancelled events. For replacement hooks, the first `Some` wins. Collection hooks call every mod.
 Receiverless hooks have no `Host`.

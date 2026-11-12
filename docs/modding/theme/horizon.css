@@ -3,7 +3,7 @@
    so every theme (light and dark) keeps its own. */
 
 :root {
-    --content-max-width: 800px;
+    --content-max-width: 900px;
     --horizon-radius: 10px;
     --mono-font: "Source Code Pro", ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -55,6 +55,15 @@ html {
     margin: 1.75em auto;
     max-width: 100%;
     height: auto;
+}
+
+/* Diagrams take the column's full width, so their labels stay legible. */
+.content p:has(> img) {
+    max-width: none;
+}
+
+.content main img[src$=".svg"] {
+    width: 100%;
 }
 
 /* Tables: full width, light rules, roomy cells. */
