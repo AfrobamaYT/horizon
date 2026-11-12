@@ -37,12 +37,14 @@ enum Utf16Units<'a> {
     Owned(std::iter::Copied<std::slice::Iter<'a, u16>>),
     Borrowed(std::str::EncodeUtf16<'a>),
 }
-impl Iterator for Utf16Units<'_> {
-    type Item = u16;
-    fn next(&mut self) -> Option<u16> {
-        match self {
-            Self::Owned(units) => units.next(),
-            Self::Borrowed(units) => units.next(),
+impl Utf16Units<'_> {
+    fn cmp(self, other: Self) -> std::cmp::Ordering {
+        // Select the concrete iterators once, not for every UTF-16 unit.
+        match (self, other) {
+            (Self::Owned(left), Self::Owned(right)) => left.cmp(right),
+            (Self::Owned(left), Self::Borrowed(right)) => left.cmp(right),
+            (Self::Borrowed(left), Self::Owned(right)) => left.cmp(right),
+            (Self::Borrowed(left), Self::Borrowed(right)) => left.cmp(right),
         }
     }
 }
