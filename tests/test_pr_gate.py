@@ -70,6 +70,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read\n", self.workflow)
 
     def test_no_fork_code_reaches_our_runners(self):
+        # The one trust decision: the gate's answer for a dispatched pull request, else the event's own repository.
+        self.assertIn(f"trusted: ${{{{ steps.gate.outputs.trusted || (({SAME_REPO}) && 'true' || 'false') }}}}",
+                      self.job("changes"))
         self.assertNotIn("github.event.pull_request.head.repo.full_name == github.repository) &&", self.job("lint"))
         for name in ("lint", "verify", "verify-static", "launcher", "boat-watch"):
             body = self.job(name)
