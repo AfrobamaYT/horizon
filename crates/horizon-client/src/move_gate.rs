@@ -16,23 +16,56 @@ use horizon_world::entity_move::MoverType;
 use horizon_world::move_gate::MoveGate;
 use horizon_world::native_load_context::LoopContext;
 use horizon_world::world_movement::EntityMovementWorld;
+use std::borrow::Cow;
 use std::io;
 
-/// Arm one physical `Entity.move` invocation (#2414): the entity `entity` of
-/// `kind` (`minecraft:zombie`) is about to move by `delta` for `cause`'s
-/// sake. PR 1b fires the `entity_move` hook here — in this one function —
-/// and writes what the listeners decided into `gate`; PR 1a records the
-/// movement unchanged.
+/// Arm one physical `Entity.move` invocation (#2414): the entity `entity` is
+/// about to move by `delta` for `cause`'s sake. PR 1b fires the `entity_move`
+/// hook here — in this one function — and writes what the listeners decided
+/// into `gate`; PR 1a records the movement unchanged.
+///
+/// `kind` names the entity's type (`minecraft:zombie`) only when called: a
+/// listener needs it, a move nobody listens to must not pay for it. PR 1b
+/// calls it after the subscriber check, so with no listener a move costs one
+/// branch and builds no string.
 #[inline(never)]
-pub fn arm(
+pub fn arm_with<'k>(
     gate: &mut MoveGate,
     _context: &LoopContext,
     _entity: u32,
-    _kind: &str,
+    _kind: impl FnOnce() -> Cow<'k, str>,
     cause: MoverType,
     delta: Vec3,
 ) {
     gate.arm(cause, delta);
+}
+
+/// [`arm_with`] for a mover whose type name is already a borrowed `&str`.
+#[inline]
+pub fn arm(
+    gate: &mut MoveGate,
+    context: &LoopContext,
+    entity: u32,
+    kind: &str,
+    cause: MoverType,
+    delta: Vec3,
+) {
+    arm_with(gate, context, entity, || Cow::Borrowed(kind), cause, delta);
+}
+
+/// [`arm_with`] for a fresh gate, in one line at a move site whose type name
+/// would cost a string to build (a boat's, a ridden vehicle's).
+#[inline]
+pub fn armed_with<'k>(
+    context: &LoopContext,
+    entity: u32,
+    kind: impl FnOnce() -> Cow<'k, str>,
+    cause: MoverType,
+    delta: Vec3,
+) -> MoveGate {
+    let mut gate = MoveGate::new();
+    arm_with(&mut gate, context, entity, kind, cause, delta);
+    gate
 }
 
 /// [`arm`] for a fresh gate, in one line at a move site.
@@ -44,9 +77,7 @@ pub fn armed(
     cause: MoverType,
     delta: Vec3,
 ) -> MoveGate {
-    let mut gate = MoveGate::new();
-    arm(&mut gate, context, entity, kind, cause, delta);
-    gate
+    armed_with(context, entity, || Cow::Borrowed(kind), cause, delta)
 }
 
 /// The collide entries: the move gate's own (#2414). The `clippy.toml` ban
