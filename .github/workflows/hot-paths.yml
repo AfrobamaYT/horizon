@@ -6,17 +6,20 @@ name: hot-paths
 # recorded on the `perf-history` branch, whose index.html is the trend page.
 #
 # It measures; it never judges. No threshold fails this workflow, and it never runs on a pull request.
-# On main pushes and by dispatch. A dispatch on another branch, or a push to a branch named `*-hot-paths` (to
-# measure one commit: point such a branch at it), measures and uploads its result, and records nothing.
+# Once a day on main, and by dispatch. A dispatch may name a commit to measure instead of the branch's head, to
+# narrow a step in the trend to one commit; such a run, like any run off main, uploads its result and records nothing.
 on:
-  push:
-    branches: [main, '*-hot-paths']
+  schedule:
+    - cron: '43 8 * * *'
   workflow_dispatch:
+    inputs:
+      commit:
+        description: A commit to measure instead of the branch's head (it must hold the benchmark); not recorded
+        type: string
+        default: ''
 permissions:
   contents: read
-# One run at a time, on one runner. Main pushes coalesce: a started run finishes, and only the newest waiting
-# push runs next, so a busy day costs one runner and a step is still narrowed to the pushes between two runs.
-# Dispatches queue in their own group per ref and never displace main's runs.
+# One run at a time per event and ref, on one runner; a started run finishes.
 concurrency:
   group: hot-paths-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
@@ -34,9 +37,10 @@ jobs:
         env:
           ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
           LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
-          # Only main pushes and dispatches run this workflow, both from this repository.
+          # Only the schedule and dispatches run this workflow, both from this repository; the schedule is
+          # routed as a dispatch is.
           SAME_REPO: true
-          EVENT: ${{ github.event_name }}
+          EVENT: workflow_dispatch
         run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
 
   measure:
@@ -44,17 +48,23 @@ jobs:
     # The workloads need the prepared vanilla data, which only Dyna's runners hold: with the pool off this run
     # measures nothing and says so, and the trend has a gap.
     if: needs.route.outputs.self_hosted == 'true'
-    runs-on: dyna-large
+    runs-on: dyna-medium
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - name: Choose build parallelism
         run: echo "CARGO_BUILD_JOBS=$(python3 tools/ci/cargo_jobs.py --job-mib 4096)" | tee -a "$GITHUB_ENV"
       - name: Self-hosted image headers or rootless fallback
         run: bash tools/ci/dyna_ci_deps.sh
+      - name: The launcher's pinned Rust
+        id: rust
+        run: |
+          echo "version=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";$/\1/p' launcher/src/rust_toolchain.rs)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.1
+          toolchain: ${{ steps.rust.outputs.version }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -82,7 +92,7 @@ jobs:
           command -v valgrind > /dev/null || echo "::warning::no valgrind on this runner: instructions and allocations are not measured"
           python3 tools/hot_paths.py measure --game "$target/release/horizon-hot-paths-game" \
             --resources "$PWD/.local/horizon-client/26.3" --work "$scratch" \
-            --commit "$GITHUB_SHA" --run "$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT" \
+            --commit "$(git rev-parse HEAD)" --host dyna-medium --run "$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT" \
             --out "$RUNNER_TEMP/hot-paths.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
@@ -90,11 +100,11 @@ jobs:
           path: ${{ runner.temp }}/hot-paths.json
           if-no-files-found: error
 
-  # The only job that may write, and only main's results: it checks the result against the record's schema,
+  # The only job that may write, and only results of main's head: it checks the result against the record's schema,
   # keeps the known fields and nothing else, and commits to the `perf-history` branch, which it creates the first time.
   record:
     needs: measure
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.commit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

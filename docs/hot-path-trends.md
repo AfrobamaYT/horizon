@@ -1,6 +1,6 @@
 # Hot-path performance trends
 
-The `hot-paths` workflow measures the game's hot paths on main and records the result, so a slow drift over many
+The `hot-paths` workflow measures the game's hot paths on main once a day and records the result, so a slow drift over many
 small merges shows up as a trend. It measures; it never judges: nothing in it fails on a slow result, it never runs
 on a pull request, and no contributor has to run it.
 
@@ -34,21 +34,26 @@ Three metrics per workload:
 - **instructions**: the instructions the measured region executed, counted by Callgrind (`Ir`). It does not depend
   on the machine's speed or on what else runs there. This is the number to read a trend from.
 - **allocations**: the calls into the allocator the region made, from the same Callgrind run.
-- **wall_ns**: wall time without Valgrind. It depends on the host, so the page compares it only between runs on the
-  same host, and it is noisy.
+- **wall_ns**: wall time without Valgrind. It depends on the machine, so the page compares it only between runs on the
+  same kind of runner and CPU model, and it is noisy.
 
-Every metric is sampled several times, each in a fresh process, and a record keeps every sample. The page shows a
+Every metric is sampled several times, each in a fresh process (3 samples for the counts, 5 for wall time), and a
+record keeps every sample. The page shows a
 metric's noise (the spread of the newest run's samples, or the difference between runs of one commit, whichever is
 larger) and marks a metric whose noise is over 1% as noisy. It flags a step: a change against the run before of
 more than 1% and more than three times the noise. A workload that changed (another checksum of its work, or
 another operation count) starts a new series.
 
-Not verified: that the instruction counts are the same on two hosts. The runs that measured the noise landed on
-one host, so until two hosts are compared, read a step that coincides with a change of host with that in mind (the
-page names each run's host).
+A series also starts again, with no step flagged, when the CPU model, the Rust version or the Valgrind version
+changes: counts taken on either side of such a change are not compared. Whether instruction counts are the same on
+two CPU models is not verified; the runs that measured the noise were on one.
 
 Not measured yet: chunk meshing, the render frame, packet encoding and handling, a wasm listener and the wasm
-boundary, a point or replaced function call, registry and tag lookups.
+boundary, a point or replaced function call, registry and tag lookups. Allocated bytes are not recorded, only the
+number of allocator calls.
+
+Most of a run is building the release executable. A follow-up is to measure an executable that main's own builds
+already produce, so that a run costs only the measuring and can follow every merge.
 
 ## Run it yourself
 
@@ -61,8 +66,8 @@ python3 tools/hot_paths.py measure --game target/release/horizon-hot-paths-game 
 python3 tools/hot_paths.py measure ... --only server.tick.mobs      # some workloads only
 ```
 
-In CI, a push to a branch named `<something>-hot-paths` measures that commit on a runner and uploads the result
-as the run's `hot-paths` artifact, recording nothing: point such a branch at a suspect commit to measure it.
+In CI, dispatch the workflow with a commit to measure that commit on a runner: the result is the run's `hot-paths`
+artifact and its summary, and nothing is recorded. That narrows a step between two daily runs to one commit.
 
 To compare two commits, measure each and read the two tables; `record` and `page` build a page from any folder of
 results:
@@ -81,6 +86,6 @@ ticks change nothing. Then add its row to the table above.
 
 ## What a record holds
 
-The commit, the date, the run number, the host and its CPU model, the kernel, the Rust and Valgrind versions, each
+The commit, the date, the run number, the kind of runner and its CPU model, the kernel, the Rust and Valgrind versions, each
 workload's operations and checksum, and the samples. `tools/hot_paths.py record` checks a result against that list
 and keeps nothing else: no path, no file name, nothing read from the game's data.

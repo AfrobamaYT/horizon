@@ -13,12 +13,12 @@ each divided by the workload's operations:
   depend on how fast or how busy the machine is, so it is the number to read a trend from.
 - allocations: the calls into the allocator the region made, read from the same Callgrind run.
 - wall_ns: wall time of the region in runs without Valgrind. It depends on the machine and on what else runs
-  there, so it is only compared between runs on one host.
+  there, so it is only compared between runs on one kind of machine.
 
 Every number is taken several times, each in a fresh process; a run's result keeps every sample, and the page
 shows the spread. Nothing here fails on a slow result: the trend is for people to read.
 
-A result holds the commit, the date, the host and its CPU, the toolchain and the numbers. It never holds a path,
+A result holds the commit, the date, a label for the kind of machine, its CPU model, the toolchain and the numbers. It never holds a path,
 a file name, an asset name or anything read from the game's data.
 """
 import argparse
@@ -28,7 +28,6 @@ import json
 import os
 import platform
 import re
-import resource
 import shutil
 import statistics
 import subprocess
@@ -94,6 +93,7 @@ STACK = 160 << 20
 
 
 def big_stack():
+    import resource  # Unix only, and only a measuring run needs it
     hard = resource.getrlimit(resource.RLIMIT_STACK)[1]
     resource.setrlimit(resource.RLIMIT_STACK, (STACK if hard == resource.RLIM_INFINITY else min(STACK, hard), hard))
 
@@ -124,7 +124,7 @@ def parse_dump(text):
     then only its number), then `calls=COUNT ...`. The allocator calls are the calls into its entry points
     from any function that is not itself one of them (an entry point may call another)."""
     name = instructions = None
-    names, entry = {}, {}
+    entry = {}
     allocations = 0
     inside = False  # whether the current `fn=` is an allocator entry point
     callee = None
@@ -140,7 +140,6 @@ def parse_dump(text):
             if found:
                 number, text_name = found.groups()
                 if text_name is not None:
-                    names[number] = text_name
                     # Callgrind may append the object or a clone suffix; the symbol is the first word.
                     entry[number] = bool(ALLOCATOR_ENTRIES.match(text_name.split("'")[0].split()[0]))
                 is_entry = entry.get(number, False)
@@ -188,13 +187,6 @@ def cpu_model():
     return platform.processor() or None
 
 
-def host_name():
-    """The machine, from a Dyna runner's name (`dyna-ci-<host>-<id>`), else the runner's or node's name."""
-    runner = os.environ.get('RUNNER_NAME', '')
-    found = re.match(r'dyna-ci-(.+)-[^-]+$', runner)
-    return found.group(1) if found else (runner or platform.node())
-
-
 def measure(args):
     game = Path(args.game).resolve()
     resources = Path(args.resources).resolve()
@@ -233,7 +225,7 @@ def measure(args):
         'commit': args.commit or first_line(['git', 'rev-parse', 'HEAD']),
         'date': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'run': args.run or '',
-        'host': host_name(),
+        'host': args.host,
         'cpu': cpu_model(),
         'kernel': platform.release(),
         'rustc': first_line(['rustc', '--version']),
@@ -319,24 +311,30 @@ def load(history):
     return sorted(runs, key=lambda run: (run['date'], run['run']))
 
 
+def setting(run, metric):
+    """What a run's value of `metric` depends on besides the code: runs that differ in it are not compared."""
+    if metric == 'wall_ns':
+        return run['host'], run['cpu'], run['rustc']
+    return run['cpu'], run['rustc'], run['valgrind']
+
+
 def series(runs, name):
     """The runs that can be compared for metric `name`, oldest first, as (run, value, spread).
 
-    A run counts only while its workload did the same work as the newest run's (same operations and checksum):
-    a changed workload starts a new series. Wall time is also kept to the newest run's host."""
+    It is the newest unbroken stretch of runs: a run whose workload did other work (operations or checksum), or
+    that was measured on another CPU model or with another rustc or Valgrind (for wall time: another host label,
+    CPU model or rustc), ends the stretch before it, so such a change starts a new series and is never a step."""
     workload, _, metric = name.rpartition('.')
-    newest = next((run for run in reversed(runs) if name in run['metrics']), None)
-    if newest is None:
-        return []
     kept = []
-    for run in runs:
-        if name not in run['metrics'] or run['workloads'].get(workload) != newest['workloads'][workload]:
+    for run in reversed(runs):
+        if name not in run['metrics']:
             continue
-        if metric == 'wall_ns' and run['host'] != newest['host']:
-            continue
+        if kept and (run['workloads'].get(workload) != kept[0][0]['workloads'][workload]
+                     or setting(run, metric) != setting(kept[0][0], metric)):
+            break
         values = run['metrics'][name]
         kept.append((run, middle(values), spread(values)))
-    return kept
+    return kept[::-1]
 
 
 def change(points, back):
@@ -460,12 +458,12 @@ td.n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 <h1>Horizon hot paths</h1>
 <p>Newest run: {html.escape(newest['date'])}, commit <code>{newest['commit'][:12]}</code>, host {html.escape(newest['host'])}.
 {len(runs)} runs recorded. Every value is per operation of a fixed, seeded workload, the median of the run's samples.</p>
-<p>Instructions and allocator calls do not depend on the machine's speed and are compared across all runs.
-Wall time is compared only with earlier runs on the newest run's host, and is noisy.
+<p>Instructions and allocator calls do not depend on the machine's speed. Wall time does, and is noisy.
 <b>Noise</b> is the larger of the spread of the newest run's samples and the difference between runs of the same commit.
 A metric whose noise is over {NOISY * 100:g}% is marked <span class="noisy">noisy</span>: read no small change from it.
 <span class="step">step</span> marks a change against the run before of more than {STEP * 100:g}% and three times the noise.
-A workload whose work changed (another checksum or operation count) starts again at one run. Nothing here fails a build.</p>
+A series starts again at one run when the workload's work changed (another checksum or operation count) or the
+runs were measured on another CPU model or with another rustc or Valgrind. Nothing here fails a build.</p>
 {''.join(sections)}
 <h2>Newest run's notes</h2><ul>{notes or '<li>none</li>'}</ul>
 <h2>Recent runs</h2>
@@ -496,6 +494,7 @@ def main():
     m.add_argument('--count-samples', type=int, default=3)
     m.add_argument('--only', help='workload name prefixes, comma-separated')
     m.add_argument('--commit')
+    m.add_argument('--host', default='local', help="a label for the kind of machine, such as CI's runner class")
     m.add_argument('--run', help='the CI run number and attempt, as N.A')
     m.set_defaults(call=measure)
     r = commands.add_parser('record')

@@ -64,11 +64,19 @@ class Trend(unittest.TestCase):
         self.assertEqual(len(points), 1)
         self.assertFalse(hot_paths.stepped(points))
 
-    def test_wall_time_is_compared_on_one_host_only(self):
+    def test_wall_time_is_compared_within_one_host_label_only(self):
         runs = [run('a', '2026-11-10T10:00:00Z', 5000.0, host='alpha'), run('b', '2026-11-11T10:00:00Z', 5000.0, host='beta'),
-                run('c', '2026-11-12T10:00:00Z', 5000.0, host='alpha')]
+                run('c', '2026-11-12T10:00:00Z', 5000.0, host='beta')]
         self.assertEqual(len(hot_paths.series(runs, 'server.tick.mobs_128.wall_ns')), 2)
         self.assertEqual(len(hot_paths.series(runs, self.NAME)), 3)
+
+    def test_another_cpu_or_toolchain_starts_a_new_series_without_a_step(self):
+        for key in ('cpu', 'rustc', 'valgrind'):
+            runs = [run('a', '2026-11-10T10:00:00Z', 5000.0), run('b', '2026-11-11T10:00:00Z', 5000.0),
+                    {**run('c', '2026-11-12T10:00:00Z', 5600.0), key: 'another'}]
+            points = hot_paths.series(runs, self.NAME)
+            self.assertEqual(len(points), 1, key)
+            self.assertFalse(hot_paths.stepped(points), key)
 
 
 class Dump(unittest.TestCase):
