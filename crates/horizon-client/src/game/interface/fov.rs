@@ -18,7 +18,7 @@ use horizon_client::{
         BobState, CameraFluid, FovPlayer, HurtBob, UseItem, bob_matrix, field_of_view_modifier,
         spinning_effect_matrix,
     },
-    fog::{FogType, fog_type, fog_type_seen},
+    fog::{FogType, fog_type},
     hud::HudBatch,
     hud_layout, hud_overlays,
 };
@@ -123,11 +123,12 @@ impl Game<'_> {
             .then(|| self.ui.death_time.min(i32::MAX as u32) as i32)
     }
     /// `Camera.getFluidInCamera` for the camera at `camera`, where the parts of each block it
-    /// reads may answer the state the camera sees there (`state_at_viewpoint`).
+    /// reads may answer the state the camera sees there (`state_at_viewpoint`). Both paths go
+    /// through the replaceable `fog_type`.
     pub(super) fn camera_fog_type(&self, camera: [f64; 3]) -> FogType {
         let (world, facts, near) = (&self.world, self.res.facts(), self.near_plane());
         if !mod_api::__private::has_scoped_hook(mod_api::HookId::StateAtViewpoint) {
-            return fog_type(world, facts, camera, &near);
+            return fog_type(world, facts, camera, &near, &|state, _| state);
         }
         let seen = |state, [x, y, z]: [i32; 3]| {
             if !super::api_values::block_state::block_listens(
@@ -140,7 +141,7 @@ impl Game<'_> {
             self.native_state_at_viewpoint(state, BlockPos::new(x, y, z), camera, &mut seen);
             seen
         };
-        fog_type_seen(world, facts, camera, &near, &seen)
+        fog_type(world, facts, camera, &near, &seen)
     }
     /// The fluid at the camera, as `Camera.getFluidInCamera` reports it.
     pub(super) fn camera_fluid(&self, camera: [f64; 3]) -> CameraFluid {

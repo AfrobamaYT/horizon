@@ -133,15 +133,11 @@ fn camera_fluid_height(
     Some((s.fluid, height))
 }
 /// `Camera.getFluidInCamera`: water at the camera, then lava or powder snow
-/// at the near plane's centre and corners.
+/// at the near plane's centre and corners. `seen` answers, for the state at each block read,
+/// the state the camera sees there (`IBlockStateExtension.getStateAtViewpoint`); the fluid and
+/// powder snow tests read the answer.
 #[horizon_mod_api_macros::replaceable]
-pub fn fog_type(world: &World, facts: &BlockFacts, camera: [f64; 3], near: &NearPlane) -> FogType {
-    fog_type_seen(world, facts, camera, near, &|state, _| state)
-}
-/// `fog_type` with `seen` answering, for the state at each block it reads, the state the
-/// camera sees there (`IBlockStateExtension.getStateAtViewpoint`); the fluid and powder snow
-/// tests read the answer.
-pub fn fog_type_seen(
+pub fn fog_type(
     world: &World,
     facts: &BlockFacts,
     camera: [f64; 3],
