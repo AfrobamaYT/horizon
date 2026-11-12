@@ -30,3 +30,15 @@ it, refusing clients and absent worlds. A second map_colors/map_meta API would
 split the existing typed read into raw-id aliases; none was added.
 
 Converter boundary: `unsupported fragment fields: ['doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
+
+## npc_entity_lookup
+
+Refused: no hook moment exists in this helper-only fragment. Upstream's
+native_npcs.rs searches placed players and current-level UUID holders, and
+entity_nbt_in temporarily enters a loaded dimension. The fork has typed
+EntityRef::nbt (host/entities.rs), not dimension-string/id entry points.
+The immutable UUID-search helper is not represented by an equivalent typed
+query in this scaffold; it is deliberately refused rather than smuggled in as
+a notification or a raw-id compatibility alias. No new dispatcher is needed.
+
+Converter boundary: `unsupported fragment fields: ['comments', 'doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
