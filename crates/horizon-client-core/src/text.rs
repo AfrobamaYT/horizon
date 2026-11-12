@@ -381,12 +381,10 @@ impl Text {
         text
     }
     pub fn styled(s: impl Into<String>, style: Style) -> Self {
-        let mut text = Self::literal(s).with_style(&style);
         // `inherit` never passes an object on, but a styled span's own style carries it.
-        for span in &mut text.spans {
-            span.style.inline_object.clone_from(&style.inline_object);
-        }
-        text
+        Self::literal(s).with_style(&style).map_styles(|own| {
+            own.inline_object.clone_from(&style.inline_object);
+        })
     }
     pub fn colored(s: impl Into<String>, color: u32) -> Self {
         Self::styled(s, Style::color(color))
