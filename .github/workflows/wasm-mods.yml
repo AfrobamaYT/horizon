@@ -179,7 +179,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: The pinned Rust (tools/ci/rust-version)
+        id: rust
+        shell: bash
+        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
       - run: cargo test --locked -p horizon-guest-stack --lib
       - run: cargo test --locked -p horizon-mod-wasm --lib deep_guest_stack_and_overflow_attribution
       - run: cargo test --locked -p horizon-mod-wasm --lib sixty_thousand_frames_exceed_wasmtime_default
