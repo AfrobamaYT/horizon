@@ -4195,22 +4195,6 @@ impl Game<'_> {
     ) {
         self.fire_item_expire(entity, stack, extra_life);
     }
-    /// A player took a crafting grid's result (`ResultSlot.onTake`, NeoForge's
-    /// `PlayerEvent.ItemCraftedEvent`): `player` is the player's uuid, `recipe`
-    /// the recipe the grid matched (`minecraft:oak_planks`) and `stack` the
-    /// result it took, with its components. It only hears: the take has
-    /// already happened. It fires for the crafting grid of an inventory or a
-    /// crafting table, on the integrated server and a dedicated server, guests
-    /// included, and not for a stonecutter's, a smithing table's or a
-    /// furnace's result. Server-side.
-    pub(in crate::game) fn native_item_crafted(
-        &mut self,
-        player: u128,
-        recipe: &str,
-        stack: &ItemStack,
-    ) {
-        self.fire_item_crafted(player, recipe, stack);
-    }
     /// The food level of the server player `player` (`name`) is about to change
     /// from `from` to `to` (Bukkit's `FoodLevelChangeEvent`):
     /// eating, hunger and saturation effects, the exhaustion that costs a
