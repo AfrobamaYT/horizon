@@ -16,16 +16,8 @@
 
 - [Wire types](how-to/wire-types.md)
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
-- [Where the mod API is going](concepts/design.md)
-- [Design: server read tier](concepts/server-read-tier.md)
-- [Design: vehicle health layout](concepts/vehicle-health-layout.md)
-- [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
-- [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
-- [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
-- [Design: villager professions and trades](concepts/villager-professions.md)
+- [Villager professions and trades](concepts/villager-professions.md)
 - [Villager profession resources and clients](concepts/villager-professions-client.md)
-- [Design: decide, fire, apply](concepts/decide-fire-apply.md)
-- [Design: decide, fire, apply: route inventory](concepts/decide-fire-apply-routes.md)
 
 # How-to
 
@@ -42,23 +34,10 @@
 
 # Reference
 
-- [NeoForge data files](reference/neoforge-data.md)
-- [NeoForge extension coverage](reference/neoforge-extensions.md)
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
-<!-- The wasm-coverage preprocessor renders this chapter from the generator at its published URL. -->
-- [Wasm boundary coverage]()
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
 <!-- The counterparts preprocessor renders the current declarations at the published URL. -->
 - [NeoForge counterparts]()
-
-# For agents
-
-- [Rules for agents](agents.md)
-
-# Contributing
-
-- [Where each doc lives](contributing.md)
-- [Design: scoped whole-stack rollback](reference/design-stack-snapshot.md)

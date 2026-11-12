@@ -27,7 +27,7 @@ The game puts this before your file:
 | `frame.time` | `f32` | Seconds of game time, smooth between ticks, wrapping to 0 every hour. |
 | `frame.viewport` | `vec2<f32>` | The world picture's size in pixels. |
 
-Colours follow the [mod render colour rule](../concepts/mod-render-colour.md): the function reads
+Colours follow the [mod render colour rule](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-render-colour.md): the function reads
 and returns linear light, 1.0 is paper white, and more is brighter where the frame can hold it. The
 alpha you return is coverage. The game supplies the vertex stage, the bindings and the conversion
 to the frame, so a file that declares a binding or an entry point is refused. Names that start with

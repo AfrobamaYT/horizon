@@ -3,7 +3,7 @@
 A **biome region** puts a mod's biomes among vanilla's in the Overworld or the Nether. The world is split into areas,
 each area belongs to one region, and inside it the region's own climate points choose the biome. Vanilla's whole
 layout is one region of weight 10 beside the mods' ones. The design, and why it works this way, is in
-[the design note](../concepts/mod-biome-regions.md).
+[the design note](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-biome-regions.md).
 
 ## Declaring a region
 

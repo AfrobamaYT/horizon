@@ -1,5 +1,5 @@
 trait-mods-parts-and-attachments
-trait-mods-draft
+writing-a-trait-mod
 dependencies-between-trait-mods
 load-phases-and-access
 the-typed-api-from-mixin-code
@@ -15,6 +15,5 @@ entity-parts-and-mob-goals
 block-state-facts
 fake-players
 testing-a-trait-mod
-adding-a-hook
 server-attachments
 camera-and-collision-reads
