@@ -98,6 +98,8 @@ pub struct Env<'a> {
     /// The side and settings of the resource generation this menu runs in: the
     /// one source of its side, and what a hook inside a menu loop is given.
     pub loop_context: &'a LoopContext,
+    /// `IItemExtension.canEquip` for the armour slots, lent by the game (none keeps the data's).
+    pub can_equip: Option<&'a dyn crate::mobs::equip::CanEquip>,
     pub items: &'a Items,
     pub recipes: &'a Recipes,
     pub brewing: &'a Brewing,
@@ -1637,18 +1639,8 @@ impl Menu {
     fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
         match self.state.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
-            Role::Armor(eq) => Self::equippable(env, stack).is_some_and(|e| {
-                ["feet", "legs", "chest", "head"]
-                    .iter()
-                    .position(|s| *s == e.slot)
-                    == Some(eq)
-                    && e.allows("minecraft:player")
-            }),
-            // LivingEntity.isEquippableInSlot: the stack's equippable slot,
-            // and the mount among its allowed entities.
-            Role::MountEquip(slot) => Self::equippable(env, stack).is_some_and(|e| {
-                e.slot == slot && self.state.mount.as_deref().is_some_and(|m| e.allows(m))
-            }),
+            Role::Armor(eq) => Self::armor_may_place(env, eq, stack),
+            Role::MountEquip(slot) => self.mount_may_place(env, slot, stack),
             Role::Shulker => fits_inside_container_items(stack),
             Role::Mod | Role::ModResult => self.state.slots[s].role == Role::Mod,
             Role::Hidden => false,
@@ -1947,7 +1939,7 @@ impl Menu {
     fn equipment_slot(&self, s: usize) -> Option<&'static str> {
         let slot = self.state.slots[s];
         match slot.role {
-            Role::Armor(eq) => Some(["feet", "legs", "chest", "head"][eq]),
+            Role::Armor(eq) => Some(equippable::ARMOR_SLOTS[eq]),
             _ if slot.container == PLAYER && slot.index == OFFHAND => Some("offhand"),
             _ => None,
         }
@@ -2514,7 +2506,7 @@ enum Equip {
 
 impl Menu {
     fn equip(env: &Env, stack: &ItemStack) -> Equip {
-        match Self::equippable(env, stack).map(|e| e.slot).as_deref() {
+        match crate::mobs::equip::equippable(env.items, stack).map(|e| e.slot) {
             Some("feet") => Equip::Armor(0),
             Some("legs") => Equip::Armor(1),
             Some("chest") => Equip::Armor(2),
@@ -3414,6 +3406,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let mut menu = Menu::new(kind);
@@ -3561,6 +3554,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let mut fuel = ItemStack::new("minecraft:stone", 2);
@@ -3608,6 +3602,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         for (input, payment) in [
@@ -3826,6 +3821,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         });
     }
@@ -4439,6 +4435,15 @@ pub(crate) mod tests {
                 is_ladder: |context, _, _, _, ladder| {
                     *ladder |= context.setting("rules_mod", "stack").is_some();
                 },
+                friction: |context, _, kind, _, _, friction| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *friction = match kind {
+                            "minecraft:player" => 0.98,
+                            "minecraft:cow" => f32::NAN,
+                            _ => 3.0,
+                        };
+                    }
+                },
                 player_stays_on_ground_surface: |context, _, staying| {
                     *staying |= context.setting("rules_mod", "stack").is_some();
                 },
@@ -4610,6 +4615,24 @@ pub(crate) mod tests {
         };
         assert!(!ladder(&before));
         assert!(ladder(&after));
+        // A block's friction reads it too; an answer that is NaN or outside 0..=2 keeps the
+        // block's own.
+        let friction = |context: &LoopContext, kind: &str| {
+            let mut friction = 0.6;
+            crate::motion::native_friction(
+                context,
+                1,
+                kind,
+                horizon_core::position::BlockPos::new(0, 0, 0),
+                horizon_world::registry::BlockStateId(0),
+                &mut friction,
+            );
+            friction
+        };
+        assert_eq!(friction(&before, "minecraft:player"), 0.6);
+        assert_eq!(friction(&after, "minecraft:player"), 0.98);
+        assert_eq!(friction(&after, "minecraft:cow"), 0.6);
+        assert_eq!(friction(&after, "minecraft:item"), 0.6);
         // The edge backoff and the fluid current read it too.
         let movement = |context: &LoopContext| {
             let (mut staying, mut flow) = (false, [0.25, 0.0, 0.0]);
@@ -4840,6 +4863,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         // Both a pick-up onto the cursor and a shift-click into the inventory.
@@ -4929,6 +4953,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let menu = &mut Menu::new(mod_menu());
@@ -5334,6 +5359,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
 
@@ -5388,6 +5414,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: true,
+            can_equip: None,
             known_recipes: Some(&known),
         };
 
@@ -5442,6 +5469,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: true,
+            can_equip: None,
             known_recipes: Some(&known),
         };
 
@@ -5500,6 +5528,7 @@ pub(crate) mod tests {
             player_entity_id: None,
             loop_context: &crate::test_resources::loop_context(LoopSide::Client),
             limited_crafting: true,
+            can_equip: None,
             known_recipes: Some(&known),
         };
 
@@ -5548,6 +5577,7 @@ pub(crate) mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);
