@@ -60,6 +60,13 @@ fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOv
     }
 }
 include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
+/// Installs the dispatcher of each injection point a mod listens at as its function's entry,
+/// once the points are sealed. The prebuilt game's staging pass writes the call; a build without
+/// points has none to arm.
+macro_rules! arm_points {
+    () => {};
+}
+
 /// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
@@ -1316,8 +1323,8 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        let mut canceled = false;
-        if self.native_authoritative {
+        let mut canceled = self.world.carrier_fences.holds_move(push, destroy);
+        if !canceled && self.native_authoritative {
             let step = direction.normal();
             self.native_piston_pre(mod_api::__private::PistonPreCall {
                 dimension: self.dimension,
@@ -2882,9 +2889,8 @@ struct Game<'a> {
     sleep_seen: (i64, i64),
     dim: Dim,
     world_root: PathBuf,
-    /// The owner's offline-to-account UUID move of this world, when it opened under
-    /// the account (`playerdata::migrate_owner`): entities the world loads still name
-    /// the player by the offline UUID until their chunk is saved again.
+    carrier_retention_snapshot: Vec<(u128, u32)>,
+    /// Offline-to-account UUID migration: loaded entities retain the old UUID until saved.
     owner_migration: Option<(u128, u128)>,
     /// The world's data packs' content tables, when it has packs (`None`
     /// keeps `Resources.rest`'s own in use).
@@ -3079,6 +3085,8 @@ struct Game<'a> {
     /// Block-entity positions retained between ticks for client effects.
     spawner_tick_positions: Vec<horizon_client::block_entities::Pos>,
     trial_spawner_tick_positions: Vec<horizon_client::block_entities::Pos>,
+    /// The `[[native.loop]]` slots' state, per published loop (`published_loops.rs`).
+    loop_states: published_loops::LoopStates,
     creative_screen: Creative,
     /// `CreativeModeInventoryScreen.ignoreTextInput`: the chat key opened the
     /// search tab, so the letter it carries is not typed into the box.
@@ -3670,20 +3678,6 @@ fn pick_view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 fn view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
     let (y, p) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
     [-y.sin() * p.cos(), -p.sin(), y.cos() * p.cos()]
-}
-/// `LivingEntity.canGlideUsing`: for each worn piece (head, chest, legs,
-/// feet), whether it is a glider (its own component, or one the server
-/// patched onto the stack) in the slot its `equippable` names, and will not
-/// break with its next point of wear (`ItemStack.nextDamageWillBreak`).
-fn gliding_pieces(items: &Items, armor: &[Option<ItemStack>; 4]) -> [bool; 4] {
-    const SLOTS: [&str; 4] = ["head", "chest", "legs", "feet"];
-    // `canGlideUsing`: the stack's own `glider` and `equippable` (its
-    // components, a server's patch), else its item's.
-    std::array::from_fn(|i| {
-        armor[i]
-            .as_ref()
-            .is_some_and(|s| horizon_client::item_sync::can_glide_using(s, SLOTS[i], items))
-    })
 }
 /// `Level.canHaveWeather`: sky light, no ceiling, and not the End (the one
 /// level the rule names by id).
@@ -6841,7 +6835,7 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
-        self.player_break_block(pos).map(|_| ())
+        self.carrier_break_block(pos)
     }
     /// `ServerPlayerGameMode.destroyBlock`: whether the block was removed.
     /// A break inside another (a mod breaking more blocks from its
@@ -11850,7 +11844,7 @@ impl Game<'_> {
         self.apply_settings();
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
-        self.load_world_state();
+        self.load_world_state()?;
         self.native_world_opened(dim);
         self.open_saved_portal_levels()
     }
@@ -11991,7 +11985,7 @@ impl Game<'_> {
         self.mod_view_distances.take();
         self.bosses = Default::default();
         self.streaming.paused = true;
-        self.world = World::new(self.res.facts().air, 0);
+        self.world = Game::world_for_mods(self.res.facts().air, 0);
         self.player = None;
         // `LocalPlayer`'s constructor: `KeyMapping.resetToggleKeys`, so a sneak or sprint toggled
         // in this world is not still on in the next one.
@@ -14528,7 +14522,7 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
-        Self::admit_entity_save()?;
+        self.admit_level_save()?;
         self.save_border();
         self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -16115,7 +16109,7 @@ impl<'a> Game<'a> {
                 None,
             )
         })?;
-        let world = World::new(res.facts().air, 0);
+        let world = Game::world_for_mods(res.facts().air, 0);
         let tutorial = tutorial::Tutorial::new(tutorial::Step::from_option(
             settings.file.int("tutorialStep"),
         ));
@@ -16420,6 +16414,7 @@ impl<'a> Game<'a> {
             sleep_seen: (0, 0),
             dim: Dim::Overworld,
             world_root: PathBuf::new(),
+            carrier_retention_snapshot: Vec::new(),
             owner_migration: None,
             world_flat: false,
             world_debug: false,
@@ -16537,6 +16532,7 @@ impl<'a> Game<'a> {
             pass_mobs: None,
             spawner_tick_positions: Vec::new(),
             trial_spawner_tick_positions: Vec::new(),
+            loop_states: Default::default(),
             creative_screen: prepared.creative_screen,
             creative_ignore_text: false,
             control: None,
@@ -17482,6 +17478,7 @@ pub(crate) fn run_with(
         crate::entry::initialize_code(&inventory);
     }
     mod_points::__private::seal();
+    arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before
@@ -17792,6 +17789,7 @@ pub(crate) fn closest_space_nudge(
 
 #[cfg(test)]
 use inventory_input::drop_whole_stack;
+use prediction::gliding_pieces;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};
