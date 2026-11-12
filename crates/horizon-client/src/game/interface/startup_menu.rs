@@ -1527,7 +1527,7 @@ mod tests {
             }
         }
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("example", Box::new(Mod))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
                 let saves = std::env::temp_dir()
                     .join(format!("horizon-startup-rules-{}", std::process::id()));

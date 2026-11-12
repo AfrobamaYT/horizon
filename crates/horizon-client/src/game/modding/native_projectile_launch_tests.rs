@@ -144,7 +144,7 @@ fn owner_launch_reports_explicit_guest_to_launch_listeners() {
         "observe",
         Box::new(Observe(observed.clone())),
     )];
-    mod_api::testing::with_mods(mods.into(), || {
+    mod_platform::testing::with_mods(mods.into(), || {
         crate::game::native_guest_turn_tests::with_guests(|game| {
             let source = game.entity(12).unwrap();
             let owner = game.living(source).unwrap();

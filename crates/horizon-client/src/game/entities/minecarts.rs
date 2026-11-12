@@ -4007,7 +4007,7 @@ mod hook_mutation_regressions {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.carts
@@ -4046,7 +4046,7 @@ mod hook_mutation_regressions {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.carts
@@ -4097,7 +4097,7 @@ mod hook_mutation_regressions {
                 Box::new(DiscardDamagedVehicle(destroyed.clone())),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 super::super::native_entity_refs::tests::with_game(|game| {
                     game.options.dedicated = Some(Vec::new());
                     game.ui

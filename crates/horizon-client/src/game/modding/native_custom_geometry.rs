@@ -1197,7 +1197,9 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn each_stage_is_asked_in_frame_order_and_its_lines_draw_there() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
-            mod_api::__private::install(vec![ModEntry::new("staged", Box::new(Staged))].into());
+            mod_platform::__private::install(
+                vec![ModEntry::new("staged", Box::new(Staged))].into(),
+            );
             STAGES_ARMED.store(true, Ordering::Relaxed);
             let mut draw = WorldGeometry::default();
             game.fill_world_geometry(
@@ -1246,7 +1248,9 @@ mod tests {
             let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(8);
             *FILL_MODEL.lock().unwrap() = Some(model);
-            mod_api::__private::install(vec![ModEntry::new("batch", Box::new(FillBatch))].into());
+            mod_platform::__private::install(
+                vec![ModEntry::new("batch", Box::new(FillBatch))].into(),
+            );
             FILL_ARMED.store(true, Ordering::Relaxed);
             let mut draw = WorldGeometry::default();
             let mut entities = vec![<Vertex as bytemuck::Zeroable>::zeroed(); 4];

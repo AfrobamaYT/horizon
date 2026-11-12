@@ -34,7 +34,7 @@ mod tests {
     fn client_level_tick_fires_pre_then_post_around_each_tick() {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![ModEntry::new("moments", Box::new(Moments(heard.clone())))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_client_game(|game| {
                 game.native_lifecycle = NativeLifecycle::default();
                 let (client, _server) = Pipe::pair();

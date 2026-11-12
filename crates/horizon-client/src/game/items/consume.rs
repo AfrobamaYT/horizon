@@ -790,7 +790,7 @@ mod teleport_hook_tests {
             Box::new(ConsumptionProbe(Arc::clone(&heard), Arc::clone(&moved))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let at = Vec3::new(0.0, 65.0, 0.0);
                 game.player = Some(PlayerMotion::new(game.motion, at).unwrap());
@@ -999,7 +999,7 @@ mod fox_consumption_hook_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.world
                     .chunks
@@ -1106,7 +1106,7 @@ mod fox_consumption_hook_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 // Legacy summon checks the actual server owner as well as
                 // the opened native lifecycle, like the production server does.

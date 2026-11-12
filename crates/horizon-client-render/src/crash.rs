@@ -1083,7 +1083,7 @@ mod tests {
                 sink.lock().unwrap().push(error);
             }
         }));
-        let unwound = mod_api::testing::with_mods(mods.into(), || {
+        let unwound = mod_platform::testing::with_mods(mods.into(), || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 mod_api::dispatch_component_types(
                     &mod_api::RegistrationContext::new(),

@@ -1481,7 +1481,7 @@ mod tests {
         ]));
         level().write(&changed).unwrap();
         set_loaded(Some(vec![record("mismatch_test", "2.0.0")]));
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![
                 ModEntry::new("mismatch_test", Box::new(Migrating(heard.clone()))),
                 ModEntry::new("erasing", Box::new(Erasing)),

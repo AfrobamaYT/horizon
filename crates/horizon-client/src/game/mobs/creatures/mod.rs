@@ -8923,7 +8923,7 @@ mod living_visibility_tests {
             Box::new(Halve(Arc::clone(&heard))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
                 let mut seen = guest(5);
@@ -9026,7 +9026,7 @@ mod enchanted_entity_loot_tests {
             Box::new(Answer(Arc::clone(&seen), 1000)),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.load_server_loot();
                 open_to_lan(game);
@@ -9114,7 +9114,7 @@ mod enchanted_entity_loot_tests {
             Box::new(Answer(Arc::clone(&seen), 0)),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.load_server_loot();
                 game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
@@ -9152,7 +9152,7 @@ mod enchanted_entity_loot_tests {
     fn a_death_with_no_attacker_is_asked_at_level_0() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = listening(&seen, 1000);
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.load_server_loot();
                 let victim = zombie(game, Damage::fall());
@@ -9177,7 +9177,7 @@ mod enchanted_entity_loot_tests {
     fn loot_kill_asks_with_the_commands_source_as_the_attacker() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = listening(&seen, 1000);
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.load_server_loot();
                 game.set_allow_commands(true);
@@ -9232,7 +9232,7 @@ mod enchanted_entity_loot_tests {
     fn loot_kill_asks_with_a_non_living_source_and_with_none() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = listening(&seen, 3);
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.load_server_loot();
                 game.set_allow_commands(true);
@@ -9302,7 +9302,7 @@ mod enchanted_entity_loot_tests {
             }
         }
         let mods = vec![mod_api::ModEntry::new("enchanted-loot", Box::new(Drawing))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.load_server_loot();
                 game.set_allow_commands(true);
@@ -9334,7 +9334,7 @@ mod enchanted_entity_loot_tests {
     fn an_answer_of_the_same_level_leaves_the_drops_alone() {
         let deaths = |mods: mod_api::Mods| {
             let mut counts = Vec::new();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_game(|game| {
                     game.load_server_loot();
                     for _ in 0..8 {
@@ -9397,7 +9397,7 @@ mod enderman_anger_tests {
             Box::new(Calm(calm, Arc::clone(&heard))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
                 game.world
@@ -9929,7 +9929,7 @@ mod mob_subscription_tests {
         #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let world = game.mob_world_base(&[]);
                 assert!(!world.asks_animal_tame && !world.asks_living_destroy_block);
@@ -10299,7 +10299,7 @@ mod breeding_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 assert!(game.mob_world_base(&[]).asks_baby_spawn);
                 let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
@@ -10497,9 +10497,9 @@ mod breeding_tests {
                 }
                 panic!("chickens did not breed");
             };
-            let no_mods = mod_api::testing::with_mods(Vec::new().into(), run);
+            let no_mods = mod_platform::testing::with_mods(Vec::new().into(), run);
             let empty = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
-            let unrelated = mod_api::testing::with_mods(empty, run);
+            let unrelated = mod_platform::testing::with_mods(empty, run);
             assert_eq!(no_mods, unrelated);
         });
     }
@@ -10512,7 +10512,7 @@ mod breeding_tests {
         #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 assert!(!game.mob_world_base(&[]).asks_baby_spawn);
                 let mut cancel = false;
@@ -10660,7 +10660,7 @@ mod projectile_batch_tests {
             Box::new(CancelImpacts(observed.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world
@@ -11337,7 +11337,7 @@ mod conversion_subscriber_tests {
             ModEntry::new("post", Box::new(PostOnly(seen.clone()))),
         ]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let zombie = game
                     .res
@@ -11433,7 +11433,7 @@ mod living_drops_tests {
             "living-drops-observer",
             Box::new(Observer(seen.clone(), cancel.clone())),
         )]);
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.load_server_loot();
                 let golem_type = game
@@ -11619,7 +11619,7 @@ mod armor_destroy_tests {
     /// A mod that clears the entries, or removes one, leaves vanilla's wear (no panic).
     #[test]
     fn a_cleared_armor_hurt_entry_keeps_vanilla_wear() {
-        mod_api::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+        mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
             mod_api::__private::resolve_items(["minecraft:diamond_helmet"]).unwrap();
             assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
             let entries = [entry(EquipmentSlot::Head, 5.0)];
@@ -12031,7 +12031,7 @@ mod mob_pearl_hook_tests {
             Box::new(PlayerPearlProbe(Arc::clone(&mode))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let from = Vec3::new(0.0, 65.0, 0.0);
                 game.player = Some(PlayerMotion::new(game.motion, from).unwrap());
@@ -12104,7 +12104,7 @@ mod mob_pearl_hook_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 for action in 0..4 {
@@ -12209,7 +12209,8 @@ mod enchanted_block_loot_breaker_tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::{MobEvent, Projectile, ProjectileKind};
     use horizon_core::geometry::Vec3;
-    use mod_api::{EnchantedBlockLootEvent, Hooks, LevelHost, ModEntry, testing::with_mods};
+    use mod_api::{EnchantedBlockLootEvent, Hooks, LevelHost, ModEntry};
+    use mod_platform::testing::with_mods;
     use std::sync::{Arc, Mutex};
 
     const POS: [i32; 3] = [1, 64, 1];

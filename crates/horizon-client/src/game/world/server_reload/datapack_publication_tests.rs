@@ -61,7 +61,7 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
         &root.join("datapacks/base/data/registry_test/registry_test/spell/conditioned.json"),
         r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"missing_condition_fixture"}],"power":"invalid"}"#,
     );
-    mod_api::testing::with_mods(
+    mod_platform::testing::with_mods(
         vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
         || {
             with_game(|game| {
@@ -187,7 +187,7 @@ fn remote_reload_never_decodes_local_registry_files() {
         &root.join("datapacks.json"),
         r#"{"enabled":["file/local"],"disabled":[]}"#,
     );
-    mod_api::testing::with_mods(
+    mod_platform::testing::with_mods(
         vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
         || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {

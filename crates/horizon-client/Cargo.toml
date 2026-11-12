@@ -19,7 +19,7 @@ winresource = "0.1"
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-hooks = { path = "../horizon-hooks" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
-horizon-mod-api = { path = "../horizon-mod-api" }
+mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" }
 horizon-engine-slots = { path = "../horizon-engine-slots" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
@@ -179,7 +179,7 @@ wat = "1.261"
 tempfile = "3"
 horizon-mod-runtime = { path = "../horizon-mod-runtime", features = ["test-work-count"] }
 horizon-threads = { path = "../horizon-threads", features = ["test-allocation-count"] }
-horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
+mod_platform = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["testing"] }
 horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
 # Every WGSL shader translated as wgpu's DirectX 12 backend does (gfx.rs tests).

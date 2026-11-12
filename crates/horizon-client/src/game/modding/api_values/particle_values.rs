@@ -138,7 +138,7 @@ impl TryIntoApi for EngineOptions {
 mod tests {
     use super::*;
     fn prepare() {
-        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        mod_platform::__private::part_tests::install_parts_fixture(&[]).unwrap();
         mod_api::__private::resolve_particles(
             ["minecraft:smoke", "minecraft:trail", "test:spark"],
             |id| {

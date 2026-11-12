@@ -12059,8 +12059,8 @@ mod tests {
         use horizon_protocol::connection::Pipe;
         use mod_api::{
             ClientHost, ClientMiningPredictEvent, ClientPacketSendEvent, Flow, Hooks, ModEntry,
-            testing::with_mods,
         };
+        use mod_platform::testing::with_mods;
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -12183,7 +12183,7 @@ mod tests {
         )]
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
                 let (client, _server) = horizon_protocol::connection::Pipe::pair();
                 game.connect_local(client, "animation-client").unwrap();
@@ -12537,7 +12537,7 @@ mod tests {
                 mod_api::Flow::Continue
             }
         }
-        mod_api::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
+        mod_platform::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
             "test-chat-received",
             Box::new(Censor),
         )]));
@@ -12978,7 +12978,7 @@ mod tests {
                 event.draw.fill([0.0, 0.0, 80.0, 10.0], 0xFF102030);
             }
         }
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new("transition_test", Box::new(Arrival))].into(),
             || {
                 let mut registrations = Vec::new();
@@ -13742,7 +13742,7 @@ mod tests {
                 living
                     .effect(
                         game,
-                        mod_api::__private::part_tests::effect_key("minecraft:speed")
+                        mod_platform::__private::part_tests::effect_key("minecraft:speed")
                     )
                     .is_none()
             );
@@ -13757,7 +13757,7 @@ mod tests {
             let effect = living
                 .effect(
                     game,
-                    mod_api::__private::part_tests::effect_key("minecraft:speed"),
+                    mod_platform::__private::part_tests::effect_key("minecraft:speed"),
                 )
                 .unwrap();
             assert_eq!((effect.duration, effect.amplifier), (600, 1));

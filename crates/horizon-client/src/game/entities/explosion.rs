@@ -2029,7 +2029,7 @@ mod tests {
                 )]
                 .into()
             };
-            mod_api::testing::with_mods(mods(false), || {
+            mod_platform::testing::with_mods(mods(false), || {
                 assert_eq!(blast(game), baseline);
                 assert_eq!(game.dropped.len(), 1);
                 assert_eq!(game.dropped[0].stack.count, 2);
@@ -2038,7 +2038,7 @@ mod tests {
             });
             assert_eq!(*seen.lock().unwrap(), [[1, 64, 1], [2, 64, 1]]);
             seen.lock().unwrap().clear();
-            mod_api::testing::with_mods(mods(true), || {
+            mod_platform::testing::with_mods(mods(true), || {
                 blast(game);
                 let check = |game: &Game<'_>| {
                     assert_eq!(game.dropped.len(), 1);

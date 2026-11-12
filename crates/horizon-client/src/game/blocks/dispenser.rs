@@ -2499,7 +2499,7 @@ mod tests {
         )]
         .into();
         super::super::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world

@@ -194,7 +194,7 @@ fn native_tick_publishes_or_rejects_item_proposals_with_writeback() {
         return;
     }
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("row4", Box::new(Fixture))].into();
-    mod_api::testing::with_mods(mods.clone(), || {
+    mod_platform::testing::with_mods(mods.clone(), || {
         super::api_values::install_parts(&mods).unwrap();
         mod_api::__private::mark_game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());

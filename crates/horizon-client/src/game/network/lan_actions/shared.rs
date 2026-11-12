@@ -565,7 +565,7 @@ mod tests {
         let mods: Mods = vec![ModEntry::new("menu_rules", Box::new(Mod))].into();
         crate::game::api_values::install_parts(&mods).unwrap();
         crate::entry::install_client_hooks();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_guest_turn_tests::with_guests(|game| {
                 game.world
                     .chunks
@@ -1014,7 +1014,7 @@ mod tests {
                     mod_api::Flow::Cancel
                 }
             }
-            mod_api::testing::with_mods(
+            mod_platform::testing::with_mods(
                 vec![mod_api::ModEntry::new("stop_menu", Box::new(StopMenu))].into(),
                 || {
                     assert!(
@@ -1264,7 +1264,7 @@ mod tests {
         )]
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world
@@ -1832,7 +1832,7 @@ mod tests {
         )]
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world
@@ -1899,7 +1899,7 @@ mod tests {
         )]
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world
@@ -2146,7 +2146,7 @@ mod hotbar_tests {
     fn a_hotbar_switch_fires_pre_then_post_and_pre_can_keep_the_slot() {
         let heard = Heard::default();
         let mods = vec![ModEntry::new("hotbar", Box::new(Hotbar(heard.clone())))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
                 game.lan.as_mut().unwrap().hub.guests.push(guest(1));
@@ -2217,7 +2217,7 @@ mod respawn_position_tests {
     fn a_mod_moves_a_respawn_and_drops_the_point() {
         let heard = Heard::default();
         let mods = vec![ModEntry::new("east", Box::new(East(heard.clone())))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
                 game.options.dedicated = Some(Vec::new());
@@ -2271,7 +2271,7 @@ mod respawn_position_tests {
             Box::new(Listen(Arc::clone(&heard))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
                 game.options.dedicated = Some(Vec::new());
@@ -2367,9 +2367,9 @@ mod pickup_xp_tests {
         let none = take_orb();
         assert_eq!(none, (false, 7));
         let mods = vec![mod_api::ModEntry::new("listen", Box::new(Listen(false)))].into();
-        mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), none));
+        mod_platform::testing::with_mods(mods, || assert_eq!(take_orb(), none));
         let mods = vec![mod_api::ModEntry::new("cancel", Box::new(Listen(true)))].into();
-        mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), (true, 0)));
+        mod_platform::testing::with_mods(mods, || assert_eq!(take_orb(), (true, 0)));
     }
 }
 

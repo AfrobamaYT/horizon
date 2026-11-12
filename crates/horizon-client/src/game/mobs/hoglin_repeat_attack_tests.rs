@@ -347,7 +347,7 @@ fn hoglin_broadcast_obeys_target_cancellation_and_redirection() {
         }),
     )]
     .into();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             let kind = game

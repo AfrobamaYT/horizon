@@ -921,7 +921,7 @@ mod tests {
             }),
         )]
         .into();
-        mod_api::__private::install(mods);
+        mod_platform::__private::install(mods);
         super::super::native_guest_turn_tests::with_guests(|game| {
             let pos = [2, 64, 2];
             game.world
@@ -1916,9 +1916,9 @@ mod mod_capability_tests {
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
     use horizon_core::nbt::{Compound, Tag};
-    use mod_api::__private::part_tests::{CHEMICALS, ChemTank, Chemical};
     use mod_api::ServerHost;
     use mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};
+    use mod_platform::__private::part_tests::{CHEMICALS, ChemTank, Chemical};
     use std::sync::Arc;
 
     /// Two mods sharing a capability one of them defines, as Mekanism's chemicals are shared

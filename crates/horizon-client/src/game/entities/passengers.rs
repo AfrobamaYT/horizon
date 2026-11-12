@@ -931,7 +931,7 @@ mod off_level_tests {
                 Box::new(CountCanceledDismount(cancel.clone())),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 crate::game::native_entity_refs::tests::with_game(|game| {
                     game.options.dedicated = Some(Vec::new());
                     let at = Vec3::new(10.0, 200.0, 20.0);
@@ -1005,7 +1005,7 @@ mod off_level_tests {
             } else {
                 Vec::new().into()
             };
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 crate::game::native_entity_refs::tests::with_game(|game| {
                     game.options.dedicated = Some(Vec::new());
                     let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -1147,7 +1147,7 @@ mod nested_vehicle_discard_tests {
             Box::new(DiscardVehicleOnDismount(count.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 let at = Vec3::new(10.0, 200.0, 20.0);
@@ -1311,7 +1311,7 @@ mod nested_vehicle_discard_tests {
                 ),
             ]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.settings.simulation_distance = 4;
                     game.settings.render_distance = 12;
@@ -1407,7 +1407,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.mobs.clear();
                     game.player = Some(
@@ -1458,7 +1458,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.mobs.clear();
                     super::super::native_player_death::tests::add_guest(game);
@@ -1521,7 +1521,7 @@ mod nested_vehicle_discard_tests {
                 Box::new(RepositionCanceledPassenger(calls.clone())),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     super::super::native_player_death::tests::add_guest(game);
                     game.build_registries();
@@ -1694,7 +1694,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, true, |game| {
                     super::super::native_player_death::tests::add_guest(game);
                     game.native_level_opened(super::super::Dim::Overworld);
@@ -1843,7 +1843,7 @@ mod nested_vehicle_discard_tests {
                     ),
                 ]
                 .into();
-                mod_api::testing::with_mods(mods, || {
+                mod_platform::testing::with_mods(mods, || {
                     with_vehicle_tree(cart, true, |game| {
                         game.next_entity = game.next_entity.max(100);
                         let items = vec![Some(horizon_client::items::ItemStack::new(
@@ -1944,7 +1944,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     super::super::native_player_death::tests::add_guest(game);
                     game.native_level_opened(super::super::Dim::Overworld);
@@ -1982,7 +1982,7 @@ mod nested_vehicle_discard_tests {
                 Box::new(CancelUntilAllowed { cancel, calls }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.native_level_opened(super::super::Dim::Overworld);
                     game.build_registries();
@@ -2029,7 +2029,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(mode != 0, true, |game| {
                     let uuid = [160, 0, 0, 71];
                     let holder = horizon_client::save::uuid_text(uuid);
@@ -2098,7 +2098,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, true, |game| {
                     let camel = game.res.mob_types().get("minecraft:camel").unwrap().clone();
                     let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
@@ -2151,7 +2151,7 @@ mod nested_vehicle_discard_tests {
                 }),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     let vehicle = game.entity(71).unwrap();
                     let rider = game.entity(72).unwrap();
@@ -2216,7 +2216,7 @@ mod nested_vehicle_discard_tests {
                     }),
                 )]
                 .into();
-                mod_api::testing::with_mods(mods, || {
+                mod_platform::testing::with_mods(mods, || {
                     with_vehicle_tree(cart, true, |game| {
                         if discard {
                             assert!(game.entity(71).unwrap().discard(game));
@@ -2282,7 +2282,7 @@ mod nested_vehicle_discard_tests {
                 Box::new(ReparentLater(count.clone())),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
                     game.mob_object_mut(72).unwrap().extra.vehicle_order = 1;
                     let later = game.mob_object_mut(73).unwrap();
@@ -2329,7 +2329,7 @@ mod nested_vehicle_discard_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_vehicle_tree(false, false, |game| {
                 if cross_level {
                     // The console service requires an active server hub.
@@ -2421,7 +2421,7 @@ mod nested_vehicle_discard_tests {
             Box::new(ReparentSelf(count.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_vehicle_tree(false, false, |game| {
                 let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 game.mobs.push(Mob::new(74, kind, Vec3::ZERO, 0.0));
@@ -2461,7 +2461,7 @@ mod nested_vehicle_discard_tests {
             Box::new(ReviewKillOnMount),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_vehicle_tree(false, false, |game| {
                 game.mob_object_mut(72).unwrap().extra.mount = None;
                 let ok = game.start_riding_target(

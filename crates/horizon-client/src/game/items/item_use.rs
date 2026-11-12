@@ -774,7 +774,7 @@ mod tests {
         let mut overridden_geometry = None;
         let mods: Mods = vec![ModEntry::new("animation", Box::new(Mod(calls.clone())))].into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
                 for id in [
                     "minecraft:bow",
@@ -951,7 +951,7 @@ mod tests {
         let mods: Mods = vec![ModEntry::new("hand", Box::new(hooks))].into();
         crate::game::api_values::install_parts(&mods).unwrap();
         let mut drawn = None;
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
                 hold_a_sword(game);
                 let kept = game.hand_geometry(0.0);
@@ -1294,7 +1294,7 @@ pub(super) mod interact_vibration_tests {
             Box::new(Reverse(calls.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game("minecraft:stick", |game| {
                 let use_block = |game: &mut Game<'_>, name: &str| {
                     let player = game.use_context();

@@ -2232,7 +2232,7 @@ mod brewing_fuel_transfer_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world.chunks.insert(

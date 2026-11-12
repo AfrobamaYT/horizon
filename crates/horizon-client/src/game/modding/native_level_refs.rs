@@ -1028,7 +1028,7 @@ mod tests {
             Box::new(Observer(heard.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_guests(|game| {
                 game.world
                     .chunks
@@ -1120,7 +1120,7 @@ mod tests {
         use mod_api::Host;
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::signal_game_thread();
+        mod_platform::__private::part_tests::signal_game_thread();
         with_game(|game| {
             game.world
                 .chunks

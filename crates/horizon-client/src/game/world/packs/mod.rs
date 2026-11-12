@@ -928,8 +928,8 @@ mod tests {
         ) {
             return;
         }
-        use mod_api::testing::with_mods;
         use mod_api::{FluidModel, Hooks, ModEntry, RegisterFluidModelsEvent, RegistrationContext};
+        use mod_platform::testing::with_mods;
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -998,7 +998,7 @@ mod tests {
                                 assert_eq!(layers.contains_key(id), expected == Some(id), "{id}");
                             }
                         };
-                        mod_api::__private::with_test_packages(&["reload_boundary"], || {
+                        mod_platform::__private::with_test_packages(&["reload_boundary"], || {
                             reload(Some("reload_boundary:block/oil_0"));
                             generation.store(1, Ordering::SeqCst);
                             reload(Some("reload_boundary:block/oil_1"));
