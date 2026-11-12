@@ -25,6 +25,7 @@ pub mod containers;
 pub mod data;
 pub mod discovery;
 pub mod entity;
+pub mod equipment_cache;
 pub mod far;
 pub mod forwarding;
 pub mod guest;
