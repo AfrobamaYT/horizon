@@ -2,7 +2,7 @@
 
 Upstream pin: `a21f8a3947e9fa6fdf47cbc0f656d6444a622e2a`, the newest completed-success push-to-main `ci.yml` head at selection ([run 43192928360](https://github.com/horizon-rust/horizon/actions/runs/43192928360), completed 2026-11-12 09:52:42 UTC). Previous integrated upstream: `911aa6ddc6ec1684eaa312c7650e938789cf2193`. Pin is fixed during integration.
 
-Started from fork main `503cdc1ffa63c38876f769a6cb6253e23313b62a`. Incoming delta: 59 paths, with 23 initial conflicts. Fresh main integration and final verification are pending.
+Started from fork main `503cdc1ffa63c38876f769a6cb6253e23313b62a`. Incoming delta: 59 paths, with 23 initial conflicts. Fresh main was fetched and merge attempted once immediately before final compile-only verification; it remained `503cdc1ffa63c38876f769a6cb6253e23313b62a` (already up to date). Final scope: 66 files.
 
 ## Production ownership
 
@@ -257,4 +257,4 @@ The new wind-charge dedicated-server parity harness additionally requires prepar
 
 The landing-orb unit fixture injects OrbMove and on_ground state: it exercises production landing-event bookkeeping, not the complete collision/fluid-to-landing path. The separate command corpus drives real motion, but was not run locally. Neither fixture presence nor resource-gated early return is runtime evidence.
 
-Rustfmt and compile-only `cargo check --workspace --all-targets` are the allowed local checks. Initial compilation identified erroneous missing-resource attribution on ordinary production branches and duplicate discovery of the new attack-check module. Both were corrected at their owners. Subsequent test compilation exposed stale NBT/Joined/Reason API fixtures and the complete orb-constructor field family; those are corrected without changing assertions or restoring legacy APIs. No local tests, clippy, harnesses or gameplay runs. Independent static review, final integrated zero-warning compile, exact-head CI and final root glance are pending.
+Rustfmt and compile-only `cargo check --workspace --all-targets` are the allowed local checks. Initial compilation identified erroneous missing-resource attribution on ordinary production branches and duplicate discovery of the new attack-check module. Both were corrected at their owners. Subsequent test compilation exposed stale NBT/Joined/Reason API fixtures and the complete orb-constructor field family; those are corrected without changing assertions or restoring legacy APIs. No local tests, clippy, harnesses or gameplay runs. Independent static review found no remaining concrete blocker after correction passes. The complete integrated `cargo check --workspace --all-targets` passed with zero warnings before the first push. Touched Rust was formatted, whitespace checks passed and the generated baseline passed the static size check. Exact-head CI and final root glance remain pending.
