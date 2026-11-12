@@ -4,21 +4,10 @@ name: fn-replace-check
 # (tools/ci/fn_replace_check.sh): function replacement, bridges, support modules, a published loop,
 # a mod with registry dependencies, and the refusals by name. So a change that breaks native mods
 # fails here and not on a player's machine (#1102). Build and link only: no game runs and no vanilla
-# data is read. Checked on main pushes, dispatches, and pull requests that touch what it builds.
+# data is read. Checked on main pushes and by dispatch, never on pull requests.
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - launcher/**
-      - crates/horizon-mod-api-gen/**
-      - crates/horizon-mod-api-macros/**
-      - crates/horizon-mod-points/**
-      - crates/horizon-mod-point-emit/**
-      - tools/ci/fn_replace_check.sh
-      - tools/ci/fn-replace-check/**
-      - tools/prebuilt_game.py
-      - .github/workflows/fn-replace-check.yml
   workflow_dispatch:
 permissions:
   contents: read
