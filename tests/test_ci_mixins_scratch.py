@@ -51,6 +51,29 @@ class MixinsScratchTests(unittest.TestCase):
                 self.assertFalse(scratch.exists())
             self.assertEqual(len(set(allocated)), 2)
 
+    def test_sdk_optimization_override_is_only_for_pull_requests(self):
+        workflow = yaml.load((ROOT / ".github/workflows/fn-replace-check.yml").read_text(), Loader=yaml.BaseLoader)
+        steps = {step.get("name"): step for step in workflow["jobs"]["fn-replace-check"]["steps"]}
+        script = steps["Server SDK, warnings denied"]["run"]
+        with tempfile.TemporaryDirectory() as directory:
+            python = Path(directory) / "python3"
+            python.write_text(
+                '#!/bin/sh\n'
+                'printf "%s|%s" "${CARGO_PROFILE_RELEASE_LTO-unset}" '
+                '"${CARGO_PROFILE_RELEASE_CODEGEN_UNITS-unset}"\n'
+                'printf "|%s" "$@"\n'
+            )
+            python.chmod(0o700)
+            for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
+                with self.subTest(event=event):
+                    env = dict(PATH=directory, GITHUB_EVENT_NAME=event,
+                               FNR_SCRATCH="/isolated SDK")
+                    result = subprocess.run(["/bin/bash", "-eu", "-c", script],
+                                            env=env, capture_output=True, text=True, check=True)
+                    settings = "off|16" if event == "pull_request" else "unset|unset"
+                    self.assertEqual(result.stdout,
+                                     settings + "|tools/prebuilt_game.py|build|/isolated SDK/prebuilt|--server")
+
     def test_self_hosted_scratch_is_private_unique_and_off_tmpfs(self):
         """Run the workflow's own allocation and cleanup steps twice."""
         workflow = yaml.load((ROOT / ".github/workflows/fn-replace-check.yml").read_text(), Loader=yaml.BaseLoader)

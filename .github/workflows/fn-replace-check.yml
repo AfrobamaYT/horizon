@@ -94,7 +94,15 @@ jobs:
           echo "FNR_SCRATCH=$scratch" >> "$GITHUB_ENV"
       # The SDK is built with the launcher's Rust: a mod's code is compiled against its metadata.
       - name: Server SDK, warnings denied
-        run: python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
+        run: |
+          # PRs prove staged exports and native linking, not shipped optimization settings.
+          # Keep these overrides step-local: main/dispatch SDKs and optimized mod builds
+          # retain the shipped release profile (ThinLTO and one codegen unit).
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            export CARGO_PROFILE_RELEASE_LTO=off
+            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+          fi
+          python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
       - name: Build the launcher
         run: cargo build --release --locked --manifest-path launcher/Cargo.toml
       - name: Function replacement check (build and link)
