@@ -1,6 +1,8 @@
 name: dyna-checks
 run-name: ${{ github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
-# Upstream-style checks on pull requests; fork-only extras on main pushes and dispatches.
+# A contributor's pull request (its head in a fork) gets the cheap checks (verify-static, format); the heavy ones
+# (everything that compiles) run on main's pushes, dispatches, and pull requests from this repository's own branches
+# (tools/ci/pr_gate.py, docs/ci-runners.md).
 # Keep upstream's workflows byte-identical; disable checks (ci.yml) in the fork's Actions
 # settings after this workflow's verify passes on main.
 # Scheduled events run only the hosted dispatcher; the dispatched run uses Dyna.
@@ -21,6 +23,10 @@ on:
         description: Check the prepared output digest
         type: boolean
         default: false
+      pr:
+        description: Run the heavy checks on this pull request's head (a fork's too) and post them on it
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -55,7 +61,13 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     outputs:
+      # Whether the heavy jobs run (tools/ci/pr_gate.py); a dispatch with `pr` runs them on that head.
+      heavy: ${{ steps.gate.outputs.heavy }}
+      pr_sha: ${{ steps.gate.outputs.pr_sha }}
+      # Whether this run's code may use our own runners: never a fork's pull request, dispatched or not.
+      trusted: ${{ steps.gate.outputs.trusted || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false') }}
       rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
       launcher_required: ${{ steps.selection.outputs.launcher_required || 'true' }}
       tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
@@ -72,6 +84,14 @@ jobs:
       forced_github: ${{ steps.hosted.outputs.forced_github }}
     steps:
       - uses: actions/checkout@v4
+      - name: Heavy checks for this event
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR: ${{ inputs.pr }}
+        run: python3 tools/ci/pr_gate.py >> "$GITHUB_OUTPUT"
       - name: Fetch this commit's history for selection
         if: github.event_name == 'pull_request'
         run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
@@ -114,7 +134,7 @@ jobs:
           VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
           VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
           EVENT: ${{ github.event_name }}
-          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          SAME_REPO: ${{ steps.gate.outputs.trusted || (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         run: |
           if [ "$SAME_REPO" = true ]; then
             ENABLED=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_SELF_HOSTED" -q .value 2>/dev/null || true)
@@ -147,7 +167,7 @@ jobs:
           ACTOR: ${{ github.triggering_actor }}
         run: python3 tools/ci/boat_health.py
       - name: The ignored-tests shard matrix
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && !inputs.pr
         id: matrix
         run: python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
 
@@ -156,7 +176,7 @@ jobs:
   # Same-run fallback jobs would leave the original queued checks pending, not green.
   boat-watch:
     needs: changes
-    if: needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && needs.changes.outputs.trusted == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -190,13 +210,13 @@ jobs:
     # build folder persists, so clippy re-checks only what changed. A fork's pull request, or a run while the
     # pool is down, stays on GitHub's runners with the snapshot cache below.
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
-    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     # A cold lint (two full clippy graphs) takes 40+ minutes on GitHub runners: room to finish, main to save its cache.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 100 }}
     env:
       # dyna (Dyna's pool: persistent build folder, no sudo), boat (a fresh VM like GitHub's, 16 GiB) or github.
-      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
         if: needs.changes.result != 'success'
@@ -206,6 +226,9 @@ jobs:
         run: echo 'Rust lint is not selected; repository hygiene still runs.'
       # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
+        with:
+          # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
+          ref: ${{ needs.changes.outputs.pr_sha }}
       - name: Check repository artifacts and workflow YAML
         run: python3 tools/ci/check_repository_hygiene.py
       - name: Check mod API boundary
@@ -340,8 +363,8 @@ jobs:
 
   verify:
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
-    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -353,12 +376,15 @@ jobs:
       # With Vulkan hidden, a runner with Mesa's GL software adapter (boat's image) would still run the GPU tests,
       # on GL, and fail (#2841); Vulkan only leaves every runner with no adapter, so GPU tests skip here everywhere.
       WGPU_BACKEND: vulkan
-      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
         if: needs.changes.result != 'success'
         run: exit 1
       - uses: actions/checkout@v4
+        with:
+          # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
+          ref: ${{ needs.changes.outputs.pr_sha }}
       - uses: actions/setup-python@v5
         if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
@@ -529,10 +555,34 @@ jobs:
           echo "memory.peak $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unavailable)"
 
   # Source checks and isolated compiler fixtures, never a second game build or game target cache.
+  # A contributor's pull request gets this instead of lint: the same repository checks and formatting, nothing that
+  # compiles. Formatting alone never blocks a merge (room rule); lint repeats it on the heavy runs.
+  format:
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.heavy != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check repository artifacts and workflow YAML
+        run: python3 tools/ci/check_repository_hygiene.py
+      - name: Check mod API boundary
+        if: needs.changes.outputs.rust_required != 'false'
+        run: python3 tools/ci/check_api_boundary.py --source-only
+      - name: Install rustfmt on the pinned Rust
+        run: bash tools/ci/rustup_install.sh --profile minimal --component rustfmt
+      - name: Check formatting
+        run: |
+          cargo fmt --all -- --check
+          find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
+          find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
+          rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+          (cd launcher && cargo fmt --check)
+
   verify-static:
     needs: changes
     if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' }}
-    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.rust_required == 'false' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -544,12 +594,15 @@ jobs:
       # With Vulkan hidden, a runner with Mesa's GL software adapter (boat's image) would still run the GPU tests,
       # on GL, and fail (#2841); Vulkan only leaves every runner with no adapter, so GPU tests skip here everywhere.
       WGPU_BACKEND: vulkan
-      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
         if: needs.changes.result != 'success'
         run: exit 1
       - uses: actions/checkout@v4
+        with:
+          # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
+          ref: ${{ needs.changes.outputs.pr_sha }}
       # Public-tree ranges and file-size ancestry need full history of this exact commit,
       # not every branch and tag. The Rust job only needs its checkout's HEAD and tracked files.
       - name: Fetch this commit's history
@@ -647,7 +700,7 @@ jobs:
     # Skip an empty matrix instead of expanding to nothing, which GitHub refuses.
     if: >-
       needs.changes.outputs.self_hosted == 'true' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && !inputs.pr &&
       fromJSON(needs.changes.outputs.ignored_matrix).shard[0] != null
     strategy:
       fail-fast: false
@@ -739,7 +792,7 @@ jobs:
     needs: [changes, ignored-tests-shards]
     if: >-
       always() && !cancelled() &&
-      !inputs.prepare-output-check &&
+      !inputs.prepare-output-check && !inputs.pr &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -769,11 +822,14 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
-    if: needs.changes.outputs.launcher_required != 'false'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.heavy == 'true'
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
+          ref: ${{ needs.changes.outputs.pr_sha }}
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -811,6 +867,33 @@ jobs:
           cargo test $JOBS --no-fail-fast --locked --test storage
           cargo build $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --example holder_actor
           cargo test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
+  # A dispatch with `pr`: posts the heavy jobs' results on that pull request's head. It runs none of its code, so it
+  # alone holds the write permission, and only for commit statuses.
+  pr-status:
+    needs: [changes, lint, verify, verify-static, launcher]
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.pr != '' && needs.changes.outputs.pr_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.changes.outputs.pr_sha }}
+          RESULTS: ${{ toJSON(needs) }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          states = {"success": "success", "skipped": "success", "failure": "failure", "cancelled": "error"}
+          for job in ("lint", "verify", "verify-static", "launcher"):
+              result = json.loads(os.environ["RESULTS"])[job]["result"]
+              subprocess.run(["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['SHA']}",
+                              "-f", f"state={states.get(result, 'error')}", "-f", f"context=dispatched/{job}",
+                              "-f", f"description=dyna-checks dispatched on this head: {result}",
+                              "-f", f"target_url={os.environ['RUN']}"], check=True)
+          PY
+
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'
@@ -854,7 +937,7 @@ jobs:
           exit "$result"
 
   vanilla-parity:
-    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check && !inputs.github-fallback
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check && !inputs.github-fallback && !inputs.pr
     runs-on: dyna-large
     permissions:
       contents: read

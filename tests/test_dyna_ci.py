@@ -227,13 +227,19 @@ class DynaRoutingTests(unittest.TestCase):
         blocks = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))
         runtime = blocks["verify"]
         static = blocks["verify-static"]
+        # verify waits for the heavy gate (tools/ci/pr_gate.py); verify-static runs on every pull request.
+        conditions = {
+            id(runtime): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && "
+                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}",
+            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' }}",
+        }
         for block in (runtime, static):
             header, steps = block.split("    steps:\n", 1)
             fields = dict(line.strip().split(":", 1) for line in header.splitlines()
                           if line.startswith("    ") and ":" in line and not line.lstrip().startswith("#"))
             self.assertEqual(fields["needs"].strip(), "changes")
             self.assertEqual(fields["timeout-minutes"].strip(), "45")
-            self.assertEqual(fields["if"].strip(), "${{ always() && !cancelled() && needs.changes.result != 'skipped' }}")
+            self.assertEqual(fields["if"].strip(), conditions[id(block)])
             first = steps.split("\n      - ", 1)[0]
             guard = dict(line.strip().split(":", 1) for line in first.splitlines()
                          if line.startswith("        ") and ":" in line)
