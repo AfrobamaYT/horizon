@@ -23,7 +23,7 @@ pub trait Hooks {
     /// `host` is read-only: read `entity` through it (its position, its
     /// equipment) to answer from its state when asked. The stack is converted
     /// once and lent to each slot and entity a menu click, a dispense or a
-    /// pickup asks about. An `entity` that is no live entity of that side any
+    /// pickup asks about; a wasm mod is given a copy of it on each call. An `entity` that is no live entity of that side any
     /// more is refused without asking.
     #[hook(
         side = "both",
