@@ -3142,17 +3142,17 @@ mod tests {
         let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
         sword.data_mut().set_other(
             "minecraft:weapon",
-            Some(horizon_world::nbt::Tag::compound([(
+            Some(horizon_core::nbt::Tag::compound([(
                 "item_damage_per_attack",
-                horizon_world::nbt::Tag::Int(3),
+                horizon_core::nbt::Tag::Int(3),
             )])),
         );
         assert_eq!(items.weapon_damage(&sword), Some(3));
         sword.data_mut().set_other(
             "!minecraft:weapon",
-            Some(horizon_world::nbt::Tag::compound(Vec::<(
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
                 &str,
-                horizon_world::nbt::Tag,
+                horizon_core::nbt::Tag,
             )>::new())),
         );
         assert_eq!(items.weapon_damage(&sword), None);
