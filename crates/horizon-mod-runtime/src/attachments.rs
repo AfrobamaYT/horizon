@@ -993,7 +993,14 @@ impl Attachments {
     }
     fn store(&mut self, namespace: &str, name: &str, value: Decoded, write: AttachmentWrite) {
         let sync = value.policy.sync;
-        let key: (JavaString, JavaString) = (namespace.into(), name.into());
+        // UTF-8 byte length is an upper bound on UTF-16 units. Reserve once
+        // instead of repeatedly growing the short key buffers during encoding.
+        let [owned_namespace, owned_name] = [namespace, name].map(|text| {
+            let mut units = Vec::with_capacity(text.len());
+            units.extend(text.encode_utf16());
+            JavaString(units)
+        });
+        let key = (owned_namespace, owned_name);
         self.write_entry(
             &key,
             Some(Arc::new(AttachmentEntry {
