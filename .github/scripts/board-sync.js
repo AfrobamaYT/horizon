@@ -81,11 +81,27 @@ module.exports = async ({ github, context, core }) => {
   for (const [id, w] of want) if (w.issue && w.open && linked.has(id)) w.status = 'In review';
 
   // Add what is missing, then set what differs, in batches.
+  // An add can answer "Content already exists in this project" when the item is on the board but was not
+  // listed above (an archived item, or one another run added meanwhile). That is the state we want: the
+  // other adds in the batch still succeed, and the existing item is looked up from the content's side.
+  const existingItem = async contentId => {
+    const node = (await q(`query($id:ID!){node(id:$id){... on Issue{projectItems(first:50){nodes{id project{id}}}}
+      ... on PullRequest{projectItems(first:50){nodes{id project{id}}}}}}`, { id: contentId })).node;
+    const found = node?.projectItems.nodes.find(n => n.project.id === proj.id);
+    if (!found) throw new Error(`board add refused ${contentId} as already present, but no board item holds it`);
+    return found.id;
+  };
   const missing = [...want.keys()].filter(id => !items.has(id));
   for (let i = 0; i < missing.length; i += 25) {
     const chunk = missing.slice(i, i + 25);
-    const r = await q(`mutation{${chunk.map((c, j) => `a${j}:addProjectV2ItemById(input:{projectId:"${proj.id}",contentId:"${c}"}){item{id}}`).join(' ')}}`);
-    chunk.forEach((c, j) => items.set(c, { item: r[`a${j}`].item.id }));
+    let r;
+    try {
+      r = await q(`mutation{${chunk.map((c, j) => `a${j}:addProjectV2ItemById(input:{projectId:"${proj.id}",contentId:"${c}"}){item{id}}`).join(' ')}}`);
+    } catch (e) {
+      if (!e.data || !e.errors?.length || !e.errors.every(x => /content already exists in this project/i.test(x.message))) throw e;
+      r = e.data;
+    }
+    for (const [j, c] of chunk.entries()) items.set(c, { item: r[`a${j}`]?.item?.id ?? await existingItem(c) });
   }
   const edits = [];
   for (const [id, w] of want) {
