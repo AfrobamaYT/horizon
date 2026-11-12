@@ -77,6 +77,12 @@ sees the changes before it. Because no mod can build or match the whole
 struct, a later version can add a field without breaking any mod, as NeoForge's event objects do; the cost is that
 a mod's own tests drive a hook through its dispatch function ([Testing a trait mod](026-testing-a-trait-mod.md#testing-a-trait-mod)).
 
+The generator validates edited stack-list outputs inside each listener's owning scope. A refused stack
+output retains the immediately preceding accepted value, not the event's initial value. Scalar
+outputs and cancellation still commit; later listeners see the accepted stacks and run independently
+under the usual cancellation rules. Each refused output logs one warning naming the mod, hook,
+output and conversion error. This policy is identical for native and wasm listeners.
+
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
 the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods keep mutable

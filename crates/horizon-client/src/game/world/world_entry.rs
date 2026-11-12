@@ -340,7 +340,7 @@ impl Game<'_> {
                 conditions,
                 suffocation,
                 files,
-                items,
+                items: Arc::new(items),
                 recipes,
                 stations,
                 reload_sources: reload.then_some(sources),

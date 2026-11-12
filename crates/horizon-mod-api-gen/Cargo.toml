@@ -10,6 +10,8 @@ description = "Build-time typed native mod API generation"
 [features]
 # Shared listener integration fixture only; never enabled by gameplay crates.
 listener-fixture = []
+# Isolated generated native/guest boundary fixture; never enabled by game builds.
+mixed-output-fixture = []
 
 [dependencies]
 horizon-game-discovery = { path = "../horizon-game-discovery" }

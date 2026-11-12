@@ -947,31 +947,8 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
     report.push_str(include_str!("../../coverage-notes.md"));
     writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
-    let ast = syn::parse_file(&generated.hooks).map_err(|e| e.to_string())?;
-    let ids = ast
-        .items
-        .iter()
-        .find_map(|item| match item {
-            syn::Item::Enum(e) if e.ident == "HookId" => Some(
-                e.variants
-                    .iter()
-                    .map(|v| v.ident.to_string())
-                    .collect::<Vec<_>>(),
-            ),
-            _ => None,
-        })
-        .ok_or("HookId absent")?;
-    for hook in crate::Catalog::load(root)?.hooks {
-        if !ids.contains(&crate::hook_id(&hook.name)) {
-            continue;
-        }
-        writeln!(
-            code,
-            "{:?} => Some(mod_api::HookId::{}),",
-            hook.name,
-            crate::hook_id(&hook.name)
-        )
-        .unwrap();
+    for (variant, name) in &surface.hooks {
+        writeln!(code, "{:?} => Some(mod_api::HookId::{}),", name, variant).unwrap();
     }
     code.push_str("_ => None } } pub fn subscriptions_of(owner: &str, names: Vec<String>) -> &'static [Option<mod_api::HookId>] { names.into_iter().filter_map(|name| { let id = hook_id(&name); if id.is_none() { log::warn!(\"wasm {owner}: unknown hook {name}\"); } id.map(Some) }).collect::<Vec<_>>().leak() }\n");
     for path in surface.types.index.read.take() {

@@ -1117,7 +1117,7 @@ struct WorldTables {
     /// The pack files the tables were built from (a native mod's among
     /// them), for the advancement tree reload and the loot data.
     files: Vec<(String, Vec<Vec<u8>>)>,
-    items: Items,
+    items: Arc<Items>,
     recipes: Recipes,
     stations: horizon_client::stations::StationData,
     reload_sources: Option<Arc<horizon_client::crafting::ResolvedSources>>,
