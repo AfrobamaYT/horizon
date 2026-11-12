@@ -534,8 +534,9 @@ mod transport {
         out.extend_from_slice(&transport(id, input));
         true
     }
-    /// Sends a panic's text to the game, unless the panic is the game's own, raised while it
-    /// answers this thread: the game is mid-call there, so it is printed instead.
+    /// Sends a panic's text to the game, unless the panic is raised while the game answers this
+    /// thread, the game's own or a mod hook's re-entered from inside that answer: the game is
+    /// mid-call there, so it is printed instead (native harness only).
     pub(super) fn try_log(input: &[u8]) -> bool {
         !SERVING.try_with(std::cell::Cell::get).unwrap_or(true)
             && try_call(crate::wire::HOST_LOG, input, &mut Vec::new())
