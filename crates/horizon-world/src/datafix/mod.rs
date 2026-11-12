@@ -24,6 +24,7 @@ mod fixes_legacy;
 mod fixes_mid;
 mod fixes_old;
 mod items;
+mod single;
 pub mod json;
 pub mod progress;
 pub mod schema;
@@ -34,6 +35,7 @@ pub mod world_upgrader;
 use dynamic::{as_str, string};
 use horizon_core::nbt::Tag;
 use schema::{Key, Ty, key, walk};
+pub use single::{MAX_BYTES, MAX_DEPTH, UpgradeError, upgrade_block_entity, upgrade_entity};
 pub use tables::{available as tables_available, set_resources};
 
 /// The DataVersion of the game.

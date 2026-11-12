@@ -2473,5 +2473,8 @@ mod play_hit_sound;
 #[path = "wire_loopback/server_has_time.rs"]
 mod server_has_time;
 
+#[path = "wire_loopback/datafix_upgrades.rs"]
+mod datafix_upgrades;
+
 #[path = "wire_loopback/friction.rs"]
 mod friction;
