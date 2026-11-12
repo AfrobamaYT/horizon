@@ -527,7 +527,7 @@ fn cauldron_register_to_all_and_admission_errors() {
             "test:syrup_cauldron",
         ] {
             assert!(
-                matches!(table.select(block,"test:syrup_bottle",false),Some(Entry::Mod(callback)) if callback.owner=="all_mod")
+                matches!(table.select(block,"test:syrup_bottle",false,|_| false),Some(Entry::Mod(callback)) if callback.owner=="all_mod")
             );
         }
         let mut registrar = make();
@@ -622,7 +622,7 @@ fn cauldron_world_close_discards_callbacks_before_failed_preparation() {
     fixture(false, false, false, |game, seen| {
         let old = snapshot();
         assert!(matches!(
-            old.select("minecraft:cauldron", "test:syrup_bottle", false),
+            old.select("minecraft:cauldron", "test:syrup_bottle", false, |_| false),
             Some(Entry::Mod(_))
         ));
         seen.fail_preparation.store(true, Ordering::SeqCst);
@@ -655,7 +655,7 @@ fn cauldron_world_close_discards_callbacks_before_failed_preparation() {
         ] {
             assert!(
                 snapshot()
-                    .select(block, "test:syrup_bottle", false)
+                    .select(block, "test:syrup_bottle", false, |_| false)
                     .is_none()
             );
         }
