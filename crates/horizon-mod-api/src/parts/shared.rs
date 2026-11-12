@@ -39,6 +39,7 @@ pub(crate) fn with_registering_keys<T>(
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
     pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
+    pub(crate) biome_regions: Vec<BiomeRegionDeclaration>,
     pub(crate) datapack_registries: Vec<crate::DatapackRegistryDeclaration>,
     pub(crate) menu_recipe_books: HashMap<String, MenuBookDeclaration>,
     pub(crate) self_refusal: Option<String>,
@@ -77,6 +78,7 @@ impl PartRegistrar {
             menu_recipe_books: HashMap::new(),
             self_refusal: None,
             biome_modifiers: Vec::new(),
+            biome_regions: Vec::new(),
             datapack_registries: Vec::new(),
             recipe_book_types: HashMap::new(),
             game_rule_categories: Vec::new(),
@@ -239,6 +241,11 @@ pub(crate) fn install_registrar(
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let installed = Installed {
         biome_modifiers: registrar.biome_modifiers,
+        biome_regions: {
+            let mut regions = registrar.biome_regions;
+            regions.sort_by(|a, b| (&a.mod_id, &a.id).cmp(&(&b.mod_id, &b.id)));
+            regions
+        },
         datapack_registries: registrar.datapack_registries,
         menu_recipe_books: registrar.menu_recipe_books,
         recipe_book_types: registrar.recipe_book_types,
@@ -514,6 +521,15 @@ pub mod tests {
             r.item_capability_before_game(&ITEM_ITEMS, "test:outer", |_, place| {
                 Some(Box::new(deep_places::Wrap(place.clone())))
             });
+            // The `test:ordered` block's first providers, registered ahead of its block entity
+            // type's: one after the game answering at x = 5, one ahead of it at x = 12.
+            let ordered_block = r.block_key("test:ordered");
+            r.block_capability(&ITEMS, &ordered_block, |_, at, _, _| {
+                (at.pos[0] == 5).then(|| Box::new(Marked(7)) as _)
+            });
+            r.block_capability_before_game(&ITEMS, &ordered_block, |_, at, _, _| {
+                (at.pos[0] == 12).then(|| Box::new(Marked(8)) as _)
+            });
             // `test:ordered`: one provider that declines, two that answer, and one ahead of the
             // game that answers only at x = 9.
             let ordered = r.block_entity_type_key("test:ordered");
@@ -559,6 +575,20 @@ pub mod tests {
             }
             let chem_tank = r.block_entity_type_key("test:chem_tank");
             r.block_entity_capability(&CHEMICALS, &chem_tank, |_, at| Some(Box::new(ChemTank(at))));
+            // `test:void_bin`, a block with no block entity, voids what it is given.
+            let void_bin = r.block_key("test:void_bin");
+            r.block_capability(&ITEMS, &void_bin, |_, _, _, entity| {
+                entity.is_none().then(|| Box::new(VoidBin) as _)
+            });
+            // The `test:ordered` block's later providers, registered after its block entity
+            // type's: one ahead of the game answering at x = 6 and x = 11, and one after it
+            // answering anywhere.
+            r.block_capability_before_game(&ITEMS, &ordered_block, |_, at, _, _| {
+                matches!(at.pos[0], 6 | 11).then(|| Box::new(Marked(5)) as _)
+            });
+            r.block_capability(&ITEMS, &ordered_block, |_, _, _, _| {
+                Some(Box::new(Marked(6)))
+            });
         }
     }
 
@@ -601,7 +631,7 @@ pub mod tests {
         }
         fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
             event.blocks.extend(
-                ["gauge", "connector", "press", "hoard"]
+                ["gauge", "connector", "press", "hoard", "void_bin"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
                     .map(|id| mod_api::Block::new(format!("test:{id}"), "minecraft:stone")),
@@ -638,6 +668,9 @@ pub mod tests {
                 "test:other",
                 "test:connector",
                 "test:press",
+                "test:void_bin",
+                "test:ordered",
+                "minecraft:stone",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(

@@ -10,16 +10,24 @@ mod block_entity_on_load;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/biome_region_registration.rs"]
+mod biome_region_registration;
 #[path = "wire_loopback/block_entity_transform.rs"]
 mod block_entity_transform;
 #[path = "wire_loopback/load_conditions.rs"]
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
+#[path = "wire_loopback/piglin_answers.rs"]
+mod piglin_answers;
 #[path = "wire_loopback/piston_push_reaction.rs"]
 mod piston_push_reaction;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
+/// The generated proxies' refusal reason; the loopback refuses only on its own encode errors.
+fn wasm_call_refusal() -> String {
+    "loopback refused".into()
+}
 thread_local! {
     static EXPECTED_LOOT_HAND: std::cell::RefCell<Option<mod_api::ItemStack>> = const { std::cell::RefCell::new(None) };
 }
@@ -234,8 +242,10 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             _: &mod_api::RegistrationContext,
         ) {
             arm_pose_registration::check(registrar);
+            biome_region_registration::register(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
+            piglin_answers::register(registrar);
             block_entity_transform::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
@@ -857,6 +867,29 @@ fn wire_loopback_answered_collect_names_the_guest_mod() {
 }
 
 #[test]
+fn wire_loopback_biome_region_declaration_reaches_the_host_bit_exact() {
+    let mods = [mod_api::ModEntry::new(
+        "wire_test",
+        Box::new(WasmMod {
+            group: 0,
+            subscribed: &[],
+            listeners: &[],
+            corrupt: false,
+        }),
+    )];
+    mod_api::__private::install_parts(
+        &mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
+    let declared = mod_api::__private::biome_region_declarations();
+    assert_eq!(declared.len(), 1);
+    assert_eq!(declared[0].mod_id, "wire_test");
+    assert_eq!(declared[0].id, "wire_test:ember_marsh");
+    assert_eq!(declared[0].region, biome_region_registration::region());
+}
+#[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
@@ -1430,21 +1463,40 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     use mod_api::*;
     struct Table;
     impl CapabilityProviders for Table {}
-    impl BlockEntitiesCapabilityProviders for Table {
-        fn block_entity_provider(
+    impl BlocksCapabilityProviders for Table {
+        fn block_provider(
             &self,
             _: &str,
-            _: BlockEntityTypeKey,
+            kind: Option<BlockEntityTypeKey>,
+            block: Option<BlockKey>,
             index: &mut u32,
         ) -> Option<(BlockProviderOf, &'static str, bool)> {
-            *index += 1;
-            Some((
-                BlockProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: BlockSide| {
-                    None::<Box<dyn EnergyHandler>>
-                })),
-                "test:block",
-                true,
-            ))
+            // Which of the position's two keys crossed picks the answer.
+            match (kind, block) {
+                (Some(_), None) => {
+                    *index += 1;
+                    Some((
+                        BlockProviderOf::EnergyHandler(Arc::new(
+                            |_: &mut dyn ServerHost, _: BlockSide| None::<Box<dyn EnergyHandler>>,
+                        )),
+                        "test:block",
+                        true,
+                    ))
+                }
+                (None, Some(_)) => {
+                    *index += 4;
+                    Some((
+                        BlockProviderOf::ResourceHandlerItemResource(Arc::new(
+                            |_: &mut dyn ServerHost, _: BlockSide| {
+                                None::<Box<dyn ResourceHandler<ItemResource>>>
+                            },
+                        )),
+                        "test:plain_block",
+                        false,
+                    ))
+                }
+                _ => None,
+            }
         }
     }
     impl EntitiesCapabilityProviders for Table {
@@ -1489,6 +1541,9 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     impl CapabilitiesCapabilityProviders for Table {
         fn provided(&self, _: ProvidedBy, _: &str) -> bool {
             true
+        }
+        fn mods_switched(&self) -> u64 {
+            7
         }
     }
     struct World;
@@ -1543,7 +1598,12 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     let _reset = Reset;
     let mut index = 5;
     let (block, owner, before) = guest::Guest
-        .block_entity_provider("test:energy", REGISTERED_KIND.get().unwrap(), &mut index)
+        .block_provider(
+            "test:energy",
+            Some(REGISTERED_KIND.get().unwrap()),
+            None,
+            &mut index,
+        )
         .unwrap();
     assert!(matches!(block, BlockProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (6, "test:block", true));
@@ -1560,6 +1620,24 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         .unwrap();
     assert!(matches!(item, ItemProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (11, "test:item", true));
+    let (block, owner, before) = guest::Guest
+        .block_provider(
+            "test:items",
+            None,
+            Some(REGISTERED_BLOCK.get().unwrap()),
+            &mut index,
+        )
+        .unwrap();
+    assert!(matches!(
+        block,
+        BlockProviderOf::ResourceHandlerItemResource(_)
+    ));
+    assert_eq!((index, owner, before), (15, "test:plain_block", false));
+    assert_eq!(
+        guest::Guest.mods_switched(),
+        7,
+        "a guest reads the game's count of mod switches, not its own"
+    );
     corrupt.set(true);
     index = 42;
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2267,3 +2345,6 @@ mod chunk_queries;
 mod client_fireworks;
 #[path = "wire_loopback/play_hit_sound.rs"]
 mod play_hit_sound;
+
+#[path = "wire_loopback/friction.rs"]
+mod friction;
