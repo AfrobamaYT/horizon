@@ -109,8 +109,8 @@ ServerboundSetStructureBlockPacket.write	port	crates/horizon-protocol/src/packet
 VecDelta.Stepped.hasDeltaX	skip:other		no callers in vanilla
 VecDelta.Stepped.hasDeltaZ	skip:other		no callers in vanilla
 VecDelta.Stepped.tryEncode	missing		minor: the LAN host sends only linear deltas (send_changes); no stepped path is encoded
-VecDelta.Linear.decode	inline	crates/horizon-client/src/game/network/remote/mod.rs::Game::handle_packet	MoveEntity arms: the delta applied to the tracked position (VecDelta::end)
-VecDelta.Stepped.decode	inline	crates/horizon-client/src/game/network/remote/mod.rs::Game::handle_packet	MoveEntity arms: each step applied to the previous step's position, with its ticks
+VecDelta.Linear.decode	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	MoveEntity arms: the delta applied to the tracked position (VecDelta::end)
+VecDelta.Stepped.decode	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	MoveEntity arms: each step applied to the previous step's position, with its ticks
 VecDeltaCodec.isDeltaTooBig	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	the i16 range check on each delta
 VecDeltaCodec.tryEncode	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	gap: minor: linear positions only; stepped paths are not encoded
 ClientIntent.byId	missing		minor: an unknown handshake intent is not rejected; the intent stays a raw number in handshake.rs

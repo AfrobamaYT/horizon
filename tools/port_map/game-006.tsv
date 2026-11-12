@@ -2,8 +2,8 @@ Interaction.defineSynchedData	port	crates/horizon-client/src/game/interactions.r
 Interaction.readAdditionalSaveData	port	crates/horizon-client/src/game/interactions.rs::InteractionState::from_tag	width, height, response and optional loaded actions
 Interaction.addAdditionalSaveData	port	crates/horizon-client/src/game/interactions.rs::InteractionState::write	width, height, response and optional action records
 Interaction.onSyncedDataUpdated	port	crates/horizon-client/src/game/interactions.rs::RemoteInteraction::metadata	DATA_WIDTH 8, DATA_HEIGHT 9, DATA_RESPONSE 10
-Interaction.skipAttackInteraction	inline	crates/horizon-client/src/game/network/remote_vehicles.rs::Game::remote_object_hit	false: an attack click picks the box like any entity, and the box ignores the hurt on the server
-Interaction.interact	port	crates/horizon-client/src/game/network/remote/mod.rs::Game::remote_use_entity	SUCCESS when the response is set (the arm swings), CONSUME otherwise; both end the click and nothing behind the box is used
+Interaction.skipAttackInteraction	inline	crates/horizon-client/src/game/remote_vehicles.rs::Game::remote_object_hit	false: an attack click picks the box like any entity, and the box ignores the hurt on the server
+Interaction.interact	port	crates/horizon-client/src/game/remote.rs::Game::remote_use_entity	SUCCESS when the response is set (the arm swings), CONSUME otherwise; both end the click and nothing behind the box is used
 Interaction.getLastAttacker	missing		client copy only: the server keeps the attack targets; a client's copy answers only the click
 Interaction.getTarget	missing		client copy only: the server keeps the attack targets; a client's copy answers only the click
 Leashable.isLeashed	inline	crates/horizon-client/src/mobs/leash.rs::tick	the mob's extra.leash being set

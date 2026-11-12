@@ -48,7 +48,7 @@ DebugQueryHandler.queryEntityTag	inline	crates/horizon-client/src/game/interface
 DebugQueryHandler.queryBlockEntityTag	inline	crates/horizon-client/src/game/interface/debug_keys.rs::Game::copy_recreate_command	the query waits in Remote.debug_query
 DeltaTracker.Timer.pause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual kept while paused
 DeltaTracker.Timer.unPause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual restored on resume
-GameNarrator	home	crates/horizon-client/src/game/interface/narrator.rs	the struct with its say_* methods in lib.rs; the game-side glue (start, option sync, Ctrl+B, the toast) in game/interface/narrator.rs
+GameNarrator	home	crates/horizon-narrator/src/lib.rs,crates/horizon-client/src/game/interface/narrator.rs	the struct with its say_* methods in lib.rs; the game-side glue (start, option sync, Ctrl+B, the toast) in game/interface/narrator.rs
 HotbarManager.get	port	crates/horizon-client/src/hotbar.rs::load	file loaded when the creative hotbar opens (creative_hotbar.rs)
 KeyMapping.forAllKeyMappings	port	crates/horizon-client-input/src/keybinds.rs::KeyBinds::mappings_for	one key drives every mapping bound to it
 KeyMapping.setAll	port	crates/horizon-client/src/game.rs::handle_window_event_inner	WindowEvent::Focused(false) drops every held key and mouse button, so nothing sticks across alt-tab; ModifiersChanged reconciles the rest

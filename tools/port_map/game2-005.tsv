@@ -92,7 +92,7 @@ Player.isEquipped	inline	crates/horizon-client/src/game/items/potions.rs::Game::
 Player.canPlayerFitWithinBlocksAndEntitiesWhen	port	crates/horizon-client/src/pose.rs::MotionWorld::can_fit_pose	the box of the pose's dimensions at the player's position, deflated by 1e-7, tested against the player's collision; `update_player_pose` asks it for the swimming, the desired and the crouching pose in that order, as `updatePlayerPose` does
 Player.increaseScore	skip:other		the score is experience.total in Horizon (death screen); there is no separate score counter
 Player.getWeaponItem	missing		the riptide spin attack keeps only `auto_spin_attack_ticks` and `auto_spin_attack_dmg`, not the stack it started with (`autoSpinAttackItemStack`), so there is no item to answer with mid-spin
-Player.destroyVanishingCursedItems	port	crates/horizon-mod-vocab/src/host/item_entities.rs::Game::drop_inventory	vanishing-curse stacks are removed from the death drops
+Player.destroyVanishingCursedItems	port	crates/horizon-client/src/game/item_entities.rs::Game::drop_inventory	vanishing-curse stacks are removed from the death drops
 Player.hasCorrectToolForDrops	port	crates/horizon-client/src/game.rs::Game::tick_mining	the correct-tool test for harvest drops
 Player.canDropItems	inline	crates/horizon-client/src/lan/menu.rs::click	THROW is not acted on while the client has dropped items too fast
 Player.readAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::read_player
@@ -109,7 +109,7 @@ Player.isSleepingLongEnough	port	crates/horizon-client/src/game/network/lan_acti
 Player.updateSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming
 Player.getXpNeededForNextLevel	port	crates/horizon-client/src/entities.rs::Experience::needed
 Player.hasEnoughFoodToDoExhaustiveManoeuvres	inline	crates/horizon-client/src/sprint.rs::Conditions::possible	the food-or-mayfly test is the sprint gate's `enough_food || may_fly`: `enough_food` is `FoodData::has_enough_food` (food level above 6) filled in `motion.rs`, and `player_food::enough_food_for_manoeuvres` is the same test as a probed free function
-Player.mayUseItemAt	port	crates/horizon-client/src/game.rs::Game::use_hand	the may-build test before use-on in adventure mode
+Player.mayUseItemAt	port	crates/horizon-client/src/game/use_hand.rs::Game::use_hand	the may-build test before use-on in adventure mode
 Player.isSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming
 Player.decorateDisplayNameComponent	port	crates/horizon-client/src/game/administration/commands/mod.rs::player_display_name	click suggests /tell, hover shows the player entity, plus the insertion
 Player.getSlot	port	crates/horizon-client/src/game/administration/commands/items.rs::Game::slots_named	gap: minor: numeric slots 499 (carried item) and 500-503 (crafting grid) are not addressed

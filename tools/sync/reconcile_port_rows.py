@@ -14,14 +14,21 @@ for file in pathlib.Path('crates').glob('**/*.rs'):
 BASE = '7b42678bcd'
 FORK = '600782248b'
 UPSTREAM = '501446443c'
+SCAFFOLD = 'b8881bd88e'
+FILES = '''animal-1 classes-01 client-001 client-002 client-003 client-004
+client-005 client-008 client2-015 client2-016 game-003 game-005 game2-001
+game2-004 game2-007 game2-009 game2-014 game2-017 gui-inventory-1 rest-004'''.split()
 
 def rows(ref, path):
     data = subprocess.check_output(['git', 'show', f'{ref}:{path}'], text=True)
     return {line.split('\t')[0]: line.split('\t') for line in data.splitlines()}
 
-for path in pathlib.Path('tools/port_map').glob('*.tsv'):
+for name in FILES:
+    path = pathlib.Path('tools/port_map') / (name + '.tsv')
     base, fork, upstream = (rows(ref, path) for ref in (BASE, FORK, UPSTREAM))
-    current = {line.split('\t')[0]: line.split('\t') for line in path.read_text().splitlines()}
+    original = subprocess.check_output(['git', 'show', f'{SCAFFOLD}:{path}'], text=True)
+    raw = {line.split('\t')[0]: line for line in original.splitlines()}
+    current = {key: line.split('\t') for key, line in raw.items()}
     for key, incoming in upstream.items():
         old = base.get(key)
         if incoming == old:
@@ -46,4 +53,8 @@ for path in pathlib.Path('tools/port_map').glob('*.tsv'):
                     row[2] = str(next(iter(candidates))) + sep + symbol
                 elif row[0] in upstream and upstream[row[0]] != base.get(row[0]):
                     print(f'Unresolved incoming path: {path}: {row[0]}: {row[2]}')
-    path.write_text('\n'.join('\t'.join(row).rstrip() for row in current.values()) + '\n')
+    path.write_text('\n'.join(
+        raw[key] if raw.get(key, '').split('\t') == row
+        else '\t'.join(row).rstrip()
+        for key, row in current.items()
+    ) + '\n')
