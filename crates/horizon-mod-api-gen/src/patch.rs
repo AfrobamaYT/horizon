@@ -736,13 +736,11 @@ pub fn generate(
         let mut sig = found.function.sig.clone();
         // A loop's function is copied for the one slot type its entry's copy runs it with:
         // horizon-mixins patches only non-generic functions.
-        if let Some(slots) = extras
+        let filled_block = extras
             .loops
             .iter()
             .find(|l| loop_generic && l.published.generic_target() == *target)
-        {
-            fill_slot(&mut sig, slots);
-        }
+            .map(|slots| fill_slot(&mut sig, &found.function.block, slots));
         let entry_of = extras.loops.iter().find(|l| l.published.entry == *target);
         let loop_block = match entry_of
             .map(|slots| {
@@ -762,7 +760,10 @@ pub fn generate(
                 continue;
             }
         };
-        let block = loop_block.as_ref().unwrap_or(&found.function.block);
+        let block = loop_block
+            .as_ref()
+            .or(filled_block.as_ref())
+            .unwrap_or(&found.function.block);
         let install = format_ident!("__fnr_install_{}", name);
         let constructor = format_ident!("__fnr_{}", name);
         let module_path = found.module.split("::").skip(1).collect::<Vec<_>>();
@@ -970,10 +971,12 @@ pub fn generate(
 }
 
 /// The loop function's signature `sig` with its slot type parameter replaced by the slots `slots`
-/// fills it with (`()` with none).
-fn fill_slot(sig: &mut syn::Signature, slots: &LoopSlots) {
+/// fills it with (`()` with none), and its body `block` with the same replacement: the type in
+/// type position, and `<Slots>::NAME` for a path through it (`S::RECHECK`).
+fn fill_slot(sig: &mut syn::Signature, block: &syn::Block, slots: &LoopSlots) -> syn::Block {
+    let mut block = block.clone();
     let Some(param) = sig.generics.type_params().next().map(|p| p.ident.clone()) else {
-        return;
+        return block;
     };
     sig.generics.params = sig
         .generics
@@ -989,16 +992,48 @@ fn fill_slot(sig: &mut syn::Signature, slots: &LoopSlots) {
         syn::parse_quote!(#ty)
     };
     struct Fill(syn::Ident, syn::Type);
+    impl Fill {
+        /// `S::rest` as `<Slots>::rest`; `None` for any other path.
+        fn through(&self, qself: &Option<syn::QSelf>, path: &syn::Path) -> Option<syn::TypePath> {
+            let first = path.segments.first()?;
+            if qself.is_some()
+                || path.leading_colon.is_some()
+                || path.segments.len() < 2
+                || first.ident != self.0
+                || !first.arguments.is_none()
+            {
+                return None;
+            }
+            let ty = &self.1;
+            let rest = path.segments.iter().skip(1);
+            Some(syn::parse_quote!(<#ty>::#(#rest)::*))
+        }
+    }
     impl syn::visit_mut::VisitMut for Fill {
         fn visit_type_mut(&mut self, ty: &mut syn::Type) {
             if matches!(ty, syn::Type::Path(p) if p.qself.is_none() && p.path.is_ident(&self.0)) {
                 *ty = self.1.clone();
-            } else {
-                syn::visit_mut::visit_type_mut(self, ty);
+                return;
             }
+            if let syn::Type::Path(p) = ty
+                && let Some(filled) = self.through(&p.qself, &p.path)
+            {
+                *p = filled;
+            }
+            syn::visit_mut::visit_type_mut(self, ty);
+        }
+        fn visit_expr_path_mut(&mut self, expr: &mut syn::ExprPath) {
+            if let Some(filled) = self.through(&expr.qself, &expr.path) {
+                expr.qself = filled.qself;
+                expr.path = filled.path;
+            }
+            syn::visit_mut::visit_expr_path_mut(self, expr);
         }
     }
-    syn::visit_mut::VisitMut::visit_signature_mut(&mut Fill(param, filled), sig);
+    let mut fill = Fill(param, filled);
+    syn::visit_mut::VisitMut::visit_signature_mut(&mut fill, sig);
+    syn::visit_mut::VisitMut::visit_block_mut(&mut fill, &mut block);
+    block
 }
 
 /// A published loop's name as an identifier part (`block_entities_tick`).
@@ -1815,6 +1850,14 @@ mod tests {
             "{}",
             both.libs[0].1
         );
+        // The copy is for the one slot type: a path through the slot parameter names that type,
+        // since the copy declares no `S` (`S::RECHECK` failed to build).
+        assert!(
+            lib.contains("if<__FnrLoopSlots_block_entities_tick>::RECHECK"),
+            "{}",
+            both.libs[0].1
+        );
+        assert!(!lib.contains("ifS::RECHECK"), "{}", both.libs[0].1);
         // The copy holds the loop itself, not a call to it: a call-site row inside the loop (the
         // check mod's selector) finds its one call there.
         assert_eq!(
