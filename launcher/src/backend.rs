@@ -505,7 +505,7 @@ pub(crate) fn get_unless_missing(url: &str) -> Result<Option<ureq::Response>, St
             request = request.set("Authorization", &format!("Bearer {token}"));
         }
     }
-    match crate::download_retry::call(&crate::download_retry::WAITS, || request.clone().call()) {
+    match crate::download_retry::get(&request).map_err(|e| *e) {
         Ok(response) => Ok(Some(response)),
         Err(ureq::Error::Status(404, _)) => Ok(None),
         Err(e) => Err(match e {

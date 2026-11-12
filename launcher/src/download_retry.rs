@@ -6,16 +6,22 @@ use std::time::Duration;
 /// The waits before the second and the third try.
 pub(crate) const WAITS: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(5)];
 
+/// `request` sent with [`WAITS`].
+pub(crate) fn get(request: &ureq::Request) -> Result<ureq::Response, Box<ureq::Error>> {
+    call(&WAITS, || request.clone().call().map_err(Box::new))
+}
+
 /// `request` once, then again after each of `waits` while it fails with no connection or a 5xx.
-pub(crate) fn call(
+/// The error is boxed: ureq's is large.
+fn call(
     waits: &[Duration],
-    mut request: impl FnMut() -> Result<ureq::Response, ureq::Error>,
-) -> Result<ureq::Response, ureq::Error> {
+    mut request: impl FnMut() -> Result<ureq::Response, Box<ureq::Error>>,
+) -> Result<ureq::Response, Box<ureq::Error>> {
     let mut answer = request();
     for wait in waits {
         match &answer {
-            Err(ureq::Error::Transport(_)) => {}
-            Err(ureq::Error::Status(code, _)) if *code >= 500 => {}
+            Err(e) if matches!(**e, ureq::Error::Transport(_)) => {}
+            Err(e) if matches!(**e, ureq::Error::Status(500.., _)) => {}
             _ => break,
         }
         std::thread::sleep(*wait);
@@ -53,9 +59,9 @@ mod tests {
         let mut requests = 0;
         let answer = call(&[Duration::ZERO; 2], || {
             requests += 1;
-            agent.get(&url).call()
+            agent.get(&url).call().map_err(Box::new)
         });
-        let outcome = match answer {
+        let outcome = match answer.map_err(|e| *e) {
             Ok(response) => Ok(response.into_string().unwrap()),
             Err(ureq::Error::Status(code, _)) => Err(code),
             Err(ureq::Error::Transport(_)) => Err(0),
