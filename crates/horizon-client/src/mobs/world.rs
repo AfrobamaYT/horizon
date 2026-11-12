@@ -849,9 +849,13 @@ impl TestResources {
         static VANILLA: std::sync::OnceLock<Option<TestResources>> = std::sync::OnceLock::new();
         VANILLA
             .get_or_init(|| {
-                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../.local/horizon-client")
-                    .join(horizon_core::VANILLA_VERSION);
+                let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| {
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("../../.local/horizon-client")
+                            .join(horizon_core::VANILLA_VERSION)
+                    });
                 Self::load(&root)
             })
             .as_ref()
