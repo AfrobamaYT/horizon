@@ -7,9 +7,10 @@ pub trait Hooks {
     /// `key.keyboard.unknown` for one it doesn't name; `getKey`), `layout_key` its name
     /// for the key the keyboard layout produced (`getKeycode`: AZERTY's key at QWERTY's
     /// W gives `key.keyboard.z`; a named key such as Enter keeps the physical name;
-    /// `None` for a dead key or a character vanilla doesn't name) and `raw_code` a code
-    /// telling physical keys apart, named or not (`getScanCode`: the platform scan code,
-    /// stable within a platform only). `action` is what it did, and the modifier bits
+    /// `None` for a character other than one ASCII letter or digit, a dead key's accent
+    /// included since it arrives as its character, and for a key vanilla doesn't name)
+    /// and `raw_code` a code telling physical keys apart, named or not (`getScanCode`:
+    /// the platform scan code, stable within a platform only). `action` is what it did, and the modifier bits
     /// the screen hooks' GLFW encoding. Not cancellable.
     #[hook(
         side = "client",
