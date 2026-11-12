@@ -1,5 +1,14 @@
 use super::*;
 
+/// Parameters supplied by the first inventory access. Automation has no entity
+/// and zero luck; a player opening supplies THIS_ENTITY and effective luck.
+#[derive(Clone, Copy, Default)]
+pub struct ContainerLootContext<'a> {
+    pub biome: Option<&'a str>,
+    pub luck: f32,
+    pub entity: Option<&'a LootEntity>,
+}
+
 impl LootData {
     /// LootTable.fill into an empty container of `slots` slots with
     /// `RandomSource.create(seed)`; `biome` is the container's biome for
@@ -23,7 +32,14 @@ impl LootData {
         biome: Option<&str>,
     ) -> Vec<Option<LootStack>> {
         let mut out = vec![None; slots];
-        if let Some(items) = self.roll_container_with(table, random, biome) {
+        if let Some(items) = self.roll_container_with(
+            table,
+            random,
+            ContainerLootContext {
+                biome,
+                ..Default::default()
+            },
+        ) {
             self.place_container_loot(items, &mut out, (0..slots).collect(), random);
         }
         out
@@ -36,17 +52,21 @@ impl LootData {
         &self,
         table: &str,
         random: &mut R,
-        biome: Option<&str>,
+        context: ContainerLootContext<'_>,
     ) -> Option<Vec<LootStack>> {
         let json = self.tables.get(table)?;
+        let entity = context.entity.map(|this| EntityLootParams {
+            this: this.clone(),
+            ..Default::default()
+        });
         let mut c = Context {
             data: self,
             random: random.clone(),
-            biome,
+            biome: context.biome,
             visited: Vec::new(),
-            luck: 0.0,
+            luck: context.luck,
             open_water: None,
-            entity: None,
+            entity: entity.as_ref(),
             enchanted_level: None,
         };
         let mut items = Vec::new();

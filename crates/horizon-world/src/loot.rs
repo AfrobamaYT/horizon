@@ -9,6 +9,7 @@
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
 mod fill;
+pub use fill::ContainerLootContext;
 #[path = "loot/tags.rs"]
 mod loot_tags;
 use horizon_core::random::{LegacyRandom, RandomSource};
@@ -1151,23 +1152,8 @@ impl LootData {
         table: &str,
         random: &mut R,
     ) -> Vec<LootStack> {
-        let Some(json) = self.tables.get(table) else {
-            return Vec::new();
-        };
-        let mut c = Context {
-            data: self,
-            random: random.clone(),
-            biome: None,
-            visited: Vec::new(),
-            luck: 0.0,
-            open_water: None,
-            entity: None,
-            enchanted_level: None,
-        };
-        let mut items = Vec::new();
-        c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
-        *random = c.random;
-        items
+        self.roll_container_with(table, random, ContainerLootContext::default())
+            .unwrap_or_default()
     }
     /// LootTable.createStackSplitter (every item is enabled).
     fn split(&self, stack: LootStack, items: &mut Vec<LootStack>) {

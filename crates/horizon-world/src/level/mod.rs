@@ -918,7 +918,7 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// containers, jukeboxes, lecterns, ...). State-only sources (cake,
     /// composter, cauldrons, beehives, ...) are evaluated by the library.
     fn block_entity_analog_signal(
-        &self,
+        &mut self,
         _pos: BlockPos,
         _state: BlockStateId,
         _direction: Direction,

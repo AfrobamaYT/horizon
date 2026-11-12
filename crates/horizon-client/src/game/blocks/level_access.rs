@@ -671,7 +671,7 @@ impl LevelAccess for GameLevel<'_> {
     }
 
     fn block_entity_analog_signal(
-        &self,
+        &mut self,
         pos: BlockPos,
         state: BlockStateId,
         direction: Direction,

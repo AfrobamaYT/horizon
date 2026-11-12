@@ -24,6 +24,7 @@ impl Game<'_> {
         self.eject_boat_mobs(i, true);
         let id = self.boats[i].id;
         self.release_vehicle_container(id);
+        self.unpack_loot(super::super::container_loot::LootTarget::Boat(id), None);
         let b = self.boats.remove(i);
         self.drop_vehicle_contents(b.position.components(), &b.items);
         self.boat_removed(&b);
@@ -46,6 +47,7 @@ impl Game<'_> {
         }
         self.eject_cart_mobs(i);
         self.release_vehicle_container(id);
+        self.unpack_loot(super::super::container_loot::LootTarget::Cart(id), None);
         let c = self.carts.remove(i);
         self.drop_vehicle_contents(c.position.components(), &c.items);
         self.native_tick_post_one(round, id, kind);
@@ -143,7 +145,10 @@ mod tests {
                 g.boats
                     .push(Boat::new(2, "oak".into(), Vec3::new(0.5, y, 0.5), 0.0));
                 assert!(g.boat_bubble_columns(0).is_empty());
-                assert_eq!(g.boat_ground_friction(&g.boats[0], g.boats[0].bounds()), 0.0);
+                assert_eq!(
+                    g.boat_ground_friction(&g.boats[0], g.boats[0].bounds()),
+                    0.0
+                );
                 g.boats.clear();
             }
         });

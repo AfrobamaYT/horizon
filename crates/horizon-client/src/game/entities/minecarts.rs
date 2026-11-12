@@ -2067,10 +2067,9 @@ impl Game<'_> {
             let Some(i) = self.cart_in_world(id, i, &round, kind) else {
                 continue;
             };
-            // The ticked copy takes the loot roll instead of copying it: only
-            // opening the cart, a command or a save reads it, never a tick, and
-            // a mineshaft's chest cart carries its whole roll as NBT. The
-            // stored cart keeps its slots for whatever reads them meanwhile.
+            // The tick copy owns pending metadata. Block-contact passes publish
+            // that whole copy, so a detector rail's comparator can unpack it.
+            // The returned inventory and metadata then follow the ticked cart.
             let due = self.with_entity_held_out(id, |game| {
                 let loot = game.carts.update(i, |c| c.loot.take());
                 let mut c = game.carts[i].clone();

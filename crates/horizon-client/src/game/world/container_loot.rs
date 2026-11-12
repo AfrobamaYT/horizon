@@ -23,26 +23,49 @@ impl Game<'_> {
             .get(index)?
             .clone()
     }
+    /// A hopper cart's tick owns its metadata while its resident row is lent out.
+    /// Publish only a pending inventory for this access, then recover the result.
+    pub(super) fn unpack_ticked_cart_loot(
+        &mut self,
+        cart: &mut super::minecarts::Minecart,
+    ) -> bool {
+        if cart.loot.is_none() {
+            return true;
+        }
+        let Some(i) = self
+            .carts
+            .iter()
+            .position(|c| c.id == cart.id && c.join == cart.join)
+        else {
+            return false;
+        };
+        self.carts.update(i, |owner| {
+            owner.loot = cart.loot.take();
+            owner.items.clone_from(&cart.items);
+            owner.position = cart.position;
+        });
+        self.unpack_loot(LootTarget::Cart(cart.id), None);
+        let Some(i) = self
+            .carts
+            .iter()
+            .position(|c| c.id == cart.id && c.join == cart.join)
+        else {
+            return false;
+        };
+        self.carts.update(i, |owner| {
+            cart.loot = owner.loot.take();
+            cart.items.clone_from(&owner.items);
+        });
+        true
+    }
     /// Consumes metadata before callbacks, so reentrant access cannot roll twice.
-    /// Player luck/context is added in the next implementation step.
+    /// A player context is captured from the admitted actor, also during as_guest.
     pub(super) fn unpack_loot(&mut self, target: LootTarget, player: Option<mod_api::PlayerRef>) {
         let (pending, pos, occupied) = match target {
             LootTarget::Block(key) => {
-                if !self.world.block_entities.contains_key(&key)
-                    || !self
-                        .world
-                        .chunks
-                        .get(&(key.0 >> 4, key.2 >> 4))
-                        .and_then(|c| c.saved.as_ref())
-                        .is_some_and(|s| s.pending_loot.contains_key(&key))
-                {
+                let Some(pending) = take_block_pending(&mut self.world, key) else {
                     return;
-                }
-                let mut pending = None;
-                self.world
-                    .with_chunk_extras(key, |extras| pending = extras.pending_loot.remove(&key));
-                let Some(pending) = pending else { return };
-                self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+                };
                 (
                     pending,
                     key,
@@ -118,31 +141,25 @@ impl Game<'_> {
         let biome = self
             .biome_name_at(super::Vec3::new(pos.0 as f64, pos.1 as f64, pos.2 as f64))
             .unwrap_or_default();
-        // Missing/zero seed policy remains unchanged; tracked separately in #3690.
-        let seed = pending.seed_value().filter(|s| *s != 0).unwrap_or_else(|| {
-            horizon_core::random::position_seed(horizon_core::position::BlockPos::new(
-                pos.0, pos.1, pos.2,
-            ))
-        });
-        let mut random = LegacyRandom::new(seed);
-        let Some(items) = loot.roll_container_with(&table, &mut random, Some(&biome)) else {
-            return;
+        let mut entity = player.map(|_| self.killer_loot_entity(None));
+        if let Some(entity) = &mut entity {
+            entity.on_fire = self.player.as_ref().is_some_and(|p| p.fire_ticks > 0);
+        }
+        let luck = if player.is_some() {
+            self.player
+                .as_mut()
+                .and_then(|p| p.attribute("minecraft:luck").ok())
+                .unwrap_or(0.0) as f32
+        } else {
+            0.0
+        };
+        let context = horizon_world::loot::ContainerLootContext {
+            biome: Some(&biome),
+            luck,
+            entity: entity.as_ref(),
         };
         let fill = |slots: &mut [Option<horizon_client::items::ItemStack>]| {
-            let available: Vec<_> = slots
-                .iter()
-                .enumerate()
-                .filter_map(|(i, s)| s.is_none().then_some(i))
-                .collect();
-            let mut placed = vec![None; slots.len()];
-            loot.place_container_loot(items, &mut placed, available, &mut random);
-            for (slot, stack) in slots.iter_mut().zip(placed) {
-                if let Some(stack) = stack {
-                    *slot = Some(horizon_client::structure_blocks::loot_item_with_components(
-                        &stack,
-                    ));
-                }
-            }
+            unpack_slots(&pending, slots, &loot, pos, context);
         };
         match target {
             LootTarget::Block(key) => {
@@ -189,5 +206,197 @@ impl Game<'_> {
                 *open = items;
             }
         }
+    }
+}
+
+/// Consume the sole block-owned marker before any callback or inventory mutation.
+pub(super) fn take_block_pending(
+    world: &mut horizon_client::world::World,
+    key: (i32, i32, i32),
+) -> Option<PendingContainerLoot> {
+    if !world.block_entities.contains_key(&key)
+        || !world
+            .chunks
+            .get(&(key.0 >> 4, key.2 >> 4))
+            .and_then(|c| c.saved.as_ref())
+            .is_some_and(|s| s.pending_loot.contains_key(&key))
+    {
+        return None;
+    }
+    let mut pending = None;
+    world.with_chunk_extras(key, |extras| pending = extras.pending_loot.remove(&key));
+    world.modified.insert((key.0 >> 4, key.2 >> 4));
+    pending
+}
+
+/// The single roll/placement implementation used by Game and its mutable level adapter.
+fn unpack_slots(
+    pending: &PendingContainerLoot,
+    slots: &mut [Option<horizon_client::items::ItemStack>],
+    loot: &horizon_world::loot::LootData,
+    pos: (i32, i32, i32),
+    context: horizon_world::loot::ContainerLootContext<'_>,
+) {
+    // Entry points discard a pre-existing mixed state. Items added by the
+    // player's advancement rewards keep their slots while this roll fills free ones.
+    // Zero/missing seed behavior is unchanged and tracked by #3690.
+    let seed = pending.seed_value().filter(|s| *s != 0).unwrap_or_else(|| {
+        horizon_core::random::position_seed(horizon_core::position::BlockPos::new(
+            pos.0, pos.1, pos.2,
+        ))
+    });
+    let mut random = LegacyRandom::new(seed);
+    let Some(items) = loot.roll_container_with(&pending.table_id(), &mut random, context) else {
+        return;
+    };
+    let mut placed = vec![None; slots.len()];
+    let free = slots
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.is_none().then_some(i))
+        .collect();
+    loot.place_container_loot(items, &mut placed, free, &mut random);
+    for (slot, stack) in slots.iter_mut().zip(placed) {
+        if let Some(stack) = stack {
+            *slot = Some(horizon_client::structure_blocks::loot_item_with_components(
+                &stack,
+            ));
+        }
+    }
+}
+
+impl super::GameLevel<'_> {
+    /// Null-player accesses inside world behavior (comparator, destruction).
+    pub(super) fn unpack_loot(&mut self, target: LootTarget, player: Option<mod_api::PlayerRef>) {
+        debug_assert!(player.is_none());
+        if let LootTarget::Cart(id) = target {
+            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+                return;
+            };
+            let Some(pending) = self.carts.update(i, |c| c.loot.take()) else {
+                return;
+            };
+            let Some(loot) = self.loot.as_ref() else {
+                return;
+            };
+            let p = self.carts[i].position;
+            let pos = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+            let biome = self.world.chunks.get(&(pos.0 >> 4, pos.2 >> 4)).map(|c| {
+                self.biomes
+                    .get(c.biome(pos.0 & 15, pos.1, pos.2 & 15))
+                    .name
+                    .clone()
+            });
+            let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, id as i32);
+            self.carts.update(i, |cart| {
+                if let Some(BlockEntity::Chest(open)) = self.world.block_entities.get(&key) {
+                    cart.items.clone_from(open);
+                }
+                if cart.items.iter().any(Option::is_some) {
+                    return;
+                }
+                unpack_slots(
+                    &pending,
+                    &mut cart.items,
+                    loot,
+                    pos,
+                    horizon_world::loot::ContainerLootContext {
+                        biome: biome.as_deref(),
+                        ..Default::default()
+                    },
+                );
+            });
+            if let Some(BlockEntity::Chest(open)) = self.world.block_entities.get_mut(&key) {
+                open.clone_from(&self.carts[i].items);
+            }
+            return;
+        }
+        let LootTarget::Block(key) = target else {
+            unreachable!("level inventory access")
+        };
+        let Some(pending) = take_block_pending(self.world, key) else {
+            return;
+        };
+        let Some(loot) = self.loot.as_ref() else {
+            return;
+        };
+        let biome = self.world.chunks.get(&(key.0 >> 4, key.2 >> 4)).map(|c| {
+            self.biomes
+                .get(c.biome(key.0 & 15, key.1, key.2 & 15))
+                .name
+                .clone()
+        });
+        if let Some(entity) = self.world.block_entities.get_mut(&key) {
+            if entity.slots().iter().any(Option::is_some) {
+                return;
+            }
+            unpack_slots(
+                &pending,
+                entity.slots_mut(),
+                loot,
+                key,
+                horizon_world::loot::ContainerLootContext {
+                    biome: biome.as_deref(),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "container_loot/tests.rs"]
+mod tests;
+
+impl super::GameLevel<'_> {
+    /// The other lists stay shared while carts can be mutated by inventory reads.
+    pub(super) fn entities(&self) -> super::entity::EntityLists<'_> {
+        super::entity::EntityLists {
+            carts: &*self.carts,
+            ..self.other_entities
+        }
+    }
+    /// Detector rails prioritize command carts, then read the first container.
+    pub(super) fn detector_rail_signal(
+        &mut self,
+        pos: horizon_core::position::BlockPos,
+        powered: bool,
+    ) -> i32 {
+        use horizon_core::geometry::{Aabb, Vec3};
+        if !powered {
+            return 0;
+        }
+        let (x, y, z) = (pos.x as f64, pos.y as f64, pos.z as f64);
+        let area = Aabb::new(
+            Vec3::new(x + 0.2, y, z + 0.2),
+            Vec3::new(x + 0.8, y + 0.8, z + 0.8),
+        );
+        let mut container = None;
+        for (i, ((lo, hi), cart)) in self.cart_boxes.iter().zip(self.carts.iter()).enumerate() {
+            if !area.intersects(Aabb::new(
+                Vec3::new(lo[0], lo[1], lo[2]),
+                Vec3::new(hi[0], hi[1], hi[2]),
+            )) {
+                continue;
+            }
+            match cart.kind {
+                super::minecarts::CartKind::CommandBlock => return cart.command.success_count,
+                super::minecarts::CartKind::Chest | super::minecarts::CartKind::Hopper
+                    if container.is_none() =>
+                {
+                    container = Some(i)
+                }
+                _ => {}
+            }
+        }
+        let Some(i) = container else { return 0 };
+        self.unpack_loot(LootTarget::Cart(self.carts[i].id), None);
+        let cart = &self.carts[i];
+        let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, cart.id as i32);
+        let slots = match self.world.block_entities.get(&key) {
+            Some(BlockEntity::Chest(open)) => open,
+            _ => &cart.items,
+        };
+        super::minecarts::Minecart::container_signal(slots, self.items)
     }
 }

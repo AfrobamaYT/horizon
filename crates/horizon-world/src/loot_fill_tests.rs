@@ -61,7 +61,11 @@ fn fill_and_split_preserve_recorded_draws() {
 
     let mut random = LegacyRandom::new(37);
     let items = data
-        .roll_container_with("minecraft:test", &mut random, None)
+        .roll_container_with(
+            "minecraft:test",
+            &mut random,
+            ContainerLootContext::default(),
+        )
         .unwrap();
     assert_eq!(
         items
@@ -105,8 +109,12 @@ fn missing_table_does_not_draw() {
     assert_eq!(random.next_int_bound(1000).unwrap(), 505);
     let mut random = LegacyRandom::new(37);
     assert!(
-        data.roll_container_with("minecraft:missing", &mut random, None)
-            .is_none()
+        data.roll_container_with(
+            "minecraft:missing",
+            &mut random,
+            ContainerLootContext::default()
+        )
+        .is_none()
     );
     assert_eq!(
         random.next_int_bound(1000).unwrap(),
@@ -125,7 +133,11 @@ fn full_container_preserves_recorded_draws() {
     assert_eq!(random.next_int_bound(1000).unwrap(), 18);
     let mut random = LegacyRandom::new(37);
     let items = data
-        .roll_container_with("minecraft:test", &mut random, None)
+        .roll_container_with(
+            "minecraft:test",
+            &mut random,
+            ContainerLootContext::default(),
+        )
         .unwrap();
     let mut slots = vec![Some(LootStack::new("test:sentinel"))];
     let before = slots.clone();
@@ -145,11 +157,54 @@ fn empty_roll_still_shuffles_slots() {
     assert_eq!(random.next_int_bound(1000).unwrap(), 230);
     let mut random = LegacyRandom::new(37);
     let items = data
-        .roll_container_with("minecraft:test", &mut random, None)
+        .roll_container_with(
+            "minecraft:test",
+            &mut random,
+            ContainerLootContext::default(),
+        )
         .unwrap();
     assert!(items.is_empty());
     let mut slots = vec![None; 5];
     data.place_container_loot(items, &mut slots, (0..5).collect(), &mut random);
     assert_eq!(summary(&slots), [None; 5]);
     assert_eq!(random.next_int_bound(1000).unwrap(), 230);
+}
+
+#[test]
+fn container_context_supplies_luck_and_this_entity() {
+    let mut data = fixture(true);
+    data.tables = Arc::new(
+        [(
+            "test:context".to_owned(),
+            serde_json::json!({
+                "pools": [{"rolls": 1, "bonus_rolls": 1, "entries": [{
+                    "type": "minecraft:item", "name": "minecraft:diamond",
+                    "condition": {"type": "minecraft:entity_properties", "entity": "this",
+                        "predicate": {"minecraft:entity_type": "minecraft:player"}}
+                }]}]
+            }),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let player = LootEntity::new("minecraft:player");
+    for (luck, entity, expected) in [
+        (2.0, Some(&player), 3),
+        (0.0, Some(&player), 1),
+        (0.0, None, 0),
+    ] {
+        let stacks = data
+            .roll_container_with(
+                "test:context",
+                &mut LegacyRandom::new(37),
+                ContainerLootContext {
+                    luck,
+                    entity,
+                    biome: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(stacks.iter().map(|s| s.count).sum::<i32>(), expected);
+        assert!(stacks.iter().all(|s| s.item == "minecraft:diamond"));
+    }
 }
