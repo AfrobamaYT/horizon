@@ -818,7 +818,7 @@ impl Game<'_> {
     /// (`VehicleEntity`) always 10, projectiles (`Projectile`) 2; any other
     /// entity takes its first passenger's delay when that is a server player
     /// (`Player.getDimensionChangingDelay`), else 300.
-    fn dimension_changing_delay(&self, id: u32) -> i32 {
+    pub(super) fn dimension_changing_delay(&self, id: u32) -> i32 {
         if self.boats.iter().any(|b| b.id == id)
             || self.carts.iter().any(|c| c.id == id)
             || self.lan_acting_entity == Some(id)

@@ -5,7 +5,7 @@
 //! (tools/test_hoglin_repeat_attack_parity.py measures the same on vanilla 26.3).
 use super::commands::Target;
 use super::*;
-use horizon_client::chunk::Chunk;
+use horizon_client::{chunk::Chunk, motion::PlayerMotion};
 use horizon_core::position::ChunkPos;
 use std::sync::Arc;
 

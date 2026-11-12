@@ -2048,35 +2048,7 @@ impl Game<'_> {
         }
         best
     }
-    pub(super) fn attack_dragon(&mut self) -> bool {
-        let Some((id, d)) = self.dragon_hit() else {
-            return false;
-        };
-        if !self.before_block(d) || self.mob_hit().is_some_and(|m| m.1 < d) {
-            return false;
-        }
-        // A dragon part is no LivingEntity: `canCriticalAttack` is false.
-        let (amount, _, _, _) = self.melee_damage(
-            "minecraft:ender_dragon",
-            false,
-            self.dragon.as_ref().map(|dragon| dragon.id),
-        );
-        self.swing_arm();
-        // The part's box.
-        let area = self
-            .special_targets()
-            .into_iter()
-            .find(|(part, _)| *part == id)
-            .map(|(_, b)| b);
-        // The sweep and the sounds read the charge, which the hit then spends.
-        let sweep = self.sweep_before_hit("minecraft:ender_dragon", false);
-        let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
-        if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
-            self.attack_effects(area, sweep, None, false, super::mace::Spared::Nothing, None);
-        }
-        self.attack_ticks = 0;
-        true
-    }
+
     /// The 24 nodes (`findClosestNode` builds them on first use).
     fn dragon_nodes(&mut self) -> [[i32; 3]; 24] {
         if let Some(n) = self.dragon.as_ref().and_then(|d| d.nodes) {
@@ -2593,12 +2565,12 @@ impl Game<'_> {
                     let look = glam::DVec2::new(head.x - pos.x, head.z - pos.z).normalize_or_zero();
                     let (x, z) = (head.x + look.x * 2.5, head.z + look.y * 2.5);
                     let mut y = head.y + 0.5;
+                    let (xi, zi) = (x.floor() as i32, z.floor() as i32);
                     while y > 0.0
-                        && self.res.facts().is_air(self.world.block(
-                            x.floor() as i32,
-                            y.floor() as i32,
-                            z.floor() as i32,
-                        ))
+                        && self
+                            .res
+                            .facts()
+                            .is_air(self.world.block(xi, y.floor() as i32, zi))
                     {
                         y -= 1.0;
                     }
@@ -2608,6 +2580,7 @@ impl Game<'_> {
                         join: Default::default(),
                         id,
                         at: [x, y.floor() + 1.0, z],
+                        motion: [0.0; 3],
                         radius: 5.0,
                         age: 0,
                         duration: 200,
@@ -3264,18 +3237,17 @@ impl Game<'_> {
     /// cloud and level event 2006, as the fireballs of the dragon's own list
     /// burst before they joined the other projectiles.
     pub(super) fn dragon_fireball_on_hit(&mut self, next: Vec3) {
-        let mobs: Vec<(Aabb, Vec3)> = self
-            .mobs
-            .iter()
-            .filter(|m| m.alive())
-            .map(|m| (m.bounds(), m.position))
-            .collect();
         let snap_targets: Vec<(Aabb, Vec3)> = self
             .fight_players()
             .iter()
             .filter(|p| p.alive)
             .map(|p| (p.bounds, p.position))
-            .chain(mobs.iter().copied())
+            .chain(
+                self.mobs
+                    .iter()
+                    .filter(|m| m.alive())
+                    .map(|m| (m.bounds(), m.position)),
+            )
             .collect();
         let id = self.take_entity_id();
         let feet = [next.x, next.y - 0.5, next.z];
@@ -3285,6 +3257,7 @@ impl Game<'_> {
             join: Default::default(),
             id,
             at,
+            motion: [0.0; 3],
             radius: 3.0,
             age: 0,
             duration: 600,
@@ -3639,6 +3612,7 @@ pub(super) struct Breath {
     /// Its entity id once a server's players track it (0 until then).
     pub(super) id: u32,
     pub(super) at: [f64; 3],
+    pub(super) motion: [f64; 3],
     pub(super) radius: f32,
     pub(super) age: i32,
     pub(super) duration: i32,
@@ -3685,11 +3659,8 @@ impl Game<'_> {
         ) else {
             return;
         };
-        let pos = glam::DVec3::new(
-            d.previous.x + (d.position.x - d.previous.x) * alpha,
-            d.previous.y + (d.position.y - d.previous.y) * alpha,
-            d.previous.z + (d.position.z - d.previous.z) * alpha,
-        );
+        let p = d.previous.lerp(d.position, alpha);
+        let pos = glam::DVec3::new(p.x, p.y, p.z);
         let h = |delay: usize| d.sample_lerp(delay, a);
         let yr = h(7).1;
         let rot2 = (h(5).0 - h(10).0) as f32;

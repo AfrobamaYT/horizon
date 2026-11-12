@@ -71,7 +71,10 @@ use {
     },
 };
 
+mod abilities;
 mod client_level_tick;
+mod item_use;
+mod tables;
 
 pub(super) use super::villager_client::builtin_registries;
 
@@ -582,7 +585,7 @@ pub(super) struct Remote {
     /// `BlockStatePredictionHandler.lastTeleportSequence`: the sequence of the last
     /// teleport, so a prediction made before it keeps its block but not its snap.
     last_teleport_sequence: i32,
-    position_sender: horizon_client::player_sync::PositionSender,
+    pub(super) position_sender: horizon_client::player_sync::PositionSender,
     last_input: u8,
     was_sprinting: bool,
     /// The slot the server last heard (`MultiPlayerGameMode.carriedIndex`): a cell, so `send` can
@@ -1686,6 +1689,14 @@ impl Game<'_> {
             r.session.send(packet);
         }
     }
+    fn send_action(&self, action: i32) {
+        self.send(S::PlayerAction(play::PlayerAction {
+            action,
+            pos: [0; 3],
+            direction: 0,
+            sequence: 0,
+        }));
+    }
     /// `LocalPlayer.isShiftKeyDown` (and so `isSecondaryUseActive`): the input as of the player's
     /// last tick (`input.keyPresses`, what the last ServerboundPlayerInputPacket said), not the key
     /// now: a sneak pressed in the frame of a click acts from the next tick, as on the server.
@@ -2610,6 +2621,7 @@ impl Game<'_> {
                     .collect()
             })
             .unwrap_or_default();
+        self.server_items = self.server_items(&registries);
         if let Some(r) = self.remote.as_mut() {
             r.enchantments = enchantments;
             let bits = ceil_log2(biomes.len());
@@ -2831,7 +2843,7 @@ impl Game<'_> {
             .as_ref()
             .is_none_or(|r| r.dimension.has_skylight);
         self.streaming.sky_light = has_sky;
-        self.streaming.nether_shading = self.dim == Dim::Nether;
+        self.streaming.nether_shading = self.nether_lighting();
         // The seed in SpawnInfo is already the hashed one the client's BiomeManager holds.
         self.streaming.biome_zoom = horizon_core::biome::BiomeZoom::new(spawn.seed);
         let player = self.player.as_ref();
@@ -3227,6 +3239,7 @@ impl Game<'_> {
                 count: 1,
                 ticks: 0,
                 health: 5,
+                air: 300,
                 following: None,
             });
         }
@@ -3900,6 +3913,7 @@ impl Game<'_> {
                 {
                     r.sequence = 0;
                 }
+                self.portals.respawn_attributes.respawn(p.keep & 1 != 0);
                 self.enter_remote_dimension(&p.spawn, true, reason);
                 // handleRespawn adds the new LocalPlayer after what the kept
                 // level holds; a new level holds nothing yet.
@@ -4020,7 +4034,7 @@ impl Game<'_> {
             C::Explode(p) => self.remote_explode(&p),
             C::Sound(p) => {
                 if let Some(name) = self.remote_sound_name(&p.sound)
-                    && !self.settings.extras.pvp.combat.mutes_sound(&name)
+                    && !self.pvp_mutes_sound(&name)
                 {
                     let at = [
                         f64::from(p.x) / 8.0,
@@ -4038,7 +4052,7 @@ impl Game<'_> {
             }
             C::SoundEntity(p) => {
                 if let Some(name) = self.remote_sound_name(&p.sound)
-                    && !self.settings.extras.pvp.combat.mutes_sound(&name)
+                    && !self.pvp_mutes_sound(&name)
                 {
                     let mut sound = LevelSound::new(&name, [0.0; 3], p.volume, p.pitch);
                     sound.emitter = Some(p.id as u32);
@@ -4964,9 +4978,7 @@ impl Game<'_> {
             // HUD draws and the health it may hold), reach, speed and so on.
             // Then the received health again, which the old maximum clamped.
             C::UpdateAttributes(p) if self.remote.as_ref().is_some_and(|r| r.entity_id == p.id) => {
-                if let Some(pl) = self.player.as_mut() {
-                    horizon_client::lan::attributes::apply(&mut pl.attributes, &p.values);
-                }
+                self.apply_own_attributes(p.values);
                 self.apply_remote_health();
             }
             C::UpdateAttributes(p) => self.remote_mob_attributes(p.id, &p.values),
@@ -6562,6 +6574,7 @@ impl Game<'_> {
                 // Player.tick derives noPhysics from the current game mode.
                 player.spectator = self.spectator();
                 player.velocity = delta;
+                self.take_carried_attributes(&mut player)?;
                 self.hook.discard();
                 self.player_attachments.retire();
                 self.resident_entities.local_player.renew();
@@ -7143,20 +7156,7 @@ impl Game<'_> {
     pub(super) fn remote_abilities(&self) -> Option<&play::PlayerAbilities> {
         self.remote.as_ref()?.abilities.as_ref()
     }
-    /// ClientPacketListener.handlePlayerAbilities: the player flies, may fly
-    /// and is invulnerable as the server says (bits 2, 4 and 1).
-    fn apply_remote_abilities(&mut self) {
-        let (Some(player), Some(a)) = (
-            self.player.as_mut(),
-            self.remote.as_ref().and_then(|r| r.abilities.as_ref()),
-        ) else {
-            return;
-        };
-        player.invulnerable = a.flags & 1 != 0;
-        player.flying = a.flags & 2 != 0;
-        player.may_fly = a.flags & 4 != 0;
-        player.flying_speed = a.flying_speed;
-    }
+
     /// The local player's share of every touching entity's
     /// `LivingEntity.pushEntities`, and of the boats' pushes: on a client
     /// `EntitySelector.pushableBy` lets entities push only the local player,
@@ -7413,7 +7413,7 @@ impl Game<'_> {
         }
         let game_time = self.world.game_time;
         // `AbstractPiglin.isConverting`: the dimension is not piglin safe.
-        let nether = self.dim == super::Dim::Nether;
+        let nether = !self.dimension_type().piglins_zombify;
         // What a wither's side heads can look at, by network entity id: the
         // mobs and the player (position and eye height).
         let wither_targets: Vec<(i32, [f64; 3], f64)> = if self
@@ -8938,6 +8938,16 @@ impl Game<'_> {
                     self.with_hand(hand, Game::swing_arm);
                 }
                 return true;
+            } else if let Some(stack) = held.as_ref().filter(|_| item_used).filter(|s| {
+                matches!(
+                    &*s.item,
+                    "minecraft:flint_and_steel" | "minecraft:fire_charge"
+                )
+            }) {
+                if self.predict_fire_starter(stack, &hit, hand, seq) {
+                    self.with_hand(hand, Game::swing_arm);
+                }
+                return true;
             } else if let Some(stack) = held.as_ref().filter(|_| item_used)
                 && &*stack.item == "minecraft:potion"
                 && stack.potion() == Some("minecraft:water")
@@ -9669,12 +9679,7 @@ impl Game<'_> {
                 self.brush_dust(hit, slot == super::shield::OFFHAND_SLOT);
             }
             if hit.is_none() && in_hand {
-                self.send(S::PlayerAction(play::PlayerAction {
-                    action: 6,
-                    pos: [0; 3],
-                    direction: 0,
-                    sequence: 0,
-                }));
+                self.send_action(6);
             }
             self.using = hit.and(Some((slot, elapsed))).filter(|_| elapsed < 200);
             return;
@@ -9705,10 +9710,7 @@ impl Game<'_> {
             self.using = (in_hand && ticks + 1 < duration).then_some((slot, ticks + 1));
             return;
         }
-        let consumable = stack
-            .as_ref()
-            .and_then(|s| self.items().get(&s.item))
-            .and_then(|i| i.consumable.clone());
+        let consumable = stack.as_ref().and_then(|s| self.consumable(s));
         let (Some(stack), Some(consumable)) = (stack, consumable) else {
             self.using = None;
             return;
@@ -9757,8 +9759,8 @@ impl Game<'_> {
         };
         // Consumable.onConsume's emitParticlesAndSounds(16): the last crumbs
         // and bite, which the server plays for the others only.
-        if let Some(consumable) = &info.consumable {
-            self.emit_consume(consumable, &stack, 16);
+        if let Some(consumable) = self.consumable(&stack) {
+            self.emit_consume(&consumable, &stack, 16);
         }
         if let Some((nutrition, saturation)) = info.food
             && let Some(r) = self.remote.as_mut()
@@ -10112,12 +10114,7 @@ impl Game<'_> {
     /// player itself). Vanilla reaches it both when the use key is let go and,
     /// in the same tick, when a keybind opens a screen.
     fn release_remote_use(&mut self) {
-        self.send(S::PlayerAction(play::PlayerAction {
-            action: 6,
-            pos: [0; 3],
-            direction: 0,
-            sequence: 0,
-        }));
+        self.send_action(6);
         // a mod's Stop may skip the item's release, and a mod's own release follows.
         let hand = self.used_hand();
         if let Some((slot, ticks)) = self.using.take()
@@ -10173,12 +10170,7 @@ impl Game<'_> {
         self.remote_send_carried();
         let dropped =
             horizon_client::items::take_held_drop(&mut self.inventory[self.selected], all, false);
-        self.send(S::PlayerAction(play::PlayerAction {
-            action: if all { 4 } else { 5 },
-            pos: [0; 3],
-            direction: 0,
-            sequence: 0,
-        }));
+        self.send_action(if all { 4 } else { 5 });
         if dropped.is_some() {
             self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
         }
@@ -10187,12 +10179,7 @@ impl Game<'_> {
     /// (ServerboundPlayerActionPacket SWAP_ITEM_WITH_OFFHAND at BlockPos.ZERO, facing down) and
     /// sends both slots back; nothing is predicted.
     pub(super) fn remote_swap_hands(&mut self) {
-        self.send(S::PlayerAction(play::PlayerAction {
-            action: 7,
-            pos: [0; 3],
-            direction: 0,
-            sequence: 0,
-        }));
+        self.send_action(7);
         // Equal stacks swap with no slot update to wait for.
         let (main, off) = (self.stack_in(self.selected), self.offhand.as_ref());
         let moves = !super::hand::matches_for_swap(main, off);
@@ -16513,6 +16500,66 @@ mod tests {
         assert_eq!(respawn.event, 11);
         assert_eq!(crafting.event, 12);
         assert!(crafting.param == 1.0);
+    }
+
+    /// #14773: Flint and steel and fire charge useOn on a client level ends the
+    /// click (returning true), so when held with an unusable off-hand item, the
+    /// click does not fall through to UseItem or try the off hand.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn flint_and_steel_use_on_ends_the_click() {
+        use super::super::{
+            Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+        };
+        use crate::game::Hit;
+        use horizon_client::{first_person::Hand, motion::PlayerMotion};
+        use horizon_core::geometry::Vec3;
+
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES")
+                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::Client;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let (client, _server) = horizon_protocol::connection::Pipe::pair();
+        game.connect_local(client, "FlintTest").unwrap();
+        game.remote.as_mut().unwrap().entity_id = 7;
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+        game.inventory[0] = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.offhand = Some(ItemStack::new("minecraft:stick", 1));
+        game.selected = 0;
+        game.forced_hit = Some(Hit {
+            pos: [0, 63, 0],
+            face: [0, 1, 0],
+            point: [0.5, 64.0, 0.5],
+        });
+
+        let done = game.remote_use_block(Hand::Main);
+        assert!(done, "flint and steel useOn must end the click");
     }
 }
 

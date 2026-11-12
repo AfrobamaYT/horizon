@@ -8,6 +8,11 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 /// and `verify` does too (2), also checking the phases that can be checked against the serial code.
 /// Each phase gives the serial result either way.
 pub fn parallel_tick() -> u8 {
+    // Typed gameplay dispatch owns mutable residency and damage contexts.
+    const FORK_PARALLEL_TICK_ENABLED: bool = false;
+    if !FORK_PARALLEL_TICK_ENABLED {
+        return 0;
+    }
     static ON: OnceLock<u8> = OnceLock::new();
     *ON.get_or_init(|| match std::env::var("HORIZON_PARALLEL_TICK").as_deref() {
         Ok("1" | "on" | "true") => 1,

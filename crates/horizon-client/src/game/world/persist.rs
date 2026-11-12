@@ -1407,6 +1407,19 @@ impl Game<'_> {
             .get(&anon_key(kind, p))
             .map(|(_, raw)| raw)
     }
+    /// `Entity.applyEffectsFromBlocks` on a fire-immune entity that is not
+    /// burning (`EndCrystal.tick`): the loaded `Fire` is reset to
+    /// `-getFireImmuneTicks()`, which is 0.
+    pub(super) fn clear_crystal_fire(&mut self) {
+        for c in &self.crystals {
+            let key = anon_key("minecraft:end_crystal", c.position);
+            if let Some((_, Tag::Compound(raw))) = self.persist.anon.get_mut(&key)
+                && let Some(fire) = raw.get_mut(&"Fire".into())
+            {
+                *fire = Tag::Short(0);
+            }
+        }
+    }
     /// The compound an entity was loaded with (and commands have edited).
     pub(super) fn persist_raw(&self, id: u32) -> Option<&Tag> {
         self.persist.raw.get(&id)
@@ -1700,7 +1713,8 @@ impl Game<'_> {
                 .push((c.id, c.join_seq(), tag));
         }
         for o in &self.others {
-            if keys.contains(&chunk_of(o.position)) {
+            // EntityType.noSave: Entity.getEncodeId is null, so the chunk never stores it.
+            if keys.contains(&chunk_of(o.position)) && o.kind.as_str() != "minecraft:leash_knot" {
                 let uuid = self
                     .persist
                     .uuids
@@ -1935,12 +1949,13 @@ impl Game<'_> {
         keys.contains(&chunk_of(at)).then(|| {
             let id = self.dropped[i].id;
             let uuid = self.uuid_for(id);
-            let tag = entity_nbt::item_entity_to_nbt_with_items(
+            let mut tag = entity_nbt::item_entity_to_nbt_with_items(
                 &self.dropped[i],
                 uuid,
                 self.persist.raw.get(&id),
                 self.items(),
             );
+            self.save_portal_cooldown(id, &mut tag);
             (chunk_of(at), tag)
         })
     }
@@ -2088,6 +2103,7 @@ impl Game<'_> {
         self.put_mob_passengers(&mut tag, id);
         // AbstractBoat.addAdditionalSaveData: the lead's holder.
         self.write_boat_leash(&mut tag, i);
+        self.save_portal_cooldown(id, &mut tag);
         Some((chunk_of(at), tag))
     }
     pub(super) fn save_cart(
@@ -2102,6 +2118,7 @@ impl Game<'_> {
         let uuid = self.saved_uuid_or_random(id);
         let mut tag = self.carts[i].to_nbt(uuid, self.persist.raw.get(&id));
         self.put_mob_passengers(&mut tag, id);
+        self.save_portal_cooldown(id, &mut tag);
         Some((chunk_of(at), tag))
     }
     pub(super) fn save_armor_stand(
@@ -2659,7 +2676,7 @@ mod item_display_saved_transform_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
-    use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
+    use horizon_core::{geometry::Vec3, position::ChunkPos, random::RandomSource};
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -2722,7 +2739,7 @@ mod item_display_saved_transform_tests {
         assert!(
             game.run_command("summon pig 13.5 200 2.5 {UUID:[I;132,0,0,99],NoAI:1b,NoGravity:1b}")
         );
-        game.world.random = LegacyRandom::new(132);
+        game.world.random.set_seed(132);
         test(&mut game);
     }
     const IDENTITY: &str = "{translation:[0f,0f,0f],left_rotation:[0f,0f,0f,1f],scale:[1f,1f,1f],right_rotation:[0f,0f,0f,1f]}";
@@ -3878,7 +3895,7 @@ mod h262_enderman_absolute_anger_tests {
         assert!(
             game.run_command("summon pig 13.5 200 2.5 {UUID:[I;262,0,0,99],NoAI:1b,NoGravity:1b}")
         );
-        game.world.random = LegacyRandom::new(262);
+        game.world.random.set_seed(262);
         test(&mut game);
     }
     fn load(game: &mut Game<'_>, n: i32, end: Option<i64>) -> (u32, usize) {
@@ -4351,7 +4368,7 @@ mod summoned_knot_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
-    use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
+    use horizon_core::{geometry::Vec3, position::ChunkPos, random::RandomSource};
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -4412,7 +4429,7 @@ mod summoned_knot_tests {
         assert!(
             game.run_command("summon pig 13.5 200 2.5 {UUID:[I;129,0,0,99],NoAI:1b,NoGravity:1b}")
         );
-        game.world.random = LegacyRandom::new(129);
+        game.world.random.set_seed(129);
         test(&mut game);
     }
     fn knot_id(game: &Game<'_>, n: i32) -> u32 {
@@ -4688,7 +4705,20 @@ mod camel_pose_saved_tests {
         game.block_ticks
             .add_empty_chunk(ChunkPos::new(0, 0))
             .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
+        // A mob only ticks with its whole 5x5 chunk neighbourhood loaded.
+        for x in -2..=2 {
+            for z in -2..=2 {
+                if (x, z) != (0, 0) {
+                    game.world
+                        .chunks
+                        .insert((x, z), Arc::new(Chunk::empty(x, z)));
+                    game.block_ticks
+                        .add_empty_chunk(ChunkPos::new(x, z))
+                        .unwrap();
+                }
+            }
+        }
+        assert!(game.run_command("forceload add -32 -32 32 32"));
         assert!(game.run_command("tick freeze"));
         let initial = game.world.game_time;
         assert!(game.run_command("tick step 128"));
@@ -4757,6 +4787,31 @@ mod camel_pose_saved_tests {
                 assert!(game.run_command("tick step 1"));
                 game.tick_server(false).unwrap();
             }
+        }
+        // Unload and reload the chunk, then let time pass: the saved game time
+        // stays what it was (`Camel.addAdditionalSaveData` writes it unchanged).
+        let written: Vec<Tag> = game
+            .entity_chunks(&HashSet::from([(0, 0)]), true)
+            .into_iter()
+            .flat_map(|(_, tags)| tags)
+            .collect();
+        game.world.loaded_entities.push(((0, 0), written));
+        game.spawn_loaded_entities();
+        for step in 0..8 {
+            for number in 1..=cases.len() as i32 {
+                let index = game
+                    .mobs
+                    .iter()
+                    .position(|m| game.persist.uuids.get(&m.id) == Some(&[94, 0, 0, number]))
+                    .unwrap();
+                let value = actors[number as usize - 1].1;
+                assert_eq!(
+                    game.mob_tree_nbt(index).get("LastPoseTick"),
+                    Some(&Tag::Long(value)),
+                    "reloaded timestamp {value} after {step} steps"
+                );
+            }
+            game.tick_server(false).unwrap();
         }
     }
 }

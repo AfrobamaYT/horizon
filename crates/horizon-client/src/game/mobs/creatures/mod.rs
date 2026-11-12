@@ -10,6 +10,7 @@ mod death_tail;
 mod hoglin_target;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
+mod projectile_targets;
 mod projectile_world;
 mod pufferfish_player;
 mod residency;
@@ -766,7 +767,7 @@ impl Game<'_> {
         fn wearable(me: &Game<'_>, stack: &ItemStack, name: &str) -> Option<u32> {
             let info = me.res.items().get(&stack.item)?;
             if info.equip_slot.is_none()
-                || !info.equip_damage_on_hurt
+                || !horizon_client::item_sync::damage_on_hurt(stack, info.equip_damage_on_hurt)
                 || info.max_damage == 0
                 || !horizon_client::stations::is_damageable(me.res.items(), stack)
                 || !me.stack_can_be_hurt_by(stack, name).unwrap_or(true)
@@ -2169,6 +2170,11 @@ impl Game<'_> {
             self.next_entity += 1;
             p.id = self.next_entity;
         }
+        // The UUID its own random made, unless it already has one (a client
+        // copy's from the spawn packet).
+        if let Some(uuid) = p.uuid.take() {
+            self.persist.uuids.entry(p.id).or_insert(uuid);
+        }
         // Projectile.setOwner: the acting player's or the mob's UUID, which
         // its save keeps even once the owner is gone.
         if p.owner_uuid.is_none() {
@@ -2497,7 +2503,8 @@ impl Game<'_> {
                 // above use their movement's flyDist/nextFlap threshold.
                 MobEvent::GameEvent { .. } => {}
                 MobEvent::AttackPlayer(amount, from) => {
-                    self.mob_hits_player(amount, from, "minecraft:mob_attack");
+                    self.combat.hit_landed =
+                        self.mob_hits_player(amount, from, "minecraft:mob_attack");
                 }
                 // doHurtTarget: the effect only when hurtServer took damage.
                 // Bee.doHurtTarget: a sting that hurt leaves the stinger in the
@@ -2521,7 +2528,9 @@ impl Game<'_> {
                     ticks,
                     amplifier,
                 } => {
-                    if self.mob_hits_player(amount, from, "minecraft:mob_attack") {
+                    self.combat.hit_landed =
+                        self.mob_hits_player(amount, from, "minecraft:mob_attack");
+                    if self.combat.hit_landed {
                         self.give_player_effect(effect, ticks, amplifier);
                     }
                 }
@@ -2715,7 +2724,7 @@ impl Game<'_> {
                     amount,
                     source,
                 } => {
-                    self.mob_attacks_mob(target, amount, source);
+                    self.combat.hit_landed = self.mob_attacks_mob(target, amount, source);
                 }
                 MobEvent::DamageMob {
                     target,
@@ -2735,7 +2744,8 @@ impl Game<'_> {
                     // CaveSpider, Husk and WitherSkeleton.doHurtTarget: the
                     // effect sits inside the branch where the hit landed, and
                     // `LivingEntity.addEffect` takes a mob as well as a player.
-                    if self.mob_attacks_mob(target, amount, source)
+                    self.combat.hit_landed = self.mob_attacks_mob(target, amount, source);
+                    if self.combat.hit_landed
                         && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target)
                     {
                         t.add_effect(effect, ticks, amplifier);
@@ -3453,20 +3463,11 @@ impl Game<'_> {
                         t.add_effect(effect, ticks, amplifier);
                     }
                 }
-                MobEvent::Ignite { target, seconds } => match target {
-                    Who::Player => {
-                        if !self.creative
-                            && let Some(p) = self.player.as_mut()
-                        {
-                            p.ignite_for_ticks(seconds * 20)?;
-                        }
-                    }
-                    Who::Mob(id) => {
-                        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            m.ignite_for_ticks(seconds * 20);
-                        }
-                    }
-                },
+                MobEvent::Ignite(target, seconds) => self.ignite_entity(target, seconds)?,
+                MobEvent::ZombieIgnite(target, seconds) if self.combat.hit_landed => {
+                    self.ignite_entity(target, seconds)?
+                }
+                MobEvent::ZombieIgnite(..) => {}
                 MobEvent::Breed {
                     parent,
                     partner,
@@ -4206,6 +4207,7 @@ impl Game<'_> {
     ) -> bool {
         let post_attack_if_alive = std::mem::take(&mut self.combat.post_attack_if_alive);
         let rocket = std::mem::take(&mut self.combat.rocket_hit);
+        let pierce = std::mem::take(&mut self.combat.piercing_hit);
         let melee = self.combat.melee_mob.take();
         // A projectile entity dealt it: `#is_projectile`, or a firework
         // rocket (its `fireworks` type is not in the tag).
@@ -4215,7 +4217,7 @@ impl Game<'_> {
                 .damage_tags
                 .get("minecraft:is_projectile")
                 .is_some_and(|t| t.contains(damage_type));
-        let blocking = self.player_blocking(from, damage_type, false);
+        let blocking = self.player_blocking(from, damage_type, pierce);
         let raised = blocking.is_some();
         // Melee: the attacker stands at `from` (another player's hit has no mob behind it).
         let attacker = match known {
@@ -5215,28 +5217,7 @@ impl Game<'_> {
         targets.extend(self.carts.iter().map(|c| (Who::Mob(c.id), c.bounds())));
         targets
     }
-    pub(super) fn projectile_targets(&self) -> Vec<(Who, Aabb)> {
-        let mut targets: Vec<(Who, Aabb)> = self
-            .mobs
-            .iter()
-            .filter(|m| m.alive())
-            .map(|m| (Who::Mob(m.id), m.bounds()))
-            .collect();
-        if let Some(p) = self.player_view()
-            && p.alive
-        {
-            targets.push((Who::Player, p.bounds));
-        }
-        targets.extend(
-            self.special_targets()
-                .into_iter()
-                .map(|(id, b)| (Who::Mob(id), b)),
-        );
-        // Boats and minecarts are pickable for every projectile
-        // (`VehicleEntity.isPickable`), so every kind shares this one list.
-        targets.extend(self.vehicle_targets());
-        targets
-    }
+
     pub(super) fn arrow_rain(&self) -> impl Fn(BlockPos) -> bool + '_ {
         move |p: BlockPos| self.raining_at(p)
     }
@@ -5517,6 +5498,24 @@ impl Game<'_> {
             && let Hit::Entity {
                 who: Who::Mob(id), ..
             } = hit
+            && self.item_frames.iter().any(|f| f.id == id)
+        {
+            // AbstractArrow.onHitEntity on an item frame: spent when the
+            // frame took the hit, turned back when a fixed one refused it.
+            let by_player = p.owner == Some(Who::Player);
+            let hurt = self.projectile_hurts_frame(id, by_player, by_player && self.creative);
+            let outcome = if hurt {
+                EntityHit::Hurt
+            } else {
+                EntityHit::Refused
+            };
+            self.finish_arrow_hit(p.clone(), outcome);
+            return Ok(());
+        }
+        if p.arrow.is_some()
+            && let Hit::Entity {
+                who: Who::Mob(id), ..
+            } = hit
             && let Some(i) = self.carts.iter().position(|c| c.id == id)
         {
             // AbstractArrow.onHitEntity on a minecart.
@@ -5657,18 +5656,11 @@ impl Game<'_> {
                 let mut dodged = false;
                 // AbstractArrow.onHitEntity: a burning arrow sets its target alight.
                 if p.arrow.as_ref().is_some_and(|a| a.on_fire()) {
-                    self.handle_mob_events(vec![MobEvent::Ignite {
-                        target: who,
-                        seconds: 5,
-                    }])?;
+                    self.handle_mob_events(vec![MobEvent::Ignite(who, 5)])?;
                 }
                 let hurt = match who {
                     Who::Player => {
-                        let hurt = self.mob_hits_player(
-                            amount,
-                            [p.previous.x, p.previous.y, p.previous.z],
-                            "minecraft:arrow",
-                        );
+                        let hurt = self.arrow_hits_player(amount, p);
                         // AbstractArrow.onHitEntity: a hit that hurt leaves a
                         // non-piercing arrow stuck in the body.
                         if hurt && p.arrow.as_ref().is_some_and(|a| (a.pierce as i8) <= 0) {
@@ -7565,16 +7557,7 @@ impl Game<'_> {
         let velocity = self.known_player_movement();
         let start = Vec3::new(eye[0], eye[1] - 0.1, eye[2]);
         let mut proj = Projectile::new(kind.clone(), start, Some(Who::Player));
-        proj.shoot_from_rotation(
-            &mut self.world.random,
-            self.pitch,
-            self.yaw,
-            0.0,
-            1.5,
-            1.0,
-            velocity,
-            on_ground,
-        );
+        proj.shoot_from_rotation(self.pitch, self.yaw, 0.0, 1.5, 1.0, velocity, on_ground);
         self.spawn_projectile(proj, stack);
         // SnowballItem.use / EggItem.use / EnderpearlItem.use: awardStat(ITEM_USED).
         self.award_stat("used", item, 1);
@@ -11053,6 +11036,7 @@ mod pearl_tests {
             dragon: None,
             leash_boats: &[],
             who_lookup: None,
+            foreign: None,
             others_grid: None,
             others_index: None,
             passenger_objects: &[],
@@ -13254,7 +13238,7 @@ mod h169_glide_travel_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, load_resources};
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
-    use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
+    use horizon_core::{geometry::Vec3, position::ChunkPos, random::RandomSource};
     use std::sync::Arc;
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
         with_role_game(
@@ -13327,7 +13311,7 @@ mod h169_glide_travel_tests {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
         game.creative = true;
         assert!(game.run_command("fill 0 199 0 31 199 31 stone"));
-        game.world.random = LegacyRandom::new(169);
+        game.world.random.set_seed(169);
         game.update_chunk_tickets();
         assert!(crate::game::ticking_chunk(&game.world, 0, 0));
         assert!(game.tickets.levels().block_ticking(0, 0));

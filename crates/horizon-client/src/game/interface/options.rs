@@ -430,12 +430,14 @@ impl Game<'_> {
                     super::packs::open_folder(&dir);
                 }
                 Event::ImportPacks(paths) => {
+                    let additional = self.discover_mod_packs(mod_api::PackType::ClientResources);
                     let vanilla = self.vanilla_root();
                     super::packs::import_resource_packs(
                         &mut self.ui.options,
                         &vanilla,
                         &self.server_packs.active,
                         &paths,
+                        &additional,
                     );
                 }
                 // Horizon's own Add button: the screen picked a hit, the game

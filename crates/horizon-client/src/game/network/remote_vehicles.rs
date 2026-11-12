@@ -586,6 +586,7 @@ impl Game<'_> {
             ..last
         });
         let mut mob = self.mobs.remove(i);
+        mob.extra.client_side = true;
         let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
         let mut events = Vec::new();
         {
