@@ -2959,7 +2959,10 @@ mod hopper_cart_transfer_tests {
         )];
             game.adv.tree = Arc::new(Tree::load_with(
                 &game.options.resources.join("data"),
-                &PackOverlay { files: &files },
+                &PackOverlay {
+                    files: &files,
+                    ..PackOverlay::NONE
+                },
             ));
             game.adv.loaded = true;
             let ai = game.adv.tree.by_id["parity:boat_loot"];
