@@ -16,6 +16,7 @@ use crate::{BlockState, EffectKey};
 /// `BaseFireBlock.fireIgnite` (with the level's random draw for a player), `LavaIgnite`
 /// ignites for 15 seconds, `Extinguish` is `clearFire`.
 // exhaustive: the closed serialized effect vocabulary and case order are a link contract.
+// no wire: manual codec in wire/wire_types.rs (a fixed case order the link contract pins).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InsideEffect {
     /// `InsideBlockEffectType.FREEZE`: powder snow's frost, one frozen tick a step.
@@ -50,6 +51,7 @@ const EFFECT_ORDER: [InsideEffect; 5] = [
 /// mob effects a wither rose and an eyeblossom add. A portal is not a write a part
 /// makes: it stays the game's own.
 // exhaustive: the closed serialized write vocabulary and case order are a link contract.
+// no wire: manual codec in wire/wire_types.rs (a fixed case order the link contract pins).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntityWrite {
     /// Add to the entity's movement (`entity.push`), as a bubble column does.
@@ -92,6 +94,7 @@ pub enum EntityWrite {
 /// The answer of the game's one entity table for an id a [`EntityWrite::Hurt`] names:
 /// the same lookup the rest of the entity design uses (#1606), never a second one.
 // exhaustive: a closed set the game matches without a wildcard
+// no wire: the game's own answer to an entity-table lookup; it is matched in the game and never sent to a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntityLookup {
     /// The entity's row is in the table.
@@ -107,6 +110,7 @@ pub enum EntityLookup {
 /// and the table could not hand out a row. Reported to the part as a typed value, not a
 /// retry and not a panic.
 // exhaustive: a closed set the game matches without a wildcard
+// no wire: a refusal the game reports to the part as a typed value inside the game; it is never encoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HurtSourceError {
     /// The source's list is lifted out of the game this moment (#1606), so its row
@@ -137,6 +141,7 @@ pub enum InsideWrite {
 /// One planned item of the flush: an effect, or an entity write that runs before or
 /// after one.
 // exhaustive: the closed serialized plan vocabulary and case order are a link contract.
+// no wire: manual codec in wire/wire_types.rs (the flushed plan crosses as its ordered items).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlannedInside {
     /// An [`InsideEffect`] applied to the swept entity.
@@ -151,6 +156,8 @@ pub enum PlannedInside {
 /// before it and those asked `run_after` after it. Steps flush in the order the walk
 /// reached them, and [`InsideEffects::take_planned`] hands the whole ordered plan to the
 /// entity's own tick, which stops applying at the first item after the entity dies.
+// exhaustive: the collector's state is private to the crate; a part only calls its methods.
+// no wire: manual codec in wire/wire_types.rs (the collector crosses as its pending steps and plan).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsideEffects {
     /// `lastStep`: the step the walk last advanced, `-1` before the first.
