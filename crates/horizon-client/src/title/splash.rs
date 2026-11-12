@@ -1,7 +1,7 @@
 //! The title screen's splash text (`SplashManager`), moved out of `title.rs` unchanged.
 use horizon_core::random::RandomSource;
 
-pub(super) fn choose_splash(text: &str, index: usize, date: (u32, u32)) -> Option<String> {
+pub(crate) fn choose_splash(text: &str, index: usize, date: (u32, u32)) -> Option<String> {
     // SplashManager checks SpecialDates before the resource list (local date).
     let special = match date {
         (12, 24) => Some("Merry X-mas!"),

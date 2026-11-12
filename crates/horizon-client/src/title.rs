@@ -12,7 +12,8 @@ use crate::{
 };
 use horizon_core::random::RandomSource;
 use horizon_world::datafix::world_upgrader::{self, WorldUpgrader};
-use splash::{choose_splash, rolls_user_splash, splash_lines};
+pub(crate) use splash::choose_splash;
+use splash::{rolls_user_splash, splash_lines};
 use std::path::{Path, PathBuf};
 use std::{
     cell::{Cell, RefCell},
