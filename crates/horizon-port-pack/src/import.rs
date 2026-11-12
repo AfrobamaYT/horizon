@@ -601,6 +601,60 @@ mod tests {
     }
 
     #[test]
+    fn prism_zip_refuses_unsafe_mod_basenames_before_staging() {
+        use std::io::{Cursor, Write};
+        use zip::{ZipWriter, write::SimpleFileOptions};
+
+        for (tag, name) in [
+            ("backslash", "nested\\example.jar"),
+            ("drive-colon", "C:example.jar"),
+            ("dot-components", "..\\example.jar"),
+        ] {
+            let root = instance_with(&format!("prism-zip-{tag}"), &[]);
+            let archive = root.join("pack.zip");
+            let mut jar = ZipWriter::new(Cursor::new(Vec::new()));
+            jar.start_file("mcmod.info", SimpleFileOptions::default())
+                .unwrap();
+            jar.write_all(br#"[{"modid":"example","version":"1.0"}]"#)
+                .unwrap();
+            let jar = jar.finish().unwrap().into_inner();
+            let mut zip = ZipWriter::new(fs::File::create(&archive).unwrap());
+            let metadata = json!({"components": [
+                {"uid": "net.minecraft", "version": "1.7.10"},
+                {"uid": "net.minecraftforge", "version": "10.13.4.1614"}
+            ]});
+            let mod_path = format!("Example Pack/.minecraft/mods/{name}");
+            for (path, bytes) in [
+                (
+                    "Example Pack/mmc-pack.json",
+                    metadata.to_string().as_bytes(),
+                ),
+                (mod_path.as_str(), jar.as_slice()),
+            ] {
+                zip.start_file(path, SimpleFileOptions::default()).unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+            zip.finish().unwrap();
+
+            let original = fs::read(&archive).unwrap();
+            let work = root.join("work");
+            let error = crate::pipeline::import(&archive, &work, &|_| {}).unwrap_err();
+            assert!(
+                error.contains("unsafe resource-pack path"),
+                "{tag}: {error}"
+            );
+            assert_eq!(count_files(&work), 0, "{tag}: staged a file");
+            // The archive is the only entry outside work, unchanged by the refusal.
+            for entry in fs::read_dir(&root).unwrap() {
+                let path = entry.unwrap().path();
+                assert!(path == archive || path == work, "{tag}: {path:?}");
+            }
+            assert_eq!(fs::read(&archive).unwrap(), original, "{tag}");
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn prism_archive_layout_rejects_ambiguous_or_unsafe_roots() {
         assert!(prism_archive_layout(&["a/mmc-pack.json", "b/mmc-pack.json"]).is_err());
         assert!(prism_archive_layout(&["../mmc-pack.json"]).is_err());
