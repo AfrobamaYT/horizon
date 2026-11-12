@@ -28,14 +28,14 @@ const CELEBRATION: i32 = 300;
 /// `PiglinAi.BARTERING_ITEM`: vanilla's barter currency, compared by item.
 pub const BARTERING_ITEM: &str = "minecraft:gold_ingot";
 
-/// `Piglin.holdInOffHand`: equip the item being admired, dropped when the
-/// piglin is killed; anything but the barter item keeps the piglin from
-/// despawning.
-pub fn hold_in_offhand(m: &mut Mob, item: std::sync::Arc<str>) {
-    if &*item != BARTERING_ITEM {
+/// `Piglin.holdInOffHand`: equip the stack being admired, components and
+/// all, dropped when the piglin is killed; anything but the barter item keeps
+/// the piglin from despawning.
+pub fn hold_in_offhand(m: &mut Mob, stack: crate::items::ItemStack) {
+    if &*stack.item != BARTERING_ITEM {
         m.persistent = true;
     }
-    super::finalize::set_item(m, super::finalize::OFFHAND, &item);
+    super::finalize::set_item_stack(m, super::finalize::OFFHAND, stack);
     super::finalize::set_drop_chance(m, super::finalize::OFFHAND, 2.0);
 }
 
@@ -2598,10 +2598,16 @@ mod crossbow_tests {
             world_seed: 0,
         };
         let mut apple = piglin();
-        hold_in_offhand(&mut apple, "minecraft:golden_apple".into());
+        hold_in_offhand(
+            &mut apple,
+            crate::items::ItemStack::new("minecraft:golden_apple", 1),
+        );
         assert!(apple.persistent);
         let mut m = piglin();
-        hold_in_offhand(&mut m, "minecraft:gold_ingot".into());
+        hold_in_offhand(
+            &mut m,
+            crate::items::ItemStack::new("minecraft:gold_ingot", 1),
+        );
         assert!(!m.persistent);
         let (drops, _) = die(
             &mut m,

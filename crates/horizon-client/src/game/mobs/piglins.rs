@@ -9,8 +9,8 @@ use horizon_client::{
         Mob, Species,
         equip::{self, Slot},
         finalize::{
-            OFFHAND, SLOT_NAMES, item_stack, set_drop_chance, set_item, set_item_stack,
-            set_slot_enchantments, slot_enchantments, stored_drop_chance,
+            OFFHAND, SLOT_NAMES, item_stack, set_drop_chance, set_item_stack,
+            set_slot_enchantments, stored_drop_chance,
         },
         piglin::{ADMIRE, BARTERING_ITEM, eat, has_eaten_recently, is_idle},
     },
@@ -186,21 +186,24 @@ impl Game<'_> {
             return false;
         }
         let m = &mut self.mobs[index];
-        let old = horizon_client::mobs::finalize::item(m, slot);
+        let old = item_stack(m, slot);
         let chance = stored_drop_chance(m, slot);
         let drop_old = old.is_some() && (m.random.next_float() - 0.1).max(0.0) < chance;
-        let old_enchantments = slot_enchantments(m, slot);
-        set_item(m, slot, item);
-        // The piglin keeps what the stack carried (Protection IV stays on).
-        set_slot_enchantments(m, slot, stack.enchantments().to_vec());
+        // The piglin keeps the stack whole: its components, enchantments and trim.
+        set_item_stack(
+            m,
+            slot,
+            ItemStack {
+                count: 1,
+                ..stack.clone()
+            },
+        );
         // setItemSlotAndDropWhenKilled, then persistenceRequired.
         set_drop_chance(m, slot, 2.0);
         m.persistent = true;
         let at = [m.position.x, m.position.y, m.position.z];
         if let (true, Some(old)) = (drop_old, old) {
-            let mut dropped = ItemStack::new(&old, 1);
-            dropped.set_crafting_enchantments(old_enchantments);
-            self.spawn_item_own(dropped, at, 10);
+            self.spawn_item_own(old, at, 10);
         }
         true
     }
@@ -371,7 +374,7 @@ impl Game<'_> {
                 one
             };
             if self.piglin_loved(&item) {
-                self.start_admiring(i, item);
+                self.start_admiring(i, stack);
             } else if self.item_in_tag("minecraft:piglin_food", &item)
                 && !has_eaten_recently(&self.mobs[i])
             {
@@ -395,7 +398,9 @@ impl Game<'_> {
         }
         m.extra.piglin.admire_seen(holding, nearest, loved);
     }
-    fn start_admiring(&mut self, index: usize, item: std::sync::Arc<str>) {
+    /// `PiglinAi.holdInOffhand` and `admireGoldItem`: the piglin holds `stack`, the one item it
+    /// took (`split(1)` from the ground, `consumeAndReturn(1)` from a hand), with its components.
+    fn start_admiring(&mut self, index: usize, stack: ItemStack) {
         // PiglinAi.holdInOffhand: what the off hand held is dropped, whole.
         if let Some(old) = item_stack(&self.mobs[index], OFFHAND) {
             let m = &mut self.mobs[index];
@@ -408,7 +413,7 @@ impl Game<'_> {
         let m = &mut self.mobs[index];
         // The memory is set again, for the item it holds now.
         m.extra.piglin.seen_admire = 0;
-        horizon_client::mobs::piglin::hold_in_offhand(m, item);
+        horizon_client::mobs::piglin::hold_in_offhand(m, stack);
         m.extra.using_item = ADMIRE;
         m.extra.point = None;
         m.nav_stop();
@@ -428,7 +433,13 @@ impl Game<'_> {
         {
             return false;
         }
-        self.start_admiring(index, stack.item.clone());
+        self.start_admiring(
+            index,
+            ItemStack {
+                count: 1,
+                ..stack.clone()
+            },
+        );
         true
     }
     /// `PiglinAi.stopHoldingOffHandItem`, when the admiring ran out or a hit
