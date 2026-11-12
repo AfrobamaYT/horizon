@@ -56,7 +56,8 @@ pub fn interact_with_fluid_handler(
 /// as much of it as fits, in a transaction of its own: a stack of more than one container has
 /// one split off, changed, where the place puts it, and a creative player keeps the hand's
 /// stack, as [`ItemPlace::PlayerHand`] writes. Once something moved it plays the fill or empty
-/// sound and game event at the centre of `pos`, or at the player where `pos` is none, as
+/// sound and game event at the centre of `pos`, or half a block above the player's feet
+/// where `pos` is none, as
 /// [`trigger_sound_and_game_event`]. True when something moved; false, with nothing changed,
 /// where the hand holds no fluid container or nothing moves either way.
 ///
@@ -89,7 +90,10 @@ pub fn interact_with_handler(
     let (fluid, pickup) = moved;
     let at = match pos {
         Some([x, y, z]) => Some([x, y, z].map(|c| f64::from(c) + 0.5)),
-        None => player.entity().position(host),
+        None => player
+            .entity()
+            .position(host)
+            .map(|[x, y, z]| [x, y + 0.5, z]),
     };
     if let Some(at) = at {
         trigger_sound_and_game_event(host, &fluid, level, at, Some(player), pickup);
