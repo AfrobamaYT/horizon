@@ -737,7 +737,7 @@ pub fn registry_files(
     registries: &[(&str, &str)],
     fallback: bool,
     mut accepts: impl FnMut(&str, &str, &[u8]) -> bool,
-) -> Result<BTreeMap<String, Vec<(String, Vec<u8>)>>, Box<horizon_mod_api::DatapackLoadError>> {
+) -> Result<BTreeMap<String, Vec<(String, Vec<u8>)>>, Box<mod_api::DatapackLoadError>> {
     let mut kinds: Vec<&str> = registries.iter().map(|(namespace, _)| *namespace).collect();
     kinds.sort_unstable();
     kinds.dedup();
@@ -769,12 +769,12 @@ pub fn registry_files(
             // decompressed output. No losing payload remains resident.
             let bytes = pack
                 .source
-                .read_head(&file, horizon_mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
+                .read_head(&file, mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
                 .unwrap_or_default();
-            let oversized = bytes.len() > horizon_mod_api::MAX_DATAPACK_ENTRY_BYTES;
+            let oversized = bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES;
             if oversized || accepts(&file, &pack.id, &bytes) {
                 total += bytes.len();
-                if !oversized && total > horizon_mod_api::MAX_SNAPSHOT_BYTES {
+                if !oversized && total > mod_api::MAX_SNAPSHOT_BYTES {
                     let (namespace, path) = registries
                         .iter()
                         .find(|(namespace, path)| {
@@ -790,12 +790,12 @@ pub fn registry_files(
                         .unwrap()
                         .strip_suffix(".json")
                         .unwrap();
-                    return Err(Box::new(horizon_mod_api::DatapackLoadError {
+                    return Err(Box::new(mod_api::DatapackLoadError {
                         registry: format!("{namespace}:{path}"),
                         entry: format!("{entry_namespace}:{entry}"),
                         file,
                         pack: pack.id.clone(),
-                        reason: horizon_mod_api::DatapackLoadReason::CandidateTooLarge,
+                        reason: mod_api::DatapackLoadReason::CandidateTooLarge,
                     }));
                 }
                 files.insert(file.clone(), vec![(pack.id.clone(), bytes)]);
@@ -2027,6 +2027,16 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        // Oversized losing files are never read; an oversized winner is retained
+        // only as the bounded refusal prefix, not as its full payload.
+        let path = "data/example/example/spell/fire.json";
+        std::fs::write(root.join("low").join(path), vec![b' '; 1_048_577]).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        assert_eq!(files[path], vec![("high".to_owned(), b"high".to_vec())]);
+        std::fs::write(root.join("high").join(path), vec![b' '; 1_048_578]).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        assert_eq!(files[path].len(), 1);
+        assert_eq!(files[path][0].1.len(), 1_048_577);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
