@@ -748,3 +748,135 @@ fn block_use_wasm_replace(
     let module = horizon_mod_wasm::fixture::module(&bytes).unwrap();
     module.right_click_block(mod_api::HostSide::Server(host), event)
 }
+
+fn run_block_use_regression(g: &mut Game<'_>, packet: bool, stack: ItemStack) {
+    let hit = Hit {
+        pos: [3, 64, 4],
+        face: [0, 1, 0],
+        point: [3.5, 65.0, 4.5],
+        inside: false,
+    };
+    g.lan
+        .as_mut()
+        .unwrap()
+        .hub
+        .update_guest(12, |guest| {
+            guest.inventory[guest.selected] = Some(stack);
+            guest.offhand = None;
+        })
+        .unwrap();
+    SEEN.with_borrow_mut(Vec::clear);
+    if packet {
+        let gi = g
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guests
+            .iter()
+            .position(|guest| guest.conn == 12)
+            .unwrap();
+        assert!(g.guest_use_item_on(12, gi, hit, Hand::Main).is_ok());
+    } else {
+        g.as_guest(12, |g| {
+            g.set_mode_id(0);
+            g.forced_hit = Some(hit);
+            assert!(g.use_hand(Some(&hit)).unwrap());
+            g.forced_hit = None;
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn block_use_hive_bottles_report_shrink_and_exhaustion_on_both_routes() {
+    mod_api::__private::install(Arc::from([]));
+    let _recording = Recording::start();
+    crate::game::native_guest_turn_tests::with_guests(|g| {
+        g.build_registries();
+        g.world
+            .chunks
+            .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+        let registry = g.pack.assets.registry;
+        let hive = registry.default_state("minecraft:beehive").unwrap();
+        let mut full = registry.state(hive).unwrap().clone();
+        full.properties.insert("honey_level".into(), "5".into());
+        let full = registry.id(&full).unwrap();
+        for packet in [false, true] {
+            for (count, reported, final_hand) in [
+                (
+                    5,
+                    ItemStack::new("minecraft:glass_bottle", 4),
+                    ItemStack::new("minecraft:glass_bottle", 4),
+                ),
+                (
+                    1,
+                    ItemStack::new("minecraft:air", 0),
+                    ItemStack::new("minecraft:honey_bottle", 1),
+                ),
+            ] {
+                g.world.set(3, 64, 4, full).unwrap();
+                run_block_use_regression(
+                    g,
+                    packet,
+                    ItemStack::new("minecraft:glass_bottle", count),
+                );
+                assert_eq!(
+                    any_block_use_stacks(),
+                    [reported],
+                    "packet={packet}, bottles={count}"
+                );
+                g.as_guest(12, |g| assert_eq!(g.held(), Some(&final_hand)))
+                    .unwrap();
+                let state = registry.state(g.world.block(3, 64, 4)).unwrap();
+                assert_eq!(state.properties["honey_level"], "0");
+            }
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn block_use_lodestone_reports_component_edit_on_both_routes() {
+    use horizon_core::nbt::Tag;
+    mod_api::__private::install(Arc::from([]));
+    let _recording = Recording::start();
+    crate::game::native_guest_turn_tests::with_guests(|g| {
+        g.build_registries();
+        g.world
+            .chunks
+            .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+        let lodestone = g
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:lodestone")
+            .unwrap();
+        let mut expected = ItemStack::new("minecraft:compass", 1);
+        expected.data_mut().set_other(
+            "minecraft:lodestone_tracker",
+            Some(Tag::compound([
+                (
+                    "target",
+                    Tag::compound([
+                        ("dimension", Tag::String("minecraft:overworld".into())),
+                        ("pos", Tag::IntArray(vec![3, 64, 4])),
+                    ]),
+                ),
+                ("tracked", Tag::Byte(1)),
+            ])),
+        );
+        for packet in [false, true] {
+            g.world.set(3, 64, 4, lodestone).unwrap();
+            run_block_use_regression(g, packet, ItemStack::new("minecraft:compass", 1));
+            assert_eq!(
+                any_block_use_stacks(),
+                [expected.clone()],
+                "packet={packet}"
+            );
+            g.as_guest(12, |g| assert_eq!(g.held(), Some(&expected)))
+                .unwrap();
+        }
+    });
+}
