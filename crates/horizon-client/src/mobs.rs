@@ -2420,6 +2420,8 @@ pub enum MobEvent {
         equine: Option<Box<equine::Offspring>>,
         /// Whether the parent supplies the variant, if already drawn.
         parent_variant: Option<bool>,
+        /// Wolf voice drawn before experience, unless baby-spawn approval defers inheritance.
+        wolf_voice: Option<u8>,
         /// The parent-RNG experience decision, if already made.
         experience: BreedExperience,
     },

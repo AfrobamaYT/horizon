@@ -2519,8 +2519,11 @@ impl Goal for Breed {
             let equine = super::equine::breed_offspring(m, &p).map(Box::new);
             let parent_variant =
                 super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
-            let experience =
-                super::breeding::experience(m, cx.w, equine.is_some() || parent_variant.is_some());
+            let (wolf_voice, experience) = super::breeding::voice_and_experience(
+                m,
+                cx.w,
+                equine.is_some() || parent_variant.is_some(),
+            );
             m.extra.in_love = 0;
             m.extra.age = 6000;
             // TurtleBreedGoal.breed: the mother carries an egg, not a baby.
@@ -2536,6 +2539,7 @@ impl Goal for Breed {
                 partner: p.id,
                 equine,
                 parent_variant,
+                wolf_voice,
                 experience,
             });
         }
