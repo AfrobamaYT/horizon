@@ -395,6 +395,36 @@ impl LevelAccess for GameLevel<'_> {
         self.native_should_check_weak_power(self.dimension, pos, state, direction, &mut check);
         check
     }
+    fn has_rail_hook(&self) -> bool {
+        self.rail_hooked()
+    }
+    fn adjust_rail_direction(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        vanilla: horizon_world::level::RailShape,
+    ) -> horizon_world::level::RailShape {
+        self.part_rail_direction(pos, state, vanilla)
+    }
+    fn adjust_rail_can_make_slopes(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        vanilla: bool,
+    ) -> bool {
+        self.part_rail_can_make_slopes(pos, state, vanilla)
+    }
+    fn adjust_rail_flexible(&self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        self.part_rail_flexible(pos, state, vanilla)
+    }
+    fn adjust_rail_valid_shape(
+        &self,
+        state: BlockStateId,
+        shape: horizon_world::level::RailShape,
+        vanilla: bool,
+    ) -> bool {
+        self.part_rail_valid_shape(state, shape, vanilla)
+    }
     fn has_redstone_wire_connection_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldRedstoneWireConnectTo)

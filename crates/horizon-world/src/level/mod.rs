@@ -125,6 +125,7 @@ mod query;
 pub(crate) use query::data_2d;
 pub mod orientation;
 mod rails;
+pub use rails::RailShape;
 mod redstone;
 pub mod removal;
 pub mod sculk;
@@ -999,6 +1000,45 @@ pub trait LevelAccess: BlockEntityNeighbors {
         &self,
         _state: BlockStateId,
         _other: BlockStateId,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// Whether the rail queries below need the level hooks.
+    fn has_rail_hook(&self) -> bool {
+        false
+    }
+    /// `IBaseRailBlockExtension.getRailDirection` of the rail `state` at `pos`, with no cart, once
+    /// the library read `vanilla` from its `shape`: the track it lays. The default keeps it.
+    fn adjust_rail_direction(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        vanilla: RailShape,
+    ) -> RailShape {
+        vanilla
+    }
+    /// `IBaseRailBlockExtension.canMakeSlopes` of the rail `state` at `pos` once the library
+    /// answered `vanilla`: whether it may climb toward a raised rail. The default keeps it.
+    fn adjust_rail_can_make_slopes(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// `IBaseRailBlockExtension.isFlexibleRail` of the rail `state` at `pos` once the library
+    /// answered `vanilla`: whether it may curve. The default keeps it.
+    fn adjust_rail_flexible(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// `IBaseRailBlockExtension.isValidRailShape` of the rail `state` for `shape`, about to be
+    /// written, once the library answered `vanilla`. The default keeps it.
+    fn adjust_rail_valid_shape(
+        &self,
+        _state: BlockStateId,
+        _shape: RailShape,
         vanilla: bool,
     ) -> bool {
         vanilla

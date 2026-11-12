@@ -356,3 +356,14 @@ shearing when no part answers. Entity parts are native-only, so wasm mods do not
 | Method | Verdict | Horizon route |
 | --- | --- | --- |
 | `IFallableExtension.fallingTick(level, currentPosition, entity)` | **Partial** | Server `BlockPart::falling_tick` (`hooks/falling_tick.rs`) on the falling block's state, with its block position and entity handle and a `&mut dyn ServerHost`, for each tick that ends with it still in the air; not the landing, drop or removal tick. It is delivered after the ordered pass that ticked the falling block, so a write lands on the stored entity. NeoForge also calls it on the client; Horizon calls it only on the server. |
+
+## IBaseRailBlockExtension: rail track
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `getRailDirection(state, level, pos, cart)` | **Covered** | `BlockPart::rail_direction` (`hooks/rail_direction.rs`), on both sides with a `LevelSide`, starting from the `shape` property: the cart's movement asks with the cart wherever it reads the track under it, and `RailState` and a minecart item's placement ask with none. |
+| `canMakeSlopes(state, level, pos)` | **Covered** | Server `BlockPart::rail_can_make_slopes` (`hooks/rail_can_make_slopes.rs`), asked as `RailState` would make the rail climb. |
+| `isFlexibleRail(state, level, pos)` | **Covered** | Server `BlockPart::rail_flexible` (`hooks/rail_flexible.rs`), read into `RailState`'s straightness. |
+| `isValidRailShape(shape)` | **Covered** | Server `BlockPart::rail_valid_shape` (`hooks/rail_valid_shape.rs`), with the rail's state, asked before `RailState` writes a shape; a refused shape keeps the current one. It starts false for a value the rail's `shape` property lacks, as NeoForge's default answers. |
+
+A minecart now treats any block in `#minecraft:rails` built on `BaseRailBlock` as track (`BaseRailBlock.isRail`), where it used to accept only the four vanilla rail names.
