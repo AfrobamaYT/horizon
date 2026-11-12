@@ -106,18 +106,20 @@ pub fn installer(trait_name: Option<&syn::Ident>, name: &syn::Ident) -> syn::Ide
 /// crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's contract with that crate, and often
 /// a hot path.
 pub fn replaceable_trait<'a>(
+    module: &str,
     block: &'a syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
     foreign: &BTreeSet<String>,
 ) -> Option<&'a syn::Ident> {
     let (_, path, _) = block.trait_.as_ref()?;
-    trait_exclusion(block, traits, types, foreign)
+    trait_exclusion(module, block, traits, types, foreign)
         .is_none()
         .then(|| &path.segments.last().expect("a trait path has a name").ident)
 }
 
 fn trait_exclusion(
+    module: &str,
     block: &syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
@@ -132,7 +134,7 @@ fn trait_exclusion(
         return Some("path-written trait owner");
     };
     let owner = owner.ident.to_string();
-    let undeclared = types.exclusion(&owner);
+    let undeclared = types.exclusion(module, &owner);
     [
         (negative.is_some(), "negative trait impl"),
         (block.unsafety.is_some(), "unsafe trait impl"),
@@ -148,15 +150,16 @@ fn trait_exclusion(
 /// Why a mixin's target in the trait implementation `block` has no installer, for the refusal;
 /// `None` when it has one.
 pub(crate) fn trait_refusal(
+    module: &str,
     block: &syn::ItemImpl,
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
     foreign: &BTreeSet<String>,
 ) -> Option<String> {
-    let reason = trait_exclusion(block, traits, types, foreign)?;
+    let reason = trait_exclusion(module, block, traits, types, foreign)?;
     Some(if reason == AMBIGUOUS_OWNER {
         format!(
-            "its trait implementation has no replacement installer: owner type name `{}` is ambiguous in the crate, which declares it in more than one module",
+            "its trait implementation has no replacement installer: owner type name `{}` is ambiguous in the crate, which declares it in more than one module and not in the `impl`'s own",
             quote::ToTokens::to_token_stream(&block.self_ty)
         )
     } else {
@@ -194,13 +197,14 @@ impl OwnerTypes {
         }
     }
 
-    /// Why `owner` can't carry an installer: no module declares it, or more than one does, and
-    /// a bare name does not say which.
-    fn exclusion(&self, owner: &str) -> Option<&'static str> {
-        match self.0.get(owner).map_or(0, BTreeSet::len) {
-            0 => Some("foreign trait owner"),
-            1 => None,
-            _ => Some(AMBIGUOUS_OWNER),
+    /// Why `owner`, named by an `impl` in `module`, can't carry an installer. The `impl`'s own
+    /// module declaring it settles the name, whatever other modules declare; otherwise exactly
+    /// one module must, since a bare name does not say which of several.
+    fn exclusion(&self, module: &str, owner: &str) -> Option<&'static str> {
+        match self.0.get(owner) {
+            None => Some("foreign trait owner"),
+            Some(modules) if modules.contains(module) || modules.len() == 1 => None,
+            Some(_) => Some(AMBIGUOUS_OWNER),
         }
     }
 }
@@ -490,7 +494,7 @@ fn functions<'a>(
                     && lifetimes_only(&block.generics)
                     && matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) =>
             {
-                let trait_name = replaceable_trait(block, traits, types, &foreign);
+                let trait_name = replaceable_trait(module, block, traits, types, &foreign);
                 if block.trait_.is_some() && trait_name.is_none() {
                     continue;
                 }
@@ -521,6 +525,7 @@ fn functions<'a>(
 /// Module-scope function definitions, partitioned by their first exclusion rule. Local functions
 /// inside bodies and macro expansions are not source-level replacement candidates.
 fn inventory(
+    module: &str,
     items: &[Item],
     traits: &BTreeSet<String>,
     types: &OwnerTypes,
@@ -541,13 +546,20 @@ fn inventory(
     let foreign = foreign_imports(items);
     for item in items {
         match item {
-            Item::Mod(module) => {
-                if let Some((_, inner)) = &module.content {
+            Item::Mod(inline) => {
+                if let Some((_, inner)) = &inline.content {
                     let reason = inherited.or_else(|| {
-                        (source::gated(&module.attrs) || source::test_only(&module.attrs))
+                        (source::gated(&inline.attrs) || source::test_only(&inline.attrs))
                             .then_some("conditional/test module")
                     });
-                    inventory(inner, traits, types, reason, counts);
+                    inventory(
+                        &format!("{module}::{}", inline.ident),
+                        inner,
+                        traits,
+                        types,
+                        reason,
+                        counts,
+                    );
                 }
             }
             Item::Fn(function) => record(&function.attrs, &function.sig, inherited, counts),
@@ -560,7 +572,7 @@ fn inventory(
                     } else if !matches!(&*block.self_ty, Type::Path(ty) if ty.qself.is_none()) {
                         Some("non-path/qualified impl owner")
                     } else {
-                        trait_exclusion(block, traits, types, &foreign)
+                        trait_exclusion(module, block, traits, types, &foreign)
                     }
                 });
                 for member in &block.items {
@@ -823,7 +835,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         }
         for (file, text, items) in &parsed {
             if !krate.marked_only {
-                inventory(items, &traits, &types, None, &mut counts);
+                inventory(&file.module, items, &traits, &types, None, &mut counts);
             }
             let mut found = Vec::new();
             functions(&file.module, items, &traits, &types, &mut found);
@@ -1408,7 +1420,7 @@ mod tests {
         let mut types = OwnerTypes::default();
         types.declare("k", &file.items);
         let mut counts = BTreeMap::new();
-        inventory(&file.items, &traits, &types, None, &mut counts);
+        inventory("k", &file.items, &traits, &types, None, &mut counts);
         assert_eq!(counts.values().sum::<usize>(), 7);
         assert_eq!(
             counts,
@@ -1643,19 +1655,33 @@ mod tests {
             panic!("an impl")
         };
         let foreign = foreign_imports(&implements.items);
-        assert_eq!(trait_refusal(block, &traits, &types, &foreign), None);
-        // A second module declaring the name: a bare `GameLevel` no longer says which type.
+        let here = "k::level_access";
+        assert_eq!(trait_refusal(here, block, &traits, &types, &foreign), None);
+        // A second module declaring the name, neither the `impl`'s own: a bare `GameLevel` no
+        // longer says which type.
         types.declare("k::other", &declares.items);
-        assert!(targets("k::level_access", &implements, &traits, &types).is_empty());
+        assert!(targets(here, &implements, &traits, &types).is_empty());
         assert_eq!(
-            trait_refusal(block, &traits, &types, &foreign).unwrap(),
-            "its trait implementation has no replacement installer: owner type name `GameLevel` is ambiguous in the crate, which declares it in more than one module"
+            trait_refusal(here, block, &traits, &types, &foreign).unwrap(),
+            "its trait implementation has no replacement installer: owner type name `GameLevel` is ambiguous in the crate, which declares it in more than one module and not in the `impl`'s own"
         );
-        // Declared twice in one module (one per `cfg`) is one declaration.
+    }
+
+    #[test]
+    fn two_modules_types_of_one_name_each_keep_their_own_impls_slot() {
+        let traits = BTreeSet::from(["Goal".to_owned()]);
+        let file = syn::parse_file("struct State; impl Goal for State { fn start(&mut self) {} }")
+            .unwrap();
         let mut types = OwnerTypes::default();
-        types.declare("k::levels", &declares.items);
-        types.declare("k::levels", &declares.items);
-        assert_eq!(trait_refusal(block, &traits, &types, &foreign), None);
+        for module in ["k::a", "k::b"] {
+            types.declare(module, &file.items);
+        }
+        for module in ["k::a", "k::b"] {
+            assert_eq!(
+                targets(module, &file, &traits, &types),
+                [format!("{module}::<State as Goal>::start")]
+            );
+        }
     }
 
     #[test]

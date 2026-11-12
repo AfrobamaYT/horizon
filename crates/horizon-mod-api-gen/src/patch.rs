@@ -563,9 +563,13 @@ fn replaceable(found: &Found, source: &mut Source, loop_generic: bool) -> Result
             .to_owned();
         let traits = crate::replace::declared_traits(&source.root)?;
         let foreign = crate::replace::foreign_imports(&items);
-        if let Some(why) =
-            crate::replace::trait_refusal(block, &traits, source.owner_types(&krate)?, &foreign)
-        {
+        if let Some(why) = crate::replace::trait_refusal(
+            &found.module,
+            block,
+            &traits,
+            source.owner_types(&krate)?,
+            &foreign,
+        ) {
             return Err(why);
         }
     }
