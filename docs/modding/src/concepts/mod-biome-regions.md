@@ -29,7 +29,9 @@ Not verified for this note: how vanilla's `MultiNoiseBiomeSource` presets are bu
 
 **Order.** The region list is sorted by owner mod id, then region id, the rule the attribute catalog uses (#2191). The same mods give the same order on every side, so it can be saved and compared.
 
-**Choosing a region.** A low-frequency noise of the world seed, sampled per biome cell, picks a region by cumulative weight. The nearest-point search then runs inside that region's own index only. A region never competes with another region's points, which is what makes ordering between mods unnecessary. The noise's exact form, frequency and its random-stream position are open (see questions) and must not disturb any vanilla stream: a world with no regions declared must generate exactly as today.
+**Choosing a region.** Selector version 1 uses jittered cells in quart coordinates. Each cell draws jitter x, jitter z and a cumulative-weight pick, in that order, from `root.from_hash_of(salt).fork_positional().at(cx, 0, cz)`. `from_hash_of` borrows the positional root and returns a fresh source; the fork advances that derived source only, leaving vanilla's streams unchanged. Positional y is fixed at 0, so ownership is independent of height. The owner is the nearest jitter point among the 3?3 candidate cells, with x scanned inside z and the first candidate winning a tie. This is the neighbourhood definition, not a promise to find the globally nearest jitter point. Negative coordinates use floor division, and a pick at a cumulative slot end belongs to the next slot. A different neighbourhood or draw rule requires a new selector version, not a radius field. Each selected region searches only its own climate index. With no layout or no regions, today's preset source and random draws are unchanged.
+
+With a layout, each resolver caches the 16 quart columns of its current chunk, without allocating per sample. Each first column visit evaluates nine cells and 27 bounded draws; other heights in that chunk reuse the owner. Crossing into another chunk resets that cache. Climate lookup still runs per quart. There is no tick-time change without a layout; no runtime timing has been measured for the enabled path.
 
 **Fixed at creation.** When a world is created the ordered region list (owner mod, region id, weight and full climate points, including biome ids) is written into the world's data, not hashes. A point's numeric payload is 52 bytes plus its biome id and region metadata; there is no per-region total because this proposal sets no point bound. The saved layout wins on load:
 
@@ -74,7 +76,7 @@ saved layout enables it. Inline points for custom dimensions keep their existing
 Biome selection can change generated blocks. The generator passes biome samples into surface
 material rules and uses `carver_biome` to select a carver list at each origin. An opt-in can
 therefore produce material and carving seams in newly generated chunks. Do not promise a
-biome-color-only transition.
+biome-color-only transition. Features, decoration and structure eligibility also follow biome selection; only base density stays unchanged with an unchanged router. A structure whose biome check straddles a region border follows vanilla's own check at its sample position. Height-dependent biomes and old-biome blending can make chunk fill and a carver's sample differ within the same region.
 
 For the save owners to review: store a versioned, Horizon-namespaced world record separate from
 `data/minecraft/world_gen_settings.dat`. Key the full layout and recorded substitutions by
