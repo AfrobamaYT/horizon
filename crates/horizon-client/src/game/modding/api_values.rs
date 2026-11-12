@@ -2985,7 +2985,6 @@ impl<C: ?Sized> TryIntoEngine<C> for mod_api::client::hud_layout::GuiDraw {
 
 #[path = "api_values/text_boundary.rs"]
 mod text_boundary;
-pub(in crate::game) use text_boundary::style_hover;
 #[cfg(test)]
 mod gui_draw_boundary_tests {
     use super::{TryIntoApi, TryIntoEngine};

@@ -4,9 +4,6 @@ use super::{TryIntoApi, TryIntoEngine};
 use horizon_client_core::text as engine;
 use mod_api::text::{Text, TextFormError};
 
-pub(super) use horizon_client_lib::api_text::captured_text;
-pub(in crate::game) use horizon_client_lib::api_text::style_hover;
-
 impl TryIntoApi for engine::Text {
     type Api = Text;
     type Error = TextFormError;
