@@ -2183,6 +2183,8 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     mod_api::impl_host_areas!(Client);
     impl mod_api::ClientHost for Client {}
     mod_api::impl_client_host_areas!(Client);
+    // The platform phase this scope sets is process-wide state another test may not have installed yet.
+    mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let index = guest::add_handler(vec![guest::view::<dyn BlockEntityPart>(Arc::new(Notice))]);
     let proxy = WasmHandler {
