@@ -16,9 +16,9 @@ MARKER = "impl LevelAccess for GameLevel<'_> {\n"
 
 
 def main():
-    source = SOURCE.read_text()
+    source = SOURCE.read_text(encoding="utf-8")
     if MARKER not in source:
-        if TARGET.is_file() and MARKER in TARGET.read_text():
+        if TARGET.is_file() and MARKER in TARGET.read_text(encoding="utf-8"):
             return
         raise SystemExit("LevelAccess implementation not found")
     if source.count(MARKER) != 1 or TARGET.exists():
@@ -26,8 +26,8 @@ def main():
     start = source.index(MARKER)
     end = source.index("\n}\n", start) + len("\n}\n")
     block = source[start:end]
-    TARGET.write_text(block)
-    SOURCE.write_text(source[:start] + source[end:])
+    TARGET.write_text(block, encoding="utf-8")
+    SOURCE.write_text(source[:start] + source[end:], encoding="utf-8")
 
 
 if __name__ == "__main__":
