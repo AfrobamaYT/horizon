@@ -4,9 +4,11 @@
 //! its feet and turned with its body, so a mod draws a model of its own with
 //! the helpers block entities draw with (`native_draw_cube`,
 //! `native_draw_quad`, `native_draw_block`, `native_draw_item`). A player
-//! has `native_player_submit` (`RenderPlayerEvent.Pre`), and every mob and
-//! player in view gets `native_mob_layer` after its vanilla model
-//! (`EntityRenderersEvent.AddLayers`), in the same frame.
+//! has `native_player_submit` (`RenderPlayerEvent.Pre`). After its vanilla
+//! model and layers, in the same frame, a mob or player in view gets the layers
+//! mods added to its type or player model (`register_entity_layers`,
+//! `EntityRenderersEvent.AddLayers`), then `native_mob_layer`
+//! (`RenderLivingEvent.Post`).
 pub use mod_api::game::{MobRender, PlayerRender};
 
 use super::{Game, native_block_entity_draw::BlockEntityDraw};
@@ -102,11 +104,17 @@ impl Game<'_> {
         self.native_player_render_listened(&mut listened);
         listened
     }
-    /// `native_mob_layer` for `mob` (`who` set for a player): what a mod adds
-    /// is kept, drawn after the vanilla model and its layers. `parts` are the
-    /// humanoid parts as the vanilla draw posed them this frame, kept by it.
+    /// Whether the draw keeps a humanoid model's posed parts for the mods'
+    /// layers this frame: while a mod listens to `mob_layer` or added a layer.
+    pub(super) fn mod_layer_parts_wanted(&self) -> bool {
+        self.mob_render_listened() || super::native_entity_layers::any_layer()
+    }
+    /// The mods' layers over `mob` (`who` set for a player), drawn after the
+    /// vanilla model and its layers: the layers added to its type or player
+    /// model (`register_entity_layers`), then `native_mob_layer`. `parts` are
+    /// the humanoid parts as the vanilla draw posed them this frame, kept by it.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn mod_mob_layer_geometry(
+    pub(super) fn mod_layer_geometry(
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
@@ -116,6 +124,10 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
+        if let Some(layers) = super::native_entity_layers::layers_of(mob) {
+            let parts = parts.as_ref();
+            self.registered_layer_geometry(mob, &layers, parts, partial, camera, light, out);
+        }
         // Every mob in view each frame: only when a mod listens.
         if !self.mob_render_listened() {
             return;

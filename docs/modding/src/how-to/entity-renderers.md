@@ -78,5 +78,6 @@ mods' thrown types read it: a `data/<id>/horizon/entity_type/<name>.json` with t
 `minecraft:snowball` template ([content mods](content-mods.md)) draws its renderer's geometry instead
 of its flying item, and a thrown type with no renderer keeps its item. A registration for a type whose
 family does not read the table yet (a boat, a display, a vanilla projectile, a mob) is kept silently,
-and the type keeps its own drawing until its family does. Those families, the extra layers on living
-renderers (`AddLayers`) and a mod's general entity types follow #860; they register the same way.
+and the type keeps its own drawing until its family does. Those families and a mod's general entity
+types follow #860; they register the same way. To draw over a living renderer instead of replacing it,
+add a layer ([entity layers](entity-layers.md)).

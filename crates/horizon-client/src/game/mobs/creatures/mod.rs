@@ -7891,7 +7891,7 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         self.rendered_mobs.set(0);
-        let (skinning, listened) = (self.skinning(), self.mob_render_listened());
+        let (skinning, listened) = (self.skinning(), self.mod_layer_parts_wanted());
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -8160,8 +8160,8 @@ impl Game<'_> {
                 // Held items join the GPU path's draws, their silhouette too.
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
-                // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-                self.mod_mob_layer_geometry(mob, who, parts, alpha as f32, camera, packed, out);
+                // Mods' layers (`register_entity_layers`, `native_mob_layer`), over vanilla's.
+                self.mod_layer_geometry(mob, who, parts, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);

@@ -3,8 +3,9 @@
 
 pub trait Hooks {
     /// A layer on every mob and player in view, once a frame after its
-    /// vanilla model and layers (`EntityRenderersEvent.AddLayers`, with
-    /// `RenderLivingEvent.Post` and `RenderPlayerEvent.Post`): add geometry
+    /// vanilla model and layers (`RenderLivingEvent.Post` and
+    /// `RenderPlayerEvent.Post`; a layer of one type's renderer is
+    /// `register_entity_layers`): add geometry
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
@@ -17,7 +18,7 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "EntityRenderersEvent.AddLayers",
+        neoforge = ["RenderLivingEvent.Post", "RenderPlayerEvent.Post"],
         cancellable = false
     )]
     fn mob_layer();
