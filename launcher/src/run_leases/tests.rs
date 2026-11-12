@@ -138,6 +138,8 @@ fn routed_lifetime(stop: bool) {
             .env("ROUTING_ROOT", &data)
             .env("ROUTING_MODE", "launcher")
             .env("ROUTING_STOP", if stop { "1" } else { "0" })
+            // Keep actor failures visible in CI rather than only timing out on its marker.
+            .env("RUST_BACKTRACE", "1")
             .env("HORIZON_LAUNCHER_HOME", &data)
             .env("HORIZON_HOME", &home)
             .env("XDG_DATA_HOME", data.join("xdg-data"))
@@ -148,7 +150,7 @@ fn routed_lifetime(stop: bool) {
             .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
             .env("HORIZON_NO_AUDIO", "1")
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::inherit())
             .spawn()
             .unwrap(),
     );

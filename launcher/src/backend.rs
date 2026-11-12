@@ -6809,7 +6809,7 @@ pub fn {f}("
             let app = dir.join("Horizon.app");
             fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
             fs::create_dir_all(app.join("Contents/Resources")).unwrap();
-            let bin = app.join("Contents/MacOS/horizon-launcher");
+            let bin = app.join("Contents/MacOS").join(crate::identity::EXECUTABLE);
             fs::copy("/usr/bin/true", &bin).unwrap();
             fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
             fs::write(app.join("Contents/Resources/version"), version).unwrap();
@@ -6818,7 +6818,8 @@ pub fn {f}("
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
                  <key>CFBundleExecutable</key><string>horizon-launcher</string>\
                  <key>CFBundleIdentifier</key><string>dev.horizon.test</string>\
-                 <key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n",
+                 <key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n"
+                    .replace("horizon-launcher", crate::identity::EXECUTABLE),
             )
             .unwrap();
             let signed = Command::new("codesign")
@@ -6844,7 +6845,9 @@ pub fn {f}("
         replace_bundle(&new, &installed).unwrap();
         let version = fs::read_to_string(installed.join("Contents/Resources/version")).unwrap();
         assert_eq!(version, "2.0.0");
-        let bin = installed.join("Contents/MacOS/horizon-launcher");
+        let bin = installed
+            .join("Contents/MacOS")
+            .join(crate::identity::EXECUTABLE);
         assert!(
             Command::new(&bin).status().unwrap().success(),
             "still executable"

@@ -200,11 +200,20 @@ fn creator_flags_remain_cloexec_until_child_callback() {
     let root = tempfile::tempdir().unwrap();
     let trees = [directory(&root.path().join("tree"))];
     let claims = ChildLeases::acquire(&root.path().join("data"), &trees).unwrap();
-    // SAFETY: sysconf/fcntl only query this process. Snapshot all slots, including vacant
-    // ones later used for transfer duplicates; ignore pre-existing inherited non-CLOEXEC fds.
-    let maximum = i32::try_from(unsafe { libc::sysconf(libc::_SC_OPEN_MAX) }).unwrap();
-    let flags: Vec<_> = (3..maximum)
-        .map(|fd| (fd, unsafe { libc::fcntl(fd, libc::F_GETFD) }))
+    use std::os::fd::AsRawFd;
+    // Snapshot the owned lease descriptors, which stay live until spawn returns.
+    // Vacant slots can become Command's internal non-CLOEXEC error pipe on macOS;
+    // other test threads can also reuse unowned slots between snapshot and fork.
+    let flags: Vec<_> = claims
+        .files()
+        .iter()
+        .map(|file| {
+            let fd = file.as_raw_fd();
+            // SAFETY: the claim owns this live descriptor.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert!(flags >= 0 && flags & libc::FD_CLOEXEC != 0);
+            (fd, flags)
+        })
         .collect();
     let mut command = Command::new("/bin/true");
     // This callback precedes the transfer callback and sees the fork's untouched flags.

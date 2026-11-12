@@ -199,6 +199,11 @@ jobs:
           done
           echo "HORIZON_LAUNCHER_NO_SELF_UPDATE=1" >> "$GITHUB_ENV"
           echo "HORIZON_NO_AUDIO=1" >> "$GITHUB_ENV"
+          # The default macOS TMPDIR traverses the /var symlink. Lease fixtures
+          # require physical paths because their no-follow boundary rejects symlinks.
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            echo "TMPDIR=$(cd "$RUNNER_TEMP" && pwd -P)/" >> "$GITHUB_ENV"
+          fi
       # Every test target (the library, the binary, tests/), on each system the launcher ships for.
       - run: cargo test --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
       - run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
