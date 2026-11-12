@@ -47,3 +47,7 @@ Completed compile-only `cargo check --workspace --all-targets` with zero warning
 The complete first-head verify log had one failing test: `game::lightning::tests::a_baby_pig_hit_by_lightning_becomes_a_baby_zombified_piglin`, at its restored persistence assertion. The adaptation called generic `conversion::single`, which intentionally only copies persistence, omitting the species-specific `convert_to` completion that already makes lightning-converted pigs persistent. Share that existing weapon/persistence completion with the fixture as `conversion::pig_thunder_hit`; retain every age, yaw and persistence assertion and preserve production RNG order. This is a fixture adaptation correction, not a newly introduced runtime lightning defect.
 
 Also repair the fox needless borrow and two projectile comment/documentation errors. The precision-sensitive HDR endpoint dither test now returns early for `DeviceType::Cpu` with an explicit skip message; neither shader nor tolerance changes. No local compile, clippy or tests for this CI repair; touched Rust formatted.
+
+## Rollup 48 main refresh
+
+Merged main `a6fd1291e15b7cf889eb310deb79492ded2ad267` once after the first CI repair. The merge was clean; the prior head gate was still running, not all green. Rustfmt on the two auto-merged Rust files made no changes. Compile-only `cargo check --workspace --all-targets` passed with zero warnings on the integrated tree. Main CI files remain unchanged; the size baseline was refreshed against the new main. No tests or clippy ran locally.

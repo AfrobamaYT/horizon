@@ -4,4 +4,4 @@
 crates/horizon-client/src/game.rs 17904
 crates/horizon-client/src/game/mobs/creatures/mod.rs 9049
 crates/horizon-client/src/mobs.rs 5386
-crates/horizon-items/src/items.rs 3038
+crates/horizon-items/src/items.rs 3033
