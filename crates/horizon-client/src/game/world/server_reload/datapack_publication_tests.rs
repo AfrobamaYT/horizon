@@ -219,7 +219,7 @@ fn refused_reload_names_the_pack_and_keeps_the_old_generation() {
         &root.join("datapacks.json"),
         r#"{"enabled":["vanilla","file/override"],"disabled":[]}"#,
     );
-    mod_api::testing::with_mods(
+    mod_platform::testing::with_mods(
         vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
         || {
             with_game(|game| {

@@ -42,7 +42,7 @@ mod tests {
             Box::new(Lookup(heard.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let _phase =
                     mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
