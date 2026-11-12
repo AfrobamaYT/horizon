@@ -8,6 +8,7 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
+mod fill;
 #[path = "loot/tags.rs"]
 mod loot_tags;
 use horizon_core::random::{LegacyRandom, RandomSource};
@@ -1182,53 +1183,6 @@ impl LootData {
                 items.push(copy);
             }
         }
-    }
-    /// LootTable.fill into an empty container of `slots` slots with
-    /// `RandomSource.create(seed)`; `biome` is the container's biome for
-    /// location checks (None: no origin, checks fail).
-    pub fn fill(
-        &self,
-        table: &str,
-        seed: i64,
-        slots: usize,
-        biome: Option<&str>,
-    ) -> Vec<Option<LootStack>> {
-        self.fill_with(table, &mut LegacyRandom::new(seed), slots, biome)
-    }
-    /// LootTable.fill drawing from `random` (a seeded random or the table's
-    /// random sequence), which is advanced.
-    pub fn fill_with<R: RandomSource + Clone>(
-        &self,
-        table: &str,
-        random: &mut R,
-        slots: usize,
-        biome: Option<&str>,
-    ) -> Vec<Option<LootStack>> {
-        let mut out = vec![None; slots];
-        let Some(json) = self.tables.get(table) else {
-            return out;
-        };
-        let mut c = Context {
-            data: self,
-            random: random.clone(),
-            biome,
-            visited: Vec::new(),
-            luck: 0.0,
-            open_water: None,
-            entity: None,
-            enchanted_level: None,
-        };
-        let mut items = Vec::new();
-        c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
-        *random = c.random;
-        let mut available: Vec<usize> = (0..slots).collect();
-        shuffle(&mut available, random);
-        shuffle_and_split(&mut items, available.len(), random);
-        for stack in items {
-            let Some(slot) = available.pop() else { break };
-            out[slot] = (!stack.is_empty()).then_some(stack);
-        }
-        out
     }
 }
 
@@ -3765,3 +3719,7 @@ mod custom_data_predicate_tests {
         assert_eq!(doubled(None), ["light_gray"]);
     }
 }
+
+#[cfg(test)]
+#[path = "loot_fill_tests.rs"]
+mod fill_tests;
