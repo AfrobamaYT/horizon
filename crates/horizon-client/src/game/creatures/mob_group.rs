@@ -447,7 +447,7 @@ impl<M: MobSlot> Group<M> {
         self.keep.push(kept);
         // ServerLevel ticks entities one after another: the ones
         // after this mob see it as it is now.
-        self.snapshot[i] = seen(m, shared.uuid);
+        self.snapshot[i] = seen(m, shared.uuid, shared.items);
         self.snapshot[i].alive &= kept;
         self.grid.update(i, self.snapshot[i].bounds);
         horizon_client::mobs::apply_brain_events(&mut self.mobs, &mut self.events, from);

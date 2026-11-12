@@ -131,7 +131,7 @@ impl Game<'_> {
         let creaking = self.res.mob_types().get("minecraft:creaking").cloned();
         let player_uuid = self.level.player_uuid;
         let snapshot: Vec<_> = if others {
-            mobs.iter().map(|m| seen(m, player_uuid)).collect()
+            mobs.iter().map(|m| seen(m, player_uuid, items)).collect()
         } else {
             Vec::new()
         };

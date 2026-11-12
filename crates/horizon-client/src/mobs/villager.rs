@@ -554,15 +554,15 @@ impl Ext {
     pub fn food_in_inventory(&self) -> i32 {
         self.inventory
             .iter()
-            .map(|s| food_points(&s.item) * s.count as i32)
+            .map(|s| food_points(items, &s.item) * s.count as i32)
             .sum()
     }
     /// `hasExcessFood` and `wantsMoreFood`.
     pub fn has_excess_food(&self) -> bool {
-        self.food_in_inventory() >= 24
+        self.food_in_inventory(items) >= 24
     }
     pub fn wants_more_food(&self) -> bool {
-        self.food_in_inventory() < 12
+        self.food_in_inventory(items) < 12
     }
     fn hungry(&self) -> bool {
         self.food_level < 12
@@ -572,7 +572,7 @@ impl Ext {
         if self.hungry() {
             let mut slot = 0;
             while slot < self.inventory.len() && self.hungry() {
-                let points = food_points(&self.inventory[slot].item);
+                let points = food_points(items, &self.inventory[slot].item);
                 if points > 0 {
                     while self.inventory[slot].count > 0 && self.hungry() {
                         self.food_level += points;
@@ -741,7 +741,7 @@ pub fn seen(m: &Mob) -> Seen {
         .map(|slot| m.extra.slot_stack(slot).map(|s| s.item.clone())),
         gossips: e.map(|e| e.gossips.clone()).unwrap_or_default(),
         last_gossip_time: e.map_or(0, |e| e.last_gossip_time),
-        food_points: e.map_or(0, Ext::food_in_inventory),
+        food_points: e.map_or(0, |e| e.food_in_inventory(items)),
         interaction_target,
         path_nodes,
         last_slept: last_slept.or(e.and_then(|e| e.last_slept)),
@@ -783,13 +783,13 @@ pub fn meet(
     }
     // Surplus food goes to a hungry neighbour (farmers hand it to anyone).
     let farmer = is_farmer(&mobs[a]);
-    let wants_more = ext(&mobs[b]).is_none_or(Ext::wants_more_food);
-    let excess = ext(&mobs[a]).is_some_and(Ext::has_excess_food);
+    let wants_more = ext(&mobs[b]).is_none_or(|e| e.wants_more_food(items));
+    let excess = ext(&mobs[a]).is_some_and(|e| e.has_excess_food(items));
     let mut thrown = Vec::new();
     if excess
         && (farmer || wants_more)
         && let Some(s) =
-            ext_mut(&mut mobs[a]).take_half_stack(|s| food_points(&s.item) > 0, &max_stack)
+            ext_mut(&mut mobs[a]).take_half_stack(|s| food_points(items, &s.item) > 0, &max_stack)
     {
         thrown.push(s);
     }
@@ -955,7 +955,7 @@ pub fn can_breed(m: &Mob) -> bool {
     m.species() == Species::Villager
         && m.extra.age == 0
         && !sleeping(m)
-        && ext(m).map_or(0, |e| e.food_level + e.food_in_inventory()) >= 12
+        && ext(m).map_or(0, |e| e.food_level + e.food_in_inventory(items)) >= 12
 }
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
@@ -1594,25 +1594,25 @@ mod tests {
             inventory: vec![stack("minecraft:bread", 3), stack("minecraft:carrot", 5)],
             ..Default::default()
         };
-        assert_eq!(e.food_in_inventory(), 17);
+        assert_eq!(e.food_in_inventory(items), 17);
         // Hungry below 12: three breads fill it exactly, then 12 digest away.
-        e.eat_and_digest();
+        e.eat_and_digest(items);
         assert_eq!(e.food_level, 0);
         assert_eq!(e.inventory.len(), 1);
         assert_eq!(e.inventory[0].count, 5);
         // Five carrots are not enough to be full again, and are all eaten.
-        e.eat_and_digest();
+        e.eat_and_digest(items);
         assert_eq!(e.food_level, 5 - 12);
         assert!(e.inventory.is_empty());
     }
     #[test]
     fn willingness_to_breed_needs_twelve_food_points() {
         let mut e = Ext::default();
-        assert!(e.wants_more_food() && !e.has_excess_food());
+        assert!(e.wants_more_food(items) && !e.has_excess_food(items));
         e.inventory.push(stack("minecraft:bread", 6));
-        assert!(e.has_excess_food() && !e.wants_more_food());
+        assert!(e.has_excess_food(items) && !e.wants_more_food(items));
         e.food_level = -5;
-        assert_eq!(e.food_level + e.food_in_inventory(), 19);
+        assert_eq!(e.food_level + e.food_in_inventory(items), 19);
     }
     #[test]
     fn the_inventory_has_eight_stacking_slots() {
@@ -1694,8 +1694,8 @@ mod tests {
     }
     #[test]
     fn villager_food_values() {
-        assert_eq!(food_points("minecraft:bread"), 4);
-        assert_eq!(food_points("minecraft:beetroot"), 1);
-        assert_eq!(food_points("minecraft:apple"), 0);
+        assert_eq!(food_points(items, "minecraft:bread"), 4);
+        assert_eq!(food_points(items, "minecraft:beetroot"), 1);
+        assert_eq!(food_points(items, "minecraft:apple"), 0);
     }
 }

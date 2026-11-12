@@ -658,7 +658,7 @@ mod tests {
     }
 
     fn villager_at(id: u32, at: Vec3) -> crate::mobs::Seen {
-        mob(id, Species::Villager, at).seen(None)
+        mob(id, Species::Villager, at).seen(None, &crate::items::Items::empty())
     }
 
     fn pick(w: &MobWorld) -> Option<u32> {
@@ -953,7 +953,7 @@ mod tests {
             let mut kind = (*m.kind).clone();
             kind.category = "monster".into();
             m.kind = Arc::new(kind);
-            golem_prey(&m.seen(None))
+            golem_prey(&m.seen(None, &crate::items::Items::empty()))
         };
         assert!(prey(Species::Zombie));
         assert!(!prey(Species::Creeper));
@@ -968,7 +968,7 @@ mod tests {
     fn a_creeper_that_hurts_an_iron_golem_is_never_fought_back() {
         let creeper = mob(2, Species::Creeper, Vec3::new(1.5, 64.0, 0.5));
         let zombie = mob(3, Species::Zombie, Vec3::new(1.5, 64.0, 0.5));
-        with_test_world(&[creeper.seen(None), zombie.seen(None)], |w, _| {
+        with_test_world(&[creeper.seen(None, &crate::items::Items::empty()), zombie.seen(None, &crate::items::Items::empty())], |w, _| {
             let mut golem = mob(1, Species::IronGolem, Vec3::new(0.5, 64.0, 0.5));
             let mut goal = HurtByTarget::new();
             let mut events = Vec::new();
@@ -1067,7 +1067,7 @@ mod created_golem_tests {
                 Vec3::new(0.5, 64.0, 2.5),
                 0.0,
             );
-            out = Some((golem(1, true), golem(2, false), zombie.seen(None)));
+            out = Some((golem(1, true), golem(2, false), zombie.seen(None, &crate::items::Items::empty())));
         });
         out
     }

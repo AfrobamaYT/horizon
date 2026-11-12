@@ -28,7 +28,7 @@ impl Game<'_> {
             m.on_climbable = climbing;
         }
         snapshot.extend(par_map(&self.mobs, MIN_MOBS, |part, out| {
-            out.extend(part.iter().map(|m| super::seen(m, player)));
+            out.extend(part.iter().map(|m| super::seen(m, player, items)));
         }));
     }
 }

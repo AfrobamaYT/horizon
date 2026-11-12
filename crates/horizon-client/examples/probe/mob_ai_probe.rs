@@ -425,7 +425,7 @@ fn villager_events(
                 let (Some(a), Some(b)) = (index(mobs, parent), index(mobs, partner)) else {
                     continue;
                 };
-                villager::ext_mut(&mut mobs[b]).eat_and_digest();
+                villager::ext_mut(&mut mobs[b]).eat_and_digest(items);
                 let Some((bed, variant)) = child else {
                     continue;
                 };
@@ -454,7 +454,7 @@ fn villager_events(
 const PLAYER_UUID: [i32; 4] = [0, 0x1234, 0, 0x5678];
 
 fn seen(m: &Mob) -> Seen {
-    m.seen(Some(PLAYER_UUID))
+    m.seen(Some(PLAYER_UUID), items)
 }
 
 /// The probe's mobs as a creaking heart sees them: creakings it creates take
