@@ -96,9 +96,9 @@ impl Game<'_> {
             // within 32 blocks (the server thread's window is one of them).
             self.landing_dust(below, Vec3::new(dust[0], dust[1], dust[2]), 30, 0.0);
             if !self.mobs[i].silent && self.mobs[i].age.is_multiple_of(10) {
-                let hit = self
-                    .block_sound_type(ground, below, None, mod_api::BlockSoundCause::Hit)
-                    .hit;
+                let sniffer = Some((self.mobs[i].id, self.mobs[i].kind.id.as_str()));
+                let dig = mod_api::BlockSoundCause::Dig;
+                let hit = self.block_sound_type(ground, below, sniffer, dig).hit;
                 self.audio.play(&hit, Some(at), 0.5, 0.5);
             }
         }

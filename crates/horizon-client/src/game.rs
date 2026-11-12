@@ -990,10 +990,9 @@ impl LevelAccess for GameLevel<'_> {
         &self,
         pos: BlockPos,
         state: BlockStateId,
-        by_player: bool,
         sounds: Arc<horizon_world::level::data::Sounds>,
     ) -> Arc<horizon_world::level::data::Sounds> {
-        self.part_place_sound_type(pos, state, by_player, sounds)
+        self.part_place_sound_type(pos, state, sounds)
     }
     fn allow_hopper_pickup_item(&self, pos: BlockPos, item: &str, count: u32) -> bool {
         let mut cancel = false;

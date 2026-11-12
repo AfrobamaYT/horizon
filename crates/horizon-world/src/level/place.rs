@@ -1710,7 +1710,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         let placed = self.state(ctx.pos);
         let own = b.data(placed).sounds.clone();
-        let sounds = self.level.place_sound_type(ctx.pos, placed, true, own);
+        let sounds = self.level.place_sound_type(ctx.pos, placed, own);
         self.emit(LevelEvent::Sound {
             pos: ctx.pos,
             sound: sounds.place.clone(),

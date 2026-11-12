@@ -372,7 +372,7 @@ impl Game<'_> {
             return;
         }
         if play_sound {
-            let sounds = self.block_sound_type(pos, state, None, mod_api::BlockSoundCause::Hit);
+            let sounds = self.res.facts().get(state).sounds.clone();
             // Each guest plays it from the level event itself.
             self.audio.play_unshared(
                 &sounds.hit,

@@ -61,7 +61,7 @@ fn playable(sound: &BlockSoundType) -> bool {
 impl Game<'_> {
     /// The sound type of `state` at `pos` for `cause` (`IBlockExtension.getSoundType`), as the
     /// block's parts answer on this side; `entity` is the id and type of the entity stepping,
-    /// landing or placing.
+    /// landing, placing or digging, and None for a break or a placement by no entity.
     pub(in crate::game) fn block_sound_type(
         &self,
         [x, y, z]: [i32; 3],
@@ -108,19 +108,20 @@ impl Game<'_> {
 
 impl GameLevel<'_> {
     /// `LevelAccess::place_sound_type`: the state's own `sounds` unless a part on its block
-    /// answers another, asked with the acting player when `by_player`.
+    /// answers another, asked with the acting player, or none when no player places it (a
+    /// dispenser).
     pub(super) fn part_place_sound_type(
         &self,
         pos: BlockPos,
         state: BlockStateId,
-        by_player: bool,
         sounds: Arc<Sounds>,
     ) -> Arc<Sounds> {
         if !block_state::block_listens(mod_api::HookId::SoundType, state) {
             return sounds;
         }
-        let player = self.native_player_entity.filter(|_| by_player);
-        let entity = player.map(|id| (id as u32, "minecraft:player"));
+        let entity = self
+            .native_player_entity
+            .map(|id| (id as u32, "minecraft:player"));
         let own = horizon_client::block_sounds::own(&self.facts.get(state).sounds);
         let mut answer = own.clone();
         horizon_client::block_sounds::native_sound_type(
@@ -147,17 +148,18 @@ impl GameLevel<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
-    use horizon_core::position::BlockPos;
+    use horizon_client::mobs::{Mob, MobEvent, equine};
+    use horizon_core::{geometry::Vec3, position::BlockPos};
     use horizon_world::level::LevelAccess;
-    use mod_api::BlockSoundCause::{Break, Fall, Hit, Place, Step};
+    use mod_api::BlockSoundCause::{Break, Dig, Fall, Place, Step};
     use std::sync::Arc;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_block_part_answers_the_sound_type_a_block_plays() {
         // The fixture's parts: glass answers `mymod:block.x.*` at volume 2.0 and pitch 1.5 to
-        // every cause, white wool the same to a player only, and red and blue wool a NaN volume
-        // and an event with no namespace.
+        // every cause, white wool the same to a player only, red and blue wool a NaN volume and
+        // an event with no namespace, and a snow layer as glass but only when asked at y 64.
         mod_api::__private::part_tests::sound_type_game_thread();
         // The client library asks the mods through the executable's callbacks.
         crate::entry::install_client_hooks();
@@ -165,6 +167,7 @@ mod tests {
             let registry = game.pack.assets.registry;
             let player = Some((7, "minecraft:player"));
             let creeper = Some((8, "minecraft:creeper"));
+            let sniffer = Some((9, "minecraft:sniffer"));
             let sound = |game: &crate::game::Game<'_>, block: &str, entity, cause| {
                 let state = registry.default_state(block).unwrap();
                 let sound = game.block_sound_type([5, 64, 5], state, entity, cause);
@@ -199,7 +202,10 @@ mod tests {
                 sound(game, "minecraft:glass", None, Break),
                 answered("break")
             );
-            assert_eq!(sound(game, "minecraft:glass", None, Hit), answered("hit"));
+            assert_eq!(
+                sound(game, "minecraft:glass", sniffer, Dig),
+                answered("hit")
+            );
             // A part answering for a player only.
             assert_eq!(
                 sound(game, "minecraft:white_wool", player, Step),
@@ -222,28 +228,54 @@ mod tests {
                 sound(game, "minecraft:blue_wool", creeper, Step),
                 wool("step")
             );
-            // The server's placement asks with the acting player (`BlockItem.place`), and
-            // sculk's growth with none.
+            // The server's placement (`BlockItem.place`) asks with the acting player, and with
+            // none when nothing places it (a dispenser).
             let glass = registry.default_state("minecraft:glass").unwrap();
             let white_wool = registry.default_state("minecraft:white_wool").unwrap();
-            game.lan_acting_entity = Some(7);
-            let placed = game.with_level(|behaviours, level, _| {
-                // None when the level's own sound type is kept.
-                let place = |state, by_player| {
-                    let own = Arc::clone(&behaviours.data(state).sounds);
-                    let pos = BlockPos::new(5, 64, 5);
-                    let sounds = level.place_sound_type(pos, state, by_player, Arc::clone(&own));
-                    (!Arc::ptr_eq(&sounds, &own))
-                        .then(|| (sounds.place.to_string(), sounds.volume, sounds.pitch))
-                };
-                [
-                    place(glass, false),
-                    place(white_wool, true),
-                    place(white_wool, false),
-                ]
-            });
-            let answered = Some(answered("place"));
-            assert_eq!(placed, [answered.clone(), answered, None]);
+            let mut placed = Vec::new();
+            for acting in [Some(7), None] {
+                game.lan_acting_entity = acting;
+                placed.extend(game.with_level(|behaviours, level, _| {
+                    // None when the level's own sound type is kept.
+                    let place = |state| {
+                        let own = Arc::clone(&behaviours.data(state).sounds);
+                        let pos = BlockPos::new(5, 64, 5);
+                        let sounds = level.place_sound_type(pos, state, Arc::clone(&own));
+                        (!Arc::ptr_eq(&sounds, &own))
+                            .then(|| (sounds.place.to_string(), sounds.volume, sounds.pitch))
+                    };
+                    [place(glass), place(white_wool)]
+                }));
+            }
+            let placement = Some(answered("place"));
+            assert_eq!(
+                placed,
+                [placement.clone(), placement.clone(), placement, None]
+            );
+            // A horse stepping on stone under a snow layer plays the snow's answer, asked at the
+            // stone's position (`AbstractHorse.playStepSound`): volume 2.0 × 0.15, pitch 1.5.
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let snow = registry.default_state("minecraft:snow").unwrap();
+            game.world.set(5, 64, 5, stone).unwrap();
+            game.world.set(5, 65, 5, snow).unwrap();
+            let kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+            let mut horse = Mob::new(12, kind, Vec3::ZERO, 0.0);
+            let mut events = Vec::new();
+            equine::play_step(
+                &mut horse,
+                &game.mob_world_base(&[]),
+                [5, 64, 5],
+                stone,
+                &mut events,
+            );
+            assert!(
+                matches!(
+                    events.as_slice(),
+                    [MobEvent::Sound("entity.horse.step", _, volume, pitch)]
+                        if *volume == 2.0 * 0.15 && *pitch == 1.5
+                ),
+                "{events:?}"
+            );
         });
     }
 }

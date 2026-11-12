@@ -1069,8 +1069,9 @@ pub enum BlockSoundCause {
     Place,
     /// It is broken (level event 2001): the break sound at `(volume + 1) / 2`, pitch × 0.8.
     Break,
-    /// It is hit while being mined: the hit sound at `(volume + 1) / 8`, pitch × 0.5.
-    Hit,
+    /// A sniffer digs it (`Sniffer.emitDiggingParticles`): the hit sound at a fixed volume 0.5
+    /// and pitch 0.5, whatever the answer's volume and pitch.
+    Dig,
 }
 
 /// A vector of doubles, as vanilla's `Vec3`.

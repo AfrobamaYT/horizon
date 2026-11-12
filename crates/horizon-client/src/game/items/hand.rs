@@ -420,8 +420,7 @@ impl Game<'_> {
                 let (pos, first) = (d.pos, (d.ticks as u32 - 1).is_multiple_of(4));
                 let state = self.world.block(pos[0], pos[1], pos[2]);
                 if first {
-                    let sounds =
-                        self.block_sound_type(pos, state, None, mod_api::BlockSoundCause::Hit);
+                    let sounds = self.res.facts().get(state).sounds.clone();
                     self.audio.play(
                         &sounds.hit,
                         Some(pos.map(|v| f64::from(v) + 0.5)),

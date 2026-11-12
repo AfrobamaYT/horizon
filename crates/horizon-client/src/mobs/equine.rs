@@ -694,13 +694,13 @@ pub fn play_step(
     ) {
         return;
     }
-    // The snow layer on the block, if any, steps for it; its parts answer.
-    let above = [pos[0], pos[1] + 1, pos[2]];
-    let above_state = w.world.block(above[0], above[1], above[2]);
-    let (pos, state) = if &*w.facts.get(above_state).name == "minecraft:snow" {
-        (above, above_state)
+    // The snow layer on the block, if any, steps for it; its parts answer, asked at the block
+    // below as NeoForge's `getSoundType(snow, level, pos, horse)` is.
+    let above = w.world.block(pos[0], pos[1] + 1, pos[2]);
+    let state = if &*w.facts.get(above).name == "minecraft:snow" {
+        above
     } else {
-        (pos, state)
+        state
     };
     let sound_type = &w.block_sound_type(m, pos, state, mod_api::BlockSoundCause::Step);
     let (volume, pitch) = (sound_type.volume, sound_type.pitch);

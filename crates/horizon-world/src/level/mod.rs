@@ -540,14 +540,12 @@ pub trait LevelAccess: BlockEntityNeighbors {
     }
     /// The sound type `state`, just placed at `pos`, plays its place sound from
     /// (`IBlockExtension.getSoundType`): `sounds`, its own, unless a mod's block part answers
-    /// another. `by_player` is true for `BlockItem.place`, which asks with the placing player,
-    /// and false for `SculkBlock.attemptUseCharge`, which asks with no entity. The default keeps
-    /// the block's own.
+    /// another (`BlockItem.place`, asked with the placing player, or none when nothing places
+    /// it, such as a dispenser). The default keeps the block's own.
     fn place_sound_type(
         &self,
         _pos: BlockPos,
         _state: BlockStateId,
-        _by_player: bool,
         sounds: Arc<data::Sounds>,
     ) -> Arc<data::Sounds> {
         sounds
