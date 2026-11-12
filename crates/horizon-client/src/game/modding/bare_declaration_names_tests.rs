@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use horizon_client::mod_content::{BLOCK_ENTITY_TYPES, accept_declared, resource_root};
 use horizon_mod_package::{Side, enabled::EnabledMods};
-use mod_api::{BlocksEvent, Hooks, Registrar};
+use mod_api::{__private::game::RegistrationContextNew, BlocksEvent, Hooks, Registrar};
 
 use crate::game::{Game, api_values::TryIntoEngine};
 
