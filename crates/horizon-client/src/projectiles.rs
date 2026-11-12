@@ -543,7 +543,7 @@ pub fn egg_chicken_variant(stack: &crate::items::ItemStack) -> u8 {
             horizon_core::nbt::Tag::String(s) => s.to_string().ok(),
             _ => None,
         });
-    // 🤖 Agent: a removed component resolves to absent, not to the item default.
+    // A removed component resolves to absent, not to the item default.
     let removed = stack
         .extra
         .as_ref()
@@ -1057,15 +1057,15 @@ impl Projectile {
         p.update_rotation();
         p
     }
-    /// `Fireball.setItem`: the item a fireball is drawn as. An empty stack
-    /// puts the default fire charge back, anything else is kept as a single
-    /// one (`copyWithCount(1)`); a kind that is no `Fireball` has no item.
     /// `ThrownEgg`'s item: what its hatchlings' variant comes from.
     pub fn set_egg_item(&mut self, stack: &crate::items::ItemStack) {
         if self.kind == ProjectileKind::Egg {
             self.egg_variant = Some(egg_chicken_variant(stack));
         }
     }
+    /// `Fireball.setItem`: the item a fireball is drawn as. An empty stack
+    /// puts the default fire charge back, anything else is kept as a single
+    /// one (`copyWithCount(1)`); a kind that is no `Fireball` has no item.
     pub fn set_item(&mut self, stack: crate::items::ItemStack) {
         if !self.kind.is_item_fireball() {
             return;

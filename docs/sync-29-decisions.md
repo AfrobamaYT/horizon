@@ -41,3 +41,9 @@ The new raw/generic consumable extraction helpers were removed instead of adding
 Supplemental historical-test sweeps restored two orb fixtures' actual NBT-loading setup and lightning conversion persistence assertions. These repairs retain the fork's stronger Air round-trip checks; they do not replace load coverage with literal construction.
 
 Completed compile-only `cargo check --workspace --all-targets` with zero warnings before the first push. Touched Rust was formatted; no tests, clippy, harness or game runs were performed. Initial errors were private animation paths, the incoming warden RNG context and stale typed fixture fields/arguments; the complete all-target pass now compiles them. Independent static consumption review has no remaining blocker after three rounds.
+
+## CI repair round
+
+The complete first-head verify log had one failing test: `game::lightning::tests::a_baby_pig_hit_by_lightning_becomes_a_baby_zombified_piglin`, at its restored persistence assertion. The adaptation called generic `conversion::single`, which intentionally only copies persistence, omitting the species-specific `convert_to` completion that already makes lightning-converted pigs persistent. Share that existing weapon/persistence completion with the fixture as `conversion::pig_thunder_hit`; retain every age, yaw and persistence assertion and preserve production RNG order. This is a fixture adaptation correction, not a newly introduced runtime lightning defect.
+
+Also repair the fox needless borrow and two projectile comment/documentation errors. The precision-sensitive HDR endpoint dither test now returns early for `DeviceType::Cpu` with an explicit skip message; neither shader nor tolerance changes. No local compile, clippy or tests for this CI repair; touched Rust formatted.

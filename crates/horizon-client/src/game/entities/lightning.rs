@@ -1270,7 +1270,9 @@ mod tests {
         };
         for (pig, baby) in [(&adult_pig, false), (&baby_pig, true)] {
             let mut zombified = Mob::new(2, Arc::new(kind.clone()), Vec3::ZERO, 0.0);
-            horizon_client::mobs::conversion::single(pig, &mut zombified, params);
+            let mut pig = pig.clone();
+            horizon_client::mobs::conversion::single(&pig, &mut zombified, params);
+            horizon_client::mobs::conversion::pig_thunder_hit(&mut pig, &mut zombified);
             assert_eq!(zombified.is_baby(), baby);
             assert_eq!(zombified.yaw, 45.0);
             assert!(zombified.persistent);

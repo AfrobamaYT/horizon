@@ -313,7 +313,7 @@ pub fn decide_consumption(m: &Mob, w: &MobWorld) -> Option<Consumption> {
         || m.no_ai
         || m.species() != Species::Fox
         || m.extra.ints[TICKS_SINCE_EATEN] <= 600
-        || !eats(w, &stack)
+        || !eats(w, stack)
         || m.ai.target.is_some()
         || !m.on_ground
         || flag(m, SLEEPING)

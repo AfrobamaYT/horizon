@@ -927,13 +927,7 @@ impl Game<'_> {
             }
             (Species::Pig, "minecraft:zombified_piglin") => {
                 let old = self.mobs.iter_mut().find(|m| m.id == from.id)?;
-                let spear = old.random.next_int_bound(20).unwrap_or(1) == 0;
-                mob.extra.set_main_hand(Some(if spear {
-                    "minecraft:golden_spear".into()
-                } else {
-                    "minecraft:golden_sword".into()
-                }));
-                mob.persistent = true;
+                horizon_client::mobs::conversion::pig_thunder_hit(old, &mut mob);
             }
             (Species::Hoglin, "minecraft:zoglin")
             | (Species::Piglin | Species::PiglinBrute, "minecraft:zombified_piglin") => {
