@@ -30,6 +30,7 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
         return Ok(bin);
     }
     progress(Step::Tool);
+    let started = std::time::Instant::now();
     let partial = dir.join(".source");
     let top = super::unpack_archive(
         &format!("{}/{MIXINS_REV}", horizon_addresses::HORIZON_MIXINS_SOURCE),
@@ -49,6 +50,14 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
     let built = run(cmd, "Building horizon-mixins", |_| {});
     let _ = fs::remove_dir_all(&partial);
     built?;
+    // Only a build says so: a later one finds the tool and has nothing to time.
+    super::append_log(&crate::i18n::trf(
+        "horizon-mixins tool: fetched and built in {seconds} s (once per pin)",
+        &[(
+            "seconds",
+            &format!("{:.1}", started.elapsed().as_secs_f64()),
+        )],
+    ))?;
     Ok(bin)
 }
 

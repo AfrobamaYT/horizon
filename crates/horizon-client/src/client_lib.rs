@@ -2,12 +2,18 @@
 //! bindings between the validated simulation pieces and the game loop.
 #![forbid(unsafe_code)]
 extern crate self as horizon_client;
+#[cfg(test)]
+#[global_allocator]
+static TEST_ALLOCATOR: horizon_threads::allocation_probe::Allocator =
+    horizon_threads::allocation_probe::Allocator;
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
+pub mod api_text;
 pub mod arrows;
 pub mod bed_geometry;
 pub mod block_contact;
+pub mod block_sounds;
 pub mod powder_snow;
 #[cfg(test)]
 mod test_resources;
@@ -126,6 +132,7 @@ pub mod pregen;
 pub mod projectiles;
 pub mod raid;
 pub mod random_tick_sections;
+pub mod raw_payloads;
 pub mod realms;
 pub mod recipe_book;
 pub mod recipe_book_screen;

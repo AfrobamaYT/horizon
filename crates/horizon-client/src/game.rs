@@ -67,7 +67,7 @@ macro_rules! arm_points {
     () => {};
 }
 
-/// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
+/// The game's side of the injection points (#589), whose slots and listeners live above the engine.
 #[doc(hidden)]
 pub mod points {
     /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
@@ -700,7 +700,6 @@ enum GuestUse {
     /// an entity again from the view.
     Entity(Hand, InteractTarget),
 }
-
 /// The entity an interact packet names and where its client clicked it (the
 /// packet's location, measured from the entity's position): what
 /// `ServerGamePacketListenerImpl.handleInteract` takes from
@@ -808,6 +807,7 @@ struct GameLevel<'w> {
     /// `Level.isDebug`: `setBlock` changes nothing.
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
+    loop_context: &'w horizon_world::native_load_context::LoopContext,
     native_particles: &'w mut Vec<lan_particles::QueuedParticle>,
     sound_seeds: Option<&'w horizon_client::lan::hub::Hub>,
     drop_entity: Option<mod_api::EntityRef>,
@@ -991,6 +991,14 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
+    }
+    fn place_sound_type(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        sounds: Arc<horizon_world::level::data::Sounds>,
+    ) -> Arc<horizon_world::level::data::Sounds> {
+        self.part_place_sound_type(pos, state, sounds)
     }
     fn allow_hopper_pickup_item(&self, pos: BlockPos, item: &str, count: u32) -> bool {
         let mut cancel = false;
@@ -1323,20 +1331,7 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        let mut canceled = self.world.carrier_fences.holds_move(push, destroy);
-        if !canceled && self.native_authoritative {
-            let step = direction.normal();
-            self.native_piston_pre(mod_api::__private::PistonPreCall {
-                dimension: self.dimension,
-                piston,
-                direction: step,
-                extending,
-                push,
-                destroy,
-                canceled: &mut canceled,
-            });
-        }
-        !canceled
+        self.piston_move_allowed(piston, direction, extending, push, destroy)
     }
     fn observe_piston_moved(
         &self,
@@ -1346,10 +1341,7 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) {
-        if self.native_authoritative {
-            let step = direction.normal();
-            self.native_piston_post(self.dimension, piston, step, extending, push, destroy);
-        }
+        self.piston_moved(piston, direction, extending, push, destroy);
     }
     fn adjust_signal_source(&self, state: BlockStateId, vanilla: bool) -> bool {
         let mut source = vanilla;
@@ -1670,7 +1662,7 @@ impl LevelAccess for GameLevel<'_> {
         {
             return signal;
         }
-        machines::container_signal(self.world, self.behaviours, self.items, self.registry, pos)
+        machines::container_signal(self, pos)
     }
     fn item_frame_analog_output(&self, pos: BlockPos, facing: Direction) -> Option<i32> {
         let mut frames = self
@@ -1689,10 +1681,17 @@ impl LevelAccess for GameLevel<'_> {
     fn block_entity_signal(
         &self,
         pos: BlockPos,
-        _state: BlockStateId,
+        state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
-        native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
+        native_level_signals::block_entity_signal(
+            self.world,
+            self.registry,
+            self.items,
+            self.lid_openers,
+            pos,
+            state,
+        )
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
@@ -1956,6 +1955,24 @@ impl LevelAccess for GameLevel<'_> {
                 Some(BlockEntity::Mod(_))
             )
     }
+    fn adjust_piston_carries_block_entity(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<bool> {
+        self.piston_carries_block_entity(pos, state)
+    }
+    fn carry_block_entity(&mut self, from: BlockPos, to: BlockPos) {
+        self.carry_mod_block_entity(from, to);
+    }
+    fn land_block_entity(&mut self, pos: BlockPos) -> bool {
+        self.land_carried_block_entity(pos)
+    }
+    fn discard_carried_block_entity(&mut self, pos: BlockPos) {
+        self.world
+            .block_entities
+            .discard_carried(&(pos.x, pos.y, pos.z));
+    }
     /// `ShulkerBoxBlockEntity.isClosed`: the lid state the block-entity tick
     /// copied from `be_anims` (`ShulkerBoxBlock.getBlockSupportShape`).
     fn shulker_is_closed(&self, pos: BlockPos) -> Option<bool> {
@@ -2172,14 +2189,7 @@ struct PreparedParts {
     parts: Option<mod_api::Parts>,
     cauldrons: Arc<cauldron_interactions::Table>,
 }
-struct PreparedWorldReload {
-    structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns,
-    tables: Option<WorldTables>,
-    health: horizon_client::health::HealthResources,
-    parts: PreparedParts,
-    wire: Option<Arc<horizon_client::lan::data::SyncData>>,
-    datapack_registries: Option<mod_api::DatapackRegistrySet>,
-}
+use condition_reload_state::PreparedWorldReload;
 
 impl WorldTables {
     /// The registries [`WorldTables::pack_tags`] holds.
@@ -2932,6 +2942,8 @@ struct Game<'a> {
     tickets: horizon_client::ticket_levels::ChunkTickets,
     random_tick_sections: horizon_client::random_tick_sections::RandomTickSections,
     level_events: Vec<LevelEvent>,
+    /// Falling models by state and selected-model address list; cleared on pack/atlas replacement.
+    falling_vertices: RefCell<HashMap<BlockStateId, Vec<(Vec<usize>, Vec<Vertex>)>>>,
     falling: horizon_client::join_seq::JoinList<FallingBlock, false>,
     /// Blocks the server shows for a moment (`ClientboundAddTransientBlockPacket`).
     transient_blocks: transient_blocks::TransientBlocks,
@@ -3134,7 +3146,7 @@ struct Game<'a> {
     /// Native mods' config files this game loaded (game/modding/native_configs.rs).
     native_configs: native_configs::NativeConfigs,
     mod_phase: mod_api::__private::PhaseOwner,
-    /// Native mods' messages waiting (`game/modding/native_net.rs`).
+    /// Private custom-book connection and placement state.
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
     native_mod_screen: Option<String>,
@@ -3173,9 +3185,9 @@ struct Game<'a> {
     water_plane_memo: std::cell::Cell<Option<f32>>,
     /// The camera's block and the second `water_plane` last scanned at.
     water_plane_scan: std::cell::Cell<Option<([i32; 3], i64)>>,
-    /// The mobs' box reach while the boats and minecarts tick, with the mob count it was
-    /// worked out for (`vehicle_mob_reach`).
-    vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
+    /// What the boats' and minecarts' ticks know about the mobs: their box reach
+    /// (`vehicle_mob_reach`) and a grid of their boxes (`mobs_meeting`).
+    vehicle_mobs: boat_passengers::VehicleMobs,
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
@@ -3305,6 +3317,7 @@ struct Game<'a> {
     /// The last `use_hand` that ended the click did so with `FAIL`, which
     /// does not consume the action (handleUseItemOn's ANY_BLOCK_USE).
     use_failed: bool,
+    block_use_original: Vec<(Hand, Option<ItemStack>)>,
     /// Level events of this tick for the guests, with their excluded source.
     lan_events: Vec<QueuedLevelEvent>,
     /// Jukebox level events 1010 (song name) and 1011 (`None`) for the guests;
@@ -3354,8 +3367,8 @@ struct Game<'a> {
     save_after_guest_turn: bool,
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
-    /// The active player's map; a guest turn moves it from its owning record.
-    player_attachments: horizon_mod_runtime::attachments::ResidentAttachments,
+    /// Live attachments and original snapshots retained during player replacement.
+    player_state: original_player::PlayerState,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -4745,6 +4758,16 @@ impl Game<'_> {
     ) -> [f64; 3] {
         self.add_item_entity(stack, position, None, pickup_delay)
     }
+    /// The dispenser constructs default motion before replacing it with the throw.
+    pub(super) fn spawn_item_thrown(
+        &mut self,
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: [f64; 3],
+    ) {
+        let random = spill::prepare_item_random(None);
+        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random));
+    }
     fn add_item_entity(
         &mut self,
         stack: ItemStack,
@@ -5289,45 +5312,44 @@ impl Game<'_> {
                 && b.max_position().y > min[1]
                 && b.min_position().z < max[2]
                 && b.max_position().z > min[2];
-            // ItemEntity.playerTouch: no pickup delay, and the target (if any) is this player.
-            if touching && item.pickup_delay == 0 && item.target.is_none_or(|t| t == own) {
-                if game.native_pickup_refused(&item.stack) {
-                    item.pickup_delay = 10;
-                    return false;
-                }
+            // ItemEntity.playerTouch: `item_picked_up`, then vanilla's delay and target rule.
+            if touching && game.native_pickup_allowed(item, own) {
                 let before = item.stack.count;
                 let kind = item.stack.item.clone();
                 let thrower = item.thrower;
-                match game.add_stack_to_inventory(item.stack.clone()) {
-                    None => {
-                        game.award_stat("picked_up", &kind, before as i32);
-                        if let Some(thrower) = thrower {
-                            game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                        }
-                        return true;
-                    }
-                    Some(rest) => {
-                        if rest.count < before {
-                            game.award_stat("picked_up", &kind, (before - rest.count) as i32);
+                let left = match game.native_pickup_insert(&item.stack) {
+                    Some(rest) => rest,
+                    // ItemEntityPickupEvent.Post: `remaining` is all mods reach of the lifted item.
+                    None => match game.native_pickup_post(&item.stack) {
+                        None => {
+                            game.award_stat("picked_up", &kind, before as i32);
                             if let Some(thrower) = thrower {
-                                game.trigger_thrown_picked_up_by_player(&rest, thrower);
+                                game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
                             }
-                            game.add_pickup(
-                                pickups::Taken::Item(Box::new(item.clone())),
-                                pickups::Collector::Player,
-                            );
-                            // handleTakeItemEntity: the random pitch of a full pickup.
-                            let pitch = ((game.world.random.next_float()
-                                - game.world.random.next_float())
-                                * 0.7
-                                + 1.0)
-                                * 2.0;
-                            game.audio
-                                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
+                            return true;
                         }
-                        item.stack = rest;
+                        Some(raised) => raised,
+                    },
+                };
+                let taken = before.saturating_sub(left.count);
+                if taken > 0 {
+                    game.award_stat("picked_up", &kind, taken as i32);
+                    if let Some(thrower) = thrower {
+                        game.trigger_thrown_picked_up_by_player(&left, thrower);
                     }
+                    game.add_pickup(
+                        pickups::Taken::Item(Box::new(item.clone())),
+                        pickups::Collector::Player,
+                    );
+                    // handleTakeItemEntity: the random pitch of a full pickup.
+                    let pitch = ((game.world.random.next_float() - game.world.random.next_float())
+                        * 0.7
+                        + 1.0)
+                        * 2.0;
+                    game.audio
+                        .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
                 }
+                item.stack = left;
             }
             false
         }) {
@@ -5354,18 +5376,11 @@ impl Game<'_> {
             horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
         );
     }
-    /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
-    /// becomes an item entity where that item lay (`new ItemEntity(level, x,
-    /// y, z, stack)`), nudged by 0.2 less 0.1 per axis and pickable at once.
+    /// `ItemUtils.onContainerDestroyed`: spilled stacks use their own constructor
+    /// motion (0.2 up and ±0.1 sideways), leaving the level random untouched.
     fn spawn_destroyed_contents(&mut self, destroyed: Vec<(ItemStack, Vec3)>) {
         for (stack, at) in destroyed {
-            let r = &mut self.world.random;
-            let motion = [
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-            ];
-            self.spawn_item(stack, [at.x, at.y, at.z], motion, 0);
+            self.spawn_item_own(stack, [at.x, at.y, at.z], 0);
         }
     }
     /// Run vanilla block behaviour against the world through `LevelAccess`.
@@ -5568,6 +5583,7 @@ impl Game<'_> {
             native_player_entity: self.lan_acting_entity.map(|id| id as i32),
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
+            loop_context: &self.loop_context,
             native_particles: &mut self.creatures.lan_particles,
             sound_seeds: self.lan.as_ref().map(|host| &host.hub),
             drop_tool: None,
@@ -5875,21 +5891,7 @@ impl Game<'_> {
                     let state = BlockStateId(data as u32);
                     let p = [pos.x, pos.y, pos.z];
                     self.destroy_particles(p, state);
-                    if self.res.facts().is_air(state) {
-                        continue;
-                    }
-                    let sounds = self.res.facts().get(state).sounds.clone();
-                    let c = [
-                        f64::from(pos.x) + 0.5,
-                        f64::from(pos.y) + 0.5,
-                        f64::from(pos.z) + 0.5,
-                    ];
-                    self.audio.play(
-                        &sounds.break_sound,
-                        Some(c),
-                        (sounds.volume + 1.0) / 2.0,
-                        sounds.pitch * 0.8,
-                    );
+                    self.play_break_sound(p, state);
                 }
                 LevelEvent::LevelEvent {
                     id: 3006,
@@ -6677,6 +6679,13 @@ impl Game<'_> {
         }
         if on_ground {
             self.falling_block_impact(f);
+            if f.fall_distance > 0.0 {
+                self.post_landing_event(
+                    f.position,
+                    horizon_client::falling_block::bounds(f.position),
+                    false,
+                );
+            }
             f.fall_distance = 0.0;
         }
         // applyEffectsFromBlocks: WebBlock.entityInside makes it stuck
@@ -6883,11 +6892,7 @@ impl Game<'_> {
         self.input_feedback(horizon_client::input_source::Feedback::BlockBroken);
         let broken = state;
         let facts = self.res.facts().get(state).clone();
-        let state = self.crack_mined_pot(pos, state);
-        // Block.playerWillDestroy: mining their gold angers all nearby piglins.
-        if self.guarded_by_piglins(&facts.name) {
-            self.anger_piglins(false);
-        }
+        let held = self.held().cloned();
         // The block entity as it was, for what the drops copy from it.
         let key = (pos[0], pos[1], pos[2]);
         let loot_entity = if self.creative {
@@ -6896,79 +6901,25 @@ impl Game<'_> {
             self.loot_block_entity(pos, &facts.name)
         };
         if let Some(entity) = self.world.block_entities.get(&key).cloned() {
-            let name = self.world.block_names.get(&key).cloned();
-            self.pending.record(pos, &entity, &facts.name, name);
+            self.pending
+                .record_from(&self.world, pos, &entity, &facts.name);
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
-        self.creaking_heart_broken(pos, true);
         let hive = match self.world.block_entities.get(&key) {
             Some(BlockEntity::Beehive(h)) => self.hive_state(pos).map(|s| ((**h).clone(), s)),
             _ => None,
         };
-        // playerWillDestroy and Level.removeBlock through the vanilla behaviour
-        // library: the block entity's side effects (containers spill), neighbour
-        // and shape updates, and the destroy event (particles, sound).
+        let filled_hive = hive
+            .as_ref()
+            .is_some_and(|(h, (honey, _))| !h.bees.is_empty() || honey.is_some_and(|l| l > 0));
         let creative = self.creative;
-        // TripWireBlock.playerWillDestroy: shears disarm the string first (flags
-        // 260), so taking it down does not trip the hook.
-        if &*facts.name == "minecraft:tripwire"
-            && self.held().is_some_and(|s| &*s.item == "minecraft:shears")
-            && let Some(disarmed) = self.with_props(state, &[("disarmed", "true")])
-        {
-            let at = BlockPos::new(pos[0], pos[1], pos[2]);
-            self.with_level(|b, level, ticks| b.set_block(level, ticks, at, disarmed, 260));
-            self.post_block_game_event("minecraft:shear", pos, self.sculk_actor(), None);
-        }
-        if creative && storage::is_shulker_box(&facts.name) {
-            self.drop_creative_shulker(pos);
-        }
-        // BeehiveBlock.playerWillDestroy: a creative break still drops the hive
-        // with its bees and honey level.
-        if creative
-            && self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
-            && let Some((h, (honey, _))) = &hive
-            && (!h.bees.is_empty() || honey.is_some_and(|l| l > 0))
-            && let Some(stack) = self.picked_stack(pos, true)
-        {
-            let at = pos.map(f64::from);
-            self.spawn_item_own(stack, at, 10);
-        }
-        let mut correct_tool =
-            !facts.requires_tool || self.res.items().correct_for_drops(self.held(), &facts.name);
-        if !creative
-            && self
-                .res
-                .behaviours()
-                .data(state)
-                .is(horizon_world::level::classes::Class::Door)
-        {
-            self.mod_harvest_check(pos, state, &mut correct_tool);
-        }
-        let source = self
-            .lan_acting_uuid
-            .map(horizon_world::level::LevelEventPlayer);
-        let removed = self.with_level(|b, level, ticks| {
-            b.player_destroy_block(
-                level,
-                ticks,
-                BlockPos::new(pos[0], pos[1], pos[2]),
-                creative,
-                correct_tool,
-                source,
-            )
-        });
+        // The block's parts first, then playerWillDestroy and Level.removeBlock.
+        let (removed, state, harvest) =
+            self.player_destroy_block_removal(pos, state, &facts, held.as_ref(), filled_hive);
         if !creative {
+            // The stack as the removal left it: a listener may have swapped it.
             let held = self.held().cloned();
-            let mut harvest = !facts.requires_tool
-                || self
-                    .res
-                    .items()
-                    .correct_for_drops(held.as_ref(), &facts.name);
-            self.mod_harvest_check(pos, state, &mut harvest);
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);
             }
@@ -7053,15 +7004,17 @@ impl Game<'_> {
             let prevents_melting = held
                 .as_ref()
                 .is_some_and(|h| h.enchantment_level("minecraft:silk_touch") > 0);
-            self.with_level(|b, level, ticks| {
-                b.ice_destroyed_by_player(
-                    level,
-                    ticks,
-                    BlockPos::new(pos[0], pos[1], pos[2]),
-                    broken,
-                    prevents_melting,
-                );
-            });
+            if removed {
+                self.with_level(|b, level, ticks| {
+                    b.ice_destroyed_by_player(
+                        level,
+                        ticks,
+                        BlockPos::new(pos[0], pos[1], pos[2]),
+                        broken,
+                        prevents_melting,
+                    );
+                });
+            }
         }
         self.pending.clear(pos);
         self.process_level_events()?;
@@ -7273,26 +7226,8 @@ impl Game<'_> {
                     respawn_anchor::AnchorUse::Pass => anchor_passed = true,
                     respawn_anchor::AnchorUse::Other => {}
                 }
-                // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the underside passes, so the next sign chains below instead of
-                // opening the editor, unless the side has click commands to run (`shouldTryToChainAnotherHangingSign`).
-                chains_sign = hit.face == [0, -1, 0]
-                // `instanceof HangingSignItem`, independent of the item's name.
-                && held.as_ref().is_some_and(|s| {
-                    self.res.behaviours().item_binding(&s.item)
-                        .is_some_and(|i| i.kind == horizon_world::level::ItemKind::HangingSign)
-                })
-                && self
-                    .res
-                    .facts()
-                    .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-                    .has_class("CeilingHangingSignBlock")
-                && matches!(
-                    self.world
-                        .block_entities
-                        .get(&(hit.pos[0], hit.pos[1], hit.pos[2])),
-                    Some(BlockEntity::Sign(_))
-                )
-                && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
+                // Hanging signs chain on ceiling undersides and wall edges unless click commands run.
+                chains_sign = self.chains_hanging_sign(hit.pos, hit.face, held.as_ref());
             }
             if block_answer.is_none() {
                 use horizon_world::level::UseBranch::ItemOn;
@@ -10899,14 +10834,7 @@ impl Game<'_> {
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             let start = out.len();
             self.mark_motion(start, Self::MOTION_OBJECT | u64::from(f.id));
-            self.block_model_vertices(
-                f.state,
-                horizon_core::random::position_seed(f.start_pos),
-                glam::Mat4::from_translation(o),
-                packed,
-                false,
-                &mut out,
-            );
+            self.falling_model_vertices(f.state, f.start_pos, o, packed, &mut out);
             let tint = horizon_client::mobs::render::abgr(tint);
             for vertex in &mut out[start..] {
                 vertex.color = horizon_client::hud_layout::multiply(vertex.color, tint);
@@ -12403,6 +12331,7 @@ impl Game<'_> {
             _ => "east",
         };
         let registry = self.pack.assets.registry;
+        let block = world.block(pos[0], pos[1], pos[2]);
         let around = Column {
             world,
             registry,
@@ -12449,7 +12378,7 @@ impl Game<'_> {
                 ability,
                 simulated,
             });
-            self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
+            self.mod_tool_modification(stack, block, &tool, &mut state, &mut cancel);
             if cancel {
                 return None;
             }
@@ -12658,50 +12587,6 @@ impl Game<'_> {
             self.post_block_game_event("minecraft:block_change", at, None, Some(new));
         }
     }
-    pub(super) fn damage_held(&mut self, amount: u32) {
-        self.damage_held_in_slot(
-            amount,
-            horizon_core::equipment_slot::EquipmentSlot::MainHand,
-        );
-    }
-    /// Hurt the acting hand's stack through ordinary wear/criterion/break handling,
-    /// reporting its break in the caller's explicit equipment slot.
-    pub(super) fn damage_held_in_slot(
-        &mut self,
-        amount: u32,
-        break_slot: horizon_core::equipment_slot::EquipmentSlot,
-    ) {
-        let Some(stack) = self.held().cloned() else {
-            return;
-        };
-        let (updated, broken) = self.damage_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
-        if self.held() != Some(&stack) {
-            return;
-        }
-        *self.held_mut() = updated;
-        if let Some(broken) = broken {
-            self.award_stat("broken", &broken.item, 1);
-            self.player_equipment_broke(break_slot, &broken);
-        }
-    }
-    /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
-    /// one point of durability left instead of breaking.
-    fn hurt_held_without_breaking(&mut self, amount: u32) {
-        if self.creative {
-            return;
-        }
-        let Some(held) = self.held().cloned() else {
-            return;
-        };
-        let amount = self.wear(&held, amount);
-        let max = self.trident_max_damage(&held);
-        if amount == 0 || max == 0 {
-            return;
-        }
-        if let Some(stack) = self.held_mut().as_mut() {
-            stack.damage = (stack.damage + amount).min(max - 1);
-        }
-    }
     /// Block tool use: distinguish success, failure and fall-through for hand feedback.
     fn use_tool(
         &mut self,
@@ -12844,10 +12729,7 @@ impl Game<'_> {
             }
             if let Some(kind) = mob {
                 if let Some(id) = self.spawn_mob_at(kind, (target[0], target[1], target[2]), true) {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        horizon_client::entity_nbt::apply_item_components(m, stack);
-                    }
-                    self.mob_placed(id)?;
+                    self.mob_placed(id, stack)?;
                 }
                 self.post_block_game_event(
                     "minecraft:entity_place",
@@ -13928,6 +13810,7 @@ impl Game<'_> {
             None,
             self.settings.horizon.api,
             self.settings.horizon.translucent_batching,
+            self.settings.vsync,
             &self.settings.horizon,
             shader_packs::picked_pack_shape(&self.settings),
             display,
@@ -14568,7 +14451,8 @@ impl Game<'_> {
     fn save_chunks_eagerly(&mut self) {
         // No world open (`world_root` is set by `finish_open_world`): the save
         // is `Game::new`'s placeholder under the working directory.
-        if self.remote.is_some()
+        if self.world.carrier_fences.is_broken()
+            || self.remote.is_some()
             || self.world_root.as_os_str().is_empty()
             || self.agent.hold_server
             || self.clock.sprinting()
@@ -15748,11 +15632,8 @@ impl Game<'_> {
                 }
             }
         }
-        if self.lod.is_some() {
-            for &((x, _, z), _, _) in &self.world.light_edits {
-                self.lod_observe.insert((x >> 4, z >> 4));
-            }
-        }
+        self.observe_light_edits();
+        self.ask_edited_light_emission();
         if let (Some(map), Some(p), Some(lod)) = (&self.lod_blue_map, &self.player, &mut self.lod) {
             map.set_center(p.position.x.floor() as i32, p.position.z.floor() as i32);
             for change in map.take_changed() {
@@ -15812,6 +15693,7 @@ impl Game<'_> {
             log::warn!("Horizon: failed to save unloaded chunks: {e}");
         }
         self.spawn_fresh_chunks();
+        self.ask_loaded_light_emission();
         // Vanilla saves the chunk before its unload hook and drops its block entities afterwards.
         self.native_chunks_loaded();
         self.native_chunks_unloaded(&unloaded);
@@ -16070,7 +15952,7 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
-        let phase = match mod_api::__private::current_phase() {
+        let phase = match Self::mod_phase_for_construction() {
             mod_api::__private::ModPhase::Packages if cfg!(test) => {
                 mod_api::__private::ModPhase::World
             }
@@ -16434,6 +16316,7 @@ impl<'a> Game<'a> {
             tickets: Default::default(),
             random_tick_sections: Default::default(),
             level_events: Vec::new(),
+            falling_vertices: Default::default(),
             falling: Default::default(),
             transient_blocks: Default::default(),
             paintings: Default::default(),
@@ -16580,7 +16463,7 @@ impl<'a> Game<'a> {
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),
-            vehicle_mob_reach: Default::default(),
+            vehicle_mobs: Default::default(),
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
@@ -16644,6 +16527,7 @@ impl<'a> Game<'a> {
             client_targeting: Default::default(),
             guest_use: None,
             use_failed: false,
+            block_use_original: Vec::new(),
             lan_events: Vec::new(),
             lan_songs: Vec::new(),
             lan_cushion_breaks: Vec::new(),
@@ -16664,7 +16548,7 @@ impl<'a> Game<'a> {
             lan_building_boxes: Default::default(),
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
-            player_attachments: Default::default(),
+            player_state: Default::default(),
             lan_break_pos: None,
             break_collect: None,
             guest_packets: Vec::new(),
@@ -17450,7 +17334,7 @@ pub(crate) fn run_with(
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    if let Some(error) = missing_resources(&vanilla_root) {
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.
@@ -17469,7 +17353,7 @@ pub(crate) fn run_with(
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
-    api_values::install_packages(options.mods.native.packages(), &options.mods.selected);
+    api_values::install_packages(options.mods.native.packages(), &options.mods.selected)?;
     mods::install_registration_data(&vanilla_root)?;
     {
         use mod_api::__private::game::RegistrationContextNew;
@@ -17477,7 +17361,7 @@ pub(crate) fn run_with(
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
         crate::entry::initialize_code(&inventory);
     }
-    mod_points::__private::seal();
+    horizon_engine_slots::seal().expect("engine registration seals once at startup");
     arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
@@ -18117,3 +18001,102 @@ impl Game<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod destroyed_contents_tests {
+    use super::game_tests::tests::server_game;
+    use super::*;
+    use horizon_client::items::ItemStack;
+    use horizon_core::random::RandomSource;
+
+    /// The motion of each spilled stack, in the order the spill made them.
+    fn spilled_motions(game: &Game<'_>) -> Vec<[f64; 3]> {
+        game.dropped
+            .iter()
+            .map(|item| [item.velocity.x, item.velocity.y, item.velocity.z])
+            .collect()
+    }
+
+    /// `ItemUtils.onContainerDestroyed` makes each stack with
+    /// `new ItemEntity(level, x, y, z, stack)`, whose motion is 0.2 up and
+    /// ±0.1 sideways from the *item's* random (ItemEntity.java:61-66), and
+    /// draws nothing from the level's. Every destroyed container funnels here:
+    /// lava, fire and cactus in the item's environment tick, an explosion, and
+    /// the damage command.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn spilled_stacks_rise_from_their_own_randoms() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        let at = Vec3::new(8.5, 70.0, 8.5);
+        let stacks = ["minecraft:stone", "minecraft:dirt", "minecraft:glass"]
+            .into_iter()
+            .map(|id| (ItemStack::new(id, 1), at))
+            .collect();
+        let mut level = game.world.random.clone();
+        game.spawn_destroyed_contents(stacks);
+        let motions = spilled_motions(&game);
+        assert_eq!(motions.len(), 3);
+        for motion in &motions {
+            assert_eq!(motion[1], 0.2, "the four-argument constructor rises 0.2");
+            assert!((-0.1..0.1).contains(&motion[0]), "{motion:?}");
+            assert!((-0.1..0.1).contains(&motion[2]), "{motion:?}");
+        }
+        // Three stacks, three different sideways motions: each drew its own.
+        assert_ne!(motions[0], motions[1]);
+        assert_ne!(motions[1], motions[2]);
+        assert_ne!(motions[0], motions[2]);
+        // The spill leaves the level's random alone.
+        assert_eq!(game.world.random.next_double(), level.next_double());
+        assert_eq!(game.world.random.next_double(), level.next_double());
+    }
+
+    /// The damage command is one of those callers: killing a shulker box item
+    /// spills its contents with the same upward motion.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_damaged_shulker_box_spills_its_stacks_upward() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+        let feet = Vec3::new(8.5, 70.0, 8.5);
+        game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
+        game.update_chunk_tickets();
+        let boxed = horizon_client::item_data::parse_stack(
+            r#"{id:"minecraft:shulker_box",count:1,components:{"minecraft:container":[
+                {slot:0,item:{id:"minecraft:stone",count:2}},
+                {slot:4,item:{id:"minecraft:dirt",count:1}},
+                {slot:8,item:{id:"minecraft:glass",count:3}}]}}"#,
+        )
+        .unwrap()
+        .unwrap();
+        game.spawn_item(boxed, [8.5, 70.0, 8.5], [0.0; 3], 0);
+        assert_eq!(game.dropped.len(), 1);
+        assert!(game.run_command("damage @e[type=minecraft:item,limit=1] 100 minecraft:generic"));
+        let mut spilled: Vec<_> = game
+            .dropped
+            .iter()
+            .map(|item| (item.stack.item.to_string(), item.stack.count))
+            .collect();
+        spilled.sort();
+        assert_eq!(
+            spilled,
+            [
+                ("minecraft:dirt".to_owned(), 1),
+                ("minecraft:glass".to_owned(), 3),
+                ("minecraft:stone".to_owned(), 2)
+            ]
+        );
+        for item in &game.dropped {
+            assert_eq!(item.velocity.y, 0.2, "{item:?}");
+        }
+    }
+}
+#[cfg(test)]
+#[path = "game/interface/tests/sign_chain_tests.rs"]
+mod sign_chain_tests;

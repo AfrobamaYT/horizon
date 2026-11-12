@@ -768,7 +768,7 @@ impl Game<'_> {
         &self,
         camera: glam::DVec3,
         alpha: f64,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         if !self.player_model_shown() {
             return;
@@ -1015,7 +1015,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         let stack = m
             .extra
@@ -1064,7 +1064,7 @@ impl Game<'_> {
         crouching: bool,
         light: u32,
         overlay: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         // The worn stack's own `equippable`, for the chest slot, with an asset
         // (getEquipmentIfRenderable: anything else counts as nothing worn).
@@ -1158,7 +1158,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         let Some(rect) = m
             .cape
@@ -1210,7 +1210,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         if name != "deadmau5" {
             return;
@@ -1324,7 +1324,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         let sprites = &self.gui.atlas.sprites;
         let layers = [
@@ -1368,7 +1368,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         let Some(parrot) = self.res.mob_types().get("minecraft:parrot") else {
             return;
@@ -1392,7 +1392,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<mod_render::render::Vertex>,
+        out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         if !m.extra.auto_spin_attack {
             return;
@@ -1440,7 +1440,7 @@ fn entity_in_ui_shade(normal: glam::Vec3) -> f32 {
 }
 
 pub(super) fn player_preview_quads(
-    verts: Vec<mod_render::render::Vertex>,
+    verts: Vec<horizon_client_render::render_geometry::Vertex>,
     gui: glam::Mat4,
     fire: Option<(f32, f32)>,
     sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
@@ -1452,7 +1452,7 @@ pub(super) fn player_preview_quads(
 /// kept when they look away (a `NoCull` render type); their light still comes
 /// from the face's own outward normal, as the vertex normal gives it.
 pub(super) fn player_preview_quads_no_cull(
-    mut verts: Vec<mod_render::render::Vertex>,
+    mut verts: Vec<horizon_client_render::render_geometry::Vertex>,
     gui: glam::Mat4,
     fire: Option<(f32, f32)>,
     sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
@@ -1796,7 +1796,7 @@ mod preview_tests {
 
     #[test]
     fn no_cull_faces_stay_in_the_preview_when_they_look_away() {
-        use mod_render::render::Vertex;
+        use horizon_client_render::render_geometry::Vertex;
         // The wings' `armorCutoutNoCull`: a face turned from the viewer is
         // dropped by the preview's culling unless its vertices are no-cull.
         let face = |z: f32| {

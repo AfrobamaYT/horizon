@@ -614,7 +614,9 @@ impl Game<'_> {
         if self.dim.key() != level.dimension() {
             return Err(mod_api::LevelWriteError::Unavailable);
         }
-        Ok(world.loaded(pos[0], pos[2]) && world.shape.contains_y(pos[1]))
+        Ok(!self.world.carrier_fences.locks_cell(&pos)
+            && world.loaded(pos[0], pos[2])
+            && world.shape.contains_y(pos[1]))
     }
     pub(crate) fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         // A carrier transfer fence holds this cell: every mod write
@@ -1173,6 +1175,43 @@ pub(super) mod tests {
         ));
         test(&mut game);
         let _ = std::fs::remove_dir_all(saves);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn typed_uuid_and_nbt_reads_follow_the_entity_level() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let words = [7, 0, 0, 3];
+            let uuid = (7u128 << 96) | 3;
+            assert!(game.run_command(
+                "execute in minecraft:the_nether run summon cow 8.5 70 8.5 {UUID:[I;7,0,0,3],NoAI:1b}"
+            ));
+            let original = game.dim;
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let id = *game
+                .persist
+                .uuids
+                .iter()
+                .find(|(_, value)| **value == words)
+                .unwrap()
+                .0;
+            let entity = game.entity(id).unwrap();
+            assert_eq!(game.entity_uuid(entity), Some(uuid));
+            let nbt = game.entity_nbt(entity).unwrap();
+            assert_eq!(
+                nbt.get(&"NoAI".into()),
+                Some(&horizon_core::nbt::Tag::Byte(1))
+            );
+            assert!(!nbt.contains_key(&"id".into()));
+            game.enter_command_level(original).unwrap();
+            assert_eq!(game.entity_nbt(entity), None);
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(game.entity_uuid(entity), Some(uuid));
+            assert_eq!(game.entity_nbt(entity), Some(nbt));
+            game.enter_command_level(original).unwrap();
+            assert_eq!(game.dim, original);
+        });
     }
 
     #[test]

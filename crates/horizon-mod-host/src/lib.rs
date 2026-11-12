@@ -13,3 +13,6 @@ pub fn exit_if_compile_child() {
         std::process::exit(code);
     }
 }
+
+/// A typed API-point listener supplied by generated native startup.
+pub use mod_points::__private::SlotListener;

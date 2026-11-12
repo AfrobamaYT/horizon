@@ -182,12 +182,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   captured stack before consumption (count and components included). A fox's listener receives the full server
   host before its living movement and before the next mob ticks; writes to actors or the level survive the
   continuation. Changing the consumer's mouth item, position or eligibility refuses the captured effect.
-- **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
-  `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
-  leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and
-  before the new player is placed, once each, on a server. The uuid stays the same, so `player` names the old and the
-  new player alike; no player's state is swapped in, so the helpers that look a player up may find nothing. It cannot
-  stop anything.
+- **`native_player_clone(player, name, was_death, original)`**: after death (`was_death` true) or the
+  credits-showing End return (false), after copying vanilla state and attachments and before placement.
+  `player` is the replacement's UUID; `original: OriginalPlayerRef` lends read-only old state and all
+  attachments, including non-copy-on-death and unserialized values. Inventory follows death drops
+  (retained with keep-inventory or spectator) or is intact on End return. Reads expire after the hook;
+  no subscriber means no snapshot. No state is swapped in. See `Hooks::player_clone` for full API docs.
 - **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
   (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
   join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for
@@ -1297,21 +1297,6 @@ pieces.
   The tints are the biome's own at the column's top, not blended over the biome blend radius as the game draws them, so
   near a biome border they can differ from what players see by a few blocks.
 
-### Mod messages
-
-`crates/horizon-client/src/game/modding/native_net.rs`: bytes between a mod's server half and its client half, on the
-one custom payload channel `horizon:mod_net`. A vanilla client never gets them, and a vanilla server isn't sent any.
-
-- `native_net_send_to_player(player, channel, data)` on the server and `native_net_send_to_server(channel, data)` on the
-  client send one. The channel is `mod_id:name`: the id `[a-z0-9_]`, the name `[a-z0-9_./-]`, each 1 to 64 characters;
-  `minecraft` and `horizon` are the game's. The data is at most 30 000 bytes, and 32 messages a tick go each way per
-  player. Ok means accepted: a player who left doesn't get it. Sending to the server is an error until the player has
-  joined.
-- `native_net_from_client(player, channel, data)` and `native_net_from_server(channel, data)` hear them, all mods on every
-  message: check the channel. What a client sent is checked by nothing, so treat it as a player's own input.
-- A player's message reaches the server's hook in the tick after it arrives, when the helpers can reach every player;
-  a message to a player leaves at the end of the tick, from any server hook.
-
 ### Chat and commands a client mod sends
 
 `ClientHost::send_chat(message)` sends what the player could type in chat, to any server, a vanilla one included:
@@ -2221,7 +2206,7 @@ registration path.
   tick, and `native_music_layers(layers)` lists looping tracks played over it, each easing to its own volume (stems that
   grow fuller).
 
-- A server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player; Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types.
+- A server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(player, recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once the joining player exists, after admission and before their recipes are sent; `player` is a required `PlayerRef`. Reload asks once per online player, at most once per player per reload, before re-sending their recipes; with nobody online it is not asked. Configuration tags precede admission; Horizon sends their final recipes (data packs merged, load conditions held) to that Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types.
 - `level.recipe_for(host, &recipe_type, &inputs)` matches through the game's crafting, cooking, stonecutting and smithing matchers, including data-pack recipes of those vanilla types. `RecipeInput` has Crafting, Single and Smithing variants. A `RecipeMatch` carries recipe id, typed output, ordered remainders, experience and processing time. Valid non-matching input is `Ok(None)`; malformed input, invalid items and unavailable levels are typed errors. Mod-owned types return `RecipeLookupError::NotMatchable`: cache `recipes_of_type` once per load/reload and match in mod memory, with no per-tick host crossing. Dynamic custom outputs/contextual predicates stay mod-owned. Lookup does not consume inputs; cache the result until the input changes.
 
 - `native_input_key(key, action, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats (`InputEvent.Key`). key is vanilla's name for the physical key (`key.keyboard.a`; `key.keyboard.unknown` for one it doesn't name), action is `KeyAction::Press`, `Repeat` or `Release`, and modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
@@ -2294,7 +2279,7 @@ registration path.
 
 - `native_map_decorations(map, decorations)` is asked each time a map is drawn (held, in an item frame, or on the cartography table's screen) with `MapInfo` (id, centre block, scale, dimension, locked, whether it is in a frame); push `MapDecoration { sprite, x, y, rot, shown_on_frame }` (an atlas sprite, a position in half map pixels from -128 to 127, a rotation 0 to 15, and whether it shows in frames and on the screen like vanilla's markers) and it is drawn after the vanilla decorations with the same pose; a sprite the atlas lacks is left out. Nothing is saved in the map and vanilla's decorations are not passed in. This is the client half of NeoForge's `MapDecorationType`; types registered on the server and saved in map data need code-side registration.
 
-- A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `native_player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `native_player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `native_net_send_to_player`. Each start has one stop.
+- A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `native_player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `native_player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `PlayerRef::send_payload`. Each start has one stop.
 
 - An energy buffer on a mod block's block entity. `native_block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability answers it (see "A block's energy").
 
@@ -2681,7 +2666,7 @@ registration path.
 
 - A statistic about to be awarded to a server player: `native_player_stat_award(player, name, stat_type, stat, value, cancel)`, with `stat_type` such as `minecraft:mined` or `minecraft:custom`, `stat` such as `minecraft:stone` or `minecraft:walk_one_cm`, and `value` the amount added. Set `cancel` to award nothing: the count and its scoreboard criteria stay as they were.
 
-- A player's data copied to their new player: `native_player_clone(player, name, was_death)` is heard from `ServerPlayer.restoreFrom` once for each death respawn (`was_death` true) and for each exit from the End after the credits (`was_death` false), after the retained data is copied and before the new player is placed (NeoForge's `PlayerEvent.Clone`). The uuid stays the same, so `player` names both the old and the new player. It cannot change or stop anything; no player's state is swapped in.
+- A player's data copied to their replacement: `native_player_clone(player, name, was_death, original)` fires after death (`was_death` true) and the credits-showing End return (`was_death` false), after vanilla state and attachments are copied and before placement (`ServerPlayer.restoreFrom`, NeoForge's `PlayerEvent.Clone`). `player` is the replacement's UUID; `original: OriginalPlayerRef` reads all pre-copy attachments, health, experience, effects, inventory after death drops (or intact with keep-inventory and on End return), position, dimension and level only during the hook, on native and wasm. Set/remove on the original refuse; lazy reads/defaults work. No subscriber means no snapshot. Nothing swaps a player's state in.
 
 - A player loaded from the world's save: `native_player_load_from_file(player, name, directory)` is heard once for each join (the owner of an integrated server too), after the player's `.dat` is read and applied and before they are placed in a level (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`). `directory` is the world's player directory (`players/data`); a mod reads its own file there, named `<uuid>.<suffix>`. It cannot change or stop anything; no player's state is swapped in.
 
@@ -3055,9 +3040,9 @@ registration path.
   the stack is the place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place, and
   `native_on_equip` hears an equipment slot take a different item.
 
-- [mod messages](#mod-messages) between a mod's server and client halves, and hearing players and mobs on the
-  server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
-  `native_item_toss` (`ItemTossEvent`: a throw; not the items scattered when a player dies; `canceled` makes no item entity and the items are lost) and `native_item_picked_up` (`canceled` leaves the stack on the ground). They name a player by UUID.
+- Hearing players and mobs on the server for every player: `native_player_died`, `native_mob_spawned`,
+  `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
+  `native_item_toss` (`ItemTossEvent`: a throw; not the items scattered when a player dies; `canceled` makes no item entity and the items are lost) and `native_item_picked_up` (`can_pickup`: `False` leaves the stack on the ground, `True` takes it despite its pickup delay or another player's target), then `native_item_picked_up_post` (`ItemEntityPickupEvent.Post`: a copy of the stack before the pickup and the live remainder on the item entity, which a listener may set; heard only when the whole stack went in, never on a partial pickup). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
 - [Client asset reload listeners](#client-asset-reload-listeners) read a mod's pack resources with resource-pack overrides, once per reload.
