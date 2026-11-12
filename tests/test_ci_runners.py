@@ -110,7 +110,8 @@ class OwnRunnerTests(unittest.TestCase):
                 self.assertIn(FORK_GUARD, value, where)
             else:
                 self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
-            self.assertTrue(value.endswith("|| 'ubuntu-latest' }}"), where)
+            # Both labels select a GitHub-hosted Ubuntu runner when our pools are disabled.
+            self.assertRegex(value, r"\|\| 'ubuntu-(?:latest|24\.04)' \}\}$", where)
             if "checks" in pools:
                 # The desktop paused: every checks job back to GitHub, the bots stay.
                 self.assertIn("vars.SELF_HOSTED_CI != 'light'", value, where)
