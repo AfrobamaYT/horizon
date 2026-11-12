@@ -5300,36 +5300,39 @@ impl Game<'_> {
                 let before = item.stack.count;
                 let kind = item.stack.item.clone();
                 let thrower = item.thrower;
-                match game.native_pickup_insert(&item.stack) {
-                    None => {
-                        game.award_stat("picked_up", &kind, before as i32);
-                        if let Some(thrower) = thrower {
-                            game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                        }
-                        return true;
-                    }
-                    Some(rest) => {
-                        if rest.count < before {
-                            game.award_stat("picked_up", &kind, (before - rest.count) as i32);
+                let left = match game.native_pickup_insert(&item.stack) {
+                    Some(rest) => rest,
+                    // ItemEntityPickupEvent.Post: `remaining` is all mods reach of the lifted item.
+                    None => match game.native_pickup_post(&item.stack) {
+                        None => {
+                            game.award_stat("picked_up", &kind, before as i32);
                             if let Some(thrower) = thrower {
-                                game.trigger_thrown_picked_up_by_player(&rest, thrower);
+                                game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
                             }
-                            game.add_pickup(
-                                pickups::Taken::Item(Box::new(item.clone())),
-                                pickups::Collector::Player,
-                            );
-                            // handleTakeItemEntity: the random pitch of a full pickup.
-                            let pitch = ((game.world.random.next_float()
-                                - game.world.random.next_float())
-                                * 0.7
-                                + 1.0)
-                                * 2.0;
-                            game.audio
-                                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
+                            return true;
                         }
-                        item.stack = rest;
+                        Some(raised) => raised,
+                    },
+                };
+                let taken = before.saturating_sub(left.count);
+                if taken > 0 {
+                    game.award_stat("picked_up", &kind, taken as i32);
+                    if let Some(thrower) = thrower {
+                        game.trigger_thrown_picked_up_by_player(&left, thrower);
                     }
+                    game.add_pickup(
+                        pickups::Taken::Item(Box::new(item.clone())),
+                        pickups::Collector::Player,
+                    );
+                    // handleTakeItemEntity: the random pitch of a full pickup.
+                    let pitch = ((game.world.random.next_float() - game.world.random.next_float())
+                        * 0.7
+                        + 1.0)
+                        * 2.0;
+                    game.audio
+                        .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
                 }
+                item.stack = left;
             }
             false
         }) {

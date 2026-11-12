@@ -295,8 +295,11 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             PICKED_UP_POST.set(Some((
                 event.player,
                 event.original.count(),
-                event.remaining.map(|rest| rest.count()),
+                event.remaining.as_ref().map(|rest| rest.count()),
             )));
+            let mut rest = event.original.clone();
+            rest.set_count(3).unwrap();
+            *event.remaining = Some(rest);
         }
         fn game_rule_changed(
             &self,
@@ -960,7 +963,7 @@ fn wire_loopback_optional_borrowed_record() {
     }
 }
 #[test]
-fn wire_loopback_item_picked_up_post_carries_the_original_and_the_remainder() {
+fn wire_loopback_item_picked_up_post_carries_the_original_and_writes_back_the_remainder() {
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct World;
     impl mod_api::Host for World {}
@@ -975,20 +978,22 @@ fn wire_loopback_item_picked_up_post_carries_the_original_and_the_remainder() {
         corrupt: false,
     };
     let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
-    let rest = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 2).unwrap();
-    for (remaining, heard) in [(None, None), (Some(&rest), Some(2))] {
-        PICKED_UP_POST.set(None);
-        let mut event = mod_api::ItemPickedUpPostEvent {
-            player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
-            original: &original,
-            remaining,
-        };
-        module.item_picked_up_post(&mut World, &mut event);
-        assert_eq!(
-            PICKED_UP_POST.get(),
-            Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, heard))
-        );
-    }
+    let mut remaining = None;
+    let mut event = mod_api::ItemPickedUpPostEvent {
+        player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+        original: &original,
+        remaining: &mut remaining,
+    };
+    module.item_picked_up_post(&mut World, &mut event);
+    assert_eq!(
+        PICKED_UP_POST.get(),
+        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, None))
+    );
+    assert_eq!(
+        remaining.map(|rest| rest.count()),
+        Some(3),
+        "the remainder a guest sets comes back"
+    );
 }
 #[test]
 fn wire_loopback_array_of_optional_borrowed_records() {

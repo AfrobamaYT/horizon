@@ -20,33 +20,49 @@ impl Game<'_> {
         self.fire_item_picked_up(player, item, count, can_pickup);
     }
 
-    /// `player` took at least part of a ground stack into their inventory
-    /// (`ItemEntity.playerTouch`, right after `Inventory.add`). `original` is
-    /// the stack as it lay before the pickup and `remaining` what is left on
-    /// the ground, `None` when all of it was taken. It only hears: not called
-    /// when `item_picked_up` refused the pickup or the inventory took nothing.
-    /// Server-side.
+    /// `player` picked up a whole ground stack (`ItemEntity.playerTouch`,
+    /// right after `Inventory.add` took all of it). `original` is a copy of
+    /// the stack as it lay before the pickup: changing it does nothing.
+    /// `remaining` is what the item entity still holds, so it starts as
+    /// `None` (empty). Set a stack there to leave the entity on the ground
+    /// holding it: the pickup then counts only `original`'s count less its
+    /// count. Neither says how many were picked up; that is `original`'s
+    /// count less `remaining`'s. A mod that removes the item entity meanwhile
+    /// keeps it removed: no take animation, the stat and criteria still run.
+    /// Not called on a partial pickup, where some of the stack went in and
+    /// the rest stayed on the ground, nor when
+    /// `item_picked_up` refused the pickup or the inventory took nothing; a
+    /// forced `True` from `item_picked_up` changes none of this. A creative
+    /// player always takes the whole stack. Server-side.
     pub(in crate::game) fn native_item_picked_up_post(
         &mut self,
         player: u128,
         original: &ItemStack,
-        remaining: Option<&ItemStack>,
+        remaining: &mut Option<ItemStack>,
     ) {
         self.fire_item_picked_up_post(player, original, remaining);
     }
 
-    /// `Inventory.add` of the ground `stack` the acting player picks up:
-    /// returns what did not fit, after `item_picked_up_post` heard a pickup
-    /// that took anything.
+    /// `Inventory.add` of the ground `stack` the acting player picks up: what
+    /// did not fit. A player with infinite materials (creative) takes all of it.
     pub(in crate::game) fn native_pickup_insert(&mut self, stack: &ItemStack) -> Option<ItemStack> {
         let rest = self.add_stack_to_inventory(stack.clone());
-        if rest.as_ref().is_none_or(|rest| rest.count < stack.count)
-            && mod_api::__private::listened(mod_api::HookId::ItemPickedUpPost)
-        {
+        rest.filter(|_| !self.creative)
+    }
+
+    /// `item_picked_up_post` for the acting player, who took all of
+    /// `original`: the stack a mod left on the item entity, `None` when none
+    /// did or no mod listens.
+    pub(in crate::game) fn native_pickup_post(
+        &mut self,
+        original: &ItemStack,
+    ) -> Option<ItemStack> {
+        let mut remaining = None;
+        if mod_api::__private::listened(mod_api::HookId::ItemPickedUpPost) {
             let player = self.native_acting_id();
-            self.native_item_picked_up_post(player, stack, rest.as_ref());
+            self.native_item_picked_up_post(player, original, &mut remaining);
         }
-        rest
+        remaining
     }
 
     /// `item_picked_up` for the acting player touching the ground `stack`:

@@ -43,7 +43,7 @@ impl Hooks for Pickups {
     ) {
         self.2.lock().unwrap().push((
             event.original.count(),
-            event.remaining.map(|rest| rest.count()),
+            event.remaining.as_ref().map(|rest| rest.count()),
         ));
     }
 }
@@ -145,8 +145,8 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                 );
                 assert_eq!(
                     *posts.lock().unwrap(),
-                    [(1, None), (3, Some(2))],
-                    "full and partial pickups are heard with the stack before insertion, the refused one not"
+                    [(1, None)],
+                    "only the whole pickup is heard, not the partial or the refused one"
                 );
                 assert_eq!(game.inventory[0].as_ref().unwrap().count, 64);
                 assert_eq!(
