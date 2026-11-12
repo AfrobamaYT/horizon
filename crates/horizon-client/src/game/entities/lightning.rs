@@ -26,24 +26,24 @@ pub(super) struct Bolt {
     /// The entity id a server's players know it by (0 until it has one).
     pub id: u32,
     pub at: [f64; 3],
-    life: i32,
-    flashes: i32,
-    seed: i64,
+    pub(in crate::game) life: i32,
+    pub(in crate::game) flashes: i32,
+    pub(in crate::game) seed: i64,
     /// The bolt's own random (`Entity.random`): its seed, flashes, flash
     /// timing, fire spots and thunder pitch draw from it, never the level's.
-    random: LegacyRandom,
-    visual_only: bool,
+    pub(in crate::game) random: LegacyRandom,
+    pub(in crate::game) visual_only: bool,
     /// Mooshrooms and copper golems change once per bolt.
-    converted: Vec<u32>,
+    pub(in crate::game) converted: Vec<u32>,
     /// The mobs it has struck (`hitEntities`).
-    hit: Vec<u32>,
+    pub(in crate::game) hit: Vec<u32>,
     /// The dropped items in the strike box (`hitEntities` holds every entity).
-    hit_items: Vec<u32>,
+    pub(in crate::game) hit_items: Vec<u32>,
     /// Items a cushion dropped under it, spared for 20 ticks
     /// (`Cushion.dropItem`: `setInvulnerableTime(20)`).
-    spared: Vec<u32>,
+    pub(in crate::game) spared: Vec<u32>,
     /// Blocks it set on fire (`blocksSetOnFire`).
-    fires: i32,
+    pub(in crate::game) fires: i32,
     /// The player who channelled it (`LightningBolt.cause`): `Some(None)` for
     /// the host, `Some(Some(conn))` for a guest.
     pub cause: Option<Option<u32>>,
@@ -551,7 +551,7 @@ impl Game<'_> {
     /// `CHANNELED_LIGHTNING` counts them. Boats, minecarts and experience
     /// orbs are hit too (`VehicleEntity.hurtServer` adds 5 x 10 > 40 and
     /// destroys them; an orb has 5 health).
-    fn thunder_hit(&mut self, b: &mut Bolt) -> Vec<EntityView> {
+    pub(in crate::game) fn thunder_hit(&mut self, b: &mut Bolt) -> Vec<EntityView> {
         let at = b.at;
         let strike = Aabb::new(
             Vec3::new(at[0] - 3.0, at[1] - 3.0, at[2] - 3.0),
@@ -760,7 +760,7 @@ impl Game<'_> {
         };
         strike_players(self);
         self.each_guest_hit(strike_players);
-        // Dropped items burn up (ItemEntity health 5), save fire-resistant ones.
+        // Items run Entity.thunderHit, then the shared ItemEntity hurt path.
         let mut left = self.thunder_count(strike, ThunderHit::Item);
         for h in self.entity_handles_rev() {
             if left == 0 {
@@ -776,10 +776,24 @@ impl Game<'_> {
             if !self.lightning_may_strike(e.id, bolt) {
                 continue;
             }
-            let e = &self.dropped[i];
-            if !(e.stack.item.contains("netherite") || (e.age < 20 && b.spared.contains(&e.id))) {
-                self.dropped.remove(i);
+            let e = &mut self.dropped[i];
+            e.fire_ticks += 1;
+            if e.fire_ticks == 0 {
+                e.fire_ticks = 160;
             }
+            // Cushion spare stands in for vanilla's invulnerableTime window.
+            if e.age < 20 && b.spared.contains(&e.id) {
+                continue;
+            }
+            let id = e.id;
+            self.hurt_item_entity(
+                id,
+                5.0,
+                "minecraft:lightning_bolt",
+                Some(Target::Other(bolt)),
+                None,
+                Some(at),
+            );
         }
         self.native_leaves_flush();
         struck

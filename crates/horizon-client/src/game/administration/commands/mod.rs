@@ -943,7 +943,7 @@ impl Game<'_> {
         self.enter_command_level(back);
         Some(result)
     }
-    fn entity_tag_matches(&self, tag: &str, ty: &str) -> bool {
+    pub(in crate::game) fn entity_tag_matches(&self, tag: &str, ty: &str) -> bool {
         let path = self.options.resources.join(format!(
             "data/minecraft/tags/entity_type/{}.json",
             tag.trim_start_matches("minecraft:")
