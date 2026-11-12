@@ -1,4 +1,4 @@
-# Design: a mod's container items report their fluid
+# A mod's container items report their fluid
 
 This answers [#3089](https://github.com/arismoko/horizon/issues/3089). The `neoforge:fluid_container` item model
 (#2707) draws the fluid a stack holds, but only vanilla's buckets could say which one. A mod's own tank, canteen or

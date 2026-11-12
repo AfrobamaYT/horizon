@@ -82,7 +82,7 @@ not listed; a public re-export can give a private module's type a public path.
 A mixed-target dependent with a different layout is refused naming the library
 and differing type. Even matching layouts do not enable mixed native and wasm
 dependencies yet: those edges are refused explicitly. See the
-[extension design](../concepts/mod-extensions.md#layout-hash-and-versioning) for the
+[extension design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-extensions.md#layout-hash-and-versioning) for the
 complete layout contract.
 
 ## Hand-written implementations

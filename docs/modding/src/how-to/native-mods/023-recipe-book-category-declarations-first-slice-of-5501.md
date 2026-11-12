@@ -39,4 +39,4 @@ searching recipes there, and unlocking them like vanilla remain follow-up work
 for #5501; a declaration alone will not make a recipe visible.
 
 For proposed book identities and saved open/filter flags, see the
-[custom recipe-book settings design](../../concepts/recipe-book-types.md).
+[custom recipe-book settings design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/recipe-book-types.md).
