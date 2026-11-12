@@ -984,6 +984,7 @@ impl Game<'_> {
             .and_then(|r| r.session.counters.lock().unwrap().clone());
         self.profile.perf.set_connection(connection);
         let (wanted, renderer) = (self.profile.gpu, self.renderer.as_ref());
+        let entities = self.perf_entity_count() as u32;
         self.profile.perf.frame_with_gpu(
             t,
             wall_ms,
@@ -991,9 +992,15 @@ impl Game<'_> {
             gpu_ms,
             detail,
             || WorldCounts {
-                players: self.lan.as_ref().map_or(0, |h| h.hub.guests.len() as u32),
+                players: self.lan.as_ref().map_or(0, |h| {
+                    h.hub
+                        .guests
+                        .iter()
+                        .filter(|g| g.participates_online())
+                        .count() as u32
+                }),
                 chunks: self.world.chunks.len() as u32,
-                entities: self.mobs.len() as u32,
+                entities,
             },
             || gpu_readout(wanted, renderer),
         );

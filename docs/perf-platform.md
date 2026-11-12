@@ -645,7 +645,7 @@ occurs in the bytes, except the players' names, which `net` must hold.
 That is two checks. `a_capture_of_a_server_with_names_text_and_a_seed_holds_none_of_them` (in `report.rs`) has no
 connected player and is `#[ignore]`d: it needs `HORIZON_TEST_RESOURCES`, so run it with `--ignored`. IP addresses are
 covered by `tools/server_perf_e2e.py`, which joins bots named `SteveSecret` from `127.0.0.1` to a fixture server and checks
-the capture names them in `net` (build with `cargo build --profile fast -p horizon-client -p horizon-bots -p horizon-perf`, then run
+the capture names them in `net` (build with `cargo build --profile fast -p horizon-game -p horizon-bots -p horizon-perf`, then run
 `python3 tools/server_perf_e2e.py --bin-dir target/fast`). It is not in CI yet: run it by hand before merging a change to what a capture holds.
 
 Uploads (§7.3) change nothing in the file: what a shared capture holds is exactly what the local one holds. Sharing is

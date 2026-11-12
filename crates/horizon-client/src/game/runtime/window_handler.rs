@@ -1541,6 +1541,7 @@ impl Game<'_> {
                         horizon_threads::work::tick_end(cpu.as_nanos() as u64);
                         if rendered {
                             let ms = |d: Duration| d.as_secs_f32() * 1000.0;
+                            perf_times = Some((ms(cpu), r.gpu_times.last().copied()));
                             self.frame_graph.record(
                                 ms(elapsed),
                                 ms(cpu),

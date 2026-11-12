@@ -693,3 +693,19 @@ impl<R, C, S> Envelope<R, C, S> {
         self.rows.as_deref().unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wasm_mod_kind_keeps_its_reader_name() {
+        let kind = ModKindName::from(proto::ModKind::Wasm);
+        assert_eq!(kind.as_str(), "wasm");
+        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"wasm\"");
+        assert_eq!(
+            serde_json::from_str::<ModKindName>("\"wasm\"").unwrap(),
+            kind
+        );
+    }
+}

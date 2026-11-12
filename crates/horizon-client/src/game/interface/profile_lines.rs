@@ -5,6 +5,7 @@ use horizon_client::text::{
     ClickEvent, DARK_GRAY, GOLD, GRAY, InlineObject, RED, Style, Text, WHITE, YELLOW,
 };
 use std::path::Path;
+use std::sync::Arc;
 
 /// Where a message goes: the chat history, or the action bar above the hotbar.
 #[derive(Debug, PartialEq)]
@@ -52,7 +53,7 @@ fn button(label: &str, hover: Text, click: ClickEvent) -> Text {
     tr(label, &[]).with_style(&Style {
         color: Some(GOLD),
         click: Some(click),
-        hover: Some(Box::new(hover)),
+        hover: Some(Arc::new(hover)),
         ..Style::default()
     })
 }
@@ -114,7 +115,7 @@ fn link(url: &str) -> Text {
             color: Some(WHITE),
             underlined: Some(true),
             click: Some(ClickEvent::OpenUrl(url.to_owned())),
-            hover: Some(Box::new(tr("horizon.perf.link_hover", &[]))),
+            hover: Some(Arc::new(tr("horizon.perf.link_hover", &[]))),
             ..Style::default()
         },
     )
