@@ -6,6 +6,8 @@
     "watchPatterns": [
       "/crates/horizon-mod-package/**",
       "/crates/horizon-core/**",
+      "/crates/horizon-mod-api-gen/**",
+      "/crates/horizon-game-discovery/**",
       "/crates/horizon-mod-vocab/**",
       "/crates/horizon-mod-runtime/**",
       "/crates/horizon-mod-api-macros/**",

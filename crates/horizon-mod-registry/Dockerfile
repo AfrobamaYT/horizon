@@ -6,6 +6,8 @@ COPY Cargo.toml Cargo.toml
 # Every crate the registry's Cargo.lock builds from a path (tests/test_service_images.py checks the list); cargo needs
 # an optional dependency's manifest even with its feature off (horizon-shader-api).
 COPY crates/horizon-core crates/horizon-core
+COPY crates/horizon-mod-api-gen crates/horizon-mod-api-gen
+COPY crates/horizon-game-discovery crates/horizon-game-discovery
 COPY crates/horizon-mod-vocab crates/horizon-mod-vocab
 COPY crates/horizon-mod-runtime crates/horizon-mod-runtime
 COPY crates/horizon-mod-api-macros crates/horizon-mod-api-macros
