@@ -676,7 +676,7 @@ impl Game<'_> {
         }
         let mut built = Some(self.mob_death_message(m, killer));
         let kind = super::native_hooks::mob_kind(m);
-        horizon_client::living_death::native_living_death_message(m.id, &kind, &mut built);
+        self.native_living_death_message(m.id, &kind, &mut built);
         // A native mod may have changed the message, or set it to None to tell the owner nothing.
         let Some(message) = built else {
             return;
