@@ -1,7 +1,7 @@
 #![cfg(test)]
 //! `client_chunk_load` and `client_chunk_unload` through a loopback client (#3425): a chunk
 //! packet adopts a column and tells its load once the blocks are in; every route that frees a
-//! resident column tells its unload once.
+//! resident column tells its unload once, with its blocks still readable.
 use crate::game::Game;
 use crate::game::execution_role::ExecutionRole;
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_role};
@@ -12,30 +12,39 @@ use horizon_protocol::{
 use mod_api::{ClientChunkLoadEvent, ClientChunkUnloadEvent, ClientHost, Hooks};
 use std::sync::Mutex;
 
-/// What each event saw: its name, dimension, chunk and, for a load, the block id at
-/// `(48, 64, 64)` read through the client host inside the listener.
+/// What each event saw: its name, dimension, chunk and the block id at the chunk's corner
+/// `(16 x, 64, 16 z)`, read through the client host inside the listener.
 type Call = (&'static str, String, [i32; 2], Option<String>);
 static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
+
+/// The block at `chunk`'s corner at y 64, as a listener reads it.
+fn corner(host: &dyn ClientHost, dimension: &str, [x, z]: [i32; 2]) -> Option<String> {
+    host.level(dimension)
+        .and_then(|level| level.block(host, [x * 16, 64, z * 16]))
+        .and_then(mod_api::__private::block_key_id)
+        .map(str::to_owned)
+}
 
 struct Probe;
 #[mod_api::__subscriptions]
 impl Hooks for Probe {
     fn client_chunk_load(&self, host: &mut dyn ClientHost, event: &mut ClientChunkLoadEvent<'_>) {
-        let block = host
-            .level(event.dimension)
-            .and_then(|level| level.block(&*host, [48, 64, 64]))
-            .and_then(mod_api::__private::block_key_id)
-            .map(str::to_owned);
+        let block = corner(&*host, event.dimension, event.chunk);
         CALLS
             .lock()
             .unwrap()
             .push(("load", event.dimension.to_owned(), event.chunk, block));
     }
-    fn client_chunk_unload(&self, _: &mut dyn ClientHost, event: &mut ClientChunkUnloadEvent<'_>) {
+    fn client_chunk_unload(
+        &self,
+        host: &mut dyn ClientHost,
+        event: &mut ClientChunkUnloadEvent<'_>,
+    ) {
+        let block = corner(&*host, event.dimension, event.chunk);
         CALLS
             .lock()
             .unwrap()
-            .push(("unload", event.dimension.to_owned(), event.chunk, None));
+            .push(("unload", event.dimension.to_owned(), event.chunk, block));
     }
 }
 
@@ -45,8 +54,10 @@ fn take_calls() -> Vec<Call> {
 
 fn with_client(f: impl FnOnce(&mut Game<'_>)) {
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("chunk_probe", Box::new(Probe))].into();
-    mod_platform::__private::install(mods.clone());
-    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_platform::testing::with_mods(mods, || with_loopback(f));
+}
+
+fn with_loopback(f: impl FnOnce(&mut Game<'_>)) {
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
     with_game_role(
@@ -57,18 +68,7 @@ fn with_client(f: impl FnOnce(&mut Game<'_>)) {
             let (client, _server) = horizon_protocol::connection::Pipe::pair();
             game.connect_local(client, "ChunkProbe").unwrap();
             game.enter_remote_dimension(
-                &SpawnInfo {
-                    dimension_type: 0,
-                    dimension: "minecraft:overworld".into(),
-                    seed: 0,
-                    game_type: 1,
-                    previous_game_type: None,
-                    debug: false,
-                    flat: true,
-                    last_death: None,
-                    portal_cooldown: 0,
-                    sea_level: 63,
-                },
+                &overworld(),
                 false,
                 horizon_client::level_loading::Reason::Other,
             );
@@ -77,6 +77,21 @@ fn with_client(f: impl FnOnce(&mut Game<'_>)) {
             f(game);
         },
     );
+}
+
+fn overworld() -> SpawnInfo {
+    SpawnInfo {
+        dimension_type: 0,
+        dimension: "minecraft:overworld".into(),
+        seed: 0,
+        game_type: 1,
+        previous_game_type: None,
+        debug: false,
+        flat: true,
+        last_death: None,
+        portal_cooldown: 0,
+        sea_level: 63,
+    }
 }
 
 /// A chunk packet for column `(x, z)` with stone at its local `(0, 64, 0)`.
@@ -132,12 +147,27 @@ fn load(chunk: [i32; 2], block: Option<&str>) -> Call {
     )
 }
 
-fn unload(chunk: [i32; 2]) -> Call {
-    ("unload", "minecraft:overworld".into(), chunk, None)
+fn unload(chunk: [i32; 2], block: Option<&str>) -> Call {
+    (
+        "unload",
+        "minecraft:overworld".into(),
+        chunk,
+        block.map(str::to_owned),
+    )
+}
+
+/// Each call without the block read, for the routes whose columns are empty.
+fn without_blocks(calls: Vec<Call>) -> Vec<(&'static str, String, [i32; 2])> {
+    calls.into_iter().map(|(n, d, c, _)| (n, d, c)).collect()
+}
+
+fn unloaded(chunk: [i32; 2]) -> Vec<(&'static str, String, [i32; 2])> {
+    vec![("unload", "minecraft:overworld".into(), chunk)]
 }
 
 /// A load once the column is in (its block reads through the host), again for a re-sent
-/// column; an unload for a forget, and none for a second forget of the same column.
+/// column; an unload for a forget with the block still readable, and none for a second forget
+/// of the same column; on a dimension change, an unload naming the old dimension.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_client_tells_a_chunk_packet_and_its_forget_once() {
@@ -159,10 +189,24 @@ fn a_client_tells_a_chunk_packet_and_its_forget_once() {
 
         let mut gone = [(3, 4)].into_iter().collect();
         game.forget_remote_columns(&mut gone, true);
-        assert_eq!(take_calls(), [unload([3, 4])]);
+        assert_eq!(take_calls(), [unload([3, 4], Some("minecraft:stone"))]);
         let mut gone = [(3, 4)].into_iter().collect();
         game.forget_remote_columns(&mut gone, true);
         assert!(take_calls().is_empty(), "a column already gone is not told");
+
+        // A respawn into another level drops the old level's columns, told as the old
+        // dimension's, before the client level changes.
+        game.remote_chunk(&packet, None);
+        take_calls();
+        game.enter_remote_dimension(
+            &SpawnInfo {
+                dimension: "minecraft:the_nether".into(),
+                ..overworld()
+            },
+            false,
+            horizon_client::level_loading::Reason::Other,
+        );
+        assert_eq!(take_calls(), [unload([3, 4], Some("minecraft:stone"))]);
     });
 }
 
@@ -181,10 +225,10 @@ fn every_route_that_frees_a_column_tells_its_unload() {
                 .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(x, 0));
         }
         assert_eq!(game.drop_remote_chunks_out_of_range((15, 0), 10), [(1, 0)]);
-        assert_eq!(take_calls(), [unload([1, 0])]);
+        assert_eq!(without_blocks(take_calls()), unloaded([1, 0]));
         assert_eq!(game.drop_remote_chunks_out_of_range((15, 0), 2), [(7, 0)]);
-        assert_eq!(take_calls(), [unload([7, 0])]);
+        assert_eq!(without_blocks(take_calls()), unloaded([7, 0]));
         assert_eq!(game.forget_all_remote_columns(), [(13, 0)]);
-        assert_eq!(take_calls(), [unload([13, 0])]);
+        assert_eq!(without_blocks(take_calls()), unloaded([13, 0]));
     });
 }

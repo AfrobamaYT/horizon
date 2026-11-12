@@ -12,6 +12,18 @@ pub trait Hooks {
     /// that is gone. Only on a client of a server, a LAN guest included; an
     /// integrated world's own chunks have the server's `native_chunk_unload`.
     /// Client-side.
+    #[notes = r##"## Client chunk unload
+
+`native_client_chunk_unload(dimension, chunk)` runs on a client of a server once
+for each column that leaves the client level, while its blocks and block
+entities are still readable, just before they are freed. Every route a column
+leaves by tells it: the server's `ForgetLevelChunk` packet, the view centre
+moving away, the view radius shrinking, and the client level going (a dimension
+change, a respawn into another level, leaving the server). A column that is
+already gone is not told again. NeoForge tells only the forget packet
+(`ClientChunkCache.drop`); Horizon tells every route, so a listener never keeps
+state for a column the client no longer holds. `dimension` is the level the
+column belonged to: on a dimension change, the old one."##]
     #[hook(
         side = "client",
         contract = "listen",
