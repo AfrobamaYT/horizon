@@ -18,7 +18,7 @@ use {
     horizon_world::{
         attribute_map::ValueKind,
         attributes::{
-            AttributeError, Instance, Modifier, Operation, Packed,
+            AttributeError, Definition, Instance, Modifier, Operation, Packed,
             entity::Catalog,
             live::{Dirty, Identities, LiveAttributes},
         },
@@ -160,8 +160,9 @@ pub fn apply_saved(attributes: &mut Live, saved: Option<&Tag>) -> Result<()> {
                 .collect(),
             _ => Vec::new(),
         };
+        let definition = attributes.catalog().attribute(key.attribute()).definition;
         let packed = Packed {
-            base: float(entry.get("base")).unwrap_or(0.0),
+            base: loaded_base(key.name(), definition, float(entry.get("base")).unwrap_or(0.0)),
             modifiers,
         };
         let Some(handle) = attributes
@@ -175,6 +176,36 @@ pub fn apply_saved(attributes: &mut Live, saved: Option<&Tag>) -> Result<()> {
             .map_err(attribute_error)?;
     }
     Ok(())
+}
+
+/// A saved base as a load takes it (#3728): one outside the attribute's
+/// bounds, saved while a mod had widened them, is clamped into them, and the
+/// first such base of each attribute in a run is logged. Any other base,
+/// NaN included, stays as saved, as vanilla's `AttributeInstance.load` keeps it.
+pub fn loaded_base(name: &str, definition: Definition, base: f64) -> f64 {
+    let Some((min, max)) = definition.bounds() else {
+        return base;
+    };
+    if (min..=max).contains(&base) || base.is_nan() {
+        return base;
+    }
+    if first_clamp(name) {
+        log::warn!(
+            "Horizon: a saved {name} base of {base} is outside its bounds [{min}, {max}]              (a mod that widened them is not loaded): clamped"
+        );
+    }
+    base.clamp(min, max)
+}
+
+/// Whether this is the first saved base of `name` [`loaded_base`] clamps in
+/// this run.
+fn first_clamp(name: &str) -> bool {
+    static CLAMPED: std::sync::Mutex<std::collections::BTreeSet<String>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    CLAMPED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(name.to_owned())
 }
 
 /// The attribute map of a mob, an armor stand or the dragon.
@@ -512,6 +543,45 @@ fn apply_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A catalog with one player attribute, bounded at `max`, and its map.
+    fn player(id: &str, max: f64) -> Live {
+        let bits = |v: f64| format!("{:016x}", v.to_bits());
+        let catalog = Arc::new(
+            Catalog::from_json(&serde_json::json!({
+                "data_version": horizon_world::DATA_VERSION,
+                "attributes": [{"id": id, "default": bits(20.0), "min": bits(1.0), "max": bits(max), "syncable": true}],
+                "entities": {"minecraft:player": {id: bits(20.0)}},
+            }))
+            .unwrap(),
+        );
+        new_live(&catalog, "minecraft:player").unwrap()
+    }
+
+    /// #3728: with a mod's widened bounds, a base past vanilla's survives a
+    /// save and a load; without them, the load clamps the base itself, and
+    /// only the first clamp of the attribute in a run is logged.
+    #[test]
+    fn a_saved_base_past_the_bounds_survives_only_with_them() {
+        let id = "test:widened_health";
+        let mut widened = player(id, 1e6);
+        let key = widened.key(id).unwrap();
+        let handle = widened.get_instance(Some(key)).unwrap().unwrap();
+        widened
+            .edit(&handle, |value, observer| value.set_base_value(5000.0, observer))
+            .unwrap();
+        let saved = Tag::List(pack(&widened, true));
+        let mut reloaded = player(id, 1e6);
+        apply_saved(&mut reloaded, Some(&saved)).unwrap();
+        assert_eq!(reloaded.computed_value_of(id).unwrap(), 5000.0);
+        let mut removed = player(id, 1024.0);
+        apply_saved(&mut removed, Some(&saved)).unwrap();
+        let key = removed.key(id).unwrap();
+        assert_eq!(removed.value(Some(key), ValueKind::Base).unwrap(), 1024.0);
+        assert!(!first_clamp(id), "the clamp above was logged already");
+        let definition = removed.catalog().definition(id).unwrap();
+        assert!(loaded_base(id, definition, f64::NAN).is_nan());
+    }
 
     /// Held items apply their main-hand and off-hand modifiers (#4118, #4777).
     #[test]

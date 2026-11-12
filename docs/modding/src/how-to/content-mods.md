@@ -621,6 +621,20 @@ so a mod's entity set may name its own new attribute. Values sanitize through th
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
 
+A code mod can widen the bounds of an attribute that already exists, vanilla's or another mod's, with
+`Registrar::widen_attribute_bounds(id, min, max)` ([#3728](https://github.com/arismoko/horizon/issues/3728); Java
+mods use a mixin or an access transformer on `RangedAttribute.minValue` / `maxValue`): an RPG mod lets
+`minecraft:max_health` go past 1024 with `widen_attribute_bounds("minecraft:max_health", 1.0, 1e6)`. Every mod's
+asks join the catalog once, at load, after the declared attributes: the bounds become their union (the lowest
+`min`, the highest `max`, never narrower than the attribute's own), whatever the load order, so an ask narrower
+than another mod's is a silent no-op. The default never moves. Every clamp and check of the value reads the
+catalog, on both sides: the player's and mobs' attributes, the LAN record check, the sync. Only both-side
+packages may widen bounds (`WrongSide` otherwise); a non-finite bound (`NotFinite`) or `min > max`
+(`InvalidBounds`) refuses at registration, and an attribute the catalog does not have or a range that leaves the
+default out refuses the load, naming the mod. A client needs nothing more than the mod-set check it already
+passes at join: a client without the mod cannot join. A save keeps a base past vanilla's bound while the mod is
+there; once it is gone, the load clamps the base into the bounds and logs it, once per attribute per run.
+
 A code mod can declare a datapack registry of its own with `Registrar::declare_datapack_registry(path, sync,
 fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`; [#811](https://github.com/arismoko/horizon/issues/811)).
 `path` lands in the mod's namespace (`spell` of `example` is `example:spell`), and `fields` is a flat record

@@ -356,6 +356,13 @@ pub(super) fn gameplay_tables(
                 motion.attributes =
                     std::sync::Arc::new(with_mod_attributes(&motion.attributes, declared)?);
             }
+            // #3728: then the bounds mods widen, on vanilla's attributes and
+            // the declared ones alike, before anything reads a definition.
+            let widenings = mod_api::__private::attribute_bounds_widenings();
+            if !widenings.is_empty() {
+                motion.attributes =
+                    std::sync::Arc::new(with_mod_widened_bounds(&motion.attributes, widenings)?);
+            }
             // #845: a mod's declared attribute sets
             // (`EntityAttributeCreationEvent`) become their entity types' rows
             // in the live attribute map's catalog — the one record the mob
@@ -431,6 +438,28 @@ pub(super) fn with_mod_attributes(
     catalog
         .with_attributes(&added)
         .map_err(|error| format!("mod attribute declarations: {error}"))
+}
+
+/// The catalog with the attribute bounds mods widened (#3728,
+/// `Registrar::widen_attribute_bounds`): the union of every ask, whatever the
+/// load order. An unknown attribute, or a range without the attribute's
+/// default, refuses the load, naming the mod.
+pub(super) fn with_mod_widened_bounds(
+    catalog: &horizon_world::attributes::entity::Catalog,
+    widenings: &[mod_api::__private::AttributeBoundsWidening],
+) -> std::result::Result<horizon_world::attributes::entity::Catalog, String> {
+    let asks: Vec<_> = widenings
+        .iter()
+        .map(|ask| horizon_world::attributes::entity::WidenedBounds {
+            mod_id: ask.mod_id.clone(),
+            id: ask.id.clone(),
+            min: ask.min,
+            max: ask.max,
+        })
+        .collect();
+    catalog
+        .with_widened_bounds(&asks)
+        .map_err(|error| format!("mod attribute bounds: {error}"))
 }
 
 /// The catalog with the attributes mods add to existing entity types
