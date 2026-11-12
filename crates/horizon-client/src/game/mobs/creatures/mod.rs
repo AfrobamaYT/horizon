@@ -8735,24 +8735,18 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
         Game::grief_hooked(self)
     }
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
-        if !mod_api::__private::listened(mod_api::HookId::LivingVisibility) {
-            return visibility;
-        }
-        let Some(epoch) = self.native_lifecycle.epoch() else {
-            return visibility;
-        };
         let uuid = horizon_client::lan::playerdata::ints_uuid(player.uuid);
-        let Some(player) = self.player(uuid) else {
-            return visibility;
-        };
-        let mut visibility = visibility;
-        self.native_living_visibility(
-            mod_api::LivingRef::new(player.entity()),
-            Some(mod_api::EntityRef::new(epoch, looking)),
-            &mut visibility,
-        );
-        // CommonHooks.getEntityVisibilityMultiplier: never below 0.
-        visibility.max(0.0)
+        match self.player(uuid) {
+            Some(player) => self.scaled_visibility(|_| player.entity(), looking, visibility),
+            None => visibility,
+        }
+    }
+    fn living_visibility_mob(&self, target: u32, looking: u32, visibility: f64) -> f64 {
+        self.scaled_visibility(
+            |epoch| mod_api::EntityRef::new(epoch, target),
+            looking,
+            visibility,
+        )
     }
 }
 
