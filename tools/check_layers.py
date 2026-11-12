@@ -13,7 +13,7 @@ optional (behind a feature), for the layer and the portable check alike. The che
 - with --base, an `allowed` or `optional` entry the branch added from a crate that already had a layer on the base;
 - a shipped crate depending on a tool;
 - a portable crate depending on a crate of the repository that isn't portable, or on a `forbidden` library.
-An `allowed` or `optional` entry with no dependency left is reported, not failed. Dev-dependencies are not checked.
+An `allowed` or `optional` entry with no dependency left is reported, not failed. Dev-dependencies are exempt: tests may reach the platform, but shipped code may not.
 
     python3 tools/check_layers.py                     # the check
     python3 tools/check_layers.py --base origin/main  # and no new exceptions since the base

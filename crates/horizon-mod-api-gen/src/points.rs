@@ -802,7 +802,13 @@ pub(crate) fn dependencies(
             .as_table_mut()
             .ok_or("[dependencies] is not a table")?;
         // Every package with points sits in `crates/`, beside these two.
-        for name in ADDED {
+        // The engine already imports vocabulary as mod_api. Do not add the
+        // platform under its default lib name as a second, conflicting mod_api.
+        let added: Vec<_> = ADDED
+            .into_iter()
+            .filter(|name| *name != "horizon-mod-api" || !dependencies.contains_key("mod_api"))
+            .collect();
+        for &name in &added {
             dependencies.entry(name).or_insert_with(|| {
                 toml::Value::Table(toml::Table::from_iter([(
                     "path".to_owned(),
@@ -816,7 +822,7 @@ pub(crate) fn dependencies(
             .and_then(toml::Value::as_str)
             .ok_or_else(|| format!("{}: no package name", manifest.display()))?
             .to_owned();
-        lock = locked_with(&lock, &name, &ADDED)
+        lock = locked_with(&lock, &name, &added)
             .ok_or_else(|| format!("Cargo.lock has no entry for {name}"))?;
         fs::write(
             &manifest,
@@ -1067,6 +1073,28 @@ pub(crate) fn records_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn staging_keeps_engine_vocabulary_without_platform() {
+        let root = std::env::temp_dir().join(format!("point-vocabulary-{}", std::process::id()));
+        let package = root.join("crates/engine");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("Cargo.toml"), "[package]\nname = 'engine'\n[dependencies]\nmod_api = { package = 'horizon-mod-vocab', path = '../horizon-mod-vocab' }\n").unwrap();
+        std::fs::write(root.join("Cargo.lock"), "[[package]]\nname = \"engine\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-vocab\",\n]\n").unwrap();
+        dependencies(&root, std::collections::BTreeSet::from([package.clone()])).unwrap();
+        let manifest = std::fs::read_to_string(package.join("Cargo.toml")).unwrap();
+        let parsed: toml::Table = toml::from_str(&manifest).unwrap();
+        let deps = parsed["dependencies"].as_table().unwrap();
+        assert!(deps.contains_key("mod_api"));
+        assert!(deps.contains_key("horizon-mod-points"));
+        assert!(!deps.contains_key("horizon-mod-api"));
+        assert!(
+            !std::fs::read_to_string(root.join("Cargo.lock"))
+                .unwrap()
+                .contains("\"horizon-mod-api\"")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn selected_guest_exports_keep_the_full_layout() {
