@@ -1,5 +1,5 @@
 //! The crate's integration tests in one binary (tools/refactors/merge_integration_tests.py):
-//! one link instead of one per file. A new file under `integration/` needs its `mod` line.
+//! one link instead of one per file. A new file beside this one needs its `mod` line.
 
 mod biome_data;
 mod biome_direct_lists;
@@ -36,11 +36,11 @@ mod world_io;
 mod world_movement;
 mod world_ray_limits;
 
-/// Every file under `tests/integration/` is declared above, so none is silently left unrun.
+/// Every module file beside this one is declared above by an active `mod` line, so none is silently left unrun.
 #[test]
 fn every_integration_file_is_declared() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/integration");
-    let declared = include_str!("integration.rs");
+    let declared: Vec<&str> = include_str!("main.rs").lines().map(str::trim).collect();
     for entry in std::fs::read_dir(root).unwrap() {
         let name = entry
             .unwrap()
@@ -49,9 +49,12 @@ fn every_integration_file_is_declared() {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        assert!(
-            declared.contains(&format!("mod {name};")),
-            "tests/integration/{name}.rs is not declared"
-        );
+        if name != "main" {
+            let line = format!("mod {name};");
+            assert!(
+                declared.contains(&line.as_str()),
+                "tests/integration/{name}.rs is not declared"
+            );
+        }
     }
 }
