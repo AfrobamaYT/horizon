@@ -1320,7 +1320,7 @@ mod tests {
             "k",
             &file.items,
             &BTreeSet::new(),
-            &BTreeSet::new(),
+            &OwnerTypes::default(),
             &mut found,
         );
         let mut count = 0;
@@ -1525,7 +1525,7 @@ mod tests {
             "k",
             &file.items,
             &BTreeSet::new(),
-            &BTreeSet::new(),
+            &OwnerTypes::default(),
             &mut found,
         );
         let mut count = 7;
@@ -1578,7 +1578,7 @@ mod tests {
             "k",
             &file.items,
             &BTreeSet::new(),
-            &BTreeSet::new(),
+            &OwnerTypes::default(),
             &mut found,
         );
         let error =
