@@ -95,6 +95,9 @@ impl WasmMod {
     fn mod_id(&self) -> &str {
         if self.group == 0 { "loopback" } else { "other" }
     }
+    fn refusal(&self) -> String {
+        "loopback refused".into()
+    }
     fn call<R>(
         &self,
         _: CallClass,

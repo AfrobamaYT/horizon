@@ -34,3 +34,17 @@ pub fn measure<R>(run: impl FnOnce() -> R) -> (R, Counts) {
     let result = run();
     (result, COUNTS.with(|c| c.get().unwrap()))
 }
+/// Runs `run` with each of this thread's non-load guest calls given the load budget (30 000 epoch
+/// ticks, about 30 s) instead of a hook's 100. For measurement only: such a test counts copies and
+/// allocations, not time, and its probes slow the call it measures.
+pub fn with_load_budget<R>(run: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            crate::runtime::CALL_BUDGET.with(|budget| budget.set(None));
+        }
+    }
+    crate::runtime::CALL_BUDGET.with(|budget| budget.set(Some(30_000)));
+    let _guard = Guard;
+    run()
+}

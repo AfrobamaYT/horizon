@@ -132,6 +132,33 @@ struct Running {
 }
 /// Only faults may leave guest state half-updated. Refusals returned normally.
 #[derive(Debug)]
+thread_local! {
+    /// Why this thread's last guest call answered nothing, for the caller's typed error.
+    static LAST_REFUSAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// A measurement test's budget for non-load calls, in epoch ticks (about 1 ms each).
+    pub(crate) static CALL_BUDGET: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+fn note(reason: String) {
+    LAST_REFUSAL.with(|last| *last.borrow_mut() = Some(reason));
+}
+/// Why this thread's last guest call answered nothing: an epoch deadline, a trap with its
+/// code, a refusal by the stack guard, the group's state or the guest's own refusal.
+pub(crate) fn take_refusal() -> String {
+    LAST_REFUSAL
+        .with(|last| last.borrow_mut().take())
+        .unwrap_or_else(|| "refused".into())
+}
+fn fault_reason(error: &wasmtime::Error, budget: u64) -> String {
+    match error.downcast_ref::<wasmtime::Trap>() {
+        Some(wasmtime::Trap::Interrupt) => {
+            format!(
+                "epoch deadline: the call ran past its budget of {budget} ticks (about {budget} ms)"
+            )
+        }
+        Some(trap) => format!("{trap}"),
+        None => format!("fault: {error:#}"),
+    }
+}
 enum CallError {
     Refused(wasmtime::Error),
     Fault(wasmtime::Error),
@@ -209,6 +236,10 @@ impl WeakWasmMod {
             .upgrade()
             .is_some_and(|running| running.poisoned.load(Ordering::Relaxed))
     }
+    /// Why this thread's last call answered nothing.
+    pub(crate) fn refusal(&self) -> String {
+        take_refusal()
+    }
     /// Refusals answer unavailable without stopping the group; faults stop all members.
     pub(crate) fn call<R>(
         &self,
@@ -219,9 +250,13 @@ impl WeakWasmMod {
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
     ) -> Option<R> {
+        let Some(running) = self.running.upgrade() else {
+            note("the module was dropped".into());
+            return None;
+        };
         let module = WasmMod {
             id: self.id.clone(),
-            running: self.running.upgrade()?,
+            running,
             input: self.input.clone(),
             hook: self.hook.clone(),
             subscribed: self.subscribed,
@@ -446,6 +481,10 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
 }
 
 impl WasmMod {
+    /// Why this thread's last call answered nothing.
+    pub(crate) fn refusal(&self) -> String {
+        take_refusal()
+    }
     pub(crate) fn downgrade(&self) -> WeakWasmMod {
         WeakWasmMod {
             id: self.id.clone(),
@@ -591,13 +630,16 @@ impl WasmMod {
         // guards. Their destructors must not reenter the still-lent guest.
         if std::thread::panicking() {
             self.disable();
+            note("called while the thread unwinds".into());
             return None;
         }
         if let Err(error) = horizon_guest_stack::check_current() {
             log::error!("wasm mod {}: {error}", self.mod_id());
+            note(error.into());
             return None;
         }
         if self.running.poisoned.load(Ordering::Relaxed) {
+            note("its group has stopped after an earlier fault".into());
             return None;
         }
         let key = Arc::as_ptr(&self.running) as usize;
@@ -625,6 +667,7 @@ impl WasmMod {
                                     >= Duration::from_secs(5)) =>
                     {
                         log::warn!("wasm mod {}: {}", self.id, Refusal::Busy);
+                        note(Refusal::Busy.to_string());
                         return None;
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(1)),
@@ -638,7 +681,7 @@ impl WasmMod {
                 let budget = if class == CallClass::Load {
                     30_000
                 } else {
-                    100
+                    CALL_BUDGET.with(std::cell::Cell::get).unwrap_or(100)
                 };
                 store.set_epoch_deadline(budget);
                 store.data_mut().epoch_budget = budget;
@@ -649,6 +692,7 @@ impl WasmMod {
             if store.data().depth == 0 {
                 drop(std::mem::take(&mut store.data_mut().cx.held));
             }
+            note("its group has stopped after an earlier fault".into());
             return None;
         }
         let budget = store.data().epoch_budget;
@@ -658,6 +702,7 @@ impl WasmMod {
             if store.data_mut().refusals.insert(path.clone()) {
                 log::warn!("wasm depth refusal: {path}");
             }
+            note(format!("nested past depth 64: {path}"));
             return None;
         }
         store.data_mut().depth = depth;
@@ -731,8 +776,12 @@ impl WasmMod {
         drop(scope);
         match result {
             Ok(value) => Some(value),
-            Err(CallError::Refused(_)) => None,
+            Err(CallError::Refused(e)) => {
+                note(format!("refused: {e:#}"));
+                None
+            }
             Err(CallError::Fault(e)) => {
+                note(fault_reason(&e, budget));
                 if first_failure {
                     log::error!(
                         "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {e:#}",
