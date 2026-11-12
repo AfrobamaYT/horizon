@@ -402,8 +402,6 @@ pub trait ProjectileWorld {
         velocity
     }
     fn targets(&self) -> &[(Who, Aabb)];
-    /// Server-only mod-block contacts along the completed movement.
-    fn block_contacts(&self, _entity: i32, _from: Vec3, _to: Vec3, _bounds: Aabb) {}
     /// `Level.isEmptyBlock`.
     fn empty(&self, _p: [i32; 3]) -> bool {
         true
@@ -1491,7 +1489,9 @@ impl Projectile {
         if self.applies_block_effects() {
             self.bubble_columns_along(w, from);
         }
-        w.block_contacts(self.id as i32, from, self.position, self.bounds());
+        // The block sweep runs at the batch that ticks the projectile
+        // (Game::sweep_projectile_inside), where the level host for a part's
+        // contact is: this tick's world view is read-only.
         self.fire_tick(w, client_side);
         self.stuck_tick(w, from);
         if !base_first {

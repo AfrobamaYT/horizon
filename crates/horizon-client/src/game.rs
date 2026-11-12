@@ -1322,8 +1322,8 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
-        let mut canceled = false;
-        if self.native_authoritative {
+        let mut canceled = self.world.carrier_fences.holds_move(push, destroy);
+        if !canceled && self.native_authoritative {
             let step = direction.normal();
             self.native_piston_pre(mod_api::__private::PistonPreCall {
                 dimension: self.dimension,
@@ -2897,9 +2897,8 @@ struct Game<'a> {
     sleep_seen: (i64, i64),
     dim: Dim,
     world_root: PathBuf,
-    /// The owner's offline-to-account UUID move of this world, when it opened under
-    /// the account (`playerdata::migrate_owner`): entities the world loads still name
-    /// the player by the offline UUID until their chunk is saved again.
+    carrier_retention_snapshot: Vec<(u128, u32)>,
+    /// Offline-to-account UUID migration: loaded entities retain the old UUID until saved.
     owner_migration: Option<(u128, u128)>,
     /// The world's data packs' content tables, when it has packs (`None`
     /// keeps `Resources.rest`'s own in use).
@@ -6855,7 +6854,7 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
-        self.player_break_block(pos).map(|_| ())
+        self.carrier_break_block(pos)
     }
     /// `ServerPlayerGameMode.destroyBlock`: whether the block was removed.
     /// A break inside another (a mod breaking more blocks from its
@@ -11839,7 +11838,7 @@ impl Game<'_> {
         self.apply_settings();
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
-        self.load_world_state();
+        self.load_world_state()?;
         self.native_world_opened(dim);
         self.open_saved_portal_levels()
     }
@@ -11980,7 +11979,7 @@ impl Game<'_> {
         self.mod_view_distances.take();
         self.bosses = Default::default();
         self.streaming.paused = true;
-        self.world = World::new(self.res.facts().air, 0);
+        self.world = Game::world_for_mods(self.res.facts().air, 0);
         self.player = None;
         // `LocalPlayer`'s constructor: `KeyMapping.resetToggleKeys`, so a sneak or sprint toggled
         // in this world is not still on in the next one.
@@ -14514,7 +14513,7 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
-        Self::admit_entity_save()?;
+        self.admit_level_save()?;
         self.save_border();
         self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -16101,7 +16100,7 @@ impl<'a> Game<'a> {
                 None,
             )
         })?;
-        let world = World::new(res.facts().air, 0);
+        let world = Game::world_for_mods(res.facts().air, 0);
         let tutorial = tutorial::Tutorial::new(tutorial::Step::from_option(
             settings.file.int("tutorialStep"),
         ));
@@ -16407,6 +16406,7 @@ impl<'a> Game<'a> {
             sleep_seen: (0, 0),
             dim: Dim::Overworld,
             world_root: PathBuf::new(),
+            carrier_retention_snapshot: Vec::new(),
             owner_migration: None,
             world_flat: false,
             world_debug: false,

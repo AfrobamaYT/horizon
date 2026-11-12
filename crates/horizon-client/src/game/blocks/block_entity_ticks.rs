@@ -232,6 +232,7 @@ impl Game<'_> {
             scratch,
         };
         let this = &mut *enclosing.game;
+        this.fire_pending_block_entity_loads();
         this.tick_mount_menu();
         this.tick_craft_table();
         this.tick_container_reach();
