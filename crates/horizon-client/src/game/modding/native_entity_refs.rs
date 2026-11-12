@@ -4432,3 +4432,7 @@ pub(super) mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "native_entity_refs/restitution_replay_tests.rs"]
+mod restitution_replay_tests;
