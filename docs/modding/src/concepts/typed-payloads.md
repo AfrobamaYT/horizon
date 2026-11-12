@@ -14,8 +14,16 @@ For a complete declaration value, `PayloadDeclaration::new` takes the channel,
 version, protocol, direction, optional flag, and handler thread explicitly;
 registration still owns channel and version validation.
 
+A trait mod overrides `Hooks::register` directly; it does not need to implement a
+block, item, or other Part. The example below assumes the owning mod's id is
+`example`. Payload declarations use the same load-owned registrar and freeze point
+as Parts, not a separate manifest channel list.
+
 ```rust,ignore
-use mod_api::{IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar};
+use mod_api::{
+    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar,
+    RegistrationContext, horizon_mod,
+};
 use std::sync::Arc;
 
 struct Update;
@@ -27,9 +35,14 @@ impl IPayloadHandler for Update {
         Ok(())
     }
 }
-fn register(registrar: &mut dyn Registrar) {
-    registrar.payload_handlers().registrar("1")
-        .play_to_server(PayloadId("example:update".into()), Arc::new(Update));
+struct ExampleMod;
+
+#[horizon_mod]
+impl Hooks for ExampleMod {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+        r.payload_handlers().registrar("1")
+            .play_to_server(PayloadId("example:update".into()), Arc::new(Update));
+    }
 }
 ```
 
