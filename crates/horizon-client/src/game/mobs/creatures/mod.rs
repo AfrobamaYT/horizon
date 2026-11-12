@@ -1253,18 +1253,7 @@ impl Game<'_> {
         self.refresh_gear_knockback_resistance();
         self.tick_leads();
         // Vanilla's spawning and raids run before ChunkMap.tick.
-        let from = self.lan_synced_from();
-        horizon_client::spans::time("spawn_natural", || self.spawn_natural());
-        // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
-        if self
-            .ui
-            .rules
-            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
-        {
-            self.tick_custom_spawners();
-        }
-        self.tick_raids();
-        self.lan_synced_since(from);
+        self.tick_spawners();
         let ticked =
             horizon_client::spans::time("tick_creature_entities", || self.tick_creature_entities());
         self.dismount_underwater_mob_riders();
@@ -1317,6 +1306,8 @@ impl Game<'_> {
         }
         // Their victims have been looted and mourned: no charged creeper is
         // waiting any more.
+        // Resolve saved attacker UUIDs before the mobs run baseTick.
+        self.resolve_last_hurt_by_refs();
         self.combat.charged_exploders.clear();
         self.combat.exploded.clear();
         self.combat.exploded_kinds.clear();

@@ -6,7 +6,7 @@ use crate::game::{Game, Hit};
 use horizon_client::signs::SignData;
 use horizon_client::{containers::BlockEntity, items::ItemStack, mobs::Who};
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 type Posted = (&'static str, [f64; 3], Option<Who>);
 const FAIL_SOUND: &str = "minecraft:block.hanging_sign.waxed_interact_fail";
