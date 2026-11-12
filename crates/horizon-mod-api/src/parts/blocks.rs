@@ -701,9 +701,9 @@ pub mod tests {
         struct Switch;
         #[mod_api::horizon_part]
         impl BlockPart for Switch {
-            fn rail_direction(&self, _: LevelSide<'_>, event: &mut RailDirectionEvent) {
+            fn rail_direction(&self, _: LevelSide<'_>, event: &mut RailDirectionEvent<'_>) {
                 if event.cart.is_some() {
-                    event.shape = RailShape::EastWest;
+                    *event.shape = RailShape::EastWest;
                 }
             }
             fn rail_flexible(&self, _: &dyn LevelHost, event: &mut RailFlexibleEvent) {
