@@ -416,7 +416,7 @@ impl Game<'_> {
                     let sampled = if resuming {
                         resume_sampled.take()
                     } else {
-                        super::super::tick_profile::start().map(|t| (t, mobs[i].kind.clone()))
+                        super::super::tick_profile::start_mob(&mobs[i].kind)
                     };
                     let run_tick = || {
                         if resuming {
@@ -492,9 +492,7 @@ impl Game<'_> {
                             break;
                         }
                     };
-                    if let Some((started, kind)) = sampled {
-                        super::super::tick_profile::add(level_id, &kind, started);
-                    }
+                    super::super::tick_profile::end_mob(level_id, sampled);
                     let m = &mut mobs[i];
                     if let Some(selection) = &selection
                         && selection.has_switched()

@@ -285,6 +285,30 @@ impl Drop for Enclosing<'_, '_> {
     }
 }
 
+impl TickedKind {
+    /// The block entity type a sample is attributed to while its ticker runs.
+    fn ticker_name(self) -> &'static str {
+        match self {
+            Self::Hopper => "hopper",
+            Self::Crafter => "crafter",
+            Self::Jukebox => "jukebox",
+            Self::Beacon => "beacon",
+            Self::CreakingHeart => "creaking_heart",
+            Self::Spawner => "mob_spawner",
+            Self::TrialSpawner => "trial_spawner",
+            Self::Vault => "vault",
+            Self::Beehive => "beehive",
+            Self::Furnace => "furnace",
+            Self::BrewingStand => "brewing_stand",
+            Self::DaylightDetector => "daylight_detector",
+            Self::Campfire => "campfire",
+            Self::Mod => "mod_block_entity",
+            Self::PotentSulfur => "potent_sulfur",
+            _ => "block_entity",
+        }
+    }
+}
+
 impl Game<'_> {
     /// The published loop `block_entities.tick` (`published_loops.rs`): with no
     /// `[[native.loop]]` mod its slot is `()`, and a mod build installs its own copy of this
@@ -399,6 +423,8 @@ impl Game<'_> {
             {
                 continue;
             }
+            horizon_threads::work::set_chunk(chunk.0, chunk.1);
+            horizon_threads::work::set_entity(horizon_threads::work::entity_id(kind.ticker_name()));
             match kind {
                 TickedKind::Hopper => this.tick_hopper(pos),
                 TickedKind::Crafter => this.tick_crafter(pos),
@@ -437,6 +463,7 @@ impl Game<'_> {
                 mod_type,
             });
         }
+        horizon_threads::work::clear_work();
         // Items move between passes: the columns hold for this one only.
         this.item_columns = None;
         this.pass_mobs = None;

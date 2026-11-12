@@ -1361,9 +1361,9 @@ impl HudAtlas {
         if !images.iter().any(|i| i.0 == mods_icon.0) {
             images.push(mods_icon);
         }
-        // The controller's art, unless a pack brought its own (walked above, as a mod's GUI
-        // textures are).
-        for image in crate::pad_glyph::images() {
+        // The controller's art and Horizon's mark, unless a pack brought its own (walked above, as a
+        // mod's GUI textures are).
+        for image in crate::pad_glyph::images().chain(crate::mark_sprite::image()) {
             if !images.iter().any(|i| i.0 == image.0) {
                 images.push(image);
             }
