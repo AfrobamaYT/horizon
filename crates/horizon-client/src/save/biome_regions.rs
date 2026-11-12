@@ -355,6 +355,20 @@ pub fn unchosen_missing(world: &Path) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// Whether adopting the installed mods' regions would change `world`'s record, so the world's
+/// owner has something to opt in to. False while the record does not read: opening refuses
+/// that with the reason.
+pub fn adoptable(world: &Path) -> bool {
+    adoptable_with(world, declarations())
+}
+
+fn adoptable_with(world: &Path, declarations: &[BiomeRegionDeclaration]) -> bool {
+    BiomeRegions::read(world).is_ok_and(|saved| {
+        let saved = saved.unwrap_or_default();
+        saved.adopted(declarations) != saved
+    })
+}
+
 /// Records the owner's choices in `world`'s record before it opens: `adopt_installed` takes the
 /// installed mods' regions, keeping the saved weights; `vanilla_for_missing` resolves the
 /// regions of mods still missing through vanilla's. The record is written only when a

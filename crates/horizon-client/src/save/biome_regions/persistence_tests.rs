@@ -15,10 +15,12 @@ fn generated_chunks_survive_restart_substitution_added_regions_and_adoption() {
         return;
     };
     let assets = Assets::load(&root).unwrap();
-    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
-        root.clone(),
-    ))
-    .unwrap();
+    let biomes = Arc::new(
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.clone(),
+        ))
+        .unwrap(),
+    );
     let items = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let resources = TerrainResources {
         data: None,
@@ -81,6 +83,15 @@ fn generated_chunks_survive_restart_substitution_added_regions_and_adoption() {
     let save = super::super::SaveDir::new(world.to_path_buf(), super::super::LevelShape::OVERWORLD);
     save.save(&[Arc::new(old)], assets.registry, &biomes)
         .unwrap();
+    let protos = (1..=2)
+        .map(|x| {
+            let proto = terrain.proto(&mut worker, x, 0);
+            let mut saved = terrain.saved_proto(&proto).unwrap();
+            saved.decorated = x == 2;
+            saved
+        })
+        .collect();
+    save.save_protos(protos, assets.registry, &biomes).unwrap();
     save.flush().unwrap();
     drop(save);
     drop(terrain);
@@ -124,6 +135,36 @@ fn generated_chunks_survive_restart_substitution_added_regions_and_adoption() {
     );
     let reopened =
         super::super::SaveDir::new(world.to_path_buf(), super::super::LevelShape::OVERWORLD);
+    for (x, decorated) in [(1, false), (2, true)] {
+        let saved = reopened.load_proto(x, 0, assets.registry, &biomes).unwrap();
+        assert_eq!(saved.decorated, decorated);
+        assert!(
+            fingerprint(&saved.column)
+                .iter()
+                .all(|biome| biome == "minecraft:ice_spikes")
+        );
+        let blocks = saved.column.clone();
+        let mut resumed = terrain.proto(&mut worker, x, 0);
+        terrain.restore_proto(&mut resumed, saved);
+        assert_eq!(terrain.is_decorated(&resumed), decorated);
+        let resumed = terrain.saved_proto(&resumed).unwrap();
+        assert!(
+            fingerprint(&resumed.column)
+                .iter()
+                .all(|biome| biome == "minecraft:desert")
+        );
+        for y in blocks.min_y()..blocks.max_y() {
+            for z in 0..16 {
+                for lx in 0..16 {
+                    assert_eq!(
+                        resumed.column.get(lx, y, z),
+                        blocks.get(lx, y, z),
+                        "resumed chunk {x} block {lx} {y} {z}"
+                    );
+                }
+            }
+        }
+    }
     let loaded = reopened.load(0, 0, assets.registry, &biomes).unwrap();
     assert_eq!(fingerprint(&loaded), old_biomes);
     assert_eq!(std::fs::read(&saved_file).unwrap(), before);

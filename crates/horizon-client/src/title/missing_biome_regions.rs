@@ -5,7 +5,7 @@ use super::*;
 
 #[cfg(test)]
 #[path = "missing_biome_regions_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 /// The prompt's text: what the choice does, then each region and its mod.
 fn message(missing: &[(String, String)]) -> String {
