@@ -182,20 +182,35 @@ def tracked_rust_paths():
     return paths
 
 
-# What an `Err` names, never what it says: a Debug variant or io::ErrorKind and an OS error number.
-# Messages, values and paths (names of prepared vanilla files) stay withheld.
-ERROR_VARIANT = re.compile(r"^([A-Z][A-Za-z0-9_]{0,63})\s*[({]")
-ERROR_KIND = re.compile(r"\bkind: ([A-Z][A-Za-z]{0,63})\b")
-OS_ERROR = re.compile(r"\(os error (\d{1,5})\)|\bcode: (\d{1,5})\b")
+# What an `Err` names, never what it says: only a std::io::Error Debug value (`Os { code, kind, .. }`,
+# `Kind(..)`, `Custom { kind, .. }`) names anything here: its shape, an io::ErrorKind from std's list and an OS
+# error code. Quoted strings inside it are removed before any field is read; any other payload (a string, an
+# unquoted message, another error type) names nothing. Messages, values and paths stay withheld.
+IO_ERROR_SHAPE = re.compile(r"^(Os|Simple|SimpleMessage|Custom|Kind)\s*[({]")
+IO_ERROR_KINDS = frozenset("""
+    NotFound PermissionDenied ConnectionRefused ConnectionReset HostUnreachable NetworkUnreachable
+    ConnectionAborted NotConnected AddrInUse AddrNotAvailable NetworkDown BrokenPipe AlreadyExists WouldBlock
+    NotADirectory IsADirectory DirectoryNotEmpty ReadOnlyFilesystem StaleNetworkFileHandle InvalidInput
+    InvalidData TimedOut WriteZero StorageFull NotSeekable QuotaExceeded FileTooLarge ResourceBusy
+    ExecutableFileBusy Deadlock CrossesDevices TooManyLinks InvalidFilename ArgumentListTooLong Interrupted
+    Unsupported UnexpectedEof OutOfMemory InProgress Other Uncategorized
+""".split())
+QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
+ERROR_KIND = re.compile(r"(?:\bkind: |^Kind\()([A-Z][A-Za-z]{0,63})\b")
+OS_ERROR = re.compile(r"^Os \{ code: (\d{1,5})\b")
 
 
 def unwrap_error_shape(value):
-    """`kind ...` for a `Result::unwrap` payload, or None when it names no kind."""
-    kinds = [found[1] for found in (ERROR_VARIANT.match(value), ERROR_KIND.search(value)) if found]
-    if os_error := OS_ERROR.search(value):
-        code = int(os_error[1] or os_error[2])
-        kinds.append(f"os error {code} {errno.errorcode.get(code, 'unknown')}")
-    return "kind " + ", ".join(dict.fromkeys(kinds)) if kinds else None
+    """`kind ...` for a std::io::Error Debug value, or None when the payload is anything else."""
+    if not (shape := IO_ERROR_SHAPE.match(value)):
+        return None
+    fields = QUOTED.sub('""', value)
+    kinds = [shape[1]]
+    if (kind := ERROR_KIND.search(fields)) and kind[1] in IO_ERROR_KINDS:
+        kinds.append(kind[1])
+    if code := OS_ERROR.match(fields):
+        kinds.append(f"os error {int(code[1])} {errno.errorcode.get(int(code[1]), 'unknown')}")
+    return "kind " + ", ".join(kinds)
 
 
 def bounded_record(record, remaining):
