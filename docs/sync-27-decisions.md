@@ -18,7 +18,7 @@ pass. The installation-scoped interner boundary remains unchanged.
 ## Contextless fireworks service: refused
 
 Upstream adds an audible flag to its contextless fireworks request helper.
-The fork removed that helper: `native_client_particles.rs` exposes the typed
+The fork removed that helper: `game/modding/native_client_particles.rs` exposes the typed
 single-particle request, not a fireworks explosion request, and the typed host
 has no corresponding fireworks service. Reintroducing the old numeric service
 would violate the clean break. A new typed fireworks service requires an
