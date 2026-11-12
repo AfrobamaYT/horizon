@@ -1754,3 +1754,40 @@ fn resource_gated_unknown_held_item_forced_use_predicts_pass_without_a_swing() {
         }
     });
 }
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn a_server_client_keeps_a_bundle_use_until_the_server_completes_it() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "finish_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    crate::game::api_values::install_parts(&mods).unwrap();
+    mod_platform::testing::with_mods(mods, || {
+        with_interaction_game(true, |game| {
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:bundle", 1));
+            // The use starts at tick 0, which records the item in use.
+            game.using = Some((game.selected, 0));
+            // 200 client ticks: the use is still on, waiting for the server.
+            for _ in 0..200 {
+                game.remote_tick_using();
+            }
+            assert_eq!(game.using, Some((game.selected, 200)));
+            game.remote_tick_using();
+            assert_eq!(game.using, Some((game.selected, 201)));
+            // Entity event 9 arrives late: the client-side finish fires once.
+            game.remote_complete_using();
+            assert_eq!(game.using, None);
+            assert_eq!(
+                observer.0.lock().unwrap().finishes,
+                [(
+                    LogicalSide::Client,
+                    Hand::Main,
+                    Some(("minecraft:bundle".to_owned(), 1))
+                )]
+            );
+        });
+    });
+}
