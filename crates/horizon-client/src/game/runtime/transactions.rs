@@ -873,7 +873,7 @@ mod tests {
                 host: &mut dyn ServerHost,
                 event: &mut PlayerStatAwardEvent<'_>,
             ) -> Flow {
-                if event.stat != "minecraft:fill_cauldron" {
+                if event.stat.as_str() != "minecraft:fill_cauldron" {
                     return Flow::Continue;
                 }
                 let level = host.level("minecraft:overworld").unwrap();

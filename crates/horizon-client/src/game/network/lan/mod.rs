@@ -507,17 +507,17 @@ impl Game<'_> {
         if std::mem::replace(&mut play.left_game, true) {
             return;
         }
-        let mut cancel = false;
-        self.native_player_stat_award(
-            player,
-            name,
-            "minecraft:custom",
-            "minecraft:leave_game",
-            1,
-            &mut cancel,
-        );
-        if !cancel && let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
+        let award = if mod_api::__private::listened(mod_api::HookId::PlayerStatAward) {
+            self.edited_stat_award(player, name, "minecraft:custom", "minecraft:leave_game", 1)
+        } else {
             play.stats.custom("leave_game", 1);
+            return;
+        };
+        if let Some((ty, key, n)) = award
+            && let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn))
+        {
+            play.stats
+                .add(ty.strip_prefix("minecraft:").unwrap_or(&ty), &key, n);
         }
     }
 

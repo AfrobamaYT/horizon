@@ -1416,11 +1416,10 @@ fn login_and_configure(
         );
         return Ok(None);
     }
-    // Custom component IDs need Horizon's registry check. The server may also
-    // require Horizon clients even when it has no custom components.
+    // Custom component and statistic IDs need Horizon's registry check.
+    // Operators may require Horizon clients without either extension.
     if brand != "horizon"
-        && (shared.config.horizon_clients_only
-            || horizon_protocol::item::custom::entries().next().is_some())
+        && (shared.config.horizon_clients_only || crate::content_identity::requires_horizon())
     {
         let text = if shared.config.horizon_clients_only {
             super::HORIZON_CLIENTS_ONLY_REASON

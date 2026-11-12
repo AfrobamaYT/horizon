@@ -428,6 +428,9 @@ impl Game<'_> {
                         "resisted" => self.award_custom_stat("damage_resisted", *amount),
                         "absorbed" => self.award_custom_stat("damage_absorbed", *amount),
                         "blocked" => self.award_custom_stat("damage_blocked_by_shield", *amount),
+                        // MotionWorld emits the authoritative jump award here too.
+                        // Both local and guest event drains share this consumer.
+                        "jump" => self.award_custom_stat("jump", *amount),
                         _ => {}
                     }
                     continue;
