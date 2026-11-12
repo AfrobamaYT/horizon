@@ -342,7 +342,7 @@ pub mod tests {
         }
         let mods: crate::Mods =
             vec![ModEntry::new("sound_type_test", Box::new(SoundTypeMod))].into();
-        crate::install(mods.clone());
+        crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         mark_game_thread();
     }
