@@ -3,7 +3,7 @@ use super::*;
 impl Game<'_> {
     /// Dropped items touching a guest go into their inventory
     /// (`ItemEntity.playerTouch`, then `ServerPlayer.onItemPickup`).
-    pub(super) fn guest_pickups(&mut self, gi: usize) {
+    pub(in crate::game) fn guest_pickups(&mut self, gi: usize) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };

@@ -1027,7 +1027,7 @@ impl ItemEntity {
             self.needs_sync = true;
         }
         if self.age != i16::MIN as i32 {
-            self.age += 1;
+            self.age = self.age.wrapping_add(1);
         }
         self.age < 6000 && self.position.y >= f64::from(world.shape.min_y - 64)
     }
@@ -1278,7 +1278,7 @@ pub fn merge_with_neighbours<I>(
 {
     let age = |items: &[ItemEntity], j: usize| {
         if j == i && items[j].age != i16::MIN as i32 {
-            items[j].age - 1
+            items[j].age.wrapping_sub(1)
         } else {
             items[j].age
         }
@@ -1327,7 +1327,7 @@ pub fn merge_with_neighbours<I>(
         let to_item = &mut items[to];
         to_item.pickup_delay = to_item.pickup_delay.max(delay);
         // This item's age goes up once its tick ends.
-        to_item.age = to_age.min(from_age) + i32::from(to == i);
+        to_item.age = to_age.min(from_age).wrapping_add(i32::from(to == i));
         if items[from].stack.count == 0 {
             removed[from] = true;
             cells.remove(from, items[from].position);
