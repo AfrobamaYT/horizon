@@ -357,7 +357,13 @@ impl Game<'_> {
             mods: self.perf_mods(),
             game_rules: Some(server_perf::game_rules(&self.ui.rules)),
             horizon_options: Some(horizon),
-            players: self.lan.as_ref().map_or(0, |h| h.hub.guests.len() as u32),
+            players: self.lan.as_ref().map_or(0, |h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .filter(|g| g.participates_online())
+                    .count() as u32
+            }),
             ..Start::default()
         };
         CaptureOptions {
@@ -375,177 +381,62 @@ impl Game<'_> {
         }
     }
 
-    /// What the health samples count: players, chunks and mobs in every level.
+    fn active_perf_view(&self) -> super::super::levels::EntityCountView<'_> {
+        super::super::levels::entity_count_view!(
+            self,
+            &self.creatures.projectiles,
+            &self.resident_entities.general.rows
+        )
+    }
+
+    /// All typed entities in the active dimension, without allocating.
+    pub(in crate::game) fn perf_entity_count(&self) -> usize {
+        self.active_perf_view().total()
+    }
+
+    /// Health samples count every typed family using lengths only.
     pub(in crate::game) fn perf_world_counts(&self) -> WorldCounts {
-        let levels = self.level_counts();
-        let chunks: u32 = levels.iter().map(|level| level.chunks).sum();
-        let entities: u32 = levels
-            .iter()
-            .flat_map(|level| &level.entities)
-            .map(|(_, count)| count)
-            .sum();
+        let (mut chunks, mut entities) = (self.world.chunks.len(), self.perf_entity_count());
+        for (_, world, view) in self.levels.parked_perf_views() {
+            chunks += world.chunks.len();
+            entities += view.total();
+        }
         WorldCounts {
-            players: self.lan.as_ref().map_or(0, |h| h.hub.guests.len() as u32),
-            chunks,
-            entities,
+            players: self.lan.as_ref().map_or(0, |h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .filter(|g| g.participates_online())
+                    .count() as u32
+            }),
+            chunks: chunks as u32,
+            entities: entities as u32,
         }
     }
 
-    /// The level in place and the parked ones: their chunks and their entities and block entities by registry id.
+    /// Capture snapshots resolve registry labels; gauges use the same view without labels.
     pub(in crate::game) fn level_counts(&self) -> Vec<LevelCounts> {
         let level = |dim: Dim,
                      world: &horizon_client::world::World,
-                     mobs: &[horizon_client::mobs::Mob],
-                     loose: [usize; 5]| {
-            let mut entities: BTreeMap<String, u32> = BTreeMap::new();
-            for m in mobs.iter().filter(|m| !m.removed) {
-                *entities.entry(m.kind.id.clone()).or_default() += 1;
-            }
-            for (id, n) in LOOSE_ENTITIES.into_iter().zip(loose) {
-                if n > 0 {
-                    *entities.entry(id.to_owned()).or_default() += n as u32;
-                }
-            }
-            let mut block_entities: BTreeMap<String, u32> = BTreeMap::new();
+                     view: super::super::levels::EntityCountView<'_>| {
+            let mut block_entities = BTreeMap::<String, u32>::new();
             for entity in world.block_entities.values() {
                 *block_entities.entry(entity.id().to_owned()).or_default() += 1;
             }
             LevelCounts {
                 dimension: dim.id().to_owned(),
                 chunks: world.chunks.len() as u32,
-                entities: entities.into_iter().collect(),
+                entities: view.registry_counts(),
                 block_entities: block_entities.into_iter().collect(),
             }
         };
-        let mut levels = vec![level(
-            self.dim,
-            &self.world,
-            &self.mobs,
-            [
-                self.dropped.len(),
-                self.orbs.len(),
-                self.creatures.projectiles.len(),
-                self.carts.len(),
-                self.boats.len(),
-            ],
-        )];
-        if !self.falling.is_empty() {
-            levels[0].entities.push((
-                "minecraft:falling_block".to_owned(),
-                self.falling.len() as u32,
-            ));
-        }
-        if !self.paintings.is_empty() {
-            levels[0]
-                .entities
-                .push(("minecraft:painting".to_owned(), self.paintings.len() as u32));
-        }
-        if !self.item_frames.is_empty() {
-            levels[0].entities.push((
-                "minecraft:item_frame".to_owned(),
-                self.item_frames.len() as u32,
-            ));
-        }
-        if !self.armor_stands.is_empty() {
-            levels[0].entities.push((
-                "minecraft:armor_stand".to_owned(),
-                self.armor_stands.len() as u32,
-            ));
-        }
-        if !self.tridents.is_empty() {
-            levels[0]
-                .entities
-                .push(("minecraft:trident".to_owned(), self.tridents.len() as u32));
-        }
-        if !self.rockets.is_empty() {
-            levels[0].entities.push((
-                "minecraft:firework_rocket".to_owned(),
-                self.rockets.len() as u32,
-            ));
-        }
-        if !self.tnts.is_empty() {
-            levels[0]
-                .entities
-                .push(("minecraft:tnt".to_owned(), self.tnts.len() as u32));
-        }
-        if !self.crystals.is_empty() {
-            levels[0].entities.push((
-                "minecraft:end_crystal".to_owned(),
-                self.crystals.len() as u32,
-            ));
-        }
-        if !self.knots.is_empty() {
-            levels[0]
-                .entities
-                .push(("minecraft:leash_knot".to_owned(), self.knots.len() as u32));
-        }
-        if !self.ominous_spawners.is_empty() {
-            levels[0].entities.push((
-                "minecraft:ominous_item_spawner".to_owned(),
-                self.ominous_spawners.len() as u32,
-            ));
-        }
-        let count = self.cushions.len();
-        if count > 0 {
-            levels[0]
-                .entities
-                .push(("minecraft:cushion".to_owned(), count as u32));
-        }
-        let count = self.fangs.perf_count();
-        if count > 0 {
-            levels[0]
-                .entities
-                .push(("minecraft:evoker_fangs".to_owned(), count as u32));
-        }
-        let count = usize::from(self.dragon.as_ref().is_some());
-        if count > 0 {
-            levels[0]
-                .entities
-                .push(("minecraft:ender_dragon".to_owned(), count as u32));
-        }
-        let count = self.breath_clouds.len();
-        if count > 0 {
-            levels[0]
-                .entities
-                .push(("minecraft:area_effect_cloud".to_owned(), count as u32));
-        }
-        let count = self.bolts.len();
-        if count > 0 {
-            levels[0]
-                .entities
-                .push(("minecraft:lightning_bolt".to_owned(), count as u32));
-        }
-        for row in self.resident_entities.general.rows.iter() {
-            levels[0].entities.push((
-                super::super::general::general_type_catalog()
-                    .key(row.type_slot)
-                    .to_owned(),
-                1,
-            ));
-        }
-        for row in self.others.iter() {
-            levels[0].entities.push((row.kind.clone(), 1));
-        }
-        for dim in self.levels.parked_dims() {
-            if let (Some(world), Some(mobs)) =
-                (self.levels.parked_world(dim), self.levels.parked_mobs(dim))
-            {
-                let loose = self.levels.parked_entity_counts(dim).unwrap_or_default();
-                let mut counts = level(dim, world, mobs, loose);
-                counts
-                    .entities
-                    .extend(self.levels.parked_extra_perf_entities(dim));
-                levels.push(counts);
-            }
-        }
-        for level in &mut levels {
-            let mut counts = BTreeMap::<String, u32>::new();
-            for (id, count) in std::mem::take(&mut level.entities) {
-                *counts.entry(id).or_default() += count;
-            }
-            level.entities = counts.into_iter().collect();
-        }
-        levels
+        std::iter::once(level(self.dim, &self.world, self.active_perf_view()))
+            .chain(
+                self.levels
+                    .parked_perf_views()
+                    .map(|(dim, world, view)| level(dim, world, view)),
+            )
+            .collect()
     }
 
     /// Each player's connection: wire bytes (in, out), name, brand and view distance.

@@ -45,6 +45,87 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A borrowed counting view: no resident-table scans and no allocation for gauges.
+pub(super) struct EntityCountView<'a> {
+    pub(super) fixed: [(&'static str, usize); 20],
+    pub(super) mobs: &'a [Mob],
+    pub(super) general: &'a super::general::GeneralRows,
+    pub(super) others: &'a [commands::OtherEntity],
+}
+impl EntityCountView<'_> {
+    pub(super) fn total(&self) -> usize {
+        self.fixed.iter().map(|(_, n)| n).sum::<usize>()
+            + self.mobs.len()
+            + self.general.len()
+            + self.others.len()
+    }
+    pub(super) fn registry_counts(&self) -> Vec<(String, u32)> {
+        let mut counts = std::collections::BTreeMap::<String, u32>::new();
+        for &(id, n) in &self.fixed {
+            if n > 0 {
+                *counts.entry(id.to_owned()).or_default() += n as u32;
+            }
+        }
+        for mob in self.mobs.iter().filter(|mob| !mob.removed) {
+            *counts.entry(mob.kind.id.clone()).or_default() += 1;
+        }
+        for row in self.general.iter() {
+            *counts
+                .entry(
+                    super::general::general_type_catalog()
+                        .key(row.type_slot)
+                        .to_owned(),
+                )
+                .or_default() += 1;
+        }
+        for row in self.others {
+            *counts.entry(row.kind.clone()).or_default() += 1;
+        }
+        counts.into_iter().collect()
+    }
+}
+
+// Both Game and Parked own these typed families. Keep their instrumentation in one list.
+macro_rules! entity_count_view {
+    ($level:expr, $projectiles:expr, $general:expr) => {
+        crate::game::levels::EntityCountView {
+            fixed: [
+                ("minecraft:item", $level.dropped.len()),
+                ("minecraft:experience_orb", $level.orbs.len()),
+                ("minecraft:minecart", $level.carts.len()),
+                ("minecraft:boat", $level.boats.len()),
+                ("minecraft:falling_block", $level.falling.len()),
+                ("minecraft:painting", $level.paintings.len()),
+                ("minecraft:item_frame", $level.item_frames.len()),
+                ("minecraft:armor_stand", $level.armor_stands.len()),
+                ("minecraft:trident", $level.tridents.len()),
+                ("minecraft:firework_rocket", $level.rockets.len()),
+                ("minecraft:tnt", $level.tnts.len()),
+                ("minecraft:end_crystal", $level.crystals.len()),
+                ("minecraft:leash_knot", $level.knots.len()),
+                (
+                    "minecraft:ominous_item_spawner",
+                    $level.ominous_spawners.len(),
+                ),
+                ("minecraft:cushion", $level.cushions.len()),
+                ("minecraft:area_effect_cloud", $level.breath_clouds.len()),
+                ("minecraft:lightning_bolt", $level.bolts.len()),
+                ("horizon:projectile", $projectiles.len()),
+                ("minecraft:evoker_fangs", $level.fangs.perf_count()),
+                // Multipart hitboxes are not independently admitted world entities.
+                (
+                    "minecraft:ender_dragon",
+                    usize::from($level.dragon.as_ref().is_some()),
+                ),
+            ],
+            mobs: &$level.mobs,
+            general: $general,
+            others: &$level.others,
+        }
+    };
+}
+pub(super) use entity_count_view;
+
 /// Server ticks a level other than the Overworld stays loaded with no player
 /// in it, before it is saved and closed (vanilla unloads a level's chunks
 /// once no ticket holds them; the Overworld stays loaded).
@@ -522,95 +603,16 @@ impl Levels {
         self.parked.get(&dim).map(|level| &*level.mobs)
     }
 
-    /// Typed families outside the legacy five-list performance summary.
-    pub(super) fn parked_extra_perf_entities(&self, dim: Dim) -> Vec<(String, u32)> {
-        let Some(level) = self.parked.get(&dim) else {
-            return Vec::new();
-        };
-        let mut counts = Vec::new();
-        if !level.falling.is_empty() {
-            counts.push((
-                "minecraft:falling_block".to_owned(),
-                level.falling.len() as u32,
-            ));
-        }
-        if !level.paintings.is_empty() {
-            counts.push((
-                "minecraft:painting".to_owned(),
-                level.paintings.len() as u32,
-            ));
-        }
-        if !level.item_frames.is_empty() {
-            counts.push((
-                "minecraft:item_frame".to_owned(),
-                level.item_frames.len() as u32,
-            ));
-        }
-        if !level.armor_stands.is_empty() {
-            counts.push((
-                "minecraft:armor_stand".to_owned(),
-                level.armor_stands.len() as u32,
-            ));
-        }
-        if !level.tridents.is_empty() {
-            counts.push(("minecraft:trident".to_owned(), level.tridents.len() as u32));
-        }
-        if !level.rockets.is_empty() {
-            counts.push((
-                "minecraft:firework_rocket".to_owned(),
-                level.rockets.len() as u32,
-            ));
-        }
-        if !level.tnts.is_empty() {
-            counts.push(("minecraft:tnt".to_owned(), level.tnts.len() as u32));
-        }
-        if !level.crystals.is_empty() {
-            counts.push((
-                "minecraft:end_crystal".to_owned(),
-                level.crystals.len() as u32,
-            ));
-        }
-        if !level.knots.is_empty() {
-            counts.push(("minecraft:leash_knot".to_owned(), level.knots.len() as u32));
-        }
-        if !level.ominous_spawners.is_empty() {
-            counts.push((
-                "minecraft:ominous_item_spawner".to_owned(),
-                level.ominous_spawners.len() as u32,
-            ));
-        }
-        let count = level.cushions.len();
-        if count > 0 {
-            counts.push(("minecraft:cushion".to_owned(), count as u32));
-        }
-        let count = level.fangs.perf_count();
-        if count > 0 {
-            counts.push(("minecraft:evoker_fangs".to_owned(), count as u32));
-        }
-        let count = usize::from(level.dragon.as_ref().is_some());
-        if count > 0 {
-            counts.push(("minecraft:ender_dragon".to_owned(), count as u32));
-        }
-        let count = level.breath_clouds.len();
-        if count > 0 {
-            counts.push(("minecraft:area_effect_cloud".to_owned(), count as u32));
-        }
-        let count = level.bolts.len();
-        if count > 0 {
-            counts.push(("minecraft:lightning_bolt".to_owned(), count as u32));
-        }
-        for row in level.general.rows.iter() {
-            counts.push((
-                super::general::general_type_catalog()
-                    .key(row.type_slot)
-                    .to_owned(),
-                1,
-            ));
-        }
-        for row in level.others.iter() {
-            counts.push((row.kind.clone(), 1));
-        }
-        counts
+    pub(super) fn parked_perf_views(
+        &self,
+    ) -> impl Iterator<Item = (Dim, &World, EntityCountView<'_>)> {
+        self.parked.iter().map(|(&dim, level)| {
+            (
+                dim,
+                &level.world,
+                entity_count_view!(level, &level.projectiles, &level.general.rows),
+            )
+        })
     }
 
     /// A parked level's loose entities, for `horizon-report`: items, experience orbs,

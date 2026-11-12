@@ -222,7 +222,11 @@ impl Game<'_> {
                     c.view_distance,
                     c.simulation_distance,
                     c.max_players,
-                    h.hub.guests.len(),
+                    h.hub
+                        .guests
+                        .iter()
+                        .filter(|g| g.participates_online())
+                        .count(),
                 )
             });
         let start = Start {

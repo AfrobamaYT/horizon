@@ -367,7 +367,7 @@ fn player_census(hub: &Hub) -> Players {
     let set = |len: usize| len * (size_of::<(i32, i32)>() + 1);
     let mut rows = Vec::new();
     let mut bytes = 0usize;
-    for g in &hub.guests {
+    for g in hub.guests.iter().filter(|g| g.participates_online()) {
         let (packets, queued) = g.sender.queued();
         bytes += queued
             + set(g.sent_chunks.capacity())
@@ -394,7 +394,11 @@ fn player_census(hub: &Hub) -> Players {
         biggest(ranked, TOP_PLAYERS)
     };
     Players {
-        count: hub.guests.len(),
+        count: hub
+            .guests
+            .iter()
+            .filter(|g| g.participates_online())
+            .count(),
         total_mb: mb(bytes),
         send_queue: top(0)
             .into_iter()

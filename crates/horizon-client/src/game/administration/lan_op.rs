@@ -42,7 +42,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .find(|g| g.name == name)
+            .find(|g| g.participates_online() && g.name == name)
             .map(|g| g.uuid)
         else {
             return false;
