@@ -65,7 +65,7 @@ jobs:
       - name: The pinned Rust (tools/ci/rust-version)
         id: rust
         shell: bash
-        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
@@ -213,12 +213,13 @@ jobs:
           sparse-checkout: |
             tools/check_glibc.py
             tools/ci/game_smoke.sh
+            tools/ci/rust-version
             tools/ci/with_xvfb.py
             tools/ci/nightly_catalog.py
       - name: The pinned Rust (tools/ci/rust-version)
         id: rust
         shell: bash
-        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/.workflow-tools/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
@@ -480,11 +481,12 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             tools/ci/game_smoke.sh
+            tools/ci/rust-version
             tools/ci/with_xvfb.py
       - name: The pinned Rust (tools/ci/rust-version)
         id: rust
         shell: bash
-        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/.workflow-tools/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}

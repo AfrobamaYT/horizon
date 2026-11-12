@@ -28,7 +28,7 @@ jobs:
       - name: The pinned Rust (tools/ci/rust-version)
         id: rust
         shell: bash
-        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}

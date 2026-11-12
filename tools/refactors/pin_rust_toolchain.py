@@ -12,11 +12,11 @@ import pathlib
 import re
 
 DISABLED = {"ci.yml", "launcher.yml", "mod-registry.yml", "nightly.yml", "pack-bench.yml", "parity-main.yml"}
-PIN_STEP = (
+PIN_STEP = (  # read from the workspace root: a job may run steps in a subfolder
     "{i}- name: The pinned Rust (tools/ci/rust-version)\n"
     "{i}  id: rust\n"
     "{i}  shell: bash\n"
-    '{i}  run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"\n'
+    '{i}  run: echo "version=$(cat \"$GITHUB_WORKSPACE/tools/ci/rust-version\")" >> "$GITHUB_OUTPUT"\n'
 )
 
 
