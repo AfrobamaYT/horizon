@@ -59,6 +59,8 @@ impl DirtySections {
     }
 }
 pub struct World {
+    /// The dimension type's fire-source tag, resolved at entry and data reload.
+    pub infiniburn: Option<Arc<horizon_world::level::data::BlockSet>>,
     /// Server-owned mod data attached to this dimension.
     pub attachments: horizon_mod_runtime::attachments::Attachments,
     /// The holders lent to mods since the last flush, whose synced changes
@@ -252,6 +254,7 @@ impl World {
 
     pub fn new(air: BlockStateId, seed: i64) -> Self {
         Self {
+            infiniburn: None,
             shape: LevelShape::OVERWORLD,
             chunks: Default::default(),
             random: LevelRandom::for_level(LegacyRandom::new(seed)),

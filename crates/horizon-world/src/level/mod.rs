@@ -144,6 +144,8 @@ mod fire_tests;
 #[cfg(test)]
 mod growth_tests;
 #[cfg(test)]
+mod infiniburn_tests;
+#[cfg(test)]
 mod piston_carry_tests;
 #[cfg(test)]
 mod survive_tests;
@@ -888,6 +890,10 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// else the built-in level's.
     fn sea_level(&self) -> i32 {
         sea_level_of(self.level_key())
+    }
+    /// `DimensionType.infiniburn` resolved once for this level; None lets the fire tick resolve the tag from the bundle.
+    fn infiniburn(&self) -> Option<&data::BlockSet> {
+        None
     }
     /// The level's dimension type.
     fn dimension_type(&self) -> &DimensionFacts {
