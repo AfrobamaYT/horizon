@@ -11,6 +11,7 @@ use horizon_client::{
 };
 use horizon_core::nbt::{Compound, Tag};
 use horizon_items::items::ItemStack;
+use horizon_world::registry::BlockStateId;
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityError, BlockEntityItemError, BlockEntityRef,
@@ -41,6 +42,23 @@ impl Game<'_> {
         Some(mod_api::__private::game::block_entity_ref(
             level, pos, generation,
         ))
+    }
+
+    /// The data of the block entity at `pos`, as saved without identity or position
+    /// metadata, for the hook that hears its block's removal: the entity is gone from
+    /// the world by then, so it is read first. None for a block without one, or while
+    /// no mod listens.
+    pub(in crate::game) fn removed_block_entity_data(
+        &self,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) -> Option<Compound> {
+        if !mod_api::__private::listened(mod_api::HookId::PlayerDestroyedBlock) {
+            return None;
+        }
+        let entity = loaded_block_entity(&self.world, pos)?;
+        let block = &self.pack.assets.registry.state(state)?.name;
+        save_without_metadata(&self.world, (pos[0], pos[1], pos[2]), entity, block)
     }
 
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
@@ -807,7 +825,7 @@ mod tests {
         let replacing = case != "provider";
         if replacing {
             let mods: Mods = vec![ModEntry::new("replace", Box::new(ReplaceDuringOpen))].into();
-            mod_api::__private::install(mods.clone());
+            mod_platform::__private::install(mods.clone());
             crate::game::api_values::install_parts(&mods).unwrap();
         }
         super::super::native_guest_turn_tests::with_guests(|game| {
