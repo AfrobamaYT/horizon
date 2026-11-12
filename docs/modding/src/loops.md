@@ -29,6 +29,8 @@ with = "Throttle"
 priority = 20
 ```
 
+(The comment says "asked second" because the same mod's `count` slot has `priority = 10`.)
+
 `src/loops/throttle.rs`:
 
 ```rust,ignore
@@ -59,10 +61,12 @@ impl BlockEntityTickSlot for Throttle {
 }
 ```
 
-The helper file is compiled beside the loop in the game's module, like a [mixin helper](mixins.md#a-helper):
-`BlockEntityTickSlot`, `BlockEntityTick`, `LoopFlow`, `TickedKind` and the game's types are in scope without
-imports, and it may call the mod's own crate (`fnr_loop::note`). Unlike a mixin helper it holds any Rust items
-you like; one of them is the slot type `with` names.
+The helper file is compiled beside the loop, in the game's module `horizon_client::game::block_entity_ticks`
+(file `crates/horizon-client/src/game/blocks/block_entity_ticks.rs`), and sees the names that module sees,
+like a [mixin helper](mixins.md#a-helper): `BlockEntityTickSlot`, `BlockEntityTick`, `LoopFlow`, `TickedKind`,
+`Game`, `BlockEntity` and the module's other imports, with no `use` lines. It may call the mod's own crate
+(`fnr_loop::note`). Unlike a mixin helper it holds any Rust items you like; one of them is the slot type
+`with` names.
 
 On success the build log prints `Published loops: 1 filled by 1 mod slots` (with the number of loops and
 slots), beside the `Function replacement:` line.
@@ -87,10 +91,11 @@ client `Game` never runs it.
 
 The slot trait, `BlockEntityTickSlot`, has two methods, both with a default that does nothing:
 
-- `before(&mut self, tick: &mut BlockEntityTick) -> LoopFlow` runs for each block entity vanilla would tick,
+- `fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow` runs for each block entity vanilla would tick,
   after vanilla's own filters (in a block-ticking chunk, inside the world border, live, not asleep) and
   before its tick.
-- `after(&mut self, tick: &mut BlockEntityTick)` runs once it has ticked; not for one a slot skipped.
+- `fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>)` runs once it has ticked. When any mod's slot
+  skipped the entity, it did not tick and no mod's `after` runs for it.
 
 The cursor, `BlockEntityTick`, lends for one call:
 
@@ -109,10 +114,20 @@ The cursor, `BlockEntityTick`, lends for one call:
 
 ### Your own mod's block entities
 
-`TickedKind::Mod` covers every mod's block entities, not only yours. The game has no per-mod kind. To act
-only on your own, look at the block entity: a mod's is `BlockEntity::Mod(entity)`, and `entity.id()` is the
-type id it was registered with, such as `mymod:machine`. That costs a map lookup and a string comparison for
-each mod block entity, each tick, so test `tick.kind == TickedKind::Mod` first.
+`TickedKind::Mod` covers every mod's block entities, not only yours; the game has no per-mod kind. To act
+only on your own, look at the block entity itself:
+
+- `tick.block_entity()` looks the visited entity up in the level's block entity map and returns
+  `Option<&mut BlockEntity>`.
+- A mod's block entity is the variant `BlockEntity::Mod(entity)`, where `entity` is a
+  `Box<ModBlockEntity>`.
+- `entity.id()` returns `&str`: the type id it was registered with, such as `"mymod:machine"`, so
+  `entity.id() == "mymod:machine"` or `entity.id().starts_with("mymod:")` works.
+- Its saved data is `entity.nbt` (an NBT compound), its item slots `entity.items` and its menu data
+  `entity.data`. Writing through `entity` marks it changed.
+
+That is a map lookup and a string comparison for each mod block entity, each tick, so test
+`tick.kind == TickedKind::Mod` first. No check mod covers this path yet.
 
 ### Changing block entities from a slot
 
@@ -129,8 +144,9 @@ The cursor's `game` is the whole game, so a slot can add, remove or replace bloc
 
 - Rows on one loop are sorted by priority, then mod id. In `before`, the first answer that is not `Continue`
   wins and later mods are not asked for that entity. `after` runs for every mod.
-- The slot value is made with `Default` on the loop's first run, once per `Game`, and kept across ticks. Key
-  per-dimension state on the game's dimension.
+- The slot value is made with `Default` on the loop's first run, once per `Game`, and kept across ticks. The
+  server's `Game` ticks each dimension in turn, so the one slot value sees all of them; `tick.game.dim` says
+  which dimension is being ticked. Key per-dimension state on it.
 - A run started from inside a slot (the slot calls something that ticks block entities again) is the game's
   own loop, without slots, and a whole pass: every entity ticks again and the work after the loop runs again.
   The enclosing pass's working state is set aside and restored, so it carries on as before. The server logs

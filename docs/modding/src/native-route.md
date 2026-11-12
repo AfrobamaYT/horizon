@@ -55,6 +55,48 @@ Every native mod already has it. The tables on this route go below it:
 `cargo horizon-mod new` writes all three. The rows of every `[[native.*]]` table and every `[[inject]]` share
 one id space: two rows of one mod never share an `id`.
 
+## The mod's crate
+
+A mod on this route is an ordinary native mod ([Your first native mod](start/first-mod.md)): a Cargo package
+beside `horizon-mod.toml`, depending on `horizon-mod-api`, with a type implementing `mod_api::Hooks` (it may
+implement no hook at all). The examples in this section come from the **check mods**: small native mods in
+`tools/ci/fn-replace-check/` that CI builds against the prebuilt game on every change to this route, so the
+examples stay true. This is the `Cargo.toml` of the check mod `fnr_alpha` (the check fills `rev` with the
+game commit; yours names your `horizon` commit):
+
+```toml
+[package]
+name = "fnr-alpha"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+horizon-mod-api = { git = "https://github.com/arismoko/horizon", rev = "HEAD" }
+```
+
+and its `src/lib.rs`:
+
+```rust,ignore
+//! The mod's own crate. Its `[[native.mixin]]` helpers (`src/mixins/`) are compiled into copies of the
+//! game functions they patch, not into this crate.
+#[derive(Default)]
+struct Mod;
+
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for Mod {}
+
+/// Called by a helper: a helper may use its mod's crate.
+pub fn note(what: &str) {
+    eprintln!("fnr: alpha {what}");
+}
+```
+
+The code your `[[native.*]]` rows name (helpers, slots, modules) lives in files under `src/` that this crate
+does not declare as modules: the launcher compiles them into the copies of the game's functions. They call
+the mod's crate by its Rust name, the package name with `-` turned into `_` (`fnr_alpha::note`); the crate
+name need not match the mod's `id`.
+
 ## What a build does
 
 The game itself is never rebuilt. When you build the mod (the launcher's **Build**, or
@@ -62,7 +104,8 @@ The game itself is never rebuilt. When you build the mod (the launcher's **Build
 for your `horizon` commit and its source. It copies each function your rows target out of that source,
 applies your mixins to the copies with horizon-mixins, adds your loop slots, bridges and modules, compiles the
 copies against the prebuilt game together with your mod's crate, and swaps each copy in for the original
-through a replacement cell the prebuilt game carries for every replaceable function. What can't be done this
+through a **replacement cell**: a pointer the prebuilt game checks at the start of every replaceable function,
+which runs the installed copy instead when one is set. What can't be done this
 way is refused by name before anything compiles
 ([What the launcher does](how-to/native-mods/028-what-the-launcher-does.md#what-the-launcher-does)).
 
@@ -74,5 +117,5 @@ Function replacement: 1 functions patched by 1 mixins, without rebuilding the ga
 ```
 
 The first build with a `[[native.mixin]]` row also downloads and builds the horizon-mixins tool, once per
-`mixins` commit; on a test machine that first build took a little over a minute. Later builds reuse the tool,
+`mixins` commit (a mod with only loops, bridges and modules never needs it); on a test machine that first build took a little over a minute. Later builds reuse the tool,
 and a build with a mixin, a loop slot, a bridge and a module took a few seconds there.

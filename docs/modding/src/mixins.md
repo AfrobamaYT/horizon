@@ -58,22 +58,8 @@ fn head(game: &mut Game<'_>) -> ::core::ops::ControlFlow<()> {
 }
 ```
 
-`src/lib.rs`, the mod's own crate (package `fnr-alpha`, so `fnr_alpha` in Rust), which the helper calls:
-
-```rust,ignore
-//! The mod's own crate. Its `[[native.mixin]]` helpers (`src/mixins/`) are compiled into copies of the
-//! game functions they patch, not into this crate.
-#[derive(Default)]
-struct Mod;
-
-#[mod_api::horizon_mod]
-impl mod_api::Hooks for Mod {}
-
-/// Called by a helper: a helper may use its mod's crate.
-pub fn note(what: &str) {
-    eprintln!("fnr: alpha {what}");
-}
-```
+The helper calls `fnr_alpha::note`, a `pub fn` in the mod's own crate; that crate's `Cargo.toml` and
+`src/lib.rs` are on [The native route](native-route.md#the-mods-crate).
 
 What happens:
 
@@ -81,17 +67,23 @@ What happens:
   copy of `on_tick_rate_changed`, in the game's module `game::autosave`, so `Game` and its private fields
   `clock` and `ticks_until_autosave` resolve exactly as they do in the game's source.
 - `cancellable = true` makes the helper return `ControlFlow<()>`: `Break(())` returns from the function before
-  its first line, `Continue(())` lets it run.
+  its first line, `Continue(())` lets it run. For a function that returns a value `R`, the helper returns
+  `ControlFlow<R>` and `Break(value)` returns that value.
 - On success the build log prints `Function replacement: 1 functions patched by 1 mixins, without rebuilding
   the game (…)`, with the time of each phase.
 
 ## A helper
 
-A helper file holds exactly one private, safe, non-generic function with no attributes. Its parameters are
-filled by `bindings`, one entry per parameter, in order. It is compiled inside the copied function's module:
+A helper file holds exactly one private, safe function with no attributes and no generic parameters (an
+`impl FnOnce` parameter for `WRAP_OPERATION`'s `$operation` is the one exception). Its name is free. Its
+parameters are filled by `bindings`, one entry per parameter, in order. The file has no `use` lines: the
+helper is compiled inside the copied function's module, so it sees exactly the names that module sees.
 
-- It sees what the target's module sees: the game's types, private fields and functions visible there. A
-  member it can't see is reached through a [bridge](bridges.md).
+- Its names: the items of the target's module and everything that module imports with `use`. Read the top of
+  the target's source file to see them. Any other name is written as a full path: `crate::…`,
+  `horizon_client::…`, `::core::ops::ControlFlow`.
+- It sees the private fields and functions visible in that module. A member it can't see is reached through
+  a [bridge](bridges.md).
 - `crate::` is the game crate (`horizon_client`), as in the game's own source.
 - It calls your mod's crate by its crate name (`fnr_alpha::note`), so longer code lives there. Code that
   needs the game's private items and is shared by several helpers goes in a [support module](support-modules.md).
@@ -161,8 +153,8 @@ fn wrapped(rate: f32, operation: impl FnOnce(f32) -> i64) -> i64 {
 }
 ```
 
-The full contract of each kind, selector and binding is horizon-mixins' own, at the commit in
-`[native] mixins`: its [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/mixin-api.md),
+The full contract of each kind, selector and binding is horizon-mixins' own. These links are to the commit
+the launcher pins today; if your `[native] mixins` differs, read the same files at your commit: [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/mixin-api.md),
 [advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/advanced-injections.md)
 and [scopes and bridges](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/scopes-and-bridges.md).
 The launcher applies one small patch to that tool, `tools/mixins/narrow-reference-rule.patch`, which accepts a
@@ -176,12 +168,29 @@ call directly under `&` for the kinds that rewrite only that call.
 | `target` | yes | The game function, as a path (below). |
 | `kind` | yes | One of the kinds above. |
 | `helper` | yes | The helper's file, a `.rs` path under `src/`. |
-| `bindings` | when the helper has parameters | One `{ name, ty, value }` per helper parameter, in order. `name` and `ty` repeat the parameter; `value` is a target parameter or its borrow (`self`, `&*self`, `&mut *self`, `rate`), or a tool value: `$value`, `$argN`, `$args`, `$operation`, `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N`. |
-| `cancellable` | no | `HEAD` (and some call-site kinds): the helper returns `ControlFlow` and can end the function. |
+| `bindings` | when the helper has parameters | One `{ name, ty, value }` per helper parameter, in order. `name` and `ty` repeat the parameter; `value` is a target parameter or its borrow (`self`, `&*self`, `&mut *self`, `rate`), or a tool value (below). |
+| `cancellable` | no | `HEAD`: the helper returns `ControlFlow<()>`, or `ControlFlow<R>` for a function returning `R`, and can end the function. |
 | `selector`, `require`, `ordinal` | for one-place kinds | Which call, how many matches, which match. |
 | `variable` | `MODIFY_VARIABLE` | `{ name, ordinal, at = "LOAD" or "STORE", parameter = true for a parameter }`. |
-| `priority` | no | Orders rows of several mods at one place. |
+| `priority` | no | Orders rows of several mods at one place: higher runs first (the tool's default is 100). |
 | `slice`, `argument`, `result` | no | Narrow the search region, pick an argument, give a call's result type; see the tool's docs. |
+
+The tool values a binding can pass:
+
+| `value` | What the helper gets |
+| --- | --- |
+| `$value` | The value being changed: the return value (`RETURN`), the expression's value (`MODIFY_EXPRESSION_VALUE`), the argument, constant or variable. |
+| `$arg0`, `$arg1`, … | An argument of the selected call (`WRAP_OPERATION`). |
+| `$args` | All arguments of the selected call as a tuple (`MODIFY_ARGS`). |
+| `$operation` | The selected call itself, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`). |
+| `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th (from 0) local variable declared as `NAME` in the original body: by value, `&` or `&mut`. |
+
+**Selectors.** A `selector` is source text matched against the original body, not a resolved name. For the
+kinds that act on a call (`BEFORE_CALL`, `AFTER_CALL`, `MODIFY_ARG`, `MODIFY_ARGS`, `WRAP_OPERATION`) it is
+the callee as written, without arguments: `autosave_interval`, `self.next_autosave_interval`. For
+`MODIFY_EXPRESSION_VALUE` it is the whole expression as written, arguments included:
+`autosave_interval(rate)`. `require` is the number of matches in the original body and `ordinal` picks one,
+from 0, in source order.
 
 ## Naming the target
 
@@ -190,11 +199,21 @@ A target is the path of the function in the game's source:
 - **A method:** the module its `impl` block is in, the type, the function:
   `horizon_client::game::autosave::Game<'_>::on_tick_rate_changed`.
 - **A free function:** `horizon_client::game::commands::misc::millis`.
-- **A trait method:** `horizon_client::game::<GameLevel<'_> as LevelAccess>::block_state`.
+- **A trait method:** the module of the `impl … for` block, then `<Type as Trait>`, then the function:
+  `horizon_client::game::<GameLevel<'_> as LevelAccess>::block_state` (an `impl LevelAccess for GameLevel<'_>`
+  in `game.rs`).
 
-The module is the Rust module, not the folder. In the game crate, the folders under `src/game/` group files
-but are not modules: `crates/horizon-client/src/game/world/autosave.rs` is the module
-`horizon_client::game::autosave`. Read the source at your `horizon` commit to find a function.
+To find the module of a function, find its file, then turn the path into a module path:
+
+1. `crates/horizon-client/src/` is the crate `horizon_client`; `game.rs` is `horizon_client::game`.
+2. A folder directly under `src/game/` that holds a `.game-area` file is an **area**: it groups files and is
+   not a module. `src/game/world/autosave.rs` is `horizon_client::game::autosave`, and
+   `src/game/administration/commands/misc.rs` is `horizon_client::game::commands::misc`.
+3. Every other folder is a module as usual: `src/game/native_hooks/base.rs` is
+   `horizon_client::game::native_hooks::base`.
+
+The type part is the `impl` block's type as written, lifetimes included (`Game<'_>`). A bridge names a struct
+differently: by the module that *declares* it (`horizon_client::game::Game`), not the one with the `impl`.
 
 ## Which functions can take a mixin
 

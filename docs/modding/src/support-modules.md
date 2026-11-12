@@ -55,8 +55,9 @@ The file `crates/horizon-client/src/game/world/autosave.rs` is the module `game:
 | `visibility` | no | `"pub(crate)"` (the default) or `"pub"`. |
 
 Inside the module, `super::` is the game module that received it, so the game's types and private items there
-are reachable as `super::Game` and so on. Make the items helpers call `pub`. Your mod's crate cannot call the
-module: it is compiled before the copies.
+are reachable as `super::Game` and so on. Make the items helpers call `pub`. The module's code may call your
+mod's crate by its Rust name, as a helper does; your mod's crate cannot call the module, because that crate is
+compiled before the copies.
 
 ## On success
 

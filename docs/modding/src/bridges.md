@@ -8,7 +8,8 @@ other method. It is part of the [native route](native-route.md), so it is pinned
 
 The check mod `fnr_support`, which CI builds against the prebuilt game, declares a mutable getter for
 `Game::ticks_until_autosave` and uses it from a `HEAD` mixin. (That field is visible from the mixin's module
-anyway; the check shows the shape.) It also uses a [support module](support-modules.md), `fnr_runtime`.
+anyway; the check shows the shape.) Its helper also calls `fnr_runtime::bumped`, a function of a
+[support module](support-modules.md) the same mod adds; that page explains the `[[native.module]]` row.
 
 `horizon-mod.toml` (excerpt; the full header is as on [Mixins](mixins.md#a-first-mixin)):
 
@@ -57,10 +58,17 @@ Its name is `__horizon_mixins_<mod>_<id>`: your mod's id and the row's id, lower
 | `GET` | `fn(&self) -> &T` | The struct: `horizon_client::game::Game` | The field's name, or its index in a tuple struct |
 | `GET_MUT` | `fn(&mut self) -> &mut T` | The struct | The field |
 | `SET` | `fn(&mut self, value: T)` | The struct | The field |
-| `INVOKE` | The method's own signature | The method, written like a [mixin target](mixins.md#naming-the-target) | none |
+| `INVOKE` | The method's own signature, renamed | The method, written like a [mixin target](mixins.md#naming-the-target) | leave it out |
 
-Write the struct as its module path and name, without lifetimes. Mixin helpers anywhere in the game crate can
-call the method; your mod's own crate and support modules cannot.
+For `INVOKE`, the generated method takes the same receiver and arguments and returns the same type as the
+method it calls: call it as `value.__horizon_mixins_<mod>_<id>(arguments…)`, or, for an associated function
+without `self`, as `Type::__horizon_mixins_<mod>_<id>(arguments…)`. No check mod covers `INVOKE` yet.
+
+Write a field bridge's struct as the module that declares it and its name, without lifetimes
+(`horizon_client::game::Game`; a mixin target names the module of the `impl` instead). The method is
+generated as a trait implemented for the type, and that trait is imported into the module of every copied
+game-crate function, so your mixin helpers on game-crate functions call it like an inherent method. Your mod's own crate cannot call it: that
+crate is compiled before the copies.
 
 ## Fields
 
