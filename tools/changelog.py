@@ -27,11 +27,12 @@ def escaped(value):
                    for c in " ".join(value.split()))
 
 
-def get(url):
+def get(url, payload=None):
     headers = {"Accept": "application/vnd.github+json"}
     if os.environ.get("GH_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
-    with urlopen(Request(url, headers=headers), timeout=60) as response:
+    body = json.dumps(payload).encode() if payload is not None else None
+    with urlopen(Request(url, data=body, headers=headers), timeout=60) as response:
         return json.load(response)
 
 
@@ -55,12 +56,46 @@ def members(pr):
     return [int(n) for n in re.findall(r"^\|\s*#(\d+)\s*\|", pr.get("body") or "", re.M)]
 
 
+def merged_prs(day):
+    """Batch the fields needed for expansion instead of one REST call per PR."""
+    query = """query($query: String!, $after: String) {
+      search(query: $query, type: ISSUE, first: 100, after: $after) {
+        issueCount pageInfo { hasNextPage endCursor }
+        nodes { ... on PullRequest {
+          number title body mergedAt headRefName headRefOid
+          author { login __typename } labels(first: 100) { nodes { name } }
+        } }
+      }
+    }"""
+    after = None
+    result = []
+    while True:
+        time.sleep(2.1)
+        response = get("https://api.github.com/graphql", {"query": query, "variables": {
+            "query": f"repo:{REPO} is:pr is:merged merged:{day}", "after": after}})
+        if response.get("errors"):
+            raise RuntimeError("GitHub GraphQL query failed")
+        batch = response["data"]["search"]
+        if batch["issueCount"] > 1000:
+            raise RuntimeError("GitHub search exceeds 1,000 results for one day")
+        for pr in batch["nodes"]:
+            author = pr["author"] or {"login": "deleted", "__typename": "User"}
+            result.append({"number": pr["number"], "title": pr["title"], "body": pr["body"],
+                           "merged_at": pr["mergedAt"], "head": {
+                               "ref": pr["headRefName"], "sha": pr["headRefOid"]},
+                           "user": {"login": author["login"], "type": author["__typename"]},
+                           "labels": pr["labels"]["nodes"]})
+        if not batch["pageInfo"]["hasNextPage"]:
+            return result
+        after = batch["pageInfo"]["endCursor"]
+
+
 def collect(now, days):
     prs, issues = {}, {}
     for offset in range(days):
         day = (now - timedelta(days=offset)).date().isoformat()
-        for item in search(f"is:pr is:merged merged:{day}"):
-            prs[item["number"]] = get(API + f"/pulls/{item['number']}")
+        for item in merged_prs(day):
+            prs[item["number"]] = item
         for query in (f"is:issue label:\"help wanted\" created:{day}",
                       f"is:issue label:bug closed:{day}"):
             for item in search(query):

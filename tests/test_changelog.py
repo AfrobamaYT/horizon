@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
-from tools.changelog import members, render
+from tools.changelog import collect, members, merged_prs, render
 
 
 class ChangelogTests(unittest.TestCase):
@@ -31,6 +32,32 @@ class ChangelogTests(unittest.TestCase):
         self.assertIn('and 1 more', output)
         self.now = datetime(2026, 12, 14, tzinfo=timezone.utc)
         self.assertIn('No matching activity.', render(self.data, self.now))
+
+    @patch('tools.changelog.time.sleep')
+    @patch('tools.changelog.get')
+    def test_pull_collection_is_batched(self, get, sleep):
+        node = {'number': 1, 'title': 'Change', 'body': '',
+                'mergedAt': '2026-11-13T00:00:00Z', 'headRefName': 'topic',
+                'headRefOid': 'a' * 40, 'author': {'login': 'author', '__typename': 'User'},
+                'labels': {'nodes': []}}
+        get.side_effect = [
+            {'data': {'search': {'issueCount': 101, 'nodes': [dict(node, number=n) for n in range(100)],
+                                'pageInfo': {'hasNextPage': True, 'endCursor': 'next'}}}},
+            {'data': {'search': {'issueCount': 101, 'nodes': [dict(node, number=100)],
+                                'pageInfo': {'hasNextPage': False, 'endCursor': 'end'}}}}]
+        self.assertEqual(len(merged_prs('2026-11-13')), 101)
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args.args[1]['variables']['after'], 'next')
+
+    @patch('tools.changelog.search', return_value=[])
+    @patch('tools.changelog.merged_prs')
+    @patch('tools.changelog.get', return_value=[])
+    def test_collect_uses_no_per_pull_rest_requests(self, get, pulls, search):
+        pulls.return_value = self.data['prs']
+        result = collect(self.now, 1)
+        self.assertEqual(len(result['prs']), 2)
+        self.assertEqual(get.call_count, 1)  # Releases only; member already batched.
+        self.assertIn('/releases?', get.call_args.args[0])
 
     def test_bot_filter_and_label_override(self):
         self.data['prs'] = [self.data['prs'][0]]
