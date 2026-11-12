@@ -100,5 +100,71 @@ class OwnRunnerTests(unittest.TestCase):
         count = 0
         for where, _, _, _, value, pools in routed():
             count += 1
-            # Both Ubuntu labels are GitHub-hosted fallbacks.
+            # dyna-ci.yml (ours) routes through the changes job's self_hosted
+            # output and dyna-medium, or SELF_HOSTED_CI=all with the fork guard
+            # before the playhorizon-ci labels; the carried upstream files use
+            # SELF_HOSTED_CI != 'off'. Both fall back to GitHub's runners.
+            if "dyna-ci.yml" in where:
+                self.assertIn("needs.changes.outputs.self_hosted == 'true'", value, where)
+                self.assertIn("vars.SELF_HOSTED_CI == 'all'", value, where)
+                self.assertIn(FORK_GUARD, value, where)
+            else:
+                self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
+            # Both labels select a GitHub-hosted Ubuntu runner when our pools are disabled.
             self.assertRegex(value, r"\|\| 'ubuntu-(?:latest|24\.04)' \}\}$", where)
+            if "checks" in pools:
+                # The desktop paused: every checks job back to GitHub, the bots stay.
+                self.assertIn("vars.SELF_HOSTED_CI != 'light'", value, where)
+        self.assertGreaterEqual(count, 10)
+
+    def test_light_runners_take_main_code_only(self):
+        for where, on, _, block, value, pools in routed():
+            if "light" not in pools:
+                continue
+            if "pull_request" in on:
+                # The guard lives in the job's `if` upstream; dyna-ci.yml (ours)
+                # puts it in `runs-on`, before the self-hosted labels.
+                guarded = FORK_GUARD in next(
+                    (l for l in block.splitlines() if l.strip().startswith("if:")), ""
+                ) or FORK_GUARD in value
+                self.assertTrue(guarded, f"{where}: a fork's pull request")
+            if "pull_request_target" in on:
+                # main's code only: every checkout is main's.
+                self.assertEqual(block.count("uses: actions/checkout"), block.count("ref: main"), where)
+
+    def test_no_secret_or_writing_token_on_our_runners(self):
+        for where, _, text, block, _, pools in routed():
+            self.assertNotIn("secrets.", block, where)
+            self.assertNotIn("environment:", block, where)
+            head = text.split("\njobs:\n", 1)[0]
+            for part in (block, head):
+                writes = {m.group(1) for m in TRUSTED_WRITES.finditer(part)}
+                if where in CANCELS_RUNS:
+                    writes -= {"actions"}
+                    self.assertNotIn("actions/checkout", block, where)
+                self.assertEqual(writes, set(), where)
+            if "checks" in pools:
+                # A checks runner keeps what a fork's job left: its jobs' tokens write nothing at all.
+                self.assertNotRegex(block, r":\s*write", where)
+                self.assertNotRegex(head, r":\s*write", where)
+
+    def test_checks_split_between_both_pools(self):
+        ci = (WORKFLOWS / "ci.yml").read_text()
+        verify = dict(jobs(ci))["verify"]
+        value = runs_on(verify)
+        # A pull request by the last digit of its number unless SELF_HOSTED_CI=all; main's pushes keep GitHub's cache.
+        self.assertIn("github.event_name == 'pull_request' && (", value)
+        self.assertIn("vars.SELF_HOSTED_CI == 'all'", value)
+        self.assertIn("endsWith(format('{0}', github.event.pull_request.number), '0')", value)
+        self.assertNotIn(FORK_GUARD, value)
+        self.assertEqual(value, runs_on(dict(jobs(ci))["launcher"]))
+
+    def test_the_light_runners_refuse_forks_themselves(self):
+        script = (ROOT / "tools/ci/checks-runners.sh").read_text()
+        self.assertIn("ACTIONS_RUNNER_HOOK_JOB_STARTED=$shared/job-started.sh", script)
+        self.assertIn('.pull_request.head.repo.full_name // "unknown"', script)
+        self.assertIn('if [ "$head" != "${GITHUB_REPOSITORY:-}" ]', script)
+
+
+if __name__ == "__main__":
+    unittest.main()
