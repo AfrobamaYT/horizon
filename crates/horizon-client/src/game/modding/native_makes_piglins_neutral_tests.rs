@@ -4,6 +4,8 @@
 //! `NEAREST_TARGETABLE_PLAYER_NOT_WEARING_GOLD` reads).
 use super::native_entity_refs::tests::with_game;
 use horizon_client::items::ItemStack;
+use horizon_client::motion::PlayerMotion;
+use horizon_core::geometry::Vec3;
 use mod_api::{Hooks, Host, ItemPart, MakesPiglinsNeutralEvent, Registrar, RegistrationContext};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -35,6 +37,17 @@ impl Hooks for NeutralMod {
     }
 }
 
+/// The player's entity id.
+const PLAYER: i32 = 42;
+
+/// A serving game with a player, entity `PLAYER`.
+fn serving(game: &mut super::Game<'_>) {
+    game.options.dedicated = Some(Vec::new());
+    let mut player = PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap();
+    player.entity_id = PLAYER;
+    game.player = Some(player);
+}
+
 /// The player wears `head` and `feet` and nothing else; whether calm piglins leave them alone.
 fn wearing(game: &mut super::Game<'_>, head: Option<&str>, feet: Option<&str>) -> bool {
     game.armor = [
@@ -60,12 +73,11 @@ fn a_part_decides_whether_a_worn_piece_counts_as_gold_isolated() {
     mod_api::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
         with_game(|game| {
-            game.options.dedicated = Some(Vec::new());
-            let player = game.player.as_ref().unwrap().entity_id as u32;
+            serving(game);
             assert!(wearing(game, Some("minecraft:leather_helmet"), None));
             assert_eq!(
                 WEARER.load(Ordering::Relaxed),
-                player,
+                PLAYER as u32,
                 "the part sees the wearer"
             );
             // Golden boots the part refuses don't count, though the tag lists them.
@@ -94,7 +106,7 @@ fn without_parts_the_piglin_safe_armor_tag_decides() {
 
 fn without_parts_the_piglin_safe_armor_tag_decides_isolated() {
     with_game(|game| {
-        game.options.dedicated = Some(Vec::new());
+        serving(game);
         assert!(!wearing(game, Some("minecraft:leather_helmet"), None));
         assert!(wearing(game, None, Some("minecraft:golden_boots")));
         assert!(!wearing(game, None, None));
