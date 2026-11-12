@@ -13,5 +13,5 @@ Mark a migration with `event.resolved.push("my_mod".to_owned().into())`.
 The first listener to mark an id owns its `resolver` attribution; later listeners
 cannot erase or replace that marker. Markers for other ids are allowed.
 Differences are logged sorted by mod id, resolved at debug with the resolver and
-self/other distinction, unresolved at warn. No dialog or cancellation is added.
+self/other distinction, unresolved at warn. The event shows no dialog and cannot be cancelled.
 The current mod list is written on the next save, not when this event fires.

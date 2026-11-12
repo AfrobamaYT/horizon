@@ -2,7 +2,7 @@
   <title id="t">Hooks, Parts, the Host and attachments</title>
   <desc id="d">When something happens in the game, every mod subscribed to that hook is called with an event and a host. A Part is called only for the blocks, items, block entities, menus or entities a mod attached it to. Through the host and the handles in the event, a mod reads and writes the game, reaches capabilities, and keeps its own data on objects as attachments.</desc>
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a8f98"/></marker>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6e7681"/></marker>
   </defs>
   <g font-size="13" fill="#1f2328">
     <!-- game moment -->
@@ -33,12 +33,12 @@
     <text x="590" y="244">Attachments: your data on objects,</text>
     <text x="590" y="262">saved and synced if you ask.</text>
   </g>
-  <g stroke="#8a8f98" stroke-width="2" fill="none" marker-end="url(#a)">
+  <g stroke="#6e7681" stroke-width="2" fill="none" marker-end="url(#a)">
     <path d="M182 155 C 210 155, 210 85, 238 85"/>
     <path d="M182 185 C 210 185, 210 255, 238 255"/>
     <path d="M512 85 C 540 85, 540 130, 568 130"/>
     <path d="M512 255 C 540 255, 540 210, 568 210"/>
   </g>
-  <text x="196" y="118" font-size="12" fill="#8a8f98" text-anchor="middle">event</text>
-  <text x="196" y="232" font-size="12" fill="#8a8f98" text-anchor="middle">event</text>
+  <text x="196" y="118" font-size="12" fill="#6e7681" text-anchor="middle">event</text>
+  <text x="196" y="232" font-size="12" fill="#6e7681" text-anchor="middle">event</text>
 </svg>

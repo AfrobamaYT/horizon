@@ -59,6 +59,6 @@ or existing offers, so restoring the mod can resolve it again.
 Clients build the same deterministic identity table from their installed mods and
 use it for villager rendering. Install the profession mod on both the server and
 its clients, with the mod declared for both sides. The mod-list handshake refuses
-missing or mismatched both-side mods; client-only and server-only mods do not
-participate in that comparison. Missing professions are not replaced with vanilla
+missing or mismatched both-side mods; client-only mods do not take part in that
+comparison. Missing professions are not replaced with vanilla
 identities.

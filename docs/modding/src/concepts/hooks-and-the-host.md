@@ -10,12 +10,18 @@ reach the game through the Host, its handles, capabilities and attachments.](../
 
 ## Dispatch
 
-A hook function is not an injection point, so
-`[[inject]]` never runs inside a hook's dispatch; a `head` injection that cancels the game function
-calling a hook keeps the hook from firing at all. A claimed cancellation reaches only listeners that receive cancelled events.
-Otherwise, mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
-they receive cancelled events. For replacement hooks, the first `Some` wins. Collection hooks call every mod.
-Receiverless hooks have no `Host`.
+Mods run in order of their listener priority, highest first, then in dependency order: a mod after the mods it
+depends on. When a mod cancels an event, the mods after it are skipped, unless they receive cancelled events
+([Listener priority and cancellation](#listener-priority-and-cancellation)).
+
+What a hook's return value means depends on its kind:
+
+- **Listen** hooks are notices: every subscribed mod is called.
+- **Cancellable** hooks return `Flow`: `Flow::Cancel` stops the game's action and skips later mods.
+- **Replacement** hooks return an `Option`: the first mod to answer `Some` wins.
+- **Collection** hooks call every mod, each adding to a list in the event.
+
+A hook with no receiver gets no `Host`.
 
 ## Saving and game events
 
@@ -140,3 +146,9 @@ in `mod_api`. Raw GPU access is native-only, unstable and outside that API, in
 `mod_render::render` (`horizon-mod-render`). Replace its frame functions with native HEAD mixins compiled against the prebuilt game.
 `render_needs` collects requests; `world_drawn` runs before the hand and HUD, and
 `hand_drawn` runs after the hand, on the render thread. Use API draw contexts for API-typed drawing.
+
+## Hooks and injections
+
+A hook is not an injection point: an `[[inject]]` never runs inside a hook's dispatch. A `head` injection that
+cancels the game function which calls a hook keeps that hook from firing at all
+([Injections](injections.md)).

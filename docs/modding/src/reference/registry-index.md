@@ -107,8 +107,8 @@ them into the profile's game folder.
 
 ## Submitting a project
 
-Submit your page and package to [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods).
-Your page needs:
+Submit through [playhorizon.dev/mods/submit](https://playhorizon.dev/mods/submit) ([Publishing your mod](../how-to/publish.md)); the service opens a pull request on
+[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods). Your page needs:
 
 - A description of 50–10,000 characters after trimming.
 - 1–3 categories from your project kind’s list and up to 10 lowercase tags.
@@ -136,7 +136,7 @@ Run these commands in your native mod’s project folder.
 | Command | Behaviour |
 | --- | --- |
 | `cargo horizon-mod internals sync` | Explicitly checks a native mod's library through the launcher against an isolated copy of its pinned game source, then replaces top-level `internals` with compiler-discovered paths, kinds and hashes. Handles globs and macros, removes unused declarations, preserves retained entries and prints additions/removals. Requires a trusted mod and `horizon-launcher` on `PATH` (or `HORIZON_LAUNCHER` set to its executable). Never runs automatically on build. |
-| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in your mod's `horizon-mod.toml`. Reads the native mod's pinned prebuilt game's `internals.json`; unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
+| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in your mod's `horizon-mod.toml`. Without support modules, reads the native mod's pinned prebuilt game's `internals.json`; with `[[native.module]]` tables it asks the launcher for a discovery catalog of the pinned source with those modules applied (trusted native code required). Unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
 | `cargo horizon-mod update [--horizon <commit>]` | Moves the native game's pin and its mod API and internals dependencies' `rev` to the newest prebuilt release (or the exact commit given). For every declared internal, prints `missing`, `changed` (old signature → new signature), or `unchanged`, then refreshes the available hashes. Missing or gated declarations keep their old hash and must be removed or replaced before building. |
 
 The native-mod commands run in the mod's project folder and preserve the manifest's comments and
@@ -150,8 +150,11 @@ metadata-check game dependencies; it does not compile or link a game executable.
 check cache is not a native mod build route. `[[native.state]]` is refused with
 `E_MIXIN_STATE_LAYOUT`; use attachments for per-object mod data.
 
-`internals add` and `update` download the same prebuilt archive layout as the launcher, check its `SHA256SUMS`, and
-read only `internals.json`; no game or mod code is run. Catalogs are kept by commit in
+Without support modules, `internals add` and `update` download the same prebuilt archive layout as the launcher,
+check its `SHA256SUMS`, and read only `internals.json`; no game or mod code is run. With support modules, they run
+`horizon-launcher native-build --catalog` (which needs trusted native code), stage the pinned source with the
+modules, and keep the discovery catalog under `target/horizon-mod/catalog-snapshots/`; the game and the mod do not
+run. Catalogs are kept by commit in
 `target/horizon-mod/prebuilt/`, so `update` can show the old signatures after that release expires.
 If a needed catalog is neither cached nor downloadable, the command fails without changing the pin
 or declarations. A mod with no declared internals needs no catalogs to update. Quote paths containing

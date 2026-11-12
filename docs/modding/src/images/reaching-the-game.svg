@@ -2,7 +2,7 @@
   <title id="t">Three ways into the game, from the most stable to the most powerful</title>
   <desc id="d">First choice: a hook or Part method, typed API values, native and WebAssembly. Second: an [[inject]] listener at a function slot or listed call site the game exposes, with API values, native and WebAssembly; it never compiles game code. Third: the native route, [[native.mixin]], [[native.loop]], [[native.bridge]] and [[native.module]], which compiles against the exact game build with real engine types, native only.</desc>
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a8f98"/></marker>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6e7681"/></marker>
   </defs>
   <g font-size="13" fill="#1f2328">
     <rect x="10" y="20" width="260" height="190" rx="12" fill="#e6f6ec" stroke="#2f8a4f" stroke-width="1.5"/>
@@ -31,7 +31,7 @@
     <text x="610" y="164">the exact game build.</text>
     <text x="610" y="186" font-weight="600">Native only</text>
   </g>
-  <path d="M30 245 L 830 245" stroke="#8a8f98" stroke-width="2" marker-end="url(#a)"/>
-  <text x="30" y="270" font-size="12.5" fill="#8a8f98">More stable</text>
-  <text x="830" y="270" font-size="12.5" fill="#8a8f98" text-anchor="end">More power, tied to one game build</text>
+  <path d="M30 245 L 830 245" stroke="#6e7681" stroke-width="2" marker-end="url(#a)"/>
+  <text x="30" y="270" font-size="12.5" fill="#6e7681">More stable</text>
+  <text x="830" y="270" font-size="12.5" fill="#6e7681" text-anchor="end">More power, tied to one game build</text>
 </svg>

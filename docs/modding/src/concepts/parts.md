@@ -10,6 +10,7 @@ use mod_api::{
     RegistrationContext,
 };
 
+#[derive(Default)]
 struct MyMod;
 struct Gauge;
 

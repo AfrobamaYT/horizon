@@ -43,8 +43,8 @@ Never write `[wasm]` by hand; rebuild instead.
 
 ## 3. Play
 
-Copy `greeter.hmod` into the game folder's `horizon-mods/` and turn it on
-([Installing and using mods](installing.md)). The game loads it at start-up; join a world and the greeting appears.
+Copy `greeter.hmod` into the game folder's `horizon-mods/` (in the launcher: **Open folder** in the instance's ⋮
+menu), and turn it on with a line `mod.greeter:true` in `horizon-mods.txt` beside `options.txt`. The game loads it at start-up; join a world and the greeting appears.
 If the game refuses the mod (a wrong layout, a missing dependency, a limit), the Mods screen shows why in red.
 
 ## What differs from native

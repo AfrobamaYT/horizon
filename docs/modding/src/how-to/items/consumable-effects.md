@@ -1,4 +1,4 @@
-# Consumable effects
+# Applying a consume effect
 
 Apply one effect from an item's loaded consumable on the server with
 `living.apply_consume_effect(host, &stack, index)`. The index is zero-based in component

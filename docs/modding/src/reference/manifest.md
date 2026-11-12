@@ -59,7 +59,7 @@ with optional `priority` (default 0). `head`, `return` and `replace` are support
 The `access` key is refused by name. Use `[[native.mixin]]` for game internals.
 Unknown fields are refused by the schema. API function declarations use only `[[inject]]`.
 See [Injections](../concepts/injections.md) for the fields and point injections, and
-[Native mods](../how-to/entities/named-hook-points.md) for the named hook contracts.
+[Named hook points](../how-to/entities/named-hook-points.md) for the named hook contracts.
 
 A module has a unique, nonempty `id` (one id space with the injections), a `file` naming the game source
 file that receives it, a `name` that is a Rust module identifier, and a `source` payload file under
@@ -67,8 +67,8 @@ file that receives it, a `name` that is a Rust module identifier, and a `source`
 `"pub"` or `"pub(crate)"`, the default. See [Support modules](../concepts/native-route/5-support-modules.md).
 
 `[[inject]]` only fills compiled slots and never compiles game code. Native source edits
-use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and upstream
-options. `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
+use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and the other
+horizon-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
 
 A wasm mod adds `[wasm]` instead, written by `cargo horizon-mod build --wasm`
 ([Building to `mod.wasm`](../how-to/wasm-mods.md)):
@@ -141,7 +141,7 @@ every owner of a shared missing file. The game never downloads jars.
 
 ## Source paths
 
-A code package contains root `Cargo.toml`, optional `build.rs`, `.rs` and `.toml` files under `src/`,
+A code package contains root `Cargo.toml`, optional `Cargo.lock` and `build.rs`, `.rs` and `.toml` files under `src/`,
 and root text files named `README*`, `LICENSE*`, `LICENCE*`, `COPYING*` or `NOTICE*`.
 Your root `impl Hooks` uses `#[mod_api::horizon_mod]`; the attribute generates the factory
 ([Writing hooks](../start/writing-hooks.md)).

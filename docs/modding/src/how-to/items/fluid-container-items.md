@@ -8,7 +8,7 @@ Attach the Part to your item with `item_part`. Keep a `FluidKey` obtained during
 #[horizon_part]
 impl ItemPart for WaterContainer {
     fn contained_fluid(&self, _: &dyn ClientHost, event: &mut ContainedFluidEvent<'_>) {
-        event.fluid = Some(self.water);
+        *event.fluid = Some(self.water);
     }
 }
 ```

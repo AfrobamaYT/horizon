@@ -613,7 +613,7 @@ content definition and resource table.
 
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
 min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
-packages may declare attributes; client-only and server-only packages refuse with `WrongSide` so extra
+packages may declare attributes; client-only packages refuse with `WrongSide` so extra
 client mods cannot shift packet IDs. `mod_api::Sentiment` is `Positive`, `Negative`, or `Neutral`.
 The id lands in the
 mod's namespace, the bounds and default follow `RangedAttribute`'s own checks, `syncable` decides whether the

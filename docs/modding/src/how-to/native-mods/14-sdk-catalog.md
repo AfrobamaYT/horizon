@@ -2,7 +2,7 @@
 
 Use `mod-catalog.json` to inspect the hooks and injection points for the game build
 you target. The catalog ships in the prebuilt SDK and as a standalone asset on the
-[fork Nightly release](https://github.com/arismoko/horizon/releases/tag/nightly).
+[Nightly release](https://github.com/arismoko/horizon/releases/tag/nightly).
 Download the [catalog asset](https://github.com/arismoko/horizon/releases/download/nightly/mod-catalog.json)
 and verify it against that release's signed `SHA256SUMS` and build-specific signature.
 For an older pinned build, use its dated Nightly release rather than the latest catalog.
@@ -38,7 +38,7 @@ Types are Rust API event field types, including their borrow lifetimes.
 | Field | Contents |
 | --- | --- |
 | `name` | Point name. |
-| `target` | Function path used by an injection's `target`. |
+| `target` | Function path used by an injection's `at`. |
 | `side` | Point side; `none` for functions outside `Game`. |
 | `host` | Listener host kind: `host`, the side's writing host, or `none`. |
 | `record` | API listener record name in `mod_points`. |

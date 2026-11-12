@@ -78,7 +78,7 @@ falling back to saved decoding.
 
 
 
-For mixin code, see [The typed API from mixin code](native-route/7-typed-api-from-mixin-code.md).
+For injection listeners, see [The typed API from injection listeners](injections/typed-api.md).
 
 ## Holders and persistence
 

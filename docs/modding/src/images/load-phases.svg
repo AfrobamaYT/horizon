@@ -2,7 +2,7 @@
   <title id="t">How a mod loads</title>
   <desc id="d">Each game thread goes through five phases in order: Packages, Registration, Setup, Config and World. Every data or asset reload enters a Reloading phase and then returns to the phase it came from.</desc>
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a8f98"/></marker>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6e7681"/></marker>
   </defs>
   <g font-size="13" fill="#1f2328">
     <!-- phase boxes -->
@@ -42,7 +42,7 @@
       <text x="770" y="122" text-anchor="middle">ClientHost.</text>
     </g>
     <!-- arrows between phases -->
-    <g stroke="#8a8f98" stroke-width="2" fill="none" marker-end="url(#a)">
+    <g stroke="#6e7681" stroke-width="2" fill="none" marker-end="url(#a)">
       <path d="M161 90 L178 90"/>
       <path d="M331 90 L348 90"/>
       <path d="M501 90 L518 90"/>
@@ -52,13 +52,13 @@
     <rect x="430" y="210" width="340" height="70" rx="12" fill="#fff6d6" stroke="#a87b00" stroke-width="1.5"/>
     <text x="600" y="238" text-anchor="middle" font-size="16" font-weight="700" fill="#5c4300">Reloading</text>
     <text x="600" y="262" text-anchor="middle">A data or asset reload: published data, no world</text>
-    <g stroke="#8a8f98" stroke-width="2" fill="none" stroke-dasharray="5 4">
+    <g stroke="#6e7681" stroke-width="2" fill="none" stroke-dasharray="5 4">
       <path d="M425 152 L 470 208" marker-end="url(#a)"/>
       <path d="M770 152 L 730 208" marker-end="url(#a)"/>
       <path d="M700 208 L 745 154" marker-end="url(#a)"/>
     </g>
   </g>
-  <text x="10" y="20" font-size="12" fill="#8a8f98">Each game thread, in order</text>
-  <text x="10" y="236" font-size="12" fill="#8a8f98">A reload returns to</text>
-  <text x="10" y="252" font-size="12" fill="#8a8f98">the phase it came from.</text>
+  <text x="10" y="20" font-size="12" fill="#6e7681">Each game thread, in order</text>
+  <text x="10" y="236" font-size="12" fill="#6e7681">A reload returns to</text>
+  <text x="10" y="252" font-size="12" fill="#6e7681">the phase it came from.</text>
 </svg>

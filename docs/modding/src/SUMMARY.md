@@ -34,8 +34,8 @@
 - [Content mods](how-to/content-mods.md)
 - [Native mods: building and shipping](how-to/native-mods.md)
 - [WebAssembly mods](how-to/wasm-mods.md)
-- [Publishing your mod](how-to/publish.md)
 - [Config files and settings](how-to/mod-settings.md)
+- [Publishing your mod](how-to/publish.md)
 - [Levels, dimensions and blocks](how-to/world.md)
 - [Items, recipes and loot](how-to/items.md)
 - [Entities, players and commands](how-to/entities.md)
@@ -45,7 +45,7 @@
 
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
-- [The mod API (rustdoc)](reference/api.md)
+- [The mod API reference](reference/api.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
 <!-- The counterparts preprocessor renders the current declarations at the published URL. -->

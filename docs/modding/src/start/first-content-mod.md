@@ -3,7 +3,7 @@
 A content mod adds blocks, items, recipes, loot, models and textures with data files alone. In this page you
 make one block, see it in the game, and pack it as a `.hmod`.
 
-You need Rust's `cargo` and a Horizon game (`horizon-client`) to run the mod in.
+You need Rust's `cargo` and the Horizon launcher with an instance to play in.
 
 ## 1. Install the mod tool
 
@@ -49,28 +49,35 @@ The block declaration starts from a vanilla block and changes what differs:
 The manifest declares the capability `registries`: a mod needs it to add blocks, items, mob effects or entity
 types to a world.
 
-## 3. Run it
-
-```sh
-cargo horizon-mod run
-```
-
-This builds `target/horizon-mod/glowing_blocks.hmod` and starts the game with the mod always on. It finds the
-game on your `PATH`, or through `--game <path>` or the `HORIZON_CLIENT` variable; arguments after `--` go to the
-game. Craft the block from an amethyst block and glowstone dust.
-
-The game reads content once, at start-up: after you edit a file, run the command again.
-
-## 4. Check and pack it
+## 3. Build it
 
 ```sh
 cargo horizon-mod build
+```
+
+This validates the content with the same checks the game uses and writes `target/horizon-mod/glowing_blocks.hmod`,
+the file you share.
+
+## 4. Play it
+
+1. In the launcher, open your instance's folder: **Open folder** in the instance's ⋮ menu in the sidebar. This is the
+   game folder, the one that holds `options.txt`.
+2. Copy `glowing_blocks.hmod` into its `horizon-mods/` folder (create the folder if it is missing).
+3. Turn the mod on: add the line `mod.glowing_blocks:true` to `horizon-mods.txt` in the same game folder.
+4. Start the instance, open a world and craft the block from an amethyst block and glowstone dust.
+
+The game reads content once, at start-up: after you edit a file, build again, copy the new `.hmod` and restart.
+
+If you run a Horizon game you built yourself, `cargo horizon-mod run --game <path to horizon-client>` builds the
+mod and starts that game with it always on.
+
+## 5. Check it before you publish
+
+```sh
 cargo horizon-mod check target/horizon-mod/glowing_blocks.hmod
 ```
 
-`build` validates the content with the same checks the game uses and writes the `.hmod`. `check` runs what the
-mod registry runs on a submission. The `.hmod` is the file you share: players put it in `horizon-mods/`
-([Installing and using mods](installing.md)).
+`check` runs what the mod registry runs on a submission ([Publishing your mod](../how-to/publish.md)).
 
 ## Next
 

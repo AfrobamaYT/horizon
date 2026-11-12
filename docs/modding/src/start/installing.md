@@ -14,7 +14,8 @@ file by hand into the game folder (the folder that holds `options.txt`):
 | WebAssembly mod (`.hmod` with `mod.wasm`) | `horizon-mods/` | Loaded into the game's sandbox when the game starts |
 | Native mod (`.hmod` with Rust source) | `horizon-native-mods/` | The launcher builds it for that instance ([Native mods](../how-to/native-mods.md)) |
 
-**Browse Mods** in the game lists content-only packages, checked against the same registry as the launcher.
+**Browse Mods** in the game lists content mods only, checked against the same registry as the launcher. Native and
+WebAssembly mods install from the launcher or by hand.
 
 Fabric and NeoForge jars do not run in Horizon: they target Minecraft's Java runtime, which Horizon does not have.
 The data and assets inside a jar can be carried over; see
@@ -22,8 +23,10 @@ The data and assets inside a jar can be carried over; see
 
 ## Turning mods on
 
-A newly installed mod is off. Turn it on from the launcher (`horizon-launcher mods enable <id>`), or add a line
-`mod.<id>:true` to `horizon-mods.txt` beside `options.txt`.
+A newly installed mod is off.
+
+- A mod installed from the launcher's **Mods** page turns on there, or with `horizon-launcher mods enable <project>`.
+- A mod you copied in by hand turns on with a line `mod.<id>:true` in `horizon-mods.txt`, beside `options.txt`.
 
 A content mod that holds only assets and reloadable data (textures, models, sounds, languages, recipes, tags,
 loot, advancements and functions) starts working as soon as it is installed from Browse Mods: the game reloads

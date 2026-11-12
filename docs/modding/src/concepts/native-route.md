@@ -67,4 +67,4 @@ launcher pins. Where no prebuilt exists for your platform or pin, the launcher b
 Read the launcher's [build log](../how-to/native-mods/05-build-log.md) (`native/build.log`,
 also available through **Build log**) for the number of patched functions and mixin rows.
 
-What the launcher does under the hood is on [How the native route works](native-route/8-how-it-works.md).
+What the launcher does under the hood is on [How the native route works](native-route/7-how-it-works.md).

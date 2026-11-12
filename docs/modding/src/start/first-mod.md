@@ -4,9 +4,9 @@ A native mod is a Rust crate that implements hooks from the mod API. The launche
 against the exact Horizon build an instance plays, then runs that instance with your mod in it. In this page you
 make a mod that greets every player who joins.
 
-You need the Horizon launcher (`horizon-launcher`) with an instance, and the `cargo horizon-mod` tool
-([installed as in the content mod tutorial](first-content-mod.md#1-install-the-mod-tool)). You do not need to
-install Rust for the build itself: the launcher uses its own pinned toolchain.
+You need the Horizon launcher (`horizon-launcher`) with an instance, and the `cargo horizon-mod` tool, which you
+install with Rust's `cargo` ([as in the content mod tutorial](first-content-mod.md#1-install-the-mod-tool)). The
+native build itself uses the launcher's own pinned Rust toolchain, not yours.
 
 ## 1. Make the project
 
