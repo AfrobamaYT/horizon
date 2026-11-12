@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 mod hardware;
 
-pub use hardware::{Display, Gpu, Hardware, power_source};
+pub use hardware::{power_source, Display, Gpu, Hardware};
 /// The process probes, from the platform (`horizon-system`).
 pub use horizon_telemetry::system::{cpu_seconds, load_average, rss_bytes};
 
