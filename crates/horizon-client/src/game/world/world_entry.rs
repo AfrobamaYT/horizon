@@ -111,7 +111,7 @@ impl Game<'_> {
                 })
                 .unwrap_or_default();
             let data_source = self.pack.data_changes.clone();
-            self.creation_job = std::thread::Builder::new()
+            let job = horizon_guest_stack::builder()
                 .name("world-creation".into())
                 .spawn(move || {
                     horizon_client::vanillagen::shared_data_from(
@@ -122,8 +122,20 @@ impl Game<'_> {
                     )
                     .map(|_| ())
                     .map_err(|e| e.to_string())
-                })
-                .ok();
+                });
+            match job {
+                Ok(job) => self.creation_job = Some(job),
+                Err(error) => {
+                    log::warn!("Horizon: world creation worker could not start: {error}");
+                    if let Some(title) = self.title.as_mut() {
+                        title.finish_preparing();
+                        title.failed(format!(
+                            "{}: {error}",
+                            horizon_client::lang::get("createWorld.preparing")
+                        ));
+                    }
+                }
+            }
             return;
         }
         if !self

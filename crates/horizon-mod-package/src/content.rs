@@ -430,9 +430,10 @@ fn yes() -> bool {
 }
 
 /// A block the mod adds: a vanilla template's behaviour, states and shapes
-/// under a new id, with `properties` applied. A native mod may build one in
-/// code (`native_blocks`): `..Default::default()` leaves the rest as a file
-/// leaves it out, except `item`, which a file sets unless told not to.
+/// under a new id, with `properties` applied. A mod's code declares one as a
+/// `mod_api::Block` (`native_blocks`), whose `item` is true as a file's is.
+/// Here `..Default::default()` leaves the rest as a file leaves it out, except
+/// `item`, false: the engine's own blocks, such as a fluid's, have none.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Block {
     /// `<mod id>:<path>`.
