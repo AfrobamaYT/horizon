@@ -89,7 +89,7 @@ impl Game<'_> {
     pub(super) fn remove_local_player_body(&mut self) {
         self.hook.discard();
         self.resident_entities.local_player.retire();
-        self.player_attachments.retire();
+        self.player_state.attachments.retire();
         self.player = None;
     }
 
@@ -320,11 +320,11 @@ impl Game<'_> {
         use horizon_mod_runtime::attachments::HasAttachmentLifetime;
         match at.source {
             Source::LocalPlayer => {
-                SlotAccess::Done(visit(self.player_attachments.attachment_lifetime()))
+                SlotAccess::Done(visit(self.player_state.attachments.attachment_lifetime()))
             }
             Source::Guest(conn) => {
                 if self.lan_acting == Some(conn) {
-                    return SlotAccess::Done(visit(self.player_attachments.attachment_lifetime()));
+                    return SlotAccess::Done(visit(self.player_state.attachments.attachment_lifetime()));
                 }
                 let Some(attachments) = self
                     .lan
