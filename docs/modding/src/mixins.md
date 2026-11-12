@@ -1,19 +1,17 @@
 # Mixins: `[[native.mixin]]`
 
-A mixin changes one game function. You name the function, say where in it your code goes (its start, its
-return value, one call inside it, or the whole body), and write that code as a small Rust function, the
-**helper**. The launcher copies the game function, puts your helper into the copy, and installs the copy in
-place of the original. Read [The native route](native-route.md) first: this is the unstable route, pinned to
-one game build.
+A mixin changes one game function. You name the function and the place in it (its start, its return value,
+one call inside it, or its whole body), and write your code there as a small Rust function, the **helper**.
 
-## A first mixin
+Use a mixin when you need private fields, a change in the middle of a function, or a new body. To run code at
+the start or end of a function with `mod_api` values, an [`[[inject]]` listener](injections.md) is enough.
 
-This mixin runs at the start of the game's `on_tick_rate_changed` (the server's `/tick rate` handler), reads two
-of `Game`'s private fields, and can cancel the rest of the function. It is the `head` row of the check mod
-`fnr_alpha`, which CI builds against the prebuilt game.
+## Example
 
-`horizon-mod.toml` (the check fills `horizon` and `mixins` with exact commits; yours has the 40-character
-commits `cargo horizon-mod new` wrote):
+This mixin runs at the start of `on_tick_rate_changed`, the server's `/tick rate` handler. It reads two private
+fields of `Game` and can cancel the rest of the function. It is the check mod `fnr_alpha`, which CI builds.
+
+`horizon-mod.toml` (CI fills `horizon` and `mixins`; yours holds the commits `cargo horizon-mod new` wrote):
 
 ```toml
 id = "fnr_alpha"
@@ -58,44 +56,44 @@ fn head(game: &mut Game<'_>) -> ::core::ops::ControlFlow<()> {
 }
 ```
 
-The helper calls `fnr_alpha::note`, a `pub fn` in the mod's own crate; that crate's `Cargo.toml` and
-`src/lib.rs` are on [The native route](native-route.md#the-mods-crate).
+`src/lib.rs`, the mod's crate. Its package is `fnr-alpha`, so helpers call it as `fnr_alpha`:
 
-What happens:
+```rust,ignore
+//! The mod's own crate. Its `[[native.mixin]]` helpers (`src/mixins/`) are compiled into copies of the
+//! game functions they patch, not into this crate.
+#[derive(Default)]
+struct Mod;
 
-- `bindings` passes the target's `self` to the helper's `game` parameter. The helper is compiled inside the
-  copy of `on_tick_rate_changed`, in the game's module `game::autosave`, so `Game` and its private fields
-  `clock` and `ticks_until_autosave` resolve exactly as they do in the game's source.
-- `cancellable = true` makes the helper return `ControlFlow<()>`: `Break(())` returns from the function before
-  its first line, `Continue(())` lets it run. For a function that returns a value `R`, the helper returns
-  `ControlFlow<R>` and `Break(value)` returns that value.
-- On success the build log prints `Function replacement: 1 functions patched by 1 mixins, without rebuilding
-  the game (…)`, with the time of each phase.
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for Mod {}
 
-## A helper
+/// Called by a helper: a helper may use its mod's crate.
+pub fn note(what: &str) {
+    eprintln!("fnr: alpha {what}");
+}
+```
 
-A helper file holds exactly one private, safe function with no attributes and no generic parameters (an
-`impl FnOnce` parameter for `WRAP_OPERATION`'s `$operation` is the one exception). Its name is free. Its
-parameters are filled by `bindings`, one entry per parameter, in order. The file has no `use` lines: the
-helper is compiled inside the copied function's module, so it sees exactly the names that module sees.
+`bindings` passes the target's `self` to the helper's `game` parameter. With `cancellable = true` the helper
+returns `ControlFlow<()>`: `Break(())` returns before the function's first line, and `Continue(())` lets it
+run. For a function that returns `R`, the helper returns `ControlFlow<R>`, and `Break(value)` returns `value`.
 
-- Its names: the items of the target's module and everything that module imports with `use`. Read the top of
-  the target's source file to see them. Any other name is written as a full path: `crate::…`,
-  `horizon_client::…`, `::core::ops::ControlFlow`.
-- It sees the private fields and functions visible in that module. A member it can't see is reached through
-  a [bridge](bridges.md).
-- `crate::` is the game crate (`horizon_client`), as in the game's own source.
-- It calls your mod's crate by its crate name (`fnr_alpha::note`), so longer code lives there. Code that
-  needs the game's private items and is shared by several helpers goes in a [support module](support-modules.md).
-- It cannot see the target's local variables unless a binding captures them (`$local:NAME:ORDINAL`).
+When it builds, the build log shows `Function replacement: 1 functions patched by 1 mixins, without
+rebuilding the game (…)`.
 
-A helper with a wrong type is an ordinary compiler error, reported under your mod's id.
+## Writing a helper
 
-## Where the code goes: kinds
+The helper file holds exactly one function: private, safe, with no attributes and no generic parameters. The
+one exception is an `impl FnOnce` parameter for `$operation`. The name is free, and the file has no `use` lines.
 
-`kind` is one of horizon-mixins' kinds, written in capitals:
+- It sees what the target's module sees: its items, imports and private fields (read the top of the target's
+  file). Write other names as full paths, such as `::core::ops::ControlFlow`. `crate::` is the game crate.
+- A field or method it can't see needs a [bridge](bridges.md). A local variable needs a `$local` binding.
+- It calls your mod's crate by its Rust name: the package name with `-` turned into `_`. Don't declare helper
+  files as modules in `src/lib.rs`. Shared code that needs private game items goes in a [support module](support-modules.md).
 
-| Kind | Your helper runs | Helper returns |
+## Kinds
+
+| `kind` | Your helper runs | It returns |
 | --- | --- | --- |
 | `HEAD` | at the start of the function | `()`, or `ControlFlow<()>` with `cancellable = true` |
 | `RETURN` | on the value the function returns (`$value`) | the value to return |
@@ -104,160 +102,90 @@ A helper with a wrong type is an ordinary compiler error, reported under your mo
 | `AFTER_ASSIGN` | after one statement that stores a call's result (`let x = f();`, `x = f();`) | `()` |
 | `MODIFY_ARG`, `MODIFY_ARGS` | on one argument, or all arguments as a tuple, of one call | the new argument(s) |
 | `MODIFY_CONSTANT` | on one literal in the body | the new value |
-| `MODIFY_VARIABLE` | on one read or write of a local or parameter (`variable = { … }`) | the new value |
+| `MODIFY_VARIABLE` | on one read or write of a local or parameter | the new value |
 | `MODIFY_EXPRESSION_VALUE` | on the value of one call in the body (`$value`) | the new value |
-| `WRAP_OPERATION` | around one call: you get the call as `$operation` and decide whether to run it | the call's type |
+| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not | the call's type |
 
-The kinds that act on one place in the body find it with a `selector`, the call as written in the source
-(`autosave_interval`, `self.next_autosave_interval`), plus `require` (how many matches the original body has;
-the build stops if it differs) and `ordinal` (which one, from 0). This is the check mod `fnr_beta`, at two
-places in `next_autosave_interval`, which ends in `autosave_interval(rate)`:
-
-```toml
-[[native.mixin]]
-id = "plus_one"
-target = "horizon_client::game::autosave::Game<'_>::next_autosave_interval"
-kind = "MODIFY_EXPRESSION_VALUE"
-selector = "autosave_interval(rate)"
-require = 1
-ordinal = 0
-priority = 100
-helper = "src/mixins/plus_one.rs"
-bindings = [{ name = "value", ty = "i64", value = "$value" }]
-
-[[native.mixin]]
-id = "wrapped"
-target = "horizon_client::game::autosave::Game<'_>::next_autosave_interval"
-kind = "WRAP_OPERATION"
-selector = "autosave_interval"
-require = 1
-ordinal = 0
-helper = "src/mixins/wrapped.rs"
-bindings = [
-  { name = "rate", ty = "f32", value = "$arg0" },
-  { name = "operation", ty = "impl FnOnce(f32) -> i64", value = "$operation" },
-]
-```
-
-```rust,ignore
-fn plus_one(value: i64) -> i64 {
-    fnr_beta::note(&format!("MODIFY_EXPRESSION_VALUE (priority 100): {value} -> {}", value + 1));
-    value + 1
-}
-```
-
-```rust,ignore
-fn wrapped(rate: f32, operation: impl FnOnce(f32) -> i64) -> i64 {
-    fnr_beta::note(&format!("WRAP_OPERATION autosave_interval({rate})"));
-    operation(rate)
-}
-```
-
-The full contract of each kind, selector and binding is horizon-mixins' own. These links are to the commit
-the launcher pins today; if your `[native] mixins` differs, read the same files at your commit: [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/mixin-api.md),
-[advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/advanced-injections.md)
-and [scopes and bridges](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/scopes-and-bridges.md).
-The launcher applies one small patch to that tool, `tools/mixins/narrow-reference-rule.patch`, which accepts a
-call directly under `&` for the kinds that rewrite only that call.
+The other kinds act on one place in the body. A `selector` finds it (`MODIFY_VARIABLE` uses `variable`
+instead): the source text as written. For a call it is the callee without arguments (`autosave_interval`,
+`self.next_autosave_interval`). For `MODIFY_EXPRESSION_VALUE` it is the whole expression,
+`autosave_interval(rate)`. `require` is how many matches the body has, and `ordinal` picks one, from 0.
 
 ## Fields
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | The row's name, unique in the mod across every `[[native.*]]` and `[[inject]]` row. Errors name it as `mod:id`. |
-| `target` | yes | The game function, as a path (below). |
+| `id` | yes | The row's name, unique in the mod. Errors name it as `mod:id`. |
+| `target` | yes | The game function's path ([Naming the target](#naming-the-target)). |
 | `kind` | yes | One of the kinds above. |
 | `helper` | yes | The helper's file, a `.rs` path under `src/`. |
-| `bindings` | when the helper has parameters | One `{ name, ty, value }` per helper parameter, in order. `name` and `ty` repeat the parameter; `value` is a target parameter or its borrow (`self`, `&*self`, `&mut *self`, `rate`), or a tool value (below). |
-| `cancellable` | no | `HEAD`, `BEFORE_CALL`, `AFTER_CALL`, `AFTER_ASSIGN`: the helper returns `ControlFlow<()>`, or `ControlFlow<R>` for a function returning `R`, and can end the function. |
-| `selector`, `require`, `ordinal` | for one-place kinds | Which call, how many matches, which match. `MODIFY_VARIABLE` has no `selector`: `variable` picks the variable, `require` and `ordinal` its access. |
-| `variable` | `MODIFY_VARIABLE` | `{ name, ordinal, at = "LOAD" or "STORE", parameter = true for a parameter }`. |
-| `priority` | no | Orders rows of several mods at one place: higher runs first (the tool's default is 100). |
-| `result` | `MODIFY_ARGS` (and `AFTER_CALL` reading the result) | The selected call's result type. Refused on other kinds. |
-| `slice`, `argument` | no | Narrow the search region; pick an argument. See the tool's docs. |
+| `bindings` | when the helper has parameters | One `{ name, ty, value }` per helper parameter, in order. `name` and `ty` repeat the parameter. `value` is a target parameter or its borrow (`self`, `&*self`, `&mut *self`, `rate`), or a tool value (below). |
+| `cancellable` | no | `HEAD`, `BEFORE_CALL`, `AFTER_CALL`, `AFTER_ASSIGN`: the helper returns `ControlFlow` and can end the function. |
+| `selector`, `require`, `ordinal` | one-place kinds | Which call, how many matches, which match. |
+| `variable` | `MODIFY_VARIABLE` | `{ name, ordinal, at = "LOAD" or "STORE", parameter = true for a parameter }`. It replaces `selector`; `require` and `ordinal` then count accesses. |
+| `priority` | no | Orders rows of several mods at one place: higher runs first. The default is 100. |
+| `result` | `MODIFY_ARGS`, and `AFTER_CALL` reading the result | The selected call's result type. Refused on other kinds. |
+| `slice`, `argument` | no | Narrow the search to a region; pick an argument. See the tool's docs below. |
 
-The tool values a binding can pass:
-
-| `value` | What the helper gets |
+| Tool `value` | The helper gets |
 | --- | --- |
-| `$value` | The value being changed: the return value (`RETURN`), the expression's value (`MODIFY_EXPRESSION_VALUE`), the argument, constant or variable. |
+| `$value` | The value being changed: the return value, the expression's value, or the argument, constant or variable. |
 | `$arg0`, `$arg1`, … | An argument of the selected call (`WRAP_OPERATION`). |
-| `$args` | All arguments of the selected call as a tuple (`MODIFY_ARGS`). |
-| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`): the first binding, and the first parameter of the operation. |
-| `$operation` | The selected call itself, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`), always the last binding. |
-| `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th (from 0) local variable declared as `NAME` in the original body: by value, `&` or `&mut`. |
+| `$args` | All arguments of the selected call, as a tuple (`MODIFY_ARGS`). |
+| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding. |
+| `$operation` | The selected call, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`); the last binding. |
+| `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th local named `NAME` in the body, from 0: by value, `&` or `&mut`. |
 
-**Selectors.** A `selector` is source text matched against the original body, not a resolved name. For the
-kinds that act on a call (`BEFORE_CALL`, `AFTER_CALL`, `MODIFY_ARG`, `MODIFY_ARGS`, `WRAP_OPERATION`) it is
-the callee as written, without arguments: `autosave_interval`, `self.next_autosave_interval`. For
-`MODIFY_EXPRESSION_VALUE` it is the whole expression as written, arguments included:
-`autosave_interval(rate)`. `require` is the number of matches in the original body (inside the `slice`, when
-there is one) and `ordinal` picks one, from 0, in source order.
+horizon-mixins documents every kind and binding in full: [Mixin API](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/mixin-api.md)
+and [advanced injections](https://github.com/horizon-rust/horizon-mixins/blob/e59da9094f0c2fdda6c627fe9eff22dec6a906f0/docs/advanced-injections.md).
+These links are at the launcher's default `mixins` commit; read the same files at yours.
 
 ## Naming the target
 
-A target is the path of the function in the game's source:
+A target is the function's module path, then its type and name:
 
-- **A method:** the module its `impl` block is in, the type, the function:
-  `horizon_client::game::autosave::Game<'_>::on_tick_rate_changed`.
-- **A free function:** `horizon_client::game::commands::misc::millis`.
-- **A trait method:** the module of the `impl … for` block, then `<Type as Trait>`, then the function:
-  `horizon_client::game::<GameLevel<'_> as LevelAccess>::block_state` (an `impl LevelAccess for GameLevel<'_>`
-  in `game.rs`).
+- a method: `horizon_client::game::autosave::Game<'_>::on_tick_rate_changed`, where the module is the one
+  holding the `impl` block and the type is written as there, lifetimes included;
+- a free function: `horizon_client::game::commands::misc::millis`;
+- a trait method: `horizon_client::game::<GameLevel<'_> as LevelAccess>::block_state`.
 
-To find the module of a function, find its file, then turn the path into a module path:
+To get the module from the file, start from `crates/horizon-client/src/`, which is `horizon_client`. A folder
+directly under `src/game/` that holds a `.game-area` file is an **area**, and an area is not a module. So
+`src/game/world/autosave.rs` is `horizon_client::game::autosave`, but `src/game/native_hooks/base.rs` is
+`horizon_client::game::native_hooks::base`.
 
-1. `crates/horizon-client/src/` is the crate `horizon_client`; `game.rs` is `horizon_client::game`.
-2. A folder directly under `src/game/` that holds a `.game-area` file is an **area**: it groups files and is
-   not a module. `src/game/world/autosave.rs` is `horizon_client::game::autosave`, and
-   `src/game/administration/commands/misc.rs` is `horizon_client::game::commands::misc`.
-3. Every other folder is a module as usual: `src/game/native_hooks/base.rs` is
-   `horizon_client::game::native_hooks::base`.
+Any function of the game crate can take a mixin. A function in a crate below it, such as `horizon_world`, needs
+the marker `#[horizon_mod_api_macros::replaceable]` in its source; ask for one in an issue on the game.
 
-The type part is the `impl` block's type as written, lifetimes included (`Game<'_>`). A bridge names a struct
-differently: by the module that *declares* it (`horizon_client::game::Game`), not the one with the `impl`.
+These functions are refused: generic over types or consts, or in such an `impl`; taking `impl Trait` or
+returning `!`; `const`, `async` or `unsafe`; taking `self` by value; `#[inline(always)]`; existing only under
+a `cfg`; with a body that declares a `static`, thread-local, `macro_rules!` or `impl`, or uses a macro
+defined elsewhere in its crate. The one generic function you can target is a [published loop's](loops.md#mixins-on-the-loop).
 
-## Which functions can take a mixin
+## With other mods
 
-- **Every function of the game crate, `horizon_client`,** without any marker. When the prebuilt game is built,
-  each of them gets a replacement cell automatically; that is why the source you read has no annotation on
-  them.
-- **A function in a crate below the game** (`horizon_client_lib`, `horizon_client_render`, `horizon_world`
-  and the others) only when its source carries `#[horizon_mod_api_macros::replaceable]`. Search for that
-  marker at your commit; to get one added, ask in an issue or pull request on the game.
+Several mods' rows on one function all apply. An `OVERWRITE` must be the only mixin on its function,
+from any mod including its own. An `[[inject]]` listener may share a function with mixins: head listeners run first, then the
+mixed-in function, then return listeners.
 
-Either way the function must be one a copy can stand for. These are refused, with the reason named:
-a function generic over types or consts or in such an `impl`; one taking `impl Trait` or returning `!`;
-`const`, `async` or `unsafe` functions; `self` taken by value; `#[inline(always)]`; a function or `impl` that
-exists only under a `cfg`; a body that declares a `static`, a thread-local, a `macro_rules!` or an `impl`, or
-uses a macro defined elsewhere in its crate. The one generic function you can target is a published loop's,
-covered on [Published loops](loops.md#what-composes-with-a-loop).
+## Errors
 
-## With other mods and with `[[inject]]`
+A row the build can't apply stops the build, naming the mod, the row and the reason. `<…>` is filled in.
 
-Rows of several mods on one function are applied to one copy, in the tool's order. An `OVERWRITE` takes the
-function alone: no other mixin of any mod, or of the same mod, may target a function that one overwrites. An `[[inject]]` listener and a mixin may share a function: the API head listeners run
-first, then the patched copy, then the API return listeners.
-
-## Refusals
-
-A row the build can't apply stops the build and names the mod, the row and the reason. Nothing falls back to
-another route. In the texts below, `<…>` is filled in.
-
-| Code | Text | Fix |
+| Code | Message | Fix |
 | --- | --- | --- |
-| `E_MIXIN_INVALID` | `horizon-mod.toml: E_MIXIN_INVALID: <mod>:<row>: invalid target; name the game function's path` | Write the target. |
+| `E_MIXIN_INVALID` | `<mod>:<row>: invalid target; name the game function's path` | Write the target. |
 | | `… invalid helper; name a Rust file under src/ in this package` | Put the helper under `src/`, ending in `.rs`. |
 | | `… invalid hook; a named hook is a mod_api::Hooks method; a mixin names its target` | Use `target`, or implement the hook in `Hooks`. |
-| | `… invalid target; a mixin targets a game function` | The target names one of your dependencies; a mod uses another mod's published functions instead. |
-| `E_MIXIN_TARGET_MISSING` | ``E_MIXIN_TARGET_MISSING: <mod>:<row>: <target>: no function `<name>` in <module> on <Type>`` (or ``no crate `<crate>` in the game's source``) | Check the path against the source at your commit, module first (above). |
-| `E_MIXIN_TARGET_AMBIGUOUS` | `E_MIXIN_TARGET_AMBIGUOUS: <mod>:<row>: <target>: several functions have this path (a cfg-gated pair, for one)` | Target another function. |
-| `E_MIXIN_NOT_REPLACEABLE` | `E_MIXIN_NOT_REPLACEABLE: <mod>:<row>: <target>: a function below the game crate takes a replacement only when it carries #[horizon_mod_api_macros::replaceable]; ask for it in an issue or pull request on the game` | Target a game-crate function, or ask for the marker. |
-| | `E_MIXIN_NOT_REPLACEABLE: <mod>:<row>: <target>: <reason>`, such as ``it is generic over types or takes `impl Trait`: one copy can't stand for every instance`` | Target a caller or callee that can be copied. |
-| `E_MIXIN_SOURCE` | `E_MIXIN_SOURCE: <mod>:<row>: <target>: <why>` | The pinned source could not be read: retry the build. |
-| `E_OVERWRITE_CONFLICT` | from the tool: `OVERWRITE must be exclusive on <function>; competing injections: <mod>/<row>, …` | Only one of the mods may stay installed. |
-| `E_LOOP_ENTRY_REPLACED` | See [Published loops](loops.md#refusals). | |
-| `E_MIXINS_PATCH` | `E_MIXINS_PATCH: tools/mixins/narrow-reference-rule.patch does not apply to horizon-mixins <commit>: <why>` | Not your mod: report it on the game. |
+| | `… invalid target; a mixin targets a game function` | The target is in one of your dependencies. Call that mod's published functions instead. |
+| `E_MIXIN_TARGET_MISSING` | ``<target>: no function `<name>` in <module> on <Type>``, or ``no crate `<crate>` in the game's source`` | Check the path against the source at your commit, module first. |
+| `E_MIXIN_TARGET_AMBIGUOUS` | `<target>: several functions have this path (a cfg-gated pair, for one)` | Target another function. |
+| `E_MIXIN_NOT_REPLACEABLE` | `<target>: a function below the game crate takes a replacement only when it carries #[horizon_mod_api_macros::replaceable]; …` | Target a game-crate function, or ask for the marker. |
+| | `<target>: <reason>`, such as ``it is generic over types or takes `impl Trait` …`` | Target a caller or callee that can be copied. |
+| `E_MIXIN_SOURCE` | `<target>: <why>` | The game's source could not be read: retry the build. |
+| `E_OVERWRITE_CONFLICT` | from the tool: `OVERWRITE must be exclusive on <function>; competing injections: <mod>/<row>, …` | Keep only one of those mods installed. |
+| `E_LOOP_ENTRY_REPLACED` | see [Published loops](loops.md#errors) | |
+| `E_MIXINS_PATCH` | `tools/mixins/narrow-reference-rule.patch does not apply to horizon-mixins <commit>: <why>` | Not your mod: report it on the game. |
 
-The tool's own codes (`E_MATCH_COUNT`, `E_UNSUPPORTED_SITE` and others) mean a selector, count or binding
-does not fit the body; its docs above list them.
+The tool's own codes, such as `E_MATCH_COUNT` and `E_UNSUPPORTED_SITE`, mean a selector, count or binding
+does not fit the body; its docs list them. A helper with a wrong type is a compiler error under your mod's id.

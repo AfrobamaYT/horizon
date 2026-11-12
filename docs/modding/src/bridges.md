@@ -1,17 +1,16 @@
 # Bridges: `[[native.bridge]]`
 
-A [mixin helper](mixins.md#a-helper) sees what its target function's module sees. A bridge reaches a field or
-method that module can't: the launcher generates a method on the game type, and your helpers call it like any
-other method. It is part of the [native route](native-route.md), so it is pinned to one game build.
+A bridge gives your mixin helpers a getter, setter or caller for a field or method they can't see. The
+launcher generates a method on the game type, and your helpers call it like any other method.
+
+Use one when a [mixin helper](mixins.md#writing-a-helper) needs a private member of a type declared in
+another module. For a value a hook or `[[inject]]` listener already gets, you need no bridge.
 
 ## Example
 
-The check mod `fnr_support`, which CI builds against the prebuilt game, declares a mutable getter for
-`Game::ticks_until_autosave` and uses it from a `HEAD` mixin. (That field is visible from the mixin's module
-anyway; the check shows the shape.) Its helper also calls `fnr_runtime::bumped`, a function of a
-[support module](support-modules.md) the same mod adds; that page explains the `[[native.module]]` row.
-
-`horizon-mod.toml` (excerpt; the full header is as on [Mixins](mixins.md#a-first-mixin)):
+The check mod `fnr_support`, which CI builds, declares a mutable getter for `Game::ticks_until_autosave` and
+uses it from a `HEAD` mixin. The manifest's header is as on [Mixins](mixins.md#example); the
+`[[native.module]]` row is explained on [Support modules](support-modules.md).
 
 ```toml
 [[native.module]]
@@ -44,15 +43,13 @@ fn head(game: &mut Game<'_>) {
 }
 ```
 
-The bridge `ticks` of the mod `fnr_support` becomes the method `__horizon_mixins_fnr_support_ticks`, returning
-`&mut i64` because the field is an `i64`. Get the type from the game's source: a wrong guess is a compiler
-error in your helper.
+The bridge `ticks` of the mod `fnr_support` becomes the method `__horizon_mixins_fnr_support_ticks`. It returns
+`&mut i64` because the field is an `i64`. (This field is visible from that module anyway; the check shows the shape.)
 
 ## The generated method
 
-Its name is `__horizon_mixins_<mod>_<id>`: your mod's id and the row's id, lowercased, with `-` turned into
-`_`. So write a bridge id with letters, digits, `_` and `-` only, and keep the ids distinct after that change
-(`ticks-a` and `ticks_a` name the same method). Its shape follows `kind`:
+Its name is `__horizon_mixins_<mod>_<id>`: the mod's id and the row's id, lowercased, with `-` turned into `_`.
+So use only letters, digits, `_` and `-` in a bridge id, and keep ids distinct after that change.
 
 | `kind` | Method | `target` | `member` |
 | --- | --- | --- | --- |
@@ -61,40 +58,33 @@ Its name is `__horizon_mixins_<mod>_<id>`: your mod's id and the row's id, lower
 | `SET` | `fn(&mut self, value: T)` | The struct | The field |
 | `INVOKE` | The method's own signature, renamed | The method, written like a [mixin target](mixins.md#naming-the-target) | leave it out |
 
-For `INVOKE`, the generated method takes the same receiver and arguments and returns the same type as the
-method it calls: call it as `value.__horizon_mixins_<mod>_<id>(arguments…)`, or, for an associated function
-without `self`, as `Type::__horizon_mixins_<mod>_<id>(arguments…)`. No check mod covers `INVOKE` yet.
+`T` is the field's type: read it in the game's source, since a wrong guess is a compiler error. An `INVOKE`
+bridge is called as `value.__horizon_mixins_<mod>_<id>(…)`, or `Type::__horizon_mixins_<mod>_<id>(…)` for a
+function without `self`. No check mod covers `INVOKE` yet.
 
-Write a field bridge's struct as the module that declares it and its name, without lifetimes
-(`horizon_client::game::Game`; a mixin target names the module of the `impl` instead). The method is
-generated as a trait implemented for the type, and that trait is imported into the module of every copied
-game-crate function, so your mixin helpers on game-crate functions call it like an inherent method. Your mod's own crate cannot call it: that
-crate is compiled before the copies.
+Name a field bridge's struct by the module that declares it, without lifetimes (`horizon_client::game::Game`).
+Mixin helpers on game-crate functions can call the method. Your mod's own crate cannot.
 
 ## Fields
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | The row's name, unique in the mod across every `[[native.*]]` and `[[inject]]` row. It is part of the method's name. |
+| `id` | yes | The row's name, unique in the mod. It is part of the method's name. |
 | `kind` | yes | `GET`, `GET_MUT`, `SET` or `INVOKE`. |
 | `target` | yes | The struct (field bridges) or the method (`INVOKE`). |
 | `member` | field bridges | The field. |
 
-## Limits
+The struct or method must be in the game crate, `horizon_client`. A field bridge's struct may be generic over
+lifetimes, not types or consts. An `INVOKE` target's type and method are not generic, and its signature names
+no associated type through `Self`, such as `Self::Error`.
 
-- The struct or method is in the game crate, `horizon_client`, not a crate below it.
-- A field bridge's struct is not generic over types or consts (lifetimes are fine: `Game<'a>`).
-- An invoker's type and method are not generic, and its signature names no associated type through `Self`
-  (such as `Self::Error`): the generated method could not name it.
+## What you will see
 
-## On success
+A bridge builds with the mixins, so the build log's `Function replacement:` line covers it.
 
-A bridge is compiled with the mixins; the build log's `Function replacement:` line covers it. A bridge no helper
-calls costs nothing.
+## Errors
 
-## Refusals
-
-Every refusal has the form `E_MIXIN_BRIDGE_TARGET: <mod>:<row>: <why>`. The reasons, and the fix:
+Every bridge error reads `E_MIXIN_BRIDGE_TARGET: <mod>:<row>: <why>`.
 
 | Reason | Fix |
 | --- | --- |
@@ -108,5 +98,5 @@ Every refusal has the form `E_MIXIN_BRIDGE_TARGET: <mod>:<row>: <why>`. The reas
 | `an invoker's target is a method or associated function of a type` | Point `INVOKE` at a method, not a free function. |
 | `an invoker's type and method are not generic` | Not possible on this route. |
 
-An `INVOKE` target that names no function is refused like a mixin's, with `E_MIXIN_TARGET_MISSING` or
-`E_MIXIN_TARGET_AMBIGUOUS` ([Mixins](mixins.md#refusals)).
+An `INVOKE` target that names no function gets `E_MIXIN_TARGET_MISSING` or `E_MIXIN_TARGET_AMBIGUOUS`, as on
+[Mixins](mixins.md#errors).
