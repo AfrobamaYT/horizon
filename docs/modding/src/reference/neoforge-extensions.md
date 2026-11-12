@@ -24,7 +24,7 @@ arguments itself. **Data** means a content declaration in `crates/horizon-mod-pa
 the game through `crates/horizon-items/src/blocks.rs`. **Handle** means a value or reference type in
 `crates/horizon-mod-vocab/src/` (`ItemStack`, `ItemResource`, `AttachmentStore`).
 
-`EntityPart` exists today but has two methods, `register_goals` and `spawn_cluster_size` (`docs/modding/src/concepts/trait-mods/023-entity-parts-and-mob-goals.md`).
+`EntityPart` exists today with goal and behavior registration, `spawn_cluster_size`, and `is_shearable` / `on_sheared` (`docs/modding/src/concepts/trait-mods/023-entity-parts-and-mob-goals.md`).
 It does not answer `IEntityExtension` methods; those are covered only where a global hook or a handle does.
 
 ## Counts
@@ -192,8 +192,8 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 
 ## `IEntityExtension`
 
-There is no per-entity Part method yet (`EntityPart` only registers goals), so entity coverage is data, handles
-and global hooks. On the server a mod can act on entities through `EntityRef` and `AttachmentStore`.
+`EntityPart` carries no `IEntityExtension` method (its methods are goals, spawn group size and shearing), so
+entity coverage is data, handles and global hooks. On the server a mod can act on entities through `EntityRef` and `AttachmentStore`.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
@@ -346,3 +346,14 @@ Horizon, as #3425 asks.
 
 Both are client-only, so the server's `chunk_load` and `chunk_unload` listeners are not called on a client. An
 integrated world's own chunks are told only through the server hooks.
+
+## IShearable: shearing entities
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `IShearable.isShearable(player, item, level, pos)` | **Covered** | `EntityPart::is_shearable(host, entity, player, shears)`, server-side, asked by a player's shears and a dispenser's before `player_shear_entity` / `block_shear_entity`; the first part to answer wins, `None` leaves it to the species. A `false` from a part ends a player's click with nothing done. |
+| `IShearable.onSheared(player, item, level, pos)` | **Covered** | `EntityPart::on_sheared(host, entity, player, shears)`, called on the part that said yes once the cancel hook passed; it returns the drops. |
+| `IShearable.spawnShearedDrop(level, pos, drop)` | **Covered, engine-side** | The game spawns each returned drop one block above the entity with the sheep's random nudge, posts the shear game event and damages the shears. Not overridable per part. |
+
+Vanilla's shearable species (sheep, mooshroom, snow golem, bogged, copper golem, sulfur cube) keep their own
+shearing when no part answers. Entity parts are native-only, so wasm mods do not have these methods yet.
