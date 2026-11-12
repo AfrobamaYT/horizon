@@ -26,6 +26,16 @@ impl Iterator for Units<'_> {
         }
     }
 }
+impl Units<'_> {
+    fn eq(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Saved(left), Self::Saved(right)) => left.as_slice() == right.as_slice(),
+            (Self::Saved(left), Self::Named(right)) => left.copied().eq(right),
+            (Self::Named(left), Self::Saved(right)) => left.eq(right.copied()),
+            (Self::Named(left), Self::Named(right)) => left.eq(right),
+        }
+    }
+}
 pub(super) trait Lookup {
     fn units(&self) -> (Units<'_>, Units<'_>);
 }
