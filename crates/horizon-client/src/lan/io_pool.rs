@@ -74,15 +74,39 @@ enum At {
 
 #[derive(Default)]
 struct Queue {
-    bodies: Vec<Vec<u8>>,
+    bodies: Vec<Queued>,
     end: Option<End>,
     at: At,
     /// In its thread's list of outboxes to serve.
     listed: bool,
 }
 
+// Include allocation capacity and geometric queue growth, even for empty bodies.
+pub(super) fn charge(body: &Vec<u8>) -> usize {
+    body.capacity()
+        .saturating_add(std::mem::size_of::<Queued>() * 2)
+}
+
+pub(super) struct Queued {
+    body: Vec<u8>,
+    prepared: bool,
+    pending: Arc<AtomicUsize>,
+    cost: usize,
+}
+impl Drop for Queued {
+    fn drop(&mut self) {
+        self.pending.fetch_sub(self.cost, Ordering::Relaxed);
+    }
+}
+
 /// One player's packets on their way to its network thread.
 pub(super) struct Outbox {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    // write attempts, nonzero write successes, bytes written, WouldBlock,
+    // nonempty buffers fully drained, remaining output bytes,
+    // successful body-framing calls since drain, lifetime body-framing calls.
+    // Body-framing calls are frames for raw payloads, not necessarily adapters.
+    probe: [AtomicUsize; 8],
     queue: Mutex<Queue>,
     /// The bytes queued and not framed yet (`PlayerSender::pending`).
     pending: Arc<AtomicUsize>,
@@ -93,6 +117,28 @@ pub(super) struct Outbox {
     worker: Arc<Worker>,
 }
 impl Outbox {
+    #[cfg(any(test, feature = "test-payload-probe"))]
+    pub(super) fn diagnostics(&self) -> String {
+        match self.queue.try_lock() {
+            Ok(q) => format!(
+                "outbox queued_items={} queued_body_bytes={} closed={} end={:?} listed={} write_attempts={} write_ok_calls={} written_bytes={} would_block={} drained_nonempty_buffers={} output_remaining_bytes={} body_frame_ok_since_drain={} body_frame_ok_total={}",
+                q.bodies.len(),
+                q.bodies.iter().map(|b| b.body.len()).sum::<usize>(),
+                matches!(q.at, At::Closed),
+                q.end,
+                q.listed,
+                self.probe[0].load(Ordering::Relaxed),
+                self.probe[1].load(Ordering::Relaxed),
+                self.probe[2].load(Ordering::Relaxed),
+                self.probe[3].load(Ordering::Relaxed),
+                self.probe[4].load(Ordering::Relaxed),
+                self.probe[5].load(Ordering::Relaxed),
+                self.probe[6].load(Ordering::Relaxed),
+                self.probe[7].load(Ordering::Relaxed)
+            ),
+            Err(_) => "outbox busy/poisoned".into(),
+        }
+    }
     /// An outbox on the least busy network thread, started the first time.
     pub(super) fn new(pending: Arc<AtomicUsize>, capped: bool) -> Result<Arc<Self>, String> {
         let workers = &pool()?.workers;
@@ -101,6 +147,8 @@ impl Outbox {
             .min_by_key(|w| w.load.load(Ordering::Relaxed))
             .expect("a pool has a thread");
         Ok(Arc::new(Self {
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            probe: std::array::from_fn(|_| AtomicUsize::new(0)),
             queue: Mutex::default(),
             pending,
             capped,
@@ -115,6 +163,18 @@ impl Outbox {
     /// Past [`MAX_PENDING`] a capped connection closes. The thread to wake, if
     /// this is the first news it has since it last looked.
     pub(super) fn push(&self, bodies: Vec<Vec<u8>>, end: Option<End>) -> Option<&Arc<Worker>> {
+        let bodies = bodies
+            .into_iter()
+            .map(|body| Queued {
+                cost: charge(&body),
+                body,
+                prepared: false,
+                pending: self.pending.clone(),
+            })
+            .collect();
+        self.push_queued(bodies, end)
+    }
+    fn push_queued(&self, bodies: Vec<Queued>, end: Option<End>) -> Option<&Arc<Worker>> {
         let mut q = self.queue();
         match (q.at, q.end) {
             (At::Closed, _) => return None,
@@ -150,11 +210,43 @@ impl Outbox {
             worker.wake();
         }
     }
+    #[cfg(test)]
+    pub(super) fn queued_contents(&self) -> Vec<Vec<u8>> {
+        self.queue().bodies.iter().map(|b| b.body.clone()).collect()
+    }
+    pub(super) fn alive(&self) -> bool {
+        let q = self.queue();
+        !matches!(q.at, At::Closed) && q.end.is_none()
+    }
+    pub(super) fn publish(&self, body: Vec<u8>, cost: usize) -> bool {
+        let packet = Queued {
+            body,
+            cost,
+            prepared: true,
+            pending: self.pending.clone(),
+        };
+        let mut q = self.queue();
+        if matches!(q.at, At::Closed) || q.end.is_some() {
+            return false;
+        }
+        q.bodies.push(packet);
+        let At::Slot(slot) = q.at else {
+            return true;
+        };
+        if std::mem::replace(&mut q.listed, true) {
+            return true;
+        }
+        drop(q);
+        if self.worker.post(|i| i.serve.push(slot)) {
+            self.worker.wake();
+        }
+        true
+    }
     /// What waits, for the thread.
     /// What waits, for the thread: the bodies and the end after them with
     /// `room` for them, else only a close. An end stays, so that nothing is
     /// queued after it.
-    fn take(&self, room: bool) -> (Vec<Vec<u8>>, Option<End>) {
+    fn take(&self, room: bool) -> (Vec<Queued>, Option<End>) {
         let mut q = self.queue();
         q.listed = false;
         match room {
@@ -320,7 +412,7 @@ fn run(mut poll: Poll, worker: &Arc<Worker>) {
         }
         for i in inbox.read {
             if let Some(Some(c)) = conns.get_mut(i) {
-                c.read(now);
+                c.memory_ready(now);
                 touched.push(i);
             }
         }
@@ -405,6 +497,12 @@ struct Conn {
     close_at: Option<Instant>,
 }
 impl Conn {
+    /// Pipe readiness covers incoming data and capacity returned by peer reads.
+    fn memory_ready(&mut self, now: Instant) {
+        self.read(now);
+        self.serve(now);
+    }
+
     fn register(
         a: Adopted,
         registry: &Registry,
@@ -506,14 +604,23 @@ impl Conn {
 
     /// Frame `bodies` into `out`, `queued` ones counted off `pending`: false
     /// if one could not be.
-    fn frame(&mut self, now: Instant, bodies: Vec<Vec<u8>>, queued: bool) -> bool {
-        for body in bodies {
-            if queued {
-                self.outbox.pending.fetch_sub(body.len(), Ordering::Relaxed);
-            }
-            if let Err(e) = super::conn::frame_body(&mut self.writer, &body, &mut self.out) {
+    fn frame(&mut self, now: Instant, bodies: Vec<Queued>, _queued: bool) -> bool {
+        for body in &bodies {
+            let result = if body.prepared {
+                self.writer.frame_into(&body.body, &mut self.out);
+                Ok(())
+            } else {
+                super::conn::frame_body(&mut self.writer, &body.body, &mut self.out)
+            };
+            if let Err(e) = result {
                 self.end(now, e.to_string());
                 return false;
+            }
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            {
+                self.outbox.probe[6].fetch_add(1, Ordering::Relaxed);
+                self.outbox.probe[7].fetch_add(1, Ordering::Relaxed);
+                self.outbox.probe[5].store(self.out.len() - self.written, Ordering::Relaxed);
             }
         }
         true
@@ -529,7 +636,19 @@ impl Conn {
             }
             // The hub's own disconnect, if it was the last queued, does for this one.
             let ours = (end.is_none()).then(|| disconnect.to_vec());
-            if !self.frame(now, bodies, true) || !self.frame(now, ours.into_iter().collect(), false)
+            if !self.frame(now, bodies, true)
+                || !self.frame(
+                    now,
+                    ours.into_iter()
+                        .map(|body| Queued {
+                            body,
+                            prepared: false,
+                            pending: self.outbox.pending.clone(),
+                            cost: 0,
+                        })
+                        .collect(),
+                    false,
+                )
             {
                 return;
             }
@@ -570,7 +689,11 @@ impl Conn {
         if self.close_at.is_some_and(|at| at <= now) {
             return false;
         }
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        let had_output = self.written < self.out.len();
         while self.written < self.out.len() {
+            #[cfg(any(test, feature = "test-payload-probe"))]
+            self.outbox.probe[0].fetch_add(1, Ordering::Relaxed);
             match self.io.write(&self.out[self.written..]) {
                 Ok(0) => {
                     self.end(now, "Disconnected");
@@ -578,9 +701,18 @@ impl Conn {
                 }
                 Ok(n) => {
                     self.written += n;
+                    #[cfg(any(test, feature = "test-payload-probe"))]
+                    {
+                        self.outbox.probe[1].fetch_add(1, Ordering::Relaxed);
+                        self.outbox.probe[2].fetch_add(n, Ordering::Relaxed);
+                        self.outbox.probe[5]
+                            .store(self.out.len() - self.written, Ordering::Relaxed);
+                    }
                     self.stalled = None;
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    #[cfg(any(test, feature = "test-payload-probe"))]
+                    self.outbox.probe[3].fetch_add(1, Ordering::Relaxed);
                     self.stalled.get_or_insert(now);
                     return true;
                 }
@@ -590,6 +722,13 @@ impl Conn {
                     return false;
                 }
             }
+        }
+        #[cfg(any(test, feature = "test-payload-probe"))]
+        {
+            if had_output {
+                self.outbox.probe[4].fetch_add(1, Ordering::Relaxed);
+            }
+            self.outbox.probe[6].store(0, Ordering::Relaxed);
         }
         self.out.clear();
         self.written = 0;
@@ -617,7 +756,16 @@ impl Conn {
         }
         if !self.draining
             && let Some(body) = self.session.tick(now)
-            && self.frame(now, vec![body], false)
+            && self.frame(
+                now,
+                vec![Queued {
+                    body,
+                    prepared: false,
+                    pending: self.outbox.pending.clone(),
+                    cost: 0,
+                }],
+                false,
+            )
         {
             self.serve(now);
         }
@@ -697,7 +845,7 @@ mod tests {
     }
     impl Served {
         fn send(&self, bodies: Vec<Vec<u8>>, end: Option<End>) {
-            let len: usize = bodies.iter().map(Vec::len).sum();
+            let len: usize = bodies.iter().map(charge).sum();
             self.pending.fetch_add(len, Ordering::Relaxed);
             self.outbox.send(bodies, end);
         }
@@ -914,3 +1062,6 @@ mod tests {
         assert!(served.seen.try_recv().is_err());
     }
 }
+
+#[cfg(test)]
+mod memory_progress_tests;

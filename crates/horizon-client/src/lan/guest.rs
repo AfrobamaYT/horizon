@@ -135,6 +135,27 @@ struct GuestInit {
     expected: bool,
 }
 
+/// One physical connection's ordered main-thread input. Provider credit follows
+/// the value through the inbox and derived HostEvent segments, never a wire-size
+/// refund/re-reserve gap. Raw work is not subject to vanilla movement freezing.
+pub enum InboxItem {
+    Packet(
+        play::Serverbound,
+        Option<crate::net::ingress::ReceiveLease<super::NetEvent>>,
+    ),
+    Raw(
+        Box<crate::raw_payloads::Delivery>,
+        crate::net::ingress::ReceiveLease<super::NetEvent>,
+    ),
+}
+#[cfg(test)]
+impl InboxItem {
+    /// Unit-test input without a network provider reservation.
+    pub fn uncredited(packet: play::Serverbound) -> Self {
+        Self::Packet(packet, None)
+    }
+}
+
 pub struct Guest {
     /// Identity generation and journal binding travel with the actual player record.
     pub residency: crate::join_seq::residency::member::Member,
@@ -401,8 +422,7 @@ pub struct Guest {
     pub ack_up_to: std::cell::Cell<i32>,
     pub sent_selected: usize,
     /// Packets waiting for the player's next turn, and their bytes on the wire.
-    pub inbox: VecDeque<(play::Serverbound, usize)>,
-    pub inbox_bytes: usize,
+    pub inbox: VecDeque<InboxItem>,
     pub joined_tick: u64,
     pub ticks: u64,
     /// The moves accepted since the game last looked (movement, on ground),
@@ -739,7 +759,6 @@ impl Guest {
             ack_up_to: std::cell::Cell::new(-1),
             sent_selected: 0,
             inbox: VecDeque::new(),
-            inbox_bytes: 0,
             joined_tick: 0,
             ticks: 0,
             moves: Vec::new(),

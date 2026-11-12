@@ -1297,21 +1297,6 @@ pieces.
   The tints are the biome's own at the column's top, not blended over the biome blend radius as the game draws them, so
   near a biome border they can differ from what players see by a few blocks.
 
-### Mod messages
-
-`crates/horizon-client/src/game/modding/native_net.rs`: bytes between a mod's server half and its client half, on the
-one custom payload channel `horizon:mod_net`. A vanilla client never gets them, and a vanilla server isn't sent any.
-
-- `native_net_send_to_player(player, channel, data)` on the server and `native_net_send_to_server(channel, data)` on the
-  client send one. The channel is `mod_id:name`: the id `[a-z0-9_]`, the name `[a-z0-9_./-]`, each 1 to 64 characters;
-  `minecraft` and `horizon` are the game's. The data is at most 30 000 bytes, and 32 messages a tick go each way per
-  player. Ok means accepted: a player who left doesn't get it. Sending to the server is an error until the player has
-  joined.
-- `native_net_from_client(player, channel, data)` and `native_net_from_server(channel, data)` hear them, all mods on every
-  message: check the channel. What a client sent is checked by nothing, so treat it as a player's own input.
-- A player's message reaches the server's hook in the tick after it arrives, when the helpers can reach every player;
-  a message to a player leaves at the end of the tick, from any server hook.
-
 ### Chat and commands a client mod sends
 
 `ClientHost::send_chat(message)` sends what the player could type in chat, to any server, a vanilla one included:
@@ -2294,7 +2279,7 @@ registration path.
 
 - `native_map_decorations(map, decorations)` is asked each time a map is drawn (held, in an item frame, or on the cartography table's screen) with `MapInfo` (id, centre block, scale, dimension, locked, whether it is in a frame); push `MapDecoration { sprite, x, y, rot, shown_on_frame }` (an atlas sprite, a position in half map pixels from -128 to 127, a rotation 0 to 15, and whether it shows in frames and on the screen like vanilla's markers) and it is drawn after the vanilla decorations with the same pose; a sprite the atlas lacks is left out. Nothing is saved in the map and vanilla's decorations are not passed in. This is the client half of NeoForge's `MapDecorationType`; types registered on the server and saved in map data need code-side registration.
 
-- A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `native_player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `native_player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `native_net_send_to_player`. Each start has one stop.
+- A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `native_player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `native_player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `PlayerRef::send_payload`. Each start has one stop.
 
 - An energy buffer on a mod block's block entity. `native_block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability answers it (see "A block's energy").
 
@@ -3055,8 +3040,8 @@ registration path.
   the stack is the place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place, and
   `native_on_equip` hears an equipment slot take a different item.
 
-- [mod messages](#mod-messages) between a mod's server and client halves, and hearing players and mobs on the
-  server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
+- Hearing players and mobs on the server for every player: `native_player_died`, `native_mob_spawned`,
+  `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
   `native_item_toss` (`ItemTossEvent`: a throw; not the items scattered when a player dies; `canceled` makes no item entity and the items are lost) and `native_item_picked_up` (`can_pickup`: `False` leaves the stack on the ground, `True` takes it despite its pickup delay or another player's target), then `native_item_picked_up_post` (`ItemEntityPickupEvent.Post`: a copy of the stack before the pickup and the live remainder on the item entity, which a listener may set; heard only when the whole stack went in, never on a partial pickup). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.

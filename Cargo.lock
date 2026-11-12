@@ -1911,6 +1911,7 @@ dependencies = [
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-runtime",
+ "horizon-mod-wasm",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -2056,6 +2057,9 @@ dependencies = [
 [[package]]
 name = "horizon-engine-slots"
 version = "0.1.0"
+dependencies = [
+ "horizon-mod-vocab",
+]
 
 [[package]]
 name = "horizon-friends"
@@ -2491,6 +2495,7 @@ dependencies = [
  "getrandom 0.3.4",
  "horizon-core",
  "horizon-mod-runtime",
+ "horizon-threads",
  "horizon-world",
  "ipconfig",
  "log",

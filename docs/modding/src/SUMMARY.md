@@ -38,6 +38,7 @@
   - [Bridges: `[[native.bridge]]`](bridges.md)
   - [Support modules: `[[native.module]]`](support-modules.md)
   - [Native state: refused](native-state.md)
+  - [How the native route works](native-how-it-works.md)
 
 # Reference
 

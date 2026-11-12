@@ -859,6 +859,7 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
         let (id, body) = c.recv().map_err(err)?;
         let reply = match id {
             cb::SELECT_KNOWN_PACKS
+            | cb::CUSTOM_PAYLOAD
             | cb::KEEP_ALIVE
             | cb::PING
             | cb::CODE_OF_CONDUCT
@@ -866,6 +867,12 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
             | cb::DISCONNECT
             | cb::FINISH_CONFIGURATION => {
                 match configuration::Clientbound::decode(id, &body).map_err(err)? {
+                    configuration::Clientbound::CustomPayload(p) => {
+                        let Some(answer) = raw_protocol_answer(o.brand.as_deref(), &p)? else {
+                            continue;
+                        };
+                        configuration::Serverbound::CustomPayload(answer)
+                    }
                     configuration::Clientbound::SelectKnownPacks(p) => {
                         configuration::Serverbound::SelectKnownPacks(p)
                     }
@@ -897,6 +904,24 @@ fn join(o: &Options, name: &str) -> Result<Connection, String> {
             _ => continue,
         };
         c.send(&reply.encode()).map_err(err)?;
+    }
+}
+
+/// Only a bot claiming Horizon support answers the fork's raw-protocol Query.
+fn raw_protocol_answer(
+    brand: Option<&str>,
+    payload: &configuration::CustomPayload,
+) -> Result<Option<configuration::CustomPayload>, String> {
+    use horizon_protocol::payload_negotiation::{CHANNEL, Control, Manifest};
+    if brand != Some("horizon") || payload.channel != CHANNEL {
+        return Ok(None);
+    }
+    match Control::decode(&payload.data).map_err(err)? {
+        Control::Query => Ok(Some(configuration::CustomPayload {
+            channel: CHANNEL.into(),
+            data: Control::Offer(Manifest::default()).encode().map_err(err)?,
+        })),
+        Control::Offer(_) => Ok(None),
     }
 }
 
@@ -1639,6 +1664,37 @@ mod tests {
     use play::{
         AddEntity, Clientbound, MoveEntity, MoveEntityPos, RemoveEntities, SetEntityData, VecDelta,
     };
+
+    #[test]
+    fn horizon_bot_answers_only_a_marked_query_with_an_empty_offer() {
+        use horizon_protocol::payload_negotiation::CHANNEL;
+        let mut payload = configuration::CustomPayload {
+            channel: CHANNEL.into(),
+            data: vec![0, 1],
+        };
+        let answer = raw_protocol_answer(Some("horizon"), &payload)
+            .unwrap()
+            .unwrap();
+        assert_eq!(answer.channel, CHANNEL);
+        assert_eq!(answer.data, [1, 1, 0]);
+        for brand in [None, Some("vanilla")] {
+            assert!(raw_protocol_answer(brand, &payload).unwrap().is_none());
+        }
+        payload.data = vec![1, 1, 0];
+        assert!(
+            raw_protocol_answer(Some("horizon"), &payload)
+                .unwrap()
+                .is_none()
+        );
+        payload.data = vec![0, 2];
+        assert!(raw_protocol_answer(Some("horizon"), &payload).is_err());
+        payload.channel = "other:plugin".into();
+        assert!(
+            raw_protocol_answer(Some("horizon"), &payload)
+                .unwrap()
+                .is_none()
+        );
+    }
 
     /// Exercise the production reader over framed connections. Pings are barriers
     /// so extra ACKs are observable without sleeps or timing guesses.

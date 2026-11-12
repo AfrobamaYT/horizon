@@ -251,14 +251,16 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
         use std::os::windows::ffi::OsStrExt;
         mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
     };
-    mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
-        builtin_registry_names(root)?,
-        horizon_world::native_load_context::capture_settings(
-            &Game::mod_data_root(),
-            packages.ids(),
+    (horizon_engine_slots::platform()?.install_registration_data)(
+        mod_api::__private::RegistrationData::new(
+            builtin_registry_names(root)?,
+            horizon_world::native_load_context::capture_settings(
+                &Game::mod_data_root(),
+                packages.ids(),
+            ),
+            directory,
         ),
-        directory,
-    ));
+    );
     Ok(())
 }
 
@@ -1360,6 +1362,7 @@ impl Game<'_> {
     pub(super) fn initialize_mod_runtime_for_tests() {
         static INITIALIZED: std::sync::Once = std::sync::Once::new();
         INITIALIZED.call_once(|| {
+            super::api_values::install_test_platform();
             mod_api::__private::initialize()
                 .expect("engine test runtime initializes before mod dispatch");
         });

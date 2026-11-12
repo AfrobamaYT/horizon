@@ -685,6 +685,217 @@ impl Codec<PlaceRecipe> for PlaceRecipe {
     }
 }
 
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for HolderSet {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Tag(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Items(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for TrimPattern {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Id(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Direct {
+                asset,
+                description,
+                decal,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(asset))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(description))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(decal)),
+        }
+    }
+}
+impl crate::retained::OwnedHeap for SlotDisplay {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Empty => 0usize,
+            Self::AnyFuel => 0usize,
+            Self::WithAnyPotion(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::OnlyWithComponent(field_0, field_1) => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_1)),
+            Self::Item(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::ItemStack(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Tag(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Dyed { dye, target } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(dye))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(target)),
+            Self::SmithingTrim {
+                base,
+                material,
+                pattern,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(base))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(material))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(pattern)),
+            Self::WithRemainder { input, remainder } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(input))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(remainder)),
+            Self::Composite(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for RecipeDisplay {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Shapeless {
+                ingredients,
+                result,
+                station,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(ingredients))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(result))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(station)),
+            Self::Shaped {
+                width,
+                height,
+                ingredients,
+                result,
+                station,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(width))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(height))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(ingredients))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(result))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(station)),
+            Self::Furnace {
+                ingredient,
+                fuel,
+                result,
+                station,
+                duration,
+                experience,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(ingredient))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(fuel))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(result))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(station))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(duration))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(experience)),
+            Self::Stonecutter {
+                input,
+                result,
+                station,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(input))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(result))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(station)),
+            Self::Smithing {
+                template,
+                base,
+                addition,
+                result,
+                station,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(template))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(base))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(addition))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(result))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(station)),
+        }
+    }
+}
+impl crate::retained::OwnedHeap for RecipeBookEntry {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            id,
+            display,
+            group,
+            category,
+            requirements,
+            flags,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(group))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(category))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(requirements))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(flags))
+    }
+}
+impl crate::retained::OwnedHeap for RecipeBookAdd {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { entries, replace } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(entries))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(replace))
+    }
+}
+impl crate::retained::OwnedHeap for RecipeBookRemove {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { ids } = self;
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(ids))
+    }
+}
+impl crate::retained::OwnedHeap for RecipeBookSettings {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { books } = self;
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(books))
+    }
+}
+impl crate::retained::OwnedHeap for RecipeBookSeenRecipe {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { recipe } = self;
+        0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(recipe))
+    }
+}
+impl crate::retained::OwnedHeap for RecipeBookChangeSettings {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            book_type,
+            open,
+            filtering,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(book_type))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(open))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(filtering))
+    }
+}
+impl crate::retained::OwnedHeap for PlaceGhostRecipe {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { container, display } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(container))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display))
+    }
+}
+impl crate::retained::OwnedHeap for PlaceRecipe {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            container,
+            recipe,
+            use_max,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(container))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(recipe))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(use_max))
+    }
+}
+// End generated retained traversals.
+
 #[cfg(test)]
 mod tests {
     use super::*;
