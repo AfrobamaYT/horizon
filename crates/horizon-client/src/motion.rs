@@ -27,6 +27,7 @@ use horizon_world::{
     living_air::{self, LivingAirWorld},
     living_fall::ImpulseContext,
     living_motion::{self, LivingMotionWorld},
+    move_gate::MoveGate,
     movement_emission::{
         self as emission, MovementDistances, MovementEmission, MovementEmissionWorld, MovementEvent,
     },
@@ -1088,8 +1089,8 @@ impl MotionWorld<'_, '_, '_> {
         self.player.on_climbable = climbable;
         Ok(climbable)
     }
-    pub fn travel_in_air(&mut self, input: Vec3) -> Result<()> {
-        living_air::travel_in_air(self, input)
+    pub fn travel_in_air(&mut self, gate: &mut MoveGate, input: Vec3) -> Result<()> {
+        living_air::travel_in_air(self, gate, input)
     }
     /// Dry, standing movement phases of LivingEntity.aiStep, including powder
     /// snow's block-inside effects and server freezing (thawing, the frost
@@ -1409,6 +1410,10 @@ impl MotionWorld<'_, '_, '_> {
     /// Player.travel: swim steering, then LivingEntity.travel (fluids first,
     /// then gliding, then air), keeping 0.6 of the vertical speed while flying.
     fn player_travel(&mut self, input: Vec3) -> Result<()> {
+        // The player's one physical move this tick goes through the move gate
+        // (#2414): whichever travel branch runs, `move_self` arms the gate it
+        // receives here.
+        let mut gate = MoveGate::new();
         if self.player.swimming {
             let look_y =
                 horizon_world::view_direction::view_vector(self.player.pitch, self.player.yaw).y;
@@ -1429,18 +1434,18 @@ impl MotionWorld<'_, '_, '_> {
         if !self.player.flying
             && (self.player.fluids.was_touching_water || self.player.is_in_lava())
         {
-            horizon_world::living_fluid::travel_in_fluid(self, input)?;
+            horizon_world::living_fluid::travel_in_fluid(self, &mut gate, input)?;
         } else if self.player.fall_flying {
             // LivingEntity.travelFallFlying: on a climbable the glide ends and
             // the player moves like in the air.
             if self.climbable()? {
-                self.travel_in_air(input)?;
+                self.travel_in_air(&mut gate, input)?;
                 self.player.fall_flying = false;
             } else {
-                self.travel_fall_flying()?;
+                self.travel_fall_flying(&mut gate)?;
             }
         } else {
-            self.travel_in_air(input)?;
+            self.travel_in_air(&mut gate, input)?;
         }
         if let Some(y) = flying_y {
             self.player.velocity.y = y * 0.6;
@@ -2140,13 +2145,13 @@ impl MotionWorld<'_, '_, '_> {
         Ok(())
     }
     /// LivingEntity.travelFallFlying with updateFallFlyingMovement.
-    fn travel_fall_flying(&mut self) -> Result<()> {
+    fn travel_fall_flying(&mut self, gate: &mut MoveGate) -> Result<()> {
         let v = self.player.velocity;
         let move_h = (v.x * v.x + v.z * v.z).sqrt();
         let gravity = living_motion::effective_gravity(self)?;
         self.player.velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
         let movement = self.player.velocity;
-        self.move_self(movement)?;
+        self.move_self(gate, movement)?;
         // LivingEntity.handleFallFlyingCollisions: the fall-damage sound plays
         // on both sides (a glider's own travel is client-side, and the sound
         // must reach its own ears, #8906), only the server hurts, and it
@@ -2207,15 +2212,39 @@ impl MotionWorld<'_, '_, '_> {
     /// ground flag — whose end writes the ground state
     /// (`Entity.setOnGroundWithMovement`): a lid lifting the body off the
     /// ground leaves it airborne, and the next tick's gravity lands it on the
-    /// lid again instead of the client holding it on a stale ground.
-    pub fn shulker_box_push(&mut self, movement: Vec3) -> Result<()> {
-        entity_move::move_entity(self, MoverType::ShulkerBox, movement)
+    /// lid again instead of the client holding it on a stale ground. The gate
+    /// is this invocation's (#2414); PR 1b fires `entity_move` in its `arm`.
+    pub fn shulker_box_push(&mut self, gate: &mut MoveGate, movement: Vec3) -> Result<()> {
+        crate::move_gate::arm(
+            gate,
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            MoverType::ShulkerBox,
+            movement,
+        );
+        if gate.skipped() {
+            return Ok(());
+        }
+        entity_move::move_entity(self, MoverType::ShulkerBox, gate.delta())
     }
     /// `LocalPlayer.move`: the move, then `updateAutoJump` with the float
-    /// horizontal displacement.
-    pub fn move_self(&mut self, movement: Vec3) -> Result<()> {
+    /// horizontal displacement. The gate is this invocation's (#2414), armed
+    /// here before the move's own handling, no-physics included.
+    pub fn move_self(&mut self, gate: &mut MoveGate, movement: Vec3) -> Result<()> {
+        crate::move_gate::arm(
+            gate,
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            MoverType::SelfMovement,
+            movement,
+        );
+        if gate.skipped() {
+            return Ok(());
+        }
         let before = self.player.position;
-        entity_move::move_entity(self, MoverType::SelfMovement, movement)?;
+        entity_move::move_entity(self, MoverType::SelfMovement, gate.delta())?;
         let dx = (self.player.position.x - before.x) as f32;
         let dz = (self.player.position.z - before.z) as f32;
         self.update_auto_jump(dx, dz)
@@ -2896,8 +2925,8 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
     fn is_player_class(&self) -> bool {
         true
     }
-    fn move_self(&mut self, v: Vec3) -> Result<()> {
-        MotionWorld::move_self(self, v)
+    fn move_self(&mut self, gate: &mut MoveGate, v: Vec3) -> Result<()> {
+        MotionWorld::move_self(self, gate, v)
     }
     fn horizontal_collision(&self) -> bool {
         self.player.collision.horizontal
@@ -4367,7 +4396,7 @@ mod tests {
             resources: &resources,
             health: &resources.health,
         };
-        w.travel_fall_flying().unwrap();
+        w.travel_fall_flying(&mut MoveGate::new()).unwrap();
         let is_fall = |e: &_| {
             matches!(
                 e,
@@ -4376,7 +4405,7 @@ mod tests {
         };
         assert_eq!(w.player.events.iter().filter(|e| is_fall(e)).count(), 1);
         // The sound must play only once on impact, not repeat on subsequent ticks (#12304):
-        w.travel_fall_flying().unwrap();
+        w.travel_fall_flying(&mut MoveGate::new()).unwrap();
         assert_eq!(w.player.events.iter().filter(|e| is_fall(e)).count(), 1);
         assert!(
             !w.player
@@ -4873,7 +4902,7 @@ mod tests {
                 resources: &resources,
                 health: &resources.health,
             };
-            w.travel_fall_flying().unwrap();
+            w.travel_fall_flying(&mut MoveGate::new()).unwrap();
             let v = w.player.velocity;
             assert_eq!(
                 [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()],
@@ -4981,7 +5010,8 @@ mod tests {
                 resources: &resources,
                 health: &resources.health,
             };
-            w.move_self(Vec3::new(0.0, -30.0, 0.0)).unwrap();
+            w.move_self(&mut MoveGate::new(), Vec3::new(0.0, -30.0, 0.0))
+                .unwrap();
             assert!(w.player.ground.on_ground);
             assert_eq!(w.player.fluids.was_touching_water, wet);
             if wet {
@@ -5069,7 +5099,8 @@ mod tests {
                 resources: &resources,
                 health: &resources.health,
             };
-            w.move_self(Vec3::new(0.0, -30.0, 0.0)).unwrap();
+            w.move_self(&mut MoveGate::new(), Vec3::new(0.0, -30.0, 0.0))
+                .unwrap();
             assert!(w.player.ground.on_ground);
             assert_eq!(w.player.fall_distance, 0.0);
             // LivingEntity.causeFallDamage's sounds play on both sides.
@@ -5520,7 +5551,8 @@ mod tests {
             resources: &resources,
             health: &resources.health,
         };
-        w.move_self(Vec3::new(0.0, -1.0, 0.0)).unwrap();
+        w.move_self(&mut MoveGate::new(), Vec3::new(0.0, -1.0, 0.0))
+            .unwrap();
         assert!(w.player.ground.on_ground);
         w.player.set_sprinting(true).unwrap();
         w.player.glider = true;
@@ -5577,7 +5609,8 @@ mod tests {
             resources: &resources,
             health: &resources.health,
         };
-        w.move_self(Vec3::new(0.0, -1.0, 0.0)).unwrap();
+        w.move_self(&mut MoveGate::new(), Vec3::new(0.0, -1.0, 0.0))
+            .unwrap();
         assert!(w.player.ground.on_ground);
         w.player.set_sprinting(true).unwrap();
         w.player.glider = true;

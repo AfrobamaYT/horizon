@@ -1486,12 +1486,30 @@ impl ExperienceOrb {
         // `double fallSpeed = getDeltaMovement().y`, taken after the stuck
         // push and before the move.
         let wanted = self.velocity;
+        // The orb's Entity.move goes through the move gate (#2414); PR 1a
+        // records the movement unchanged.
+        let mut gate = crate::move_gate::armed(
+            context,
+            self.id,
+            "minecraft:experience_orb",
+            horizon_world::entity_move::MoverType::SelfMovement,
+            wanted,
+        );
+        let wanted = gate.delta();
         // Entity.collide: the world border's walls and the entities that
         // `canBeCollidedWith` it (a boat, a shulker) stop the orb too.
         let border = border.map(|b| (b, [self.position.x, self.position.z]));
-        let moved = scene
-            .resolve_in_border_with(bounds, wanted, 0.0, self.on_ground, border, entities)
-            .unwrap_or(Vec3::ZERO);
+        let moved = crate::move_gate::scene_resolve_in_border_with(
+            &mut gate,
+            scene,
+            bounds,
+            wanted,
+            0.0,
+            self.on_ground,
+            border,
+            entities,
+        )
+        .unwrap_or(Vec3::ZERO);
         self.position = Vec3::new(
             self.position.x + moved.x,
             self.position.y + moved.y,
@@ -2119,7 +2137,8 @@ impl ArmorStand {
         in_water: bool,
         border: Option<&BorderGeometry>,
     ) {
-        if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border, &[]) {
+        let context = crate::test_resources::server_loop_context();
+        if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border, &[], context) {
             let medium = if in_water {
                 StandMedium::Water
             } else {
@@ -2461,6 +2480,7 @@ impl ArmorStand {
         in_water: bool,
         border: Option<&BorderGeometry>,
         entities: &[Aabb],
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> Option<StandStep> {
         use crate::entity_rules::EntityRules;
         self.previous = self.position;
@@ -2519,14 +2539,25 @@ impl ArmorStand {
         }
         let mut velocity = wanted;
         let mut horizontal_collision = false;
+        // The stand's Entity.move goes through the move gate (#2414); PR 1a
+        // records the movement unchanged.
+        let mut gate = crate::move_gate::armed(
+            context,
+            self.id,
+            "minecraft:armor_stand",
+            horizon_world::entity_move::MoverType::SelfMovement,
+            wanted,
+        );
+        let wanted = gate.delta();
         // Entity.collide: the world border's walls and the entities that
         // `canBeCollidedWith` the stand stop it too.
-        let moved = SceneCollisions {
-            world: scene.world,
-            binding: scene.binding,
-            subject: scene.subject,
-        }
-        .resolve_in_border_with(
+        let moved = crate::move_gate::scene_resolve_in_border_with(
+            &mut gate,
+            SceneCollisions {
+                world: scene.world,
+                binding: scene.binding,
+                subject: scene.subject,
+            },
             self.bounds(),
             wanted,
             0.0,
@@ -2595,6 +2626,7 @@ impl ArmorStand {
         border: Option<&BorderGeometry>,
         entities: &[Aabb],
         travels_after: bool,
+        context: &horizon_world::native_load_context::LoopContext,
     ) {
         let mut scene = SceneCollisions {
             subject: self.feet_are_leather_boots().then_some(
@@ -2605,12 +2637,23 @@ impl ArmorStand {
             ),
             ..scene
         };
-        let Ok(moved) = SceneCollisions {
-            world: scene.world,
-            binding: scene.binding,
-            subject: scene.subject,
-        }
-        .resolve_in_border_with(
+        // The lid's `Entity.move(MoverType.SHULKER, delta)` goes through the
+        // move gate (#2414); PR 1a records the movement unchanged.
+        let mut gate = crate::move_gate::armed(
+            context,
+            self.id,
+            "minecraft:armor_stand",
+            horizon_world::entity_move::MoverType::Shulker,
+            delta,
+        );
+        let delta = gate.delta();
+        let Ok(moved) = crate::move_gate::scene_resolve_in_border_with(
+            &mut gate,
+            SceneCollisions {
+                world: scene.world,
+                binding: scene.binding,
+                subject: scene.subject,
+            },
             self.bounds(),
             delta,
             0.0,
@@ -4678,9 +4721,15 @@ mod armor_stand_motion_tests {
                     binding: &collision,
                     subject: None,
                 };
-                if let Some(step) =
-                    stand.tick_move(&mut scene, &facts, &climbing, false, None, boxes)
-                {
+                if let Some(step) = stand.tick_move(
+                    &mut scene,
+                    &facts,
+                    &climbing,
+                    false,
+                    None,
+                    boxes,
+                    crate::test_resources::server_loop_context(),
+                ) {
                     stand.tick_settle(StandMedium::Air, step);
                 }
             }

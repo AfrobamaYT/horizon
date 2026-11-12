@@ -1064,6 +1064,7 @@ impl Game<'_> {
                 in_water,
                 Some(self.border.geometry()),
                 &nearby,
+                &self.loop_context,
             ) {
                 // LivingEntity.aiStep: `travel` first, then the blocks' push.
                 a.tick_settle(medium, step);
@@ -1207,6 +1208,7 @@ impl Game<'_> {
                 Some(self.border.geometry()),
                 &nearby,
                 travels_after,
+                &self.loop_context,
             );
         }
     }

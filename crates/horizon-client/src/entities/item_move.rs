@@ -1,5 +1,6 @@
-//! `ItemEntity`'s `Entity.move` step and the block effects around it, in its
-//! own module so `entities.rs` keeps its size.
+//! `ItemEntity`'s `Entity.move`: the tick's move step, its collision through
+//! the move gate (#2414) and the block effects around it, in its own module so
+//! `entities.rs` keeps its size.
 use super::*;
 impl ItemEntity {
     /// `ItemEntity.tick` up to the blocks' push. The game has just run the
@@ -29,6 +30,7 @@ impl ItemEntity {
             entity_boxes,
             border,
             blocks,
+            context,
         );
         self.finish_move_block_effects(world, facts, no_physics, blocks, step, context);
         step
@@ -49,6 +51,7 @@ impl ItemEntity {
         entity_boxes: &[Aabb],
         border: Option<&BorderGeometry>,
         blocks: Option<&BoundMovementProperties>,
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> ItemStep {
         self.ticks += 1;
         self.previous = self.position;
@@ -91,7 +94,18 @@ impl ItemEntity {
                 subject: None,
             };
             let from = self.position;
-            let mut wanted = self.velocity;
+            let wanted = self.velocity;
+            // The item's Entity.move goes through the move gate (#2414): armed
+            // before the move's own handling, no-physics and the stuck
+            // multiplier included. PR 1a records the movement unchanged.
+            let mut gate = crate::move_gate::armed(
+                context,
+                self.id,
+                "minecraft:item",
+                horizon_world::entity_move::MoverType::SelfMovement,
+                wanted,
+            );
+            let mut wanted = gate.delta();
             // Entity.move: a block the item sits in (cobweb, powder snow)
             // scales this move once and stops it.
             if self.stuck.length_squared() > 1.0e-7 {
@@ -106,12 +120,14 @@ impl ItemEntity {
                 // `Entity.collide`: the entities that `canBeCollidedWith` the item stop it
                 // too (a boat, a shulker, a happy ghast held still; not a minecart), and
                 // so does the world border (`Entity.collectColliders`).
-                crate::collisions::EntityCollisions {
+                let mut collisions = crate::collisions::EntityCollisions {
                     blocks: scene,
                     entities: entity_boxes,
                     border: border.map(|b| (b, [self.position.x, self.position.z])),
-                }
-                .resolve_with_context(
+                };
+                crate::move_gate::entities_resolve_with_context(
+                    &mut gate,
+                    &mut collisions,
                     self.bounds(),
                     wanted,
                     0.0,

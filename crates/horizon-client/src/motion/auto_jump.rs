@@ -3,7 +3,7 @@
 use super::*;
 use crate::auto_jump::AutoJumper;
 impl MotionWorld<'_, '_, '_> {
-    pub(super) fn update_auto_jump(&mut self, xa: f32, za: f32) -> Result<()> {
+    pub fn update_auto_jump(&mut self, xa: f32, za: f32) -> Result<()> {
         let p = &*self.player;
         // canAutoJump; MotionWorld drives an unmounted player (not a passenger).
         let ready = crate::auto_jump::can_auto_jump(

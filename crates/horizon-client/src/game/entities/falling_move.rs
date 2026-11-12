@@ -1,5 +1,5 @@
-//! The falling block's `Entity.move` (`FallingBlockEntity.tick`'s step), in
-//! its own module so `game.rs` keeps its size.
+//! The falling block's `Entity.move` (`FallingBlockEntity.tick`'s step, #2414's
+//! move gate), in its own module so `game.rs` keeps its size.
 use super::*;
 impl Game<'_> {
     /// One `FallingBlockEntity.tick` move of `f`.
@@ -15,7 +15,18 @@ impl Game<'_> {
         f.previous = f.position;
         f.age = f.age.wrapping_add(1);
         f.velocity.y -= horizon_client::entity_rules::EntityRules::get_gravity(f);
-        let mut wanted = f.velocity;
+        let wanted = f.velocity;
+        // The falling block's Entity.move goes through the move gate (#2414),
+        // armed before the stuck multiplier of the move itself; PR 1a records
+        // the movement unchanged.
+        let mut gate = horizon_client::move_gate::armed(
+            &self.loop_context,
+            f.id,
+            "minecraft:falling_block",
+            MoverType::SelfMovement,
+            wanted,
+        );
+        let mut wanted = gate.delta();
         // Entity.move: a cobweb it was in scales this move, which then
         // starts from rest.
         if f.stuck.length_squared() > 1.0e-7 {
@@ -48,12 +59,14 @@ impl Game<'_> {
         // On an error the caller keeps the block as it was before this tick.
         // Entity.collide: the world border's walls and the entities that
         // `canBeCollidedWith` it (a boat, a shulker) stop it too.
-        let movement = collisions::EntityCollisions {
+        let mut collisions = collisions::EntityCollisions {
             blocks: scene,
             entities,
             border: Some((self.border.geometry(), [f.position.x, f.position.z])),
-        }
-        .resolve_with_context(
+        };
+        let movement = horizon_client::move_gate::entities_resolve_with_context(
+            &mut gate,
+            &mut collisions,
             horizon_client::falling_block::bounds(f.position),
             wanted,
             0.0,

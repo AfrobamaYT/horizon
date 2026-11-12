@@ -1,9 +1,12 @@
-//! A particle's own collision step, in its own module so `particles.rs`
-//! keeps its size.
+//! A particle's own collision step, in its own module so `particles.rs` keeps
+//! its size.
 use super::ParticleLevel;
 use crate::collisions::SceneCollisions;
 use horizon_core::geometry::{Aabb, Vec3};
 impl ParticleLevel<'_> {
+    /// A particle step, not an `Entity.move` (#2414): the move gate is for
+    /// entities; particles borrow the collide machinery directly.
+    #[allow(clippy::disallowed_methods)]
     pub(super) fn collide(&self, bb: Aabb, d: [f64; 3]) -> [f64; 3] {
         let mut scene = SceneCollisions {
             world: self.world,

@@ -1,5 +1,5 @@
-//! The cart's `Entity.move` (`AbstractMinecart.move`'s own tick step), in its
-//! own module so `minecarts.rs` keeps its size.
+//! The cart's `Entity.move` — `AbstractMinecart.move`'s own tick move through
+//! the move gate (#2414) — in its own module so `minecarts.rs` keeps its size.
 use super::Game;
 use super::minecarts::{CartKind, Minecart};
 use horizon_client::collisions::SceneCollisions;
@@ -7,7 +7,18 @@ use horizon_core::geometry::Vec3;
 impl Game<'_> {
     /// Entity.move for a cart: collisions zero the blocked components, the world border's walls
     /// among them (`CollisionGetter.borderCollision`, asked for every entity).
-    pub(super) fn move_cart(&self, c: &mut Minecart, mut delta: Vec3) {
+    pub(super) fn move_cart(&self, c: &mut Minecart, delta: Vec3) {
+        // The cart's own move is a self move (#2414: vanilla's
+        // `AbstractMinecart.move` passes SELF for its own tick); PR 1a
+        // records the movement unchanged.
+        let mut gate = horizon_client::move_gate::armed(
+            &self.loop_context,
+            c.id,
+            c.kind.id(),
+            horizon_world::entity_move::MoverType::SelfMovement,
+            delta,
+        );
+        let mut delta = gate.delta();
         // Entity.move: a stuck multiplier scales this move and zeroes the velocity.
         if c.stuck.length_squared() > 1.0e-7 {
             delta = delta.multiply(c.stuck);
@@ -32,7 +43,14 @@ impl Game<'_> {
             entities: &entities,
             border: Some((self.border.geometry(), [c.position.x, c.position.z])),
         };
-        if let Ok(moved) = scene.resolve(c.bounds(), delta, 0.0, c.on_ground) {
+        if let Ok(moved) = horizon_client::move_gate::entities_resolve(
+            &mut gate,
+            &mut scene,
+            c.bounds(),
+            delta,
+            0.0,
+            c.on_ground,
+        ) {
             c.fall_distance = self.vehicle_fall_reset(c.fall_distance, c.position, moved);
             c.position = Vec3::new(
                 c.position.x + moved.x,

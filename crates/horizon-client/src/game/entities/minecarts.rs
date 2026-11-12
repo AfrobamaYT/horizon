@@ -18,7 +18,6 @@ use horizon_client::join_seq::{JoinList, ListStamp};
 use horizon_client::mobs::{Mob, seen_grid::SeenGrid};
 use horizon_client::{
     blocks::Fluid,
-    collisions::SceneCollisions,
     containers::BlockEntity,
     items::{ItemStack, Items},
     mesher::Vertex,

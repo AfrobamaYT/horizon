@@ -1,6 +1,7 @@
 //! A guest's move checks: the flying kicks and the `handlePlayerPositionChange`
-//! collision check that decides "moved wrongly", in their own module so
-//! `hub.rs` keeps its size.
+//! collision check whose resolved move — a Player-cause move through the move
+//! gate (#2414) — decides "moved wrongly", in their own module so `hub.rs`
+//! keeps its size.
 use super::*;
 impl Hub {
     /// `ServerGamePacketListenerImpl.tickPlayer`'s flying check: a player the
@@ -77,23 +78,34 @@ impl Hub {
             subject: None,
         };
         // player.move, then how far from the target it ended (vanilla drops
-        // the vertical part: `yDist > -0.5 || yDist < 0.5` always holds).
+        // the vertical part: `yDist > -0.5 || yDist < 0.5` always holds). A
+        // Player-cause move through the move gate (#2414); PR 1a records the
+        // movement unchanged.
         let movement = Vec3::new(
             to[0] - g.position[0],
             to[1] - g.position[1],
             to[2] - g.position[2],
         );
-        let done = scene
-            .resolve_with_context(
-                old,
-                movement,
-                0.6,
-                g.on_ground,
-                // The mover's own sneaking, as CollisionContext.of(player):
-                // a sneaking player descends through scaffolding.
-                CollisionContext::position(g.position[1]).with_descending(g.sneaking),
-            )
-            .ok();
+        let mut gate = crate::move_gate::armed(
+            &self.loop_context,
+            g.entity_id as u32,
+            "minecraft:player",
+            horizon_world::entity_move::MoverType::Player,
+            movement,
+        );
+        let movement = gate.delta();
+        let done = crate::move_gate::scene_resolve_with_context(
+            &mut gate,
+            &mut scene,
+            old,
+            movement,
+            0.6,
+            g.on_ground,
+            // The mover's own sneaking, as CollisionContext.of(player):
+            // a sneaking player descends through scaffolding.
+            CollisionContext::position(g.position[1]).with_descending(g.sneaking),
+        )
+        .ok();
         let fail = !g.creative()
             && done.is_some_and(|done| {
                 let (dx, dz) = (movement.x - done.x, movement.z - done.z);

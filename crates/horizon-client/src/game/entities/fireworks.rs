@@ -199,10 +199,14 @@ impl Rocket {
     /// One tick of a server's client: the rocket flies on by itself between
     /// the server's updates (a rocket that follows an entity is placed by the
     /// caller).
-    pub(super) fn remote_step(&mut self, scene: &mut SceneCollisions) {
+    pub(super) fn remote_step(
+        &mut self,
+        scene: &mut SceneCollisions,
+        context: &horizon_world::native_load_context::LoopContext,
+    ) {
         self.previous = self.position;
         if self.attached_to.is_none() {
-            self.free_flight(scene);
+            self.free_flight(scene, context);
         }
         self.life += 1;
     }
@@ -243,8 +247,14 @@ impl Rocket {
         )
     }
     /// `FireworkRocketEntity.tick` for a rocket attached to no entity: speed
-    /// up (an angled one keeps its motion) and rise, then move.
-    fn free_flight(&mut self, scene: &mut SceneCollisions) {
+    /// up (an angled one keeps its motion) and rise, then move. The rocket's
+    /// move is a self move through the move gate (#2414); PR 1a records the
+    /// movement unchanged.
+    fn free_flight(
+        &mut self,
+        scene: &mut SceneCollisions,
+        context: &horizon_world::native_load_context::LoopContext,
+    ) {
         let h = 0.125;
         let bounds = Aabb::new(
             Vec3::new(self.position.x - h, self.position.y, self.position.z - h),
@@ -255,7 +265,17 @@ impl Rocket {
             ),
         );
         let wanted = self.next_motion();
-        let Ok(moved) = scene.resolve(bounds, wanted, 0.0, false) else {
+        let mut gate = horizon_client::move_gate::armed(
+            context,
+            self.id,
+            "minecraft:firework_rocket",
+            horizon_world::entity_move::MoverType::SelfMovement,
+            wanted,
+        );
+        let wanted = gate.delta();
+        let Ok(moved) =
+            horizon_client::move_gate::scene_resolve(&mut gate, scene, bounds, wanted, 0.0, false)
+        else {
             return;
         };
         let horizontal = (moved.x - wanted.x).abs() > 1e-7 || (moved.z - wanted.z).abs() > 1e-7;
@@ -541,7 +561,7 @@ impl Game<'_> {
                     binding: self.collision,
                     subject: None,
                 };
-                r.free_flight(&mut scene);
+                r.free_flight(&mut scene, &self.loop_context);
             }
             self.entity_powder_snow_particles(
                 r.previous,

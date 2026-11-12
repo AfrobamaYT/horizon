@@ -7,7 +7,6 @@
 //! follow the vanilla classes; sprite sets come from `particles/*.json`.
 use crate::{
     blocks::{BlockFacts, Fluid},
-    collisions::SceneCollisions,
     hud::Rect,
     mesher::Vertex,
     world::World,

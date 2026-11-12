@@ -197,6 +197,7 @@ use {
     horizon_world::{
         block_collision::BlockCollisionRegistry,
         collision_context::{CollisionContext, CollisionEntity, CollisionItem},
+        entity_move::MoverType,
         entity_obstruction::{EntityIdentity, EntityObstructionWorld, ObstructionEntity},
         fluid::FluidState,
         level::{
