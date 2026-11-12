@@ -2,18 +2,14 @@
 //! template: `MineshaftPieces`, `NetherFortressPieces` and
 //! `StrongholdPieces`, registered as `StructurePieceType.ContextlessType`s.
 use super::{
-    BoundingBox,
     fortress::FortressPiece,
     legacy::{LegacyPiece, PieceFrame},
     mineshaft::MineshaftPiece,
     start::{StructureDef, StructureKind},
     stronghold::StrongholdPiece,
 };
-use crate::{
-    datafix::dynamic::{Number, as_number},
-    nbt::Tag,
-};
-use horizon_core::geometry::Direction;
+use crate::datafix::dynamic::{Number, as_number};
+use horizon_core::{bounding_box::BoundingBox, geometry::Direction, nbt::Tag};
 use std::{collections::BTreeSet, sync::Arc};
 
 /// `CompoundTag.getIntOr`: `Mth.floor` of a float or double tag, the low 32
