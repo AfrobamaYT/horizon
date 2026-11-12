@@ -357,3 +357,9 @@ integrated world's own chunks are told only through the server hooks.
 
 Vanilla's shearable species (sheep, mooshroom, snow golem, bogged, copper golem, sulfur cube) keep their own
 shearing when no part answers. Entity parts are native-only, so wasm mods do not have these methods yet.
+
+## IFallableExtension: falling tick
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `IFallableExtension.fallingTick(level, currentPosition, entity)` | **Partial** | Server `BlockPart::falling_tick` (`hooks/falling_tick.rs`) on the falling block's state, with its block position and entity handle and a `&mut dyn ServerHost`, for each tick that ends with it still in the air; not the landing, drop or removal tick. It is delivered after the ordered pass that ticked the falling block, so a write lands on the stored entity. NeoForge also calls it on the client; Horizon calls it only on the server. |
