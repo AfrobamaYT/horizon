@@ -2173,7 +2173,7 @@ impl Game<'_> {
         // The UUID its own random made, unless it already has one (a client
         // copy's from the spawn packet).
         if let Some(uuid) = p.uuid.take() {
-            self.persist.uuids.entry(p.id).or_insert(uuid);
+            self.persist.uuids.get_or_insert_with(p.id, || uuid);
         }
         // Projectile.setOwner: the acting player's or the mob's UUID, which
         // its save keeps even once the owner is gone.
