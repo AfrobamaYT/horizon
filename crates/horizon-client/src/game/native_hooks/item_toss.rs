@@ -66,7 +66,7 @@ mod item_toss_tests {
     struct Tosser(Arc<Mutex<u32>>);
     #[mod_api::__subscriptions]
     impl Hooks for Tosser {
-        fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent<'_>) -> Flow {
+        fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent) -> Flow {
             *self.0.lock().unwrap() += 1;
             let stack = event.item.stack(host).expect("the tossed item reads");
             if mod_api::__private::item_key_id(stack.item())

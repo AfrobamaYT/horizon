@@ -345,7 +345,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         fn item_toss(
             &self,
             _: &mut dyn mod_api::ServerHost,
-            event: &mut mod_api::ItemTossEvent<'_>,
+            event: &mut mod_api::ItemTossEvent,
         ) -> mod_api::Flow {
             TOSSED.set(Some((event.player, event.item.entity().id())));
             mod_api::Flow::Cancel
@@ -1076,11 +1076,7 @@ fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
     };
     let item =
         mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 11));
-    let mut event = mod_api::ItemTossEvent {
-        player: 0x42,
-        item,
-        canceled: false,
-    };
+    let mut event = mod_api::ItemTossEvent { player: 0x42, item };
     let flow = module.item_toss(&mut World, &mut event);
     assert_eq!(TOSSED.get(), Some((0x42, 11)));
     assert!(

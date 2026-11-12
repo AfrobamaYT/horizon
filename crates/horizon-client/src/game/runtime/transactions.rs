@@ -891,7 +891,7 @@ mod tests {
                 ));
                 Flow::Cancel
             }
-            fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent<'_>) -> Flow {
+            fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent) -> Flow {
                 let potion = event.item.stack(host).is_some_and(|stack| {
                     mod_api::__private::item_key_id(stack.item())
                         .is_some_and(|id| id == "minecraft:potion")
