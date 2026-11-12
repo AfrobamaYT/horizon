@@ -595,9 +595,15 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
             let replace = |game: &mut super::Game<'_>, block: &str, commit: bool| {
                 container_at(game, pos, "minecraft:chest");
                 let items = level.capability(game, &ITEMS, [3, 64, 1], None).unwrap();
+                let stone = ItemResource::of(
+                    &ItemStack::new("minecraft:stone", 1)
+                        .try_into_api()
+                        .unwrap(),
+                );
                 let result: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                    // Fills the chest's empty slot 1, kept as a single slot.
-                    assert_eq!(items.insert(host, tx, 1, &dirt(), 9), 9);
+                    // Takes from the chest's full slot 0: the slot kept is its 64 stone, which
+                    // an abort must not write into whatever replaced the chest.
+                    assert_eq!(items.extract(host, tx, 0, &stone, 10), 10);
                     let state = host.block_state_id(block).unwrap();
                     assert!(
                         level
