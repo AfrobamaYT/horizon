@@ -228,7 +228,7 @@ fn a_level_hears_each_block_fire_burns() {
     };
     assert_eq!((state, face), (wool, Direction::West));
 
-    // TNT primes as it burns, and the level hears it after that.
+    // The level hears TNT while it is present, before it primes.
     let primed = burn_east(&mut w, BlockPos::new(0, 1, 20), tnt);
     let tnt_heard = heard(&w, primed);
     let [(state, face, before)] = tnt_heard[..] else {
@@ -238,5 +238,44 @@ fn a_level_hears_each_block_fire_burns() {
     let primed_first = w.level.events[..before]
         .iter()
         .any(|event| matches!(event, LevelEvent::PrimeTnt { pos, .. } if *pos == primed));
-    assert!(primed_first, "the TNT primed before the level heard it");
+    assert!(!primed_first, "the TNT primes after the notice");
+    assert!(
+        w.level.events[before..]
+            .iter()
+            .any(|event| matches!(event, LevelEvent::PrimeTnt { pos, .. } if *pos == primed))
+    );
+    assert_eq!(w.level.caught_states, vec![wool, tnt]);
+}
+
+#[test]
+fn lava_queries_exact_positions_and_faces_in_both_random_tick_branches() {
+    let Some(mut w) = world() else { return };
+    let at = BlockPos::new(4, 8, 4);
+    let air = w.id("air", &[]);
+    // Seed 0 selects the lower branch: three draws at (0,0), (1,1), (1,1).
+    *w.level.random() = LegacyRandom::new(0);
+    w.b().sim(&mut w.level, &mut w.ticks).lava_random_tick(at);
+    assert_eq!(
+        *w.level.lava_asks.borrow(),
+        vec![
+            (air, BlockPos::new(4, 8, 4), Direction::Up),
+            (air, BlockPos::new(5, 8, 5), Direction::Up),
+            (air, BlockPos::new(5, 8, 5), Direction::Up),
+        ]
+    );
+    w.level.lava_asks.borrow_mut().clear();
+    // Seed 2 selects one upward pass to (3,9,5); air never short-circuits.
+    *w.level.random() = LegacyRandom::new(2);
+    w.b().sim(&mut w.level, &mut w.ticks).lava_random_tick(at);
+    assert_eq!(
+        *w.level.lava_asks.borrow(),
+        vec![
+            (air, BlockPos::new(3, 8, 5), Direction::Up),
+            (air, BlockPos::new(3, 10, 5), Direction::Down),
+            (air, BlockPos::new(3, 9, 4), Direction::South),
+            (air, BlockPos::new(3, 9, 6), Direction::North),
+            (air, BlockPos::new(2, 9, 5), Direction::East),
+            (air, BlockPos::new(4, 9, 5), Direction::West),
+        ]
+    );
 }

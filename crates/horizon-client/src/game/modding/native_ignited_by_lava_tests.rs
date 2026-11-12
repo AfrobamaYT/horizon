@@ -30,7 +30,7 @@ impl Hooks for LavaMod {
 fn a_block_part_decides_whether_lava_lights_it() {
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("lava", Box::new(LavaMod))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             let registry = game.pack.assets.registry;

@@ -510,8 +510,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let mut odds = None;
         self.level.before_fire_odds(state, pos, face, &mut odds);
         match odds {
-            // A mod's answer stays in vanilla's range, so the spread odds can't overflow.
-            Some((ignite, burn)) => (ignite.clamp(0, 100), burn.clamp(0, 100)),
+            // Burn rolls are at most 300; spread speed has no upper cap.
+            Some((ignite, burn)) => (ignite.max(0), burn.clamp(0, 300)),
             None => {
                 let data = self.b.data(state);
                 (data.ignite_odds, data.burn_odds)

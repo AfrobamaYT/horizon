@@ -34,7 +34,7 @@ fn a_block_part_answers_fire_odds_for_one_face() {
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("fire_odds", Box::new(FireOddsMod))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world

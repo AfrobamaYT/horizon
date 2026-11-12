@@ -1,14 +1,14 @@
 //! The `on_caught_fire` hook: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
-    /// On an authoritative server, fire has just burned the block `state` at
-    /// `pos` from its side `face`, the one that faces the fire
-    /// (`FireBlock.checkBurnOut`): the cell is already fire or air, and
-    /// `state` is the block as it was. It runs after the game's own action (a
-    /// TNT-class block is primed, which `tnt_primed` may still cancel), and
-    /// not when `block_burn` cancelled the burn. The level may be changed
-    /// here, and ticks scheduled. Fire spreading has no igniting entity or
-    /// item, so none is given.
+    /// On an authoritative server, a neighbour of fire passed its burn roll.
+    /// `state` is still at `pos`; `face` points toward the fire. The spread,
+    /// burn and (when replacing with fire) ignite cancel gates run first.
+    /// The listener may write or schedule ticks, but the pending fire/air
+    /// replacement overwrites any write at `pos`, then TNT is primed.
+    /// Fire spread has no igniter and an empty stack, so neither is passed.
+    /// Lava, lightning, spread into air, flint and steel, TNT use, burning
+    /// projectiles, redstone and dispensers are outside this spread-only hook.
     #[hook(
         side = "server",
         contract = "listen",

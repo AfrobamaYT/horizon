@@ -9,8 +9,9 @@ pub trait Hooks {
     /// isn't read. Ignite odds above zero let fire stand beside the block and
     /// spread into the air around it (planks 5, wool 30, leaves 30); burn odds
     /// are how fast fire destroys it (planks 20, wool 60, leaves 60). `(0, 0)`
-    /// never burns, and a face with ignite odds of zero isn't flammable. Both
-    /// are clamped to vanilla's 0 to 100. A waterlogged state never burns and
+    /// never burns, and a face with ignite odds of zero isn't flammable. Negative
+    /// answers become zero; burn odds cap at 300 (horizontal rolls are 300,
+    /// vertical rolls 250), and spread speed uses saturating arithmetic. A waterlogged state never burns and
     /// isn't asked. Answer only for your own blocks and leave `odds` empty
     /// otherwise; the level is read-only. Asked hundreds of times per fire
     /// tick: keep it short.

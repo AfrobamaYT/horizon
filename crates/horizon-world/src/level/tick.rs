@@ -714,7 +714,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let test = pos.offset(xx, yy, zz);
                     let ignite = self.fire_ignite_odds_at(test);
                     if ignite > 0 {
-                        let mut odds = (ignite + 40 + self.level.difficulty() * 7) / (age + 30);
+                        let mut odds = (ignite
+                            .saturating_add(40)
+                            .saturating_add(self.level.difficulty() * 7))
+                            / (age + 30);
                         if burnout {
                             odds /= 2;
                         }
@@ -757,7 +760,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             || self.level.is_raining_at(rel(pos, Direction::South))
     }
     /// `FireBlock.checkBurnOut` of the block beside the fire at `fire` in
-    /// `direction`, then the level's `on_caught_fire` for a block that burned.
+    /// `direction`: notify after the cancel gates, before replacing the block.
     fn fire_check_burn_out(&mut self, fire: BlockPos, direction: Direction, chance: i32, age: i32) {
         let b = self.b;
         let (pos, face) = (rel(fire, direction), direction.opposite());
@@ -773,18 +776,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     && self.level.allow_block_ignite(pos, "spread")
                 {
                     let next = self.fire_state_with_age(pos, new_age);
+                    self.level.on_caught_fire(self.ticks, old, pos, face);
                     self.set_block_and_update(pos, next);
                     burned = true;
                 }
             } else if allowed && self.level.allow_block_burn(pos) {
+                self.level.on_caught_fire(self.ticks, old, pos, face);
                 self.remove_block(pos, false);
                 burned = true;
             }
-            if burned {
-                if b.instance_of(old, Class::Tnt) {
-                    self.prime_tnt(pos);
-                }
-                self.level.on_caught_fire(self.ticks, old, pos, face);
+            if burned && b.instance_of(old, Class::Tnt) {
+                self.prime_tnt(pos);
             }
         }
     }
@@ -2050,3 +2052,7 @@ impl RandomTickMask {
         self.0[i >> 6] >> (i & 63) & 1 != 0
     }
 }
+
+#[cfg(test)]
+#[path = "fire_tick_tests.rs"]
+mod fire_tick_tests;
