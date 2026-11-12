@@ -265,6 +265,9 @@ fn a_falling_rocket_hits_the_ground_and_one_in_water_splashes() {
         game.set_allow_commands(true);
         game.update_chunk_tickets();
         assert!(game.run_command("setblock 6 199 10 stone"));
+        // Keep the falling rocket submerged through the sixth move: one
+        // floating source block ends at y = 200, above its final position.
+        assert!(game.run_command("setblock 20 199 10 water"));
         assert!(game.run_command("setblock 20 200 10 water"));
         for x in [6, 20] {
             assert!(game.run_command(&format!(

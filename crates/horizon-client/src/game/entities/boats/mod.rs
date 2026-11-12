@@ -1934,7 +1934,7 @@ impl Game<'_> {
                 seed,
                 pos,
                 &biome,
-            )
+            );
         });
         if let Some(horizon_client::containers::BlockEntity::Chest(items)) =
             self.world.block_entities.get_mut(&key)
@@ -1942,7 +1942,6 @@ impl Game<'_> {
             items.clone_from(&self.boats[i].items);
         }
     }
-
 
     /// None means a canceled hit; Some records whether an accepted hit destroyed it.
     pub(super) fn hurt_boat_result(

@@ -350,14 +350,11 @@ impl Game<'_> {
         if let Some(i) = boat
             && self.boat_loot_pending(self.boats[i].id)
         {
-            // The placeholder is the authoritative container while any menu is open.
-            self.store_cart_items(pos);
+            let id = self.boats[i].id;
             self.unpack_boat_loot(i, true);
-            if !self.boat_loot_pending(self.boats[i].id)
-                && let Some(horizon_client::containers::BlockEntity::Chest(items)) =
-                    self.world.block_entities.get_mut(&pos)
-            {
-                *items = self.boats[i].items.clone();
+            // Advancement rewards can remove the boat while generating its loot.
+            if !self.boats.iter().any(|boat| boat.id == id) {
+                return false;
             }
         }
         let Some(items) = self

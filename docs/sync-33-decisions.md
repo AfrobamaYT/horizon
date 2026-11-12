@@ -1,6 +1,6 @@
 # Upstream sync 33
 
-Upstream pin: `f24ee1accf1c816736e6e067939d04f3853f474e` (horizon-rust main with #15361, the performance capture platform); its push-to-main `ci.yml` run completed with success. Previous integrated upstream: `a21f8a3947e9fa6fdf47cbc0f656d6444a622e2a` (sync 31). Sync 32 (#3554, pin `ba91f75cb21`) was still open; this merge contains its upstream range too.
+Upstream pin: `f24ee1accf1c816736e6e067939d04f3853f474e` (horizon-rust main with #15361, the performance capture platform); its push-to-main `ci.yml` run completed with success. Previous integrated upstream: `a21f8a3947e9fa6fdf47cbc0f656d6444a622e2a` (sync 31). Sync 32 (#3554, pin `ba91f75cb21`) merged while this one was in progress; fork main was merged in afterwards, taking sync 32's resolutions where both touched the same code.
 
 Started from fork main `d6643239398`. Initial conflicts: 51 paths, 12 of them files the fork moved into area folders.
 
@@ -19,7 +19,7 @@ Started from fork main `d6643239398`. Initial conflicts: 51 paths, 12 of them fi
 | --- | --- |
 | World warp | The fork removed upstream's warp pipelines; render conflicts keep the fork's draw calls and add only the GPU timing stages (`pass.stage`/`pass.split`). |
 | Streaming update | The fork splits the update into plan and commit; upstream's laps before the split are left out, the later ones time `complete_commit`. |
-| Chest-boat loot | Upstream's `unpack_boat_loot(i, player)` is rewritten on fork APIs (`horizon_core::nbt`, three-argument `loot_data`, `JoinSeq::update`). The fork's copy in `menus.rs` is removed; command kills go through `kill_vehicle_object`, which unpacks before spilling, so upstream's `kill_boat` is not kept. |
+| Chest-boat loot | Sync 32 (#3554) ported upstream's chest-boat loot changes; this merge takes its versions of `machines`, `boats` and `lan_actions/menus.rs` unchanged. |
 | Tick timing | The fork removed `native_server_tick_timed`; the merged spans it took are no longer built. |
 | PlayerSender, Outbox | Only upstream's `queued` counters are added; the fork's removal of the per-sender fake flag and the packet tally stands. |
 | Game rules in captures | Read through `GameRules::get`, the fork's typed accessor. |
