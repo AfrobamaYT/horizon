@@ -196,7 +196,7 @@ macro_rules! define_resident_access {
                 Kind::Player | Kind::Hook => SlotAccess::UnsupportedKind(at.owner.kind),
             }
         }
-        pub(super) fn locate_resident_owner(&$this, at: Location) -> Option<SourceEntity<(Target, bool)>> {
+        pub(super) fn locate_resident_attachment_owner(&$this, at: Location) -> Option<SourceEntity<(Target, bool)>> {
             let source = match at.owner.kind {
                 $(Kind::$kind => {
                     let index = $this$(.$field)+.locate(at.join)?;
@@ -222,11 +222,20 @@ macro_rules! define_resident_access {
                     if dragon.id == 0 { return None; }
                     dragon.parts.get(usize::from(offset))?;
                     let id = dragon.id.checked_add(u32::from(offset) + 1)?;
-                    let visible = !$this.persist.removals.contains(&Target::Dragon(dragon.id));
+                    let visible = true;
                     Some(SourceEntity { id, value: (Target::DragonPart(id), visible) })
                 }
                 Kind::Player | Kind::Hook => None,
             };
+            source
+        }
+        pub(super) fn locate_resident_owner(&$this, at: Location) -> Option<SourceEntity<(Target, bool)>> {
+            let source = $this.locate_resident_attachment_owner(at).map(|mut source| {
+                if let Target::DragonPart(_) = source.value.0 {
+                    source.value.1 &= $this.dragon.as_ref().is_some_and(|dragon| !$this.persist.removals.contains(&Target::Dragon(dragon.id)));
+                }
+                source
+            });
             // Logical visibility is not physical absence: filtering here would
             // incorrectly evict reversible conversion rows or report Taken.
             source.map(|mut source| {
