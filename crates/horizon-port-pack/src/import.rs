@@ -644,10 +644,16 @@ mod tests {
                 "{tag}: {error}"
             );
             assert_eq!(count_files(&work), 0, "{tag}: staged a file");
-            // The archive is the only entry outside work, unchanged by the refusal.
+            // Outside work only the archive and the fixture's own empty mods folder exist, both
+            // unchanged by the refusal.
+            let fixture_mods = root.join("mods");
+            assert_eq!(count_files(&fixture_mods), 0, "{tag}: wrote into mods");
             for entry in fs::read_dir(&root).unwrap() {
                 let path = entry.unwrap().path();
-                assert!(path == archive || path == work, "{tag}: {path:?}");
+                assert!(
+                    path == archive || path == work || path == fixture_mods,
+                    "{tag}: {path:?}"
+                );
             }
             assert_eq!(fs::read(&archive).unwrap(), original, "{tag}");
             fs::remove_dir_all(root).unwrap();
