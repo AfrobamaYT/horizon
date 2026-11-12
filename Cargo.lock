@@ -2429,8 +2429,8 @@ name = "horizon-optifine"
 version = "0.1.0"
 dependencies = [
  "horizon-assets",
- "horizon-bench",
  "horizon-core",
+ "horizon-system",
  "log",
  "regex",
  "zip",

@@ -15,7 +15,19 @@ const edits = [];
 const pr = (id, number, extra) => ({ id, number, isDraft: false, body: '', author: { login: 'author' }, assignees: { nodes: [] },
   closingIssuesReferences: { nodes: [] }, ...extra });
 const issue = (id, number, extra) => ({ id, number, body: '', labels: { nodes: [] }, assignees: { nodes: [] }, ...extra });
+const queries = [];
+// GitHub refuses a document whose braces or parentheses do not close, or with an empty selection set.
+const wellFormed = query => {
+  const stack = [];
+  for (const char of query.replace(/"(?:[^"\\]|\\.)*"/g, '""')) {
+    if (char === '{' || char === '(') stack.push(char);
+    else if (char === '}' || char === ')') { if (stack.pop() !== (char === '}' ? '{' : '(')) return false; }
+  }
+  return stack.length === 0 && !/\{\s*\}/.test(query);
+};
 const github = { graphql: async (query, vars) => {
+  if (!wellFormed(query)) throw new Error(`malformed query: ${query.slice(0, 80)}`);
+  queries.push(query.split(/[({]/, 1)[0].trim());
   if (query.includes('projectV2(number')) return { user: { projectV2: { id: 'P', fields: { nodes: [
     { id: 'S', name: 'Status', options: ['Todo', 'In progress', 'In review', 'Done'].map(name => ({ id: `status:${name}`, name })) },
     { id: 'O', name: 'Owner' },
@@ -42,7 +54,7 @@ const github = { graphql: async (query, vars) => {
   throw new Error(`unexpected query ${query.slice(0, 60)}`);
 } };
 sync({ github, context: { eventName: 'schedule' }, core: { summary: { addRaw: () => ({ write() {} }) } } })
-  .then(() => console.log(JSON.stringify({ edits })), e => console.log(JSON.stringify({ error: e.message, edits })));
+  .then(() => console.log(JSON.stringify({ edits, queries })), e => console.log(JSON.stringify({ error: e.message, edits })));
 """
 
 
@@ -73,6 +85,9 @@ class BoardSyncTests(unittest.TestCase):
             }},
         })
         self.assertNotIn("error", result)
+        # Every query the sync sent was well formed (the fake refuses one that is not), and all of them ran:
+        # project, board items, open and closed issues and PRs, the add, two pages of the lookup, the edits.
+        self.assertEqual(result["queries"], ["query", "query", *["query"] * 5, "mutation", "query", "query", "mutation"])
         self.assertEqual(sorted(edit.split("{clientMutationId}")[0] for edit in result["edits"]), sorted([
             self.update("E1", "S", '{singleSelectOptionId:"status:In progress"}'),
             self.update("new:I2", "S", '{singleSelectOptionId:"status:In progress"}'),
@@ -88,8 +103,9 @@ class BoardSyncTests(unittest.TestCase):
             "existing": {"PR1": {"first": {"pageInfo": {"hasNextPage": False},
                                            "nodes": [board_item("E7", "Todo", "bob", "Design")]}}},
         })
-        self.assertEqual(result, {"edits": [
-            self.update("E7", "S", '{singleSelectOptionId:"status:In review"}') + "{clientMutationId}"]})
+        self.assertNotIn("error", result)
+        self.assertEqual(result["edits"], [
+            self.update("E7", "S", '{singleSelectOptionId:"status:In review"}') + "{clientMutationId}"])
 
     def test_a_batch_with_any_other_error_still_fails(self):
         result = self.run_sync({"issues": [["I1", 1, {}]], "refused": ["I1"], "otherErrors": ["Resource not accessible"],

@@ -12696,6 +12696,141 @@ mod loaded_arrow_shot_tests {
             .unwrap()
             .id
     }
+    /// `projectile_shoot` on its first tick, once; one loaded shot posts none.
+    /// `FireworkRocketEntity.tick`'s launch sound skips a silent one.
+    #[test]
+    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    fn a_rocket_posts_its_shot_once_and_a_silent_one_launches_quietly() {
+        with_game(|game| {
+            let launch = "minecraft:entity.firework_rocket.launch";
+            assert!(game.run_command(
+                "summon firework_rocket 6.5 201.5 10.5 {LifeTime:100,Silent:1b,NoGravity:1b}"
+            ));
+            assert!(game.run_command(
+                "summon firework_rocket 9.5 201.5 10.5 {LifeTime:100,HasBeenShot:1b}"
+            ));
+            assert!(
+                game.rockets
+                    .iter()
+                    .all(|r| r.has_been_shot == (r.position.x == 9.5))
+            );
+            game.audio.heard.clear();
+            start_events();
+            game.tick_rockets();
+            let first = take_shots();
+            game.tick_rockets();
+            let second = take_shots();
+            stop_events();
+            assert_eq!(
+                first,
+                vec![("minecraft:projectile_shoot", [6.5, 201.5, 10.5], None)]
+            );
+            assert!(second.is_empty());
+            assert!(game.rockets.iter().all(|r| r.has_been_shot));
+            // Only the rocket that isn't silent launches with a sound.
+            assert_eq!(game.audio.heard.get(launch), Some(&1));
+        });
+    }
+    /// #14440: an orb's move adds its drop to the fall outside water; landing
+    /// after a fall posts HIT_GROUND and forgets the fall (`Entity.checkFallDamage`);
+    /// in water the drop adds nothing, so a landing posts nothing.
+    #[test]
+    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    fn a_landing_orb_posts_hit_ground_after_a_fall() {
+        use horizon_client::entities::OrbMove;
+        with_game(|game| {
+            assert!(
+                game.run_command("summon experience_orb 6.5 200 10.5 {Value:1,fall_distance:2d}")
+            );
+            let i = game.orbs.len() - 1;
+            let from = Vec3::new(6.5, 200.5, 10.5);
+            let down = Vec3::new(0.0, -0.5, 0.0);
+            start_events();
+            // In the air: the drop adds to the fall.
+            game.orbs[i].on_ground = false;
+            game.orb_moved(
+                i,
+                OrbMove {
+                    from,
+                    moved: down,
+                    in_water: false,
+                },
+            );
+            assert_eq!(game.orbs[i].fall_distance, 2.5);
+            // On the ground: HIT_GROUND, then the fall is gone.
+            game.orbs[i].on_ground = true;
+            game.orb_moved(
+                i,
+                OrbMove {
+                    from,
+                    moved: down,
+                    in_water: false,
+                },
+            );
+            assert_eq!(game.orbs[i].fall_distance, 0.0);
+            // In water with no fall: no drop, so no landing event.
+            game.orb_moved(
+                i,
+                OrbMove {
+                    from,
+                    moved: down,
+                    in_water: true,
+                },
+            );
+            let events: Vec<_> = crate::game::sculk::TEST_POSTED_EVENTS.with(|v| {
+                std::mem::take(v.borrow_mut().as_mut().unwrap())
+                    .into_iter()
+                    .filter(|e| e.0 == "minecraft:hit_ground")
+                    .collect()
+            });
+            stop_events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(game.orbs[i].fall_distance, 0.0);
+        });
+    }
+    /// #14318: an angled rocket falling onto stone builds up its fall and posts
+    /// HIT_GROUND when it lands (`Entity.checkFallDamage`); one falling into water
+    /// splashes once (`Entity.doWaterSplashEffect`: the sound and SPLASH) and lands
+    /// with no fall.
+    #[test]
+    #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
+    fn a_falling_rocket_hits_the_ground_and_one_in_water_splashes() {
+        with_game(|game| {
+            assert!(game.run_command("setblock 20 200 10 water"));
+            for x in [6, 20] {
+                assert!(game.run_command(&format!(
+                "summon firework_rocket {x}.5 202 10.5 {{LifeTime:100,HasBeenShot:1b,ShotAtAngle:1b,Motion:[0d,-0.5d,0d]}}"
+            )));
+            }
+            game.audio.heard.clear();
+            start_events();
+            let mut falls = Vec::new();
+            for _ in 0..6 {
+                game.tick_rockets();
+                falls.push(game.rockets[0].fall_distance);
+            }
+            let events: Vec<_> = crate::game::sculk::TEST_POSTED_EVENTS.with(|v| {
+                std::mem::take(v.borrow_mut().as_mut().unwrap())
+                    .into_iter()
+                    .map(|e| (e.0, e.1[0].floor() as i32))
+                    .filter(|e| matches!(e.0, "minecraft:hit_ground" | "minecraft:splash"))
+                    .collect()
+            });
+            stop_events();
+            // The fourth move ends on the stone without a collision; the fifth lands.
+            assert_eq!(falls, [0.5, 1.0, 1.5, 2.0, 0.0, 0.0]);
+            assert_eq!(game.rockets[1].fall_distance, 0.0);
+            assert_eq!(
+                events,
+                [("minecraft:splash", 20), ("minecraft:hit_ground", 6)]
+            );
+            assert_eq!(
+                game.audio.heard.get("minecraft:entity.generic.splash"),
+                Some(&1)
+            );
+        });
+    }
+
     #[test]
     #[ignore = "prepared resources; actual registered load, Game tick and posted events"]
     fn loaded_arrow_first_tick_dispatches_once_with_its_real_owner() {

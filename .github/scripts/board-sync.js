@@ -39,7 +39,7 @@ module.exports = async ({ github, context, core }) => {
   for (let after = null; ;) {
     const page = (await q(`query($id:ID!,$a:String){node(id:$id){... on ProjectV2{items(first:50,after:$a){
       pageInfo{hasNextPage endCursor}
-      nodes{id content{... on Issue{id} ... on PullRequest{id}} ${VALUES}}}}}`, { id: proj.id, a: after })).node.items;
+      nodes{id content{... on Issue{id} ... on PullRequest{id}} ${VALUES}}}}}}`, { id: proj.id, a: after })).node.items;
     for (const n of page.nodes) if (n.content) items.set(n.content.id, known(n));
     if (!page.pageInfo.hasNextPage) break;
     after = page.pageInfo.endCursor;
