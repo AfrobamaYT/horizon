@@ -155,6 +155,23 @@ impl Outbox {
             worker: worker.clone(),
         }))
     }
+    /// Keep `packets` going `way` (0 sent, 1 received), up to [`TALLY_MAX`].
+    fn tally(&self, way: usize, packets: impl IntoIterator<Item = (i32, usize)>) {
+        let mut tally = self.tally.lock().unwrap_or_else(PoisonError::into_inner);
+        let list = &mut tally[way];
+        let room = TALLY_MAX.saturating_sub(list.len());
+        list.extend(packets.into_iter().take(room));
+    }
+    /// The play packets kept since the last call, sent then received, as (id, body bytes):
+    /// the id before an older client's renumbering, the bytes before compression and
+    /// encryption.
+    pub(super) fn take_packets(&self) -> [Vec<(i32, usize)>; 2] {
+        std::mem::take(&mut *self.tally.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+    /// The packets queued and not taken by the thread yet.
+    pub(super) fn queued(&self) -> usize {
+        self.queue().bodies.len()
+    }
     fn queue(&self) -> MutexGuard<'_, Queue> {
         self.queue.lock().unwrap_or_else(PoisonError::into_inner)
     }

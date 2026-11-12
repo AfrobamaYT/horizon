@@ -2284,7 +2284,9 @@ impl Game<'_> {
                 forgotten_credits.push(item.into_event_credit());
                 continue;
             }
-            self.forget_remote_columns(&mut forgotten, true);
+            horizon_client::spans::time("pr_forget", || {
+                self.forget_remote_columns(&mut forgotten, true)
+            });
             forgotten_credits.clear();
             let chunk = matches!(item, Received::Chunk(_, _));
             if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
@@ -2313,7 +2315,9 @@ impl Game<'_> {
                     };
                     self.observe_client_packet(&packet);
                     if let C::LevelChunkWithLight(p) = *packet {
-                        self.remote_chunk(&p, Some((&format, column)));
+                        horizon_client::spans::time("pr_chunk", || {
+                            self.remote_chunk(&p, Some((&format, column)))
+                        });
                     }
                     chunks += started.map_or(Duration::ZERO, |t| t.elapsed());
                     continue;
@@ -2482,7 +2486,12 @@ impl Game<'_> {
                     return Ok(());
                 }
                 Event::RawPayload(incoming) => self.receive_client_payload(*incoming)?,
-                Event::Packet(packet) => self.handle_packet(*packet)?,
+                Event::Packet(packet) => match *packet {
+                    C::CustomPayload(p) if p.channel == horizon_client::perf_net::CHANNEL => {
+                        self.remote_perf_reply(&p.data)
+                    }
+                    packet => self.handle_packet(packet)?,
+                },
             }
             chunks += started.map_or(Duration::ZERO, |t| t.elapsed());
             if self.remote.is_none() {
@@ -2490,7 +2499,9 @@ impl Game<'_> {
             }
         }
         if self.remote.is_some() {
-            self.forget_remote_columns(&mut forgotten, true);
+            horizon_client::spans::time("pr_forget", || {
+                self.forget_remote_columns(&mut forgotten, true)
+            });
         }
         if let Some(r) = self.remote.as_mut() {
             r.backlog_since = if events.is_empty() {
