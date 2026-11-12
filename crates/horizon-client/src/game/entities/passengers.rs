@@ -717,20 +717,13 @@ impl Game<'_> {
                 Some("minecraft:iron_helmet".into()),
             );
         }
-        let finalize = horizon_client::mobs::finalize::item;
-        let (weapon, helmet) = (
-            finalize(m, horizon_client::mobs::finalize::MAINHAND),
-            finalize(m, horizon_client::mobs::finalize::HEAD),
-        );
         let special = self.local_difficulty(at).special();
         // `SkeletonTrapGoal.enchant`: the weapon and the helmet, always.
-        for (slot, item) in [
-            (horizon_client::mobs::gear::MAIN, weapon),
-            (horizon_client::mobs::gear::HEAD, helmet),
+        for slot in [
+            horizon_client::mobs::finalize::MAINHAND,
+            horizon_client::mobs::finalize::HEAD,
         ] {
-            if let Some(item) = item {
-                self.enchant_item(id, slot, &item, special);
-            }
+            self.enchant_item(id, slot, special);
         }
         Some(id)
     }
@@ -2589,5 +2582,23 @@ mod trap_scatter_tests {
             assert_eq!((h.velocity.x, h.velocity.z), (dx, dz));
             assert!(h.extra.rider.is_some());
         }
+    }
+
+    /// `EnchantmentsByCostWithDifficulty.enchant` reads the stack the mob
+    /// holds: an empty slot draws nothing from the world's random.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn enchant_item_on_an_empty_slot_draws_nothing() {
+        let mut resources = None;
+        let mut game = super::super::game_tests::tests::server_game(&mut resources);
+        let id = game
+            .spawn_mob_raw("minecraft:skeleton_horse", [8.5, 64.0, 8.5], false)
+            .unwrap();
+        let seeded = || {
+            horizon_core::random::LevelRandom::for_level(horizon_core::random::LegacyRandom::new(5))
+        };
+        game.world.random = seeded();
+        game.enchant_item(id, horizon_client::mobs::finalize::MAINHAND, 0.5);
+        assert_eq!(game.world.random.next_long(), seeded().next_long());
     }
 }

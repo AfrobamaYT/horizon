@@ -881,7 +881,11 @@ impl Game<'_> {
             {
                 t.no_physics = true;
                 t.in_ground = false;
+                let from = t.position;
                 t.loyalty_pull(owner_eye);
+                // The pull is a position update of its own, before the trident's move.
+                let to = t.position;
+                self.entity_section_step(t.id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
                 if t.returning == 0 {
                     self.audio.play(
                         "minecraft:item.trident.return",
@@ -1306,12 +1310,16 @@ impl Game<'_> {
                 if let Some(by) = catchers.iter().find(near)
                     && self.trident_taken(&t, by)
                 {
+                    // Its move this tick is filed before it goes.
+                    let (from, to) = (t.previous, t.position);
+                    self.entity_section_step(t.id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
                     continue;
                 }
             }
             self.tridents.insert(i, t);
             i += 1;
         }
+        self.entity_sections_stepped(super::entity_sections::Family::Tridents);
     }
     /// ThrownTridentRenderer.
     pub(super) fn trident_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {

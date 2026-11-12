@@ -31,9 +31,9 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 10 | 18 | 32 | 0 |
-| `IBlockStateExtension` | 57 | 9 | 17 | 31 | 0 |
-| `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
+| `IBlockExtension` | 60 | 14 | 17 | 29 | 0 |
+| `IBlockStateExtension` | 57 | 13 | 16 | 28 | 0 |
+| `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
@@ -89,9 +89,9 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `getStateAtViewpoint(state, level, pos, viewpoint)` | Missing | — | No viewpoint-state query. |
 | `getBlockPathType(state, level, pos, mob)` | Partial | `BlockPart::is_pathfindable` (`hooks/is_pathfindable.rs`) | Answers whether a `PathComputationType` may pass, once per state and type; not a `PathType` per mob or position. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getAdjacentBlockPathType(state, level, pos, mob, pathType)` | Missing | — | No adjacent-path-type query. |
-| `isSlimeBlock(state)` | Missing | — | No per-state slime query; the piston/fall logic is engine-owned. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `isStickyBlock(state)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `canStickTo(state, otherState)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `isSlimeBlock(state)` | Covered | `BlockPart::is_slime_block` (`hooks/block_sticky.rs`) | Server only, asked by the piston structure resolver for its slime-beside-honey rule. A piston moving a slime block still bounces the entities it pushes off vanilla's slime block alone. |
+| `isStickyBlock(state)` | Covered | `BlockPart::is_sticky_block` (`hooks/block_sticky.rs`) | Server only, asked by the piston structure resolver; starts with vanilla's slime and honey. |
+| `canStickTo(state, otherState)` | Covered | `BlockPart::can_stick_to` (`hooks/block_sticky.rs`) | The part of `state` answers; the resolver asks both sides and needs both to say yes. |
 | `isFlammable(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Sets ignite and burn odds (`0, 0` = never burns), but there is no boolean flammable predicate. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getFireSpreadSpeed(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Ignite/spread odds (the first element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
 | `getFlammability(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Burn/destruction odds (the second element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
@@ -114,8 +114,8 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isEmpty(state)` | Missing | — | Air/replaceable facts exist (`block_states().replaceable`), but no `isEmpty` answer for a state. |
 | `getBubbleColumnDirection(state)` | Missing | — | Bubble-column rules are engine-owned. |
 | `shouldHideAdjacentFluidFace(state, direction, fluid)` | Missing | — | Fluid-face culling is engine-owned. |
-| `getBounceRestitution(level, pos, state, entity)` | Partial | `BlockPart::bounce_on` (`hooks/block_landing.rs`) | Edits the entity's movement after it bounced; the restitution factor is not exposed. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `getRelocability(level, pos, state)` | Missing | — | A region-copy query (cut or copy blocks, paste them elsewhere) that nothing in the engine asks; pistons do not. Horizon's `BlockPart::piston_carries_block_entity` (`hooks/piston_carries_block_entity.rs`) is a different question with no NeoForge counterpart: whether a piston carries a block with its mod block entity ([#3184](https://github.com/arismoko/horizon/issues/3184)). |
+| `getBounceRestitution(level, pos, state, entity)` | Covered | `BlockPart::bounce_restitution` (`hooks/bounce_restitution.rs`) | Asked for the player and the mobs on both sides, with the entity's level as a read-only `LevelSide` host, the entity, its type and the block's position. Dropped items keep their own slime rule. `BlockPart::bounce_on` still edits the movement after the bounce. |
+| `getRelocability(level, pos, state)` | Missing | — | No relocation query (pistons, structure blocks). |
 | `canBeConnectedTo(state, direction, neighborBlock)` | Partial | `BlockPart::connects_to` (`hooks/connects_to.rs`) | Asks the connecting fence, wall, bars or pane (your block), not the block being connected to: a modded target cannot answer for a vanilla fence, and only those shapes ask at all. |
 | `getModelData(state, level, pos)` | Missing | — | No `ModelData`; block-entity drawing takes a `block_entity_submit` part with its own model path. |
 
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 9 covered, 17 partial, 31 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 13 covered, 16 partial, 28 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -147,10 +147,10 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `onDroppedByPlayer(stack, player)` | Partial | `item_toss` (`hooks/item_toss.rs`) | Global `ItemTossEvent`, cancellable; the item is not a Part attachment. |
 | `getHighlightTip(stack, name)` | Missing | — | No highlight-name hook. |
 | `onItemUseFirst(stack, context)` | Covered | `ItemPart::on_item_use_first` (`hooks/on_item_use_first.rs`) | Runs after `use_item_on_block` let it through, before the block's own use. |
-| `isPiglinCurrency(stack)` | Missing | — | Piglin barter currency is a hard-coded item tag. |
-| `makesPiglinsNeutral(stack, entity)` | Missing | — | Piglin neutrality is a hard-coded item/tag rule. |
+| `isPiglinCurrency(stack)` | Covered | `ItemPart::is_piglin_currency` (`hooks/is_piglin_currency.rs`) | Starts from vanilla's answer, which is the item `minecraft:gold_ingot` (`PiglinAi.BARTERING_ITEM`; 26.3 has no currency tag), and is asked where vanilla asks: a piglin wanting a stack on the ground, an adult taking one from the hand (and the client's prediction of that click), and the end of the admiring, where currency is bartered or lost to a hit. A ground stack is admired only when it is also `#piglin_loved`. Both sides. [#3226](https://github.com/arismoko/horizon/issues/3226). |
+| `makesPiglinsNeutral(stack, entity)` | Covered | `ItemPart::makes_piglins_neutral` (`hooks/makes_piglins_neutral.rs`) | Starts from `#minecraft:piglin_safe_armor` (which content mods can already add to) for each stack in a player's armour slots, with the wearer, and may make a piece count or refuse a tagged one. Server-side. [#3226](https://github.com/arismoko/horizon/issues/3226). |
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
-| `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
+| `getXpRepairRatio(stack)` | Covered | `ItemPart::xp_repair_ratio` (`hooks/xp_repair_ratio.rs`) | Asked in Mending's repair (`ExperienceOrb.repairPlayerItems`) for the picked item, with the ratio arriving as its `minecraft:repair_with_xp` repair per point. Server-side, read-only `Host`. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |
 | `onLeftClickEntity(stack, player, entity)` | Covered | `ItemPart::on_left_click_entity` (`hooks/item_attack.rs`) | Runs where `Player.attack` starts, after `attack_entity` let the blow through; a cancel leaves the target unhurt, with no `hurt_enemy` and no wear. |
 | `getCraftingRemainder(instance)` | Covered | `ItemPart::crafting_remainder`, content `crafting_remainder` | The per-stack Part override replaces the data remainder in crafting, fuel and quick moves. |
@@ -159,7 +159,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `createEntity(level, entity, stack)` | Missing | — | Same. |
 | `onEntityItemUpdate(stack, itemEntity)` | Missing | — | No per-item dropped-entity tick. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
-| `canEquip(stack, slot, entity)` | Partial | `equippable.allowed_entities`, `entity_capability::goes_in_slot` | Component data decides slot and allowed entities; no per-stack code predicate. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `canEquip(stack, slot, entity)` | Covered | `ItemPart::can_equip` (`hooks/can_equip.rs`) | Starts as the stack's own `equippable` component's answer (slot and `allowed_entities`); the part sets it either way, with a read-only `Host` and the entity as a `LivingRef`. Asked for the player's armour slots (both menus), a dispenser's equip and a mob's pickup. A wasm mod is given a copy of the stack on each call (#3549 tracks the prepared path). |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
 | `onEntitySwing(stack, entity, hand)` | Covered | `ItemPart::on_entity_swing` (`hooks/item_attack.rs`) | Runs where `LivingEntity.swing` starts, on both sides; a cancel starts no swing (no animation, no packet). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
@@ -305,7 +305,7 @@ their rows have landed or become partial since and should be narrowed when they 
   `getToolModifiedState` is `tool_modified_state` before `block_tool_modification`; `onDestroyedByPlayer` is
   `on_destroyed_by_player`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
+  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo` (all Partial or Missing above).
@@ -333,3 +333,16 @@ These checks require prepared resources; they are not ordinary resource-free uni
 | Method | Verdict | Horizon route |
 | --- | --- | --- |
 | `IClientBlockExtensions.playHitSound` | **Covered** | Client `BlockPart::play_hit_sound`, with state, position, face and `ClientHost`. Returning `Flow::Cancel` handles the hit and suppresses the default sound. Both local mining ticks and `ClientLevel.addBreakingBlockEffects` use the same sound helper. Sculk growth is outside this hook. |
+
+## Client chunk events
+
+This section is not an extension interface. It records where NeoForge's client-side `ChunkEvent` posts land in
+Horizon, as #3425 asks.
+
+| NeoForge | Verdict | Horizon route |
+| --- | --- | --- |
+| `ChunkEvent.Load` on the client (`isNewChunk` always false) | **Covered** | `client_chunk_load(dimension, chunk)`, once per adopted chunk packet after the column and its block entities are in the client level; a re-sent column is told again. |
+| `ChunkEvent.Unload` on the client | **Covered, wider** | `client_chunk_unload(dimension, chunk)`, before the column's data is freed, on every route a column leaves by: the forget packet (NeoForge's only route), the view centre moving, the view radius shrinking and the client level going. |
+
+Both are client-only, so the server's `chunk_load` and `chunk_unload` listeners are not called on a client. An
+integrated world's own chunks are told only through the server hooks.

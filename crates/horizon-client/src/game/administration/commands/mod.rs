@@ -1497,10 +1497,9 @@ impl Game<'_> {
         relative: [bool; 3],
         turn_riders: bool,
     ) {
-        let from = self.place_teleport_in_level(t, pos, rotation, relative, turn_riders);
-        if self.options.dedicated.is_some()
-            && let (Some(entity), Some(from), Some(to)) =
-                (self.network_entity_id(t), from, self.target_position(t))
+        let from = self.place_teleport_filed(t, pos, rotation, relative, turn_riders);
+        if let (Some(entity), Some(to)) = (self.network_entity_id(t), self.target_position(t))
+            && let (true, Some(from)) = (self.options.dedicated.is_some(), from)
         {
             self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
         }

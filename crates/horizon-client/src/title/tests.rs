@@ -3042,3 +3042,37 @@ fn cancelling_a_realms_new_world_returns_to_the_realm() {
     ));
     let _ = fs::remove_dir_all(&f.root);
 }
+#[cfg(test)]
+mod hidden_features {
+    use super::*;
+    #[test]
+    fn experiments_done_preserves_hidden_selection_when_visible_switch_changes() {
+        let mut f = Fixture::new();
+        f.enter_create_world_for_packs();
+        if let Mode::Create { options, .. } = &mut f.title.mode {
+            options.data_packs = vec!["vanilla".into(), "hidden".into(), "visible".into()];
+        } else {
+            panic!("expected Create mode");
+        }
+        *f.title.experiments.borrow_mut() = Some(experiments::ExperimentsScreen::new(vec![
+            experiments::Flag {
+                id: "visible".into(),
+                title: Text::literal("Visible"),
+                description: Text::literal("Feature fixture"),
+                enabled: false,
+            },
+        ]));
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                "/nonexistent/horizon-test-assets".into(),
+            ),
+        )
+        .unwrap();
+        f.title.press_rules(&atlas, (100.0, 240.0), (480.0, 262.0));
+        assert!(f.title.experiments.borrow().is_none());
+        assert_eq!(
+            f.title.creation_packs().map(|(_, ids)| ids),
+            Some(vec!["vanilla".to_owned(), "hidden".to_owned()])
+        );
+    }
+}

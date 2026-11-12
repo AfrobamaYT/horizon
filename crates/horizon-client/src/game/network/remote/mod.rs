@@ -596,7 +596,7 @@ pub(super) struct Remote {
     loaded_sent: bool,
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
-    heard_level: Option<String>,
+    pub(super) heard_level: Option<String>,
     /// `ClientPacketListener.levelLoadTracker`: the loading screen after a login
     /// or respawn, until the player's section is shown.
     pub(super) level_load: horizon_client::level_loading::LevelLoadTracker,
@@ -2864,7 +2864,7 @@ impl Game<'_> {
     }
     /// The columns a moved or resized storage no longer holds. Returns the
     /// positions it freed (`forget_remote_columns`).
-    fn drop_remote_chunks_out_of_range(
+    pub(in crate::game) fn drop_remote_chunks_out_of_range(
         &mut self,
         center: (i32, i32),
         distance: i32,
@@ -3655,7 +3655,7 @@ impl Game<'_> {
         }
     }
 
-    pub(in crate::game) fn handle_packet(&mut self, packet: C) -> Result<()> {
+    pub(in crate::game) fn apply_packet(&mut self, packet: C) -> Result<()> {
         self.observe_client_packet(&packet);
         match packet {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
@@ -9608,12 +9608,12 @@ impl Game<'_> {
             self.using = hit.and(Some((slot, elapsed))).filter(|_| elapsed < 200);
             return;
         }
-        // BundleItem.getUseDuration: 200 ticks, the server drops the contents.
+        // A bundle's 200-tick use ends with the server's entity event 9, not here.
         if stack
             .as_ref()
             .is_some_and(|s| self.items().get(&s.item).is_some_and(|i| i.bundle))
         {
-            self.using = (in_hand && ticks + 1 < 200).then_some((slot, ticks + 1));
+            self.using = in_hand.then_some((slot, ticks + 1));
             return;
         }
         // A drawn bow, a charging crossbow, a raised shield...: held until
@@ -16083,6 +16083,7 @@ mod tests {
             trade: None,
             maps: None,
             limited_crafting: false,
+            can_equip: None,
             known_recipes: None,
         };
         let mut menu = Menu::new(Kind::Inventory);

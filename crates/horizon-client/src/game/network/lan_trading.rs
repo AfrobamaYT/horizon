@@ -308,6 +308,7 @@ impl Game<'_> {
             trade: Some(&trade_env),
             maps: None,
             limited_crafting: host.hub.limited_crafting,
+            can_equip: None,
             known_recipes: Some(&g.recipe_book),
         };
         let mut menu = Menu::new(Kind::Merchant);
