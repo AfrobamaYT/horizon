@@ -14,7 +14,12 @@ fn point(biome: &str, low: f32) -> mod_api::BiomePoint {
     }
 }
 
-fn declaration(mod_id: &str, id: &str, dimension: &str, weight: u32) -> BiomeRegionDeclaration {
+pub(super) fn declaration(
+    mod_id: &str,
+    id: &str,
+    dimension: &str,
+    weight: u32,
+) -> BiomeRegionDeclaration {
     BiomeRegionDeclaration {
         mod_id: mod_id.into(),
         id: id.into(),
@@ -34,7 +39,7 @@ fn overworld() -> Vec<BiomeRegionDeclaration> {
     ]
 }
 
-fn mods<'a>(ids: &[&'a str]) -> BTreeSet<&'a str> {
+pub(super) fn mods<'a>(ids: &[&'a str]) -> BTreeSet<&'a str> {
     ids.iter().copied().collect()
 }
 

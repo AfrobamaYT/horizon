@@ -4,7 +4,9 @@
 //! start the supervisor writes them into `server.properties`, which the game reads exactly as vanilla's
 //! server does; what the game changes there itself (`/whitelist on`) is copied back afterwards.
 
-use horizon_platform::server_files::biome_regions::{BiomeRegions, MissingRegions};
+use horizon_platform::server_files::biome_regions::BiomeRegions;
+#[cfg(test)]
+use horizon_platform::server_files::biome_regions::MissingRegions;
 use horizon_platform::server_files::{
     java_properties::{Properties, date_string, now_millis},
     properties::{DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy},
@@ -958,8 +960,8 @@ mod tests {
         );
         assert_eq!(interval("0").unwrap(), None);
         assert!(interval("6 hours").is_err());
-        assert!(interval("6ÃƒÂ©").is_err());
-        assert!(interval("ÃƒÂ©").is_err());
+        assert!(interval("6é").is_err());
+        assert!(interval("é").is_err());
         assert!(interval(&format!("{}d", u64::MAX)).is_err());
     }
 

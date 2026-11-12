@@ -20,6 +20,8 @@ use std::{
 };
 
 #[cfg(test)]
+mod persistence_tests;
+#[cfg(test)]
 mod tests;
 
 /// The record's format version.

@@ -4676,7 +4676,7 @@ impl Level {
 
     /// The temporary world a Realms upload packs
     /// (`RealmsCreateWorldFlow.createTemporaryWorldFolder`): level.dat as
-    /// `WorldData.createTag(null)` writes it â€” no `singleplayer_uuid` â€” with the world
+    /// `WorldData.createTag(null)` writes it — no `singleplayer_uuid` — with the world
     /// generation and game rules, and no player file or weather/clocks the server makes
     /// on its own. The caller writes the data packs and removes the folder.
     pub fn write_upload(&mut self, dir: &Path) -> Result<()> {
