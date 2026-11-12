@@ -566,7 +566,9 @@ jobs:
       - name: Big files don't grow
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/check_file_size.py ${BASE_SHA:+--base "$BASE_SHA"}
+        # The checkout is the pull request merged into main as it is now: measure the merge against that main, so
+        # main's own growth since the branch's base (a sync's) is never charged to the pull request.
+        run: python3 tools/check_file_size.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # Offline tooling compiles tiny standalone fixtures even when no game Rust changed.
       # Install their tools explicitly rather than making missing compilers turn cases into skips.
       - name: Install Rust tools for isolated tooling fixtures

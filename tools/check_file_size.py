@@ -283,6 +283,9 @@ def scan(base):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base", help="the git ref the branch starts from (CI: the pull request's base)")
+    parser.add_argument("--pull-request-merge", action="store_true",
+                        help="HEAD is the pull request merged into its base branch (CI's pull_request checkout): "
+                             "measure against that merge's first parent, the base branch as it is now")
     args = parser.parse_args(argv)
     if not args.base:
         print("File size: no base to compare with, nothing checked.")
@@ -290,7 +293,18 @@ def main(argv=None):
     if git("rev-parse", "--is-shallow-repository").strip() == "true":
         print("File size check failed: provenance needs full history; fetch --unshallow before checking.")
         return 1
-    merge_base, entries = scan(args.base)
+    base = args.base
+    if args.pull_request_merge:
+        # The event's base is where the branch last met main; main has grown since, and the merge holds that growth.
+        # Only the merge's own change, against the main it was merged into, is the pull request's.
+        parents = git("rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
+        if len(parents) != 2 or subprocess.run(["git", "merge-base", "--is-ancestor", base, parents[0]],
+                                               cwd=ROOT).returncode != 0:
+            print("File size check failed: --pull-request-merge needs HEAD to merge the pull request into a "
+                  "descendant of --base.")
+            return 1
+        base = parents[0]
+    merge_base, entries = scan(base)
     baseline_path = "tools/file_size_baseline.txt"
     file = ROOT / baseline_path
     marker, sizes = parse_baseline(file.read_text() if file.exists() else "")
