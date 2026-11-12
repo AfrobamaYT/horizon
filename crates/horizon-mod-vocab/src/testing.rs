@@ -280,32 +280,32 @@ impl crate::prelude::BlockEntitiesBackend for FakeHost {
     }
 }
 impl crate::prelude::ItemsBackend for FakeHost {
-    fn container_kind_amount(&self, at: BlockSide, resource: &crate::ItemResource) -> u64 {
+    fn container_kind_amount(&self, at: BlockSide, resource: &crate::ItemResource) -> Option<u64> {
         let Some(items) = self.level.standing(at.level, at.pos).and_then(|s| s.items.as_ref()) else {
-            return 0;
+            return Some(0);
         };
         items
             .slots
             .iter()
             .flatten()
             .filter(|stack| resource.matches(stack))
-            .map(|stack| stack.count() as u64)
-            .sum()
+            .try_fold(0u64, |total, stack| total.checked_add(stack.count() as u64))
     }
-    fn container_kind_space(&self, at: BlockSide, resource: &crate::ItemResource) -> u64 {
+    fn container_kind_space(&self, at: BlockSide, resource: &crate::ItemResource) -> Option<u64> {
         let max_stack = self.max_stack(resource);
         let Some(items) = self.level.standing(at.level, at.pos).and_then(|s| s.items.as_ref()) else {
-            return 0;
+            return Some(0);
         };
-        (0..items.slots.len())
-            .map(|slot| match &items.slots[slot] {
+        (0..items.slots.len()).try_fold(0u64, |total, slot| {
+            let room = match &items.slots[slot] {
                 Some(held) if resource.matches(held) => {
-                    items.capacity(slot, max_stack).saturating_sub(held.count()) as u64
+                    items.capacity(slot, max_stack).saturating_sub(held.count())
                 }
                 Some(_) => 0,
-                None => items.capacity(slot, max_stack) as u64,
-            })
-            .sum()
+                None => items.capacity(slot, max_stack),
+            };
+            total.checked_add(room as u64)
+        })
     }
     fn container_listing(
         &self,
@@ -314,8 +314,8 @@ impl crate::prelude::ItemsBackend for FakeHost {
         limit: usize,
     ) -> Option<Vec<Option<ItemStack>>> {
         let items = self.level.standing(at.level, at.pos)?.items.as_ref()?;
-        let end = from.saturating_add(limit).min(items.slots.len());
-        Some(items.slots[from.min(end)..end].to_vec())
+        let limit = limit.min(crate::MAX_STORAGE_PAGE);
+        Some(items.slots.iter().skip(from).take(limit).cloned().collect())
     }
     fn container_size(&self, at: BlockSide) -> Option<usize> {
         let items = self.level.standing(at.level, at.pos)?.items.as_ref()?;

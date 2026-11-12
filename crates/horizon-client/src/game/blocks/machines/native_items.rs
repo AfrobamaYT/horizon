@@ -171,22 +171,31 @@ impl Game<'_> {
     }
     /// How much of `resource` the slots `at`'s side reaches hold in all (`STORAGE`'s amount),
     /// in one pass over one view of the container.
-    pub(in crate::game) fn container_kind_amount(&self, at: BlockSide, resource: &ItemStack) -> u64 {
+    /// None where the total does not fit in 64 bits.
+    pub(in crate::game) fn container_kind_amount(
+        &self,
+        at: BlockSide,
+        resource: &ItemStack,
+    ) -> Option<u64> {
         let Some(view) = self.capability_view(at) else {
-            return 0;
+            return Some(0);
         };
         let c = self.containers();
         view.slots_for_face_iter(at.side)
             .filter_map(|slot| c.get(&view, slot))
             .filter(|held| held.same_item_same_components(resource))
-            .map(|held| u64::from(held.count))
-            .sum()
+            .try_fold(0u64, |total, held| total.checked_add(u64::from(held.count)))
     }
     /// How much of `resource` an insert through `at`'s side takes now: each slot's room for it,
     /// by the rules `container_insert` follows, summed in one pass.
-    pub(in crate::game) fn container_kind_space(&self, at: BlockSide, resource: &ItemStack) -> u64 {
+    /// None where the total does not fit in 64 bits.
+    pub(in crate::game) fn container_kind_space(
+        &self,
+        at: BlockSide,
+        resource: &ItemStack,
+    ) -> Option<u64> {
         let Some(view) = self.capability_view(at) else {
-            return 0;
+            return Some(0);
         };
         let probe = ItemStack {
             count: u32::MAX,
@@ -194,11 +203,14 @@ impl Game<'_> {
         };
         let c = self.containers();
         view.slots_for_face_iter(at.side)
-            .map(|slot| u64::from(c.fits(&view, slot, &probe)))
-            .sum()
+            .try_fold(0u64, |total, slot| {
+                total.checked_add(u64::from(c.fits(&view, slot, &probe)))
+            })
     }
     /// What the slots `at`'s side reaches hold, from its `from`th to before its
-    /// `from + limit`th (fewer at the end), empty ones included.
+    /// `from + limit`th (fewer at the end), empty ones included: never more than
+    /// `MAX_STORAGE_PAGE` slots, whatever `limit` asks, so a request cannot make the game
+    /// allocate more than one page.
     pub(in crate::game) fn container_listing(
         &self,
         at: BlockSide,
@@ -207,12 +219,11 @@ impl Game<'_> {
     ) -> Option<Vec<Option<ItemStack>>> {
         let view = self.capability_view(at)?;
         let c = self.containers();
-        let slots = view.slots_for_face(at.side);
-        let end = from.saturating_add(limit).min(slots.len());
         Some(
-            slots[from.min(end)..end]
-                .iter()
-                .map(|&slot| c.get(&view, slot).cloned())
+            view.slots_for_face_iter(at.side)
+                .skip(from)
+                .take(limit.min(mod_api::MAX_STORAGE_PAGE))
+                .map(|slot| c.get(&view, slot).cloned())
                 .collect(),
         )
     }
@@ -232,10 +243,9 @@ impl Game<'_> {
         let Some(view) = self.capability_view(at) else {
             return 0;
         };
-        let slots = view.slots_for_face(at.side);
         let (mut left, mut told) = (amount, false);
         for holding in [true, false] {
-            for &slot in &slots {
+            for slot in view.slots_for_face_iter(at.side) {
                 if left == 0 {
                     break;
                 }
@@ -286,7 +296,7 @@ impl Game<'_> {
             return 0;
         };
         let (mut left, mut told) = (amount, false);
-        for slot in view.slots_for_face(at.side) {
+        for slot in view.slots_for_face_iter(at.side) {
             if left == 0 {
                 break;
             }

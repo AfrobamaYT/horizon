@@ -4,26 +4,145 @@
 //! through one capability; a mod's bulk store (drawers, a drive, a vault) answers it itself, one
 //! entry per kind however many items it holds.
 //!
-//! The rule its handlers keep: a question about one kind, and a move of one kind, cost the same
-//! whatever is stored and however many items move. A store is listed a page at a time
-//! ([`ItemStorage::page`]), never whole in one call.
+//! **Diverges from upstream: Horizon addition.** NeoForge 26.3's transfer API has no by-kind
+//! capability; `ITEMS` (`Capabilities.Item.BLOCK`) is its counterpart and stays as it is.
+//!
+//! What a call costs is the handler's. A bulk store keyed by kind answers a question about one
+//! kind, and a move of one kind, in constant time whatever it holds. The game's own adapter
+//! answers each question in one pass over the slots the side reaches (O(slots), with no work per
+//! item moved); a mod's `ITEMS` handler wrapped by kind is asked slot by slot. [`transfer`] is
+//! four handler calls whatever it moves. A listing comes a [`StoragePage`] at a time, never
+//! longer than [`MAX_STORAGE_PAGE`] entries, whatever a caller asks.
+//!
+//! **When not to use it.** A pipe that moves a few items a tick between small containers is
+//! cheaper on `ITEMS` and [`move_resources`](crate::move_resources), slot by slot: in the
+//! measurements behind this API, 256 pipes moving 8 items a tick each cost 2.8 ms a tick that
+//! way against 3.7 ms through `STORAGE`. `STORAGE` pays off for bulk stores, large moves, and
+//! networks that sleep while idle.
 use crate::content::resource::{Ends, move_once};
 use crate::{
-    BlockEntityRef, BlockSide, Capability, CapabilityKey, Direction, ITEMS, ItemResource,
-    LevelRef, Overanswered, ResourceHandler, ServerHost, Transaction,
+    CapabilityKey, BlockSide, Capability, ITEMS, ItemResource, ResourceHandler, ServerHost,
+    Transaction,
 };
 use std::marker::PhantomData;
+
+/// The most entries one [`StoragePage`] holds: the host's cap, whatever limit a caller asks.
+pub const MAX_STORAGE_PAGE: usize = 256;
+
+/// Why a [`STORAGE`] question or move was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
+pub enum StorageError {
+    /// A page of no entries was asked for.
+    ZeroPage,
+    /// A total, an amount or a cursor does not fit in 64 bits.
+    Overflow,
+    /// A handler answered more than it was asked: a mod bug, warned once naming the mod. The
+    /// move it was part of is undone.
+    Overanswered {
+        /// The mod whose handler answered, or "the game".
+        owner: String,
+    },
+    /// The handler could not answer: a wasm mod's that is stopped, busy or out of scope.
+    Unavailable {
+        /// The mod whose handler was asked.
+        owner: String,
+    },
+}
+
+impl From<(crate::Identifier, String)> for StorageError {
+    fn from((owner, _): (crate::Identifier, String)) -> Self {
+        Self::Unavailable {
+            owner: owner.to_string(),
+        }
+    }
+}
+
+impl From<crate::Overanswered> for StorageError {
+    fn from(error: crate::Overanswered) -> Self {
+        Self::Overanswered { owner: error.owner }
+    }
+}
+
+/// One page of a storage's listing: at most its limit of (kind, amount) entries. The limit is the
+/// host's to cap ([`MAX_STORAGE_PAGE`]), and [`push`](Self::push) refuses an entry past it, so a
+/// handler cannot hand back more than was asked. Reuse one page across calls: [`page`] clears it.
+///
+/// [`page`]: ItemStorage::page
+// no wire: a manual codec (`wire/wire_types.rs`) re-checks the cap on decode, so a guest handler
+// cannot hand back more than the host's limit
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct StoragePage {
+    entries: Vec<(ItemResource, u64)>,
+    limit: usize,
+}
+
+impl StoragePage {
+    /// An empty page of at most `limit` entries, `limit` capped at [`MAX_STORAGE_PAGE`]; a limit
+    /// of 0 is refused.
+    pub fn new(limit: usize) -> Result<Self, StorageError> {
+        if limit == 0 {
+            return Err(StorageError::ZeroPage);
+        }
+        let limit = limit.min(MAX_STORAGE_PAGE);
+        Ok(Self {
+            entries: Vec::with_capacity(limit),
+            limit,
+        })
+    }
+    /// The most entries it holds.
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+    /// How many more entries it takes.
+    pub fn room(&self) -> usize {
+        self.limit - self.entries.len()
+    }
+    /// Adds an entry: false, and nothing added, when the page is full.
+    pub fn push(&mut self, resource: ItemResource, amount: u64) -> bool {
+        if self.entries.len() == self.limit {
+            return false;
+        }
+        self.entries.push((resource, amount));
+        true
+    }
+    /// Its entries, in the order the handler gave them.
+    pub fn entries(&self) -> &[(ItemResource, u64)] {
+        &self.entries
+    }
+    /// Empties it, keeping its limit.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+    /// Its entries and limit, for its wire codec.
+    pub(crate) fn wire_parts(&self) -> (&[(ItemResource, u64)], usize) {
+        (&self.entries, self.limit)
+    }
+    /// A page decoded from the wire: none where its limit passes the host's cap or its entries
+    /// pass its limit.
+    pub(crate) fn from_wire(entries: Vec<(ItemResource, u64)>, limit: u64) -> Option<Self> {
+        let limit = usize::try_from(limit).ok().filter(|&l| (1..=MAX_STORAGE_PAGE).contains(&l))?;
+        (entries.len() <= limit).then_some(Self { entries, limit })
+    }
+}
 
 /// A block's items by kind: how much of one kind it holds and has room for, and its writes, by
 /// kind and in transactions, as a [`ResourceHandler`] is written. Stateless and given the host,
 /// as every capability handler is. Amounts are 64-bit: a million items is one call.
 pub trait ItemStorage {
     /// How much of `resource` it holds.
-    fn amount(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64;
+    fn amount(&self, host: &mut dyn ServerHost, resource: &ItemResource)
+    -> Result<u64, StorageError>;
     /// How much of `resource` an insert now would take: what a router plans by, not a promise
     /// (an insert may still take less).
-    fn space_for(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64;
-    /// Puts up to `amount` of `resource` in, in transaction `tx`: how much went in.
+    fn space_for(
+        &self,
+        host: &mut dyn ServerHost,
+        resource: &ItemResource,
+    ) -> Result<u64, StorageError>;
+    /// Puts up to `amount` of `resource` in, in transaction `tx`: how much went in, never more
+    /// than `amount`.
     fn insert(
         &self,
         host: &mut dyn ServerHost,
@@ -31,7 +150,8 @@ pub trait ItemStorage {
         resource: &ItemResource,
         amount: u64,
     ) -> u64;
-    /// Takes up to `amount` of `resource` out, in transaction `tx`: how much came out.
+    /// Takes up to `amount` of `resource` out, in transaction `tx`: how much came out, never more
+    /// than `amount`.
     fn extract(
         &self,
         host: &mut dyn ServerHost,
@@ -39,16 +159,16 @@ pub trait ItemStorage {
         resource: &ItemResource,
         amount: u64,
     ) -> u64;
-    /// Appends up to `limit` of what it holds, from `cursor` on, with their amounts, and moves
-    /// `cursor` past them; true when the listing reached its end, `cursor` then back at 0. A
-    /// listing changed between pages may pass a kind over or give it twice.
+    /// Clears `page` and fills it with what it holds from position `cursor` on, as far as the page
+    /// has room: the position to ask for next, or none when the listing reached its end. The
+    /// cursor is a plain value the caller keeps, 0 for the start; a listing changed between pages
+    /// may pass a kind over or give it twice.
     fn page(
         &self,
         host: &mut dyn ServerHost,
-        cursor: &mut usize,
-        limit: usize,
-        out: &mut Vec<(ItemResource, u64)>,
-    ) -> bool;
+        cursor: u64,
+        page: &mut StoragePage,
+    ) -> Result<Option<u64>, StorageError>;
 }
 
 /// Items by kind: a block entity's [`ItemStorage`] as one side reaches it. The game answers it
@@ -73,11 +193,23 @@ pub const STORAGE: CapabilityKey<dyn ItemStorage> = CapabilityKey {
 struct GameStorage(BlockSide);
 
 impl ItemStorage for GameStorage {
-    fn amount(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64 {
-        crate::backend_of(&*host).map_or(0, |b| b.container_kind_amount(self.0, resource))
+    fn amount(
+        &self,
+        host: &mut dyn ServerHost,
+        resource: &ItemResource,
+    ) -> Result<u64, StorageError> {
+        crate::backend_of(&*host)
+            .map_or(Some(0), |b| b.container_kind_amount(self.0, resource))
+            .ok_or(StorageError::Overflow)
     }
-    fn space_for(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64 {
-        crate::backend_of(&*host).map_or(0, |b| b.container_kind_space(self.0, resource))
+    fn space_for(
+        &self,
+        host: &mut dyn ServerHost,
+        resource: &ItemResource,
+    ) -> Result<u64, StorageError> {
+        crate::backend_of(&*host)
+            .map_or(Some(0), |b| b.container_kind_space(self.0, resource))
+            .ok_or(StorageError::Overflow)
     }
     fn insert(
         &self,
@@ -104,17 +236,26 @@ impl ItemStorage for GameStorage {
     fn page(
         &self,
         host: &mut dyn ServerHost,
-        cursor: &mut usize,
-        limit: usize,
-        out: &mut Vec<(ItemResource, u64)>,
-    ) -> bool {
+        cursor: u64,
+        page: &mut StoragePage,
+    ) -> Result<Option<u64>, StorageError> {
+        page.clear();
+        let from = usize::try_from(cursor).map_err(|_| StorageError::Overflow)?;
         let slots = crate::backend_of(&*host)
-            .and_then(|b| b.container_listing(self.0, *cursor, limit))
+            .and_then(|b| b.container_listing(self.0, from, page.limit()))
             .unwrap_or_default();
-        let end = slots.len() < limit;
-        out.extend(slots.iter().flatten().map(|s| (ItemResource::of(s), s.count() as u64)));
-        *cursor = if end { 0 } else { *cursor + slots.len() };
-        end
+        // The host's cap again: a listing never holds more slots than the page could.
+        let read = slots.len().min(page.limit());
+        for stack in slots.iter().take(read).flatten() {
+            page.push(ItemResource::of(stack), stack.count() as u64);
+        }
+        if read < page.limit() {
+            return Ok(None);
+        }
+        cursor
+            .checked_add(read as u64)
+            .map(Some)
+            .ok_or(StorageError::Overflow)
     }
 }
 
@@ -149,30 +290,44 @@ impl Slots {
 }
 
 impl ItemStorage for Slots {
-    fn amount(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64 {
-        let mut held = 0;
+    fn amount(
+        &self,
+        host: &mut dyn ServerHost,
+        resource: &ItemResource,
+    ) -> Result<u64, StorageError> {
+        let mut held = 0u64;
         for index in 0..self.0.size(host) {
             if self.holds(host, index, resource) {
-                held += self.0.amount(host, index) as u64;
+                held = held
+                    .checked_add(self.0.amount(host, index) as u64)
+                    .ok_or(StorageError::Overflow)?;
             }
         }
-        held
+        Ok(held)
     }
-    fn space_for(&self, host: &mut dyn ServerHost, resource: &ItemResource) -> u64 {
-        (0..self.0.size(host))
-            .map(|index| match self.0.resource(host, index) {
+    fn space_for(
+        &self,
+        host: &mut dyn ServerHost,
+        resource: &ItemResource,
+    ) -> Result<u64, StorageError> {
+        let mut room = 0u64;
+        for index in 0..self.0.size(host) {
+            let here = match self.0.resource(host, index) {
                 Some(held) if held == *resource => self
                     .0
                     .capacity(host, index, resource)
-                    .saturating_sub(self.0.amount(host, index))
-                    as u64,
+                    .saturating_sub(self.0.amount(host, index)),
                 Some(_) => 0,
                 None if self.0.is_valid(host, index, resource) => {
-                    self.0.capacity(host, index, resource) as u64
+                    self.0.capacity(host, index, resource)
                 }
                 None => 0,
-            })
-            .sum()
+            };
+            room = room
+                .checked_add(here as u64)
+                .ok_or(StorageError::Overflow)?;
+        }
+        Ok(room)
     }
     fn insert(
         &self,
@@ -212,32 +367,29 @@ impl ItemStorage for Slots {
     fn page(
         &self,
         host: &mut dyn ServerHost,
-        cursor: &mut usize,
-        limit: usize,
-        out: &mut Vec<(ItemResource, u64)>,
-    ) -> bool {
+        cursor: u64,
+        page: &mut StoragePage,
+    ) -> Result<Option<u64>, StorageError> {
+        page.clear();
         let size = self.0.size(host);
-        let mut given = 0;
-        while *cursor < size && given < limit {
-            if let Some(resource) = self.0.resource(host, *cursor) {
-                out.push((resource, self.0.amount(host, *cursor) as u64));
-                given += 1;
+        let mut index = usize::try_from(cursor).map_err(|_| StorageError::Overflow)?;
+        while index < size && page.room() > 0 {
+            if let Some(resource) = self.0.resource(host, index) {
+                let amount = self.0.amount(host, index) as u64;
+                page.push(resource, amount);
             }
-            *cursor += 1;
+            index += 1;
         }
-        let end = *cursor >= size;
-        if end {
-            *cursor = 0;
-        }
-        end
+        Ok((index < size).then_some(index as u64))
     }
 }
 
 /// Moves up to `max` of `resource` out of `from` into `to`, in transaction `tx`: how much moved.
 /// As one step of [`move_resources`](crate::move_resources): all or nothing in a transaction of
 /// its own, a move `to` takes only part of tried again with that part, and a handler answering
-/// more than it was asked ending it with [`Overanswered`]. Four handler calls whether one item
-/// moves or a million, and none at all when `from` has none or `to` has no room.
+/// more than it was asked ending it with [`StorageError::Overanswered`]. Four handler calls
+/// whether one item moves or a million, and only the two questions when `from` has none or `to`
+/// has no room.
 pub fn transfer(
     host: &mut dyn ServerHost,
     from: &Capability<dyn ItemStorage>,
@@ -245,15 +397,15 @@ pub fn transfer(
     resource: &ItemResource,
     max: u64,
     tx: &Transaction,
-) -> Result<u64, Overanswered> {
+) -> Result<u64, StorageError> {
     let _ = tx;
     let want = max
-        .min(from.amount(host, resource))
-        .min(to.space_for(host, resource));
+        .min(from.amount(host, resource)?)
+        .min(to.space_for(host, resource)?);
     if want == 0 {
         return Ok(0);
     }
-    move_once(
+    Ok(move_once(
         host,
         Ends {
             from,
@@ -263,13 +415,14 @@ pub fn transfer(
         want,
         |host, tx, want| from.extract(host, tx, resource, want),
         |host, tx, out| to.insert(host, tx, resource, out),
-    )
+    )?)
 }
 
 /// Moves up to `max` of what `filter` accepts out of `from` into `to` (NeoForge's
 /// `ResourceHandlerUtil.move`, by kind), in transaction `tx`: how much moved. `from` is listed a
-/// page at a time and each kind moved with [`transfer`]; a pass that moved something is followed
-/// by another, as a kind emptied mid-listing can shift another past the cursor.
+/// full page ([`MAX_STORAGE_PAGE`]) at a time, into the one page this call allocates, and each
+/// kind moved with [`transfer`]; a pass that moved something is followed by another, as a kind
+/// emptied mid-listing can shift another past the cursor.
 pub fn transfer_matching(
     host: &mut dyn ServerHost,
     from: &Capability<dyn ItemStorage>,
@@ -277,15 +430,14 @@ pub fn transfer_matching(
     filter: impl Fn(&ItemResource) -> bool,
     max: u64,
     tx: &Transaction,
-) -> Result<u64, Overanswered> {
+) -> Result<u64, StorageError> {
     let mut moved = 0;
-    let mut page = Vec::new();
+    let mut page = StoragePage::new(MAX_STORAGE_PAGE)?;
     loop {
-        let (mut cursor, mut moved_in_pass) = (0, 0);
-        loop {
-            page.clear();
-            let end = from.page(host, &mut cursor, 64, &mut page);
-            for (resource, _) in page.iter().filter(|(resource, _)| filter(resource)) {
+        let (mut cursor, mut moved_in_pass) = (Some(0), 0);
+        while let Some(at) = cursor {
+            cursor = from.page(host, at, &mut page)?;
+            for (resource, _) in page.entries().iter().filter(|(resource, _)| filter(resource)) {
                 if moved == max {
                     return Ok(moved);
                 }
@@ -293,63 +445,10 @@ pub fn transfer_matching(
                 moved += went;
                 moved_in_pass += went;
             }
-            if end {
-                break;
-            }
         }
         if moved_in_pass == 0 || moved == max {
             return Ok(moved);
         }
-    }
-}
-
-/// A block capability looked up once and kept (NeoForge's `BlockCapabilityCache`), for a pipe
-/// that asks its neighbours every tick: the handler is kept while the block entity at its
-/// position is the same one, and looked up again once that one is replaced, removed or unloaded.
-/// A provider whose answer changes without that (a machine's side configuration) is told with
-/// [`invalidate`](Self::invalidate).
-// no wire: holds an owned handler a lookup made in this process; a mod keeps it, never sends it.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct BlockCapabilityCache<T: ?Sized + 'static> {
-    key: &'static CapabilityKey<T>,
-    at: BlockSide,
-    kept: Option<(Option<BlockEntityRef>, Option<Capability<T>>)>,
-}
-
-impl<T: ?Sized + 'static> BlockCapabilityCache<T> {
-    /// A cache of `key` at `pos` in `level`, reached through `side`; nothing is looked up yet.
-    pub fn new(
-        key: &'static CapabilityKey<T>,
-        level: LevelRef,
-        pos: [i32; 3],
-        side: Option<Direction>,
-    ) -> Self {
-        Self {
-            key,
-            at: BlockSide { level, pos, side },
-            kept: None,
-        }
-    }
-    /// The handler there, if any: the kept one while its block entity is the same, else looked
-    /// up again ([`LevelRef::capability`]).
-    pub fn get(&mut self, host: &mut dyn ServerHost) -> Option<&Capability<T>> {
-        let entity = host.block_entity(self.at.level, self.at.pos);
-        if !matches!(&self.kept, Some((kept, _)) if *kept == entity) {
-            let found = self
-                .at
-                .level
-                .capability(host, self.key, self.at.pos, self.at.side);
-            self.kept = Some((entity, found));
-        }
-        self.kept.as_ref()?.1.as_ref()
-    }
-    /// Forgets the kept handler, so the next [`get`](Self::get) looks it up again.
-    pub fn invalidate(&mut self) {
-        self.kept = None;
-    }
-    /// Where it looks.
-    pub fn at(&self) -> BlockSide {
-        self.at
     }
 }
 
@@ -361,6 +460,7 @@ mod tests {
     use crate::{HostTransaction, Identifier, ItemStack, Tag};
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
+    use std::hash::BuildHasher;
 
     fn host_with(items: &[&str]) -> (FakeHost, Vec<ItemResource>) {
         let mut host = FakeHost::new();
@@ -384,6 +484,12 @@ mod tests {
         }
     }
 
+    fn storage_at(host: &mut FakeHost, pos: [i32; 3]) -> Capability<dyn ItemStorage> {
+        let level = host.level.level();
+        let server: &mut dyn ServerHost = host;
+        level.capability(server, &STORAGE, pos, None).unwrap()
+    }
+
     /// A bulk store in memory, counting the calls made to it: no transactions, for the cases
     /// that never abort.
     #[derive(Default)]
@@ -391,44 +497,48 @@ mod tests {
         held: RefCell<HashMap<ItemResource, u64>>,
         room: u64,
         calls: Cell<u32>,
+        /// What `page` tries to push, whatever the page's limit.
+        greedy: usize,
     }
     struct Shared(std::rc::Rc<Bulk>);
     impl ItemStorage for Shared {
-        fn amount(&self, _: &mut dyn ServerHost, r: &ItemResource) -> u64 {
+        fn amount(&self, _: &mut dyn ServerHost, r: &ItemResource) -> Result<u64, StorageError> {
             self.0.calls.set(self.0.calls.get() + 1);
-            self.0.held.borrow().get(r).copied().unwrap_or(0)
+            Ok(self.0.held.borrow().get(r).copied().unwrap_or(0))
         }
-        fn space_for(&self, _: &mut dyn ServerHost, _: &ItemResource) -> u64 {
+        fn space_for(&self, _: &mut dyn ServerHost, _: &ItemResource) -> Result<u64, StorageError> {
             self.0.calls.set(self.0.calls.get() + 1);
-            self.0.room - self.0.held.borrow().values().sum::<u64>()
+            Ok(self.0.room - self.0.held.borrow().values().sum::<u64>())
         }
         fn insert(&self, h: &mut dyn ServerHost, _: &Transaction, r: &ItemResource, n: u64) -> u64 {
-            let went = n.min(self.space_for(h, r));
+            let went = n.min(self.space_for(h, r).unwrap());
             *self.0.held.borrow_mut().entry(r.clone()).or_default() += went;
             went
         }
         fn extract(&self, h: &mut dyn ServerHost, _: &Transaction, r: &ItemResource, n: u64) -> u64 {
-            let came = n.min(self.amount(h, r));
+            let came = n.min(self.amount(h, r).unwrap());
             *self.0.held.borrow_mut().entry(r.clone()).or_default() -= came;
             came
         }
         fn page(
             &self,
             _: &mut dyn ServerHost,
-            cursor: &mut usize,
-            _: usize,
-            out: &mut Vec<(ItemResource, u64)>,
-        ) -> bool {
-            out.extend(self.0.held.borrow().iter().map(|(r, n)| (r.clone(), *n)));
-            *cursor = 0;
-            true
+            _: u64,
+            page: &mut StoragePage,
+        ) -> Result<Option<u64>, StorageError> {
+            page.clear();
+            let entries: Vec<_> = self.0.held.borrow().iter().map(|(r, n)| (r.clone(), *n)).collect();
+            for (resource, amount) in entries.into_iter().cycle().take(self.0.greedy.max(1)) {
+                page.push(resource, amount);
+            }
+            Ok(None)
         }
     }
     fn bulk(room: u64, held: &[(&ItemResource, u64)]) -> (std::rc::Rc<Bulk>, Capability<dyn ItemStorage>) {
         let store = std::rc::Rc::new(Bulk {
             held: RefCell::new(held.iter().map(|(r, n)| ((*r).clone(), *n)).collect()),
             room,
-            calls: Cell::new(0),
+            ..Default::default()
         });
         let handler = Capability {
             handler: Box::new(Shared(store.clone())) as Box<dyn ItemStorage>,
@@ -442,39 +552,94 @@ mod tests {
         let (mut host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
         let (stone, dirt) = (&r[0], &r[1]);
         chest(&mut host, [0, 64, 0], &[Some((stone, 40)), Some((dirt, 5)), Some((stone, 10)), None]);
-        let level = host.level.level();
+        let storage = storage_at(&mut host, [0, 64, 0]);
         let host: &mut dyn ServerHost = &mut host;
-        let storage = level.capability(host, &STORAGE, [0, 64, 0], None).unwrap();
-        assert_eq!(storage.amount(host, stone), 50);
-        assert_eq!(storage.amount(host, dirt), 5);
+        assert_eq!(storage.amount(host, stone), Ok(50));
+        assert_eq!(storage.amount(host, dirt), Ok(5));
         // 24 and 54 topping up the stone, 64 in the empty slot.
-        assert_eq!(storage.space_for(host, stone), 24 + 54 + 64);
+        assert_eq!(storage.space_for(host, stone), Ok(24 + 54 + 64));
         let went = host.transaction(|host, tx| Ok::<_, ()>(storage.insert(host, tx, stone, 500)));
         assert_eq!(went, Ok(142), "no more than the room");
-        assert_eq!(storage.amount(host, stone), 192);
-        assert_eq!(storage.amount(host, dirt), 5, "the dirt's slot is not touched");
+        assert_eq!(storage.amount(host, stone), Ok(192));
+        assert_eq!(storage.amount(host, dirt), Ok(5), "the dirt's slot is not touched");
         let came = host.transaction(|host, tx| Ok::<_, ()>(storage.extract(host, tx, stone, 100)));
         assert_eq!(came, Ok(100));
-        let mut cursor = 0;
-        let mut listed = Vec::new();
-        assert!(storage.page(host, &mut cursor, 10, &mut listed));
-        assert_eq!(listed.iter().map(|(_, n)| n).sum::<u64>(), 97);
-        assert_eq!(cursor, 0);
+        let mut page = StoragePage::new(10).unwrap();
+        assert_eq!(storage.page(host, 0, &mut page), Ok(None));
+        assert_eq!(page.entries().iter().map(|(_, n)| n).sum::<u64>(), 97);
     }
 
     #[test]
     fn a_slot_write_aborted_with_its_transaction_is_put_back() {
         let (mut host, r) = host_with(&["minecraft:stone"]);
         chest(&mut host, [0, 64, 0], &[Some((&r[0], 10)), None]);
-        let level = host.level.level();
+        let storage = storage_at(&mut host, [0, 64, 0]);
         let host: &mut dyn ServerHost = &mut host;
-        let storage = level.capability(host, &STORAGE, [0, 64, 0], None).unwrap();
         let aborted: Result<(), ()> = host.transaction(|host, tx| {
             assert_eq!(storage.insert(host, tx, &r[0], 70), 70);
             Err(())
         });
         assert!(aborted.is_err());
-        assert_eq!(storage.amount(host, &r[0]), 10);
+        assert_eq!(storage.amount(host, &r[0]), Ok(10));
+    }
+
+    #[test]
+    fn a_page_is_the_hosts_size_whatever_a_caller_asks() {
+        assert_eq!(StoragePage::new(0).err(), Some(StorageError::ZeroPage));
+        assert_eq!(StoragePage::new(1).unwrap().limit(), 1);
+        assert_eq!(StoragePage::new(usize::MAX).unwrap().limit(), MAX_STORAGE_PAGE);
+        // A container larger than a page lists across pages, the cursor a plain value.
+        let (mut host, r) = host_with(&["minecraft:stone"]);
+        let slots: Vec<_> = (0..300).map(|_| Some((&r[0], 1))).collect();
+        chest(&mut host, [0, 64, 0], &slots);
+        let storage = storage_at(&mut host, [0, 64, 0]);
+        let host: &mut dyn ServerHost = &mut host;
+        let mut page = StoragePage::new(100_000).unwrap();
+        assert_eq!(storage.page(host, 0, &mut page), Ok(Some(MAX_STORAGE_PAGE as u64)));
+        assert_eq!(page.entries().len(), MAX_STORAGE_PAGE);
+        let next = storage.page(host, MAX_STORAGE_PAGE as u64, &mut page);
+        assert_eq!(next, Ok(None));
+        assert_eq!(page.entries().len(), 300 - MAX_STORAGE_PAGE, "the page was cleared first");
+        assert_eq!(storage.page(host, u64::MAX, &mut page), Ok(None), "past the end: empty");
+        assert!(page.entries().is_empty());
+    }
+
+    #[test]
+    fn a_handler_cannot_hand_back_more_than_its_page() {
+        let (mut host, r) = host_with(&["minecraft:stone"]);
+        let (_, storage) = bulk(u64::MAX, &[(&r[0], 5)]);
+        let greedy = std::rc::Rc::new(Bulk {
+            held: RefCell::new([(r[0].clone(), 5)].into()),
+            greedy: 10_000,
+            ..Default::default()
+        });
+        let greedy = Capability {
+            handler: Box::new(Shared(greedy)) as Box<dyn ItemStorage>,
+            owner: None,
+        };
+        let host: &mut dyn ServerHost = &mut host;
+        let mut page = StoragePage::new(8).unwrap();
+        assert_eq!(greedy.page(host, 0, &mut page), Ok(None));
+        assert_eq!(page.entries().len(), 8, "pushes past the limit are refused");
+        assert!(!page.push(r[0].clone(), 1));
+        assert_eq!(storage.page(host, 0, &mut page), Ok(None));
+        assert_eq!(page.entries().len(), 1);
+    }
+
+    #[test]
+    fn a_page_off_the_wire_is_held_to_the_cap() {
+        let (_, r) = host_with(&["minecraft:stone"]);
+        let entries = vec![(r[0].clone(), 1); 3];
+        assert!(StoragePage::from_wire(entries.clone(), 3).is_some());
+        assert!(StoragePage::from_wire(entries.clone(), 2).is_none(), "more entries than its limit");
+        assert!(StoragePage::from_wire(entries, MAX_STORAGE_PAGE as u64 + 1).is_none(), "past the cap");
+        assert!(StoragePage::from_wire(Vec::new(), 0).is_none(), "a zero limit");
+        let mut page = StoragePage::new(4).unwrap();
+        page.push(r[0].clone(), 7);
+        let mut out = crate::wire::Writer::default();
+        crate::wire::Wire::put(&page, &mut out);
+        let back: StoragePage = crate::wire::Reader::decode(&out.into_bytes()).unwrap();
+        assert_eq!((back.entries(), back.limit()), (page.entries(), 4));
     }
 
     #[test]
@@ -484,7 +649,7 @@ mod tests {
         let (into_store, into) = bulk(u64::MAX, &[]);
         let host: &mut dyn ServerHost = &mut host;
         let moved = host.transaction(|host, tx| transfer(host, &from, &into, &r[0], u64::MAX, tx));
-        assert_eq!(moved.ok(), Some(5_000_000_000));
+        assert_eq!(moved, Ok(5_000_000_000));
         assert_eq!(into_store.held.borrow()[&r[0]], 5_000_000_000);
         // amount and space_for to plan, then the extract (with its amount) and the insert
         // (with its space_for).
@@ -495,61 +660,93 @@ mod tests {
     fn a_transfer_into_slots_takes_what_fits_and_leaves_the_rest() {
         let (mut host, r) = host_with(&["minecraft:stone"]);
         chest(&mut host, [0, 64, 0], &[None, None, None]);
-        let level = host.level.level();
+        let into = storage_at(&mut host, [0, 64, 0]);
         let (from_store, from) = bulk(u64::MAX, &[(&r[0], 1000)]);
         let host: &mut dyn ServerHost = &mut host;
-        let into = level.capability(host, &STORAGE, [0, 64, 0], None).unwrap();
         let moved = host.transaction(|host, tx| transfer(host, &from, &into, &r[0], 1000, tx));
-        assert_eq!(moved.ok(), Some(192));
+        assert_eq!(moved, Ok(192));
         assert_eq!(from_store.held.borrow()[&r[0]], 808);
         let moved = host.transaction(|host, tx| transfer(host, &from, &into, &r[0], 1000, tx));
-        assert_eq!(moved.ok(), Some(0), "a full target is not tried");
+        assert_eq!(moved, Ok(0), "a full target is not tried");
     }
 
     #[test]
     fn transfer_matching_moves_only_what_the_filter_takes() {
         let (mut host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
         chest(&mut host, [0, 64, 0], &[Some((&r[0], 30)), Some((&r[1], 20)), Some((&r[1], 7))]);
-        let level = host.level.level();
+        let from = storage_at(&mut host, [0, 64, 0]);
         let (into_store, into) = bulk(u64::MAX, &[]);
         let host: &mut dyn ServerHost = &mut host;
-        let from = level.capability(host, &STORAGE, [0, 64, 0], None).unwrap();
         let dirt = r[1].clone();
         let moved = host.transaction(|host, tx| {
             transfer_matching(host, &from, &into, |res| *res == dirt, u64::MAX, tx)
         });
-        assert_eq!(moved.ok(), Some(27));
-        assert_eq!(from.amount(host, &r[0]), 30);
+        assert_eq!(moved, Ok(27));
+        assert_eq!(from.amount(host, &r[0]), Ok(30));
         assert_eq!(into_store.held.borrow().get(&r[0]), None);
+    }
+
+    #[test]
+    fn transfers_aborted_and_committed_conserve_every_item() {
+        let (mut host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
+        chest(&mut host, [0, 64, 0], &[Some((&r[0], 64)), Some((&r[1], 40)), Some((&r[0], 9))]);
+        chest(&mut host, [1, 64, 0], &[None, Some((&r[1], 3)), None]);
+        let a = storage_at(&mut host, [0, 64, 0]);
+        let b = storage_at(&mut host, [1, 64, 0]);
+        let host: &mut dyn ServerHost = &mut host;
+        let total = |host: &mut dyn ServerHost| {
+            r.iter()
+                .map(|kind| a.amount(host, kind).unwrap() + b.amount(host, kind).unwrap())
+                .sum::<u64>()
+        };
+        let before = total(host);
+        for round in 0..40u64 {
+            let (from, to) = if round.is_multiple_of(2) { (&a, &b) } else { (&b, &a) };
+            let kind = &r[(round % 3 % 2) as usize];
+            let result: Result<u64, StorageError> = host.transaction(|host, tx| {
+                let moved = transfer(host, from, to, kind, round + 1, tx)?;
+                // Every third round aborts after it wrote.
+                if round.is_multiple_of(3) {
+                    return Err(StorageError::ZeroPage);
+                }
+                Ok(moved)
+            });
+            assert_eq!(result.is_err(), round.is_multiple_of(3));
+            assert_eq!(total(host), before, "round {round}");
+        }
     }
 
     #[test]
     fn a_resource_keys_a_map_by_item_damage_and_components() {
         let (host, r) = host_with(&["minecraft:stone", "minecraft:dirt"]);
-        let mut worn = ItemStack::new(host.item_key(&Identifier::parse("minecraft:stone").unwrap()).unwrap(), 9).unwrap();
+        let stone = host.item_key(&Identifier::parse("minecraft:stone").unwrap()).unwrap();
+        let state = std::hash::RandomState::new();
+        let hash_with = |resource: &ItemResource| state.hash_one(resource);
+        // Equal stacks of different counts are one kind, and hash alike.
+        let many = ItemResource::of(&ItemStack::new(stone, 64).unwrap());
+        assert_eq!(many, r[0]);
+        assert_eq!(hash_with(&many), hash_with(&r[0]));
+        // Damage and a component patch each make another kind.
+        let mut worn = ItemStack::new(stone, 9).unwrap();
         worn.set_damage(3);
+        let mut named = ItemStack::new(stone, 1).unwrap();
+        named
+            .set_components(
+                [(
+                    "minecraft:custom_data".into(),
+                    Tag::Compound([("bench".into(), Tag::Int(1))].into()),
+                )]
+                .into(),
+            )
+            .unwrap();
+        let named = ItemResource::of(&named);
+        assert_ne!(named, r[0]);
         let mut counts: HashMap<ItemResource, u64> = HashMap::new();
-        for resource in [&r[0], &r[1], &ItemResource::of(&worn), &r[0]] {
+        for resource in [&r[0], &r[1], &ItemResource::of(&worn), &named, &many, &named] {
             *counts.entry(resource.clone()).or_default() += 1;
         }
-        assert_eq!(counts.len(), 3);
-        assert_eq!(counts[&r[0]], 2, "equal resources hash alike, whatever their counts were");
-    }
-
-    #[test]
-    fn a_cache_keeps_its_handler_until_the_block_entity_changes() {
-        let (mut host, r) = host_with(&["minecraft:stone"]);
-        chest(&mut host, [0, 64, 0], &[Some((&r[0], 5))]);
-        let level = host.level.level();
-        let mut cache = BlockCapabilityCache::new(&STORAGE, level, [0, 64, 0], None);
-        {
-            let server: &mut dyn ServerHost = &mut host;
-            let storage = cache.get(server).unwrap() as *const _;
-            assert_eq!(storage, cache.get(server).unwrap() as *const _, "kept, not looked up again");
-        }
-        host.level.remove_block_entity([0, 64, 0]);
-        assert!(cache.get(&mut host).is_none(), "gone with its block entity");
-        chest(&mut host, [0, 64, 0], &[Some((&r[0], 8))]);
-        assert!(cache.get(&mut host).is_some(), "found again once one is placed");
+        assert_eq!(counts.len(), 4);
+        assert_eq!(counts[&r[0]], 2, "stone of any count is one key");
+        assert_eq!(counts[&named], 2, "the patch keys its own entry");
     }
 }

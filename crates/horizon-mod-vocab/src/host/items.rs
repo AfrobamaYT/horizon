@@ -167,20 +167,23 @@ pub trait ItemsBackend {
     fn container_capacity(&self, at: BlockSide, slot: usize, stack: &ItemStack) -> u32;
     /// Side: server.
     /// How much of `resource` the slots `at`'s side reaches hold in all: [`STORAGE`]'s
-    /// amount for a block entity with slots, in one pass over them.
+    /// amount for a block entity with slots, in one pass over them. None where the total does
+    /// not fit in 64 bits; 0 where no block entity has slots.
     ///
     /// [`STORAGE`]: crate::STORAGE
     #[access(WorldOnly)]
-    fn container_kind_amount(&self, at: BlockSide, resource: &ItemResource) -> u64;
+    fn container_kind_amount(&self, at: BlockSide, resource: &ItemResource) -> Option<u64>;
     /// Side: server.
     /// How much of `resource` an insert through `at`'s side would take now: the room left in
-    /// the slots holding it and in the empty slots it may go in, in one pass.
+    /// the slots holding it and in the empty slots it may go in, in one pass. None where the
+    /// total does not fit in 64 bits.
     #[access(WorldOnly)]
-    fn container_kind_space(&self, at: BlockSide, resource: &ItemResource) -> u64;
+    fn container_kind_space(&self, at: BlockSide, resource: &ItemResource) -> Option<u64>;
     /// Side: server.
     /// What the slots `at`'s side reaches hold, from its `from`th to before its
-    /// `from + limit`th (fewer at the end), empty ones included. None where no block entity
-    /// has slots.
+    /// `from + limit`th (fewer at the end), empty ones included, never more than
+    /// [`MAX_STORAGE_PAGE`](crate::MAX_STORAGE_PAGE) slots whatever `limit` asks. None where no
+    /// block entity has slots.
     #[access(WorldOnly)]
     fn container_listing(
         &self,
