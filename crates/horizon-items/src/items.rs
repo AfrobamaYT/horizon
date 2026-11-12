@@ -2909,25 +2909,20 @@ pub fn bucket_contents(
     item: &str,
 ) -> Option<(horizon_world::level::BucketContent, &str, Option<&str>)> {
     use horizon_world::{fluid::FluidKind, level::BucketContent as C};
+    // A bucket of a fluid empties with that fluid's sound.
+    let fluid = |kind| {
+        Some((
+            C::Fluid(kind),
+            horizon_world::level::fluid_empty_sound(kind)?,
+            None,
+        ))
+    };
     Some(match item {
-        _ if !item.starts_with("minecraft:") => {
-            let fluid = horizon_world::fluid::mod_fluid_of_bucket(item)?;
-            (
-                C::Fluid(FluidKind::Mod(fluid)),
-                "minecraft:item.bucket.empty",
-                None,
-            )
-        }
-        "minecraft:water_bucket" => (
-            C::Fluid(FluidKind::Water),
-            "minecraft:item.bucket.empty",
-            None,
-        ),
-        "minecraft:lava_bucket" => (
-            C::Fluid(FluidKind::Lava),
-            "minecraft:item.bucket.empty_lava",
-            None,
-        ),
+        _ if !item.starts_with("minecraft:") => fluid(FluidKind::Mod(
+            horizon_world::fluid::mod_fluid_of_bucket(item)?,
+        ))?,
+        "minecraft:water_bucket" => fluid(FluidKind::Water)?,
+        "minecraft:lava_bucket" => fluid(FluidKind::Lava)?,
         "minecraft:powder_snow_bucket" => {
             (C::Powder, "minecraft:item.bucket.empty_powder_snow", None)
         }

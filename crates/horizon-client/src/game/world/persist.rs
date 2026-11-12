@@ -3,6 +3,9 @@
 //! scheduled block/fluid ticks (chunk `block_ticks`/`fluid_ticks`).
 #[path = "persist/display.rs"]
 mod display;
+#[path = "persist/entity_uuids.rs"]
+mod entity_uuids;
+pub(super) use entity_uuids::EntityUuids;
 #[path = "persist/loaded_pass.rs"]
 mod loaded_pass;
 #[path = "persist/object_memory.rs"]
@@ -172,7 +175,7 @@ pub(super) fn write_static_entity_fields(tag: &mut Tag) {
 pub struct EntityMemory {
     /// UUIDs of entities by Horizon entity ID: the one each was loaded with,
     /// or made up once something needed it (a save, a native mod's attachment).
-    pub(super) uuids: HashMap<u32, [i32; 4]>,
+    pub(super) uuids: EntityUuids,
     /// The compound each mob or item entity was loaded with.
     pub(super) raw: HashMap<u32, Tag>,
     /// Full rejected passenger objects, not resident entities or frozen NBT copies.
@@ -1554,7 +1557,7 @@ impl Game<'_> {
         if let Some(uuid) = self.known_resident_entity_uuid_at(self.dim.key(), id) {
             return uuid;
         }
-        *self.persist.uuids.entry(id).or_insert_with(random_uuid)
+        self.persist.uuids.get_or_insert_with(id, random_uuid)
     }
     /// `BlockState.CODEC`: a block name or `{id, properties}` (or legacy `{Name, Properties}`).
     pub(super) fn state_from_nbt(&self, tag: &Tag) -> Option<BlockStateId> {
