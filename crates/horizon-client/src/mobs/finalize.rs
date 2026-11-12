@@ -1053,7 +1053,7 @@ pub const SLOT_NAMES: [&str; 8] = super::drops::SLOTS;
 pub use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
 const SADDLE: usize = horizon_items::equipment::SADDLE;
 /// The `gear` slot of an `EquipmentSlot`.
-fn gear_slot(slot: usize) -> usize {
+pub fn gear_slot(slot: usize) -> usize {
     match slot {
         MAINHAND => gear::MAIN,
         OFFHAND => gear::OFF,
