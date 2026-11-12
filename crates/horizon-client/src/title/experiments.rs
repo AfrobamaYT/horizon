@@ -206,6 +206,9 @@ pub fn repository_flags(
 ) -> Vec<Flag> {
     crate::datapack::feature_repository(resources, additional)
         .into_iter()
+        // A mod's hidden pack stays out (`PackRegistration::hidden`); Done only touches the
+        // listed packs, so a hidden one keeps its selection.
+        .filter(|pack| !pack.selection.as_ref().is_some_and(|info| info.hidden))
         .map(|pack| {
             let id = pack.id.clone();
             // `ExperimentsScreen.getHumanReadableTitle`.
