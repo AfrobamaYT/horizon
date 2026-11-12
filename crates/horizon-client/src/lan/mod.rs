@@ -45,6 +45,7 @@ mod registry_names;
 pub mod scoreboard;
 mod sound_order;
 pub mod tracking;
+pub mod viewed_levels;
 pub mod waypoints;
 
 pub use conn::{Holding, PlayerSender, flush_all};
