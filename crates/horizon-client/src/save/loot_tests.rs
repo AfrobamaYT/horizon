@@ -316,3 +316,111 @@ fn unmodified_container_nbt_has_no_stack_limit() {
         assert!(tag.get("horizon:stack_limit").is_none());
     }
 }
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn generated_structure_chest_stays_pending_after_save_and_reload() {
+    use crate::{
+        streaming::{ChunkGenerator, Proto},
+        vanillagen::{TerrainResources, VanillaTerrain},
+    };
+    let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+    let assets = crate::assets::Assets::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.clone(),
+    ))
+    .unwrap();
+    let items = crate::test_resources::item_data(
+        &root,
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+    )
+    .unwrap();
+    // Existing generation_saves::saved_proto_block_entities_keep_their_id fixture:
+    // seed 12345, cold ocean ruin centered on chunk (43, 21).
+    let generator = VanillaTerrain::for_dimension(
+        TerrainResources {
+            data: None,
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &items,
+        },
+        12345,
+        "minecraft:overworld",
+    )
+    .unwrap();
+    let mut worker = generator.worker();
+    let mut region: [Proto; 9] = std::array::from_fn(|i| {
+        generator.proto(&mut worker, 43 + i as i32 % 3 - 1, 21 + i as i32 / 3 - 1)
+    });
+    generator.decorate(&mut worker, &mut region);
+    let chunk = generator.finish(region.into_iter().nth(4).unwrap());
+    const CHEST: (i32, i32, i32) = (692, 60, 348);
+    const TABLE: &str = "minecraft:chests/underwater_ruin_small";
+    const SEED: i64 = 8294534313461660897;
+    let expected = PendingContainerLoot {
+        table: string(TABLE),
+        seed: Some(Tag::Long(SEED)),
+    };
+    assert_eq!(
+        chunk.saved.as_ref().unwrap().pending_loot.get(&CHEST),
+        Some(&expected)
+    );
+    assert!(
+        chunk
+            .block_entities
+            .iter()
+            .find(|(p, _)| *p == CHEST)
+            .unwrap()
+            .1
+            .slots()
+            .iter()
+            .all(Option::is_none)
+    );
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "generated-pending-loot-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&dir).unwrap();
+    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+    save.save(&[Arc::new(chunk)], assets.registry, &biomes)
+        .unwrap();
+    save.flush().unwrap();
+    let reopened = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+    let reloaded = reopened.load(43, 21, assets.registry, &biomes).unwrap();
+    assert_eq!(
+        reloaded.saved.as_ref().unwrap().pending_loot.get(&CHEST),
+        Some(&expected)
+    );
+    assert!(
+        reloaded
+            .block_entities
+            .iter()
+            .find(|(p, _)| *p == CHEST)
+            .unwrap()
+            .1
+            .slots()
+            .iter()
+            .all(Option::is_none)
+    );
+    let saved = encode(&reloaded, assets.registry, &biomes);
+    let Tag::List(entities) = saved.tag.get("block_entities").unwrap() else {
+        panic!()
+    };
+    let chest = entities
+        .iter()
+        .find(|e| {
+            number(e.get("x")) == Some(692)
+                && number(e.get("y")) == Some(60)
+                && number(e.get("z")) == Some(348)
+        })
+        .unwrap();
+    assert_eq!(chest.get("LootTable"), Some(&string(TABLE)));
+    assert_eq!(chest.get("LootTableSeed"), Some(&Tag::Long(SEED)));
+    assert!(chest.get("Items").is_none());
+    drop(reopened);
+    drop(save);
+    fs::remove_dir_all(dir).unwrap();
+}

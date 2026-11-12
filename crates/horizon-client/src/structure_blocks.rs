@@ -129,7 +129,7 @@ struct LoadedLoot {
 }
 static LOOT: Mutex<Option<LoadedLoot>> = Mutex::new(None);
 
-/// A world's atomically replaceable loot snapshot, shared by its chunk workers.
+/// A world's atomically replaceable loot snapshot, shared by gameplay loot readers.
 #[derive(Clone, Default)]
 pub struct LootSnapshot(Arc<std::sync::RwLock<Option<Arc<LootData>>>>);
 
@@ -316,7 +316,6 @@ fn generated_block_entity(block: &str, nbt: &Compound) -> Option<BlockEntity> {
 /// pending loot metadata of its containers.
 pub fn block_entities(
     chunk: &ProtoChunk,
-    _loot: Option<&LootData>,
 ) -> (
     Vec<((i32, i32, i32), BlockEntity)>,
     std::collections::HashMap<(i32, i32, i32), crate::save::PendingContainerLoot>,
@@ -390,26 +389,6 @@ mod tests {
             );
             assert_eq!(entity.items[0].as_ref().unwrap().count, 3);
         }
-    }
-
-    #[test]
-    fn a_loot_seed_is_any_number() {
-        assert_eq!(
-            crate::save::PendingContainerLoot {
-                table: Tag::String("test:x".into()),
-                seed: Some(Tag::Int(42))
-            }
-            .seed_value(),
-            Some(42)
-        );
-        assert_eq!(
-            crate::save::PendingContainerLoot {
-                table: Tag::String("test:x".into()),
-                seed: Some(Tag::Long(7))
-            }
-            .seed_value(),
-            Some(7)
-        );
     }
 
     #[test]
@@ -532,18 +511,6 @@ mod tests {
         assert!(Arc::ptr_eq(&in_flight, &first));
         assert!(Arc::ptr_eq(&worker.get().unwrap(), &other));
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_pending_container_saves_its_table_without_loot_data() {
-        let pending = crate::save::PendingContainerLoot {
-            table: Tag::String("minecraft:chests/simple_dungeon".into()),
-            seed: Some(Tag::Long(7)),
-        };
-        let mut saved = horizon_core::nbt::Compound::new();
-        pending.write_tags(&mut saved);
-        assert!(!saved.contains_key(&"Items".into()));
-        assert_eq!(saved.get(&"LootTableSeed".into()), Some(&Tag::Long(7)));
     }
 
     #[test]

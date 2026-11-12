@@ -323,7 +323,6 @@ impl WorldRequest {
             shape,
             level.seed,
             &level.enabled_features,
-            loot.clone(),
         )?;
         drop(streaming_step);
         streaming.radius = settings.render_distance;
@@ -960,14 +959,12 @@ pub(super) fn make_streaming(
     shape: horizon_client::chunk::LevelShape,
     seed: i64,
     enabled_features: &[String],
-    loot: horizon_client::structure_blocks::LootSnapshot,
 ) -> Result<(Streaming, Arc<SaveDir>, Option<Arc<VanillaTerrain>>)> {
     let mut save = SaveDir::new(
         horizon_client::save::dimension_dir(world_root, dim.id()),
         shape,
     );
     save.enable_trusted_fluid_load();
-    save.set_loot_source(loot.clone());
     let save = Arc::new(save);
     if dim == Dim::End {
         // Migrate before any chunk reader can cache the old block entities. A side file it
@@ -1049,7 +1046,6 @@ pub(super) fn make_streaming(
             automatic_structures,
         ) {
             Ok(mut terrain) => {
-                terrain.set_loot_source(loot.clone());
                 terrain.add_mod_signs(res.facts());
                 Some(Arc::new(terrain))
             }
@@ -1181,7 +1177,6 @@ pub(super) fn make_streaming(
                     format!("{e}\nThe world's data packs change its world generation: one of them may not be made for this version")
                 }
             })?;
-        inner.set_loot_source(loot);
         inner.add_mod_signs(res.facts());
         register_sea_level(inner.sea_level());
         let inner = Arc::new(inner);
