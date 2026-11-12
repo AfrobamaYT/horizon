@@ -379,7 +379,10 @@ mod tests {
 
             // An End portal opening: one packet with the global flag for every player.
             assert!(level.global_level_event(game, 1038, [10, 64, -3], 0));
-            assert_eq!(game.lan_global_events, [(1038, [10, 64, -3], 0)]);
+            assert_eq!(
+                game.lan_global_events,
+                [("minecraft:overworld", 1038, [10, 64, -3], 0)]
+            );
             assert!(game.lan_events.is_empty(), "no plain event while the rule is on");
             assert!(
                 !level.global_level_event(game, 2001, [0, 64, 0], -1),
