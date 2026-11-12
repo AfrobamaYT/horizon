@@ -478,12 +478,15 @@ impl Game<'_> {
             Some(&self.res.motion().blocks),
             entities,
         )?;
-        let snow = (t.previous, t.position, t.bounds(), t.velocity);
+        let (id, snow) = (t.id, (t.previous, t.position, t.bounds(), t.velocity));
         // Entity.checkFallDamage: HIT_GROUND after a fall, during the move.
         if landed {
             self.post_landing_event(snow.1, snow.2, false);
         }
         self.entity_powder_snow_particles(snow.0, snow.1, snow.2, snow.3, false);
+        // Its move is filed at once, also for one about to explode.
+        let (from, to) = (snow.0, snow.1);
+        self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
         for pos in tops {
             self.bubble_column_particles(pos);
         }
