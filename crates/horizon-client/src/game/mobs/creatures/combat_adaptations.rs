@@ -54,12 +54,10 @@ impl Game<'_> {
     }
     pub(super) fn bred_wolf_voice(&mut self, parent: u32) -> Option<u8> {
         let voices = horizon_client::mobs::finalize::sound_variants(Species::Wolf);
-        let voice = self
-            .mobs
+        self.mobs
             .iter_mut()
             .find(|m| m.id == parent)
             .and_then(|m| m.random.next_int_bound(voices.len() as i32).ok())
-            .map(|i| i as u8);
-        voice
+            .map(|i| i as u8)
     }
 }

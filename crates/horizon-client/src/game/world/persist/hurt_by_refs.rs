@@ -67,20 +67,4 @@ impl Game<'_> {
             ai.last_hurt_by_ref = None;
         }
     }
-    /// The player in the world with `uuid` (`EntityReference.getPlayer`), as
-    /// `last_hurt_by_player` keeps them: None for the player in place, else the
-    /// guest's connection.
-    pub(in crate::game) fn player_with_uuid(&self, uuid: [i32; 4]) -> Option<Option<u32>> {
-        if self.player.is_some()
-            && horizon_client::mobs::tame::owned_by(Some(uuid), self.acting_uuid())
-        {
-            return Some(self.lan_acting);
-        }
-        let uuid = horizon_client::lan::playerdata::ints_uuid(uuid);
-        self.lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .find(|g| g.placed && g.uuid == uuid)
-            .map(|g| Some(g.conn))
-    }
 }

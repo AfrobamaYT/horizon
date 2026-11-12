@@ -286,10 +286,6 @@ pub(super) trait Entity: EntityRules {
     fn is_vehicle(&self) -> bool {
         false
     }
-    /// `Entity.getDimensionChangingDelay`, overridden by vehicles and projectiles.
-    fn dimension_changing_delay(&self) -> i32 {
-        horizon_client::nether_portal::ENTITY_DELAY
-    }
     /// Whether movement applies portal block effects before Entity's base tick.
     fn portal_after_move(&self) -> bool {
         false
@@ -1819,9 +1815,6 @@ impl Entity for Boat {
         // A boat keeps no fall distance here.
     }
 
-    fn dimension_changing_delay(&self) -> i32 {
-        10
-    }
     fn set_on_ground(&mut self, on_ground: bool) {
         self.on_ground = on_ground;
     }
@@ -1910,9 +1903,6 @@ impl Entity for Minecart {
         self.fall_distance = 0.0;
     }
 
-    fn dimension_changing_delay(&self) -> i32 {
-        10
-    }
     fn set_on_ground(&mut self, on_ground: bool) {
         self.on_ground = on_ground;
     }
@@ -2284,9 +2274,6 @@ impl Entity for Projectile {
                 | horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
         )
     }
-    fn dimension_changing_delay(&self) -> i32 {
-        2
-    }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
     }
@@ -2443,9 +2430,6 @@ impl Entity for Rocket {
     fn reset_fall_distance(&mut self) {
         // A firework rocket keeps no fall distance here.
     }
-    fn dimension_changing_delay(&self) -> i32 {
-        2
-    }
     fn rotation(&self) -> [f32; 2] {
         self.rotation
     }
@@ -2527,9 +2511,6 @@ impl Entity for ThrownTrident {
     }
     fn portal_after_move(&self) -> bool {
         true
-    }
-    fn dimension_changing_delay(&self) -> i32 {
-        2
     }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]

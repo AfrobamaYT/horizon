@@ -51,3 +51,11 @@ a registry image build was not run locally.
 The upstream fragment names a helper, not a new hook moment. The sync does not
 restore a contextless helper or add a duplicate hook; no new capability issue is
 needed for this fragment.
+
+## Fork-orphaned upstream lookups: removed
+
+Remove `Entity::dimension_changing_delay` and its overrides,
+`Game::entity_portal_delay`, and `Game::player_with_uuid`. The fork retained
+its own active portal-delay lookups and creature owner resolution, leaving
+these upstream helpers unreferenced here. Removing them preserves the active
+behavior without dead code or suppression attributes.

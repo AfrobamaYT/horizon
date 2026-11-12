@@ -210,6 +210,21 @@ fn entity_near(entities: &[EntityState], own: i32, at: [f64; 3], slack: f64) -> 
     })
 }
 
+/// `LivingEntity.canGlideUsing`: for each worn piece (head, chest, legs,
+/// feet), whether it is a glider (its own component, or one the server
+/// patched onto the stack) in the slot its `equippable` names, and will not
+/// break with its next point of wear (`ItemStack.nextDamageWillBreak`).
+pub(super) fn gliding_pieces(items: &Items, armor: &[Option<ItemStack>; 4]) -> [bool; 4] {
+    const SLOTS: [&str; 4] = ["head", "chest", "legs", "feet"];
+    // `canGlideUsing`: the stack's own `glider` and `equippable` (its
+    // components, a server's patch), else its item's.
+    std::array::from_fn(|i| {
+        armor[i]
+            .as_ref()
+            .is_some_and(|s| horizon_client::item_sync::can_glide_using(s, SLOTS[i], items))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,19 +344,4 @@ mod tests {
         };
         assert!(!entity_near(&[item], 0, at, s));
     }
-}
-
-/// `LivingEntity.canGlideUsing`: for each worn piece (head, chest, legs,
-/// feet), whether it is a glider (its own component, or one the server
-/// patched onto the stack) in the slot its `equippable` names, and will not
-/// break with its next point of wear (`ItemStack.nextDamageWillBreak`).
-pub(super) fn gliding_pieces(items: &Items, armor: &[Option<ItemStack>; 4]) -> [bool; 4] {
-    const SLOTS: [&str; 4] = ["head", "chest", "legs", "feet"];
-    // `canGlideUsing`: the stack's own `glider` and `equippable` (its
-    // components, a server's patch), else its item's.
-    std::array::from_fn(|i| {
-        armor[i]
-            .as_ref()
-            .is_some_and(|s| horizon_client::item_sync::can_glide_using(s, SLOTS[i], items))
-    })
 }

@@ -796,16 +796,6 @@ impl Game<'_> {
             );
         }
     }
-    /// The live entity's `getDimensionChangingDelay`; unknown ids use Entity's default.
-    pub(in crate::game) fn entity_portal_delay(&self, id: u32) -> i32 {
-        self.entity_handles()
-            .find_map(|handle| {
-                with_entity!(self, handle, entity => {
-                    (entity.id() == id).then(|| entity.dimension_changing_delay())
-                })
-            })
-            .unwrap_or(ENTITY_DELAY)
-    }
     /// `Entity.saveWithoutId`: the modeled non-arrow projectile codecs
     /// share the live cooldown between command reads and chunk writes.
     pub(super) fn save_projectile_portal_cooldown(
