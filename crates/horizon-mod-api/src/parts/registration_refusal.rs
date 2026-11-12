@@ -9,6 +9,19 @@ impl RegistrationRefusalRegistrar for PartRegistrar {
             self.self_refusal = mod_vocab::__private::take_registration_refusal(&context);
         }
     }
+    fn registration_warning(&mut self, warning: crate::LoadingMessage) {
+        let kept = self
+            .warnings
+            .iter()
+            .filter(|(owner, _)| owner == self.mod_id)
+            .count();
+        if kept < mod_vocab::__private::MAX_LOADING_WARNINGS {
+            // A guest's message crosses the wire whole: bound it again here.
+            let args: Vec<&str> = warning.args().iter().take(16).map(String::as_str).collect();
+            let warning = crate::LoadingMessage::new(warning.key(), &args);
+            self.warnings.push((self.mod_id.to_owned(), warning));
+        }
+    }
 }
 
 impl PartRegistrar {
@@ -120,6 +133,38 @@ mod tests {
             r.declare_fluid("soup");
             r.declare_biome_region("kept", region()).unwrap();
         }
+    }
+
+    struct Warns;
+    impl Hooks for Warns {
+        fn subscribed(&self) -> &'static [Option<crate::HookId>] {
+            &[]
+        }
+        fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
+            cx.warn("test.warn.optional", &["jei"]);
+            r.declare_fluid("soup");
+        }
+    }
+
+    #[test]
+    fn a_warning_keeps_the_mod_loading_and_is_published_for_it() {
+        let mods = [ModEntry::new("warns", Box::new(Warns))];
+        let registrar = super::super::register_all(&mods, |_| false);
+        assert!(registrar.refused.is_empty());
+        assert!(
+            registrar
+                .registry_keys
+                .borrow()
+                .declared_fluids
+                .contains_key("warns:soup")
+        );
+        assert_eq!(
+            registrar.warnings,
+            [(
+                "warns".to_owned(),
+                crate::LoadingMessage::new("test.warn.optional", &["jei"])
+            )]
+        );
     }
 
     #[test]
