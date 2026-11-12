@@ -596,7 +596,7 @@ pub(super) struct Remote {
     loaded_sent: bool,
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
-    heard_level: Option<String>,
+    pub(super) heard_level: Option<String>,
     /// `ClientPacketListener.levelLoadTracker`: the loading screen after a login
     /// or respawn, until the player's section is shown.
     pub(super) level_load: horizon_client::level_loading::LevelLoadTracker,
@@ -2863,7 +2863,7 @@ impl Game<'_> {
     }
     /// The columns a moved or resized storage no longer holds. Returns the
     /// positions it freed (`forget_remote_columns`).
-    fn drop_remote_chunks_out_of_range(
+    pub(in crate::game) fn drop_remote_chunks_out_of_range(
         &mut self,
         center: (i32, i32),
         distance: i32,

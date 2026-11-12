@@ -333,3 +333,16 @@ These checks require prepared resources; they are not ordinary resource-free uni
 | Method | Verdict | Horizon route |
 | --- | --- | --- |
 | `IClientBlockExtensions.playHitSound` | **Covered** | Client `BlockPart::play_hit_sound`, with state, position, face and `ClientHost`. Returning `Flow::Cancel` handles the hit and suppresses the default sound. Both local mining ticks and `ClientLevel.addBreakingBlockEffects` use the same sound helper. Sculk growth is outside this hook. |
+
+## Client chunk events
+
+This section is not an extension interface. It records where NeoForge's client-side `ChunkEvent` posts land in
+Horizon, as #3425 asks.
+
+| NeoForge | Verdict | Horizon route |
+| --- | --- | --- |
+| `ChunkEvent.Load` on the client (`isNewChunk` always false) | **Covered** | `client_chunk_load(dimension, chunk)`, once per adopted chunk packet after the column and its block entities are in the client level; a re-sent column is told again. |
+| `ChunkEvent.Unload` on the client | **Covered, wider** | `client_chunk_unload(dimension, chunk)`, before the column's data is freed, on every route a column leaves by: the forget packet (NeoForge's only route), the view centre moving, the view radius shrinking and the client level going. |
+
+Both are client-only, so the server's `chunk_load` and `chunk_unload` listeners are not called on a client. An
+integrated world's own chunks are told only through the server hooks.

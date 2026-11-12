@@ -14,6 +14,7 @@ pub mod arrows;
 pub mod bed_geometry;
 pub mod block_contact;
 pub mod block_sounds;
+pub mod item_damage;
 pub mod parallel;
 pub mod powder_snow;
 #[cfg(test)]
