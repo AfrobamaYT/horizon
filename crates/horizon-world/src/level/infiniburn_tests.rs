@@ -78,6 +78,8 @@ fn refreshed_and_builtin_dimension_infiniburn() {
     let facts = DimensionFacts::overworld();
     assert!(burns(&mut w, facts, None, "netherrack"));
     assert!(burns(&mut w, facts, None, "magma_block"));
+    let nether = DimensionFacts::vanilla("minecraft:the_nether").unwrap();
+    assert!(burns(&mut w, nether, None, "netherrack"));
     let end = DimensionFacts::vanilla("minecraft:the_end").unwrap();
     assert!(burns(&mut w, end, None, "bedrock"));
 }
