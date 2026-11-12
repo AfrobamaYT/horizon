@@ -62,7 +62,9 @@ fn moving_from_an_infinite_source_fills_the_target_and_leaves_the_source_endless
     let target = capability(buffer.clone());
     let mut fake = FakeHost::new();
     let host: &mut dyn ServerHost = &mut fake;
-    let moved = host.transaction(|host, tx| move_energy(host, &source, &target, 1000, tx));
+    // The buffer isn't journaled, so ask only what it takes: a partial take would be undone and
+    // retried, and the retry would find it already full.
+    let moved = host.transaction(|host, tx| move_energy(host, &source, &target, 64, tx));
     assert_eq!(moved, Ok(64));
     assert_eq!(buffer.held(), 64);
     assert!(target.is_full(host));
