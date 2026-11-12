@@ -67,23 +67,27 @@ One durable world-level file, `data/horizon/biome_regions.dat`, separate from `d
 
 ## Acceptance matrix
 
-| Fixture | Expected |
-| --- | --- |
-| No region declared | Overworld and Nether biome output identical to today for fixed seeds (seeded preset oracle), negative coordinates and chunk edges included. |
-| Two mods, weights 1 and 3, vanilla 10 | Over a large sample, region ownership follows the weights within a stated tolerance; the same seed gives the same map twice. |
-| Same mods installed in a different order | Same sorted list, same map. |
-| A structure whose biome check straddles a border | Placement follows vanilla's check at its sample position. |
-| World created with mod A, mod A removed | The missing mod and region are named; do-not-open or a recorded vanilla substitution is required. Dedicated servers refuse without the setting. Existing chunks are never touched. |
-| Mod A returns after a substitution | Reported once; the substitution stays until the owner opts back in. |
-| Mod A changes its climate points or weight | The saved points and weights win until a recorded opt-in; the difference is reported once. |
-| Mod B added to an existing world, no opt-in | No change in any generated or new chunk. |
-| Opt-in on an existing world | New chunks may use B's region; existing chunks unchanged; the saved list includes B afterwards. |
-| Malformed record | The open is refused with the reason; the file is unchanged on disk. |
-| A region with invalid points, a bad weight or a duplicate id | Refused at registration, naming the mod; no region installed. |
+Each row names fixture coverage, not a passing run. The generated-column persistence test and both-server-role creation test require prepared resources; the latter is ignored by default. The seeded preset oracle and structure-border test still need the separately ordered worldgen run.
+
+| Fixture | Expected | Covered by |
+| --- | --- | --- |
+| No region declared | Overworld and Nether biome output identical to today for fixed seeds (seeded preset oracle), negative coordinates and chunk edges included. | `tools/test_biome_generation_parity.py` (the seeded preset oracle, unchanged path); `horizon-world` `worldgen::biome_source::region_selector_tests::without_regions_the_source_is_vanilla_unchanged` (no record, an empty record and a never-chosen region all give vanilla's biomes over negative and positive quarts, scalar and prepared) |
+| Two mods, weights 1 and 3, vanilla 10 | Over a large sample, region ownership follows the weights within a stated tolerance; the same seed gives the same map twice. | `horizon-world` `worldgen::biome_source::region_selector_tests::cells_split_by_weight` (20 000 cells, each share within 0.02 of its weight / 14); `horizon-world` `worldgen::biome_source::region_selector_tests::same_seed_and_layout_give_the_same_owners` |
+| Same mods installed in a different order | Same sorted list, same map. | `horizon-mod-api` `parts::biome_regions::tests::declared_regions_install_in_mod_then_id_order` (the list); `horizon-world` `worldgen::biome_source::region_selector_tests::selection_reads_only_the_saved_weights_in_order` (the map follows the saved list only) |
+| A structure whose biome check straddles a border | Placement follows vanilla's check at its sample position. | `horizon-world` `worldgen::generator::region_tests::structure_biome_checks_read_the_region_at_their_own_quart` |
+| World created with mod A, mod A removed | The missing mod and region are named; do-not-open or a recorded vanilla substitution is required. Dedicated servers refuse without the setting. Existing chunks are never touched. | `horizon-client` `save::biome_regions::tests::a_missing_mods_region_refuses_the_open_naming_mod_and_region`; `horizon-client` `save::biome_regions::tests::choosing_vanilla_is_saved_and_opens_from_then_on`; `horizon-client` `title::missing_biome_regions_tests::a_missing_biome_mod_asks_before_the_world_opens` (the prompt); `horizon-client` `game::interface::dedicated::biome_regions::tests::missing_mods_refuse_and_nothing_is_adopted_unless_set` and `horizon-server-launch` `config::tests::biome_regions_refuse_missing_mods_unless_their_section_says` (the server); `horizon-world` `worldgen::biome_source::region_selector_tests::a_substituted_region_resolves_through_vanilla_and_moves_no_border`. `save::biome_regions::persistence_tests::generated_chunks_survive_restart_substitution_added_regions_and_adoption` generates and saves a column, reopens it after each choice and checks its biomes and region-file bytes. |
+| Mod A returns after a substitution | Reported once; the substitution stays until the owner opts back in. | `horizon-client` `save::biome_regions::tests::choosing_vanilla_is_saved_and_opens_from_then_on` (the return is a difference and the record is unchanged). `save::biome_regions::tests::named_reports_are_remembered_across_restarts` pins persisted changed/returned names and no rewrite on the second open. |
+| Mod A changes its climate points or weight | The saved points and weights win until a recorded opt-in; the difference is reported once. | `horizon-client` `save::biome_regions::tests::changed_added_and_removed_regions_are_reported_and_the_record_wins` |
+| Mod B added to an existing world, no opt-in | No change in any generated or new chunk. | `horizon-client` `save::biome_regions::tests::changed_added_and_removed_regions_are_reported_and_the_record_wins` (the record, which generation reads, is unchanged). `save::biome_regions::persistence_tests::generated_chunks_survive_restart_substitution_added_regions_and_adoption` also compares generated biomes without adoption. |
+| Opt-in on an existing world | New chunks may use B's region; existing chunks unchanged; the saved list includes B afterwards. | `horizon-client` `save::biome_regions::tests::adopting_takes_installed_regions_and_keeps_saved_weights` (the saved list); the server setting in the dedicated test above. `save::biome_regions::persistence_tests::generated_chunks_survive_restart_substitution_added_regions_and_adoption` checks adopted new biomes against saved old biomes and unchanged region bytes. Client adoption follows in #3176. |
+| Malformed record | The open is refused with the reason; the file is unchanged on disk. | `save::biome_regions::tests::a_malformed_record_is_refused_and_left_untouched`, `every_required_record_field_refuses_missing_or_wrong_types`, `saved_selector_identity_climate_and_counts_are_bounded`, `oversized_and_overbudget_nbt_refuse_before_materializing_the_record` and `literal_version_one_file_decodes_without_the_record_encoder` |
+| A region with invalid points, a bad weight or a duplicate id | Refused at registration, naming the mod; no region installed. | `horizon-mod-vocab` `world::biome_region::tests::a_region_needs_a_preset_dimension_a_weight_and_valid_points`; `horizon-mod-api` `parts::biome_regions::tests::biome_region_declarations_validate_and_refuse_duplicates` |
+| A wasm mod's region | Reaches the game as declared. | `horizon-mod-wasm` `wire_loopback_biome_region_declaration_reaches_the_host_bit_exact` |
 
 ## Stages
 
 1. Saved biome ids kept when the game lacks them (#3132).
 2. `BiomeRegion`, `declare_biome_region` and validation, with unit tests and a wire round trip. No generator change. **Built.**
 3. Region selection in the biome source (`ResolvedBiomeSource`), behind "no record means today's path", with the oracle, distribution, order and structure fixtures. **Built.**
-4. The saved record (`crates/horizon-client/src/save/biome_regions.rs`), world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix. **Built**, except the client opt-in button.
+4. The saved record (`crates/horizon-client/src/save/biome_regions.rs`), world create and open, the missing-mod prompt, the server settings and the opt-in, with this acceptance matrix. **Built**, with client adoption tracked in #3176. Creation on both roles is covered by the ignored `game::world_loading::tests::both_server_roles_record_regions_before_world_generation` fixture.
+5. User docs ([biome regions](../how-to/biome-regions.md), [hosting](../../../hosting.md)), an example mod (`docs/modding/examples/src/biome_regions.rs`, one Overworld and one Nether region) and the tests named in the matrix. **Built.**

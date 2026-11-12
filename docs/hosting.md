@@ -616,6 +616,26 @@ legacy = true
 
 Players join with any vanilla 26.3 client: only the server decides the damage.
 
+### Mods' biome regions: `[biome_regions]`
+
+A world made with a mod that adds a [biome region](modding/src/how-to/biome-regions.md) saves that region with the
+world. If the mod is later removed, the server refuses to start and names the mod and region. To start anyway with
+vanilla's biomes where that region was (chunks that already exist stay as they are), add to `server.toml`, then
+restart:
+
+```toml
+[biome_regions]
+missing = "vanilla"      # "refuse", the default: don't start
+adopt_installed = false  # true explicitly adopts installed regions for new generation
+```
+
+The choice for a missing mod is saved in the world, so it holds even if the setting is removed later.
+Substitution keeps the missing region's slot and weight; a returning mod does not undo it.
+Adoption keeps saved weights for returning regions, takes declared weights for new regions and
+drops absent regions. Completed chunks keep their saved biomes and blocks. New generation may
+differ in surface material, carving, features and structures. The
+[design note](modding/src/concepts/mod-biome-regions.md) lists record limits and fixture coverage.
+
 ## 8. Start it with the computer
 
 ```sh
@@ -746,20 +766,3 @@ environment still applies.
 - **It keeps restarting**: `horizon-server status` shows the last crash and `horizon-server logs -n 200` the log
   before it. Crash reports are in `crash-reports/`.
 - Report problems at <https://github.com/horizon-rust/horizon/issues>, with the end of the log.
-
-## Biome regions from mods
-
-A world keeps the region layout saved when it was created. If a region's mod is missing, the
-server refuses to start and names it. To record a choice in `server.toml`:
-
-```toml
-[biome_regions]
-missing = "vanilla"       # default: "refuse"
-adopt_installed = false   # true explicitly adopts installed regions for new generation
-```
-
-Substitution keeps each missing region's slot and weight; it resolves through vanilla's biomes.
-A returning mod does not undo that choice. Adoption keeps saved weights for returning regions,
-takes declared weights for new regions and drops absent regions. Completed chunks keep their
-saved biomes and blocks. New generation can differ in surface material, carving, features and
-structures. See [biome regions](modding/src/concepts/mod-biome-regions.md) for limits and fixtures.
