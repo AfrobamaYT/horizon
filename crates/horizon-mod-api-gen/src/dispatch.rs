@@ -540,7 +540,7 @@ pub(super) fn emit<'a>(
                     ty.to_token_stream()
                         .to_string()
                         .split(|c: char| !c.is_alphanumeric())
-                        .any(|word| matches!(word, "BlockState" | "LandingWrite"))
+                        .any(|word| matches!(word, "BlockState" | "LandingWrite" | "InsideWrite"))
                 });
             if block_carrier {
                 let engine: Vec<_> = carried
@@ -557,6 +557,9 @@ pub(super) fn emit<'a>(
                                     }
                                     "LandingWrite" => {
                                         *ty = syn::parse_quote!(horizon_world::level::LandingWrite)
+                                    }
+                                    "InsideWrite" => {
+                                        *ty = syn::parse_quote!(horizon_world::level::InsideWrite)
                                     }
                                     _ => syn::visit_mut::visit_type_mut(self, ty),
                                 }
@@ -904,7 +907,7 @@ fn stack_crossing_routed(
         "LootContext",
         "ParticleOptions",
     ];
-    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite"];
+    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite", "InsideWrite"];
     const INFALLIBLE_VALUES: &[&str] = &["GuiDraw", "Text"];
     fn contains_boundary(ty: &Type, names: &[&str]) -> bool {
         use syn::visit::Visit;
