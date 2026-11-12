@@ -24,7 +24,7 @@ type and data, rather than adding another item-dispatched special case.
 | Only text wraps, once | `crates/horizon-client/src/game/blocks/stations/tooltip.rs:183`, `:218`, `:229`; `crates/horizon-client/src/game/blocks/stations.rs:12` | Text currently splits when max_width is nonnegative; invalid image sizes silently disappear. Preserve components, refuse invalid mod output explicitly, and wrap before Pre under the supplied contract. |
 | Whole-tooltip cancellation | `crates/horizon-mod-vocab/src/hooks/render_tooltip_gather_components.rs:21`, `render_tooltip_pre.rs:21`, `render_tooltip_texture.rs:18`; `crates/horizon-client/src/game/blocks/stations/tooltip.rs:57`, `:209` | Gather empties the list; Pre skips the whole tooltip; neither component callback has cancellation. Texture stays noncancellable. |
 
-`crates/horizon-mod-vocab/src/hooks/notes.rs:1744–1750` describes the old
+`crates/horizon-mod-vocab/src/hooks/notes.rs:1728` and `:1732` describe the old
 stack-based contract and must change with implementation. The adapters are
 `crates/horizon-client/src/game/native_hooks/base.rs:3377`, `:3387`, and
 `native_hooks/render_tooltip_{gather_components,pre,texture}.rs:15`, `:9`, `:9`.
@@ -223,7 +223,10 @@ and rollback rules.
 With no subscribers or custom data, take O(1) presence checks and run exactly the
 vanilla path: no API element conversion, payload encoding, registry scan, factory
 allocation or new validation/clamp/minimum. Built-in constants and default font,
-wrapping, positioning and bundle behavior remain vanilla. Today's unconditional
+positioning and bundle behavior remain vanilla. The screen-fit wrap below is part of
+this contract, not mod work: it applies with or without subscribers (fixtures A–G and
+K, B among them, have no listener; H–J add a listener's maximum on top), and the fast
+path skips only the mod dispatch. Today's unconditional
 API list conversions in `tooltip.rs:120` and `:190` are costs to remove, not the
 promised baseline. With custom data use indexed exact-key dispatch and prepare
 each component once; no per-frame string hashing or formatting.
