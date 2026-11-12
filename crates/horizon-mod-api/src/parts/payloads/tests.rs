@@ -1,6 +1,17 @@
 use super::*;
 use crate::{IPayloadContext, PayloadBytes, RegisterPayloadHandlersEvent};
 
+fn frozen(registrar: &PartRegistrar) -> mod_vocab::__private::game::Payloads {
+    registrar
+        .parts
+        .payloads
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .clone()
+        .into()
+}
+
 struct Handler;
 impl IPayloadHandler for Handler {
     fn handle(&self, _: PayloadBytes, _: &mut dyn IPayloadContext) -> Result<(), String> {
@@ -26,13 +37,8 @@ fn registrar_views_preserve_defaults_and_common_occupies_both_protocols() {
         required.play_to_server(PayloadId("test:required".into()), handler());
     }
     assert!(registrar.refused.is_empty());
-    let declarations: Vec<_> = registrar
-        .parts
-        .payloads
-        .as_ref()
-        .unwrap()
-        .declarations()
-        .collect();
+    let snapshot = frozen(&registrar);
+    let declarations: Vec<_> = snapshot.declarations().collect();
     assert_eq!(declarations.len(), 3);
     let required = declarations
         .iter()
@@ -57,16 +63,7 @@ fn registrar_views_preserve_defaults_and_common_occupies_both_protocols() {
         .registrar("3")
         .common_to_server(PayloadId("test:required".into()), handler());
     assert_eq!(registrar.refused.len(), 1);
-    assert_eq!(
-        registrar
-            .parts
-            .payloads
-            .as_ref()
-            .unwrap()
-            .declarations()
-            .count(),
-        3
-    );
+    assert_eq!(frozen(&registrar).declarations().count(), 3);
 }
 
 #[test]
@@ -79,11 +76,7 @@ fn client_event_supplies_both_common_handlers_and_refuses_replacement() {
         .executes_on(HandlerThread::Network)
         .common_to_client(id.clone(), None);
     assert_eq!(
-        registrar
-            .parts
-            .payloads
-            .as_ref()
-            .unwrap()
+        frozen(&registrar)
             .validate_client_handlers()
             .unwrap_err()
             .len(),
@@ -92,15 +85,7 @@ fn client_event_supplies_both_common_handlers_and_refuses_replacement() {
     (&mut registrar as &mut dyn Registrar)
         .client_payload_handlers()
         .register(&id, handler());
-    assert!(
-        registrar
-            .parts
-            .payloads
-            .as_ref()
-            .unwrap()
-            .validate_client_handlers()
-            .is_ok()
-    );
+    assert!(frozen(&registrar).validate_client_handlers().is_ok());
     (&mut registrar as &mut dyn Registrar)
         .client_payload_handlers()
         .register(&id, handler());
@@ -140,4 +125,44 @@ fn invalid_ownership_versions_and_receiving_handlers_refuse_load() {
     );
     assert_eq!(registrar.refused.len(), 2);
     assert!(registrar.parts.payloads.is_none());
+}
+
+#[test]
+fn owner_refusal_and_checkpoint_keep_both_frozen_phase_callbacks_unchanged() {
+    let mut registrar = PartRegistrar::new("test");
+    let id = PayloadId("test:checkpoint".into());
+    (&mut registrar as &mut dyn Registrar)
+        .payload_handlers()
+        .registrar("1")
+        .common_to_client(id.clone(), None);
+    let checkpoint = registrar.parts.clone();
+    (&mut registrar as &mut dyn Registrar)
+        .client_payload_handlers()
+        .register(&id, handler());
+    for protocol in [PayloadProtocol::Configuration, PayloadProtocol::Play] {
+        assert!(
+            frozen(&registrar)
+                .handler(&id.0, protocol, PayloadDirection::ToClient)
+                .is_some()
+        );
+    }
+    registrar.mod_id = "other";
+    registrar.add_client_payload_handler(&id, HandlerThread::Network, handler());
+    assert_eq!(registrar.refused.len(), 1);
+    assert!(registrar.refused[0].contains("owned by test"));
+    registrar.parts = checkpoint;
+    assert_eq!(
+        frozen(&registrar)
+            .validate_client_handlers()
+            .unwrap_err()
+            .len(),
+        2
+    );
+    for protocol in [PayloadProtocol::Configuration, PayloadProtocol::Play] {
+        assert!(
+            frozen(&registrar)
+                .handler(&id.0, protocol, PayloadDirection::ToClient)
+                .is_none()
+        );
+    }
 }

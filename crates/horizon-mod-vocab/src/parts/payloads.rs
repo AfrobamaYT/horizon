@@ -6,13 +6,13 @@ use crate::{
 };
 
 #[derive(Clone)]
-struct Registered {
-    declaration: PayloadDeclaration,
-    owner: &'static str,
-    owner_index: usize,
-    server: Option<Arc<dyn IPayloadHandler>>,
-    client: Option<Arc<dyn IPayloadHandler>>,
-    client_thread: HandlerThread,
+pub(crate) struct Registered {
+    pub(crate) declaration: PayloadDeclaration,
+    pub(crate) owner: &'static str,
+    pub(crate) owner_index: usize,
+    pub(crate) server: Option<Arc<dyn IPayloadHandler>>,
+    pub(crate) client: Option<Arc<dyn IPayloadHandler>>,
+    pub(crate) client_thread: HandlerThread,
 }
 
 // no wire: frozen process-local registration storage contains callback trait objects and owning-mod identities.
@@ -21,7 +21,7 @@ struct Registered {
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct Payloads {
-    phases: [HashMap<String, Registered>; 2],
+    pub(crate) phases: [HashMap<String, Registered>; 2],
 }
 
 // no wire: resolved process-local callback and its owning mod's live enable guard.
@@ -168,4 +168,3 @@ pub trait PayloadsRegistrar {
         handler: Arc<dyn IPayloadHandler>,
     );
 }
-
