@@ -360,6 +360,8 @@ fn host(
             .get(ptr as usize..end)
             .ok_or_else(|| wasmtime::Error::msg("input outside memory"))?,
     );
+    #[cfg(feature = "test-copy-probe")]
+    crate::copy_probe::record(false, input.len());
     let mut reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     reply.clear();
     let cx = &mut *caller.data_mut().cx as *mut Cx;
@@ -414,6 +416,8 @@ fn host(
     let size = u32::try_from(reply.bytes().len())?;
     if size != 0 && size <= cap {
         memory.write(&mut caller, out as usize, reply.bytes())?;
+        #[cfg(feature = "test-copy-probe")]
+        crate::copy_probe::record(true, reply.bytes().len());
     }
     caller.data_mut().replies[depth] = reply;
     Ok(size)
@@ -431,6 +435,8 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
     let result = memory.write(&mut caller, ptr as usize, reply.bytes());
     caller.data_mut().replies[depth] = reply;
     result?;
+    #[cfg(feature = "test-copy-probe")]
+    crate::copy_probe::record(true, caller.data().replies[depth].bytes().len());
     Ok(())
 }
 
@@ -749,6 +755,8 @@ impl WasmMod {
         memory
             .write(&mut *store, ptr as usize, input.bytes())
             .map_err(|e| CallError::Fault(e.into()))?;
+        #[cfg(feature = "test-copy-probe")]
+        crate::copy_probe::record(true, input.bytes().len());
         let result = self.hook.call(&mut *store, id).map_err(CallError::Fault)?;
         let ptr = (result >> 32) as usize;
         let len = result as u32;
@@ -769,6 +777,8 @@ impl WasmMod {
                 .get(ptr..end)
                 .ok_or_else(|| CallError::Refused(wasmtime::Error::msg("reply outside memory")))?,
         );
+        #[cfg(feature = "test-copy-probe")]
+        crate::copy_probe::record(false, output.len());
         Ok(())
     }
 }

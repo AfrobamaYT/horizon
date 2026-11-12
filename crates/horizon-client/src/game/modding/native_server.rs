@@ -1692,7 +1692,7 @@ impl Game<'_> {
             host.hub
                 .chat_filter
                 .as_ref()
-                .is_none_or(|g| !g.filter.matches(text)),
+                .is_none_or(|g| !g.matches(text)),
         )
     }
     /// A system line in every player's chat and the server's log.
@@ -2491,6 +2491,7 @@ mod tests {
             count: 1,
             ticks: 0,
             health: 5,
+            air: 300,
             no_gravity: true,
             following: None,
         });

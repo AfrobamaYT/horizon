@@ -10,6 +10,24 @@ pub fn main_with(
 ) {
     horizon_engine_slots::install_seal(mod_points::__private::seal)
         .expect("engine seal provider must be installed once before startup");
+    // Platform instrumentation must precede registration and the first mod guard.
+    if let Err(error) = mod_api::__private::initialize() {
+        eprintln!("Horizon: refusing startup because mod instrumentation is unavailable: {error}");
+        std::process::exit(1);
+    }
+    if let Err(error) = horizon_engine_slots::install_platform(horizon_engine_slots::Platform {
+        install_packages: mod_api::__private::install_packages,
+        install_registration_data: mod_api::__private::install_registration_data,
+        install_parts: mod_api::__private::install_parts,
+        profiler_is_enabled: mod_api::__private::profiler::is_enabled,
+        profiler_start: mod_api::__private::profiler::start,
+        profiler_stop: mod_api::__private::profiler::stop,
+        profiler_summary: mod_api::__private::profiler::summary,
+        profiler_firefox_profile: mod_api::__private::profiler::firefox_profile,
+    }) {
+        eprintln!("Horizon: {error}");
+        std::process::exit(1);
+    }
     let exe = std::env::current_exe();
     let native: Result<_, Box<dyn std::error::Error + Send + Sync>> = exe
         .as_ref()

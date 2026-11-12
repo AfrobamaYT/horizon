@@ -126,3 +126,6 @@ mod tests {
         assert_eq!(REENTRANT.seal(), Err(Refusal::Sealed));
     }
 }
+
+mod platform;
+pub use platform::{Platform, PlatformRefusal, install_platform, platform};

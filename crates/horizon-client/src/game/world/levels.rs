@@ -1050,8 +1050,11 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_pre(level);
             }
-            self.update_dedicated_streaming();
-            self.update_world();
+            horizon_client::spans::time("dedicated_streaming", || {
+                self.update_dedicated_streaming();
+            });
+            horizon_client::spans::time("update_world", || self.update_world());
+            let tick_span = horizon_client::spans::guard("level_tick");
             result = horizon_client::block_contact::in_level(
                 (self.serving.is_some() || self.options.dedicated.is_some()).then_some(dim.id()),
                 || {
@@ -1068,6 +1071,7 @@ impl Game<'_> {
                     }
                 },
             );
+            drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {
                 break;
@@ -1075,10 +1079,11 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_post(level);
             }
-            self.publish_server_debug(dim);
+            horizon_client::spans::time("server_debug", || self.publish_server_debug(dim));
             // An entity that crossed into a level that already ticked this
             // server tick is in it when the tick ends (`addDuringTeleport`).
             if running == Some(true) {
+                let _span = horizon_client::spans::guard("late_portal_arrivals");
                 let mut moved = false;
                 for &earlier in &order[..k] {
                     if !self.arrival_chunks(earlier).is_empty() && self.enter_level(earlier).is_ok()

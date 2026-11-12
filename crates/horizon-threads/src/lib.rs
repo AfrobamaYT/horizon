@@ -1,12 +1,18 @@
 //! Scheduling hints for the game's threads and its allocator: the few OS calls
 //! that the other crates, which forbid unsafe code, can't make themselves.
 
+#[cfg(feature = "test-allocation-probe")]
+pub mod allocation_probe;
 /// The game window's boot screen, before wgpu's first frame paints over it.
 #[cfg(target_os = "windows")]
 pub mod boot_paint;
 pub mod heap_census;
 pub mod jobs;
 pub mod process_memory;
+pub mod stack_dump;
+/// Alt+Space and a bare Alt never open the window's system menu, as in GLFW.
+#[cfg(target_os = "windows")]
+pub mod system_menu;
 
 use std::sync::{
     OnceLock,

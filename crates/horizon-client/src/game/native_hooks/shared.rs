@@ -2741,8 +2741,6 @@ impl Game<'_> {
         for (player, name) in players {
             self.native_player_logged_out(player, &name);
         }
-        // No tick follows to send what they said.
-        self.flush_native_net();
     }
     /// The mobs from index `from` on are new in the world.
     pub(super) fn native_mobs_joined(&mut self, from: usize, natural: bool) {
@@ -5118,7 +5116,7 @@ mod item_fall_on_tests {
                         .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
                     let pos = BlockPos::new(1, 64, 1);
                     game.world.set(pos.x, pos.y, pos.z, stone).unwrap();
-                    game.world.random = horizon_core::random::LegacyRandom::new(12345);
+                    *game.world.random = horizon_core::random::LegacyRandom::new(12345);
                     LOAN_VALUE
                         .set(&mut game.world.attachments, mod_api::Holder::Level, 11)
                         .unwrap();
@@ -5248,6 +5246,7 @@ pub(super) mod particle_count_tests {
             count: 1,
             ticks: 0,
             health: 5,
+            air: 300,
             following: None,
         }
     }

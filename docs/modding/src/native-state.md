@@ -1,28 +1,16 @@
 # Native state: `[[native.state]]` is refused
 
-horizon-mixins can add a field to a game type with a `[[state]]` table. Horizon refuses it: a mod that
-declares `[[native.state]]` does not build.
+`[[native.state]]` would add a field to a game type. Horizon refuses it, because a new field would break the
+prebuilt game, which is never rebuilt for a mod. A mod that declares it does not build:
 
 ```text
 E_MIXIN_STATE_LAYOUT: <mod>:<row>: native state changes the prebuilt game's layout; use an attachment instead
 ```
 
-## Why
-
-The [native route](native-route.md) never rebuilds the game. Your mod's code is compiled against the prebuilt
-game, and only the functions you target are copied and swapped in. A new field changes the type's size and
-the place of its other fields, but every function of the prebuilt game that you did not copy was compiled
-with the old layout and would keep reading the old places. The only way to add a field safely would be to
-rebuild the whole game for each set of mods, which is what this route exists to avoid.
-
-## What to use instead
-
-Per-object data is an **attachment**: a typed value the game keeps for you on an entity, block entity, chunk,
-level or player, saved with it when you give it a codec. Attachments work the same on native and wasm mods,
-and through the stable API, so they also survive game updates. See
-[server attachments](concepts/trait-mods.md#server-attachments) and
+Fix: remove the row and use an **attachment**. An attachment is a typed value the game keeps for you on an
+entity, block entity, chunk, level or player, and saves with it when you give it a codec. It works the same
+on native and wasm. See [server attachments](concepts/trait-mods.md#server-attachments) and
 [querying attachment holders](how-to/attachments.md).
 
-Data for the whole game rather than one object is a [published loop](loops.md)'s slot value when it fits, which the game keeps once per `Game` and drops
-with it. A `static` in your mod's crate is shared by every `Game` in the process (single player runs a client
-and a server one) and outlives each world, so key it by world and clear it yourself.
+For data about the whole game, a [published loop](loops.md)'s slot value lives once per `Game`. A `static` in
+your crate is shared by every `Game` in the process and outlives each world: key it by world and clear it yourself.
