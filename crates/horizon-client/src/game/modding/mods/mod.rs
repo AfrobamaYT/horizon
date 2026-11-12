@@ -1359,7 +1359,7 @@ impl Game<'_> {
     }
 
     #[cfg(test)]
-    pub(in crate::game) fn initialize_mod_runtime_for_tests() {
+    pub(super) fn initialize_mod_runtime_for_tests() {
         static INITIALIZED: std::sync::Once = std::sync::Once::new();
         INITIALIZED.call_once(|| {
             super::api_values::install_test_platform();
