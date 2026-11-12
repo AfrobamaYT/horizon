@@ -101,7 +101,7 @@ A helper with a wrong type is an ordinary compiler error, reported under your mo
 | `RETURN` | on the value the function returns (`$value`) | the value to return |
 | `OVERWRITE` | instead of the whole body; one mod per function | the function's return type |
 | `BEFORE_CALL`, `AFTER_CALL` | before or after one call in the body | `()` |
-| `AFTER_ASSIGN` | after one assignment in the body | `()` |
+| `AFTER_ASSIGN` | after one statement that stores a call's result (`let x = f();`, `x = f();`) | `()` |
 | `MODIFY_ARG`, `MODIFY_ARGS` | on one argument, or all arguments as a tuple, of one call | the new argument(s) |
 | `MODIFY_CONSTANT` | on one literal in the body | the new value |
 | `MODIFY_VARIABLE` | on one read or write of a local or parameter (`variable = { … }`) | the new value |
@@ -169,11 +169,12 @@ call directly under `&` for the kinds that rewrite only that call.
 | `kind` | yes | One of the kinds above. |
 | `helper` | yes | The helper's file, a `.rs` path under `src/`. |
 | `bindings` | when the helper has parameters | One `{ name, ty, value }` per helper parameter, in order. `name` and `ty` repeat the parameter; `value` is a target parameter or its borrow (`self`, `&*self`, `&mut *self`, `rate`), or a tool value (below). |
-| `cancellable` | no | `HEAD`: the helper returns `ControlFlow<()>`, or `ControlFlow<R>` for a function returning `R`, and can end the function. |
-| `selector`, `require`, `ordinal` | for one-place kinds | Which call, how many matches, which match. |
+| `cancellable` | no | `HEAD`, `BEFORE_CALL`, `AFTER_CALL`, `AFTER_ASSIGN`: the helper returns `ControlFlow<()>`, or `ControlFlow<R>` for a function returning `R`, and can end the function. |
+| `selector`, `require`, `ordinal` | for one-place kinds | Which call, how many matches, which match. `MODIFY_VARIABLE` has no `selector`: `variable` picks the variable, `require` and `ordinal` its access. |
 | `variable` | `MODIFY_VARIABLE` | `{ name, ordinal, at = "LOAD" or "STORE", parameter = true for a parameter }`. |
 | `priority` | no | Orders rows of several mods at one place: higher runs first (the tool's default is 100). |
-| `slice`, `argument`, `result` | no | Narrow the search region, pick an argument, give a call's result type; see the tool's docs. |
+| `result` | `MODIFY_ARGS` (and `AFTER_CALL` reading the result) | The selected call's result type. Refused on other kinds. |
+| `slice`, `argument` | no | Narrow the search region; pick an argument. See the tool's docs. |
 
 The tool values a binding can pass:
 
@@ -182,15 +183,16 @@ The tool values a binding can pass:
 | `$value` | The value being changed: the return value (`RETURN`), the expression's value (`MODIFY_EXPRESSION_VALUE`), the argument, constant or variable. |
 | `$arg0`, `$arg1`, … | An argument of the selected call (`WRAP_OPERATION`). |
 | `$args` | All arguments of the selected call as a tuple (`MODIFY_ARGS`). |
-| `$operation` | The selected call itself, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`). |
+| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`): the first binding, and the first parameter of the operation. |
+| `$operation` | The selected call itself, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`), always the last binding. |
 | `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th (from 0) local variable declared as `NAME` in the original body: by value, `&` or `&mut`. |
 
 **Selectors.** A `selector` is source text matched against the original body, not a resolved name. For the
 kinds that act on a call (`BEFORE_CALL`, `AFTER_CALL`, `MODIFY_ARG`, `MODIFY_ARGS`, `WRAP_OPERATION`) it is
 the callee as written, without arguments: `autosave_interval`, `self.next_autosave_interval`. For
 `MODIFY_EXPRESSION_VALUE` it is the whole expression as written, arguments included:
-`autosave_interval(rate)`. `require` is the number of matches in the original body and `ordinal` picks one,
-from 0, in source order.
+`autosave_interval(rate)`. `require` is the number of matches in the original body (inside the `slice`, when
+there is one) and `ordinal` picks one, from 0, in source order.
 
 ## Naming the target
 
@@ -233,8 +235,8 @@ covered on [Published loops](loops.md#what-composes-with-a-loop).
 
 ## With other mods and with `[[inject]]`
 
-Rows of several mods on one function are applied to one copy, in the tool's order. Only one mod may
-`OVERWRITE` a function. An `[[inject]]` listener and a mixin may share a function: the API head listeners run
+Rows of several mods on one function are applied to one copy, in the tool's order. An `OVERWRITE` takes the
+function alone: no other mixin of any mod, or of the same mod, may target a function that one overwrites. An `[[inject]]` listener and a mixin may share a function: the API head listeners run
 first, then the patched copy, then the API return listeners.
 
 ## Refusals

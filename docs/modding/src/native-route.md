@@ -36,8 +36,10 @@ Code on this route is compiled into copies of the game's functions, so it sees t
 one build:
 
 - It is pinned to the exact game commit in `[native] horizon`. A mod built for one commit is rebuilt for the
-  next. When a function it targets changed, the build fails with a refusal or a compiler error under your
-  mod's id, never silently.
+  next. Each build copies the targeted functions from the new source. When a target was renamed, moved, or
+  its selected call or types changed, the build fails with a refusal or a compiler error under your mod's id.
+  A change elsewhere in a target's body is not reported: your mixin applies to the new body, so reread the
+  functions you target when you move to a new commit.
 - It gets the game's own types (`Game`, its fields, its block entity map), not `mod_api` values. Those types
   change between builds without notice.
 - It is trusted native code with the player's rights, not a sandbox.

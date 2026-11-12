@@ -51,7 +51,8 @@ error in your helper.
 ## The generated method
 
 Its name is `__horizon_mixins_<mod>_<id>`: your mod's id and the row's id, lowercased, with `-` turned into
-`_`. Its shape follows `kind`:
+`_`. So write a bridge id with letters, digits, `_` and `-` only, and keep the ids distinct after that change
+(`ticks-a` and `ticks_a` name the same method). Its shape follows `kind`:
 
 | `kind` | Method | `target` | `member` |
 | --- | --- | --- | --- |
@@ -83,7 +84,8 @@ crate is compiled before the copies.
 
 - The struct or method is in the game crate, `horizon_client`, not a crate below it.
 - A field bridge's struct is not generic over types or consts (lifetimes are fine: `Game<'a>`).
-- An invoker's type and method are not generic.
+- An invoker's type and method are not generic, and its signature names no associated type through `Self`
+  (such as `Self::Error`): the generated method could not name it.
 
 ## On success
 

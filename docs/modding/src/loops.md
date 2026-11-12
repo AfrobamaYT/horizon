@@ -151,11 +151,11 @@ The cursor's `game` is the whole game, so a slot can add, remove or replace bloc
   own loop, without slots, and a whole pass: every entity ticks again and the work after the loop runs again.
   The enclosing pass's working state is set aside and restored, so it carries on as before. The server logs
   once: `Published loop block_entities.tick: it was entered again while it ran; it runs without its mods' slots`.
-- A panic in a slot's `before`, `after` or `Default` unwinds out of the tick like any game panic: the server
-  writes its crash report and saves the world. The report names the mod and the loop:
-  `in native mod <id>, hook loop block_entities.tick, part <id>::<Type>`. That `Game` then runs the loop
-  without slots and logs once: `Published loop block_entities.tick: a mod's slot panicked; it runs without
-  its mods' slots`. The slots already made are dropped, each attributed to its own mod.
+- A panic in a slot's `before`, `after` or `Default` unwinds out of the tick like any game panic, and the
+  panic is attributed to the mod and the loop: `in native mod <id>, hook loop block_entities.tick, part
+  <id>::<Type>`. That `Game` never runs the slots again: if something catches the panic and the `Game` goes on,
+  it runs the loop without slots and logs once: `Published loop block_entities.tick: a mod's slot panicked;
+  it runs without its mods' slots`. The slots already made are dropped, each attributed to its own mod.
 - Each mod's slot is dropped on its own. If one mod's `Drop` panics, the others are still dropped and the
   process does not abort.
 

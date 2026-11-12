@@ -23,5 +23,6 @@ and through the stable API, so they also survive game updates. See
 [server attachments](concepts/trait-mods.md#server-attachments) and
 [querying attachment holders](how-to/attachments.md).
 
-Data for the whole game rather than one object belongs in your mod's own crate (a `static`, which Rust requires to be `Sync`: single player runs a client and a server thread), or in a [published loop](loops.md)'s slot value, which the game keeps once per
-`Game`.
+Data for the whole game rather than one object is a [published loop](loops.md)'s slot value when it fits, which the game keeps once per `Game` and drops
+with it. A `static` in your mod's crate is shared by every `Game` in the process (single player runs a client
+and a server one) and outlives each world, so key it by world and clear it yourself.
