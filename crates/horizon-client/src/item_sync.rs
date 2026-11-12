@@ -48,7 +48,8 @@ pub fn can_glide_using(stack: &ItemStack, slot: &str, items: &crate::items::Item
     let Some(info) = items.get(&stack.item) else {
         return false;
     };
-    if info.max_damage != 0 && stack.damage + 1 >= info.max_damage {
+    let max_damage = items.stack_max_damage(stack);
+    if max_damage != 0 && stack.damage.saturating_add(1) >= max_damage {
         return false;
     }
     // Asked every tick for each slot: a stack with no components of its own

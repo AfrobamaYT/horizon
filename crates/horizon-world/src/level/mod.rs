@@ -1069,7 +1069,7 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// The `piston_carries_block_entity` hook (Horizon's own) for the block
     /// `state` at `pos`, asked at the last step of `PistonBaseBlock.isPushable`, for a block that got
     /// past its push reaction: `Some(false)` keeps it in place, `Some(true)`
-    /// lets a piston move it with its mod block entity, and `None` keeps
+    /// lets a piston move it with its block entity, and `None` keeps
     /// vanilla's rule (a block with a block entity does not move). The default
     /// answers `None`.
     fn adjust_piston_carries_block_entity(
@@ -1079,7 +1079,7 @@ pub trait LevelAccess: BlockEntityNeighbors {
     ) -> Option<bool> {
         None
     }
-    /// Take the mod block entity at `from` out of the level with its
+    /// Take the block entity at `from` out of the level with its
     /// attachments, running none of its removal side effects, for the moving
     /// piston `PistonBaseBlock.moveBlocks` puts at `to`, which holds it until
     /// its block lands. Levels without block entities do nothing.
@@ -1871,3 +1871,5 @@ mod dimension_key_tests {
 
 #[cfg(test)]
 mod block_entity_neighbor_tests;
+
+mod piston_reactions;
