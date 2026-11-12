@@ -228,7 +228,7 @@ entity coverage is data, handles and global hooks. On the server a mod can act o
 | `canHydrateInFluidType(type)` | Partial | `FluidTypeProperties.can_hydrate` | Per-fluid data. |
 | `getSoundFromFluidType(type, action)` | Missing | — | No fluid sound-action table. |
 | `sendPairingData(player, consumer)` | Missing | — | No pairing-payload API. |
-| `copyAttachmentsFrom(entity, wasDeath)` | Partial | attachments survive dimension change; `player_clone` (`hooks/base.rs`) | Copy rules are the attachment store's; there is no per-entity hook at the copy. |
+| `copyAttachmentsFrom(entity, wasDeath)` | Partial | attachments survive dimension change; player respawn keeps `copy_on_death` entries; mob conversion copies every entry with a codec; `player_clone` (`hooks/base.rs`) | Copy rules are the attachment store's; there is no per-entity hook at the copy. |
 | `getBlockBounciness(pos, state)` | Partial | `BlockPart::bounce_on` (`hooks/block_landing.rs`) | Edits post-bounce movement instead of returning a bounciness factor. |
 
 ## `ILivingEntityExtension`
