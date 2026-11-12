@@ -2061,3 +2061,6 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     );
     assert_eq!(CALLS.get(), 1);
 }
+
+#[path = "wire_loopback/play_hit_sound.rs"]
+mod play_hit_sound;

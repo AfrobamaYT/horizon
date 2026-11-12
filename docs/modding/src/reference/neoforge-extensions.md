@@ -313,3 +313,9 @@ their rows have landed or become partial since and should be narrowed when they 
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing
   above; they have no follow-up issue yet. The largest are the entity fluid queries, block entity model data and
   fluid tooltips.
+
+## IClientBlockExtensions: mining hit sound
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `IClientBlockExtensions.playHitSound` | **Covered** | Client `BlockPart::play_hit_sound`, with state, position, face and `ClientHost`. Returning `Flow::Cancel` handles the hit and suppresses the default sound. Both local mining ticks and `ClientLevel.addBreakingBlockEffects` use the same sound helper. Sculk growth is outside this hook. |
