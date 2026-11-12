@@ -167,6 +167,12 @@ impl Game<'_> {
         if !self.entity_attachments.contains_key(&id.get()) {
             return Ok(());
         }
+        if matches!(
+            self.with_resident_slot(&self.dim.key(), id, |slot| slot.is_bound()),
+            super::entity_residency::SlotAccess::Done(true)
+        ) {
+            return Ok(());
+        }
         // Cleanup owns per-level UUID metadata, while attachment maps are global.
         // Record the actual part identity so its level alone retires its map.
         if self.level_dragon_part(id.get()).is_some() {
