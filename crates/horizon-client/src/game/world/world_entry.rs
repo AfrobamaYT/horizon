@@ -362,16 +362,27 @@ impl Game<'_> {
         let packs: Vec<_> = std::iter::once(&stack.content)
             .chain(stack.enabled_packs())
             .collect();
-        let files: Vec<(String, Vec<(String, Vec<u8>)>)> =
-            horizon_client::datapack::registry_files(&packs, &keys)
-                .into_iter()
-                .map(|(path, versions)| {
-                    let versions = super::condition_reload_state::registry_versions(
-                        versions, conditions, &path,
-                    );
-                    (path, versions)
-                })
-                .collect();
+        let files: Vec<_> = horizon_client::datapack::registry_files(
+            &packs,
+            &keys,
+            !conditions.has_registered(),
+            |path, pack, bytes| {
+                !super::condition_reload_state::registry_versions(
+                    vec![(pack.to_owned(), bytes.to_vec())],
+                    conditions,
+                    path,
+                )
+                .is_empty()
+            },
+        )
+        .map_err(|error| {
+            format!(
+                "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                error.registry, error.entry, error.pack, error.file, error.reason
+            )
+        })?
+        .into_iter()
+        .collect();
         mod_api::DatapackCandidate::build(declarations, &files)
             .map(Some)
             .map_err(|error| {

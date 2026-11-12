@@ -733,11 +733,13 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
 pub fn registry_files(
     packs: &[&DataPack],
     registries: &[(&str, &str)],
-) -> BTreeMap<String, Vec<(String, Vec<u8>)>> {
+    fallback: bool,
+    mut accepts: impl FnMut(&str, &str, &[u8]) -> bool,
+) -> Result<BTreeMap<String, Vec<(String, Vec<u8>)>>, Box<horizon_mod_api::DatapackLoadError>> {
     let mut kinds: Vec<&str> = registries.iter().map(|(namespace, _)| *namespace).collect();
     kinds.sort_unstable();
     kinds.dedup();
-    let mut files: BTreeMap<String, Vec<(String, Vec<u8>)>> = BTreeMap::new();
+    let mut sources: BTreeMap<String, Vec<&DataPack>> = BTreeMap::new();
     for pack in packs {
         for file in pack.list_kinds(&kinds) {
             let in_registry = file
@@ -752,16 +754,59 @@ pub fn registry_files(
                                 .is_some_and(|rest| rest.starts_with('/'))
                         })
                 });
-            if in_registry && let Some(bytes) = pack.read(&file) {
-                files
-                    .entry(file)
-                    .or_default()
-                    .push((pack.id.clone(), bytes));
+            if in_registry {
+                sources.entry(file).or_default().push(pack);
             }
         }
     }
-    files
+    let mut files = BTreeMap::new();
+    let mut total = 0;
+    for (file, packs) in sources {
+        for pack in packs.into_iter().rev() {
+            // Read at most the custom-registry limit plus a refusal byte, including
+            // decompressed output. No losing payload remains resident.
+            let bytes = pack
+                .source
+                .read_head(&file, horizon_mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
+                .unwrap_or_default();
+            let oversized = bytes.len() > horizon_mod_api::MAX_DATAPACK_ENTRY_BYTES;
+            if oversized || accepts(&file, &pack.id, &bytes) {
+                total += bytes.len();
+                if !oversized && total > horizon_mod_api::MAX_SNAPSHOT_BYTES {
+                    let (namespace, path) = registries
+                        .iter()
+                        .find(|(namespace, path)| {
+                            file.splitn(3, '/').nth(2).is_some_and(|rest| {
+                                rest.starts_with(&format!("{namespace}/{path}/"))
+                            })
+                        })
+                        .expect("listed custom registry file");
+                    let rest = file.strip_prefix("data/").unwrap();
+                    let (entry_namespace, rest) = rest.split_once('/').unwrap();
+                    let entry = rest
+                        .strip_prefix(&format!("{namespace}/{path}/"))
+                        .unwrap()
+                        .strip_suffix(".json")
+                        .unwrap();
+                    return Err(Box::new(horizon_mod_api::DatapackLoadError {
+                        registry: format!("{namespace}:{path}"),
+                        entry: format!("{entry_namespace}:{entry}"),
+                        file,
+                        pack: pack.id.clone(),
+                        reason: horizon_mod_api::DatapackLoadReason::CandidateTooLarge,
+                    }));
+                }
+                files.insert(file.clone(), vec![(pack.id.clone(), bytes)]);
+                break;
+            }
+            if !fallback {
+                break;
+            }
+        }
+    }
+    Ok(files)
 }
+
 impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
         Self::load_impl(packs, None)
@@ -1963,7 +2008,7 @@ mod tests {
             ));
         }
         let refs = packs.iter().collect::<Vec<_>>();
-        let files = registry_files(&refs, &[("example", "spell")]);
+        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
         assert_eq!(
             files.keys().map(String::as_str).collect::<Vec<_>>(),
             [
@@ -1973,12 +2018,13 @@ mod tests {
         );
         assert_eq!(
             files["data/example/example/spell/fire.json"],
-            vec![
-                ("low".to_owned(), b"low".to_vec()),
-                ("high".to_owned(), b"high".to_vec())
-            ]
+            vec![("high".to_owned(), b"high".to_vec())]
         );
-        assert!(registry_files(&refs, &[]).is_empty());
+        assert!(
+            registry_files(&refs, &[], true, |_, _, _| true)
+                .unwrap()
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
