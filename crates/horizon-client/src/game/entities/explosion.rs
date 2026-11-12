@@ -49,13 +49,13 @@ struct ExplosionDropPiece {
 
 /// `Level.clip` with `ClipContext.Block.COLLIDER`, no fluids and the
 /// collision context of the entity whose exposure is measured.
-pub(super) struct ClipData<'a, 'r> {
+pub(in crate::game) struct ClipData<'a, 'r> {
     pub facts: &'a horizon_client::blocks::BlockFacts,
     pub behaviours: &'a horizon_world::level::Behaviours,
     pub tables: &'a horizon_client::mesher::MeshTables,
     pub registry: &'r horizon_world::registry::BlockRegistry,
 }
-pub(super) struct ColliderRays<'a, 'r> {
+pub(in crate::game) struct ColliderRays<'a, 'r> {
     pub scene: SceneCollisions<'a, 'r>,
     pub context: CollisionContext<'static>,
     pub clip_data: Option<ClipData<'a, 'r>>,
@@ -146,7 +146,7 @@ impl JavaKey for Key {
 
 /// `Explosion.BlockInteraction` for the explosions Horizon produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum BlockInteraction {
+pub(in crate::game) enum BlockInteraction {
     Keep,
     Destroy,
     DestroyWithDecay,
@@ -154,17 +154,17 @@ pub(super) enum BlockInteraction {
 
 /// Properties of the direct entity passed to `ServerLevel.explode`.
 #[derive(Clone, Copy, Default)]
-pub(super) struct ExplosionSource {
+pub(in crate::game) struct ExplosionSource {
     silent: bool,
     /// The entity that exploded and its kind (`Explosion.getDirectSourceEntity`), when known.
     entity: Option<(u32, &'static str)>,
 }
 impl ExplosionSource {
-    pub(super) fn with_silence(mut self, silent: bool) -> Self {
+    pub(in crate::game) fn with_silence(mut self, silent: bool) -> Self {
         self.silent = silent;
         self
     }
-    pub(super) fn with_entity(mut self, id: u32, kind: &'static str) -> Self {
+    pub(in crate::game) fn with_entity(mut self, id: u32, kind: &'static str) -> Self {
         self.entity = Some((id, kind));
         self
     }
@@ -172,7 +172,7 @@ impl ExplosionSource {
 
 /// `ServerExplosion.hurtEntities`: an entity is hurt when its position is
 /// within the blast's diameter of the centre.
-pub(super) fn blast_reaches(center: [f64; 3], diameter: f64, at: [f64; 3]) -> bool {
+pub(in crate::game) fn blast_reaches(center: [f64; 3], diameter: f64, at: [f64; 3]) -> bool {
     let d =
         ((at[0] - center[0]).powi(2) + (at[1] - center[1]).powi(2) + (at[2] - center[2]).powi(2))
             .sqrt();
@@ -194,7 +194,7 @@ fn items_ignore_explosion(mob_griefing: bool, interaction: BlockInteraction) -> 
 /// `ignoreExplosion`; no wind charge goes through `server_explode`), and one a
 /// mob causes does no harm (`BlockAttachedEntity.hurtServer` and
 /// `ArmorStand.hurtServer`: `source.getEntity() instanceof Mob`).
-pub(super) fn blast_spares_decorations(
+pub(in crate::game) fn blast_spares_decorations(
     mob_griefing: bool,
     interaction: BlockInteraction,
     by_mob: bool,
@@ -281,13 +281,13 @@ thread_local! {
     /// Client-side randomness (explosion sound pitch), separate from the level random.
     static CLIENT_RANDOM: std::cell::RefCell<LegacyRandom> = std::cell::RefCell::new(LegacyRandom::new(0x5eed));
 }
-pub(super) fn client_float() -> f32 {
+pub(in crate::game) fn client_float() -> f32 {
     CLIENT_RANDOM.with(|r| r.borrow_mut().next_float())
 }
 
 impl Game<'_> {
     /// `blast_cause` for the blast going off now.
-    pub(super) fn blast_attacker(&self) -> Option<(u32, Text)> {
+    pub(in crate::game) fn blast_attacker(&self) -> Option<(u32, Text)> {
         // `Explosion.getIndirectSourceEntity`: a primed TNT's owner names the
         // blast before any mob does, which makes the damage type
         // `minecraft:player_explosion` (`server_explode` asks this).
@@ -301,7 +301,12 @@ impl Game<'_> {
         })
     }
     /// `ServerExplosion.getSeenPercent` for an entity box.
-    pub(super) fn seen_percent(&self, center: [f64; 3], min: [f64; 3], max: [f64; 3]) -> f32 {
+    pub(in crate::game) fn seen_percent(
+        &self,
+        center: [f64; 3],
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> f32 {
         let xs = 1.0 / ((max[0] - min[0]) * 2.0 + 1.0);
         let ys = 1.0 / ((max[1] - min[1]) * 2.0 + 1.0);
         let zs = 1.0 / ((max[2] - min[2]) * 2.0 + 1.0);
@@ -924,7 +929,7 @@ impl Game<'_> {
     }
     /// `ServerExplosion.getIndirectSourceEntity`: the causing living entity,
     /// including a TNT igniter or the player who broke an end crystal.
-    pub(super) fn explosion_kill_credit(&self) -> Option<super::commands::Target> {
+    pub(in crate::game) fn explosion_kill_credit(&self) -> Option<super::commands::Target> {
         use super::commands::Target;
         // A primed TNT's owner (a player) names the blast before any mob does.
         if self.combat.blast_owner.is_some() {
@@ -941,7 +946,7 @@ impl Game<'_> {
     }
     /// `blast_spares_decorations` for the blast going off now: its causing
     /// mob (`blast_attacker`) is the source's entity.
-    pub(super) fn blast_spares_decorations(&self, interaction: BlockInteraction) -> bool {
+    pub(in crate::game) fn blast_spares_decorations(&self, interaction: BlockInteraction) -> bool {
         let by_mob = self.blast_attacker().is_some();
         blast_spares_decorations(
             self.ui
@@ -953,7 +958,7 @@ impl Game<'_> {
         )
     }
     /// `Entity.isInWater` for an entity box: `updateFluidInteraction` over the box.
-    pub(super) fn bounds_in_water(&self, bounds: horizon_core::geometry::Aabb) -> bool {
+    pub(in crate::game) fn bounds_in_water(&self, bounds: horizon_core::geometry::Aabb) -> bool {
         self.mob_world_base(&[])
             .fluids(bounds, bounds.max_position().y)
             .in_water
@@ -1025,7 +1030,10 @@ impl Game<'_> {
     }
     /// `ExplosionEvent.Start` for the explosion `start`: true when a mod
     /// cancels it, and nothing of it happens.
-    pub(super) fn explosion_start_cancelled(&mut self, start: &ExplosionStart<'_>) -> bool {
+    pub(in crate::game) fn explosion_start_cancelled(
+        &mut self,
+        start: &ExplosionStart<'_>,
+    ) -> bool {
         if !mod_api::__private::listened(mod_api::HookId::ExplosionStart) {
             return false;
         }
@@ -1060,7 +1068,7 @@ impl Game<'_> {
     }
     /// `ServerLevel.getDestroyType`: a drop decay rule picks between decaying
     /// and plain destruction.
-    pub(super) fn destroy_type(
+    pub(in crate::game) fn destroy_type(
         &self,
         rule: horizon_client::gamerules::RuleIndex,
     ) -> BlockInteraction {
@@ -1073,7 +1081,10 @@ impl Game<'_> {
     /// Runs an explosion whose source empties the hives it destroys
     /// (`BeehiveBlock.getDrops`: primed TNT, creeper, wither skull, wither,
     /// TNT minecart).
-    pub(super) fn with_hive_emptying_blast<R>(&mut self, blast: impl FnOnce(&mut Self) -> R) -> R {
+    pub(in crate::game) fn with_hive_emptying_blast<R>(
+        &mut self,
+        blast: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         self.combat.hive_emptying_blast = true;
         let result = blast(self);
         self.combat.hive_emptying_blast = false;
@@ -1081,7 +1092,7 @@ impl Game<'_> {
     }
     /// `Level.explode` on the server: positions, entities, blocks, fire; then
     /// the client's explosion sound.
-    pub(super) fn server_explode(
+    pub(in crate::game) fn server_explode(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1098,7 +1109,7 @@ impl Game<'_> {
     }
     /// `ServerLevel.explode`: only the direct source's `isSilent` suppresses
     /// the sound; terrain, entity damage and the visual packet are unchanged.
-    pub(super) fn server_explode_from(
+    pub(in crate::game) fn server_explode_from(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1114,7 +1125,7 @@ impl Game<'_> {
     }
     /// `server_explode` with the damage type the player takes and a block
     /// whose explosion resistance the damage calculator overrides.
-    pub(super) fn server_explode_as(
+    pub(in crate::game) fn server_explode_as(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1238,7 +1249,7 @@ impl Game<'_> {
     /// `InfestedBlock.spawnAfterBreak` without a tool that prevents it: while
     /// blocks drop, its silverfish (`spawnInfestation`) comes out at the
     /// bottom centre of the block, with its spawn animation.
-    pub(super) fn spawn_infestation(&mut self, pos: [i32; 3]) {
+    pub(in crate::game) fn spawn_infestation(&mut self, pos: [i32; 3]) {
         if !self
             .ui
             .rules
@@ -1301,7 +1312,8 @@ impl Game<'_> {
         }
         if let Some(entity) = self.world.block_entities.get(&key).cloned() {
             let custom = self.world.block_names.get(&key).cloned();
-            self.pending.record(pos, &entity, &name, custom);
+            self.pending
+                .record(pos, &entity, &name, custom, self.world.block_lock(key));
         } else if let Some(tag) = super::spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -1466,7 +1478,7 @@ impl Game<'_> {
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
     /// rule picks decay).
-    pub(super) fn explode(
+    pub(in crate::game) fn explode(
         &mut self,
         source: Option<u32>,
         center: [f64; 3],
@@ -1476,7 +1488,7 @@ impl Game<'_> {
         self.explode_with(source, center, radius, false, blast)
     }
     /// `ServerLevel.explode` with `ExplosionInteraction.MOB` and the caller's fire flag.
-    pub(super) fn explode_mob(
+    pub(in crate::game) fn explode_mob(
         &mut self,
         center: [f64; 3],
         radius: f32,
@@ -1487,7 +1499,7 @@ impl Game<'_> {
     }
     /// `SulfurCube.tickFuse`: `ExplosionInteraction.TNT` (the
     /// tnt_explosion_drop_decay rule) with mobGriefing, `NONE` without.
-    pub(super) fn explode_sulfur_cube(
+    pub(in crate::game) fn explode_sulfur_cube(
         &mut self,
         source: Option<u32>,
         center: [f64; 3],
@@ -1506,7 +1518,7 @@ impl Game<'_> {
 #[cfg(test)]
 impl Game<'_> {
     /// Exercise the real explosion entity walk on an empty, headless world.
-    pub(super) fn run_explosion_items_fixture(
+    pub(in crate::game) fn run_explosion_items_fixture(
         &mut self,
         directory: &std::path::Path,
     ) -> Result<()> {
@@ -2298,3 +2310,158 @@ mod tests {
 #[cfg(test)]
 #[path = "explosion/explosion_part_tests.rs"]
 mod explosion_part_tests;
+
+#[cfg(test)]
+mod shulker_lock_drop_tests {
+    use super::super::native_machines::tests::server_game;
+    use super::*;
+    use horizon_client::{containers::BlockEntity, save};
+    use horizon_core::nbt::Tag;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    fn destruction_captures_the_external_shulker_lock_before_removal() {
+        let mut game = server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.block_ticks
+            .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
+            .unwrap();
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+        assert!(
+            game.ui.rules.bool("block_drops"),
+            "actual drop rule must be enabled"
+        );
+        game.creative = false;
+        game.selected = 0;
+        game.inventory[0] = Some(ItemStack::new("minecraft:diamond_pickaxe", 1));
+        let clock = game.world.game_time;
+        let mut missing = Vec::new();
+        for (x, z, kind, locked, route) in [
+            (3, 3, "shulker_box", true, "command"),
+            (11, 3, "shulker_box", true, "player"),
+            (3, 11, "shulker_box", true, "explosion"),
+            (11, 11, "red_shulker_box", false, "command"),
+            (7, 3, "chest", true, "command"),
+            (7, 11, "crafter", true, "command"),
+        ] {
+            let shulker = kind.ends_with("shulker_box");
+            let mut fields = Vec::new();
+            if shulker {
+                fields.push("CustomName:\"Box\"");
+                fields.push("Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h211:1}}},{Slot:26b,id:\"minecraft:apple\",count:5}]");
+            }
+            if locked {
+                fields.push("lock:{items:\"minecraft:diamond\"}");
+            }
+            assert!(game.run_command(&format!(
+                "setblock {x} 200 {z} minecraft:{kind}{{{}}}",
+                fields.join(",")
+            )));
+            let pos = [x, 200, z];
+            let key = (x, 200, z);
+            assert_eq!(
+                &*game.res.facts().get(game.world.block(x, 199, z)).name,
+                "minecraft:stone",
+                "positive floor"
+            );
+            let actual_lock = game.world.block_lock(key).cloned();
+            assert_eq!(actual_lock.is_some(), locked, "actual external source lock");
+            if locked {
+                assert!(matches!(&actual_lock,Some(Tag::Compound(c)) if !c.is_empty()));
+            }
+            let entity = game
+                .world
+                .block_entities
+                .get(&key)
+                .expect("actual command-created source");
+            assert!(
+                save::encode_block_entity(key, entity, &format!("minecraft:{kind}"))
+                    .get("lock")
+                    .is_none(),
+                "external lock must not be invented in modeled serializer"
+            );
+            if shulker {
+                let BlockEntity::Chest(slots) = entity else {
+                    panic!("modeled shulker inventory missing");
+                };
+                assert_eq!(slots[0].as_ref().unwrap().count, 3);
+                assert_eq!(slots[26].as_ref().unwrap().count, 5);
+                assert_eq!(
+                    game.world.block_names.get(&key),
+                    Some(&Tag::String("Box".into()))
+                );
+            }
+            let start = game.dropped.len();
+            match route {
+                "command" => {
+                    assert!(game.run_command(&format!("setblock {x} 200 {z} air destroy")))
+                }
+                "player" => game.break_block(pos).unwrap(),
+                "explosion" => game
+                    .server_explode(
+                        pos.map(|v| f64::from(v) + 0.5),
+                        2.0,
+                        BlockInteraction::Destroy,
+                        false,
+                    )
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+            game.flush_spill();
+            assert!(
+                game.res.facts().is_air(game.world.block(x, 200, z)),
+                "actual destruction occurred: {route}"
+            );
+            assert!(!game.world.block_entities.contains_key(&key));
+            assert!(
+                game.world.block_lock(key).is_none(),
+                "actual external source was removed"
+            );
+            let item_id = format!("minecraft:{kind}");
+            let drops: Vec<_> = game.dropped[start..]
+                .iter()
+                .filter(|d| *d.stack.item == item_id)
+                .collect();
+            assert_eq!(drops.len(), 1, "actual one-item drop: {kind}/{route}");
+            let stack = &drops[0].stack;
+            assert_eq!(stack.count, 1);
+            let data = stack.data();
+            let dropped_lock = data.and_then(|d| d.other("minecraft:lock"));
+            if shulker {
+                let data = data.expect("actual shulker components");
+                assert_eq!(data.custom_name, Some(Tag::String("Box".into())));
+                let slots = &data.container;
+                assert_eq!(slots.len(), 2);
+                let diamond = &slots.iter().find(|(slot, _)| *slot == 0).unwrap().1;
+                assert_eq!((&*diamond.item, diamond.count), ("minecraft:diamond", 3));
+                assert_eq!(
+                    diamond
+                        .data()
+                        .and_then(|d| d.other("minecraft:custom_data"))
+                        .and_then(|t| t.get("h211")),
+                    Some(&Tag::Int(1))
+                );
+                assert_eq!(
+                    slots.iter().find(|(slot, _)| *slot == 26).unwrap().1.count,
+                    5
+                );
+            }
+            if shulker && locked {
+                if dropped_lock != actual_lock.as_ref() {
+                    missing.push((route, dropped_lock.cloned(), actual_lock));
+                }
+            } else {
+                assert!(
+                    dropped_lock.is_none(),
+                    "non-shulker/unlocked policy unchanged"
+                );
+            }
+            assert_eq!(game.world.game_time, clock, "zero observation ticks");
+        }
+        assert!(
+            missing.is_empty(),
+            "actual external lock lost at destruction capture sites: {missing:?}"
+        );
+    }
+}
