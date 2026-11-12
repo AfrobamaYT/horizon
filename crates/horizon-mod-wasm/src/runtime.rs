@@ -84,6 +84,12 @@ pub(crate) const ENGINE_CONFIG: (&str, bool) = ("epoch_interruption", true);
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = wasmtime::Config::new();
     config.epoch_interruption(ENGINE_CONFIG.1);
+    config.max_wasm_stack(horizon_guest_stack::GUEST_STACK_BYTES);
+    // Wasmtime validates this bound even for synchronous engines. No async
+    // support or fiber execution is enabled by setting its size.
+    config.async_stack_size(
+        horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM,
+    );
     let engine = Engine::new(&config)?;
     let weak = engine.weak();
     std::thread::Builder::new()
@@ -258,17 +264,16 @@ impl WasmHandler {
         {
             return value;
         }
-        let names = self
-            .module
-            .call(
-                CallClass::Callback,
-                Frame::default(),
-                export_id,
-                Some(self.index),
-                |_| {},
-                |r| r.take(),
-            )
-            .unwrap_or_default();
+        let Some(names) = self.module.call(
+            CallClass::Callback,
+            Frame::default(),
+            export_id,
+            Some(self.index),
+            |_| {},
+            |r| r.take(),
+        ) else {
+            return &[];
+        };
         let value = crate::boundary::subscriptions_of(owner, names);
         self.module
             .subscriptions
@@ -360,6 +365,8 @@ fn host(
             .get(ptr as usize..end)
             .ok_or_else(|| wasmtime::Error::msg("input outside memory"))?,
     );
+    #[cfg(feature = "test-copy-probe")]
+    crate::copy_probe::record(false, input.len());
     let mut reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     reply.clear();
     let cx = &mut *caller.data_mut().cx as *mut Cx;
@@ -414,6 +421,8 @@ fn host(
     let size = u32::try_from(reply.bytes().len())?;
     if size != 0 && size <= cap {
         memory.write(&mut caller, out as usize, reply.bytes())?;
+        #[cfg(feature = "test-copy-probe")]
+        crate::copy_probe::record(true, reply.bytes().len());
     }
     caller.data_mut().replies[depth] = reply;
     Ok(size)
@@ -431,6 +440,8 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
     let result = memory.write(&mut caller, ptr as usize, reply.bytes());
     caller.data_mut().replies[depth] = reply;
     result?;
+    #[cfg(feature = "test-copy-probe")]
+    crate::copy_probe::record(true, caller.data().replies[depth].bytes().len());
     Ok(())
 }
 
@@ -472,6 +483,7 @@ impl WasmMod {
         members: &[Member<'_>],
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
+        horizon_guest_stack::check_current().map_err(|error| Refusal::Runtime(error.into()))?;
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
@@ -579,6 +591,10 @@ impl WasmMod {
         // guards. Their destructors must not reenter the still-lent guest.
         if std::thread::panicking() {
             self.disable();
+            return None;
+        }
+        if let Err(error) = horizon_guest_stack::check_current() {
+            log::error!("wasm mod {}: {error}", self.mod_id());
             return None;
         }
         if self.running.poisoned.load(Ordering::Relaxed) {
@@ -749,6 +765,8 @@ impl WasmMod {
         memory
             .write(&mut *store, ptr as usize, input.bytes())
             .map_err(|e| CallError::Fault(e.into()))?;
+        #[cfg(feature = "test-copy-probe")]
+        crate::copy_probe::record(true, input.bytes().len());
         let result = self.hook.call(&mut *store, id).map_err(CallError::Fault)?;
         let ptr = (result >> 32) as usize;
         let len = result as u32;
@@ -769,6 +787,8 @@ impl WasmMod {
                 .get(ptr..end)
                 .ok_or_else(|| CallError::Refused(wasmtime::Error::msg("reply outside memory")))?,
         );
+        #[cfg(feature = "test-copy-probe")]
+        crate::copy_probe::record(false, output.len());
         Ok(())
     }
 }

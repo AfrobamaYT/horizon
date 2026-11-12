@@ -111,7 +111,7 @@ impl Game<'_> {
                 })
                 .unwrap_or_default();
             let data_source = self.pack.data_changes.clone();
-            self.creation_job = std::thread::Builder::new()
+            let job = horizon_guest_stack::builder()
                 .name("world-creation".into())
                 .spawn(move || {
                     horizon_client::vanillagen::shared_data_from(
@@ -122,8 +122,20 @@ impl Game<'_> {
                     )
                     .map(|_| ())
                     .map_err(|e| e.to_string())
-                })
-                .ok();
+                });
+            match job {
+                Ok(job) => self.creation_job = Some(job),
+                Err(error) => {
+                    log::warn!("Horizon: world creation worker could not start: {error}");
+                    if let Some(title) = self.title.as_mut() {
+                        title.finish_preparing();
+                        title.failed(format!(
+                            "{}: {error}",
+                            horizon_client::lang::get("createWorld.preparing")
+                        ));
+                    }
+                }
+            }
             return;
         }
         if !self
@@ -362,22 +374,33 @@ impl Game<'_> {
         let packs: Vec<_> = std::iter::once(&stack.content)
             .chain(stack.enabled_packs())
             .collect();
-        let files: Vec<(String, Vec<Vec<u8>>)> =
-            horizon_client::datapack::registry_files(&packs, &keys)
-                .into_iter()
-                .map(|(path, versions)| {
-                    let versions = super::condition_reload_state::registry_versions(
-                        versions, conditions, &path,
-                    );
-                    (path, versions)
-                })
-                .collect();
+        let files: Vec<_> = horizon_client::datapack::registry_files(
+            &packs,
+            &keys,
+            !conditions.has_registered(),
+            |path, pack, bytes| {
+                !super::condition_reload_state::registry_versions(
+                    vec![(pack.to_owned(), bytes.to_vec())],
+                    conditions,
+                    path,
+                )
+                .is_empty()
+            },
+        )
+        .map_err(|error| {
+            format!(
+                "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                error.registry, error.entry, error.pack, error.file, error.reason
+            )
+        })?
+        .into_iter()
+        .collect();
         mod_api::DatapackCandidate::build(declarations, &files)
             .map(Some)
             .map_err(|error| {
                 format!(
-                    "datapack registry {} entry {} ({}): {:?}",
-                    error.registry, error.entry, error.file, error.reason
+                    "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                    error.registry, error.entry, error.pack, error.file, error.reason
                 )
                 .into()
             })

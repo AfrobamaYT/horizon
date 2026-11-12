@@ -203,7 +203,7 @@ mod tests {
         let taken = || std::mem::take(&mut *seen.lock().unwrap());
         let mods: mod_api::Mods =
             vec![ModEntry::new("editor", Box::new(Editor(seen.clone())))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_client_game(|game| {
                 let _event_loop = frame_scene(game);
                 let social = |game: &Game<'_>| {

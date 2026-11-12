@@ -138,6 +138,31 @@ impl Game<'_> {
             || self.native_client_tracked(entity).is_some())
         .then_some(entity)
     }
+    pub(super) fn entity_by_uuid(&self, uuid: mod_api::EntityUuid) -> Option<EntityRef> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        let epoch = self.native_lifecycle.epoch()?;
+        let dimension = self.dim.key();
+        let uuid = horizon_client::lan::playerdata::uuid_ints(uuid.0);
+        let mut after = None;
+        loop {
+            let id = self
+                .resident_entities
+                .table
+                .borrow_mut()
+                .level_uuid_candidate(dimension, uuid, after)?;
+            let entity = EntityRef::new(epoch, id.get());
+            if self
+                .native_entity_target(entity)
+                .is_some_and(|target| self.resident_source_target_visible(dimension, target))
+            {
+                return Some(entity);
+            }
+            // A queued departure can overlap a replacement with the same UUID.
+            after = Some(id);
+        }
+    }
     /// Whether the entity is made of parts that are entities of their own
     /// (`Entity.isMultipartEntity`): the dragon, not one of its parts.
     pub(super) fn entity_is_multipart(&self, entity: EntityRef) -> Option<bool> {
@@ -1015,7 +1040,7 @@ pub(super) mod tests {
         if run_fresh_cases(name, "HORIZON_DECLARED_PART_GAME_CHILD", &["valid"]) {
             return None;
         }
-        let _mods = mod_api::__private::part_tests::game_thread();
+        let _mods = mod_platform::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::super::mods::content_root(&base, &Default::default())
             .unwrap()
@@ -1184,9 +1209,11 @@ pub(super) mod tests {
             game.options.dedicated = Some(Vec::new());
             let words = [7, 0, 0, 3];
             let uuid = (7u128 << 96) | 3;
-            assert!(game.run_command(
+            // Harness commands use the console boundary; setting dedicated
+            // options alone does not grant the command parser operator rights.
+            assert!(game.as_console(|game| game.run_command(
                 "execute in minecraft:the_nether run summon cow 8.5 70 8.5 {UUID:[I;7,0,0,3],NoAI:1b}"
-            ));
+            )));
             let original = game.dim;
             game.enter_command_level(super::super::Dim::Nether).unwrap();
             let id = *game
@@ -1221,7 +1248,7 @@ pub(super) mod tests {
         use horizon_core::position::BlockPos;
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::weak_power_game_thread();
+        mod_platform::__private::part_tests::weak_power_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1256,7 +1283,7 @@ pub(super) mod tests {
         use std::sync::Arc;
 
         // The fixture's parts: glass sustains any plant, grass sustains none.
-        mod_api::__private::part_tests::sustain_plant_game_thread();
+        mod_platform::__private::part_tests::sustain_plant_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1293,7 +1320,7 @@ pub(super) mod tests {
         use std::sync::Arc;
 
         // The fixture's parts: stone is harvested by any tool, dirt by none.
-        mod_api::__private::part_tests::harvest_game_thread();
+        mod_platform::__private::part_tests::harvest_game_thread();
         with_game(|game| {
             let scratch = std::env::temp_dir().join(format!(
                 "horizon-harvest-part-{}-{:?}",
@@ -1663,7 +1690,9 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn neighbor_changed_reads_its_inputs_and_its_tick_fires_at_its_delay() {
-        use mod_api::__private::part_tests::{SignalRead, signal_reader_game_thread, signal_reads};
+        use mod_platform::__private::part_tests::{
+            SignalRead, signal_reader_game_thread, signal_reads,
+        };
 
         // The fixture's part on glass reads its inputs in `neighbor_changed` and schedules
         // its own tick 2 ticks later, as a diode does.
@@ -1725,7 +1754,7 @@ pub(super) mod tests {
         use horizon_core::geometry::Direction::West;
 
         // The fixture's part lets glass conduct (`should_check_weak_power`).
-        mod_api::__private::part_tests::weak_power_game_thread();
+        mod_platform::__private::part_tests::weak_power_game_thread();
         with_game(|game| {
             lever_on(game, "minecraft:glass");
             let level = game.level(game.dim.id()).unwrap();
@@ -1752,7 +1781,7 @@ pub(super) mod tests {
                 }
             }
         });
-        mod_api::__private::part_tests::pathfindable_game_thread();
+        mod_platform::__private::part_tests::pathfindable_game_thread();
         with_game(|game| {
             let registry = game.pack.assets.registry;
             let asks = |name: &str, kind: PathComputationType| {
@@ -1786,7 +1815,7 @@ pub(super) mod tests {
         use horizon_core::position::BlockPos;
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::removal_game_thread();
+        mod_platform::__private::part_tests::removal_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1840,7 +1869,7 @@ pub(super) mod tests {
         use horizon_core::{geometry::Direction, position::BlockPos};
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::redstone_game_thread();
+        mod_platform::__private::part_tests::redstone_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1876,7 +1905,7 @@ pub(super) mod tests {
         use horizon_core::{geometry::Direction, position::BlockPos};
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::connection_game_thread();
+        mod_platform::__private::part_tests::connection_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -3173,7 +3202,7 @@ pub(super) mod tests {
                 Box::new(Logout(logouts.clone())),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 game.native_player_logged_out(0, "control");
                 assert_eq!(logouts.swap(0, std::sync::atomic::Ordering::Relaxed), 1);
                 game.tick_lan_packets();
@@ -3211,7 +3240,7 @@ pub(super) mod tests {
                 .iter()
                 .filter(|g| g.placed && g.participates_online())
                 .count();
-            mod_api::testing::with_mods(mods, || game.native_players_leaving());
+            mod_platform::testing::with_mods(mods, || game.native_players_leaving());
             assert_eq!(logouts.load(Ordering::Relaxed), real_count);
             game.lan.as_mut().unwrap().play.entry(fake_id).or_default();
             game.award_leave_game_to_all();

@@ -7,3 +7,6 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+mod_vocab = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" }

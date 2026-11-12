@@ -62,8 +62,10 @@ reference.
 
 A new or changed catalog point is proven by the wasm fixture: real wasm mods (`crates/horizon-mod-wasm/tests/fixture`,
 `library-fixture` and `groups`) built with `cargo horizon-mod build --wasm` and loaded by the real loader. The
-`wasm-mods` CI job does all of it on every push to main, once per commit, and on manual dispatch; it does not run on
-pull requests. A maintainer dispatches it on a PR branch that changes what it builds. That job is the answer; you don't
+`wasm-mods` CI job does all of it on pushes to main and on manual dispatch; it does not run on pull requests. Main
+pushes coalesce: a started run finishes and only the newest waiting push runs next, so the newest finished main run
+proves every commit before it. A red is attributed by reading the error, with a manual dispatch on a suspect commit
+(through a branch pointing at it) when needed. A maintainer dispatches it on a PR branch that changes what it builds. That job is the answer; you don't
 need a local build.
 
 To run it yourself, on Linux or Windows, follow the steps of `.github/workflows/wasm-mods.yml` from the repository

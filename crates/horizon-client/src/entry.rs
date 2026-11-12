@@ -96,11 +96,6 @@ pub fn start<G>(
     code: CodeRuntime,
     startup: Startup,
 ) {
-    // Platform instrumentation must precede registration and the first mod guard.
-    if let Err(error) = mod_api::__private::initialize() {
-        eprintln!("Horizon: refusing startup because mod instrumentation is unavailable: {error}");
-        std::process::exit(game::exit_code::ERROR);
-    }
     let _ = CODE_RUNTIME.set(code);
     let Startup {
         launch,
@@ -108,6 +103,7 @@ pub fn start<G>(
         _capture,
     } = startup;
     horizon_threads::configure_allocator();
+    horizon_chat_filter::install();
     horizon_look::give();
     // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
     horizon_client::pack_formats::install();

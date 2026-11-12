@@ -1,123 +1,77 @@
 # The native route
 
-The native route lets a native mod change the game's own code. You declare it with tables under
-`[native]` in `horizon-mod.toml`:
+The native route lets a native mod change the game's own code: a function's body, a value or call inside
+it, or a hot loop. You declare it with `[[native.*]]` tables written after `[native]` in `horizon-mod.toml`,
+and the launcher applies them to the prebuilt game without rebuilding the game.
 
-| Table | What it does | Page |
+## When to use it
+
+Try these first. They work on native and wasm, and they keep working on the next game build:
+
+1. a **hook**, a method of `mod_api::Hooks` that the game calls at one moment, or a **Part** method
+   ([Your first native mod](start/first-mod.md));
+2. an **`[[inject]]` listener**: your function, run at the start or end of a game function with `mod_api`
+   values ([Injections](injections.md)).
+
+Take the native route when neither can do it: you need the game's real types or private fields, a change in
+the middle of a function, a whole function replaced, or a change inside a hot loop. It is not for a wasm mod,
+which cannot declare `[native]` tables. Data kept on one entity or block is an
+[attachment](concepts/trait-mods.md#server-attachments), not this route.
+
+## The tables
+
+| Table | Use it to | Page |
 | --- | --- | --- |
-| `[[native.mixin]]` | Changes one game function: runs code at its start or end, changes a value or a call inside it, or replaces its body. | [Mixins](mixins.md) |
-| `[[native.loop]]` | Puts your type into a slot of a hot loop the game publishes, such as the block entity tick. | [Published loops](loops.md) |
-| `[[native.bridge]]` | Gives your mixin code a getter, setter or caller for a private field or method of a game type. | [Bridges](bridges.md) |
-| `[[native.module]]` | Adds a module of your Rust code inside a game source file, for mixin code to share. | [Support modules](support-modules.md) |
-| `[[native.state]]` | Would add a field to a game type. Refused: use attachments. | [Native state](native-state.md) |
+| `[[native.mixin]]` | run code at the start or end of a game function, change a value or a call inside it, or replace its body | [Mixins](mixins.md) |
+| `[[native.loop]]` | run code before and after each entry of a hot loop the game publishes, such as the block entity tick | [Published loops](loops.md) |
+| `[[native.bridge]]` | read, write or call a private field or method of a game type from your mixin code | [Bridges](bridges.md) |
+| `[[native.module]]` | add a module of your own code inside a game source file, for your mixin code to share | [Support modules](support-modules.md) |
+| `[[native.state]]` | add a field to a game type: refused, use an attachment | [Native state](native-state.md) |
 
-## Try the stable route first
+Every row of these tables has an `id`. No two rows of one mod share an `id`, counting `[[inject]]` rows too.
 
-Most mods never need this page. The stable route is the same on native and wasm and survives game updates:
+## It is tied to one game build
 
-1. A **hook** (a method of `mod_api::Hooks`) or a **Part** method, when one covers the moment
-   ([Your first native mod](start/first-mod.md)).
-2. An **`[[inject]]` listener**: your function runs at the start or end of an engine function and gets its
-   arguments as `mod_api` values ([Injections](injections.md)). Ask for a hook at the same time.
+A mod on this route builds against one exact game build: the commit in `[native] horizon`. Your code gets
+the game's own types, such as `Game` and its fields, and these change between builds without notice.
 
-Take the native route when neither can do it: you need the game's real types and private fields, a value
-or a call in the middle of a function, a whole function replaced, or a change inside a hot loop.
-
-Don't take it when:
-
-- the mod must also run as wasm: a wasm mod cannot declare `[native]` tables;
-- you want the mod to keep working on the next game build without a rebuild;
-- you want per-object data: that is an [attachment](concepts/trait-mods.md#server-attachments), on native
-  and wasm alike ([Native state](native-state.md) says why).
-
-## Unstable on purpose
-
-Code on this route is compiled into copies of the game's functions, so it sees the game exactly as it is in
-one build:
-
-- It is pinned to the exact game commit in `[native] horizon`. A mod built for one commit is rebuilt for the
-  next. Each build copies the targeted functions from the new source. When a target was renamed, moved, or
-  its selected call or types changed, the build fails with a refusal or a compiler error under your mod's id.
-  A change elsewhere in a target's body is not reported: your mixin applies to the new body, so reread the
-  functions you target when you move to a new commit.
-- It gets the game's own types (`Game`, its fields, its block entity map), not `mod_api` values. Those types
-  change between builds without notice.
-- It is trusted native code with the player's rights, not a sandbox.
+- To move to a new build, change `horizon` and rebuild. A target that was renamed or moved fails the build
+  with an error naming your mod.
+- A change elsewhere in a target's body is not reported. Reread the functions you target on each new build.
+- Read the game's source at your `horizon` commit on [GitHub](https://github.com/arismoko/horizon). Every
+  target path, field and type on these pages comes from it.
+- This code runs with the player's rights. It is not sandboxed.
 
 ## The `[native]` table
-
-Every native mod already has it. The tables on this route go below it:
 
 | Field | Value |
 | --- | --- |
 | `game` | The Minecraft version, `"26.3"`. |
-| `horizon` | The exact Horizon commit the mod builds against, 40 lowercase hex characters. |
-| `mixins` | The exact commit of the [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) tool that applies `[[native.mixin]]` rows, 40 lowercase hex characters. |
+| `horizon` | The game build: the exact Horizon commit, 40 lowercase hex characters. |
+| `mixins` | The exact commit of the [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) tool, which applies `[[native.mixin]]` rows; 40 lowercase hex characters. |
 
-`cargo horizon-mod new` writes all three. The rows of every `[[native.*]]` table and every `[[inject]]` share
-one id space: two rows of one mod never share an `id`.
+`cargo horizon-mod new` writes all three; to move an existing mod, edit them. Otherwise the mod is an ordinary native mod
+([Your first native mod](start/first-mod.md)).
 
-## The mod's crate
+## Building
 
-A mod on this route is an ordinary native mod ([Your first native mod](start/first-mod.md)): a Cargo package
-beside `horizon-mod.toml`, depending on `horizon-mod-api`, with a type implementing `mod_api::Hooks` (it may
-implement no hook at all). The examples in this section come from the **check mods**: small native mods in
-`tools/ci/fn-replace-check/` that CI builds against the prebuilt game on every change to this route, so the
-examples stay true. This is the `Cargo.toml` of the check mod `fnr_alpha` (the check fills `rev` with the
-game commit; yours names your `horizon` commit):
+Build as for any native mod: the launcher's **Build**, or
+`horizon-launcher native-build path/to/mod --trust-native-code`. The flag says you trust the mod's code to
+run with your rights.
 
-```toml
-[package]
-name = "fnr-alpha"
-version = "0.1.0"
-edition = "2024"
-publish = false
+The first build with a `[[native.mixin]]` row gets the horizon-mixins tool once for your `mixins` commit:
+a prebuilt download where one is published, otherwise a build from source that takes about a minute. Later
+builds take a few seconds.
 
-[dependencies]
-horizon-mod-api = { git = "https://github.com/arismoko/horizon", rev = "HEAD" }
-```
+The prebuilt tool is checked against its release's `SHA256SUMS` and against the commit, patch and platform the
+launcher pins. Where no prebuilt exists for your platform or pin, the launcher builds the tool from source.
 
-and its `src/lib.rs`:
-
-```rust,ignore
-//! The mod's own crate. Its `[[native.mixin]]` helpers (`src/mixins/`) are compiled into copies of the
-//! game functions they patch, not into this crate.
-#[derive(Default)]
-struct Mod;
-
-#[mod_api::horizon_mod]
-impl mod_api::Hooks for Mod {}
-
-/// Called by a helper: a helper may use its mod's crate.
-pub fn note(what: &str) {
-    eprintln!("fnr: alpha {what}");
-}
-```
-
-The code your `[[native.*]]` rows name (helpers, slots, modules) lives in files under `src/` that this crate
-does not declare as modules: the launcher compiles them into the copies of the game's functions. They call
-the mod's crate by its Rust name, the package name with `-` turned into `_` (`fnr_alpha::note`); the crate
-name need not match the mod's `id`.
-
-## What a build does
-
-The game itself is never rebuilt. When you build the mod (the launcher's **Build**, or
-`horizon-launcher native-build path/to/mod --trust-native-code`), the launcher downloads the prebuilt game
-for your `horizon` commit and its source. It copies each function your rows target out of that source,
-applies your mixins to the copies with horizon-mixins, adds your loop slots, bridges and modules, compiles the
-copies against the prebuilt game together with your mod's crate, and swaps each copy in for the original
-through a **replacement cell**: a pointer the prebuilt game checks at the start of every replaceable function,
-which runs the installed copy instead when one is set. What can't be done this
-way is refused by name before anything compiles
-([What the launcher does](how-to/native-mods/028-what-the-launcher-does.md#what-the-launcher-does)).
-
-The launcher's build log (`native/build.log`) shows the route and how long each phase took:
+When it works, the launcher's [build log](how-to/native-mods/029-build-log.md#build-log) (`native/build.log`, also
+the **Build log** button) shows the number of patched functions and mixin rows:
 
 ```text
 Prebuilt game: only the mods compile
 Function replacement: 1 functions patched by 1 mixins, without rebuilding the game (copy … ms, horizon-mixins … ms, compile … ms, total … ms)
 ```
 
-The first build with a `[[native.mixin]]` row also downloads and builds the horizon-mixins tool, once per
-`mixins` commit (a mod with only loops, bridges and modules never needs it); on a test machine that first build took a little over a minute. Later builds reuse the tool,
-and a build with a mixin, a loop slot, a bridge and a module took a few seconds there.
+What the launcher does under the hood is on [How the native route works](native-how-it-works.md).
