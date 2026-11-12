@@ -498,13 +498,13 @@ impl Game<'_> {
                         super::super::tick_profile::add(level_id, &kind, started);
                     }
                     let m = &mut mobs[i];
-                    // Each teleport in its tick (`snapTo`) is a position update of its own,
-                    // then where the tick left it (`EntityInLevelCallback.onMove` for each).
+                    // Its `xo` (`previous`) is where its tick began, unless a teleport in the
+                    // tick (`snapTo`) moved it along: that teleport, then where the tick left
+                    // it, are two position updates (`EntityInLevelCallback.onMove` for each).
                     if round.sections() {
-                        section_moves.extend(m.teleports.iter().map(|&at| (m.id, at)));
+                        section_moves.push((m.id, m.previous));
                         section_moves.push((m.id, m.position));
                     }
-                    m.teleports.clear();
                     if let Some(selection) = &selection
                         && selection.has_switched()
                         && let Some(player) = selection.selected()

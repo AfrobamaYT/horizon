@@ -149,8 +149,9 @@ impl Game<'_> {
                 super::entity::taken_pass_tests::after_take(self);
                 let w = self.mob_world_base(&[]);
                 let mut events = Vec::new();
-                let mut teleports = Vec::new();
+                let mut teleported = None;
                 let moved = mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                    let from = m.position;
                     let moved = horizon_client::mobs::living::random_teleport(
                         m,
                         &w,
@@ -158,13 +159,17 @@ impl Game<'_> {
                         avoid,
                         &mut events,
                     );
-                    teleports = std::mem::take(&mut m.teleports);
+                    teleported = moved.then_some((from, m.position));
                     moved
                 });
                 self.mobs
                     .restore(mobs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
                 let _ = self.handle_mob_events(events);
-                self.entity_sections_teleported(id, &teleports);
+                // `teleportTo` is one position update, told at once.
+                if let Some((from, to)) = teleported {
+                    let (from, to) = ([from.x, from.y, from.z], [to.x, to.y, to.z]);
+                    self.entity_section_moved(id, Some(from), to);
+                }
                 moved
             }
             _ => false,

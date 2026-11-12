@@ -251,13 +251,15 @@ fn floating_cow(game: &mut crate::game::Game<'_>, at: [f64; 3]) -> u32 {
     id
 }
 
-/// One mob tick of the cow `id`: it teleports to `to` (`snapTo`, as an enderman's, a pet's or a
-/// shulker's teleport does in its tick), then walks on at `velocity`.
+/// The cow `id` teleported to `to` (`snapTo`: its position and its `xo` move together, as an
+/// enderman's, a pet's or a shulker's teleport moves them in its tick), then one mob tick that
+/// walks it on at `velocity`.
 fn teleport_then_walk(game: &mut crate::game::Game<'_>, id: u32, to: [f64; 3], velocity: [f64; 3]) {
     use horizon_core::geometry::Vec3;
     let i = game.mobs.iter().position(|m| m.id == id).unwrap();
     game.mobs.update(i, |m| {
-        m.snap_to(Vec3::new(to[0], to[1], to[2]));
+        m.position = Vec3::new(to[0], to[1], to[2]);
+        m.previous = m.position;
         m.velocity = Vec3::new(velocity[0], velocity[1], velocity[2]);
     });
     game.tick_creature_entities().unwrap();

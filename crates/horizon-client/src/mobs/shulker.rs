@@ -390,11 +390,12 @@ fn teleport(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool {
             1.0,
             1.0,
         ));
-        m.snap_to(Vec3::new(
+        m.position = Vec3::new(
             f64::from(t[0]) + 0.5,
             f64::from(t[1]),
             f64::from(t[2]) + 0.5,
-        ));
+        );
+        m.previous = m.position;
         // Level.levelEvent(2016, oldPos, packedDiff): the teleport's
         // particles at both ends, seen by the players around.
         events.push(MobEvent::LevelEvent {

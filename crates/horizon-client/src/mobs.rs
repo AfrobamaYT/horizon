@@ -1752,10 +1752,6 @@ pub struct Mob {
     pub kind: Arc<MobType>,
     pub position: Vec3,
     pub previous: Vec3,
-    /// Where each [`Mob::snap_to`] since the game last read this put the mob, in order. The
-    /// game files each one as its own position update (`entity_entering_section`) after the
-    /// mob's tick, before where the tick left it, and empties the list.
-    pub teleports: Vec<Vec3>,
     pub velocity: Vec3,
     /// Entity.yRot (movement facing).
     pub yaw: f32,
@@ -3953,14 +3949,6 @@ pub fn living_random() -> (LegacyRandom, [i32; 4]) {
     (random, uuid)
 }
 impl Mob {
-    /// `Entity.snapTo` (`teleportTo`): the position and the old position move together, and
-    /// the move is one position update of its own (`setPosRaw`), kept in [`Mob::teleports`].
-    pub fn snap_to(&mut self, at: Vec3) {
-        self.position = at;
-        self.previous = at;
-        self.teleports.push(at);
-    }
-
     /// A mob as its authoritative side builds it — spawned, or loaded from a
     /// chunk (`Mob.finalizeSpawn` runs around it): the species' own goals, then
     /// the goals every mod part attached to its type (#1077), vanilla's
@@ -4009,7 +3997,6 @@ impl Mob {
             health: kind.max_health,
             position,
             previous: position,
-            teleports: Vec::new(),
             velocity: Vec3::ZERO,
             yaw,
             previous_yaw: yaw,
