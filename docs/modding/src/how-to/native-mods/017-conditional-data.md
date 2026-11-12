@@ -9,6 +9,9 @@ instruments, damage types, advancements, synchronized registry JSON, world-table
 tags (including loot, damage, synchronized registry and function tags), and native item/block data maps.
 Every condition must hold; a false condition omits the file. Mods can
 [register conditions](../../concepts/load-conditions.md) for this same evaluator.
+Register one handler per id using the read-only `RegistrationContext`. A handler
+reads the condition's JSON from a borrowed raw value and validates its own
+arguments. Invalid mod input must return `ConditionError`, never panic.
 
 Ordinary JSON resources select the winning pack file first, then evaluate its
 conditions before decoding the data. If the winner is omitted, a lower pack's
@@ -25,8 +28,16 @@ resource namespaces are not mod IDs. Other supported forms are `neoforge:true`,
 `neoforge:not` (`value`), and `neoforge:and` / `neoforge:or` (`values`). A namespace
 is owned only when a loaded mod registered at least one condition in it. Unknown
 names there refuse reload, naming the file, condition and mod, at any depth in
-these trees. Other unknown names omit the file with one warning listing its
-unknown condition names, including beneath `not` or `or`.
+these trees. **Diverges from upstream:** refusing reload for an unknown name in
+an owned namespace is a Horizon addition. Typed-codec alignment is a later item,
+to revisit once the shared codec foundation exists
+([#811](https://github.com/arismoko/horizon/issues/811) and
+[#2332](https://github.com/arismoko/horizon/issues/2332)).
+Foreign unknown names leave the file
+absent and produce one ERROR-level log entry naming the file and its distinct
+unknown ids. Every branch of `not`, `and` and `or` is visited, at every depth:
+`or(true, othermod:unknown)` is absent even though its first branch is true.
+Foreign unknown ids do not themselves refuse the whole reload.
 A file without the conditions array loads normally. Successful reloads publish
 changed enabled IDs together with the data generation, including command predicates
 and item modifiers; retained readers keep

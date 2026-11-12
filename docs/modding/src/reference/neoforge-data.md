@@ -32,7 +32,7 @@ Supported forms are `neoforge:mod_loaded`, `neoforge:true`, `neoforge:not`
 `neoforge:conditions` array. Every condition must hold. An unknown kind in a
 namespace where a loaded mod registered conditions refuses reload, naming the
 file, condition and owner. Other unknown kinds omit the file with one named
-warning, including beneath `not` or `or`. Files without the array load normally.
+error-level log entry, including beneath `not` or `or`. Files without the array load normally.
 
 `mod_loaded` reads an immutable snapshot of the owning generation's server-enabled
 mod IDs, including code-only native and WebAssembly mods, plus `minecraft`.

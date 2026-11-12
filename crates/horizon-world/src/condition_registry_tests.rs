@@ -28,7 +28,7 @@ fn variants(name: &str) -> Vec<Value> {
     ]
 }
 #[test]
-fn owned_unknown_conditions_refuse_at_every_depth_and_foreign_names_warn_once() {
+fn owned_unknown_conditions_refuse_at_every_depth_and_foreign_names_report_once() {
     for (i, node) in variants("testmod:nope").into_iter().enumerate() {
         let conditions = registered(Arc::default());
         let path = format!("data/testmod/recipe/owned_{i}.json");
@@ -46,13 +46,13 @@ fn owned_unknown_conditions_refuse_at_every_depth_and_foreign_names_warn_once() 
         }
         assert_eq!(conditions.check_errors(), Ok(()));
         assert_eq!(
-            conditions.warnings(),
+            conditions.foreign_errors(),
             [
                 "data/testmod/recipe/foreign.json: unknown load conditions [othermod:second, othermod:thing]; file left out"
             ]
         );
         assert_eq!(
-            conditions.warnings()[0]
+            conditions.foreign_errors()[0]
                 .matches("data/testmod/recipe/foreign.json")
                 .count(),
             1
@@ -94,7 +94,7 @@ fn loaded_mod_ids_alone_do_not_own_condition_namespaces() {
             assert_eq!(conditions.check_errors(), Ok(()));
         }
     }
-    assert_eq!(conditions.warnings().len(), 1);
+    assert_eq!(conditions.foreign_errors().len(), 1);
 }
 
 #[test]

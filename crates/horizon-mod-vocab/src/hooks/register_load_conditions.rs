@@ -4,7 +4,8 @@ pub trait Hooks {
     /// Names must belong to the registering mod's namespace. Native and wasm
     /// handlers use the same registration and evaluation route. Registering one
     /// name owns that namespace; an unknown condition in it refuses data reload.
-    /// Unknown conditions in other namespaces omit their file with one warning.
+    /// Foreign unknown ids omit their file with one ERROR-level log entry,
+    /// even inside `or(true, unknown)`; every combinator branch is visited.
     #[hook(
         side = "server",
         contract = "collect",

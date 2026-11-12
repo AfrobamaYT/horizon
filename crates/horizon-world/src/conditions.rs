@@ -60,7 +60,7 @@ impl LoadConditions {
                     .or_default()
                     .clone(),
                 // Without handlers there are no cached answers or errors;
-                // keep warning deduplication shared across the candidate.
+                // keep foreign diagnostic deduplication shared across the candidate.
                 None => self.diagnostics.clone(),
             };
         }
@@ -105,7 +105,7 @@ impl LoadConditions {
         self.allows_file(file, "data file")
     }
 
-    /// Evaluate a resource, constructing its path only for registered handlers or warnings.
+    /// Evaluate a resource, constructing its path only for registered handlers or diagnostics.
     pub fn allows_id(&self, file: &Value, kind: &str, id: &str) -> bool {
         self.allows_context(file, || {
             let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
@@ -158,7 +158,7 @@ impl LoadConditions {
             let _ = evaluate(file, &loaded, &|_, _| None, &BTreeMap::new(), &mut |name| {
                 names.insert(name.to_owned());
             });
-            self.warn_unknown(&context(), names);
+            self.report_unknown(&context(), names);
             return answer;
         };
         let path = context();
@@ -189,7 +189,7 @@ impl LoadConditions {
                 },
             );
             if !unknown.is_empty() {
-                self.warn_unknown(path, unknown);
+                self.report_unknown(path, unknown);
             }
             match result {
                 Ok(answer) => answer,
@@ -205,8 +205,8 @@ impl LoadConditions {
         })
     }
 
-    fn warn_unknown(&self, path: &str, names: BTreeSet<String>) {
-        let warning = || {
+    fn report_unknown(&self, path: &str, names: BTreeSet<String>) {
+        let diagnostic = || {
             format!(
                 "{path}: unknown load conditions [{}]; file left out",
                 names.into_iter().collect::<Vec<_>>().join(", ")
@@ -214,22 +214,30 @@ impl LoadConditions {
         };
         if let Some(state) = &self.diagnostics.0 {
             let mut state = state.lock().unwrap();
-            if !state.warnings.contains_key(path) {
-                let warning = warning();
-                log::warn!("{warning}");
-                state.warnings.insert(path.to_owned(), warning);
+            if !state.foreign_errors.contains_key(path) {
+                let diagnostic = diagnostic();
+                log::error!("{diagnostic}");
+                state.foreign_errors.insert(path.to_owned(), diagnostic);
             }
         } else {
-            log::warn!("{}", warning());
+            log::error!("{}", diagnostic());
         }
     }
 
-    /// Named warnings emitted by this candidate, one per file.
-    pub fn warnings(&self) -> Vec<String> {
+    /// Non-fatal foreign-namespace errors emitted by this candidate, one per file.
+    pub fn foreign_errors(&self) -> Vec<String> {
         self.diagnostics
             .0
             .as_ref()
-            .map(|state| state.lock().unwrap().warnings.values().cloned().collect())
+            .map(|state| {
+                state
+                    .lock()
+                    .unwrap()
+                    .foreign_errors
+                    .values()
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -248,7 +256,7 @@ impl LoadConditions {
 #[derive(Debug, Default)]
 struct CandidateDiagnostics {
     cache: BTreeMap<(String, String), std::sync::Arc<std::sync::OnceLock<bool>>>,
-    warnings: BTreeMap<String, String>,
+    foreign_errors: BTreeMap<String, String>,
     errors: Vec<String>,
 }
 // Diagnostics do not contribute to a resource generation's cache identity.
@@ -342,6 +350,8 @@ fn evaluate(
             Some("neoforge:true") => Some(true),
             Some("neoforge:not") => hold(&c["value"], loaded, lookup, owned, unknown)?.map(|v| !v),
             Some(kind @ ("neoforge:and" | "neoforge:or")) => {
+                // Visit every child: an unknown node invalidates the whole file,
+                // including after a sibling already determines its boolean result.
                 let mut answer = kind == "neoforge:and";
                 let mut known = true;
                 for child in c["values"].as_array().into_iter().flatten() {
@@ -519,3 +529,7 @@ mod tests {
 #[cfg(test)]
 #[path = "condition_registry_tests.rs"]
 mod registry_tests;
+
+#[cfg(test)]
+#[path = "condition_log_tests.rs"]
+mod log_tests;

@@ -100,9 +100,9 @@ fn wire_loopback_load_conditions_native_and_guest_registrars_and_callbacks_agree
                             );
                         } else {
                             assert!(
-                                conditions.warnings().iter().any(
-                                    |warning| warning.contains(&file) && warning.contains(name)
-                                )
+                                conditions.foreign_errors().iter().any(|warning| warning
+                                    .contains(&file)
+                                    && warning.contains(name))
                             );
                         }
                     }

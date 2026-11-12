@@ -1,10 +1,11 @@
 # Registered data load conditions
 
-Implement `LoadCondition`, then register it from
+Implement `LoadCondition` as a handler that reads the condition's JSON, then
+register it from
 `Hooks::register_load_conditions` using its `RegistrationContext` and
 `event.conditions.register(Identifier::parse("testmod:flag").unwrap(), Flag)`.
-Registration happens once per mod load. The name must belong to the calling
-mod's namespace. Duplicate names refuse registration and name both owners;
+Registration happens once per mod load, with one handler per id and a read-only
+`RegistrationContext`. The name must belong to the calling mod's namespace. Duplicate names refuse registration and name both owners;
 ignoring a registration error still refuses admission.
 
 ```rust,ignore
@@ -31,9 +32,11 @@ A recipe can use the registered name alongside the built-in conditions:
 }
 ```
 
-The handler receives the JSON object without `type`, retaining JSON booleans,
-numbers, strings, lists and objects. `ConditionError` has an explicit Wire
-codec. Native and WebAssembly registrants cross the same generated route.
+The handler receives a borrowed raw JSON value: the condition's object without
+`type`. It reads and validates its own arguments, retaining JSON booleans,
+numbers, strings, lists and objects. Invalid mod input must return
+`ConditionError`; handlers must not panic while reading it. `ConditionError`
+has explicit Wire encoding. Native and WebAssembly registrants cross the same generated route.
 Handlers run in the server's candidate data reload, before the entries become
 visible. Results are retained for each entry and condition payload in that
 candidate, so repeated readers do not call the handler again. A new reload
@@ -48,15 +51,24 @@ usable recipe and resource generation stays installed.
 A namespace is owned only when a loaded mod registered at least one condition
 in it. A loaded mod ID alone does not own a condition namespace. An unknown
 name in an owned namespace refuses reload, naming the file, condition and
-registering mod. This also applies at every depth inside `not`, `and` and `or`,
+registering mod. **Diverges from upstream:** this owned-namespace refusal is a
+Horizon addition. This also applies at every depth inside `not`, `and` and `or`,
 even beside an already false or true branch.
 
+Typed-codec alignment is a later item, to revisit when the shared codec
+foundation exists ([#811](https://github.com/arismoko/horizon/issues/811) and
+[#2332](https://github.com/arismoko/horizon/issues/2332)).
+
 An unknown name in any other namespace keeps the existing fail-closed behavior:
-the file is absent, including beneath the combinators. One warning per file
-names the file and its distinct unknown condition names. Existing built-in
+the file is absent if the unknown id appears anywhere inside `not`, `and` or
+`or`, at any depth. Evaluation visits every branch, so `or(true, othermod:unknown)`
+also leaves the file absent. One ERROR-level log entry per file names that file
+and all its distinct unknown condition ids; repeated occurrences do not produce
+extra entries. Existing built-in
 conditions and files without conditions continue to use the same evaluator.
 
 The public [NeoForge data load condition documentation](https://docs.neoforged.net/docs/resources/server/conditions/)
 describes `ICondition` and the top-level `neoforge:conditions` array. Horizon's
-owned-namespace refusal and foreign-name warning rule is its own admission
-contract; it does not claim NeoForge error-policy parity.
+owned-namespace refusal is the Horizon-specific addition described above.
+Foreign unknown ids leave the file absent and produce an error-level diagnostic;
+they do not themselves refuse the whole reload.

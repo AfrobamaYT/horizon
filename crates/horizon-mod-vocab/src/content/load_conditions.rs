@@ -35,15 +35,19 @@ impl From<(Identifier, String)> for ConditionError {
     }
 }
 
-/// A named data-file condition. Arguments are the JSON object without `type`.
+/// A handler that reads the condition's JSON from a borrowed raw value.
+/// Arguments are the JSON object without `type`; validate their shape and
+/// return `ConditionError` for invalid mod input, never panic while decoding it.
 /// Called once per entry per candidate reload, before publication. Return false
 /// to omit the entry, or an error to keep the previous usable generation.
 /// Registering a condition owns its namespace: unknown names there refuse the
-/// reload. Unknown names elsewhere omit the file with one named warning.
+/// reload. Foreign unknown ids anywhere inside `not`, `and` or `or` omit the
+/// file, even in `or(true, unknown)`, with one ERROR-level log entry per file
+/// naming its distinct unknown ids.
 /// A returned error or native panic refuses the candidate reload, naming the
 /// file, condition and owner. Handlers must not mutate published data.
 pub trait LoadCondition: Send + Sync + 'static {
-    /// Evaluate the typed JSON arguments for one entry.
+    /// Read and validate the raw JSON arguments for one entry.
     fn test(&self, args: &serde_json::Value) -> Result<bool, ConditionError>;
 }
 
