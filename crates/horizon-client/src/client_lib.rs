@@ -162,6 +162,7 @@ pub mod server_perf;
 pub mod shadows;
 pub mod spear;
 pub mod spectator_menu;
+pub mod splashes;
 pub mod sprint;
 pub mod stand_up;
 pub mod stations;
