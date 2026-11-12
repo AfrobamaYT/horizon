@@ -17257,7 +17257,7 @@ pub(crate) fn run_with(
     {
         options.spikes = Some(dedicated::SLOW_TICK_MS);
     }
-    horizon_client::spans::enable(options.spikes.is_some());
+    tick_profile::want_spans(tick_profile::SPANS_SPIKES, options.spikes.is_some());
     // A player who allows performance statistics also says what their slow frames spent their
     // time in: this thread, which draws the frames, times its steps (wall time only).
     if options.execution_role.is_client()

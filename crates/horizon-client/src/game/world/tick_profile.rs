@@ -25,10 +25,9 @@ thread_local! {
 }
 
 /// Who wants the tick's spans recorded besides nobody: `HORIZON_SPIKES` (the slow ring's steps),
-/// a report's recording, a mod (`native_spans`).
+/// a report's recording.
 pub(super) const SPANS_SPIKES: u8 = 1;
 pub(super) const SPANS_REPORT: u8 = 2;
-pub(super) const SPANS_MOD: u8 = 4;
 static SPAN_USERS: AtomicU8 = AtomicU8::new(0);
 
 /// `user` wants the spans recorded, or no longer does: they stay on while anyone does.
