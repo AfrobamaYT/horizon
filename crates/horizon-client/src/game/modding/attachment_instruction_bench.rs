@@ -13,6 +13,13 @@ static VALUE: mod_api::AttachmentType<u32> = mod_api::AttachmentType {
 #[test]
 #[ignore = "callgrind fixture; needs HORIZON_TEST_RESOURCES"]
 fn attachment_instruction_count() {
+    let Some(passes) = std::env::var("ATTACHMENT_PASSES")
+        .ok()
+        .and_then(|passes| passes.parse::<usize>().ok())
+    else {
+        eprintln!("refused, needs ATTACHMENT_PASSES; run by the parity harness");
+        return;
+    };
     with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         prepare_entity_ticking_neighborhood(game, ChunkPos::new(0, 0));
@@ -44,7 +51,6 @@ fn attachment_instruction_count() {
                 .len(),
             700
         );
-        let passes: usize = std::env::var("ATTACHMENT_PASSES").unwrap().parse().unwrap();
         attachment_measured_passes(game, &holders, passes);
         for &holder in &holders {
             assert_eq!(VALUE.get(game, holder).unwrap(), passes as u32);
