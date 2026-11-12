@@ -4360,10 +4360,7 @@ impl Hub {
                             // The prediction's replay starts again where the client now is.
                             if recording {
                                 let kept = g.awaiting_keeps_motion;
-                                g.anticheat
-                                    .record
-                                    .get_or_insert_default()
-                                    .teleported(at, kept);
+                                g.record.get_or_insert_default().teleported(at, kept);
                             }
                         });
                         let rot = (p.yaw, p.pitch);
