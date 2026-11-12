@@ -1102,7 +1102,11 @@ fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
     };
     let item =
         mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 11));
-    let mut event = mod_api::ItemTossEvent { player: 0x42, item };
+    let mut event = mod_api::ItemTossEvent {
+        player: 0x42,
+        item,
+        cancelled: false,
+    };
     let flow = module.item_toss(&mut World, &mut event);
     assert_eq!(TOSSED.get(), Some((0x42, 11)));
     assert!(

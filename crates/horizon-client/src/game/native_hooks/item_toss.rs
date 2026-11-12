@@ -39,13 +39,17 @@ impl Game<'_> {
         {
             let player = self.native_acting_id();
             let mut canceled = false;
+            self.native_lifecycle.held_joins.push(id);
             self.native_item_toss(player, item, &mut canceled);
+            self.native_lifecycle.held_joins.pop();
             if canceled {
                 // A canceled toss never enters the world; what was thrown is gone.
                 if let Some(at) = self.dropped.iter().rposition(|d| d.id == id) {
                     self.remove_dropped(at);
                 }
                 self.forget_entity(id);
+                // What the listeners spawned waited behind the toss.
+                self.native_joins_flush(false, 0);
                 return None;
             }
         }
@@ -105,6 +109,84 @@ mod item_toss_tests {
                 let dirt = ItemStack::new("minecraft:dirt", 1);
                 assert!(game.throw_from_eyes(dirt, eye, true, false).is_some());
                 assert_eq!(*heard.lock().unwrap(), 2);
+            });
+        });
+    }
+
+    /// Spawns a stone where the toss is, then cancels the toss; records the
+    /// tossed id and every item join and leave.
+    #[derive(Default)]
+    struct SpawnSeen {
+        tossed: Mutex<Option<u32>>,
+        spawned: Mutex<Option<u32>>,
+        joins: Mutex<Vec<u32>>,
+        leaves: Mutex<Vec<u32>>,
+    }
+    struct SpawnThenCancel(Arc<SpawnSeen>);
+    #[mod_api::__subscriptions]
+    impl Hooks for SpawnThenCancel {
+        fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent) -> Flow {
+            *self.0.tossed.lock().unwrap() = Some(event.item.entity().id());
+            let level = host.level("minecraft:overworld").unwrap();
+            let stone = mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:stone").unwrap(),
+                1,
+            )
+            .unwrap();
+            let spawned = level.spawn_item(host, 0.5, 65.0, 0.5, stone, 0).unwrap();
+            *self.0.spawned.lock().unwrap() = spawned.map(|e| e.id());
+            Flow::Cancel
+        }
+        fn entity_join_level(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::EntityJoinLevelEvent<'_>,
+        ) -> Flow {
+            if event.kind == "minecraft:item" {
+                self.0.joins.lock().unwrap().push(event.entity);
+            }
+            Flow::Continue
+        }
+        fn entity_leave_level(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::EntityLeaveLevelEvent<'_>,
+        ) {
+            self.0.leaves.lock().unwrap().push(event.entity);
+        }
+    }
+
+    /// A toss listener that spawns another item flushes the pending joins,
+    /// but not the toss it is still deciding: a cancel then leaves the toss
+    /// unannounced (no join, no leave), and the listener's item joins.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_listener_spawn_does_not_announce_the_toss_it_then_cancels() {
+        let probe = Arc::new(SpawnSeen::default());
+        let mods = vec![ModEntry::new(
+            "toss_spawn_probe",
+            Box::new(SpawnThenCancel(probe.clone())),
+        )];
+        with_mods(mods.into(), || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let dirt = ItemStack::new("minecraft:dirt", 1);
+                assert!(
+                    game.throw_from_eyes(dirt, [0.5, 65.0, 0.5], false, true)
+                        .is_none()
+                );
+                game.native_joins_flush(false, 0);
+                let tossed = probe.tossed.lock().unwrap().expect("the toss was asked");
+                let spawned = probe
+                    .spawned
+                    .lock()
+                    .unwrap()
+                    .expect("the listener's item spawned");
+                let joins = probe.joins.lock().unwrap().clone();
+                assert!(!joins.contains(&tossed), "the canceled toss never joins");
+                assert!(joins.contains(&spawned), "the listener's item joins");
+                assert!(!probe.leaves.lock().unwrap().contains(&tossed));
+                assert!(game.dropped.iter().all(|d| d.id != tossed));
             });
         });
     }
