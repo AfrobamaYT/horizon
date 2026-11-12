@@ -1,5 +1,4 @@
-<!-- chapter: Native mod source revisions -->
-<!-- separator: 1 -->
+# Native mod source revisions
 
 ## Native mod source revisions
 

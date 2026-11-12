@@ -928,7 +928,7 @@ outside 1 to 1000, no points or an invalid point refuse the mods at startup, nam
 declared regions in `data/horizon/biome_regions.dat`, and from then on that record decides: a changed or added region
 reaches an existing world only when its owner opts in, and a world whose region's mod is missing asks before it opens
 (a dedicated server reads `[biome_regions] missing = "refuse" | "vanilla"` in `server.toml`). The full contract is in
-[the design](../concepts/mod-biome-regions.md).
+[the design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-biome-regions.md).
 
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A

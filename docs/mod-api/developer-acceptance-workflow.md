@@ -1,5 +1,4 @@
-<!-- chapter: Developer acceptance workflow -->
-<!-- separator: 0 -->
+# Developer acceptance workflow
 
 ### Developer acceptance workflow
 
