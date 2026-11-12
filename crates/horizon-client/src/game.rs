@@ -9902,7 +9902,7 @@ impl Game<'_> {
             brewing: &self.stations().brewing,
             banners: &self.stations().banners,
             station_recipes: &self.stations().recipes,
-            enchantments: self.enchantments(),
+            enchantments: self.item_enchantments(),
             names: &self.pack.names,
             trade: Some(&trade_env),
             maps: level_maps

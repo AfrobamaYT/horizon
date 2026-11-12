@@ -2491,6 +2491,7 @@ mod tests {
             count: 1,
             ticks: 0,
             health: 5,
+            air: 300,
             no_gravity: true,
             following: None,
         });
