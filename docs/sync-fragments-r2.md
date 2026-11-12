@@ -42,3 +42,13 @@ query in this scaffold; it is deliberately refused rather than smuggled in as
 a notification or a raw-id compatibility alias. No new dispatcher is needed.
 
 Converter boundary: `unsupported fragment fields: ['comments', 'doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
+
+## riding_getters
+
+Merged into existing typed queries, not new hooks: EntityRef::vehicle and
+EntityRef::passengers (host/entities.rs, entity_vehicle/entity_passengers).
+Upstream native_travel.rs reads actor/guest/mob mount ids and enumerates riders;
+the fork already owns resident handle queries with explicit off-level semantics.
+No hook moment, duplicate notification, native_ alias, or new type was added.
+
+Converter boundary: `unsupported fragment fields: ['comments', 'doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
