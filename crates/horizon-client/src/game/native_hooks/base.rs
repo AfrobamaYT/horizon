@@ -4301,20 +4301,6 @@ impl Game<'_> {
     ) {
         self.fire_pickup_xp(player, dimension, orb, value, count, canceled);
     }
-    /// The selected damaged Mending `stack` and the proposed durability repair
-    /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
-    /// experience unspent when it overrides a positive proposal. If the selected
-    /// stack changes, the repair is skipped.
-    /// Server-side, including `PlayerRef::give_experience_points`.
-    pub(in crate::game) fn native_mending_repair(
-        &mut self,
-        player: u128,
-        stack: &ItemStack,
-        experience: u32,
-        repair: &mut u32,
-    ) {
-        self.fire_mending_repair(player, stack, experience, repair);
-    }
     /// A player's hit landed on the mob `entity` of type `kind`
     /// (`minecraft:zombie`), holding `stack`: where `Item.hurtEnemy` is called,
     /// before the post-attack enchantments and the weapon's wear. It only
