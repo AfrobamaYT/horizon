@@ -8,7 +8,7 @@ impl Game<'_> {
     /// as the off hand's stack and `to_off_hand` as the main hand's; the hands
     /// get what the listeners leave, and a client whose stacks changed gets
     /// both slots. Set `cancel` to keep the items where they are: the player's
-    /// client, which swapped them at once, gets its slots back. The player's
+    /// client is sent both slots again. The player's
     /// state is swapped in, so `native_acting_player`, `native_tell` and the
     /// item helpers reach them. Once for each press, on a server: a LAN or
     /// dedicated server's players, the single-player owner and a LAN host.

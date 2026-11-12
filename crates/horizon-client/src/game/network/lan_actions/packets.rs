@@ -341,8 +341,8 @@ impl Game<'_> {
                 // (ServerGamePacketListenerImpl.handlePlayerAction), not for spectators.
                 7 if !spectator => {
                     // The mods hear the swap first (LivingSwapItemsEvent.Hands):
-                    // they may stop it, and the client, which swapped at once,
-                    // gets its slots back, or change what each hand gets. The
+                    // they may stop it, and the client is sent its slots again,
+                    // or change what each hand gets. The
                     // stacks are copied only for a listener: `heard` holds the
                     // vanilla (to main hand, to off hand), the old off and main.
                     let (uuid, name, heard) = {
@@ -381,6 +381,18 @@ impl Game<'_> {
                         return;
                     }
                     let changed = chosen != heard;
+                    let used =
+                        host.play
+                            .get(&conn)
+                            .and_then(|play| play.using)
+                            .and_then(|(slot, _)| {
+                                let guest = &host.hub.guests[gi];
+                                if slot == crate::game::shield::OFFHAND_SLOT {
+                                    guest.offhand.clone()
+                                } else {
+                                    guest.inventory[slot].clone()
+                                }
+                            });
                     let (offhand, main) = host.hub.guests.update(gi, |g| {
                         let slot = g.selected;
                         std::mem::swap(&mut g.inventory[slot], &mut g.offhand);
@@ -389,12 +401,9 @@ impl Game<'_> {
                         }
                         (g.offhand.clone(), g.inventory[slot].clone())
                     });
-                    // A mod's stacks differ from the client's own swap: both slots go back.
+                    // A mod's stacks differ from vanilla's swap: both slots go to the client.
                     if changed {
                         host.hub.send_inventory(gi);
-                    }
-                    if let Some(play) = host.play.get_mut(&conn) {
-                        play.using = None;
                     }
                     // setItemInHand: the off hand, then the main hand, from what each held.
                     let (old_off, old_main) = match &heard {
@@ -404,6 +413,10 @@ impl Game<'_> {
                     self.as_guest(conn, |g| {
                         g.player_on_equip("offhand", old_off, offhand.as_ref());
                         g.player_on_equip("mainhand", old_main, main.as_ref());
+                        match used {
+                            Some(stack) => g.stop_using_item(&stack),
+                            None => g.using = None,
+                        }
                     });
                     if mod_api::__private::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
                         let Some(host) = self.lan.as_ref() else {
@@ -460,20 +473,20 @@ impl Game<'_> {
                         return;
                     }
                 }
+                self.as_guest(conn, |g| {
+                    if changed
+                        && g.using
+                            .is_some_and(|(slot, _)| slot != crate::game::shield::OFFHAND_SLOT)
+                    {
+                        g.stop_active_item_use();
+                    }
+                });
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
                 {
                     let value = p.slot as usize;
                     host.hub.guests.update(gi, |guest| guest.selected = value);
-                }
-                if let Some(play) = host.play.get_mut(&conn)
-                    && changed
-                    && play
-                        .using
-                        .is_some_and(|(slot, _)| slot != crate::game::shield::OFFHAND_SLOT)
-                {
-                    play.using = None;
                 }
                 if changed {
                     self.native_player_switch_hotbar_slot_post(
@@ -801,6 +814,9 @@ impl Game<'_> {
             }
             S::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CHECK_CHANNEL => {
                 self.guest_recipe_check(conn, &p.data);
+            }
+            S::CustomPayload(p) if p.channel == horizon_client::perf_net::CHANNEL => {
+                self.guest_perf(conn, &p.data)
             }
             S::CustomPayload(p) if p.channel == horizon_client::lod_net::CHANNEL => {
                 self.guest_far_terrain(conn, &p.data)

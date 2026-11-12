@@ -399,8 +399,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in, unless the guest was already removed in the same poll (a kick and the disconnect arriving together): the hook still fires, without it.
 - **`native_player_level_change(player, name, from, to)`**: a server player's experience change altered their level, after the new level was applied. The guest's state is swapped in when the player is a guest.
 - **`native_player_swap_hands(player, name, to_main_hand, to_off_hand, cancel)` (version 2)**: a player pressed the swap-hands key (not a spectator), heard
-  before the main and off hand items swap. `to_main_hand` starts as the off hand's stack and `to_off_hand` as the main hand's; the hands get what the listeners leave, and the client gets both slots when they changed. Set `cancel` and they stay where they are; the player's client, which swapped
-  them at once, gets its slots back. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the item
+  before the main and off hand items swap. `to_main_hand` starts as the off hand's stack and `to_off_hand` as the main hand's; the hands get what the listeners leave, and the client gets both slots when they changed. Set `cancel` and they stay where they are; the player's client
+  is sent both slots again. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the item
   helpers reach them. Heard for a server's players, the single-player owner and a LAN host. Not heard: the same swap from an open inventory (hovering a slot and pressing the key).
 - Services: `host.players().server_players()` returns online player handles in connection order;
   `player.tell(host, text)` sends a system line to one player, also the acting player inside their hook;
@@ -1417,7 +1417,7 @@ clicks already.
 `dyn LoopContext` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
 `"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format`,
-`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `fluid_flow`, `player_stays_on_ground_surface`, `block_jump_factor`, `block_speed_factor`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
+`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `fluid_flow`, `player_stays_on_ground_surface`, `block_jump_factor`, `block_speed_factor`, `friction`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
@@ -2326,11 +2326,11 @@ registration path.
   thunder), on a block broken by a player or an explosion and on a mob's death loot; None on the other rolls. The game sets it
   around a roll with `with_native_loot_place`.
 
-- How a mod block burns, and whether it makes a campfire over it a signal fire, on an authoritative server. `native_fire_odds(dimension, state, odds)` answers
-  `FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table: put
+- How a mod block burns, and whether it makes a campfire over it a signal fire, on an authoritative server. `native_fire_odds(dimension, state, pos, face, odds)` answers
+  `FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table, for the block at `pos` seen from its side `face` (the one facing the fire, or the air fire may take): put
   `(ignite, burn)` in `odds` for your own blocks. Ignite odds above zero let fire stand beside the block and spread
-  to the air around it (planks 5, wool 30); burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never
-  burns; keep both within vanilla's 0 to 100. A waterlogged state never burns and isn't asked. It runs hundreds of times per fire tick: keep it short.
+  to the air around it (planks 5, wool 30), so a face with ignite odds of zero isn't flammable; burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never
+  burns; negative answers become zero, burn odds cap at 300 and spread arithmetic saturates. A waterlogged state never burns and isn't asked. It runs hundreds of times per fire tick: keep it short. `native_is_fire_source`, `native_ignited_by_lava` and `native_on_caught_fire` are the block's other fire questions.
   `native_smoke_source(dimension, state, smoke)` answers `CampfireBlock.isSmokeSource` for the block under a campfire,
   as the campfire is placed or that block changes: `Some(true)` makes the campfire a signal fire, as a hay bale does.
   Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. The deprecated in-frame
@@ -2372,7 +2372,7 @@ registration path.
   number above zero keeps vanilla's. Only the window's clock changes; a server keeps its own rate. Client side; with no
   listener, one branch a frame.
 
-- A player swapping their main and off hand items: version 2 of `native_player_swap_hands(player, name, to_main_hand, to_off_hand, cancel)` is heard before the swap (NeoForge's `LivingSwapItemsEvent.Hands`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod may replace the stack each hand gets, or set `cancel` to keep the items where they are; the player's client gets its slots back. Named injections must request `hook_version = 2`.
+- A player swapping their main and off hand items: version 2 of `native_player_swap_hands(player, name, to_main_hand, to_off_hand, cancel)` is heard before the swap (NeoForge's `LivingSwapItemsEvent.Hands`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod may replace the stack each hand gets, or set `cancel` to keep the items where they are; the player's client is sent both slots again. Named injections must request `hook_version = 2`.
 
 - A player's food level changing: `native_food_level_changed(player, name, from, to, cancel)` is heard for a player of a server when a turn of theirs changed it (eating, hunger and saturation effects, exhaustion, starving; Bukkit's `FoodLevelChangeEvent`), before the new level reaches them. A mod changes `to` or sets `cancel` to leave the level at `from`.
 
