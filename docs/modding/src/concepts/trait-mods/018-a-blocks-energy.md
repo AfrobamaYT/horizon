@@ -13,6 +13,14 @@ extract; a side that reaches neither finds no handler. `move_energy(host, &from,
 (`EnergyHandlerUtil.move`) as one step of `move_resources`: all or nothing, a move the target takes only part of
 tried again with that part.
 
+NeoForge's stock energy handlers come ready to wrap or answer with: `EmptyEnergyHandler` (0 of 0, refusing both
+ways), `InfiniteEnergyHandler` (gives every extract whole, takes nothing: a creative battery),
+`VoidingEnergyHandler` (takes every insert, holds nothing) and `LimitingEnergyHandler::new(inner, max_insert,
+max_extract)`, which clamps each call before forwarding it to `inner` in the same transaction. Any handler, a
+`Capability` included, answers `is_full` and `comparator_signal` (`EnergyHandlerUtil`: 0 when empty, else
+`1 + floor(14 * amount / capacity)`). To pass calls through (`DelegatingEnergyHandler`), implement `EnergyHandler`
+on a struct holding the other handler and forward.
+
 Energy held by an item is `ITEM_ENERGY` (NeoForge's `Capabilities.Energy.ITEM`), found where its stack lives with
 `place.capability(host, &ITEM_ENERGY)`, as `ITEM_FLUIDS` is, and moved by `move_energy` as a block's is. A mod
 answers it for its item with `r.item_capability(&ITEM_ENERGY, "mymod:cell", …)`, keeping the energy in the item's
