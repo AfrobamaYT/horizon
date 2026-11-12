@@ -439,9 +439,12 @@ jobs:
       - name: Why the core build is not fresh
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests --no-run -v 2>&1 | grep -E '^ +(Dirty|Compiling) ' || true
+      # The binaries built above, four at a time: Cargo runs them one by one, and a few large ones (the API
+      # generator's, the client library's, no_wire_registration) took most of this step while the runner idled.
+      # Every binary still runs every test, from its package directory, and any failure fails the step.
       - name: Test Rust core and voxel kernel correctness
         if: needs.changes.outputs.rust_required != 'false'
-        run: cargo +stable test $JOBS --no-fail-fast --profile test --workspace --lib --bins --tests
+        run: python3 tools/ci/run_test_binaries.py --jobs 4 -- cargo +stable test $JOBS --profile test --workspace --lib --bins --tests
       # Prepared-data content-root tests stay in the existing client-lib data leg.
       # Running them again here without the data only rebuilds targets before they return early.
       # One genuine pinned export also validates source staging and listed slots.
