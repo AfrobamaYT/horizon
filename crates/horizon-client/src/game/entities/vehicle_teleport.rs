@@ -5,7 +5,8 @@
 //! turns an entity without teleporting it (`RotateCommand` ->
 //! `Entity.forceSetRotation`).
 use super::Game;
-use super::commands::{Target, TeleportMotion};
+use super::commands::Target;
+use super::entity::{Entity as _, with_entity, with_entity_mut};
 use horizon_core::geometry::Vec3;
 use horizon_core::nbt::Tag;
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -67,6 +68,28 @@ pub(super) fn passenger_rotation(before: [f32; 2], after: [f32; 2], rider: [f32;
 pub(super) struct PlacedRotation {
     pub before: [f32; 2],
     pub after: [f32; 2],
+}
+
+/// What a teleport's `TeleportTransition` does with the entity's motion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::game) enum TeleportMotion {
+    /// `Entity.teleportTo(ServerLevel, ..)`, as `/tp` calls it: no delta and no
+    /// `Relative.DELTA`, so the entity arrives still.
+    Stop,
+    /// A portal's `Relative.DELTA` with no delta of its own: the entity keeps
+    /// the motion it had (`PositionMoveRotation.of(this)`), unturned.
+    Keep,
+}
+
+/// `AbstractMinecart.getKnownMovement` with `OldMinecartBehavior`: the cart's
+/// motion clamped to 0.4 either way along x and z, what a teleport's
+/// `PositionMoveRotation.of(this)` carries over.
+pub(super) fn cart_known_movement(velocity: Vec3) -> Vec3 {
+    Vec3::new(
+        velocity.x.clamp(-0.4, 0.4),
+        velocity.y,
+        velocity.z.clamp(-0.4, 0.4),
+    )
 }
 
 /// The entity id a vehicle's riders point at, for the targets that carry some.
@@ -254,6 +277,37 @@ impl Game<'_> {
                 self.snap_mob_passengers(child);
             }
         }
+    }
+
+    /// `PositionMoveRotation.of(entity).deltaMovement()`: the motion a
+    /// transition that keeps it (`TeleportMotion::Keep`) carries over, a
+    /// minecart's clamped (`cart_known_movement`). None for a player, whose
+    /// client holds its motion, and an entity no level holds.
+    pub(super) fn transition_motion(&mut self, t: Target) -> Option<Vec3> {
+        let id = super::native_entities::target_id(t)?;
+        let motion = self
+            .in_target_level(t, |g| {
+                let h = g.native_walk_entity(id)?;
+                Some(with_entity!(g, h, e => e.velocity()))
+            })
+            .flatten()?;
+        Some(if matches!(t, Target::Cart(_)) {
+            cart_known_movement(motion)
+        } else {
+            motion
+        })
+    }
+    /// After a teleport placed `t` in its level: `motion` is its motion again
+    /// (`Entity.teleportSetPosition` with `Relative.DELTA`).
+    pub(super) fn restore_transition_motion(&mut self, t: Target, motion: Vec3) {
+        let Some(id) = super::native_entities::target_id(t) else {
+            return;
+        };
+        let _ = self.in_target_level(t, |g| {
+            if let Some(h) = g.native_walk_entity(id) {
+                with_entity_mut!(g, h, e => *e.velocity_mut() = motion);
+            }
+        });
     }
 
     /// The cross-level teleport of a command's or a mod's target: a general

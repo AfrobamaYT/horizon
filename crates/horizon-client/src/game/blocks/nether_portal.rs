@@ -1403,7 +1403,7 @@ impl Game<'_> {
                 return;
             };
             // `PositionMoveRotation.of(this)` takes the cart's `getKnownMovement`.
-            let m = super::minecarts::known_movement(horizon_client::entity_nbt::motion(&tag));
+            let m = super::vehicle_teleport::cart_known_movement(horizon_client::entity_nbt::motion(&tag));
             if let Tag::Compound(c) = &mut tag {
                 c.insert("Motion".into(), doubles([m.x, m.y, m.z]));
             }
