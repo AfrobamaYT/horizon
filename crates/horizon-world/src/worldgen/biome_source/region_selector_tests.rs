@@ -124,7 +124,10 @@ fn without_regions_the_source_is_vanilla_unchanged() {
     }
     // Regions that never win a cell leave every quart vanilla's, scalar and prepared.
     let unpicked = ResolvedBiomeSource::MultiNoise(vanilla())
-        .with_regions(Some(&layout(10, vec![region("never", 0)])), &root(1))
+        .with_regions(
+            Some(&layout(i32::MAX as u32 - 1, vec![region("never", 1)])),
+            &root(1),
+        )
         .unwrap();
     assert!(matches!(unpicked, ResolvedBiomeSource::Regions(_)));
     assert_eq!(biomes(&unpicked, &climate), plain);
@@ -300,6 +303,17 @@ fn layouts_this_build_cannot_run_are_refused() {
     let mut version = layout(10, vec![region("a", 1)]);
     version.selector.version = 2;
     assert_eq!(refused(version.clone()), Some(RegionError::Version(2)));
+    for weight in [0, 1001, u32::MAX] {
+        assert_eq!(
+            refused(layout(10, vec![region("a", weight)])),
+            Some(RegionError::Weight)
+        );
+    }
+    let mut widest = layout(10, vec![region("a", 1)]);
+    widest.selector.cell = 1 << 30;
+    assert_eq!(refused(widest.clone()), None);
+    widest.selector.cell += 1;
+    assert_eq!(refused(widest), Some(RegionError::Cell((1 << 30) + 1)));
     let mut cell = layout(10, vec![region("a", 1)]);
     cell.selector.cell = 0;
     assert_eq!(refused(cell), Some(RegionError::Cell(0)));
@@ -334,4 +348,37 @@ fn building_the_selector_leaves_the_generator_random_where_it_was() {
     RegionSelector::new(&layout(10, vec![region("a", 1)]), &positional).unwrap();
     assert_eq!(positional, untouched_positional);
     assert_eq!(random.next_long(), untouched.next_long());
+}
+
+#[test]
+fn selector_version_one_has_literal_seeded_draws_and_owners() {
+    // Independently calculated with Python hashlib MD5 and unsigned xoroshiro arithmetic.
+    let root = root(42);
+    let stream = root.from_hash_of("horizon:biome_region").fork_positional();
+    for ((x, z), expected) in [
+        ((0, 0), [4, 5, 7]),
+        ((-1, 0), [2, 2, 13]),
+        ((2, -3), [6, 1, 12]),
+    ] {
+        let mut random = stream.at(BlockPos::new(x, 0, z));
+        assert_eq!(
+            [
+                random.next_int_bound(8).unwrap(),
+                random.next_int_bound(8).unwrap(),
+                random.next_int_bound(14).unwrap()
+            ],
+            expected
+        );
+    }
+    let selector =
+        RegionSelector::new(&layout(10, vec![region("a", 1), region("b", 3)]), &root).unwrap();
+    for ((x, z), expected) in [
+        ((-9, -1), 2),
+        ((-4, 0), 0),
+        ((0, 0), 0),
+        ((3, 17), 2),
+        ((31, -12), 0),
+    ] {
+        assert_eq!(selector.owner(x, z), expected, "quart {x}, {z}");
+    }
 }

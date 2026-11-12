@@ -626,10 +626,15 @@ restart:
 ```toml
 [biome_regions]
 missing = "vanilla"      # "refuse", the default: don't start
-adopt_installed = true   # optional: new chunks use the installed mods' regions instead of the world's saved ones
+adopt_installed = false  # true explicitly adopts installed regions for new generation
 ```
 
 The choice for a missing mod is saved in the world, so it holds even if the setting is removed later.
+Substitution keeps the missing region's slot and weight; a returning mod does not undo it.
+Adoption keeps saved weights for returning regions, takes declared weights for new regions and
+drops absent regions. Completed chunks keep their saved biomes and blocks. New generation may
+differ in surface material, carving, features and structures. The
+[design note](modding/src/concepts/mod-biome-regions.md) lists record limits and fixture coverage.
 
 ## 8. Start it with the computer
 

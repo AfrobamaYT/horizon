@@ -14,7 +14,12 @@ fn point(biome: &str, low: f32) -> mod_api::BiomePoint {
     }
 }
 
-fn declaration(mod_id: &str, id: &str, dimension: &str, weight: u32) -> BiomeRegionDeclaration {
+pub(super) fn declaration(
+    mod_id: &str,
+    id: &str,
+    dimension: &str,
+    weight: u32,
+) -> BiomeRegionDeclaration {
     BiomeRegionDeclaration {
         mod_id: mod_id.into(),
         id: id.into(),
@@ -34,7 +39,7 @@ fn overworld() -> Vec<BiomeRegionDeclaration> {
     ]
 }
 
-fn mods<'a>(ids: &[&'a str]) -> BTreeSet<&'a str> {
+pub(super) fn mods<'a>(ids: &[&'a str]) -> BTreeSet<&'a str> {
     ids.iter().copied().collect()
 }
 
@@ -269,7 +274,7 @@ fn choosing_vanilla_is_saved_and_opens_from_then_on() {
     assert_eq!(differences.returned, ["zeta:canyon"]);
     assert!(differences.missing.is_empty());
     let reopened = open_with(dir.path(), &everyone, &overworld()).unwrap();
-    assert_eq!(reopened, Some(opened));
+    assert_eq!(reopened.unwrap().dimensions, opened.dimensions);
 }
 
 #[test]
@@ -288,8 +293,11 @@ fn changed_added_and_removed_regions_are_reported_and_the_record_wins() {
     changed.sort();
     assert_eq!(changed, ["alpha:marsh", "zeta:canyon", "zeta:dunes"]);
     assert_eq!(
-        open_with(dir.path(), &everyone, &now).unwrap(),
-        Some(saved.clone())
+        open_with(dir.path(), &everyone, &now)
+            .unwrap()
+            .unwrap()
+            .dimensions,
+        saved.dimensions
     );
     // A changed weight is a difference too.
     let mut heavier = overworld();
@@ -370,4 +378,254 @@ fn choices_refuse_a_world_already_open_in_another_session() {
     assert!(!path(dir).exists());
     drop(lock);
     assert!(choose_with(dir, &mods(&[]), &[], true, true).is_ok());
+}
+
+fn at_mut<'a>(tag: &'a mut Tag, path: &[&str]) -> &'a mut Tag {
+    let mut tag = tag;
+    for key in path {
+        tag = match tag {
+            Tag::List(values) => &mut values[key.parse::<usize>().unwrap()],
+            _ => tag.get_mut(key).unwrap(),
+        };
+    }
+    tag
+}
+
+#[test]
+fn every_required_record_field_refuses_missing_or_wrong_types() {
+    let good = BiomeRegions::from_declarations(&overworld()).encode();
+    let layout = ["dimensions", "minecraft:overworld"];
+    let region = ["dimensions", "minecraft:overworld", "regions", "0"];
+    let point = [
+        "dimensions",
+        "minecraft:overworld",
+        "regions",
+        "0",
+        "points",
+        "0",
+    ];
+    let mut paths = vec![vec!["version"], vec!["dimensions"]];
+    for field in ["selector", "regions"] {
+        paths.push([layout.as_slice(), &[field]].concat());
+    }
+    for field in ["version", "cell", "salt", "vanilla_weight"] {
+        paths.push([layout.as_slice(), &["selector", field]].concat());
+    }
+    for field in ["owner", "id", "weight", "points"] {
+        paths.push([region.as_slice(), &[field]].concat());
+    }
+    for field in [
+        "biome",
+        "temperature",
+        "humidity",
+        "continentalness",
+        "erosion",
+        "depth",
+        "weirdness",
+        "offset",
+    ] {
+        paths.push([point.as_slice(), &[field]].concat());
+    }
+    for path in paths {
+        for missing in [true, false] {
+            let mut bad = good.clone();
+            let (key, parents) = path.split_last().unwrap();
+            let Tag::Compound(fields) = at_mut(&mut bad, parents) else {
+                panic!("compound parent")
+            };
+            if missing {
+                fields.remove(&JavaString::from(*key));
+            } else {
+                fields.insert((*key).into(), Tag::Byte(0));
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let file = super::path(dir.path());
+            write_dat_durable(&file, bad).unwrap();
+            let before = fs::read(&file).unwrap();
+            assert!(
+                open_with(dir.path(), &mods(&["alpha", "zeta"]), &overworld()).is_err(),
+                "{path:?} missing={missing}"
+            );
+            assert_eq!(fs::read(&file).unwrap(), before);
+            assert_eq!(entries(file.parent().unwrap()), ["biome_regions.dat"]);
+        }
+    }
+}
+
+#[test]
+fn saved_selector_identity_climate_and_counts_are_bounded() {
+    let good = BiomeRegions::from_declarations(&overworld()).encode();
+    let variants = [
+        (
+            vec!["dimensions", "minecraft:overworld", "selector", "cell"],
+            Tag::Int((1 << 30) + 1),
+        ),
+        (
+            vec!["dimensions", "minecraft:overworld", "selector", "cell"],
+            Tag::Int(0),
+        ),
+        (
+            vec!["dimensions", "minecraft:overworld", "selector", "version"],
+            Tag::Int(2),
+        ),
+        (
+            vec!["dimensions", "minecraft:overworld", "selector", "salt"],
+            string(""),
+        ),
+        (
+            vec![
+                "dimensions",
+                "minecraft:overworld",
+                "selector",
+                "vanilla_weight",
+            ],
+            Tag::Int(i32::MAX),
+        ),
+        (
+            vec!["dimensions", "minecraft:overworld", "regions", "0", "owner"],
+            string("other"),
+        ),
+        (
+            vec![
+                "dimensions",
+                "minecraft:overworld",
+                "regions",
+                "0",
+                "points",
+                "0",
+                "offset",
+            ],
+            Tag::Float(f32::NAN.to_bits()),
+        ),
+        (
+            vec![
+                "dimensions",
+                "minecraft:overworld",
+                "regions",
+                "0",
+                "points",
+                "0",
+                "temperature",
+            ],
+            Tag::List(vec![Tag::Float(f32::INFINITY.to_bits()), Tag::Float(0)]),
+        ),
+    ];
+    for (path, value) in variants {
+        let mut bad = good.clone();
+        *at_mut(&mut bad, &path) = value;
+        assert!(decode(&bad).is_err(), "{path:?}");
+    }
+    let mut widest = good.clone();
+    *at_mut(
+        &mut widest,
+        &["dimensions", "minecraft:overworld", "selector", "cell"],
+    ) = Tag::Int(1 << 30);
+    assert!(decode(&widest).is_ok());
+    let mut bad = good.clone();
+    let Tag::Compound(dimensions) = bad.get_mut("dimensions").unwrap() else {
+        unreachable!()
+    };
+    dimensions.insert("extra:a".into(), Tag::Int(0));
+    dimensions.insert("extra:b".into(), Tag::Int(0));
+    assert!(decode(&bad).unwrap_err().contains("exceeds 2"));
+    let mut bad = good.clone();
+    let values = regions(&mut bad);
+    values.resize(MAX_REGIONS + 1, values[0].clone());
+    assert!(decode(&bad).unwrap_err().contains("exceeds 1024"));
+    let mut bad = good;
+    let Tag::List(points) = regions(&mut bad)[0].get_mut("points").unwrap() else {
+        unreachable!()
+    };
+    points.resize(MAX_POINTS + 1, points[0].clone());
+    assert!(decode(&bad).unwrap_err().contains("exceeds 16384"));
+}
+
+#[test]
+fn named_reports_are_remembered_across_restarts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut record = BiomeRegions::from_declarations(&overworld());
+    Arc::make_mut(record.dimensions.get_mut("minecraft:overworld").unwrap()).regions[1]
+        .substituted = true;
+    record.write(dir.path()).unwrap();
+    let mut now = overworld();
+    now[0].region.points[0].offset = 0.5;
+    let opened = open_with(dir.path(), &mods(&["alpha", "zeta"]), &now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        opened
+            .reported
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["changed:alpha:marsh", "returned:zeta:canyon"]
+    );
+    let before = fs::read(path(dir.path())).unwrap();
+    let backup = fs::read(path(dir.path()).with_extension("dat_old")).unwrap();
+    let reopened = open_with(dir.path(), &mods(&["alpha", "zeta"]), &now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reopened, opened);
+    assert_eq!(fs::read(path(dir.path())).unwrap(), before);
+    assert_eq!(
+        fs::read(path(dir.path()).with_extension("dat_old")).unwrap(),
+        backup
+    );
+    assert!(reopened.layout("minecraft:overworld").unwrap().regions[1].substituted);
+}
+
+#[test]
+fn oversized_and_overbudget_nbt_refuse_before_materializing_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = path(dir.path());
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let oversized = fs::File::create(&file).unwrap();
+    oversized
+        .set_len(RECORD_LIMITS.max_bytes as u64 + 1)
+        .unwrap();
+    assert!(
+        BiomeRegions::read(dir.path())
+            .unwrap_err()
+            .contains("32 MiB")
+    );
+    // A tiny NBT header claiming too many list nodes must fail before allocating its list.
+    let mut raw = b"\x0a\x00\x00\x09\x00\x01x\x01".to_vec();
+    raw.extend_from_slice(&(RECORD_LIMITS.max_nodes as i32 + 1).to_be_bytes());
+    fs::write(&file, &raw).unwrap();
+    assert!(BiomeRegions::read(dir.path()).is_err());
+    assert_eq!(fs::read(&file).unwrap(), raw);
+    assert_eq!(entries(file.parent().unwrap()), ["biome_regions.dat"]);
+}
+
+#[test]
+fn literal_version_one_file_decodes_without_the_record_encoder() {
+    let hex = concat!(
+        "0a000003000776657273696f6e000000010a000a64696d656e73696f6e730a00136d696e6563726166743a6f76657277",
+        "6f726c640a000873656c6563746f7203000776657273696f6e0000000103000463656c6c0000008008000473616c7400",
+        "14686f72697a6f6e3a62696f6d655f726567696f6e03000e76616e696c6c615f7765696768740000000a000900077265",
+        "67696f6e730a000000010800056f776e65720005616c70686108000269640009616c7068613a69636503000677656967",
+        "687400000003090006706f696e74730a0000000108000562696f6d6500146d696e6563726166743a6963655f7370696b",
+        "657309000b74656d70657261747572650500000002bf0000003e80000009000868756d69646974790500000002bf0000",
+        "003e80000009000f636f6e74696e656e74616c6e6573730500000002bf0000003e80000009000765726f73696f6e0500",
+        "000002bf0000003e80000009000564657074680500000002bf0000003e80000009000977656972646e65737305000000",
+        "02bf0000003e8000000500066f66667365743ec000000000000000",
+    );
+    let bytes: Vec<u8> = hex
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(path(dir.path()).parent().unwrap()).unwrap();
+    fs::write(path(dir.path()), &bytes).unwrap();
+    let record = BiomeRegions::read(dir.path()).unwrap().unwrap();
+    let layout = record.layout("minecraft:overworld").unwrap();
+    assert_eq!(layout.selector, SelectorParams::current());
+    assert_eq!(layout.regions[0].id, "alpha:ice");
+    assert_eq!(layout.regions[0].weight, 3);
+    assert_eq!(layout.regions[0].points[0].biome, "minecraft:ice_spikes");
+    assert_eq!(layout.regions[0].points[0].intervals, [(-0.5, 0.25); 6]);
+    assert_eq!(layout.regions[0].points[0].offset, 0.375);
+    assert!(record.reported.is_empty());
+    assert_eq!(fs::read(path(dir.path())).unwrap(), bytes);
 }

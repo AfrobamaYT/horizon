@@ -1,12 +1,18 @@
 //! A world's biome regions: `data/horizon/biome_regions.dat`, the region layout of each
 //! dimension fixed when the world was created and changed only by its owner's recorded choice.
 //! Design: `docs/modding/src/concepts/mod-biome-regions.md`.
-use super::{DatIssue, Result, Tag, try_read_dat, write_dat_durable};
+use super::{DatIssue, Result, Tag, write_dat_durable};
 use horizon_core::nbt::JavaString;
+use horizon_core::{
+    identifier::Identifier,
+    nbt::{self, Limits, NamedTag},
+};
+use horizon_world::compression::Compression;
 use horizon_world::worldgen::biome_source::regions::{
     LayoutRegion, REGION_SELECTOR_VERSION, RegionLayout, RegionPoint, SelectorParams,
 };
 use mod_api::__private::BiomeRegionDeclaration;
+use std::io::Read;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -14,10 +20,21 @@ use std::{
 };
 
 #[cfg(test)]
+mod persistence_tests;
+#[cfg(test)]
 mod tests;
 
 /// The record's format version.
 const VERSION: u32 = 1;
+const MAX_DIMENSIONS: usize = 2;
+const MAX_REGIONS: usize = 1024;
+const MAX_POINTS: usize = 16384;
+const MAX_REPORTS: usize = 4096;
+const RECORD_LIMITS: Limits = Limits {
+    max_bytes: 32 * 1024 * 1024,
+    max_nodes: 2_000_000,
+    max_depth: 32,
+};
 /// What a substituted region resolves through: vanilla's region.
 const VANILLA: &str = "minecraft:vanilla";
 /// A point's climate intervals, in `RegionPoint::intervals` order.
@@ -42,6 +59,7 @@ fn path(world: &Path) -> PathBuf {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BiomeRegions {
     dimensions: BTreeMap<String, Arc<RegionLayout>>,
+    reported: BTreeSet<String>,
 }
 
 /// How a world's record differs from the mods installed now.
@@ -77,6 +95,7 @@ impl BiomeRegions {
                 .into_iter()
                 .map(|(id, layout)| (id, Arc::new(layout)))
                 .collect(),
+            reported: BTreeSet::new(),
         }
     }
 
@@ -89,7 +108,7 @@ impl BiomeRegions {
     /// `world`'s record; `None` without the file. A file that does not read as a record is
     /// the reason why, and stays as it is.
     fn read(world: &Path) -> Decoded<Option<Self>> {
-        match try_read_dat(&path(world)) {
+        match read_record(&path(world)) {
             Ok(tag) => decode(&tag).map(Some),
             Err(DatIssue::Missing) => {
                 for name in ["biome_regions.dat_old", "biome_regions.dat_new"] {
@@ -107,7 +126,20 @@ impl BiomeRegions {
 
     /// Writes the record into `world`, synced to the disk before any chunk generates with it.
     fn write(&self, world: &Path) -> Result<()> {
-        write_dat_durable(&path(world), self.encode())
+        count(self.dimensions.len(), MAX_DIMENSIONS, "record dimensions")?;
+        for layout in self.dimensions.values() {
+            count(layout.regions.len(), MAX_REGIONS, "layout regions")?;
+            for region in &layout.regions {
+                count(region.points.len(), MAX_POINTS, "region points")?;
+            }
+        }
+        let named = NamedTag {
+            name: "".into(),
+            tag: self.encode(),
+        };
+        decode(&named.tag)?;
+        nbt::write_named(&named, RECORD_LIMITS)?;
+        write_dat_durable(&path(world), named.tag)
     }
 
     fn differences(
@@ -168,6 +200,7 @@ impl BiomeRegions {
     /// names keeps its selector.
     fn adopted(&self, declarations: &[BiomeRegionDeclaration]) -> Self {
         let mut adopted = Self::from_declarations(declarations);
+        adopted.reported = self.reported.clone();
         for (dimension, layout) in &mut adopted.dimensions {
             let Some(saved) = self.dimensions.get(dimension) else {
                 continue;
@@ -192,6 +225,10 @@ impl BiomeRegions {
         Tag::compound([
             ("version", Tag::Int(VERSION as i32)),
             ("dimensions", Tag::Compound(dimensions)),
+            (
+                "reported",
+                Tag::List(self.reported.iter().map(|id| string(id)).collect()),
+            ),
         ])
     }
 }
@@ -257,7 +294,7 @@ fn open_with(
     installed: &BTreeSet<&str>,
     declarations: &[BiomeRegionDeclaration],
 ) -> Decoded<Option<BiomeRegions>> {
-    let Some(record) = BiomeRegions::read(world)? else {
+    let Some(mut record) = BiomeRegions::read(world)? else {
         return Ok(None);
     };
     let differences = record.differences(installed, declarations);
@@ -274,16 +311,27 @@ fn open_with(
             named.join(", ")
         ));
     }
-    for id in &differences.changed {
+    let changed: Vec<_> = differences
+        .changed
+        .iter()
+        .filter(|id| record.reported.insert(format!("changed:{id}")))
+        .collect();
+    let returned: Vec<_> = differences
+        .returned
+        .iter()
+        .filter(|id| record.reported.insert(format!("returned:{id}")))
+        .collect();
+    if !changed.is_empty() || !returned.is_empty() {
+        record.write(world).map_err(|why| why.to_string())?;
+    }
+    for id in changed {
         log::warn!(
-            "Horizon: biome region {id} differs from the world's saved regions; the saved ones \
-             stay until the world adopts the installed regions"
+            "Horizon: biome region {id} differs from the world's saved regions; the saved ones stay until the world adopts the installed regions"
         );
     }
-    for id in &differences.returned {
+    for id in returned {
         log::warn!(
-            "Horizon: the mod of biome region {id} is installed again; the world keeps vanilla's \
-             biomes there until it adopts the installed regions"
+            "Horizon: the mod of biome region {id} is installed again; the world keeps vanilla's biomes there until it adopts the installed regions"
         );
     }
     Ok(Some(record))
@@ -441,6 +489,23 @@ fn decode(tag: &Tag) -> Decoded<BiomeRegions> {
     let Some(Tag::Compound(dimensions)) = tag.get("dimensions") else {
         return Err("record: dimensions is not a compound".into());
     };
+    count(dimensions.len(), MAX_DIMENSIONS, "record dimensions")?;
+    let reported = match tag.get("reported") {
+        None => BTreeSet::new(),
+        Some(Tag::List(reports)) => {
+            count(reports.len(), MAX_REPORTS, "record reports")?;
+            reports
+                .iter()
+                .map(|entry| match entry {
+                    Tag::String(id) => id
+                        .to_string()
+                        .map_err(|_| "record: invalid report text".to_owned()),
+                    _ => Err("record: report is not text".to_owned()),
+                })
+                .collect::<Decoded<BTreeSet<_>>>()?
+        }
+        _ => return Err("record: reported is not a list".into()),
+    };
     let dimensions = dimensions
         .iter()
         .map(|(id, layout)| -> Decoded<(String, Arc<RegionLayout>)> {
@@ -451,10 +516,16 @@ fn decode(tag: &Tag) -> Decoded<BiomeRegions> {
             Ok((id, Arc::new(layout)))
         })
         .collect::<Decoded<_>>()?;
-    Ok(BiomeRegions { dimensions })
+    Ok(BiomeRegions {
+        dimensions,
+        reported,
+    })
 }
 
 fn decode_layout(tag: &Tag, dimension: &str) -> Decoded<RegionLayout> {
+    if !["minecraft:overworld", "minecraft:nether"].contains(&dimension) {
+        return Err(format!("{dimension}: unsupported region dimension"));
+    }
     let at = format!("{dimension} selector");
     let selector = field(tag, "selector", dimension)?;
     let selector = SelectorParams {
@@ -466,12 +537,19 @@ fn decode_layout(tag: &Tag, dimension: &str) -> Decoded<RegionLayout> {
     if selector.version != REGION_SELECTOR_VERSION {
         return Err(format!("{at}: unknown version {}", selector.version));
     }
-    if selector.cell == 0 || selector.vanilla_weight == 0 {
-        return Err(format!("{at}: cell and vanilla_weight must be above 0"));
+    if !(1..=1 << 30).contains(&selector.cell)
+        || selector.vanilla_weight == 0
+        || selector.vanilla_weight > i32::MAX as u32
+        || selector.salt.is_empty()
+    {
+        return Err(format!(
+            "{at}: cell must be 1..=2^30, vanilla_weight 1..=i32::MAX, and salt nonempty"
+        ));
     }
     let Some(Tag::List(regions)) = tag.get("regions") else {
         return Err(format!("{dimension}: regions is not a list"));
     };
+    count(regions.len(), MAX_REGIONS, dimension)?;
     let regions = regions
         .iter()
         .map(|region| decode_region(region, dimension))
@@ -491,7 +569,9 @@ fn decode_layout(tag: &Tag, dimension: &str) -> Decoded<RegionLayout> {
     if regions
         .iter()
         .try_fold(selector.vanilla_weight, |total, r| {
-            total.checked_add(r.weight)
+            total
+                .checked_add(r.weight)
+                .filter(|total| *total <= i32::MAX as u32)
         })
         .is_none()
     {
@@ -508,6 +588,12 @@ fn decode_region(tag: &Tag, dimension: &str) -> Decoded<LayoutRegion> {
     let Some(Tag::List(points)) = tag.get("points") else {
         return Err(format!("{at}: points is not a list"));
     };
+    count(points.len(), MAX_POINTS, &at)?;
+    if Identifier::parse_namespaced(&id).is_none_or(|id| id.namespace() != owner) {
+        return Err(format!(
+            "{at}: region id must be namespaced to its owner {owner}"
+        ));
+    }
     let points = points
         .iter()
         .map(|point| decode_point(point, &at))
@@ -523,26 +609,10 @@ fn decode_region(tag: &Tag, dimension: &str) -> Decoded<LayoutRegion> {
             true
         }
     };
-    // The same checks as a declaration's: a record holds only regions a mod could declare.
-    mod_api::BiomeRegion {
-        dimension: dimension.to_owned(),
-        weight,
-        points: points
-            .iter()
-            .map(|p| mod_api::BiomePoint {
-                biome: p.biome.clone(),
-                temperature: p.intervals[0],
-                humidity: p.intervals[1],
-                continentalness: p.intervals[2],
-                erosion: p.intervals[3],
-                depth: p.intervals[4],
-                weirdness: p.intervals[5],
-                offset: p.offset,
-            })
-            .collect(),
+    // Version 1 validates its own saved contract, independently of future registration rules.
+    if !(1..=1000).contains(&weight) || points.is_empty() {
+        return Err(format!("{at}: weight must be 1..=1000 and points nonempty"));
     }
-    .check()
-    .map_err(|error| format!("{at}: {error:?}"))?;
     Ok(LayoutRegion {
         owner,
         id,
@@ -565,9 +635,55 @@ fn decode_point(tag: &Tag, at: &str) -> Decoded<RegionPoint> {
     }
     let offset =
         float(tag.get("offset")).ok_or_else(|| format!("{at} point {biome}: no float offset"))?;
+    if biome.is_empty()
+        || !intervals.iter().all(|&(min, max)| {
+            (-2.0..=2.0).contains(&min) && (-2.0..=2.0).contains(&max) && min <= max
+        })
+        || !(0.0..=1.0).contains(&offset)
+    {
+        return Err(format!(
+            "{at} point {biome}: invalid version-1 climate values"
+        ));
+    }
     Ok(RegionPoint {
         biome,
         intervals,
         offset,
     })
+}
+
+fn count(actual: usize, limit: usize, at: &str) -> Decoded<()> {
+    if actual > limit {
+        Err(format!("{at}: count {actual} exceeds {limit}"))
+    } else {
+        Ok(())
+    }
+}
+
+fn read_record(path: &Path) -> std::result::Result<Tag, DatIssue> {
+    let unreadable = |why: std::io::Error| DatIssue::Unreadable(why.to_string());
+    let file = std::fs::File::open(path).map_err(|why| match why.kind() {
+        std::io::ErrorKind::NotFound => DatIssue::Missing,
+        _ => unreadable(why),
+    })?;
+    let mut bytes = Vec::new();
+    file.take(RECORD_LIMITS.max_bytes as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(unreadable)?;
+    if bytes.len() > RECORD_LIMITS.max_bytes {
+        return Err(DatIssue::Unreadable("record exceeds 32 MiB".into()));
+    }
+    let raw = if bytes.starts_with(&[0x1f, 0x8b]) {
+        Compression::Gzip
+            .decode(&bytes, RECORD_LIMITS.max_bytes)
+            .map_err(unreadable)?
+    } else {
+        bytes
+    };
+    let (named, used) = nbt::read_named(&raw, RECORD_LIMITS)
+        .map_err(|why| DatIssue::Unreadable(why.to_string()))?;
+    if used != raw.len() {
+        return Err(DatIssue::Unreadable("trailing record data".into()));
+    }
+    Ok(named.tag)
 }
