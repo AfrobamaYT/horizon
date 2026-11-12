@@ -668,7 +668,7 @@ mod tests {
     #[test]
     fn samples_inside_a_span_carry_its_id() {
         use horizon_threads::{sampler, work};
-        use std::time::{Duration, Instant};
+        let minimum = sampler::test_support::cpu_count(30) as usize;
         let worker = std::thread::spawn(|| {
             assert!(sampler::sampled_thread("spans-id-test"));
             let config = sampler::Config {
@@ -676,9 +676,10 @@ mod tests {
                 ..Default::default()
             };
             let session = sampler::start(config, |n| n == "spans-id-test").unwrap();
+            // Match calibration's CPU-time denominator, not scheduler-dependent wall time.
             let busy = |ms| {
-                let until = Instant::now() + Duration::from_millis(ms);
-                while Instant::now() < until {
+                let until = sampler::thread_cpu_ns() + ms * 1_000_000;
+                while sampler::thread_cpu_ns() < until {
                     std::hint::black_box(0);
                 }
             };
@@ -696,11 +697,19 @@ mod tests {
             spans.iter().filter(|s| **s == 0).count(),
         );
         assert!(
-            named > 30 && plain > 30,
-            "{named} named, {plain} outside of {} samples",
+            named > minimum && plain > minimum,
+            "{named} named, {plain} outside of {} samples (minimum {minimum} each)",
             spans.len()
         );
         assert_eq!(named + plain, spans.len(), "no other span id");
+        // Equal CPU work should split attribution in half. At 250 Hz each 60 ms
+        // section has about 15 samples; 0.15 allows a few boundary samples, but
+        // rejects a substantial attribution bias without changing with the rate.
+        let named_share = named as f64 / (named + plain) as f64;
+        assert!(
+            (named_share - 0.5).abs() < 0.15,
+            "{named} named, {plain} outside"
+        );
     }
 
     /// A slow tick's notes are its slowest steps, slowest first; short steps and steps on a

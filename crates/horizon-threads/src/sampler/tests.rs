@@ -3,6 +3,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::test_support::{cpu_count, cpu_hz, cpu_ms_for_samples};
 use super::*;
 
 const fn at_1khz(unwind: Unwind, ring_samples: usize) -> Config {
@@ -98,6 +99,7 @@ fn sampled<T: Send + 'static>(
 }
 
 fn start_session(config: Config, name: &'static str) -> Session {
+    cpu_hz();
     start(config, |n| n == name).expect("start sampling")
 }
 
@@ -110,7 +112,7 @@ fn busy_function_is_in_its_threads_samples(name: &'static str, config: Config) {
     let samples = cpu(&records);
     let found = samples.iter().filter(|r| in_spin_known(r)).count();
     assert!(
-        (140..=260).contains(&samples.len()),
+        (cpu_count(140)..=cpu_count(260)).contains(&(samples.len() as u64)),
         "{} samples for 200 ms of CPU at 1 kHz",
         samples.len()
     );
@@ -138,7 +140,11 @@ fn deep_recursion_unwinds(name: &'static str, config: Config) {
     });
     let samples = cpu(&records);
     let deep = samples.iter().filter(|r| recurse_frames(r) >= 35).count();
-    assert!(samples.len() > 80, "{} samples", samples.len());
+    assert!(
+        samples.len() as u64 > cpu_count(80),
+        "{} samples",
+        samples.len()
+    );
     assert!(
         deep * 10 >= samples.len() * 8,
         "{deep} of {} samples hold at least 35 of the 41 recurse frames",
@@ -179,7 +185,7 @@ fn an_allocating_thread_survives_ten_seconds_of_signals() {
         "{bad} corrupted blocks in {loops} allocations"
     );
     assert!(
-        stats.samples > 5000,
+        stats.samples > cpu_count(5000),
         "only {} samples in 10 s of CPU at 1 kHz",
         stats.samples
     );
@@ -196,7 +202,11 @@ fn context_shares_follow_the_work() {
         }
     });
     let samples = cpu(&records);
-    assert!(samples.len() > 200, "{} samples", samples.len());
+    assert!(
+        samples.len() as u64 > cpu_count(200),
+        "{} samples",
+        samples.len()
+    );
     let share =
         |t| samples.iter().filter(|r| r.ctx.entity_type == t).count() as f64 / samples.len() as f64;
     assert!(
@@ -219,11 +229,11 @@ fn only_the_slow_ticks_samples_are_kept() {
     });
     let kept: Vec<_> = slow_tick_samples(&records, 50_000_000).collect();
     assert!(
-        cpu(&records).len() > kept.len() + 5,
+        cpu(&records).len() > kept.len() + cpu_count(5) as usize,
         "the fast ticks sampled too"
     );
     assert!(
-        kept.len() > 50 && kept.iter().all(|r| r.ctx.tick == 4),
+        kept.len() as u64 > cpu_count(50) && kept.iter().all(|r| r.ctx.tick == 4),
         "kept {} samples",
         kept.len()
     );
@@ -243,7 +253,23 @@ fn only_the_slow_ticks_samples_are_kept() {
 
 #[test]
 fn a_full_ring_drops_and_counts() {
-    let (records, stats, ()) = sampled("t-full", at_1khz(Unwind::StackCopy, 4), || spin_known(100));
+    let cpu_ms = cpu_ms_for_samples(100);
+    let (ready, registered) = mpsc::channel();
+    let (go, begin) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        assert!(sampled_thread("t-full"));
+        ready.send(()).unwrap();
+        begin.recv().unwrap();
+        spin_known(cpu_ms);
+    });
+    registered.recv().unwrap();
+    let session = start_session(at_1khz(Unwind::StackCopy, 4), "t-full");
+    go.send(()).unwrap();
+    // Do not drain until the workload finishes: a slow CPU timer must still
+    // saturate this fixed-size ring, independently of wall-clock drain cadence.
+    worker.join().unwrap();
+    let mut records = Vec::new();
+    let stats = session.stop(|_, record| records.push(*record));
     assert_eq!(
         records.len() as u64,
         stats.samples,
@@ -253,7 +279,7 @@ fn a_full_ring_drops_and_counts() {
     let attempts = stats.samples + stats.dropped;
     assert!(
         (60..=140).contains(&attempts),
-        "{attempts} signals for 100 ms of CPU at 1 kHz"
+        "{attempts} signals for calibrated CPU work targeting 100 timer deliveries"
     );
 }
 
@@ -266,7 +292,7 @@ fn a_session_that_needs_a_larger_ring_than_the_threads_first_gets_one() {
         sampled_thread("t-grow");
         ready.send(()).unwrap();
         while work.recv().is_ok() {
-            on_deep_stack(|| spin_known(100));
+            on_deep_stack(|| spin_known(cpu_ms_for_samples(100)));
             done.send(()).unwrap();
         }
     });

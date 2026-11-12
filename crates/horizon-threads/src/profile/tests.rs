@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use super::agg::{MAX_KEYS, MAX_NODES};
 use super::*;
+use crate::sampler::test_support::{cpu_count, cpu_hz};
 use crate::sampler::{self, Context, Kind, Record};
 use crate::unwind::MAX_FRAMES;
 
@@ -63,6 +64,7 @@ fn config(wall: bool) -> Config {
 
 /// Runs `body` on a thread opted in as `name`, profiled for exactly its duration.
 fn profiled(name: &'static str, config: Config, body: fn()) -> (Profile, Status) {
+    cpu_hz();
     let (ready, wait) = mpsc::channel();
     let (go, start) = mpsc::channel::<()>();
     let worker = thread::spawn(move || {
@@ -237,7 +239,7 @@ fn a_session_keeps_the_slow_tick_apart_and_reports_status_while_running() {
         .filter(|(k, _)| k.slow && k.state == State::Cpu)
         .collect();
     let slow_n: u64 = slow.iter().map(|(_, n)| **n).sum();
-    assert!(slow_n > 60, "{slow_n} slow samples");
+    assert!(slow_n > cpu_count(60), "{slow_n} slow samples");
     assert!(
         slow.iter().all(|(k, _)| path_has(agg, k, spin_slow)),
         "a slow sample outside spin_slow"
@@ -248,13 +250,20 @@ fn a_session_keeps_the_slow_tick_apart_and_reports_status_while_running() {
         .filter(|(k, _)| !k.slow && k.state == State::Cpu)
         .collect();
     assert!(fast.iter().all(|(k, _)| !path_has(agg, k, spin_slow)));
-    assert!(fast.iter().map(|(_, n)| **n).sum::<u64>() > 20);
+    let fast_n: u64 = fast.iter().map(|(_, n)| **n).sum();
+    assert!(fast_n > cpu_count(20));
+    // One 120 ms slow tick and five 8 ms fast ticks: 75% of CPU work is slow.
+    let slow_share = slow_n as f64 / (slow_n + fast_n) as f64;
+    assert!(
+        (slow_share - 0.75).abs() < 0.1,
+        "slow share {slow_share}: {slow_n} slow / {fast_n} fast samples"
+    );
     assert_eq!((agg.ticks[&0].count, agg.ticks[&0].slow), (6, 1));
     assert!(
         mid.cpu_samples > 0,
         "the writer drained during the session: {mid:?}"
     );
-    assert!(profile.writer_cpu_ns > 0 && profile.stats.samples > 100);
+    assert!(profile.writer_cpu_ns > 0 && profile.stats.samples > cpu_count(100));
 }
 
 fn sleeps() {
@@ -299,7 +308,10 @@ fn a_wall_session_also_records_cpu_samples_without_mixing_them() {
         agg.total(State::Running, false),
         agg.total(State::Waiting, false),
     );
-    assert!(cpu > 100 && running > 100, "cpu {cpu} running {running}");
+    assert!(
+        cpu > cpu_count(100) && running > 100,
+        "cpu {cpu} running {running}"
+    );
     assert!(
         waiting * 5 <= running,
         "{waiting} waiting vs {running} running"
@@ -544,17 +556,20 @@ fn a_live_session_cuts_its_samples_into_blocks_of_block_s() {
     // Keep the production elapsed / block_s calculation, and wait for a notification
     // rather than sleeping or polling session status for an assumed duration.
     let (complete, completed) = mpsc::channel();
-    let progress = Mutex::new((0u16, Some(complete)));
+    let progress = Mutex::new((0u16, 0u64, Some(complete)));
     let block_s = 0.1;
     let block = Duration::from_secs_f32(block_s);
     let config = Config {
         block_s,
         test_clock: Some(Arc::new(move |_: Instant, agg: &Aggregate| {
             let mut progress = progress.lock().unwrap();
-            if agg.counts.keys().any(|k| k.time_block == progress.0) {
+            // CPU keys stay pending until a tick marker, a full pending buffer or
+            // finish(). The monotonic counter includes this drain's pending samples.
+            if agg.cpu_samples > progress.1 {
+                progress.1 = agg.cpu_samples;
                 if progress.0 < 5 {
                     progress.0 += 1;
-                } else if let Some(complete) = progress.1.take() {
+                } else if let Some(complete) = progress.2.take() {
                     complete.send(()).unwrap();
                 }
             }

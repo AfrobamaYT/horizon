@@ -99,3 +99,7 @@ horizon-perf = { path = "../horizon-perf" }
 horizon-theme = { path = "../horizon-theme" }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
 naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out", "glsl-out", "msl-out", "spv-out"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Independently calibrate CPU timer delivery for live sampling assertions.
+horizon-threads = { path = "../horizon-threads", features = ["sampling-test-support"] }

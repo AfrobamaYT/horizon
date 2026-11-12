@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::*;
+use crate::sampler::test_support::{cpu_count, cpu_hz};
 use crate::sampler::{self, Config, Kind, Record};
 
 fn cpu_ns() -> u64 {
@@ -28,6 +29,7 @@ fn spin(cpu_ms: u64) {
 
 /// Runs `body` on a thread sampled at 1 kHz under `name`, returning its records.
 fn sampled(name: &'static str, body: fn()) -> Vec<Record> {
+    cpu_hz();
     let (ready, wait) = mpsc::channel();
     let (go, start) = mpsc::channel::<()>();
     let worker = thread::spawn(move || {
@@ -66,7 +68,11 @@ fn entity_samples_split_by_the_work_done_under_each_type() {
         clear_work();
     });
     let samples: Vec<_> = records.iter().filter(|r| r.kind == Kind::Cpu).collect();
-    assert!(samples.len() > 200, "{} samples", samples.len());
+    assert!(
+        samples.len() as u64 > cpu_count(200),
+        "{} samples",
+        samples.len()
+    );
     let share = |n: &str| {
         let hits = samples
             .iter()
@@ -102,7 +108,11 @@ fn spans_nest_and_restore_the_outer_one() {
             .count();
         hits as f64 / samples.len() as f64
     };
-    assert!(samples.len() > 50, "{} samples", samples.len());
+    assert!(
+        samples.len() as u64 > cpu_count(50),
+        "{} samples",
+        samples.len()
+    );
     assert!(
         (share(Some("p-test-outer")) - 0.5).abs() < 0.15,
         "{}",

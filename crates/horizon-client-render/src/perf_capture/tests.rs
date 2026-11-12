@@ -369,12 +369,14 @@ fn entity_units() {
 
 #[test]
 fn three_units_of_a_and_one_of_b_split_the_samples_three_to_one() {
+    // CPU timers may deliver below the requested 1 kHz on tick-accounted kernels.
+    let minimum = sampler::test_support::cpu_count(100);
     let c = convert(&profiled("perf-capture-entities", entity_units));
     let by = c.by_entity(false);
     let total = (by["test:a"] + by["test:b"]) as f64;
     let (a, b) = (by["test:a"] as f64 / total, by["test:b"] as f64 / total);
     assert!((a - 0.75).abs() < 0.1 && (b - 0.25).abs() < 0.1, "{by:?}");
-    assert!(total > 100.0, "{total} samples");
+    assert!(total > minimum as f64, "{total} samples, minimum {minimum}");
     assert_eq!(c.samples.threads[0].units, 4);
 }
 
@@ -393,6 +395,8 @@ fn ticks_with_one_slow() {
 
 #[test]
 fn only_the_slow_ticks_function_is_in_the_slow_weights() {
+    let slow_minimum = sampler::test_support::cpu_count(60);
+    let fast_minimum = sampler::test_support::cpu_count(20);
     let c = convert(&profiled("perf-capture-slow", ticks_with_one_slow));
     let w = c.samples.weights.as_ref().unwrap();
     let (mut slow, mut fast) = (0, 0);
@@ -409,7 +413,14 @@ fn only_the_slow_ticks_function_is_in_the_slow_weights() {
             assert!(!names.contains(&"spin_slow"), "{names:?}");
         }
     }
-    assert!(slow > 60 && fast > 20, "{slow} slow, {fast} other");
+    assert!(
+        slow > slow_minimum && fast > fast_minimum,
+        "{slow} slow (minimum {slow_minimum}), {fast} other (minimum {fast_minimum})"
+    );
+    // 120 ms slow versus five 8 ms fast ticks: 3/4 of CPU samples should be slow.
+    // As in the entity test, allow 0.1 for finite samples and timer boundaries.
+    let slow_share = slow as f64 / (slow + fast) as f64;
+    assert!((slow_share - 0.75).abs() < 0.1, "{slow} slow, {fast} other");
     assert_eq!(
         (c.samples.threads[0].units, c.samples.threads[0].slow_units),
         (6, 1)
