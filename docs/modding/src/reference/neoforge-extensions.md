@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 14 | 17 | 29 | 0 |
-| `IBlockStateExtension` | 57 | 13 | 16 | 28 | 0 |
+| `IBlockExtension` | 60 | 15 | 17 | 28 | 0 |
+| `IBlockStateExtension` | 57 | 14 | 16 | 27 | 0 |
 | `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -86,7 +86,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `getWeakChanges(state, level, pos)` | Missing | — | No weak-change observer query. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getSoundType(state, level, pos, entity)` | Covered | `BlockPart::sound_type` (`hooks/sound_type.rs`) | Asked with the position, the entity (nullable: the stepping, landing, placing or digging one, none for a break or a dispenser's placement) and the sound about to play, on NeoForge's paths only: the step and combination step, a horse's step (at the block below a snow layer), a mob's fall, a block item's placement, the break event and a sniffer's digging. Not for the mining hit sound (its own client hook, `BlockPart::play_hit_sound`, below) or sculk growth; an answer with a volume or pitch that is not finite and at least 0, or an event that is not a `namespace:path` id, is dropped. The part answers from its inputs, without the level; `host.block_states().sound(state)` still reads the static type. |
 | `getBeaconColorMultiplier(state, level, pos, beaconPos)` | Missing | — | Beacon beam colour is engine-owned. |
-| `getStateAtViewpoint(state, level, pos, viewpoint)` | Missing | — | No viewpoint-state query. |
+| `getStateAtViewpoint(state, level, pos, viewpoint)` | Covered | `BlockPart::state_at_viewpoint` (`hooks/state_at_viewpoint.rs`) | Asked on the client for each block `Camera.getFluidInCamera` reads (the eye, the block above it, the near plane's centre and corners); the fluid and powder snow tests read the answer, so the fog, the fluid field of view and water vision follow it. |
 | `getBlockPathType(state, level, pos, mob)` | Partial | `BlockPart::is_pathfindable` (`hooks/is_pathfindable.rs`) | Answers whether a `PathComputationType` may pass, once per state and type; not a `PathType` per mob or position. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getAdjacentBlockPathType(state, level, pos, mob, pathType)` | Missing | — | No adjacent-path-type query. |
 | `isSlimeBlock(state)` | Covered | `BlockPart::is_slime_block` (`hooks/block_sticky.rs`) | Server only, asked by the piston structure resolver for its slime-beside-honey rule. A piston moving a slime block still bounces the entities it pushes off vanilla's slime block alone. |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 13 covered, 16 partial, 28 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 14 covered, 16 partial, 27 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
