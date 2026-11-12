@@ -2578,6 +2578,7 @@ dependencies = [
  "horizon-protocol",
  "horizon-world",
  "log",
+ "serde",
  "ureq",
  "windows-sys 0.61.2",
 ]
