@@ -23,6 +23,7 @@ payloads: the prepared data is Mojang's. Compile/list failures expose bounded co
 """
 
 import os
+import errno
 import io
 from functools import lru_cache
 import re
@@ -181,6 +182,22 @@ def tracked_rust_paths():
     return paths
 
 
+# What an `Err` names, never what it says: a Debug variant or io::ErrorKind and an OS error number.
+# Messages, values and paths (names of prepared vanilla files) stay withheld.
+ERROR_VARIANT = re.compile(r"^([A-Z][A-Za-z0-9_]{0,63})\s*[({]")
+ERROR_KIND = re.compile(r"\bkind: ([A-Z][A-Za-z]{0,63})\b")
+OS_ERROR = re.compile(r"\(os error (\d{1,5})\)|\bcode: (\d{1,5})\b")
+
+
+def unwrap_error_shape(value):
+    """`kind ...` for a `Result::unwrap` payload, or None when it names no kind."""
+    kinds = [found[1] for found in (ERROR_VARIANT.match(value), ERROR_KIND.search(value)) if found]
+    if os_error := OS_ERROR.search(value):
+        code = int(os_error[1] or os_error[2])
+        kinds.append(f"os error {code} {errno.errorcode.get(code, 'unknown')}")
+    return "kind " + ", ".join(dict.fromkeys(kinds)) if kinds else None
+
+
 def bounded_record(record, remaining):
     raw = record.encode("utf-8")
     shortened = len(raw) > FAILURE_BYTES
@@ -230,9 +247,14 @@ def failure_diagnostics(output):
                 ("index out of bounds", "index out of bounds"),
                 ("attempt to", "arithmetic failure"),
             ) if line.strip().startswith(prefix)), "custom panic")
+            withheld_text = "payload withheld (resource privacy)"
+            if reason == "Result::unwrap on an error":
+                if shape := unwrap_error_shape(line.strip().split(" value: ", 1)[-1]):
+                    reason += f" ({shape})"
+                    withheld_text = "rest of payload withheld (resource privacy)"
             if arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
                 reason = "attempt to " + arithmetic[1]
-            context.append(f"  panic reason: {reason}; payload withheld (resource privacy)")
+            context.append(f"  panic reason: {reason}; {withheld_text}")
             panic_reason_pending = False
             continue
         if found := RESULT.match(line):
