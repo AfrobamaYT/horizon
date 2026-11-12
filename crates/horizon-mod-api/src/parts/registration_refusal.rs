@@ -106,7 +106,7 @@ mod tests {
                 .transform(|data: &crate::Compound, _: crate::StructureTransform| Ok(data.clone()))
                 .build();
             r.block_entity_part(&kind, Callback).unwrap();
-            cx.refuse("bootstrap failed: cafÃ©\nmissing bridge");
+            cx.refuse("bootstrap failed: café\nmissing bridge");
             cx.refuse("ignored");
             r.declare_fluid("foreign:after");
         }
@@ -132,7 +132,7 @@ mod tests {
         let registrar = super::super::register_all(&mods, |_| false);
         assert_eq!(
             registrar.refused,
-            ["mod broken refused registration: bootstrap failed: cafÃ©\nmissing bridge"]
+            ["mod broken refused registration: bootstrap failed: café\nmissing bridge"]
         );
         assert_eq!(
             registrar

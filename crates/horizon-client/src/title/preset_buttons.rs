@@ -296,6 +296,30 @@ impl Title {
                     .does(crate::widgets::Action::Back),
                 ]
             }
+            Mode::MissingBiomeRegions { .. } => {
+                let y = confirm_top(h, self.message_lines.get())
+                    + 41.0
+                    + self.message_lines.get() as f32 * 9.0;
+                vec![
+                    b(
+                        (w / 2.0).floor() - 152.0,
+                        y,
+                        150.0,
+                        &lang::get("horizon.biome_regions.missing.open_vanilla"),
+                        true,
+                        96,
+                    ),
+                    b(
+                        (w / 2.0).floor() + 2.0,
+                        y,
+                        150.0,
+                        &lang::get("horizon.biome_regions.missing.dont_open"),
+                        true,
+                        97,
+                    )
+                    .does(crate::widgets::Action::Back),
+                ]
+            }
             Mode::Recover { issues, .. } => {
                 let y = recover_buttons_top(h, self.message_lines.get());
                 // The restore button is active only when level.dat is the broken one

@@ -25,6 +25,7 @@ mod confirm_experiments;
 mod create_world;
 mod experiments;
 mod flat;
+mod missing_biome_regions;
 mod onboarding;
 pub mod preset_editors;
 mod splash;
@@ -317,6 +318,11 @@ pub enum Mode {
     /// `openWorldCheckDiskSpace`'s ConfirmScreen: little space is left on the device.
     LowDiskSpace {
         world: WorldEntry,
+    },
+    /// Saved biome regions of missing mods, as `(mod, region)` (`missing_biome_regions`).
+    MissingBiomeRegions {
+        world: WorldEntry,
+        missing: Vec<(String, String)>,
     },
     Delete {
         world: WorldEntry,
@@ -768,6 +774,7 @@ impl Mode {
             Self::OptimizeConfirm { .. } => "world_optimize_confirm",
             Self::Optimize { .. } => "world_optimize",
             Self::LowDiskSpace { .. } => "low_disk_space",
+            Self::MissingBiomeRegions { .. } => "missing_biome_regions",
             Self::Delete { .. } => "world_delete",
             Self::Recover { .. } => "world_recover",
             Self::Recovered { .. } => "world_recovered",
@@ -1586,13 +1593,10 @@ impl Title {
                 return Action::None;
             }
         }
-        if crate::save::low_disk_space(&dir) {
-            self.set_mode(Mode::LowDiskSpace { world });
+        if self.ask_missing_biome_regions(&world) {
             return Action::None;
         }
-        Action::Play {
-            folder: world.folder,
-        }
+        self.check_disk_space(world)
     }
     /// `RecoverWorldDataScreen.attemptRestore`: with level.dat still broken and
     /// level.dat_old readable, level.dat_old takes level.dat's place
@@ -2015,6 +2019,9 @@ Running out of disk space while in game can lead to your world being damaged.",
                     ),
                 ]),
             ),
+            Mode::MissingBiomeRegions { missing, .. } => {
+                missing_biome_regions::screen_info(missing)
+            }
             // AccessibilityOnboardingScreen narrates its title.
             Mode::Onboarding(_) => ScreenInfo::new(
                 "accessibility_onboarding",
@@ -2728,6 +2735,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     centered(atlas, batch, line, top + 17.0 + i as f32 * 9.0, u32::MAX);
                 }
             }
+            Mode::MissingBiomeRegions { missing, .. } => {
+                self.draw_missing_biome_regions(atlas, batch, (w, h), missing)
+            }
             Mode::Backup { .. } => {
                 self.backup_shown.set(true);
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
@@ -3373,9 +3383,14 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             (Mode::LowDiskSpace { world }, Some(94)) => Action::Play {
                 folder: world.folder.clone(),
             },
-            (Mode::LowDiskSpace { .. }, Some(95)) => {
+            (Mode::LowDiskSpace { .. }, Some(95))
+            | (Mode::MissingBiomeRegions { .. }, Some(97)) => {
                 self.escape();
                 Action::None
+            }
+            (Mode::MissingBiomeRegions { world, .. }, Some(96)) => {
+                let world = world.clone();
+                self.open_with_vanilla_regions(world)
             }
             (
                 Mode::OptimizeConfirm {
@@ -4538,6 +4553,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             | Mode::Recover { world, .. }
             | Mode::Recovered { world, .. }
             | Mode::LowDiskSpace { world }
+            | Mode::MissingBiomeRegions { world, .. }
             | Mode::BackupBeforeUpgrade { world, .. } => {
                 let folder = world.folder.clone();
                 self.return_to_list(Some(&folder));

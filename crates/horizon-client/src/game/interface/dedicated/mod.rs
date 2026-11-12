@@ -35,6 +35,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod biome_regions;
 pub(super) mod events;
 mod management;
 mod predicate_graph;
@@ -1027,6 +1028,9 @@ impl Game<'_> {
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
         let sync = super::lan::preload_sync_data(&self.res.core.item_data);
+        if !new_world {
+            biome_regions::choose(&world_dir)?;
+        }
         self.load_world(WorldRequest::new(
             &folder,
             Some(&level_name),

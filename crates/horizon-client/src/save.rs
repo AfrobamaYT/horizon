@@ -15,6 +15,7 @@
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
 mod backpressure;
+pub mod biome_regions;
 pub mod level_mods;
 mod respawn;
 

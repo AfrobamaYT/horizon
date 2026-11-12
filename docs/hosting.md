@@ -746,3 +746,20 @@ environment still applies.
 - **It keeps restarting**: `horizon-server status` shows the last crash and `horizon-server logs -n 200` the log
   before it. Crash reports are in `crash-reports/`.
 - Report problems at <https://github.com/horizon-rust/horizon/issues>, with the end of the log.
+
+## Biome regions from mods
+
+A world keeps the region layout saved when it was created. If a region's mod is missing, the
+server refuses to start and names it. To record a choice in `server.toml`:
+
+```toml
+[biome_regions]
+missing = "vanilla"       # default: "refuse"
+adopt_installed = false   # true explicitly adopts installed regions for new generation
+```
+
+Substitution keeps each missing region's slot and weight; it resolves through vanilla's biomes.
+A returning mod does not undo that choice. Adoption keeps saved weights for returning regions,
+takes declared weights for new regions and drops absent regions. Completed chunks keep their
+saved biomes and blocks. New generation can differ in surface material, carving, features and
+structures. See [biome regions](modding/src/concepts/mod-biome-regions.md) for limits and fixtures.
