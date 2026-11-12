@@ -10,6 +10,7 @@ state another file's tests would observe (an installed hook, a set-once initiali
 """
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 GUARD = '''
@@ -36,6 +37,9 @@ def main():
     args = parser.parse_args()
     tests = args.crate / "tests"
     target = tests / "integration"
+    # The merged binary's root is `integration/main.rs`: a crate's own `tests/main.rs` would be moved onto it.
+    if (tests / "main.rs").exists() and "main" not in args.keep:
+        sys.exit(f"{tests / 'main.rs'}: its name is the merged binary's root; keep it with --keep main")
     target.mkdir()
     names = sorted(path.stem for path in tests.glob("*.rs") if path.stem not in args.keep)
     for name in names:
