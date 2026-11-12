@@ -134,7 +134,8 @@ class OwnRunnerTests(unittest.TestCase):
     def test_no_secret_or_writing_token_on_our_runners(self):
         for where, _, text, block, _, pools in routed():
             self.assertNotIn("secrets.", block, where)
-            self.assertNotIn("environment:", block, where)
+            # Deployment environments are job-level YAML keys, not Python variables in run blocks.
+            self.assertNotRegex(block, r"(?m)^    [\"']?environment[\"']?\s*:", where)
             head = text.split("\njobs:\n", 1)[0]
             for part in (block, head):
                 writes = {m.group(1) for m in TRUSTED_WRITES.finditer(part)}
@@ -146,6 +147,19 @@ class OwnRunnerTests(unittest.TestCase):
                 # A checks runner keeps what a fork's job left: its jobs' tokens write nothing at all.
                 self.assertNotRegex(block, r":\s*write", where)
                 self.assertNotRegex(head, r":\s*write", where)
+
+    def test_deployment_environment_guard_distinguishes_script_variables(self):
+        from unittest.mock import patch
+        script = "    steps:\n      - run: |\n          with open('output') as environment:\n              pass\n"
+        record = ("fixture verify", {"pull_request"}, "permissions:\n  contents: read\njobs:\n",
+                  script, "dyna-large", {"large"})
+        with patch(f"{__name__}.routed", return_value=[record]):
+            self.test_no_secret_or_writing_token_on_our_runners()
+        for key in ("environment:", "\"environment\":", "'environment' :"):
+            unsafe = (*record[:3], f"    {key} deployment\n" + script, *record[4:])
+            with self.subTest(key=key), patch(f"{__name__}.routed", return_value=[unsafe]):
+                with self.assertRaises(AssertionError):
+                    self.test_no_secret_or_writing_token_on_our_runners()
 
     def test_checks_split_between_both_pools(self):
         ci = (WORKFLOWS / "ci.yml").read_text()
