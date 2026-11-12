@@ -16,10 +16,10 @@ mod block_entity_transform;
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
-#[path = "wire_loopback/piston_push_reaction.rs"]
-mod piston_push_reaction;
 #[path = "wire_loopback/piglin_answers.rs"]
 mod piglin_answers;
+#[path = "wire_loopback/piston_push_reaction.rs"]
+mod piston_push_reaction;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 thread_local! {
