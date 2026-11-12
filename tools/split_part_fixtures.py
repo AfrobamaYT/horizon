@@ -23,7 +23,7 @@ def split(area):
         if not match:
             continue
         j = i
-        while j > 0 and lines[j - 1].strip() and (lines[j - 1].startswith('    #[') or lines[j - 1].startswith('    ///')):
+        while j > 0 and lines[j - 1].strip() and (lines[j - 1].startswith('    #[') or lines[j - 1].startswith('    //')):
             j -= 1
         kind, rest = match.groups()
         name = re.search(r'\w+', rest)
