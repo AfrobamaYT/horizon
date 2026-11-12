@@ -82,7 +82,7 @@ impl Game<'_> {
                 if subscribed.get(slot).copied().unwrap_or(false)
                     && let Some(epoch) = epoch
                 {
-                    self.native_general_entity_tick(kind, EntityRef::new(epoch, id));
+                    self.dispatch_general_tick(kind, epoch, id);
                 }
                 self.tick_general_riders(
                     &mut taken,
@@ -138,9 +138,50 @@ impl Game<'_> {
             if subscribed.get(slot).copied().unwrap_or(false)
                 && let Some(epoch) = epoch
             {
-                self.native_general_entity_tick(catalog.key(slot), EntityRef::new(epoch, id));
+                self.dispatch_general_tick(catalog.key(slot), epoch, id);
             }
             self.tick_general_riders(taken, id, born, catalog, subscribed, epoch, riders);
+        }
+    }
+
+    /// One row's subscribed behavior, contained: the dispatch runs in a
+    /// transaction, so a native panic unwinding out of it (caught here, as
+    /// the mob tick's is) or a wasm trap inside it (a wasm dispatch fails
+    /// without unwinding) rolls back every write the row's parts made —
+    /// their counters and listener edits — and nothing leaves the row. The
+    /// pass's lift stays balanced either way, and the next row ticks as if
+    /// nothing happened; a panicking subscriber is reported, not disabled.
+    fn dispatch_general_tick(&mut self, kind: &str, epoch: mod_api::WorldEpoch, id: u32) {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            mod_api::run_transaction(self, |game, _| {
+                let before = game.wasm_dispatch_failures.get();
+                game.native_general_entity_tick(kind, EntityRef::new(epoch, id));
+                (game.wasm_dispatch_failures.get() == before)
+                    .then_some(())
+                    .ok_or(())
+            })
+        }));
+        match outcome {
+            Ok(Ok(())) => {}
+            // A wasm trap: the runtime poisoned the caller's group and told
+            // the log; the transaction above aborted with this refusal.
+            Ok(Err(())) => {
+                log::error!(
+                    "general entity {kind} #{id}: its tick's writes were rolled back after a wasm dispatch failure"
+                );
+            }
+            // A native panic: the unwind aborted the transaction as it
+            // passed, and the thread-local mod attribution named the part.
+            Err(payload) => {
+                let panic = payload
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .map_or_else(|| "box".to_owned(), |text| text);
+                log::error!(
+                    "general entity {kind} #{id}: its tick's writes were rolled back after a native mod panicked: {panic}"
+                );
+            }
         }
     }
 }
