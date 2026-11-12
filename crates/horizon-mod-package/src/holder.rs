@@ -241,11 +241,17 @@ fn run(encoded: OsString, claims: &mut Option<Acquired>) -> io::Result<ExitStatu
     command.env(ENTRY, request.record.encode()?);
     command.status()
 }
+/// Retain the contiguous capability marker without entering private holder mode.
+#[inline(never)]
+pub fn retain_capability() {
+    // An address escaping through an opaque operation retains the actual static,
+    // including under linker dead stripping.
+    std::hint::black_box(&CAPABILITY);
+}
+
 /// Does nothing for ordinary startup. Private startup can never reach the normal game path.
 pub fn enter() {
-    // An address escaping through an opaque operation retains the actual static,
-    // including under linker dead stripping. Every shipping holder calls enter().
-    std::hint::black_box(&CAPABILITY);
+    retain_capability();
     let Some(encoded) = std::env::var_os(ENV) else {
         return;
     };
