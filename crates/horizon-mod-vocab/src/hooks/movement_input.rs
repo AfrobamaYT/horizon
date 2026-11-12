@@ -12,6 +12,7 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "MovementInputUpdateEvent",
+        version = 2,
         cancellable = false
     )]
     fn movement_input(
