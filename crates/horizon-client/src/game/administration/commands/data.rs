@@ -107,6 +107,8 @@ impl Game<'_> {
             // Neither is saved: `FishingHook.shouldBeSaved` and
             // `EnderDragonPart.shouldBeSaved` are false.
             Target::Hook(_) | Target::DragonPart(_) => return None,
+            // Stage 3's save owns the general record; none is saved here.
+            Target::General(_) => return None,
             Target::Guest(_) => {
                 return self
                     .for_player(t, |g| g.command_target_nbt(Target::Player))

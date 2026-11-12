@@ -16,6 +16,7 @@ pub(crate) struct Installed {
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
+    pub(crate) general_entity_types: Vec<crate::parts::entity_types::GeneralEntityTypeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
     pub(crate) datapack_registries:
@@ -56,6 +57,7 @@ pub struct PartRegistrar {
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
+    pub(crate) general_entity_types: Vec<crate::parts::entity_types::GeneralEntityTypeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
     pub(crate) datapack_registries:
