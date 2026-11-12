@@ -374,6 +374,9 @@ impl ResourceSource {
     /// The folder that supplies `name`, following an index to the layer its
     /// winning file comes from. None for an archive, merged bytes, or no file.
     pub fn folder_of(&self, name: &str) -> Option<PathBuf> {
+        if !stays_inside(name) {
+            return None;
+        }
         match self.0.as_ref() {
             Storage::Directory(root) => root.join(name).is_file().then(|| root.clone()),
             #[cfg(not(target_arch = "wasm32"))]

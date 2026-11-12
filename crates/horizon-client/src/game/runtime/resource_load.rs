@@ -522,7 +522,11 @@ pub(super) fn load_resources(
             UiResources::server(source)
         } else {
             UiResources::load(source).map(|ui| {
-                ui.with_splashes(source, vanilla_root, settings.extras.skip_modded_splashes_if_vanilla_modified)
+                ui.with_splashes(
+                    source,
+                    vanilla_root,
+                    settings.extras.skip_modded_splashes_if_vanilla_modified,
+                )
             })
         }
     };

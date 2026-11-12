@@ -152,7 +152,12 @@ impl UiResources {
         })
     }
     /// The title's splash pool from `stack` (`horizon_client::splashes::pool`).
-    pub fn with_splashes(mut self, stack: &horizon_assets::resource_source::ResourceSource, vanilla: &std::path::Path, skip_if_modified: bool) -> Self {
+    pub fn with_splashes(
+        mut self,
+        stack: &horizon_assets::resource_source::ResourceSource,
+        vanilla: &std::path::Path,
+        skip_if_modified: bool,
+    ) -> Self {
         self.splashes = horizon_client::splashes::pool(stack, vanilla, skip_if_modified).into();
         self
     }

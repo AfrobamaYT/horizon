@@ -112,8 +112,7 @@ mod tests {
                         &mut editors,
                     );
                     assert_eq!(editors.len(), 1);
-                    let mut title =
-                        game.new_title(game.save.root.join("editor-saves"));
+                    let mut title = game.new_title(game.save.root.join("editor-saves"));
                     title.set_preset_data_source(game.pack.data_changes.clone());
                     let dimensions = horizon_core::nbt::Tag::compound([(
                         "minecraft:overworld",

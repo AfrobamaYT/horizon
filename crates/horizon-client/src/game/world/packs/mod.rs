@@ -548,7 +548,10 @@ impl Game<'_> {
         self.options.resources = root.clone();
         self.falling_vertices.get_mut().clear();
         self.pack = pack;
-        let skip = self.settings.extras.skip_modded_splashes_if_vanilla_modified;
+        let skip = self
+            .settings
+            .extras
+            .skip_modded_splashes_if_vanilla_modified;
         self.gui = gui.with_splashes(&self.pack.source, &self.vanilla_root(), skip);
         self.standalone_geometry = standalone_geometry;
         self.instance_groups.borrow_mut().clear();

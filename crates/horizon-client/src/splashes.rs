@@ -104,7 +104,16 @@ mod tests {
 
     #[test]
     fn a_packs_own_minecraft_splashes_replace_the_pool() {
-        let (vanilla, stack) = stack(Some("Pack line!"), &[]);
+        let (vanilla, stack) = stack(
+            Some("Pack line!"),
+            &[("assets/testmod/texts/splashes.txt", "Mod line!")],
+        );
+        assert_eq!(
+            pool(&stack, vanilla.path(), false),
+            "Pack line!
+Mod line!
+"
+        );
         let pool = pool(&stack, vanilla.path(), true);
         for index in 0..2 {
             assert_eq!(
