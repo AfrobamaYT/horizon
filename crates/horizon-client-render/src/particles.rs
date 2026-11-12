@@ -30,6 +30,7 @@ use std::{
 
 pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_items::firework::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape};
+mod collide;
 mod groups;
 mod mod_behaviour;
 mod native;
@@ -983,21 +984,6 @@ pub struct ParticleLevel<'a> {
     pub cached_chunk: std::cell::Cell<Option<((i32, i32), Option<&'a crate::chunk::Chunk>)>>,
 }
 impl<'a> ParticleLevel<'a> {
-    fn collide(&self, bb: Aabb, d: [f64; 3]) -> [f64; 3] {
-        let mut scene = SceneCollisions {
-            world: self.world,
-            binding: self.collision,
-            subject: None,
-        };
-        let movement = Vec3::new(d[0], d[1], d[2]);
-        if scene.cells_without_collision(bb.expand_towards(movement)) {
-            return d;
-        }
-        match scene.resolve(bb, movement, 0.0, false) {
-            Ok(v) => [v.x, v.y, v.z],
-            Err(_) => d,
-        }
-    }
     pub(crate) fn block_at(p: [f64; 3]) -> [i32; 3] {
         [
             p[0].floor() as i32,
