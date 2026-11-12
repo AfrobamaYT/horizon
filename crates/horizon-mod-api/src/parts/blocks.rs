@@ -701,7 +701,7 @@ pub mod tests {
         struct Pool;
         #[mod_api::horizon_part]
         impl BlockPart for Pool {
-            fn state_at_viewpoint(&self, host: &dyn Host, event: &mut StateAtViewpointEvent) {
+            fn state_at_viewpoint(&self, host: &dyn ClientHost, event: &mut StateAtViewpointEvent) {
                 if event.viewpoint[1] < f64::from(event.pos.y) + 0.5
                     && let Some(water) = host.block_state_id("minecraft:water")
                 {
