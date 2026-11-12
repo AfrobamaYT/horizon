@@ -20,7 +20,6 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::game::native_entity_refs::tests::with_game;
     use mod_api::{Authority, ChunkRef, DimensionKey, LevelRef};
 

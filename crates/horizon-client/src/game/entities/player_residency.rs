@@ -324,7 +324,9 @@ impl Game<'_> {
             }
             Source::Guest(conn) => {
                 if self.lan_acting == Some(conn) {
-                    return SlotAccess::Done(visit(self.player_state.attachments.attachment_lifetime()));
+                    return SlotAccess::Done(visit(
+                        self.player_state.attachments.attachment_lifetime(),
+                    ));
                 }
                 let Some(attachments) = self
                     .lan
