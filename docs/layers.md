@@ -80,8 +80,10 @@ Vanilla Minecraft: Java Edition 26.3, and nothing else.
 ### Portable crates
 
 `horizon-core`, `horizon-world`, `horizon-protocol`, `horizon-items`, `horizon-command`, `horizon-client-core`
-and `horizon-assets` hold vanilla's rules and data with no desktop in them: no window, GPU, sound, gamepad or
-clipboard library, no HTTP client, and no engine crate outside this list. The platform sits on the desktop engine
+and `horizon-assets` hold vanilla's rules and data with no desktop in them. `horizon-threads` and
+`horizon-guest-stack` provide the desktop-free execution plumbing: worker scheduling, sampling and stack
+reservations. These portable crates have no window, GPU, sound, gamepad or clipboard library, no HTTP client,
+and no engine crate outside the portable list. The platform sits on the desktop engine
 (`wgpu`, `winit`, `cpal`), which a handheld console or a browser can't run, so a port there builds on these crates
 instead. They stay that way: the layer check fails when one takes `winit`, `wgpu`, `cpal`, `gilrs`, `arboard` or
 `ureq`, or an engine crate outside the list (#13002). Gameplay itself still lives in `horizon-client`; step P of

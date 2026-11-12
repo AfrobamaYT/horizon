@@ -12,7 +12,7 @@ No local tests, clippy, harnesses or game runs are permitted for this sync. Only
 
 - `crates/horizon-client-render/Cargo.toml`: union fork `tempfile` and `mod_platform` test dependencies with incoming `horizon-perf`; retain incoming format dependency and allocation-count feature forwarding.
 - `crates/horizon-world/Cargo.toml`: retain fork `horizon-assets` and add upstream `horizon-threads`.
-- `crates/horizon-server/Cargo.toml`: retain fork `horizon-bench`, add incoming direct anticheat/chat-filter dependencies.
+- `crates/horizon-server/Cargo.toml`: take upstream's removal of direct `horizon-bench`; the server probes already use `horizon_platform::bench`. Retain incoming direct anticheat/chat-filter dependencies.
 - `crates/horizon-threads/Cargo.toml`: upstream `alloc-census = ["alloc-count"]`; retain both fork allocation-test features.
 - `crates/horizon-client/Cargo.toml`: incoming allocator feature propagation and allocation counting; retain fork Windows prebuilt allocator documentation and mod test edges.
 - `Cargo.lock` and `launcher/Cargo.lock`: preserve the fork's locked registry versions, resolve incoming additional packages, and keep the newly introduced protobuf packages at upstream's exact `0.14.4` versions. No pre-existing locked registry package/version is removed. Both `object` versions coexist where the profiler and fork native machinery require different versions.
@@ -81,7 +81,7 @@ Each row names the exact conflicted path, including retired paths that remain de
 | `crates/horizon-client/src/main.rs` | Keep deleted; executable ownership stays with fork; apply GameAllocator to canonical gameplay library src/lib.rs. |
 | `crates/horizon-client/src/mobs/spawn_selection.rs` | Union fork limit/overflow tests with incoming attempt-counter publication test. |
 | `crates/horizon-command/src/tests.rs` | Union custom argument tests with incoming profiler parsing, completion and namespace ownership tests. |
-| `crates/horizon-server/Cargo.toml` | Union fork bench dependency with incoming anticheat/chat-filter references required by server CLI. |
+| `crates/horizon-server/Cargo.toml` | Take upstream's bench dependency removal and platform API routing, with incoming anticheat/chat-filter references required by server CLI. |
 | `crates/horizon-server/src/main.rs` | Fork thin executable retained; incoming report help ported to canonical server src/lib.rs. |
 | `crates/horizon-threads/Cargo.toml` | Incoming alloc-census depends on alloc-count; retain fork allocation probe/count test flags and incoming platform dependencies. |
 | `crates/horizon-threads/src/lib.rs` | Union modules; incoming sampling/GameAllocator routing with fork test allocator guards and mutually exclusive fallback. |
@@ -113,7 +113,7 @@ The incoming `perf-wasm.yml` workflow keeps main and manual triggers for the rea
 
 Retained incoming coverage includes command parsing/completion and namespace collisions; report CLI/capture selection and privacy; text styling; allocation counters, heap sampling, stack/context conversion, aggregation and work attribution; queue and level timing; GPU timing/counters and draw equivalence; format/reader round trips and synthetic fixtures; loopback sharing and upload limits. Synthetic `.hzperf` fixtures remain included; they are not vanilla assets. Linux sampling cases require platform sampling/unwind support, and GPU cases require compatible adapters/query features.
 
-The ignored producer tests `a_capture_of_a_server_with_names_text_and_a_seed_holds_none_of_them` in dedicated/report.rs and `a_servers_report_names_its_entities_and_players_and_leaves_the_rest_unattributed` in runtime/memory.rs require private prepared resources through `HORIZON_TEST_RESOURCES`. Their resource factories are adapted to the fork's production ResourceRoot, ResourceSource and execution-role helpers. Self-contained format, reader and recorder suites do not prove these ignored producer contracts. Real-game profile and LAN fixtures require prepared 26.3 resources, scratch homes and built game/control/perf binaries; GPU client cases additionally need offscreen rendering support. The vanilla comparison is optional when its licensed server jar is absent. Viewer wasm builds require `wasm32-unknown-unknown`. These requirements are an inventory, not evidence of execution or runtime correctness.
+The ignored producer tests `a_capture_of_a_server_with_names_text_and_a_seed_holds_none_of_them` in dedicated/report.rs and `a_servers_report_names_its_entities_and_players_and_leaves_the_rest_unattributed` in runtime/memory.rs require private prepared resources through `HORIZON_TEST_RESOURCES`. The incoming `slow_ticks_enter_the_ring_and_not_the_log` fixture in world/levels.rs also requires `HORIZON_TEST_RESOURCES`. Their resource factories are adapted to the fork's production ResourceRoot, ResourceSource and execution-role helpers. Self-contained format, reader and recorder suites do not prove these ignored producer contracts. Real-game profile and LAN fixtures require prepared 26.3 resources, scratch homes and built game/control/perf binaries; GPU client cases additionally need offscreen rendering support. The vanilla comparison is optional when its licensed server jar is absent. Viewer wasm builds require `wasm32-unknown-unknown`. These requirements are an inventory, not evidence of execution or runtime correctness.
 
 ### Generated baseline justification
 
@@ -124,6 +124,12 @@ The generated baseline was originally a separate commit, `98a17c12d6`, relative 
 | `crates/horizon-client/src/game.rs` | 17,877 → 17,914 (+37 code lines) | Profiler state/options and work tracing within the existing canonical game implementation; no resurrected implementation block. |
 | `crates/horizon-client/src/game/entities/minecarts.rs` | 3,405 → 3,407 (+2 code lines) | Work attribution and clearing around canonical minecart processing. |
 | `crates/horizon-client/src/game/network/remote/mod.rs` | 11,863 → 11,874 (+11 code lines) | Profiler reply routing and chunk tracing ported from the retired remote polling path. |
+
+### CI layer corrections
+
+Upstream `a86ab9d4bc` moved `horizon-bench` into the engine layer and exposed its probes through `horizon_platform::bench`. The server source already took that platform route, but the conflict resolution incorrectly retained the old direct manifest edge. Remove that dependency and its lockfile edge; no layer exception is added.
+
+Main's `c32e27f3b00` introduced `horizon-threads`' dependency on the shared guest-stack policy. Upstream `a86ab9d4bc` then classified threads as portable. The stack-policy leaf is now classified portable alongside it, rather than allowing a forbidden edge: it has no workspace dependencies and no window, GPU, sound, gamepad, clipboard or HTTP library, only target-gated libc and standard-library process/thread plumbing. Native stack queries are target-gated, and unsupported targets refuse clearly. This satisfies the documented desktop-free portability contract, just like threads' existing native CPU/sampler plumbing. The leaf remains allocator-independent for executable/build-script consumers; moving it into threads would reverse that dependency and pull in allocator machinery. The portable list and its documentation are updated together, with no `allowed` entry.
 
 ### Compile-only corrections and retired contracts
 

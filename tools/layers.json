@@ -111,7 +111,8 @@
       "horizon-mod-api-macros",
       "horizon-game-discovery",
       "horizon-engine-slots",
-      "horizon-threads"
+      "horizon-threads",
+      "horizon-guest-stack"
     ],
     "forbidden": [
       "arboard",
