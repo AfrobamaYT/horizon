@@ -653,6 +653,7 @@ impl Game<'_> {
         self.creative_screen.invalidate_build();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
         self.install_loop_context(loop_context);
+        self.resolve_entity_renderers();
         self.texture_atlases_stitched();
         self.native_model_baking_completed();
         self.native_client_resources_reloaded();

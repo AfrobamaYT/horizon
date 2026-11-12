@@ -8494,12 +8494,7 @@ impl Game<'_> {
                 }
                 continue;
             }
-            if let Some(stack) = a.drawn_item() {
-                let owner = super::item_draw::owner_at(at, 0.0, a.kind.id());
-                let state = self.resolve_item(&stack, DisplayContext::Ground, Some(&owner), 0);
-                let pose = glam::Mat4::from_translation(c)
-                    * glam::Mat4::from_quat(self.camera_orientation());
-                self.submit_item_world(&state, pose, packed, out);
+            if self.thrown_item_geometry(a, alpha, at, c, packed, out) {
                 continue;
             }
             // `Entity.displayFireAnimation`: a thrown item that flew through a
