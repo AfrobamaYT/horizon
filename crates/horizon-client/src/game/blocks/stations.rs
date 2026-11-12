@@ -3545,12 +3545,12 @@ mod tests {
                         event.elements.insert(
                             1,
                             TooltipElement::Image(TooltipImage {
-                                stack: event.stack.clone(),
+                                source: mod_api::TooltipImageSource::ItemPart(event.stack.clone()),
                                 size: [16.0, 8.0],
                             }),
                         );
                         event.elements.push(TooltipElement::Image(TooltipImage {
-                            stack: event.stack.clone(),
+                            source: mod_api::TooltipImageSource::ItemPart(event.stack.clone()),
                             size: [f32::NAN, 8.0],
                         }));
                     }
@@ -3558,7 +3558,7 @@ mod tests {
                         *event.elements = vec![
                             TooltipElement::Text(mod_api::Text::literal("Name"), u32::MAX),
                             TooltipElement::Image(TooltipImage {
-                                stack: event.stack.clone(),
+                                source: mod_api::TooltipImageSource::ItemPart(event.stack.clone()),
                                 size: [12.0, 16.0],
                             }),
                             TooltipElement::Text(mod_api::Text::literal("Second"), u32::MAX),

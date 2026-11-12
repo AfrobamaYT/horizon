@@ -91,7 +91,7 @@ pub enum RandomTicks {
 pub struct BlockShapes {
     /// State property names selecting a shape, in tuple order.
     pub properties: Vec<String>,
-    /// Comma-separated property-value tuples mapped to boxes in block pixels.
+    /// Comma-separated property-value tuples mapped to boxes in block units (one block is 1).
     pub values: BTreeMap<String, Vec<[f64; 6]>>,
     /// Boxes used when no tuple matches.
     pub default: Option<Vec<[f64; 6]>>,
@@ -184,8 +184,8 @@ pub struct Block {
     /// the block's item: a mature crop picks its seed. An item of this mod or a vanilla
     /// one, checked to exist when the content loads. Absent is the block's item.
     pub pick_item: Option<String>,
-    /// Its item's ordered component patch: `Some(tag)` sets a component, `None` removes it.
-    /// Component names do not include the removal prefix `!`.
+    /// Its item's component patch: `Some(tag)` sets a component, `None` removes it.
+    /// Component names do not include the removal prefix `!`; repeated IDs are refused.
     pub components: Vec<(String, Option<crate::Tag>)>,
     /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
     /// without the chorus plant's rules): the block tag, without `#`, whose
@@ -242,8 +242,8 @@ pub struct Item {
     pub max_stack_size: Option<u8>,
     /// Rarity overriding the template's.
     pub rarity: Option<Rarity>,
-    /// An ordered component patch over the template: `Some(tag)` sets, `None` removes.
-    /// Component names are namespaced identifiers, without a removal prefix `!`.
+    /// A component patch over the template: `Some(tag)` sets, `None` removes.
+    /// Component names are namespaced identifiers, without a removal prefix `!`; repeated IDs are refused.
     pub components: Vec<(String, Option<crate::Tag>)>,
     /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
     /// a vanilla item or one of the mod's own.
