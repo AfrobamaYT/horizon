@@ -232,7 +232,6 @@ pub struct RestitutionHooks {
 
 pub static RESTITUTION_HOOKS: OnceLock<RestitutionHooks> = OnceLock::new();
 
-
 /// What a contact asked to keep until the entity's batch ends, delivered in
 /// the order it happened: the parts' `entity_inside` contacts themselves fire
 /// mid-walk now, on the shared inside sweep, so what stays here is the level
