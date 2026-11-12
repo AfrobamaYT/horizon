@@ -24,7 +24,7 @@ type and data, rather than adding another item-dispatched special case.
 | Only text wraps, once | `crates/horizon-client/src/game/blocks/stations/tooltip.rs:183`, `:218`, `:229`; `crates/horizon-client/src/game/blocks/stations.rs:12` | Text currently splits when max_width is nonnegative; invalid image sizes silently disappear. Preserve components, refuse invalid mod output explicitly, and wrap before Pre under the supplied contract. |
 | Whole-tooltip cancellation | `crates/horizon-mod-vocab/src/hooks/render_tooltip_gather_components.rs:21`, `render_tooltip_pre.rs:21`, `render_tooltip_texture.rs:18`; `crates/horizon-client/src/game/blocks/stations/tooltip.rs:57`, `:209` | Gather empties the list; Pre skips the whole tooltip; neither component callback has cancellation. Texture stays noncancellable. |
 
-`crates/horizon-mod-vocab/src/hooks/notes.rs:1728` and `:1732` describe the old
+`crates/horizon-mod-vocab/src/hooks/notes.rs:1744–1750` describes the old
 stack-based contract and must change with implementation. The adapters are
 `crates/horizon-client/src/game/native_hooks/base.rs:3377`, `:3387`, and
 `native_hooks/render_tooltip_{gather_components,pre,texture}.rs:15`, `:9`, `:9`.
@@ -220,8 +220,8 @@ A bad listener answer must not poison the next ordinary tooltip. No game-state
 mutation is required; any allowed listener transaction follows existing root-commit
 and rollback rules.
 
-With no subscribers or custom data, take O(1) presence checks and run exactly the
-vanilla path: no API element conversion, payload encoding, registry scan, factory
+With no subscribers or custom data, take O(1) presence checks and run the vanilla
+path apart from the contract's screen-fit wrap: no API element conversion, payload encoding, registry scan, factory
 allocation or new validation/clamp/minimum. Built-in constants and default font,
 positioning and bundle behavior remain vanilla. The screen-fit wrap below is part of
 this contract, not mod work: it applies with or without subscribers (fixtures A–G and
@@ -362,7 +362,7 @@ there is no pending overflow-boundary row.
 The #2927 implementation starts only after #2974 lands, and carries stages 2–4
 as one complete native/wasm contract: registrar, Wire data envelope, font reference,
 prepared component, removal of both old parts with every caller and the catalog,
-shared item/text-only preparation, exact vanilla no-listener fast path and a book
+shared item/text-only preparation, a no-listener fast path that is vanilla apart from the screen-fit wrap, and a book
 example. Keep new logic in sibling modules rather than growing oversized owners.
 
 Start with failing tests: every acceptance-matrix row must have its own test with
