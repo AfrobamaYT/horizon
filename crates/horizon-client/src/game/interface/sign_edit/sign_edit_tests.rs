@@ -5,7 +5,7 @@
 //! `SignBlock.otherPlayerIsEditingSign`, `SignBlockEntity.tick` and
 //! `SignBlockEntity.updateSignText`.
 use super::*;
-use crate::game::{Audio, Options, Progress, Settings, load_resources};
+use crate::game::{Audio, Options, Progress, Settings, lan::LanHost, load_resources};
 use horizon_client::{
     chunk::Chunk,
     items::ItemStack,
@@ -26,8 +26,6 @@ const SIGN: [i32; 3] = [4, 100, 4];
 /// Two players on one world and what each player's client was sent.
 struct Edits {
     game: Game<'static>,
-    /// The hub, out of `game.lan` as the game holds it while an action runs.
-    host: Option<LanHost>,
     inbox: Vec<(u32, mpsc::Receiver<Out>)>,
     sequence: i32,
 }
@@ -42,13 +40,14 @@ impl Edits {
         );
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -63,7 +62,9 @@ impl Edits {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -102,7 +103,6 @@ impl Edits {
             },
         )
         .unwrap();
-        let mut host = game.lan.take().unwrap();
         let mut inbox = Vec::new();
         for (conn, uuid, name, at) in [
             (A, A_UUID, "EditA", [6.5, 100.0, 4.5]),
@@ -121,7 +121,6 @@ impl Edits {
                     latency: Arc::new(AtomicI32::new(0)),
                     address: "127.0.0.1:25565".parse().unwrap(),
                     expected: false,
-                    configured: Default::default(),
                 },
                 conn as i32,
                 at,
@@ -130,33 +129,28 @@ impl Edits {
             guest.placed = true;
             guest.loaded = true;
             guest.dimension = "minecraft:overworld".into();
-            host.hub.guests.push(guest);
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
             inbox.push((conn, rx));
         }
         Self {
             game,
-            host: Some(host),
             inbox,
             sequence: 0,
         }
     }
     fn host(&mut self) -> &mut LanHost {
-        self.host
+        self.game
+            .lan
             .as_mut()
-            .expect("the hub is out only inside a tick")
+            .expect("the game hosts the test world")
     }
     /// Runs `packet` as if `conn`'s client had sent it.
     fn packet(&mut self, conn: u32, packet: S) {
-        let mut host = self.host.take().expect("the hub is out only inside a tick");
-        self.game.lan_guest_packet(&mut host, conn, packet);
-        self.host = Some(host);
+        self.game.lan_guest_packet(conn, packet);
     }
-    /// `Level.tickBlockEntities`, with the hub where the game keeps it
-    /// between actions.
+    /// `Level.tickBlockEntities`.
     fn tick(&mut self) {
-        self.game.lan = self.host.take();
         self.game.tick_block_entities().unwrap();
-        self.host = self.game.lan.take();
     }
     /// `PlayerList.remove` for `conn`.
     fn leave(&mut self, conn: u32) {

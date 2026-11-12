@@ -399,12 +399,15 @@ impl Game<'_> {
                         let attacker = match recorded.take() {
                             Some((t, id)) if t == d.name => Some(id),
                             _ => {
-                                if let Some((_, attacker, _)) =
-                                    self.combat.pending.iter().find(|(t, _, _)| *t == d.name)
+                                if let Some(pending) = self
+                                    .combat
+                                    .pending
+                                    .iter()
+                                    .find(|pending| pending.damage_type == d.name)
                                 {
                                     self.combat.last_hurt_by =
-                                        Some((attacker.clone(), self.world.game_time));
-                                    Some(attacker.0)
+                                        Some((pending.attacker.clone(), self.world.game_time));
+                                    Some(pending.attacker.0)
                                 } else {
                                     None
                                 }

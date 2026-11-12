@@ -271,14 +271,15 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::native_machines::tests::server_game;
+    use crate::game::game_tests::tests::server_game;
 
     /// `AbstractThrownPotion.douseFire` -> `CampfireBlock.douse(entity, ...)`:
     /// the campfire's block change is sourced from the potion's owner.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_doused_campfire_posts_block_change_from_the_potion_owner() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let pos = [2, 4, 3];
         let campfire = game
             .pack

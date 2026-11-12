@@ -663,6 +663,7 @@ impl Game<'_> {
                 &mut r.velocity,
                 &self.world,
                 &self.res.motion().fluids,
+                &self.loop_context,
             );
             if water > 0.0 {
                 r.fall_distance = 0.0;

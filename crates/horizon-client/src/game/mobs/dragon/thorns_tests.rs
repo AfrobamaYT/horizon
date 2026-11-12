@@ -5,7 +5,6 @@ use horizon_client::{
     mobs::{Damage, DamageKind, Mob, MobEvent, Who, finalize as f},
     projectiles::{Hit, Projectile, ProjectileKind},
 };
-use horizon_core::random::LegacyRandom;
 
 fn with_game(test: impl FnOnce(&mut Game<'_>)) {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());

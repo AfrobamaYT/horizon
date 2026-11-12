@@ -1002,7 +1002,14 @@ impl Game<'_> {
                         if hurt {
                             if source.attacker == Some(Who::Player) {
                                 let guest = self.combat.blast_guest;
-                                self.last_hurt_by_player.insert(victim, guest);
+                                if let Some(uuid) = self.player_uuid_of(guest) {
+                                    self.last_hurt_by_player.insert(
+                                        victim,
+                                        crate::game::combat::PlayerCredit(
+                                            horizon_client::lan::playerdata::ints_uuid(uuid),
+                                        ),
+                                    );
+                                }
                                 if let Some(host) = self.lan.as_mut() {
                                     match guest {
                                         Some(conn) => {
@@ -1569,8 +1576,14 @@ impl Game<'_> {
         // player (a primed TNT's owner, not a mob's): ores, sculk and spawners
         // sample their experience then, and pop it while blocks drop.
         if !is_tnt && self.combat.blast_owner_player {
-            let xp = self.block_experience(&name);
-            if xp > 0 && self.ui.rules.bool("block_drops") {
+            let xp = horizon_world::level::removal::break_experience(&mut self.world.random, &name)
+                .unwrap_or(0);
+            if xp > 0
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+            {
                 self.spawn_orbs(pos.map(|v| f64::from(v) + 0.5), xp);
             }
         }

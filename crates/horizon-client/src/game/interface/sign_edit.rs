@@ -540,7 +540,6 @@ impl Game<'_> {
                     front: edit.front,
                 }),
             );
-            host.play.entry(conn).or_default().sign_editing = Some(pos);
         }
     }
     /// `ServerGamePacketListenerImpl.handleSignUpdate`: the lines, formatting
@@ -563,9 +562,7 @@ impl Game<'_> {
             horizon_client::lan::hub::chat_filter::Place::Sign,
         ) {
             // The sign stays as it was: the editor closes, as after a sign the server refused.
-            if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
-                play.sign_editing = None;
-            }
+            self.world.block_entities.set_sign_editor(key, None);
             // The player's client shows the text it sent: the sign as it is, again.
             self.mark_block_entity_updated(key);
             return;
@@ -602,9 +599,7 @@ impl Game<'_> {
             if cancel {
                 // The sign keeps its text: the editor closes, and the player's
                 // client, which shows what it sent, gets the sign as it is.
-                if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
-                    play.sign_editing = None;
-                }
+                self.world.block_entities.set_sign_editor(key, None);
                 self.mark_block_entity_updated(key);
                 return;
             }
@@ -638,9 +633,7 @@ impl Game<'_> {
         for (line, new) in side.lines.iter_mut().zip(&p.lines) {
             *line = horizon_client::clipboard::strip_formatting(new);
         }
-        if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
-            play.sign_editing = None;
-        }
+        self.world.block_entities.set_sign_editor(key, None);
         self.mark_block_entity_updated(key);
     }
     /// `ClientPacketListener.handleOpenSignEditor`: the editor on a sign this

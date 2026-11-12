@@ -59,10 +59,10 @@ impl ItemTables<'_> {
         // Entity.baseTick splashes before moving, except on the first tick, at
         // the motion before the currents push it.
         let before = item.velocity;
-        let heights = item.push_by_fluid(self.world, &self.motion.fluids);
+        let heights = item.push_by_fluid(self.world, &self.motion.fluids, self.context);
         item.water_entry(heights.0 > 0.0, item.ticks == 0, before, splash);
         item.lava_fall(heights.1 > 0.0);
-        let step = item.tick_move_before_block_effects(
+        let mut step = item.tick_move_before_block_effects(
             self.world,
             self.facts,
             self.collision,
@@ -73,7 +73,7 @@ impl ItemTables<'_> {
             Some(self.border),
             Some(&self.motion.blocks),
         );
-        item.check_fall(&step, |fall, from, moved| {
+        item.check_fall(&mut step, |fall, from, moved| {
             if fall == 0.0 || moved.length_squared() < 1.0 {
                 return fall;
             }
@@ -105,12 +105,13 @@ impl ItemTables<'_> {
             no_physics,
             Some(&self.motion.blocks),
             step,
+            self.context,
         );
         item.push_by_bubble_column(self.world, self.registry, self.facts, self.collision);
         let alive = item.tick_settle(self.world, self.facts, no_physics, step);
         // ItemEntity.tick refreshes immersion and splashes on water entry.
         let before = item.velocity;
-        let (water, _) = item.push_by_fluid(self.world, &self.motion.fluids);
+        let (water, _) = item.push_by_fluid(self.world, &self.motion.fluids, self.context);
         item.water_entry(water > 0.0, false, before, splash);
         alive
     }
@@ -272,8 +273,8 @@ fn check(id: u32, serial: &ItemEntity, expected: &Moved, ahead: &ItemEntity, got
 
 #[cfg(test)]
 mod tests {
-    use super::super::native_machines::tests::server_game;
     use super::{AHEAD, TAKEN};
+    use crate::game::game_tests::tests::server_game;
     use horizon_client::{chunk::Chunk, items::ItemStack};
     use horizon_core::{geometry::Vec3, random::RandomSource};
     use std::sync::Arc;
@@ -285,7 +286,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn moves_worked_out_ahead_match_those_made_at_each_turn() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let feet = horizon_core::geometry::Vec3::new(8.5, 70.0, 8.5);
         game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
         // `ChunkMap.prepareEntityTickingChunk`: the chunks within 2 are loaded too.

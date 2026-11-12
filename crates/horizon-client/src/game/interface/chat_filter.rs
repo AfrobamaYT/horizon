@@ -142,16 +142,12 @@ impl Game<'_> {
         }
         // The text only goes to the filter's own log, for operators: never to the console or the stream.
         dedicated::log("INFO", &summary);
-        if let Some(path) = self
-            .lan
-            .as_ref()
-            .and_then(|host| host.hub.chat_filter_log())
+        if let Some(host) = self.lan.as_mut()
+            && let Err(e) = host
+                .hub
+                .log_chat_filtered(now, name, uuid, place, count, action, text)
         {
-            let line =
-                horizon_chat_filter::log_line(now, name, uuid, place.name(), count, action, text);
-            if let Err(e) = horizon_chat_filter::append_log(std::path::Path::new(path), &line) {
-                dedicated::log("WARN", &format!("[chat-filter] {path}: {e}"));
-            }
+            dedicated::log("WARN", &format!("[chat-filter] {e}"));
         }
         dedicated::events::record(
             "chat_filtered",

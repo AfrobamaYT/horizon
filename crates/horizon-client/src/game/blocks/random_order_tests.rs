@@ -3,15 +3,18 @@
 //! land on other blocks from one run of a world to the next (#15164).
 
 use super::Game;
-use super::native_machines::tests::server_game;
+use crate::game::game_tests::tests::server_game;
 use horizon_client::chunk::Chunk;
 use horizon_core::geometry::Vec3;
 use std::sync::Arc;
 
 /// A game whose player stands in chunk (0, 0), with lit chunks loaded in
 /// `order`.
-fn game_loading(order: &[(i32, i32)]) -> Game<'static> {
-    let mut game = server_game();
+fn game_loading<'a>(
+    resources: &'a mut Option<Arc<crate::game::Resources>>,
+    order: &[(i32, i32)],
+) -> Game<'a> {
+    let mut game = server_game(resources);
     game.settings.simulation_distance = 5;
     game.settings.render_distance = 8;
     game.player = Some(
@@ -33,11 +36,13 @@ fn chunks_random_tick_in_the_same_order_however_they_loaded() {
     let mut loaded: Vec<(i32, i32)> = (-8..=8)
         .flat_map(|x| (-8..=8).map(move |z| (x, z)))
         .collect();
-    let first = game_loading(&loaded);
+    let mut first_resources = None;
+    let first = game_loading(&mut first_resources, &loaded);
     // The streaming workers finish in another order on another run.
     loaded.reverse();
     loaded.rotate_left(97);
-    let second = game_loading(&loaded);
+    let mut second_resources = None;
+    let second = game_loading(&mut second_resources, &loaded);
 
     let (mut a, mut b) = (Vec::new(), Vec::new());
     first.random_tick_chunks(&mut a);

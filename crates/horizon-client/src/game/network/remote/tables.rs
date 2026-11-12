@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 impl Game<'_> {
     /// The game's items with the server's block and item tags, by name. The
     /// window's own server thread plays with the world's tables instead.
-    pub(super) fn server_items(&self, registries: &Dynamic) -> Option<Arc<Items>> {
+    pub(in crate::game) fn server_items(&self, registries: &Dynamic) -> Option<Arc<Items>> {
         let r = self.remote.as_ref().filter(|_| self.integrated.is_none())?;
         let names = |registry: &str| -> Option<HashMap<String, Vec<String>>> {
             let ids = r.builtin.get(registry)?;

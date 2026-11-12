@@ -288,7 +288,11 @@ impl Game<'_> {
             let xp = 20 + self.world.random.next_int_bound(5).unwrap_or(0) as u32;
             // Block.popExperience: the amount is drawn, then nothing pops
             // with `block_drops` off.
-            if self.ui.rules.bool("block_drops") {
+            if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+            {
                 self.spawn_orbs(
                     [
                         f64::from(pos[0]) + 0.5,

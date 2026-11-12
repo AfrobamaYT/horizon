@@ -1978,16 +1978,11 @@ impl Game<'_> {
         state: Option<BlockStateId>,
     ) {
         if let Some(conn) = guest.filter(|conn| owner.is_some() && self.lan_acting != Some(*conn)) {
-            let posted = match self.lan.take() {
-                Some(mut host) => {
-                    let ran = self.as_guest(&mut host, conn, |g| {
-                        g.projectile_own_event(event, owner, None, at, state);
-                    });
-                    self.lan = Some(host);
-                    ran.is_some()
-                }
-                None => false,
-            };
+            let posted = self
+                .as_guest(conn, |g| {
+                    g.projectile_own_event(event, owner, None, at, state);
+                })
+                .is_some();
             if !posted {
                 self.projectile_own_event(event, None, None, at, state);
             }

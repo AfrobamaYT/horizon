@@ -2,7 +2,7 @@
 //! floor minus 64, so the Nether and the End lose one at y = -64 while the
 //! Overworld keeps it down to y = -128.
 use super::Dim;
-use super::native_machines::tests::server_game;
+use crate::game::game_tests::tests::server_game;
 use horizon_client::chunk::Chunk;
 use horizon_client::items::ItemStack;
 use horizon_client::motion::PlayerMotion;
@@ -13,7 +13,8 @@ use std::sync::Arc;
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn items_fall_to_each_dimensions_own_void_floor() {
-    let mut game = server_game();
+    let mut resources = None;
+    let mut game = server_game(&mut resources);
     game.player = Some(PlayerMotion::new(game.motion, Vec3::new(8.5, 70.0, 8.5)).unwrap());
     for x in -2..=2 {
         for z in -2..=2 {

@@ -1130,14 +1130,15 @@ mod bell_ownership_tests {
 #[cfg(test)]
 mod gateway_age_tests {
     use super::*;
-    use crate::game::native_machines::tests::server_game;
+    use crate::game::game_tests::tests::server_game;
 
     /// `TheEndGatewayBlockEntity.portalTick`: an age that moved is a change
     /// to save.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_gateway_that_ages_marks_the_chunk() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let state = game
             .pack
             .assets

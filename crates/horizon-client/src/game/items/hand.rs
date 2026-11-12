@@ -499,15 +499,22 @@ impl Game<'_> {
         self.mod_harvest_check(pos, state, &mut harvest);
         let block_break_speed = self.block_break_speed();
         let facts = self.res.facts().get(state);
-        let mut speed = self.items().mining_speed(self.held(), &facts.name);
-        speed = self.modify_destroy_speed(speed);
-        speed *= block_break_speed;
-        if self.mining_eyes_in_water() {
-            speed *= self.submerged_mining_speed();
-        }
-        if self.player.as_ref().is_some_and(|p| !p.ground.on_ground) {
-            speed /= 5.0;
-        }
+        let tool_speed = self.items().mining_speed(self.held(), &facts.name);
+        let player = horizon_items::mining::DestroySpeedModifiers {
+            // Vanilla reads the attribute (recomputing a dirty one) only then.
+            mining_efficiency: if tool_speed > 1.0 {
+                self.mining_efficiency()
+            } else {
+                0.0
+            },
+            effects: self.potions.effects.mining_speed_factor(),
+            block_break_speed,
+            submerged_mining_speed: self
+                .mining_eyes_in_water()
+                .then(|| self.submerged_mining_speed()),
+            on_ground: self.player.as_ref().is_none_or(|p| p.ground.on_ground),
+        };
+        let mut speed = horizon_items::mining::destroy_speed(tool_speed, &player);
         let mut canceled = false;
         if mod_api::__private::listened(mod_api::HookId::PlayerBreakSpeed) {
             self.native_player_break_speed(
@@ -522,7 +529,7 @@ impl Game<'_> {
         if canceled {
             return 0.0;
         }
-        speed / hardness / if harvest { 30.0 } else { 100.0 }
+        horizon_items::mining::destroy_progress(hardness, harvest, speed)
     }
     /// `EntityFluidInteraction`: compare the eyes with the camera fluid surface.
     fn mining_eyes_in_water(&self) -> bool {

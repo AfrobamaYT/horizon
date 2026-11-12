@@ -576,7 +576,6 @@ fn host_with_guest(game: &mut Game<'_>, guest_at: [f64; 3]) {
         latency: Arc::new(std::sync::atomic::AtomicI32::new(0)),
         address: "127.0.0.1:25565".parse().unwrap(),
         expected: false,
-        configured: Default::default(),
     };
     let mut guest = Guest::new(joined, 2, guest_at, 0);
     guest.placed = true;

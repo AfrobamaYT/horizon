@@ -614,11 +614,18 @@ impl Loading {
                     packs::open_folder(&dir);
                 }
                 Event::ImportPacks(paths) => {
+                    let additional = self.options.as_ref().map_or_else(Vec::new, |options| {
+                        super::pack_finders::discover(
+                            mod_api::PackType::ClientResources,
+                            &options.mods,
+                        )
+                    });
                     packs::import_resource_packs(
                         &mut self.menu.options,
                         &self.vanilla_root,
                         &[],
                         &paths,
+                        &additional,
                     );
                 }
                 Event::DownloadPack(i) => {
@@ -1126,7 +1133,7 @@ impl Loading {
             // `PackSelectionScreen.onFilesDrop`: a pack dropped on the window
             // joins the Create New World screen's data packs.
             WindowEvent::DroppedFile(path) => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 let handled = self.menu.options_open
                     && self.gui.as_ref().is_some_and(|gui| {
                         self.menu.options.drop_resource_pack(

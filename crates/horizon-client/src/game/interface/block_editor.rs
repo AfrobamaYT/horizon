@@ -849,7 +849,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_local_jigsaw_edit_applies_and_marks_the_chunk() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let pos = (2, 4, 3);
         let state = game
             .pack

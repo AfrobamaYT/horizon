@@ -3210,7 +3210,7 @@ mod machines_chest_cat_tests;
 #[cfg(test)]
 mod can_take_tests {
     use super::*;
-    use crate::game::native_machines::tests::server_game;
+    use crate::game::game_tests::tests::server_game;
     use horizon_client::containers::ChiseledBookshelf;
 
     /// `ChiseledBookShelfBlockEntity.canTakeItem`: a hopper takes a book only
@@ -3218,7 +3218,8 @@ mod can_take_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_full_hopper_cannot_take_a_book_from_a_chiseled_shelf() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let shelf_pos = (2, 4, 3);
         let hopper_pos = (2, 5, 3);
         let shelf_state = game

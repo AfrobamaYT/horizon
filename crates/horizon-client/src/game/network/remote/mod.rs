@@ -271,7 +271,7 @@ pub(super) struct Tracked {
     silent: bool,
     /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever
     /// either one's type.
-    vehicle: Option<u32>,
+    pub(in crate::game) vehicle: Option<u32>,
 }
 
 /// `Entity.startRiding` / `removePassenger` for a `SetPassengers` packet: the
@@ -16559,6 +16559,7 @@ mod tests {
             pos: [0, 63, 0],
             face: [0, 1, 0],
             point: [0.5, 64.0, 0.5],
+            inside: false,
         });
 
         let done = game.remote_use_block(Hand::Main);

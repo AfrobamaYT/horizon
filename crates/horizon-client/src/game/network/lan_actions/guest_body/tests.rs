@@ -21,7 +21,6 @@ fn guest(entity_id: i32) -> Guest {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         entity_id,
         [0.5, 64.0, 0.5],

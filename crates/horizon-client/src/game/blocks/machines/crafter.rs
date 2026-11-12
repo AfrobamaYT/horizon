@@ -401,8 +401,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_slot_toggled_in_the_menu_lands_on_the_crafter() {
-        use crate::game::native_machines::tests::server_game;
-        let mut game = server_game();
+        use crate::game::game_tests::tests::server_game;
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let key = (2, 4, 3);
         let state = game
             .pack

@@ -2823,7 +2823,7 @@ impl Game<'_> {
         }
         if integrated {
             // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
-            return self.stop_integrated();
+            return self.stop_integrated(true);
         }
         self.native_lifecycle.begin_close();
         log("INFO", "Saving worlds");

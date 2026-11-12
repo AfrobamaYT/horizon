@@ -2347,6 +2347,7 @@ mod pickup_xp_tests {
                 on_ground: true,
                 count: 1,
                 ticks: 0,
+                air: 300,
                 health: 5,
                 no_gravity: true,
                 following: None,

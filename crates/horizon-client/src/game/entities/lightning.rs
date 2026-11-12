@@ -892,7 +892,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
     fn a_struck_rod_updates_the_wire_beside_the_block_behind_it() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let registry = game.pack.assets.registry;
         let stone = registry.default_state("minecraft:stone").unwrap();
         let wire = registry.default_state("minecraft:redstone_wire").unwrap();

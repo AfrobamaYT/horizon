@@ -141,7 +141,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .update(i, |guest| super::guest_body::initialize(self.motion, guest));
-            if initialized != Some(true) {
+            if !initialized {
                 return Err(TurnRefused::Gone);
             }
         }

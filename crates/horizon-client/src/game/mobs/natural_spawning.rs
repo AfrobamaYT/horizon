@@ -1290,7 +1290,7 @@ impl<'a> Game<'a> {
                     if !level.can_spawn_in_chunk(chunk.0, chunk.1) {
                         continue;
                     }
-                    let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LegacyRandom| {
+                    let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LevelRandom| {
                         let spawned = l.finalize_spawned(r, &mut pending, rng);
                         if let Some(s) = &spawned {
                             l.pending.borrow_mut().push(s.bounds);
@@ -2058,7 +2058,7 @@ mod tests {
                     .collect();
                 let mut state = SpawnState::new(&natural, 289, players, &[], |_, _| true);
                 let mut pending = Vec::new();
-                let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LegacyRandom| {
+                let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LevelRandom| {
                     let spawned = l.finalize_spawned(r, &mut pending, rng);
                     if let Some(s) = &spawned {
                         l.pending.borrow_mut().push(s.bounds);

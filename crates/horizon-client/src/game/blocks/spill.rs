@@ -1157,7 +1157,8 @@ mod tests {
             let ore = registry.default_state("minecraft:diamond_ore").unwrap();
             let pos = BlockPos::new(1, 64, 2);
             let break_of = |game: &mut Game<'_>, state, item, exp_to_drop| {
-                game.world.random = LegacyRandom::new(7);
+                game.world.random =
+                    horizon_core::random::LevelRandom::for_level(LegacyRandom::new(7));
                 let dropped = game.with_level(|_, level, _| {
                     level.block_dropped(
                         pos,

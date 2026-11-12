@@ -69,6 +69,10 @@ fn burn_in(game: &mut Game<'_>, pos: [i32; 3]) {
             collision_binding: game.collision,
             resources: game.motion,
             health: &game.health_resources,
+            tag_items: Some(game.res.items()),
+            loop_context: &game.loop_context,
+            damage_hooks: &game.damage_hooks,
+            block_registries: Some(&game.pack.block_registries),
         };
         w.server_block_damage(at).unwrap();
         std::mem::take(&mut w.player.events)

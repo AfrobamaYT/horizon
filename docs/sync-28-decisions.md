@@ -142,7 +142,7 @@ Diverges from upstream (performance only). The fork retains serial dispatch whil
 - Keep the existing waypoint Icon vocabulary; persistence is implemented around it, without introducing a duplicate WaypointIcon type.
 - Take upstream Horizon cosmetics settings, PvP helpers, dedicated crash-stop behavior, beacon text, sign edit lifecycle, crack sprites and world-update spans. Existing fork save-before-unload hooks remain in their established order.
 - New position_args validation lands at administration/commands/position_args.rs, cosmetics settings at interface/cosmetics/settings.rs, and renamed upstream extras/pvp.rs merges into entities/pvp.rs. No duplicate extras/pvp.rs is restored.
-- World content access retains server_items precedence while allowing remote.tables.items fallback; item_enchantments reads remote.tables.enchantments.
+- World content access uses the existing Game.server_items cache before local resource items. Enchantment readers use Remote.enchantments. The upstream ServerTables aggregate is not duplicated: synced tag/item/enchantment updates already populate these flat fields, and typed mod tag notices remain separate.
 
 ## Entity, network and world decisions
 

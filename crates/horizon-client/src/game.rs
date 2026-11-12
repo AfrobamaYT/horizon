@@ -19,11 +19,7 @@ macro_rules! world_items {
         match (&$s.server_items, &$s.world_tables) {
             (Some(items), _) => &**items,
             (None, Some(t)) => &t.items,
-            (None, None) => $s
-                .remote
-                .as_ref()
-                .and_then(|r| r.tables.items.as_deref())
-                .unwrap_or_else(|| $s.res.items()),
+            (None, None) => $s.res.items(),
         }
     };
 }

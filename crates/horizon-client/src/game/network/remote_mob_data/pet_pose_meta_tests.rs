@@ -53,7 +53,16 @@ fn meta_hub() -> horizon_client::lan::hub::Hub {
         integrated: false,
         levels: Default::default(),
     };
-    hub::Hub::new(lan, sync, encoder, hub_config)
+    hub::Hub::new(
+        lan,
+        sync,
+        encoder,
+        hub_config,
+        std::sync::Arc::new(
+            crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+        ),
+    )
 }
 
 /// What the host sends for `m`, and the flags byte among it.

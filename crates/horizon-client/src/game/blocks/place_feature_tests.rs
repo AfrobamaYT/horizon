@@ -165,7 +165,7 @@ fn inline_and_named_features_fail_and_succeed_alike() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn an_inline_feature_draws_the_level_random_as_its_named_twin() {
-    use horizon_core::random::{LegacyRandom, RandomSource};
+    use horizon_core::random::RandomSource;
     let mut game_resources = None;
     let mut game = game(&mut game_resources);
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());

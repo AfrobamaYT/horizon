@@ -13,7 +13,9 @@ pub(super) fn initialize(resources: &MotionResources, guest: &mut Guest) -> bool
     guest.motion = Some(Box::new(motion));
     let entity_id = guest.entity_id as u32;
     if let Some(motion) = guest.motion.as_mut() {
-        motion.random = horizon_client::mobs::entity_random(entity_id, p);
+        motion.random = horizon_core::random::EntityRandom::own(
+            horizon_client::mobs::entity_random(entity_id, p),
+        );
     }
     // The first body after joining burns, breathes and falls on as saved.
     let g = &mut *guest;
@@ -49,4 +51,5 @@ pub(super) fn initialize(resources: &MotionResources, guest: &mut Guest) -> bool
 }
 
 #[cfg(test)]
+#[path = "guest_body/tests.rs"]
 mod tests;

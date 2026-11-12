@@ -86,15 +86,19 @@ impl Game<'_> {
             }
             "dragon" => {
                 let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
-                dragon
-                    .parts
-                    .fill((Vec3::new(100.0, 100.0, 100.0), Vec3::ZERO));
-                dragon.parts[0] = (at, at);
+                for part in &mut dragon.parts {
+                    part.0 = Vec3::new(100.0, 100.0, 100.0);
+                    part.1 = Vec3::ZERO;
+                }
+                dragon.parts[0].0 = at;
+                dragon.parts[0].1 = at;
                 self.dragon = Some(dragon);
                 self.special_targets()[0].1.center()
             }
             "painting" => {
                 self.paintings.push(Painting {
+                    attachment_lifetime: Default::default(),
+                    join: Default::default(),
                     id: 1,
                     pos: [0, 1, 0],
                     facing: 2,
@@ -112,6 +116,8 @@ impl Game<'_> {
             }
             "frame" | "fixed_frame" | "filled_frame" => {
                 self.item_frames.push(ItemFrame {
+                    attachment_lifetime: Default::default(),
+                    join: Default::default(),
                     id: 1,
                     pos: [0, 1, 0],
                     facing: 2,
@@ -179,36 +185,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources and HORIZON_SPECIAL_ATTACK_CASES=INPUT,OUTPUT"]
     fn special_attack_cases_without_world_startup() {
-        let root = std::path::PathBuf::from(
-            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
-        );
         let spec = std::env::var("HORIZON_SPECIAL_ATTACK_CASES").expect("case paths required");
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.dispense_fixture(&spec).unwrap();
     }

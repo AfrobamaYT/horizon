@@ -1,4 +1,4 @@
-use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+use crate::game::{Game, game_tests::tests::server_game};
 use horizon_client::items::ItemStack;
 
 /// #13541: a portal's `ClientboundRespawnPacket` keeps the attribute modifiers
@@ -12,34 +12,9 @@ fn a_new_player_after_a_portal_keeps_the_old_ones_modifiers() {
     use horizon_protocol::packets::play::{
         self, AttributeModifier, AttributeSnapshot, Clientbound as C,
     };
-    let root = std::path::PathBuf::from(
-        std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
-    );
-    let settings = Settings::default();
-    let loaded = load_resources(
-        root.clone(),
-        None,
-        &root,
-        &settings,
-        std::time::Instant::now(),
-        false,
-        true,
-        &Progress::new(),
-        &mut |_, _| unreachable!(),
-    )
-    .unwrap();
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    let mut game = Game::new(
-        &loaded.resources,
-        loaded.pack,
-        loaded.gui.unwrap(),
-        options,
-        settings,
-        Audio::silent(&root),
-        None,
-    )
-    .unwrap();
+    let mut resources = None;
+    let mut game = server_game(&mut resources);
+    game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
     let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
     game.connect_local(pipe, "Steve").unwrap();
     let spawn = |dimension: &str| play::SpawnInfo {

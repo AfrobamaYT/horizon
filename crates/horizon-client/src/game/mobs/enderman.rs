@@ -242,11 +242,7 @@ impl Game<'_> {
         });
         met || player
             .into_iter()
-            .chain(
-                self.lan_block_trigger_boxes()
-                    .into_iter()
-                    .map(|(_, b)| boxed(b)),
-            )
+            .chain(self.lan_block_trigger_boxes().into_iter().map(boxed))
             .chain(self.item_frames.iter().map(|f| boxed(f.bounds())))
             .chain(self.paintings.iter().map(|p| boxed(p.bounds())))
             .chain(self.crystals.iter().map(super::dragon::Crystal::bounds))

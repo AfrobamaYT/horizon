@@ -122,7 +122,8 @@ fn a_torch_that_stays_connects_the_wire_in_a_line_and_powers_it() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn editing_a_command_block_marks_its_chunk() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     run(&mut game, &["setblock 5 100 2 command_block[facing=up]"]);
     game.world.modified.clear();
     if let Some(log) = game.world.block_log.as_mut() {

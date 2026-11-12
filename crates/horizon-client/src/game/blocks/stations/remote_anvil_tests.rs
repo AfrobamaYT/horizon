@@ -1,6 +1,4 @@
-use super::super::super::{
-    Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
-};
+use super::super::super::{Game, execution_role::ExecutionRole, game_tests::tests::server_game};
 use super::super::{Kind, Station};
 use horizon_client::items::ItemStack;
 use horizon_protocol::connection::Pipe;
@@ -8,38 +6,11 @@ use std::sync::Arc;
 
 /// A client on a server whose data pack adds `fixture:drill`, which the
 /// game's own table doesn't have: the registry sync sent its definition.
-fn client_on_a_server_with_a_custom_enchantment() -> Game<'static> {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("HORIZON_TEST_RESOURCES")
-            .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
-    );
-    let settings = Settings::default();
-    let loaded = load_resources(
-        root.clone(),
-        None,
-        &root,
-        &settings,
-        std::time::Instant::now(),
-        false,
-        true,
-        &Progress::new(),
-        &mut |_, _| unreachable!("no menu handoff"),
-    )
-    .unwrap();
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    options.execution_role = ExecutionRole::Client;
-    let res: &'static _ = Box::leak(Box::new(loaded.resources));
-    let mut game = Game::new(
-        res,
-        loaded.pack,
-        loaded.gui.unwrap(),
-        options,
-        settings,
-        Audio::silent(&root),
-        None,
-    )
-    .unwrap();
+fn client_on_a_server_with_a_custom_enchantment<'a>(
+    resources: &'a mut Option<Arc<super::super::super::Resources>>,
+) -> Game<'a> {
+    let mut game = server_game(resources);
+    game.options.execution_role = ExecutionRole::Client;
     let (client, _server) = Pipe::pair();
     game.connect_local(client, "AnvilTest").unwrap();
     let definition = serde_json::json!({
@@ -53,7 +24,7 @@ fn client_on_a_server_with_a_custom_enchantment() -> Game<'static> {
         .enchantments
         .with_entries([("fixture:drill", &definition)])
         .expect("the game's own table lacks fixture:drill");
-    game.remote.as_mut().unwrap().tables.enchantments = Some(Arc::new(synced));
+    game.remote.as_mut().unwrap().enchantments = Some(Arc::new(synced));
     game
 }
 
@@ -63,7 +34,8 @@ fn client_on_a_server_with_a_custom_enchantment() -> Game<'static> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_servers_custom_enchantment_book_gives_an_anvil_result() {
-    let mut game = client_on_a_server_with_a_custom_enchantment();
+    let mut resources = None;
+    let mut game = client_on_a_server_with_a_custom_enchantment(&mut resources);
     let mut book = ItemStack::new("minecraft:enchanted_book", 1);
     book.set_crafting_enchantments(vec![("fixture:drill".into(), 2)]);
     let mut station = Station::new(Kind::Anvil, [0, 64, 0]);

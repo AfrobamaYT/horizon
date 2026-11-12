@@ -361,6 +361,7 @@ mod durability_tests {
             game.using = Some((OFFHAND_SLOT, 20));
             game.after_block(
                 BlockOutcome {
+                    blocking_item_used: true,
                     hurt: false,
                     blocked: 4.0,
                     shield_damage: 1,
@@ -397,6 +398,7 @@ mod durability_tests {
                 game.using = Some((OFFHAND_SLOT, 20));
                 game.after_block(
                     BlockOutcome {
+                        blocking_item_used: true,
                         hurt: false,
                         blocked: 0.0,
                         shield_damage: 8,

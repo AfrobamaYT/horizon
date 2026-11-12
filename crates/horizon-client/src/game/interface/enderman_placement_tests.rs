@@ -4,7 +4,8 @@ use horizon_client::{
     chunk::Chunk,
     mobs::{Mob, MobEvent, goals::Cx},
 };
-use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
+use horizon_core::{geometry::Vec3, position::ChunkPos};
+use mod_api::RandomSource;
 use std::sync::Arc;
 
 /// The production tick lends the level's RNG and attachments to goals while

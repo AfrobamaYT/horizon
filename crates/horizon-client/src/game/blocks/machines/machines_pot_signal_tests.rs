@@ -1,8 +1,8 @@
 //! `DecoratedPotBlock.getAnalogOutputSignal` (`getRedstoneSignalFromBlockEntity`
 //! → `getRedstoneSignalFromContainer`): a pot's one slot lives in the chunk's
 //! saved block entity, so a comparator beside it has to read that tag.
-use super::super::{native_machines::tests::server_game, spill};
 use super::*;
+use crate::game::{game_tests::tests::server_game, spill};
 use horizon_client::save;
 use horizon_world::level::LevelAccess;
 
@@ -25,7 +25,8 @@ fn saved_count(game: &Game<'_>, pos: Pos) -> u32 {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
 fn a_pot_feeds_a_comparator_from_its_saved_slot_like_a_chest() {
-    let mut game = server_game();
+    let mut resources = None;
+    let mut game = server_game(&mut resources);
     game.build_registries();
     game.set_allow_commands(true);
     assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
@@ -61,7 +62,8 @@ fn a_pot_feeds_a_comparator_from_its_saved_slot_like_a_chest() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
 fn a_hopper_inserted_item_updates_the_comparator_beside_the_pot() {
-    let mut game = server_game();
+    let mut resources = None;
+    let mut game = server_game(&mut resources);
     game.build_registries();
     game.set_allow_commands(true);
     assert!(game.run_command("fill 0 199 0 15 199 15 stone"));

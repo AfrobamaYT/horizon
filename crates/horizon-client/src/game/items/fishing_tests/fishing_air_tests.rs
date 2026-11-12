@@ -7,7 +7,8 @@ use horizon_world::loot::LootStack;
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cave_air_above_a_water_source_is_open_water_and_catches_treasure() {
-    let mut game = super::super::native_machines::tests::server_game();
+    let mut resources = None;
+    let mut game = crate::game::game_tests::tests::server_game(&mut resources);
     let (air, cave_air, void_air, water, stone) = {
         let registry = &game.pack.assets.registry;
         let id = |name: &str| registry.default_state(name).unwrap();
@@ -45,9 +46,12 @@ fn cave_air_above_a_water_source_is_open_water_and_catches_treasure() {
 
     // The flag the hook's retrieval reads: `gameplay/fishing`'s treasure entry is
     // conditioned on `in_open_water`, so the cave's air decides whether treasure comes.
-    let loot =
-        horizon_client::structure_blocks::loot_data(&game.options.resources, &game.pack_files())
-            .expect("the fishing loot table");
+    let loot = horizon_client::structure_blocks::loot_data(
+        &game.options.resources,
+        &game.pack_files(),
+        game.res.item_defaults(),
+    )
+    .expect("the fishing loot table");
     // `gameplay/fishing/treasure`'s items (26.3's table).
     let treasure = [
         "minecraft:name_tag",

@@ -161,6 +161,24 @@ impl Hub {
     pub fn unmute(&mut self, name: &str) -> Option<String> {
         self.chat_filter.as_deref_mut()?.unmute(name)
     }
+
+    /// Writes a refused text to the filter's own log, when it keeps one; `Err` says why it couldn't.
+    #[allow(clippy::too_many_arguments)]
+    pub fn log_chat_filtered(
+        &mut self,
+        now: i64,
+        name: &str,
+        uuid: u128,
+        place: Place,
+        count: u32,
+        action: Action,
+        text: &str,
+    ) -> Result<(), String> {
+        match self.chat_filter.as_deref_mut() {
+            Some(guard) => guard.log(now, name, uuid, place, count, action, text),
+            None => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]

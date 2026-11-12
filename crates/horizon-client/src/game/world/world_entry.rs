@@ -5,11 +5,7 @@ use super::*;
 impl Game<'_> {
     /// The server's data-pack enchantments, or the local world's registry.
     pub(super) fn item_enchantments(&self) -> &Arc<horizon_client::enchant::Enchantments> {
-        match self
-            .remote
-            .as_ref()
-            .and_then(|r| r.tables.enchantments.as_ref())
-        {
+        match self.remote.as_ref().and_then(|r| r.enchantments.as_ref()) {
             Some(e) => e,
             None => &self.stations().enchantments,
         }
@@ -513,11 +509,7 @@ impl Game<'_> {
 
 impl Game<'_> {
     pub(super) fn active_enchantment_definitions(&self) -> &horizon_client::enchant::Enchantments {
-        match self
-            .remote
-            .as_ref()
-            .and_then(|r| r.tables.enchantments.as_ref())
-        {
+        match self.remote.as_ref().and_then(|r| r.enchantments.as_ref()) {
             Some(e) => e,
             None => &self.stations().enchantments,
         }

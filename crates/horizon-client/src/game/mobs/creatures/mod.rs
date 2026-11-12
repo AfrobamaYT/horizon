@@ -2274,6 +2274,25 @@ impl Game<'_> {
         self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
         !cancel
     }
+    /// `Entity.igniteForSeconds`: `seconds * 20` ticks of fire, scaled by the
+    /// target's burning-time attribute.
+    fn ignite_entity(&mut self, target: Who, seconds: i32) -> Result<()> {
+        match target {
+            Who::Player => {
+                if !self.creative
+                    && let Some(p) = self.player.as_mut()
+                {
+                    p.ignite_for_ticks(seconds * 20)?;
+                }
+            }
+            Who::Mob(id) => {
+                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                    m.ignite_for_ticks(seconds * 20);
+                }
+            }
+        }
+        Ok(())
+    }
     pub(super) fn handle_mob_events(&mut self, mut events: Vec<MobEvent>) -> Result<()> {
         self.handle_mob_events_reusable(&mut events)
     }

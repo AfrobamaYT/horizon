@@ -158,7 +158,7 @@ impl Game<'_> {
             });
             let mut spawn = |l: &super::natural_spawning::GameLevel,
                              r: &SpawnerSpawn,
-                             rng: &mut LegacyRandom| {
+                             rng: &mut LevelRandom| {
                 l.game.plan_spawner_mob(l, r, source, &mut planned, rng)
             };
             spawner.server_tick(&level, &mut random, pos, &mut spawn, &mut events);

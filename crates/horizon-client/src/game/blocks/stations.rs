@@ -691,7 +691,10 @@ impl Game<'_> {
             return;
         };
         let creative = self.creative;
-        let (enchantments, data) = (std::sync::Arc::clone(self.enchantments()), self.stations());
+        let (enchantments, data) = (
+            std::sync::Arc::clone(self.item_enchantments()),
+            self.stations(),
+        );
         let items = self.items();
         match s.kind {
             // A server's table: its data slots carry the offers, and its

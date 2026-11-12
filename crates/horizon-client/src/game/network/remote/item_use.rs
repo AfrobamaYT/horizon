@@ -112,13 +112,14 @@ mod tests {
             .expect("needs prepared resources in HORIZON_TEST_RESOURCES");
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -132,7 +133,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -154,6 +157,7 @@ mod tests {
             pos,
             face: [0, 1, 0],
             point: [0.5, 65.0, 0.5],
+            inside: false,
         };
 
         // Fire charge on TNT: returns true, leaves consumption and sound to server.

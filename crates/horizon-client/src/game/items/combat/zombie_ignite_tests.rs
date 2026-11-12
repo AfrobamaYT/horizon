@@ -2,38 +2,13 @@
 //! real resources: it rides a blow that hurt, on the local difficulty's chance.
 use super::*;
 use crate::game::*;
-use horizon_client::mobs::{ai::do_hurt_target, goals::Cx};
-use horizon_core::random::{EntityRandom, LegacyRandom};
+use horizon_client::mobs::{Who, ai::do_hurt_target, goals::Cx};
+use horizon_core::random::LegacyRandom;
 use horizon_world::food::Difficulty;
 
 fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-    let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let settings = Settings::default();
-    let loaded = load_resources(
-        root.clone(),
-        None,
-        &root,
-        &settings,
-        Instant::now(),
-        false,
-        true,
-        &Progress::new(),
-        &mut |_, _| unreachable!(),
-    )
-    .unwrap();
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let mut g = Game::new(
-        &loaded.resources,
-        loaded.pack,
-        loaded.gui.unwrap(),
-        options,
-        settings,
-        Audio::silent(&root),
-        None,
-    )
-    .unwrap();
+    let mut resources = None;
+    let mut g = crate::game::game_tests::tests::server_game(&mut resources);
     g.options.dedicated = Some(Vec::new());
     g.world = World::new(g.res.facts().air, 1);
     test(&mut g);
@@ -71,18 +46,19 @@ fn blows(cases: &[Case]) -> Vec<(i32, f32)> {
             let type_ = g.res.mob_types().get(kind).unwrap().clone();
             let mut m = Mob::new(41, type_, Vec3::new(2.5, 64.0, 0.5), 0.0);
             m.fire_ticks = if burning { 100 } else { 0 };
-            m.extra.main_hand = hand.map(Arc::from);
-            m.random = EntityRandom::own(LegacyRandom::new(seed));
+            m.extra.set_main_hand(hand.map(Arc::from));
+            m.random = LegacyRandom::new(seed);
             g.mobs.push(m);
             // The mob out of the level while its own blow runs, as in its tick.
             let mut mobs = std::mem::take(&mut g.mobs);
-            let mut lr = LegacyRandom::new(0);
+            let mut test_level = horizon_client::health::TestLevel::new(0);
+            let mut level = test_level.level();
             let mut events = Vec::new();
             {
                 let w = g.mob_world_base(&[]);
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level: &mut level,
                     events: &mut events,
                 };
                 do_hurt_target(&mut mobs[0], Who::Player, &mut cx);
