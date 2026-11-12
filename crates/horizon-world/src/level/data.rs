@@ -1140,6 +1140,7 @@ fn build_with_gameplay<G: GameplayStateSource>(
         dynamic,
         occlusion_cache: Default::default(),
         growth: Default::default(),
+        block_maps: Default::default(),
     })
 }
 

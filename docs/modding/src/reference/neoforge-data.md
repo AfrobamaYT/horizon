@@ -41,3 +41,16 @@ loaded mod. Changed enabled IDs participate in cache identity and are published
 with successful reloads; failed preparation preserves the old generation, and
 retained readers keep their old snapshot. Recipe condition behavior is unchanged.
 This shared contract does not add readers for the two modifier kinds above.
+
+## Built-in block data maps
+
+NeoForge's `neoforge:flammable`, `neoforge:oxidizables` and `neoforge:waxables`
+(`data/neoforge/data_maps/block/<name>.json`) load from the world's data packs
+and mods' files on every server data load, merged as a mod's own data maps are.
+Fire reads a block's `ignite_odds` and `burn_odds` before vanilla's table.
+Weathering takes `next_oxidation_stage`, and scraping and lightning walk its
+inverse. Honeycomb waxing (player and dispenser) takes `waxed`, and a block a map waxes to
+counts as waxed. A block the maps don't name keeps vanilla's behaviour.
+`generate_block_transform`, `neoforge:transformables` and
+`block_transform_appenders` are not read yet
+([#3359](https://github.com/arismoko/horizon/issues/3359)).

@@ -495,14 +495,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.fire_odds(state).1
     }
     /// `FireBlock.getIgniteOdds` and `getBurnOdds`: the level's answer, else
-    /// `FireBlock.bootStrap`'s table.
+    /// the world's `neoforge:flammable` value, else `FireBlock.bootStrap`'s table.
     fn fire_odds(&self, state: BlockStateId) -> (i32, i32) {
         if self.b.is_waterlogged(state) {
             return (0, 0);
         }
         let mut odds = None;
         self.level.before_fire_odds(state, &mut odds);
-        odds.unwrap_or_else(|| {
+        let b = self.b;
+        odds.or_else(|| {
+            b.read_block_maps(|maps| maps.flammable(&b.table.info(b.block(state)).name))
+        })
+        .unwrap_or_else(|| {
             let data = self.b.data(state);
             (data.ignite_odds, data.burn_odds)
         })

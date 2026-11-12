@@ -1655,10 +1655,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.set_block_and_update(pos, next);
         }
     }
-    /// `WeatheringCopper.getNext` by registry naming.
+    /// `WeatheringCopper.getNext`: the world's `neoforge:oxidizables` value
+    /// (`DataMapHooks.getNextOxidizedStage`), else by registry naming.
     pub(crate) fn copper_next(&self, state: BlockStateId) -> Option<BlockStateId> {
         let b = self.b;
         let name = &*b.table.info(b.block(state)).name;
+        if let Some(next) = b.read_block_maps(|maps| {
+            maps.next_oxidation(name)
+                .and_then(|n| b.table.block_by_name(n))
+        }) {
+            return Some(b.table.with_properties_of(next, state));
+        }
         let path = name.strip_prefix("minecraft:")?;
         let next = if path == "copper_block" {
             "exposed_copper".to_owned()
@@ -1691,14 +1698,28 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             })
         }
     }
+    /// One oxidation step back, or all of them: the world's
+    /// `neoforge:oxidizables` inverse (`DataMapHooks.getPreviousOxidizedStage`)
+    /// first, else by registry naming.
     fn copper_stepped(&self, state: BlockStateId, all_the_way: bool) -> Option<BlockStateId> {
         let b = self.b;
-        let name = &*b.table.info(b.block(state)).name;
-        let mut path = Self::copper_previous_name(name.strip_prefix("minecraft:")?)?;
-        while all_the_way && let Some(earlier) = Self::copper_previous_name(&path) {
-            path = earlier;
+        let previous = |name: &str| -> Option<String> {
+            b.read_block_maps(|maps| maps.previous_oxidation(name).map(str::to_owned))
+                .or_else(|| {
+                    let path = Self::copper_previous_name(name.strip_prefix("minecraft:")?)?;
+                    Some(format!("minecraft:{path}"))
+                })
+        };
+        let start: &str = &b.table.info(b.block(state)).name;
+        let mut name = previous(start)?;
+        // A pack's chain may loop: vanilla's has four stages.
+        for _ in 0..16 {
+            match previous(name.as_str()) {
+                Some(earlier) if all_the_way => name = earlier,
+                _ => break,
+            }
         }
-        let block = b.table.block_by_name(&format!("minecraft:{path}"))?;
+        let block = b.table.block_by_name(&name)?;
         Some(b.table.with_properties_of(block, state))
     }
     /// `LightningBolt.clearCopperOnLightningStrike`: the struck copper goes
@@ -1711,7 +1732,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let weathering = b
             .data(state)
             .implements(super::classes::Interface::WeatheringCopper);
-        let waxed = b.table.name(state).starts_with("minecraft:waxed_");
+        let waxed = b.is_waxed(state);
         if !(weathering || waxed) {
             return;
         }

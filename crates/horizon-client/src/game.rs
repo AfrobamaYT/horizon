@@ -11645,9 +11645,7 @@ impl Game<'_> {
         if item == "honeycomb" {
             let registry = self.pack.assets.registry;
             let old = registry.state(clicked);
-            if let Some(waxed) = old.and_then(|old| self.res.transformers().waxed(registry, old))
-                && let Ok(state) = registry.resolve(&waxed)
-            {
+            if let Some(state) = self.honeycomb_waxed(clicked) {
                 let other = old.and_then(|old| storage::chest_connected_pos(old, hit.pos));
                 // HoneycombItem.useOn: ITEM_USED_ON_BLOCK before the swap.
                 self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
