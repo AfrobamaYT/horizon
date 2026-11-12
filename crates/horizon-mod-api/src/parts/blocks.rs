@@ -202,6 +202,115 @@ pub mod tests {
         mark_game_thread();
     }
 
+    /// Install piston parts on real blocks: gold is sticky and sticks only to itself, diamond is
+    /// sticky, and emerald is a sticky slime block.
+    pub fn sticky_game_thread() {
+        struct Gold;
+        #[mod_api::horizon_part]
+        impl BlockPart for Gold {
+            fn is_sticky_block(&self, _: &dyn LevelHost, event: &mut IsStickyBlockEvent) {
+                event.sticky = true;
+            }
+            fn can_stick_to(&self, _: &dyn LevelHost, event: &mut CanStickToEvent) {
+                event.sticks = event.other == event.state;
+            }
+        }
+        struct Diamond;
+        #[mod_api::horizon_part]
+        impl BlockPart for Diamond {
+            fn is_sticky_block(&self, _: &dyn LevelHost, event: &mut IsStickyBlockEvent) {
+                event.sticky = true;
+            }
+        }
+        struct Emerald;
+        #[mod_api::horizon_part]
+        impl BlockPart for Emerald {
+            fn is_sticky_block(&self, _: &dyn LevelHost, event: &mut IsStickyBlockEvent) {
+                event.sticky = true;
+            }
+            fn is_slime_block(&self, _: &dyn LevelHost, event: &mut IsSlimeBlockEvent) {
+                event.slime = true;
+            }
+        }
+        struct StickyMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for StickyMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let gold = r.block_key("minecraft:gold_block");
+                r.block_part(gold, Gold);
+                let diamond = r.block_key("minecraft:diamond_block");
+                r.block_part(diamond, Diamond);
+                let emerald = r.block_key("minecraft:emerald_block");
+                r.block_part(emerald, Emerald);
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new("sticky_test", Box::new(StickyMod))].into();
+        crate::__private::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+    }
+
+    /// What a restitution part heard: whether its level was a client's, the entity, its type,
+    /// the block's position, and whether the level host reads the block's state there.
+    // no wire: test-only observation log shared with the fixture, never passed to a mod.
+    pub type RestitutionHeard =
+        std::sync::Arc<std::sync::Mutex<Vec<(bool, i32, String, BlockPos, bool)>>>;
+
+    /// Install restitution parts on real blocks: glass records what it heard and answers 0.5
+    /// on a server's level and 0.25 on a client's; stone answers not a number.
+    pub fn restitution_game_thread() -> RestitutionHeard {
+        struct Glass(RestitutionHeard);
+        #[mod_api::horizon_part]
+        impl BlockPart for Glass {
+            fn bounce_restitution(
+                &self,
+                level: LevelSide<'_>,
+                event: &mut BounceRestitutionEvent<'_>,
+            ) {
+                let (client, host) = match level {
+                    LevelSide::Server(host) => (false, host),
+                    LevelSide::Client(host) => (true, host),
+                };
+                let pos = [event.pos.x, event.pos.y, event.pos.z];
+                self.0.lock().unwrap().push((
+                    client,
+                    event.entity,
+                    event.kind.to_owned(),
+                    event.pos,
+                    host.block_state(pos) == Some(event.state),
+                ));
+                event.factor = if client { 0.25 } else { 0.5 };
+            }
+        }
+        struct NotANumber;
+        #[mod_api::horizon_part]
+        impl BlockPart for NotANumber {
+            fn bounce_restitution(&self, _: LevelSide<'_>, event: &mut BounceRestitutionEvent<'_>) {
+                event.factor = f32::NAN;
+            }
+        }
+        struct RestitutionMod(RestitutionHeard);
+        #[mod_api::__subscriptions]
+        impl Hooks for RestitutionMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let glass = r.block_key("minecraft:glass");
+                r.block_part(glass, Glass(self.0.clone()));
+                let stone = r.block_key("minecraft:stone");
+                r.block_part(stone, NotANumber);
+            }
+        }
+        let heard = RestitutionHeard::default();
+        let mods: crate::Mods = vec![ModEntry::new(
+            "restitution_test",
+            Box::new(RestitutionMod(heard.clone())),
+        )]
+        .into();
+        crate::__private::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+        heard
+    }
+
     /// Install parts that change what a path may cross: glass becomes land and air, air
     /// stops being land and becomes water.
     pub fn pathfindable_game_thread() {
@@ -586,6 +695,53 @@ pub mod tests {
         mark_game_thread();
     }
 
+    pub fn friction_game_thread() -> Arc<std::sync::atomic::AtomicUsize> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        struct Answer(f32, Option<&'static str>, Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl BlockPart for Answer {
+            fn friction(&self, _: &dyn LoopContext, event: &mut FrictionEvent<'_>) {
+                self.2.fetch_add(1, Ordering::SeqCst);
+                if self.1.is_none_or(|kind| kind == event.kind) {
+                    event.friction = self.0;
+                }
+            }
+        }
+        struct FrictionMod(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for FrictionMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                for (block, answer) in [
+                    (
+                        "minecraft:glass",
+                        Answer(0.98, Some("minecraft:player"), self.0.clone()),
+                    ),
+                    ("minecraft:white_wool", Answer(0.98, None, self.0.clone())),
+                    ("minecraft:red_wool", Answer(f32::NAN, None, self.0.clone())),
+                    ("minecraft:blue_wool", Answer(3.0, None, self.0.clone())),
+                    (
+                        "minecraft:green_wool",
+                        Answer(f32::INFINITY, None, self.0.clone()),
+                    ),
+                    ("minecraft:black_wool", Answer(-0.5, None, self.0.clone())),
+                ] {
+                    let key = r.block_key(block);
+                    r.block_part(key, answer);
+                }
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new(
+            "friction_test",
+            Box::new(FrictionMod(calls.clone())),
+        )]
+        .into();
+        crate::__private::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+        calls
+    }
+
     /// Install soil parts: glass sustains any plant, and grass sustains none.
     pub fn sustain_plant_game_thread() {
         struct Soil(bool);
@@ -796,6 +952,8 @@ pub mod tests {
                 "test:other",
                 "test:connector",
                 "test:press",
+                "test:void_bin",
+                "test:ordered",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(
@@ -831,6 +989,8 @@ pub mod tests {
                 "test:connector",
                 "test:press",
                 "minecraft:granite",
+                "test:void_bin",
+                "test:ordered",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(
@@ -1178,5 +1338,40 @@ impl BlocksRegistrar for PartRegistrar {
     fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
         let part = self.tagged(kind, tag, part);
         self.tags.blocks.extend(part);
+    }
+
+    fn provide_block_capability(
+        &mut self,
+        name: &'static str,
+        block: &crate::BlockKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    ) {
+        let slot = mod_vocab::__private::parts_installation::block_key_slot(*block);
+        let id = self
+            .registry_keys
+            .borrow()
+            .blocks
+            .id(slot)
+            .map(str::to_owned);
+        let Some(id) = id else {
+            self.refused.push(format!(
+                "mod {}: invalid block key slot {slot}",
+                self.mod_id
+            ));
+            return;
+        };
+        self.capability(
+            |p| &mut p.block_capabilities,
+            Some(|p| &p.capabilities),
+            name,
+            ProviderTarget::Id(&id),
+            before_game,
+            {
+                let handler =
+                    mod_vocab::__private::parts_installation::block_provider_handler(&provider);
+                (provider, handler)
+            },
+        );
     }
 }

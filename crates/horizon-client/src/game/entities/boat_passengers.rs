@@ -690,6 +690,7 @@ impl Game<'_> {
             Target::Boat(_) => {
                 if let Some(i) = self.boats.iter().position(|b| b.id == id) {
                     self.release_vehicle_container(id);
+                    self.unpack_boat_loot(i, false);
                     let boat = self.boats.remove(i);
                     self.drop_vehicle_contents(boat.position.components(), &boat.items);
                     self.boat_removed(&boat);

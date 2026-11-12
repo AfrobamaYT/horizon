@@ -20,6 +20,7 @@ mod retained_limits_tests;
 mod world_view;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::level_sounds::LevelSound;
+use super::piston_push::Lid;
 use super::{
     Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
     native_mob_draw::PlayerRender, native_projectiles::Impact, view_vector,
@@ -2619,26 +2620,23 @@ impl Game<'_> {
                         }
                     }
                 },
-                MobEvent::Shift { target, delta } => {
-                    let d = Vec3::new(delta[0], delta[1], delta[2]);
-                    match target {
-                        Who::Player => {
-                            if let Some(p) = self.player.as_mut() {
-                                p.position = p.position.add_vector(d);
-                            }
-                        }
-                        Who::Mob(id) => {
-                            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                                m.position = m.position.add_vector(d);
-                            }
-                        }
-                    }
-                }
                 MobEvent::LidPush {
                     shulker,
                     area,
                     delta,
-                } => self.lid_pushes_armor_stands(shulker, area, delta),
+                } => {
+                    let (lid, delta) = (
+                        Lid::Shulker(shulker),
+                        Vec3::new(delta[0], delta[1], delta[2]),
+                    );
+                    // A client of a server pushes only its own player, as
+                    // the shulker box's lid does.
+                    if self.remote.is_some() {
+                        self.lid_push_local(lid, area, delta);
+                    } else {
+                        self.lid_push(lid, area, delta);
+                    }
+                }
                 MobEvent::Wololo { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         // DyeColor.RED.
@@ -4499,7 +4497,7 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn tick_projectiles(&mut self) -> Result<()> {
+    pub(super) fn tick_projectiles_now(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();
@@ -5345,7 +5343,7 @@ impl Game<'_> {
             if !super::native_entity_moves::in_bounds(target) {
                 return Ok(());
             }
-            let _ = game.place_teleport_in_level(
+            let _ = game.place_teleport_filed(
                 super::commands::Target::Mob(id),
                 target,
                 None,
@@ -6678,8 +6676,8 @@ impl Game<'_> {
             self.swing_arm();
             return Ok(true);
         }
-        // PiglinAi.mobInteract: hand over something gold to admire.
-        if self.mobs[index].alive() && self.give_piglin(index, &item) {
+        // PiglinAi.mobInteract: hand over barter currency to admire.
+        if self.mobs[index].alive() && held.as_ref().is_some_and(|h| self.give_piglin(index, h)) {
             self.swing_arm();
             if !creative && let Some(stack) = self.stack_in_mut(selected).as_mut() {
                 stack.count -= 1;
@@ -11501,7 +11499,11 @@ mod armor_destroy_tests {
             game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
             assert_eq!(game.mobs[0].item_by_slot(EquipmentSlot::Body), Some(sword));
             let resistant = ItemStack::new("minecraft:netherite_chestplate", 1);
-            assert!(game.items().resists_fire(&resistant, "minecraft:lava"));
+            assert!(
+                !game
+                    .stack_can_be_hurt_by(&resistant, "minecraft:lava")
+                    .unwrap()
+            );
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(resistant.clone()));
             game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
             assert_eq!(
