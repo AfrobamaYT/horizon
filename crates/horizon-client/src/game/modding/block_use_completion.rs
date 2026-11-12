@@ -41,8 +41,12 @@ impl Game<'_> {
         }
     }
 
-    /// Complete a consuming use with the original value and its engine edits.
-    /// Listener writes and whole-stack replacements are excluded.
+    /// Complete a consuming use with the stack held when block use started,
+    /// including the action's own in-place consumption, damage, component edits,
+    /// and creative-mode count restore. An exhausted stack is reported empty.
+    /// Listener hand replacements and whole replacements by the action (such as
+    /// a bucket becoming a water bucket) do not change the reported original.
+    /// This matches vanilla passing the same stack object it read before the action.
     pub(super) fn finish_block_use(&mut self, pos: [i32; 3], _hand: Hand) {
         let stack = self
             .block_use_original
