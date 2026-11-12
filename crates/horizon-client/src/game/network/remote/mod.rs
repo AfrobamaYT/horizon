@@ -7847,6 +7847,9 @@ impl Game<'_> {
         // push out of a block, which are the server's): gravity, buoyancy,
         // collisions and the pull of the nearest player between the server's
         // updates; the server removes it on pickup.
+        // Each orb's interpolation step and its own move are position updates of their own.
+        let sections = self.entity_section_scope().is_some();
+        let mut orb_moves = std::mem::take(&mut self.native_lifecycle.entity_sections.ticked);
         let (world, facts, collision) = (&self.world, self.res.facts(), self.collision);
         let border = Some(self.border.geometry());
         let mut lava_random = None;
@@ -7882,6 +7885,9 @@ impl Game<'_> {
                     l.steps -= 1;
                 }
                 let before = o.position;
+                if sections {
+                    orb_moves.push((o.id, before));
+                }
                 let kept = o.tick(
                     world,
                     facts,
@@ -7905,9 +7911,14 @@ impl Game<'_> {
                     l.target[1] += o.position.y - before.y;
                     l.target[2] += o.position.z - before.z;
                 }
+                if sections {
+                    orb_moves.push((o.id, o.position));
+                }
                 kept
             });
         }
+        self.entity_sections_ticked(&mut orb_moves);
+        self.native_lifecycle.entity_sections.ticked = orb_moves;
         // ItemEntity.tick runs on a client too: gravity, collisions and
         // friction move the item between the server's updates (every 20
         // ticks). Ordinary removal remains server-authoritative. Mods can opt

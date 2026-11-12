@@ -277,6 +277,9 @@ impl Game<'_> {
                     // orb that is done is removed.
                     let snow = (o.previous, o.position, o.bounds(), o.velocity);
                     self.entity_powder_snow_particles(snow.0, snow.1, snow.2, snow.3, false);
+                    // Its move is filed at once, also for an orb about to go.
+                    let (from, to) = (snow.0, snow.1);
+                    self.entity_section_step(orb_id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
                     if !stays {
                         self.orbs.remove(i);
                     }

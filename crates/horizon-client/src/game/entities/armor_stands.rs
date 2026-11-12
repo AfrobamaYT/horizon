@@ -1151,6 +1151,12 @@ impl Game<'_> {
                 dead.push((i, damage_type));
             }
         }
+        // A stand that breaks has its move this tick filed before it goes.
+        for &(i, _) in &dead {
+            let s = &self.armor_stands[i];
+            let (id, from, to) = (s.id, s.previous, s.position);
+            self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
+        }
         for (i, damage_type) in dead.into_iter().rev() {
             self.break_armor_stand_by_anything(i, damage_type, 0);
         }

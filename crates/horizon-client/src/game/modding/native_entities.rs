@@ -220,7 +220,7 @@ impl Game<'_> {
             } else {
                 self.remember_join(id, kind.into_owned());
                 // `addEntity` files it under its section, untold.
-                self.entity_section_placed(id, [at.x, at.y, at.z]);
+                self.entity_section_joined(id, [at.x, at.y, at.z]);
             }
         }
         self.persist.joined_seq = self.persist.joined_seq.max(observed);

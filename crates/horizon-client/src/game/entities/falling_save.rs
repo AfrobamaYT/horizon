@@ -16,7 +16,13 @@ impl Game<'_> {
         let mut f = self.falling.extract(self.falling[i].join).unwrap();
         let original = f.clone();
         let (id, join) = (f.id, f.join);
-        match self.fall_step(&mut f, entity_drops, entities) {
+        let step = self.fall_step(&mut f, entity_drops, entities);
+        // Its move is filed at once, also for one that lands or drops.
+        if step.is_ok() {
+            let (from, to) = (original.position, f.position);
+            self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
+        }
+        match step {
             Ok(FallStep::Falling) => {
                 self.falling.put_back(i.min(self.falling.len()), f);
                 return Ok(());

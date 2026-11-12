@@ -129,11 +129,12 @@ impl Game<'_> {
         }
         let dimension = self.dim.id();
         for (id, kind) in &round.ticking {
-            if round.listening {
-                self.native_entity_tick_post(dimension, *id, kind.id());
-            }
+            // Its tick's move is filed before its Post: a Post listener's move starts from it.
             if round.sections {
                 self.entity_section_moved_id(*id);
+            }
+            if round.listening {
+                self.native_entity_tick_post(dimension, *id, kind.id());
             }
         }
         self.tell_entity_sections();
@@ -161,11 +162,13 @@ impl Game<'_> {
 
     /// `native_entity_tick_post` for one entity that ticked, and its move filed and told.
     pub(super) fn native_tick_post_one(&mut self, round: &TickRound, id: u32, kind: &str) {
+        if round.sections {
+            self.entity_section_moved_id(id);
+        }
         if round.listening {
             self.native_entity_tick_post(self.dim.id(), id, kind);
         }
         if round.sections {
-            self.entity_section_moved_id(id);
             self.tell_entity_sections();
         }
     }

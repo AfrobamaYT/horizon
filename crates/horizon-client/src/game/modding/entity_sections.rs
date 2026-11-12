@@ -299,6 +299,31 @@ impl Game<'_> {
         moves.clear();
     }
 
+    /// Entity `id`'s position was written from `from` to `to` (`setPosRaw`) where nothing is told
+    /// yet: inside its family's tick (so one about to be removed is filed first), or a rider
+    /// carried along by its vehicle's teleport. Filed now, told at the boundary that follows.
+    pub(super) fn entity_section_step(&mut self, id: u32, from: [f64; 3], to: [f64; 3]) {
+        if id != 0
+            && let Some(scope) = self.entity_section_scope()
+        {
+            self.native_lifecycle
+                .entity_sections
+                .moved(scope, id, Some(from), to);
+        }
+    }
+
+    /// An entity joined (`addEntity`): filed untold where it is now, which a join listener may
+    /// have changed from `at`, where it joined.
+    pub(super) fn entity_section_joined(&mut self, id: u32, at: [f64; 3]) {
+        let Some(scope) = self.entity_section_scope() else {
+            return;
+        };
+        let now = self.entity_position(EntityRef::new(scope.epoch, id));
+        self.native_lifecycle
+            .entity_sections
+            .placed(scope, id, now.unwrap_or(at));
+    }
+
     /// A mob's teleports outside its tick (`teleports`, taken from its `Mob::teleports`): each
     /// one filed as one position update and told now.
     pub(super) fn entity_sections_teleported(&mut self, id: u32, teleports: &[Vec3]) {
