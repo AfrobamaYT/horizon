@@ -19,12 +19,25 @@ interval. There is no 64-block, 32-chunk or 1200-tick ceiling.
 
 The engine freezes declarations in mod-id/type-id order into non-narrowed
 catalog indices. Stage 2 supplies record validation and a `Kind::General` row
-with residency lookup, not live entity admission. It does not yet enable
-spawning, saving/loading, tracking, rendering, or entity tick dispatch. The
-record validator preserves the general-record policies of 65,536 payload
-bytes and passenger depth 16; decoded payload nesting 32 belongs to stage 3.
+with residency lookup, not live entity admission. The record validator
+preserves the general-record policies of 65,536 payload bytes and passenger
+depth 16; decoded payload nesting 32 belongs to stage 3.
 Unknown types are reported separately after structural validation; byte-preserving
 quarantine is future work, not an implemented save guarantee.
+
+Stage 4 ships the authoritative tick for native mods: the
+`general_entity_tick` entity-scope moment on `EntityPart` (the scope's
+first; its goal, behavior and spawn-size registrars are plain methods, not
+hooks), dispatched from one join-order pass per level tick — each root's
+common bookkeeping, its subscribed behavior, then its rider subtree
+depth-first, `Batch::General` keeping the mobile kinds' join order against
+the rows — with a per-pass resolved slot table, the `ordered.born` cutoff
+holding this tick's joins for the next, parked levels untouched, and a
+transaction plus catch around each row's dispatch so a panic or trap rolls
+the row's writes back. The moment fires only for general rows: vanilla
+families tick their own paths, and bringing them to one walk is #6509's,
+extendable later if Ari wants it wider. Wasm crossing is stage 4b; the
+trait stays native-only until then.
 
 The remaining sections describe the wider design, not shipped lifecycle support.
 
