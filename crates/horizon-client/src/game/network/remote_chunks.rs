@@ -451,7 +451,12 @@ impl Game<'_> {
             let state = self.world.block(pos.0, pos.1, pos.2);
             self.sync_block_entity(pos, None, state);
             // LevelChunk.replaceWithPacketData: the block entity loads its update tag.
-            self.remote_block_entity_data([pos.0, pos.1, pos.2], info.kind, &info.tag);
+            self.remote_block_entity_data(
+                [pos.0, pos.1, pos.2],
+                info.kind,
+                mod_api::BlockEntityDataSource::Chunk,
+                &info.tag,
+            );
             self.bind_remote_attachment(Holder::BlockEntity([pos.0, pos.1, pos.2]));
         }
         // After the column's block entities load: an attachment keeps its block entity if the
@@ -465,6 +470,9 @@ impl Game<'_> {
                 _ => true,
             });
         }
+        // Asked once the packet's block entities and attachments are in, so a part reading them
+        // sees this column's data.
+        self.ask_chunk_light_emission((x, z));
     }
 
     /// `ClientPacketListener.handleChunksBiomes`: each loaded column takes
@@ -521,6 +529,7 @@ impl Game<'_> {
             format.has_skylight,
         );
         Streaming::light_updated(&mut self.world, p.x, p.z, &changed);
+        self.ask_updated_light_emission((p.x, p.z), &changed);
     }
 }
 

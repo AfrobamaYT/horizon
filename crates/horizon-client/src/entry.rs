@@ -104,6 +104,11 @@ pub fn start<G>(
     slots: &[NativeSlot],
     startup: Startup,
 ) {
+    // Platform instrumentation must precede registration and the first mod guard.
+    if let Err(error) = mod_api::__private::initialize() {
+        eprintln!("Horizon: refusing startup because mod instrumentation is unavailable: {error}");
+        std::process::exit(game::exit_code::ERROR);
+    }
     let _ = CODE_RUNTIME.set(code);
     let Startup {
         launch,
@@ -388,6 +393,9 @@ pub(crate) fn install_client_hooks() {
             let reader = horizon_client_render::api_context::LoopReader(context);
             let context = reader.context();
             mod_api::dispatch_fluid_flow(&context, fluid, pos, flow);
+        },
+        sound_type: |context, pos, state, entity, cause, sound| {
+            crate::game::native_block_sounds::sound_type(context, pos, state, entity, cause, sound);
         },
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
