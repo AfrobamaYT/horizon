@@ -74,6 +74,8 @@ use {
 };
 
 mod abilities;
+mod chat_received;
+use chat_received::QueuedChat;
 mod client_level_tick;
 mod item_use;
 mod remote_attributes;
@@ -212,20 +214,6 @@ fn entity_sound_state(
 /// component's styles, and the `§` codes a literal holds (`StringDecomposer`).
 fn menu_title(tag: &Tag) -> horizon_client::text::Text {
     remote_text(tag).resolve_legacy()
-}
-
-/// A player message Chat Delay holds back, its signature and trust level,
-/// what the narrator says of it once it shows, and who sent it in which
-/// chat type, for mods told when it shows (`ClientChatReceivedEvent`).
-struct QueuedChat {
-    line: horizon_client::text::Text,
-    signature: Option<Signature>,
-    trust: ChatTrust,
-    narration: String,
-    /// The player's UUID, 0 for disguised chat (`Util.NIL_UUID`).
-    sender: u128,
-    /// The chat type's network ID (`ChatType.Bound.chatType`).
-    chat_type: i32,
 }
 
 /// `ChatTrustLevel`; a modified message keeps the signed content it was
@@ -1951,6 +1939,7 @@ impl Game<'_> {
             narration,
             sender: 0,
             chat_type: chat_type.chat_type,
+            player: None,
         });
     }
 
@@ -2052,6 +2041,7 @@ impl Game<'_> {
             narration,
             sender,
             chat_type,
+            player,
         } = chat;
         // ChatListener.showMessageToPlayer: Only Show Secure Chat drops what is not secure.
         if matches!(trust, ChatTrust::NotSecure) && self.settings.file.bool("onlyShowSecureChat") {
@@ -2059,7 +2049,8 @@ impl Game<'_> {
         }
         // handleChatMessageError says its line as system chat, and mods are not told of it.
         let error = matches!(trust, ChatTrust::Error);
-        if !error && !self.chat_received(false, false, sender, Some(chat_type), &mut line) {
+        let (system, kind, player) = (false, Some(chat_type), player.as_ref());
+        if !error && !self.chat_received(system, false, sender, kind, player, &mut line) {
             return false;
         }
         let source = horizon_client::chat::ChatSource::Player;
@@ -2070,29 +2061,6 @@ impl Game<'_> {
             self.say_chat_queued(&narration);
         }
         shown
-    }
-
-    /// NeoForge's `ClientChatReceivedEvent` (`ClientHooks.onClientChat`,
-    /// `onClientPlayerChat` and `onClientSystemChat`): mods may replace
-    /// `line` or cancel it. False when cancelled.
-    fn chat_received(
-        &mut self,
-        system: bool,
-        overlay: bool,
-        sender: u128,
-        chat_type: Option<i32>,
-        line: &mut horizon_client::text::Text,
-    ) -> bool {
-        if !mod_api::__private::listened(mod_api::HookId::ClientChatReceived) {
-            return true;
-        }
-        let registries = self.remote.as_ref().map(|r| Arc::clone(&r.registries));
-        let name = chat_type
-            .zip(registries.as_deref())
-            .and_then(|(id, registries)| registries.name("minecraft:chat_type", id));
-        let mut cancel = false;
-        self.native_client_chat_received(system, overlay, sender, name, line, &mut cancel);
-        !cancel
     }
 
     /// `ChatListener.messageDelay`: Chat Delay in milliseconds, as Java
@@ -5297,7 +5265,7 @@ impl Game<'_> {
                 // language; mods may change or cancel it. ChatListener.handleOverlay
                 // for the action bar.
                 let mut text = remote_text(&p.content);
-                if !self.chat_received(true, p.overlay, 0, None, &mut text) {
+                if !self.chat_received(true, p.overlay, 0, None, None, &mut text) {
                     return Ok(());
                 }
                 if p.overlay {
@@ -5414,6 +5382,9 @@ impl Game<'_> {
                     }
                     return Ok(());
                 };
+                let listened = mod_api::__private::listened(mod_api::HookId::ClientChatReceived);
+                let player =
+                    listened.then(|| chat_received::player_chat_info(&p, signature.is_some()));
                 self.handle_player_chat(QueuedChat {
                     line,
                     signature,
@@ -5421,6 +5392,7 @@ impl Game<'_> {
                     narration,
                     sender: p.sender,
                     chat_type: p.chat_type.chat_type,
+                    player,
                 });
             }
             C::DisguisedChat(p) => {
@@ -5436,6 +5408,7 @@ impl Game<'_> {
                     narration,
                     sender: 0,
                     chat_type: p.chat_type.chat_type,
+                    player: None,
                 });
             }
             C::DeleteChat(p) => self.handle_delete_chat(&p.signature)?,
