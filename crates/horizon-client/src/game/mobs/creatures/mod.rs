@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod borrowed_panic_tests;
 mod borrowed_tick;
+mod combat_adaptations;
 mod death_tail;
 mod hoglin_target;
 #[cfg(test)]
@@ -2599,47 +2600,7 @@ impl Game<'_> {
                     apply_blocking,
                 } => match target {
                     // Ram knockback checks blocking independently of the hurt call.
-                    Who::Player => {
-                        let mut power = power;
-                        let attack = self.attack_of(match source.attacker {
-                            Some(Who::Mob(id)) => id as i32,
-                            _ => 0,
-                        });
-                        if let Some(damage) = apply_blocking
-                            && let Some(blocking) =
-                                self.player_blocking(source.from, source_damage_type(source), false)
-                            && let blocked = blocking.blocked(damage)
-                            && blocked > 0.0
-                        {
-                            let attacker = match source.attacker {
-                                Some(Who::Mob(id)) => Some(id),
-                                _ => None,
-                            };
-                            self.after_block(
-                                horizon_client::health::BlockOutcome {
-                                    blocked,
-                                    fully_blocked: blocked >= damage,
-                                    ..Default::default()
-                                },
-                                (attacker, false),
-                                HurtSource {
-                                    damage_type: source_damage_type(source),
-                                    causing: attacker.map_or(0, |id| id as i32),
-                                    direct: 0,
-                                    position: source.from,
-                                },
-                                &attack,
-                            );
-                            power *= 0.5;
-                        }
-                        let source = HurtSource {
-                            damage_type: source_damage_type(source),
-                            causing: 0,
-                            direct: 0,
-                            position: None,
-                        };
-                        self.knock_back_player(power, x, z, source, &attack, 0.0);
-                    }
+                    Who::Player => self.mob_pushes_player(power, x, z, source, apply_blocking),
                     Who::Mob(id) => {
                         let attack = self.attack_of_who(source.attacker);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
@@ -4122,13 +4083,7 @@ impl Game<'_> {
                     );
                     child.extra.color = mixed;
                 }
-                let voices = horizon_client::mobs::finalize::sound_variants(Species::Wolf);
-                child.extra.sound_variant = self
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == parent)
-                    .and_then(|m| m.random.next_int_bound(voices.len() as i32).ok())
-                    .map(|i| i as u8);
+                child.extra.sound_variant = self.bred_wolf_voice(parent);
                 break 'offspring;
             }
             // Panda.getBreedOffspring: genes from both parents.
