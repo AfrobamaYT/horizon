@@ -23,6 +23,15 @@ pub trait EntitiesHost {
 #[horizon_mod_api_macros::host_area]
 pub trait EntitiesServerHost {
     /// Side: server.
+    /// Finds a loaded entity by UUID in the server level in place for this
+    /// hook. Returns `None` for unloaded entities, entities in another level,
+    /// and dragon parts. It also returns `None` for entities held out of
+    /// lookup, taken from their resident storage, unavailable under a scoped
+    /// item loan, queued for removal, or vehicles undergoing destruction.
+    /// The lookup leaves entity and level state alone.
+    #[access(WorldOnly)]
+    fn entity_by_uuid(&self, uuid: EntityUuid) -> Option<EntityRef>;
+    /// Side: server.
     /// Spawns an entity of `kind` (`minecraft:item_display`) at `pos` in the
     /// level in place, `dimension`, from `nbt` (its compound, as `/summon
     /// <kind> <pos> <nbt>` takes it; passengers included): its id. None on a
@@ -51,8 +60,9 @@ pub trait EntitiesServerHost {
     /// The experience orbs of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: what a mod reads before it
     /// cancels an orb in `native_entity_join_level`, to give its points with
-    /// `PlayerRef::give_experience_points`. Empty for a level not in place and on a
-    /// client of a server.
+    /// `PlayerRef::give_experience_points`. Empty for a level not in place, on a
+    /// client of a server and for a bound that is not finite (NaN or infinite); a
+    /// minimum above its maximum is the same box with the two swapped (`AABB`).
     #[access(WorldOnly)]
     fn experience_orbs(&self, dimension: &str, min: [f64; 3], max: [f64; 3]) -> Vec<ExperienceOrb>;
     /// Side: server.

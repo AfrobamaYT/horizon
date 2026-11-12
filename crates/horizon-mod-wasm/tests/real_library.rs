@@ -56,6 +56,12 @@ fn real_library_dependency() {
     replaced[0].manifest.wasm = Some(serde_json::from_value(manifest).unwrap());
     let refused = load(&std::fs::read(&std).unwrap(), replaced);
     assert!(refused.refused.iter().any(|(_, r)| matches!(r, horizon_mod_wasm::Refusal::LinkedAgainst { dependency } if dependency == "wasm_test_library")));
+    if !mod_points::STAGED {
+        // Fresh no-points variants retain the same library links, statics and Parts.
+        for package in &mut packages {
+            package.manifest.inject.clear();
+        }
+    }
     let loaded = load(&std::fs::read(std).unwrap(), packages);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 3);
@@ -68,6 +74,7 @@ fn real_library_dependency() {
         )
         .unwrap();
         mod_api::__private::mark_game_thread();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         let mut entity = mod_api::ModBlockEntity::new(
             "wasm_test_dependent:dependent".into(),
             Default::default(),
@@ -84,7 +91,11 @@ fn real_library_dependency() {
             "one static, including its address"
         );
     });
+    if !mod_points::STAGED {
+        return;
+    }
     mod_points::__private::seal();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut args = mod_points::TickArgs::__new();
     mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(

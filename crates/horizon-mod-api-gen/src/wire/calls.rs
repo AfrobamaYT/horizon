@@ -93,7 +93,7 @@ pub(super) fn trait_path(owner: &str) -> String {
             }
         }
     }
-    let owner = super::IMPORTS
+    let owner = super::imports()
         .iter()
         .copied()
         .find(|candidate| candidate.rsplit("::").next() == Some(owner))
@@ -223,7 +223,7 @@ pub(super) fn guest(
     let all = imports(methods);
     // Every imported trait, a method or not (one with none still holds up its subtraits), and
     // each area trait that is a part of one.
-    let mut owners: Vec<&str> = super::IMPORTS.to_vec();
+    let mut owners: Vec<&str> = super::imports().to_vec();
     owners.extend(parts.iter().map(|(_, via)| via.as_str()));
     for owner in owners {
         writeln!(out, "impl {} for Guest {{", trait_path(owner)).unwrap();
@@ -243,6 +243,12 @@ pub(super) fn guest(
         for m in dropped.iter().filter(|m| {
             !exports().contains(&m.owner) && m.via.as_deref().unwrap_or(m.owner) == owner
         }) {
+            // Frame accessors are local proxies, not absent capabilities. Their service
+            // methods cross the wire and the engine owns the phase check there.
+            if super::frame_accessor(m) {
+                writeln!(out, "{}", import_body(types, m, 0, "")).unwrap();
+                continue;
+            }
             // What the API keeps off wasm exists only on a native build of the guest.
             if excused.iter().any(|(o, n)| *o == m.owner && *n == m.name) {
                 out.push_str("#[cfg(not(target_arch = \"wasm32\"))]\n");
@@ -380,6 +386,20 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) -> String
             "&Guest"
         };
         return format!("{sig} {{ {body} }}");
+    }
+    if let Some((target, mutable, error)) = super::fallible_frame_accessor(m) {
+        let error = rust_ty(types, error, false);
+        let value = if mutable {
+            format!(
+                "::std::boxed::Box::leak(::std::boxed::Box::new(Guest)) as &mut dyn {}",
+                trait_path(target)
+            )
+        } else {
+            format!("&Guest as &dyn {}", trait_path(target))
+        };
+        return format!(
+            "{sig} {{ let w = {guest}::begin(); let r = {guest}::host({id}u32, w); let answer: Result<(), {error}> = r.take().expect(\"the host answered with an invalid frame-access result\"); answer.map(|()| {value}) }}"
+        );
     }
     let mut put = String::new();
     let mut back = Vec::new();

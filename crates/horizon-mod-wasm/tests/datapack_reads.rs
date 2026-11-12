@@ -80,7 +80,9 @@ fn real_wasm_datapack_reads_preserve_values_and_ordering() {
     use horizon_mod_package::manifest::Package;
     use horizon_mod_wasm::{WasmPackage, load};
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
-    let manifest = Package::read(std::path::Path::new(&path)).unwrap().manifest;
+    let mut manifest = Package::read(std::path::Path::new(&path)).unwrap().manifest;
+    // This fixture variant exercises ordinary hooks and Parts, not game points.
+    manifest.inject.clear();
     let info = PackageInfo::new(
         manifest.id.clone(),
         manifest.version.clone(),
@@ -112,11 +114,11 @@ fn real_wasm_datapack_reads_preserve_values_and_ordering() {
         &[
             (
                 "data/wasm_fixture/wasm_fixture/spell/fire.json".into(),
-                vec![br#"{"power":7}"#.to_vec()],
+                vec![("pack".to_owned(), br#"{"power":7}"#.to_vec())],
             ),
             (
                 "data/addon/wasm_fixture/spell/ice.json".into(),
-                vec![br#"{"power":3}"#.to_vec()],
+                vec![("pack".to_owned(), br#"{"power":3}"#.to_vec())],
             ),
         ],
     )
@@ -128,6 +130,7 @@ fn real_wasm_datapack_reads_preserve_values_and_ordering() {
     );
     mod_api::testing::with_mods(loaded.mods.into(), || {
         mod_api::__private::mark_game_thread();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         mod_api::dispatch_server_started(&mut world, true);
         assert!(
             world.2.get(),

@@ -23,6 +23,7 @@ payloads: the prepared data is Mojang's. Compile/list failures expose bounded co
 """
 
 import os
+import errno
 import io
 from functools import lru_cache
 import re
@@ -181,6 +182,37 @@ def tracked_rust_paths():
     return paths
 
 
+# What an `Err` names, never what it says: only a std::io::Error Debug value (`Os { code, kind, .. }`,
+# `Kind(..)`, `Custom { kind, .. }`) names anything here: its shape, an io::ErrorKind from std's list and an OS
+# error code. Quoted strings inside it are removed before any field is read; any other payload (a string, an
+# unquoted message, another error type) names nothing. Messages, values and paths stay withheld.
+IO_ERROR_SHAPE = re.compile(r"^(Os|Simple|SimpleMessage|Custom|Kind)\s*[({]")
+IO_ERROR_KINDS = frozenset("""
+    NotFound PermissionDenied ConnectionRefused ConnectionReset HostUnreachable NetworkUnreachable
+    ConnectionAborted NotConnected AddrInUse AddrNotAvailable NetworkDown BrokenPipe AlreadyExists WouldBlock
+    NotADirectory IsADirectory DirectoryNotEmpty ReadOnlyFilesystem StaleNetworkFileHandle InvalidInput
+    InvalidData TimedOut WriteZero StorageFull NotSeekable QuotaExceeded FileTooLarge ResourceBusy
+    ExecutableFileBusy Deadlock CrossesDevices TooManyLinks InvalidFilename ArgumentListTooLong Interrupted
+    Unsupported UnexpectedEof OutOfMemory InProgress Other Uncategorized
+""".split())
+QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
+ERROR_KIND = re.compile(r"(?:\bkind: |^Kind\()([A-Z][A-Za-z]{0,63})\b")
+OS_ERROR = re.compile(r"^Os \{ code: (\d{1,5})\b")
+
+
+def unwrap_error_shape(value):
+    """`kind ...` for a std::io::Error Debug value, or None when the payload is anything else."""
+    if not (shape := IO_ERROR_SHAPE.match(value)):
+        return None
+    fields = QUOTED.sub('""', value)
+    kinds = [shape[1]]
+    if (kind := ERROR_KIND.search(fields)) and kind[1] in IO_ERROR_KINDS:
+        kinds.append(kind[1])
+    if code := OS_ERROR.match(fields):
+        kinds.append(f"os error {int(code[1])} {errno.errorcode.get(int(code[1]), 'unknown')}")
+    return "kind " + ", ".join(kinds)
+
+
 def bounded_record(record, remaining):
     raw = record.encode("utf-8")
     shortened = len(raw) > FAILURE_BYTES
@@ -230,9 +262,14 @@ def failure_diagnostics(output):
                 ("index out of bounds", "index out of bounds"),
                 ("attempt to", "arithmetic failure"),
             ) if line.strip().startswith(prefix)), "custom panic")
+            withheld_text = "payload withheld (resource privacy)"
+            if reason == "Result::unwrap on an error":
+                if shape := unwrap_error_shape(line.strip().split(" value: ", 1)[-1]):
+                    reason += f" ({shape})"
+                    withheld_text = "rest of payload withheld (resource privacy)"
             if arithmetic := re.fullmatch(r"attempt to ((?:add|subtract|multiply|divide|negate|shift left|shift right) with overflow|(?:divide|calculate the remainder) by zero)", line.strip()):
                 reason = "attempt to " + arithmetic[1]
-            context.append(f"  panic reason: {reason}; payload withheld (resource privacy)")
+            context.append(f"  panic reason: {reason}; {withheld_text}")
             panic_reason_pending = False
             continue
         if found := RESULT.match(line):
@@ -333,6 +370,32 @@ def missing_result_framing(output, name):
     return f"framing={framing}; candidate_lines={len(seen)}; {metadata}; sampled_matches={matches}; sample_limit=8"
 
 
+def listed_result_records(line, expected, max_name_length):
+    """Literal, bounded parsing of listed identities in interleaved libtest output.
+
+    Prefix output is ignored, but every matching listed result is counted:
+    a second prefixed record must not escape duplicate detection. Ambiguous
+    suffixes are reported to the caller, never guessed or printed. A slow-test
+    notice or other mention without a result status is not a result record.
+    """
+    cursor = line.find("test ")
+    while cursor >= 0:
+        start = cursor + len("test ")
+        end = line.find(" ", start, start + max_name_length + 1)
+        if end >= 0:
+            name = line[start:end]
+            if name in expected:
+                for panic in ("", " - should panic"):
+                    for status in ("ok", "FAILED", "ignored"):
+                        ending = f"{panic} ... {status}"
+                        if line.startswith(ending, end):
+                            after = end + len(ending)
+                            boundary = (after == len(line) or line.startswith("test ", after)
+                                        or line.startswith(" test ", after))
+                            yield name, status if boundary else "ambiguous"
+        cursor = line.find("test ", start)
+
+
 def run(package, skip, number=None, count=None):
     """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build."""
     # Resource-backed fixtures need a fresh home, not the runner user's game files.
@@ -396,6 +459,9 @@ def run(package, skip, number=None, count=None):
     target_number = 0
     awaiting_count = False
     incomplete = False
+    occurrences = {}
+    ambiguous = set()
+    max_name_length = max(map(len, expected), default=0)
     failure_diagnostics(process.stdout)
     for line in process.stdout.splitlines():
         if TARGET.match(line):
@@ -420,6 +486,24 @@ def run(package, skip, number=None, count=None):
         elif status := re.search(r"\((?:signal|exit status): \d+", line):
             # Emit only the numeric status, never adjacent test output.
             print(f"{package}: {status[0]})")
+        if expected:
+            for name, status in listed_result_records(line, expected, max_name_length):
+                if status == "ambiguous":
+                    ambiguous.add(name)
+                    continue
+                occurrences[name] = occurrences.get(name, 0) + 1
+                # --include-ignored must execute listed tests; an ignored record
+                # is not promoted to a passing result or missing-test credit.
+                if status != "ignored":
+                    results[name] = status == "ok"
+    framing_problems = {name: "duplicate-result" for name, seen in occurrences.items() if seen > 1}
+    framing_problems.update({name: "ambiguous-result" for name in ambiguous})
+    if framing_problems:
+        remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
+        for name, category in sorted(framing_problems.items()):
+            bounded_record(f"  {safe_identity(name)}; category={category}\n", remaining)
+        print(f"{package}: {len(framing_problems)} listed identities have ambiguous or duplicate result framing")
+        return None
     if incomplete or awaiting_count or target_count is not None:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
         return None

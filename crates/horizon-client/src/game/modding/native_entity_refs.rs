@@ -138,6 +138,31 @@ impl Game<'_> {
             || self.native_client_tracked(entity).is_some())
         .then_some(entity)
     }
+    pub(super) fn entity_by_uuid(&self, uuid: mod_api::EntityUuid) -> Option<EntityRef> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        let epoch = self.native_lifecycle.epoch()?;
+        let dimension = self.dim.key();
+        let uuid = horizon_client::lan::playerdata::uuid_ints(uuid.0);
+        let mut after = None;
+        loop {
+            let id = self
+                .resident_entities
+                .table
+                .borrow_mut()
+                .level_uuid_candidate(dimension, uuid, after)?;
+            let entity = EntityRef::new(epoch, id.get());
+            if self
+                .native_entity_target(entity)
+                .is_some_and(|target| self.resident_source_target_visible(dimension, target))
+            {
+                return Some(entity);
+            }
+            // A queued departure can overlap a replacement with the same UUID.
+            after = Some(id);
+        }
+    }
     /// Whether the entity is made of parts that are entities of their own
     /// (`Entity.isMultipartEntity`): the dragon, not one of its parts.
     pub(super) fn entity_is_multipart(&self, entity: EntityRef) -> Option<bool> {
@@ -211,7 +236,9 @@ impl Game<'_> {
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None for a stale handle or a parked level: its entity handles
-    /// cannot resolve until the level is in place. On a client, see
+    /// cannot resolve until the level is in place, and for a bound that is not
+    /// finite (NaN or infinite). A minimum above its maximum is the same box
+    /// with the two swapped, as vanilla's `AABB`. On a client, see
     /// `client_entities_in`. The walk
     /// is in entity-list order followed by players; each overlap requires a
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
@@ -226,7 +253,9 @@ impl Game<'_> {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
-        if self.native_lifecycle.epoch() != Some(level.epoch()) {
+        if self.native_lifecycle.epoch() != Some(level.epoch())
+            || !min.iter().chain(&max).all(|v| v.is_finite())
+        {
             return None;
         }
         let bounds = Aabb::new(
@@ -610,10 +639,15 @@ impl Game<'_> {
         if self.dim.key() != level.dimension() {
             return Err(mod_api::LevelWriteError::Unavailable);
         }
-        Ok(world.loaded(pos[0], pos[2]) && world.shape.contains_y(pos[1]))
+        Ok(!self.world.carrier_fences.locks_cell(&pos)
+            && world.loaded(pos[0], pos[2])
+            && world.shape.contains_y(pos[1]))
     }
-    fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.is_logical_server()
+    pub(crate) fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        // A carrier transfer fence holds this cell: every mod write
+        // through the level gate refuses while the operation runs.
+        !self.world.carrier_fences.locks_cell(&pos)
+            && self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && self.world.loaded(pos[0], pos[2])
             && self.world.shape.contains_y(pos[1])
@@ -1096,7 +1130,7 @@ pub(super) mod tests {
         );
     }
 
-    fn with_game_role(
+    pub(in crate::game) fn with_game_role(
         root: std::path::PathBuf,
         role: super::super::execution_role::ExecutionRole,
         test: impl FnOnce(&mut super::Game<'_>),
@@ -1166,6 +1200,43 @@ pub(super) mod tests {
         ));
         test(&mut game);
         let _ = std::fs::remove_dir_all(saves);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn typed_uuid_and_nbt_reads_follow_the_entity_level() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let words = [7, 0, 0, 3];
+            let uuid = (7u128 << 96) | 3;
+            assert!(game.run_command(
+                "execute in minecraft:the_nether run summon cow 8.5 70 8.5 {UUID:[I;7,0,0,3],NoAI:1b}"
+            ));
+            let original = game.dim;
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let id = *game
+                .persist
+                .uuids
+                .iter()
+                .find(|(_, value)| **value == words)
+                .unwrap()
+                .0;
+            let entity = game.entity(id).unwrap();
+            assert_eq!(game.entity_uuid(entity), Some(uuid));
+            let nbt = game.entity_nbt(entity).unwrap();
+            assert_eq!(
+                nbt.get(&"NoAI".into()),
+                Some(&horizon_core::nbt::Tag::Byte(1))
+            );
+            assert!(!nbt.contains_key(&"id".into()));
+            game.enter_command_level(original).unwrap();
+            assert_eq!(game.entity_nbt(entity), None);
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(game.entity_uuid(entity), Some(uuid));
+            assert_eq!(game.entity_nbt(entity), Some(nbt));
+            game.enter_command_level(original).unwrap();
+            assert_eq!(game.dim, original);
+        });
     }
 
     #[test]
@@ -4154,6 +4225,55 @@ pub(super) mod tests {
             assert_eq!(ids(game, stale, [-1.0; 3], [3.0; 3]), None);
             game.remote.as_mut().unwrap().logged_in = false;
             assert_eq!(ids(game, level, [-1.0; 3], [3.0; 3]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_refuses_a_box_with_a_bound_that_is_not_finite_and_swaps_an_inverted_one() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::connection::Pipe;
+        use mod_api::{Host, LevelRef};
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EntitiesInTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
+            let level = game.level("minecraft:overworld").unwrap();
+            let ids = |host: &dyn Host, level: LevelRef, min, max| {
+                level
+                    .entities_in(host, min, max)
+                    .map(|found| found.into_iter().map(|e| e.id()).collect::<Vec<_>>())
+            };
+            // Mod code chooses the bounds: one that is not finite is refused, never panics,
+            // and nothing is walked by the box's size.
+            for (min, max) in [
+                ([f64::NAN, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                ([-1.0, -1.0, -1.0], [3.0, f64::NAN, 1.0]),
+                ([f64::NEG_INFINITY, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                ([-1.0, -1.0, -1.0], [3.0, 2.0, f64::INFINITY]),
+                ([f64::NEG_INFINITY; 3], [f64::INFINITY; 3]),
+            ] {
+                assert_eq!(ids(game, level, min, max), None, "{min:?} {max:?}");
+            }
+            // A minimum above its maximum on one axis is the same box swapped (vanilla's
+            // AABB): the tracked pig, then the window's own player.
+            assert_eq!(
+                ids(game, level, [3.0, -1.0, -1.0], [-1.0, 2.0, 1.0]),
+                Some(vec![15, 7])
+            );
+            assert_eq!(
+                ids(game, level, [3.0, 2.0, 1.0], [-1.0, -1.0, -1.0]),
+                Some(vec![15, 7])
+            );
         });
     }
 }

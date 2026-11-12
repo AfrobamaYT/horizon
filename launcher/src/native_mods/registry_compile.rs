@@ -15,6 +15,23 @@ pub(super) struct Options<'a> {
     pub adapter: &'a Path,
 }
 
+fn compiler_plan(
+    rust: &Toolchain,
+    game: &Path,
+    bindings: BTreeMap<PathBuf, registry_rustc::Bindings>,
+) -> registry_rustc::Plan {
+    registry_rustc::Plan {
+        rustc: rust.rustc(),
+        target: rust.host.target.into(),
+        cache_wrapper: std::env::var_os("RUSTC_WRAPPER").map(PathBuf::from),
+        workspace_wrapper: std::env::var_os("RUSTC_WORKSPACE_WRAPPER").map(PathBuf::from),
+        // Transitive proc-macro metadata lives in host, just as on the direct SDK route.
+        search: vec![game.join("deps"), game.join("host")],
+        native: game.join("native"),
+        crates: bindings,
+    }
+}
+
 pub(super) fn compile(
     rust: &Toolchain,
     game: &Path,
@@ -57,8 +74,7 @@ pub(super) fn compile(
         }
     }
     let links = sdk.native_links.as_ref().ok_or_else(|| tr("The prebuilt SDK does not declare native library providers; registry-bearing mods cannot be linked safely").to_string())?;
-    let catalog =
-        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
+    let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
@@ -89,7 +105,6 @@ pub(super) fn compile(
         let relative = format!("native-api/{id}");
         let dest = out.join(&relative);
         super::copy_bundle(bundle, &dest)?;
-        super::mod_points::stage(&dest, &catalog.wire)?;
         let mut todo = vec![PathBuf::new()];
         let mut seen = std::collections::BTreeSet::new();
         while let Some(local) = todo.pop() {
@@ -171,7 +186,7 @@ pub(super) fn compile(
                 .crates
                 .iter()
                 .map(String::as_str)
-                .chain(["horizon_client", "mod_points"])
+                .chain(["horizon_client"])
             {
                 facade_externs.insert(
                     name.to_owned(),
@@ -219,21 +234,78 @@ pub(super) fn compile(
         );
         members.push(relative);
     }
+    // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
+    // crates their helpers call, and compile against the SDK like a mod.
+    let patch = super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk)?;
+    if let Some(patch) = &patch {
+        for name in &patch.names {
+            let dir = patch.dir.join(name);
+            let mut manifest = toml::toml! { [package] name = (name.clone()) version = "0.0.0" edition = "2024" [lib] path = "src/lib.rs" };
+            let mut dependencies = toml::Table::new();
+            for bundle in &patch.bundles {
+                let id = &bundle.manifest.id;
+                let project = projects
+                    .iter()
+                    .find(|project| project.bundle.manifest.id == *id)
+                    .expect("a prepared mod is a project");
+                let krate = project.crate_name();
+                dependencies.insert(
+                    krate,
+                    toml::toml! { path = (out.join("native-api").join(id).display().to_string()) package = (project.package.clone()) }
+                        .into(),
+                );
+            }
+            manifest.insert("dependencies".into(), dependencies.into());
+            let features: toml::Table = sdk
+                .game_features()
+                .iter()
+                .map(|feature| (feature.clone(), toml::Value::Array(Vec::new())))
+                .collect();
+            manifest.insert("features".into(), features.into());
+            fs::write(dir.join("Cargo.toml"), manifest.to_string()).map_err(|e| e.to_string())?;
+            bindings.insert(
+                dir,
+                registry_rustc::Bindings {
+                    externs: super::patch::sdk_externs(game, &sdk)?.into_iter().collect(),
+                    link_args: Vec::new(),
+                },
+            );
+            let relative = format!(
+                "fnr/{}/{name}",
+                patch
+                    .dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+            );
+            members.push(relative.clone());
+            wrapper_deps.insert(
+                name.clone(),
+                toml::toml! { path = (relative) features = (sdk.game_features().iter().cloned().map(toml::Value::String).collect::<Vec<_>>()) }.into(),
+            );
+        }
+        // The tool's workspace files would make the crates a second workspace inside this one.
+        for file in ["Cargo.toml", "Cargo.lock"] {
+            let _ = fs::remove_file(patch.dir.join(file));
+        }
+    }
     let manifests: Vec<_> = resolution
         .order
         .iter()
         .map(|&index| &projects[index].bundle.manifest)
         .collect();
     fs::create_dir_all(out.join("src")).map_err(|e| e.to_string())?;
-    fs::write(
-        out.join("src/main.rs"),
-        api::main_rs(
-            &api::template(&game.join(prebuilt::TEMPLATE))?,
-            &manifests,
-            &catalog,
-        ),
-    )
-    .map_err(|e| e.to_string())?;
+    let template = api::template(&game.join(prebuilt::TEMPLATE))?;
+    let mut main = api::main_rs(&template, &manifests, &catalog);
+    if let Some(patch) = &patch {
+        let installs: String = patch
+            .installs
+            .iter()
+            .map(|install| format!("        {install},\n"))
+            .collect();
+        main = main.replace("/* MOD_REDIRECTS */", installs.trim_end());
+    }
+    fs::write(out.join("src/main.rs"), main).map_err(|e| e.to_string())?;
     let mut manifest = toml::toml! { [package] name = "horizon-native-registry-game" version = "0.0.0" edition = "2024" [workspace] resolver = "2" };
     manifest
         .get_mut("workspace")
@@ -267,21 +339,21 @@ pub(super) fn compile(
     let wanted = super::crates::wanted(out, &declared_paths)?;
     let mut plan = registry_plan::Plan::read(lock, projects, &wanted)?;
     plan.authorize_game_patches(&patches);
-    plan.fetch_with_patches(rust, &out.join("fetch"), &patches)?;
     registry_plan::apply_patches(out, &patches)?;
     fs::write(
         out.join("Cargo.lock"),
         plan.mods.seed("version=4\npackage=[]\n")?,
     )
     .map_err(|e| e.to_string())?;
+    plan.fetch_with_patches(rust, out, &patches)?;
     let metadata = super::registry_inventory::read(rust, out)
         .map_err(|error| plan.explain_resolution(error))?;
     plan.check_mods(&super::registry_lock::RegistryLock::parse(
         &super::read_lock(out)?,
     )?)?;
-    plan.allowed.check_resolution(
+    plan.allowed.check_partial_resolution(
         &super::registry_lock::RegistryLock::parse(&super::read_lock(out)?)?,
-        &super::registry_lock::RegistryLock::default(),
+        &plan.game,
     )?;
     let mut game_names = plan.game.game_package_names();
     for registry in patches.values() {
@@ -294,15 +366,7 @@ pub(super) fn compile(
     if inventory.added_crates > 0 && !options.consent.is_some_and(|ask| ask(&inventory)) {
         return Err(crate::i18n::tr("Registry dependency compilation was not approved").into());
     }
-    let mut externs = BTreeMap::new();
-    for name in [
-        "horizon_client",
-        "mod_api",
-        "mod_points",
-        "horizon_mod_package",
-    ] {
-        externs.insert(name.to_owned(), prebuilt::library(&deps, name)?);
-    }
+    let externs = prebuilt::wrapper_externs(&deps, &template)?;
     let mut link_args = sdk.link_args;
     if cfg!(target_os = "linux") {
         link_args.push("-Wl,--disable-new-dtags".into());
@@ -328,25 +392,19 @@ pub(super) fn compile(
         .arg("--target-dir")
         .arg(&target_dir)
         .arg("--message-format=json-render-diagnostics");
-    let wrapper = registry_rustc::Plan {
-        rustc: rust.rustc(),
-        target: rust.host.target.into(),
-        cache_wrapper: std::env::var_os("RUSTC_WRAPPER").map(PathBuf::from),
-        workspace_wrapper: std::env::var_os("RUSTC_WORKSPACE_WRAPPER").map(PathBuf::from),
-        search: vec![deps],
-        native: game.join("native"),
-        crates: bindings,
-    };
+    let wrapper = compiler_plan(rust, game, bindings);
     wrapper.configure(&mut command, &out.join("rustc-plan.json"), options.adapter)?;
     let messages = out.join("cargo-messages.jsonl");
     let result = super::run_checked(
         command,
         "Compiling registry mods and linking the prebuilt game",
         |_| {},
-        None,
         Some(fs::File::create(&messages).map_err(|e| e.to_string())?),
     );
     let outputs = super::registry_runtime::Outputs::read(&messages)?;
+    if let Some(patch) = &patch {
+        patch.log()?;
+    }
     super::append_log(&fs::read_to_string(&messages).map_err(|e| e.to_string())?)?;
     if let Err(failure) = result {
         let mut error = format!("{}\n{}", failure.error, outputs.errors.join("\n"));
@@ -388,6 +446,234 @@ pub(super) fn compile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_adapter_compiles_facade_with_transitive_host_macro_metadata() {
+        use std::{ffi::OsString, process::Command};
+        let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/registry-facade-tests");
+        fs::create_dir_all(&target).unwrap();
+        let scratch = tempfile::tempdir_in(target).unwrap();
+        let game = scratch.path().join("sdk");
+        for folder in ["deps", "host", "native"] {
+            fs::create_dir_all(game.join(folder)).unwrap();
+        }
+        let sysroot = Command::new("rustc")
+            .arg("--print")
+            .arg("sysroot")
+            .output()
+            .unwrap();
+        assert!(sysroot.status.success());
+        let rust = Toolchain {
+            dir: PathBuf::from(String::from_utf8(sysroot.stdout).unwrap().trim()),
+            host: crate::rust_toolchain::host().expect("supported test host"),
+        };
+        let macros = game.join("host").join(format!(
+            "{}sdk_macros{}",
+            std::env::consts::DLL_PREFIX,
+            std::env::consts::DLL_SUFFIX
+        ));
+        let macro_source = scratch.path().join("macros.rs");
+        fs::write(&macro_source, "extern crate proc_macro; #[proc_macro_derive(Marker)] pub fn marker(_: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }").unwrap();
+        let built = Command::new(rust.rustc())
+            .args([
+                "--crate-name",
+                "sdk_macros",
+                "--crate-type",
+                "proc-macro",
+                "--edition",
+                "2024",
+            ])
+            .arg(&macro_source)
+            .arg("-o")
+            .arg(&macros)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let engine = game.join("deps/libhorizon_client-fixture.rmeta");
+        let engine_source = scratch.path().join("engine.rs");
+        fs::write(
+            &engine_source,
+            "pub use sdk_macros::Marker; #[derive(Marker)] pub struct Game;",
+        )
+        .unwrap();
+        let built = Command::new(rust.rustc())
+            .args([
+                "--crate-name",
+                "horizon_client",
+                "--crate-type",
+                "rlib",
+                "--edition",
+                "2024",
+                "--emit",
+                "metadata",
+                "-C",
+                "prefer-dynamic",
+                "--target",
+                rust.host.target,
+            ])
+            .arg(&engine_source)
+            .arg("--extern")
+            .arg(format!("sdk_macros={}", macros.display()))
+            .arg("-o")
+            .arg(&engine)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let facade = scratch.path().join("facade");
+        fs::create_dir_all(&facade).unwrap();
+        let source = facade.join("lib.rs");
+        fs::write(&source, "pub use horizon_client::Game;").unwrap();
+        let mut plan = compiler_plan(
+            &rust,
+            &game,
+            BTreeMap::from([(
+                facade.clone(),
+                registry_rustc::Bindings {
+                    externs: BTreeMap::from([("horizon_client".into(), engine)]),
+                    link_args: vec![],
+                },
+            )]),
+        );
+        plan.cache_wrapper = None;
+        plan.workspace_wrapper = None;
+        let args: Vec<OsString> = vec![
+            rust.rustc().into_os_string(),
+            source.into_os_string(),
+            "--crate-name".into(),
+            "facade".into(),
+            "--crate-type".into(),
+            "rlib".into(),
+            "--edition".into(),
+            "2024".into(),
+            "--target".into(),
+            rust.host.target.into(),
+            "--emit".into(),
+            "metadata".into(),
+            "-o".into(),
+            scratch.path().join("facade.rmeta").into_os_string(),
+        ];
+        let (program, arguments) = plan
+            .arguments(args.clone(), Some(facade.clone()), scratch.path())
+            .unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        // Render a real SDK-route executable workspace. Its SDK libraries are
+        // binary externs, not Cargo source dependencies, including the host that
+        // the SDK-owned template calls after the layer split.
+        for name in [
+            "mod_api",
+            "mod_points",
+            "horizon_mod_package",
+            "horizon_mod_host",
+        ] {
+            let source = scratch.path().join(format!("{name}.rs"));
+            fs::write(
+                &source,
+                if name == "horizon_mod_host" {
+                    "pub fn main_with() {}"
+                } else {
+                    ""
+                },
+            )
+            .unwrap();
+            let result = Command::new(rust.rustc())
+                .args([
+                    "--crate-name",
+                    name,
+                    "--crate-type",
+                    "rlib",
+                    "--edition",
+                    "2024",
+                    "--emit",
+                    "metadata",
+                    "--target",
+                    rust.host.target,
+                ])
+                .arg(source)
+                .arg("-o")
+                .arg(game.join(format!("deps/lib{name}-fixture.rmeta")))
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        fs::write(game.join(prebuilt::TEMPLATE), "fn main() { horizon_mod_host::main_with(); }\n/* MOD_ENTRIES */\n/* MOD_SLOTS */\n/* BUILT_MODS */\n").unwrap();
+        let template = api::template(&game.join(prebuilt::TEMPLATE)).unwrap();
+        let wrapper = scratch.path().join("wrapper");
+        fs::create_dir_all(wrapper.join("src")).unwrap();
+        fs::write(
+            wrapper.join("Cargo.toml"),
+            "[package]\nname='registry-game'\nversion='0.0.0'\nedition='2024'\n[workspace]\n",
+        )
+        .unwrap();
+        fs::write(
+            wrapper.join("src/main.rs"),
+            api::main_rs(&template, &[], &internals::Catalog::default()),
+        )
+        .unwrap();
+        let bindings = prebuilt::wrapper_externs(&game.join("deps"), &template).unwrap();
+        let mut wrapper_plan = compiler_plan(
+            &rust,
+            &game,
+            BTreeMap::from([(
+                wrapper.clone(),
+                registry_rustc::Bindings {
+                    externs: bindings,
+                    link_args: vec![],
+                },
+            )]),
+        );
+        wrapper_plan.cache_wrapper = None;
+        wrapper_plan.workspace_wrapper = None;
+        let mut wrapper_args = args.clone();
+        wrapper_args[1] = wrapper.join("src/main.rs").into_os_string();
+        wrapper_args[3] = "registry_game".into();
+        wrapper_args[5] = "bin".into();
+        *wrapper_args.last_mut().unwrap() = scratch.path().join("wrapper.rmeta").into_os_string();
+        let (program, arguments) = wrapper_plan
+            .arguments(wrapper_args.clone(), Some(wrapper.clone()), scratch.path())
+            .unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        wrapper_plan
+            .crates
+            .get_mut(&wrapper)
+            .unwrap()
+            .externs
+            .remove("horizon_mod_host");
+        let (program, arguments) = wrapper_plan
+            .arguments(wrapper_args, Some(wrapper), scratch.path())
+            .unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("E0433"));
+        // The old registry route supplied deps alone, unlike the direct SDK route.
+        plan.search = vec![game.join("deps")];
+        let (program, arguments) = plan.arguments(args, Some(facade), scratch.path()).unwrap();
+        let result = Command::new(program).args(arguments).output().unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("E0463"));
+    }
+
     #[test]
     #[ignore = "requires an explicitly prepared private SDK, mod and launcher executable"]
     fn real_sdk_registry_compile() {
