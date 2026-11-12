@@ -503,7 +503,7 @@ impl Game<'_> {
         }
         self.adv.tree = advancements;
         self.adv.reset_tree();
-        self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
+        self.announce_data_bound(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.build_screen();
     }

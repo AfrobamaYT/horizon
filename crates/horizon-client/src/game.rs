@@ -10593,7 +10593,7 @@ impl Game<'_> {
         if self.remote.is_none() {
             self.read_raids();
         }
-        self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
+        self.announce_data_bound(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);

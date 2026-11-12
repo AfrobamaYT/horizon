@@ -68,7 +68,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.tags = Some(items);
         }
-        self.native_tags_updated(mod_api::TagsUpdateCause::ClientPacketReceived {
+        self.announce_data_bound(mod_api::TagsUpdateCause::ClientPacketReceived {
             integrated_server: self.integrated.is_some(),
         });
     }
