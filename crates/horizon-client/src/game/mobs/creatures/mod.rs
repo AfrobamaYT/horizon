@@ -2586,13 +2586,42 @@ impl Game<'_> {
                     x,
                     z,
                     source,
+                    apply_blocking,
                 } => match target {
-                    // A player's source names no melee attacker, as its damage's doesn't.
+                    // Ram knockback checks blocking independently of the hurt call.
                     Who::Player => {
+                        let mut power = power;
                         let attack = self.attack_of(match source.attacker {
                             Some(Who::Mob(id)) => id as i32,
                             _ => 0,
                         });
+                        if let Some(damage) = apply_blocking
+                            && let Some(blocking) =
+                                self.player_blocking(source.from, source_damage_type(source), false)
+                            && let blocked = blocking.blocked(damage)
+                            && blocked > 0.0
+                        {
+                            let attacker = match source.attacker {
+                                Some(Who::Mob(id)) => Some(id),
+                                _ => None,
+                            };
+                            self.after_block(
+                                horizon_client::health::BlockOutcome {
+                                    blocked,
+                                    fully_blocked: blocked >= damage,
+                                    ..Default::default()
+                                },
+                                (attacker, false),
+                                HurtSource {
+                                    damage_type: source_damage_type(source),
+                                    causing: attacker.map_or(0, |id| id as i32),
+                                    direct: 0,
+                                    position: source.from,
+                                },
+                                &attack,
+                            );
+                            power *= 0.5;
+                        }
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
