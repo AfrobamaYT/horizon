@@ -1,7 +1,6 @@
 //! A guest's `horizon:perf` requests (docs/perf-platform.md §4.2): who may profile this server, the one capture at a time, and the log lines about it.
 use super::Game;
 use super::integrated::capture::{Live, Target};
-use super::lan::LanHost;
 use super::profile_capture::{reports_dir, shown};
 use horizon_client::perf_net::{
     CHANNEL, Held, OPERATOR_LEVEL, Outgoing, Refusal, Reply, Request, Verdict, Wanted, judge,
@@ -72,8 +71,8 @@ fn window(wanted: &Wanted) -> String {
 
 impl Game<'_> {
     /// A `horizon:perf` payload from `conn`.
-    pub(super) fn guest_perf(&mut self, host: &mut LanHost, conn: u32, data: &[u8]) {
-        let Some(guest) = host.hub.guest(conn) else {
+    pub(super) fn guest_perf(&mut self, conn: u32, data: &[u8]) {
+        let Some(guest) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
         let name = guest.name.clone();

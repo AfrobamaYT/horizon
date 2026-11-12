@@ -779,7 +779,7 @@ impl Game<'_> {
                 self.guest_recipe_check(conn, &p.data);
             }
             S::CustomPayload(p) if p.channel == horizon_client::perf_net::CHANNEL => {
-                self.guest_perf(host, conn, &p.data)
+                self.guest_perf(conn, &p.data)
             }
             S::CustomPayload(p) if p.channel == horizon_client::lod_net::CHANNEL => {
                 self.guest_far_terrain(conn, &p.data)

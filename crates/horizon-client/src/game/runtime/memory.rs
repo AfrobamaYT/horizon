@@ -449,15 +449,12 @@ impl Game<'_> {
 
     /// The entities of every level by type; a record's bytes are its struct and the buffers its fields own.
     fn entity_census(&self) -> Entities {
-        fn size<T>(_: &[T]) -> usize {
-            size_of::<T>()
-        }
         let record = [
-            size(self.dropped.as_slice()),
-            size(self.orbs.as_slice()),
-            size(self.creatures.projectiles.as_slice()),
-            size(self.carts.as_slice()),
-            size(self.boats.as_slice()),
+            size_of::<horizon_client::entities::ItemEntity>(),
+            size_of::<horizon_client::entities::ExperienceOrb>(),
+            size_of::<horizon_client::projectiles::Projectile>(),
+            size_of::<super::minecarts::Minecart>(),
+            size_of::<super::boats::Boat>(),
         ];
         let mut by_type: BTreeMap<String, (usize, usize)> = BTreeMap::new();
         let mut level = |mobs: &[horizon_client::mobs::Mob], loose: [usize; 5]| {

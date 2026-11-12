@@ -47,14 +47,16 @@ use std::{
 
 /// A borrowed counting view: no resident-table scans and no allocation for gauges.
 pub(super) struct EntityCountView<'a> {
-    pub(super) fixed: [(&'static str, usize); 20],
+    pub(super) fixed: [(&'static str, usize); 19],
     pub(super) mobs: &'a [Mob],
+    pub(super) projectiles: &'a [horizon_client::projectiles::Projectile],
     pub(super) general: &'a super::general::GeneralRows,
     pub(super) others: &'a [commands::OtherEntity],
 }
 impl EntityCountView<'_> {
     pub(super) fn total(&self) -> usize {
         self.fixed.iter().map(|(_, n)| n).sum::<usize>()
+            + self.projectiles.len()
             + self.mobs.len()
             + self.general.len()
             + self.others.len()
@@ -65,6 +67,9 @@ impl EntityCountView<'_> {
             if n > 0 {
                 *counts.entry(id.to_owned()).or_default() += n as u32;
             }
+        }
+        for projectile in self.projectiles {
+            *counts.entry(projectile.kind.id().to_owned()).or_default() += 1;
         }
         for mob in self.mobs.iter().filter(|mob| !mob.removed) {
             *counts.entry(mob.kind.id.clone()).or_default() += 1;
@@ -87,7 +92,7 @@ impl EntityCountView<'_> {
 
 // Both Game and Parked own these typed families. Keep their instrumentation in one list.
 macro_rules! entity_count_view {
-    ($level:expr, $projectiles:expr, $general:expr) => {
+    ($level:expr, $projectiles:expr, $general:expr, $knots:expr) => {
         crate::game::levels::EntityCountView {
             fixed: [
                 ("minecraft:item", $level.dropped.len()),
@@ -102,7 +107,7 @@ macro_rules! entity_count_view {
                 ("minecraft:firework_rocket", $level.rockets.len()),
                 ("minecraft:tnt", $level.tnts.len()),
                 ("minecraft:end_crystal", $level.crystals.len()),
-                ("minecraft:leash_knot", $level.knots.len()),
+                ("minecraft:leash_knot", $knots.len()),
                 (
                     "minecraft:ominous_item_spawner",
                     $level.ominous_spawners.len(),
@@ -110,7 +115,6 @@ macro_rules! entity_count_view {
                 ("minecraft:cushion", $level.cushions.len()),
                 ("minecraft:area_effect_cloud", $level.breath_clouds.len()),
                 ("minecraft:lightning_bolt", $level.bolts.len()),
-                ("horizon:projectile", $projectiles.len()),
                 ("minecraft:evoker_fangs", $level.fangs.perf_count()),
                 // Multipart hitboxes are not independently admitted world entities.
                 (
@@ -119,6 +123,7 @@ macro_rules! entity_count_view {
                 ),
             ],
             mobs: &$level.mobs,
+            projectiles: $projectiles,
             general: $general,
             others: &$level.others,
         }
@@ -398,7 +403,7 @@ impl Default for Pass {
 pub(super) struct TickTiming {
     pub wall_ms: f32,
     pub cpu_ms: Option<f32>,
-    /// As recorded in the tick, each span after the spans inside it; the ones from between ticks are left out.
+    /// Recorded span events, including work between ticks, in observation order.
     pub raw: Vec<horizon_client::spans::Span>,
 }
 
@@ -610,7 +615,7 @@ impl Levels {
             (
                 dim,
                 &level.world,
-                entity_count_view!(level, &level.projectiles, &level.general.rows),
+                entity_count_view!(level, &level.projectiles, &level.general.rows, &level.knots),
             )
         })
     }
@@ -1154,6 +1159,7 @@ impl Game<'_> {
                 Dim::Overworld => 1,
                 Dim::Nether => 2,
                 Dim::End => 3,
+                Dim::Extra(_) => 0,
             });
             let _level_span = horizon_client::spans::guard(match dim {
                 Dim::Overworld => "level_overworld",
@@ -1284,12 +1290,10 @@ impl Game<'_> {
             .zip(cpu)
             .map(|(end, start)| (end - start).as_secs_f32() * 1000.0);
         // Taken every tick: nothing else takes this thread's spans.
-        let raw = horizon_client::spans::take_raw();
-        let spans = if between.is_empty() {
-            horizon_client::spans::merge(&raw)
-        } else {
-            horizon_client::spans::merge(&[&between[..], &raw[..]].concat())
-        };
+        let raw = between
+            .into_iter()
+            .chain(horizon_client::spans::take_raw())
+            .collect();
         // The spans go to the slow ring; whose packets or events took the tick stays in the owner's log.
         let notes = horizon_client::spans::take_notes();
         if let Some(threshold) = self.options.spikes
@@ -1662,13 +1666,14 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -1683,7 +1688,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

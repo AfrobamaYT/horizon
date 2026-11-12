@@ -385,7 +385,8 @@ impl Game<'_> {
         super::super::levels::entity_count_view!(
             self,
             &self.creatures.projectiles,
-            &self.resident_entities.general.rows
+            &self.resident_entities.general.rows,
+            &self.resident_entities.knots
         )
     }
 
