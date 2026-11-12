@@ -3990,37 +3990,23 @@ impl Game<'_> {
     ) {
         self.fire_player_stop_tracking(player, name, entity, uuid, kind);
     }
-    /// Whether a mod listens to the mobs' and players'
-    /// `native_living_equipment_change`: a mod that hooks it hooks this one too
-    /// and sets `listened` (HEAD, `*listened = true`). Without it the game does
-    /// not read every mob's and connected player's equipment each tick, and
-    /// neither is told (armor stands still are). A mob that ticks, or a player
-    /// who is in the level, once it is set counts from empty. Asked once a tick
-    /// for the mobs, after their tick, and once for the players. Server-side.
+    /// Whether a mod listens to `native_living_equipment_change` for mobs and
+    /// connected players: a mod that hooks it hooks this one too and sets
+    /// `listened` (HEAD, `*listened = true`). Without it the game does not read
+    /// their equipment each tick and only armor stands are told. A mob or player
+    /// counts from empty once it is set. Asked once a tick. Server-side.
     pub(in crate::game) fn native_living_equipment_listened(&mut self, listened: &mut bool) {
         self.fire_living_equipment_listened(listened);
     }
-    /// A mob's, an armor stand's or a player's equipment slot took a different
-    /// stack (NeoForge's `LivingEquipmentChangeEvent`, posted in
-    /// `LivingEntity.collectEquipmentChanges`): `entity` is its ID and `kind`
-    /// its type (`minecraft:zombie`, `minecraft:player`), `slot` the
-    /// `EquipmentSlot` (`mainhand`, `offhand`, `feet`, `legs`, `chest`, `head`,
-    /// `body`, `saddle`), `from` what the slot held when this was last heard
-    /// (none for empty) and `to` what it holds now. Once for each slot that
-    /// changed, in that order, after the mobs' tick, so a mob that joins the
-    /// level wearing something counts from empty on its first tick. It only
-    /// hears: change the entity with its own helpers.
-    ///
-    /// Players are told the same way, once a tick, for the players connected
-    /// to the server (a dedicated server's, a published world's guests): a
-    /// player new to the level counts from empty, and the main hand is the
-    /// selected hotbar slot, so a hotbar selection or a pickup into the
-    /// selected slot is a `mainhand` change. Only their six slots `mainhand`,
-    /// `offhand`, `feet`, `legs`, `chest` and `head` are told: a player's
-    /// `body` and `saddle` slots are never told. Mobs and players are told
-    /// only while a mod sets `native_living_equipment_listened`. The world
-    /// host's own player, in single player or hosting a LAN world, isn't told
-    /// here: `native_on_equip` hears it. Server-side.
+    /// A mob's, an armor stand's or a connected player's equipment slot took a
+    /// different stack (NeoForge's `LivingEquipmentChangeEvent`,
+    /// `LivingEntity.collectEquipmentChanges`): `entity` its ID, `kind` its type
+    /// (`minecraft:player` for a player), `slot` the `EquipmentSlot`, `from` what
+    /// the slot held when last heard and `to` what it holds now. Once per changed
+    /// slot, after the mobs' tick; one new to the level counts from empty. A
+    /// player's `mainhand` is the selected hotbar slot; their `body` and `saddle`
+    /// are never told. The world host's own player is heard by `native_on_equip`.
+    /// It only hears. Server-side.
     pub(in crate::game) fn native_living_equipment_change(
         &mut self,
         entity: u32,
