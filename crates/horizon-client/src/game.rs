@@ -3297,6 +3297,7 @@ struct Game<'a> {
     /// The last `use_hand` that ended the click did so with `FAIL`, which
     /// does not consume the action (handleUseItemOn's ANY_BLOCK_USE).
     use_failed: bool,
+    block_use_original: Vec<(Hand, Option<ItemStack>)>,
     /// Level events of this tick for the guests, with their excluded source.
     lan_events: Vec<QueuedLevelEvent>,
     /// Jukebox level events 1010 (song name) and 1011 (`None`) for the guests;
@@ -12664,50 +12665,6 @@ impl Game<'_> {
             self.post_block_game_event("minecraft:block_change", at, None, Some(new));
         }
     }
-    pub(super) fn damage_held(&mut self, amount: u32) {
-        self.damage_held_in_slot(
-            amount,
-            horizon_core::equipment_slot::EquipmentSlot::MainHand,
-        );
-    }
-    /// Hurt the acting hand's stack through ordinary wear/criterion/break handling,
-    /// reporting its break in the caller's explicit equipment slot.
-    pub(super) fn damage_held_in_slot(
-        &mut self,
-        amount: u32,
-        break_slot: horizon_core::equipment_slot::EquipmentSlot,
-    ) {
-        let Some(stack) = self.held().cloned() else {
-            return;
-        };
-        let (updated, broken) = self.damage_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
-        if self.held() != Some(&stack) {
-            return;
-        }
-        *self.held_mut() = updated;
-        if let Some(broken) = broken {
-            self.award_stat("broken", &broken.item, 1);
-            self.player_equipment_broke(break_slot, &broken);
-        }
-    }
-    /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
-    /// one point of durability left instead of breaking.
-    fn hurt_held_without_breaking(&mut self, amount: u32) {
-        if self.creative {
-            return;
-        }
-        let Some(held) = self.held().cloned() else {
-            return;
-        };
-        let amount = self.wear(&held, amount);
-        let max = self.trident_max_damage(&held);
-        if amount == 0 || max == 0 {
-            return;
-        }
-        if let Some(stack) = self.held_mut().as_mut() {
-            stack.damage = (stack.damage + amount).min(max - 1);
-        }
-    }
     /// Block tool use: distinguish success, failure and fall-through for hand feedback.
     fn use_tool(
         &mut self,
@@ -16648,6 +16605,7 @@ impl<'a> Game<'a> {
             client_targeting: Default::default(),
             guest_use: None,
             use_failed: false,
+            block_use_original: Vec::new(),
             lan_events: Vec::new(),
             lan_songs: Vec::new(),
             lan_cushion_breaks: Vec::new(),
