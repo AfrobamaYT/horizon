@@ -436,6 +436,7 @@ impl Game<'_> {
         let events = self.as_guest(conn, |game| {
             let (rules, motion) = (game.world.health_rules, game.motion);
             let health = &motion.health;
+            let leather_boots = super::super::worn_boots::leather_boots(&game.armor);
             let freeze_immune = game.wears_freeze_immune();
             let burn_immune = game.wears_burn_from_stepping_immunity();
             let boat = game.riding_boat_fluid_box();
@@ -524,6 +525,7 @@ impl Game<'_> {
             // lit campfires and grown sweet berry bushes hurt (#1305).
             w.player.shift_key_down = sneaking;
             let _ = w.player.set_sleeping(sleeping);
+            w.player.leather_boots = leather_boots;
             w.player.freeze_immune = freeze_immune;
             w.player.burn_from_stepping_immune = burn_immune;
             let _ = w.server_block_damage(start);

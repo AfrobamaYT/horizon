@@ -3498,9 +3498,7 @@ impl Game<'_> {
         let respiration = self.armor[0]
             .as_ref()
             .map_or(0, |s| s.enchantment_level("minecraft:respiration") as i32);
-        let leather_boots = self.armor[3]
-            .as_ref()
-            .is_some_and(|s| &*s.item == "minecraft:leather_boots");
+        let leather_boots = worn_boots::leather_boots(&self.armor);
         let freeze_immune = self.wears_freeze_immune();
         let burn_immune = self.wears_burn_from_stepping_immunity();
         let nudge = self.closest_space_nudge();
@@ -4371,9 +4369,7 @@ impl Game<'_> {
                     |stack| Arc::clone(&stack.item),
                 ),
                 main_hand_count: main_hand.map_or(0, |stack| stack.count as i32),
-                leather_boots: self.armor[3]
-                    .as_ref()
-                    .is_some_and(|stack| stack.item.as_ref() == "minecraft:leather_boots"),
+                leather_boots: worn_boots::leather_boots(&self.armor),
             }
         });
         let cart_boxes = self
