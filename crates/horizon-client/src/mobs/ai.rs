@@ -5079,14 +5079,17 @@ mod feed_tests {
             return;
         }
         let data = MobTypes::load(&root).unwrap();
-        let mut level = horizon_core::random::LegacyRandom::new(0);
+        let mut level = crate::health::TestLevel::new(0);
         for id in ["minecraft:wolf", "minecraft:cat"] {
             let kind = Arc::new(data.types.get(id).unwrap().clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
             m.extra.tame = true;
             m.extra.age = -24000;
             assert!(takes_food(&m), "{id}: a tamed baby takes its food");
-            assert!(feed_animal(&mut m, &mut level, None).is_some(), "{id}");
+            assert!(
+                feed_animal(&mut m, &mut level.level(), None).is_some(),
+                "{id}"
+            );
             // getSpeedUpSecondsWhenFeeding(24000): a tenth of 1200 seconds.
             assert_eq!(m.extra.age, -24000 + 120 * 20, "{id}: grew a tenth");
             assert_eq!(m.extra.in_love, 0, "{id}: a baby does not fall in love");
@@ -5121,17 +5124,17 @@ mod feed_tests {
             m.extra.age = age;
             m
         };
-        let mut level = LegacyRandom::new(0);
+        let mut level = crate::health::TestLevel::new(0);
         let mut frog = mob("minecraft:frog", Species::Frog, -24_000);
         assert!(!frog.is_baby());
         assert!(!takes_food(&frog), "a frog is never a baby");
-        assert!(feed_animal(&mut frog, &mut level, None).is_none());
+        assert!(feed_animal(&mut frog, &mut level.level(), None).is_none());
         assert_eq!(frog.extra.age, -24_000, "it does not grow");
 
         let mut cow = mob("minecraft:cow", Species::Cow, -24_000);
         assert!(cow.is_baby());
         assert!(takes_food(&cow));
-        assert!(feed_animal(&mut cow, &mut level, None).is_some());
+        assert!(feed_animal(&mut cow, &mut level.level(), None).is_some());
         assert_eq!(cow.extra.age, -24_000 + 120 * 20, "it grows a tenth");
     }
 
@@ -5147,7 +5150,7 @@ mod feed_tests {
             return;
         }
         let data = MobTypes::load(&root).unwrap();
-        let mut level = horizon_core::random::LegacyRandom::new(0);
+        let mut level = crate::health::TestLevel::new(0);
         let kind = Arc::new(data.types.get("minecraft:turtle").unwrap().clone());
         let mut m = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         m.extra.age = 0;
@@ -5156,14 +5159,14 @@ mod feed_tests {
         assert!(crate::mobs::turtle::has_egg(&m));
         assert!(!takes_food(&m), "an egg-carrying turtle refuses its food");
         assert!(
-            feed_animal(&mut m, &mut level, None).is_none(),
+            feed_animal(&mut m, &mut level.level(), None).is_none(),
             "and does not enter love mode"
         );
         assert_eq!(m.extra.in_love, 0);
 
         m.extra.flag = false;
         assert!(takes_food(&m), "a turtle without an egg takes it");
-        assert!(feed_animal(&mut m, &mut level, None).is_some());
+        assert!(feed_animal(&mut m, &mut level.level(), None).is_some());
         assert_eq!(m.extra.in_love, 600);
     }
 }

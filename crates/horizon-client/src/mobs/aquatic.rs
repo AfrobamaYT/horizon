@@ -1767,7 +1767,7 @@ mod squid_tests {
             squid.no_ai = true;
             squid.tick(
                 w,
-                &mut horizon_core::random::LegacyRandom::new(0),
+                &mut crate::health::TestLevel::new(0).level(),
                 &mut Vec::new(),
             );
             assert_eq!(squid.velocity, Vec3::new(0.0, -0.0784000015258789, 0.0));

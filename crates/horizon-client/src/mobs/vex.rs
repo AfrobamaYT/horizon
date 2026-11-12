@@ -472,11 +472,11 @@ mod owner_save_tests {
                 vex.position = Vec3::new(0.5, 64.0, 0.5);
                 vex.extra.counter2 = 2;
                 vex.ai.targets.add(2, CopyOwnerTarget);
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut lr = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut lr.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut vex.ai.targets);
