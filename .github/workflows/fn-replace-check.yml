@@ -23,9 +23,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  # One run per ref, queued: a started run finishes, and a newer main push replaces only the waiting one.
-  group: fn-replace-check-${{ github.ref }}
-  cancel-in-progress: false
+  # A new push to a pull request replaces its running check, so the new head starts at once instead of
+  # queuing behind a stale one. Main is never cancelled: a started run finishes, and a newer main push
+  # replaces only the waiting one.
+  group: fn-replace-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # sccache (shared per Dyna host) cannot cache incremental compiles, so every Rust job builds non-incremental.
   CARGO_INCREMENTAL: 0
