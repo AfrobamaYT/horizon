@@ -346,3 +346,14 @@ Horizon, as #3425 asks.
 
 Both are client-only, so the server's `chunk_load` and `chunk_unload` listeners are not called on a client. An
 integrated world's own chunks are told only through the server hooks.
+
+## IBaseRailBlockExtension: rail track
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `getRailDirection(state, level, pos, cart)` | **Covered** | `BlockPart::rail_direction` (`hooks/rail_direction.rs`), on both sides with a `LevelSide`, starting from the `shape` property: the cart's movement asks with the cart wherever it reads the track under it, and `RailState` and a minecart item's placement ask with none. |
+| `canMakeSlopes(state, level, pos)` | **Covered** | Server `BlockPart::rail_can_make_slopes` (`hooks/rail_can_make_slopes.rs`), asked as `RailState` would make the rail climb. |
+| `isFlexibleRail(state, level, pos)` | **Covered** | Server `BlockPart::rail_flexible` (`hooks/rail_flexible.rs`), read into `RailState`'s straightness. |
+| `isValidRailShape(shape)` | **Covered** | Server `BlockPart::rail_valid_shape` (`hooks/rail_valid_shape.rs`), with the rail's state, asked before `RailState` writes a shape; a refused shape keeps the current one. It starts false for a value the rail's `shape` property lacks, as NeoForge's default answers. |
+
+A minecart now treats any block in `#minecraft:rails` built on `BaseRailBlock` as track (`BaseRailBlock.isRail`), where it used to accept only the four vanilla rail names.

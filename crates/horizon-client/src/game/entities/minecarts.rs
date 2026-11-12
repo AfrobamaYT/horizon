@@ -410,7 +410,7 @@ pub(super) enum Shape {
     NorthEast,
 }
 impl Shape {
-    fn parse(s: &str) -> Self {
+    pub(super) fn parse(s: &str) -> Self {
         match s {
             "east_west" => Self::EastWest,
             "ascending_east" => Self::AscendingEast,
@@ -449,9 +449,9 @@ impl Shape {
     }
 }
 pub(super) struct Rail {
-    name: Arc<str>,
+    pub(super) name: Arc<str>,
     pub(super) shape: Shape,
-    powered: bool,
+    pub(super) powered: bool,
 }
 impl Minecart {
     /// `Minecart.tick`: stationary rotation does not turn the passenger.
@@ -595,27 +595,6 @@ impl CartModels {
     }
 }
 impl Game<'_> {
-    pub(super) fn rail(&self, x: i32, y: i32, z: i32) -> Option<Rail> {
-        let state = self.world.block(x, y, z);
-        let name = self.res.facts().get(state).name.clone();
-        if !matches!(
-            &*name,
-            "minecraft:rail"
-                | "minecraft:powered_rail"
-                | "minecraft:detector_rail"
-                | "minecraft:activator_rail"
-        ) {
-            return None;
-        }
-        let s = self.pack.assets.registry.state(state)?;
-        let shape = Shape::parse(s.properties.get("shape").map_or("", String::as_str));
-        let powered = s.properties.get("powered").is_some_and(|v| v == "true");
-        Some(Rail {
-            name,
-            shape,
-            powered,
-        })
-    }
     /// `getCurrentBlockPosOrRailBelow`.
     fn rail_block(&self, p: Vec3) -> [i32; 3] {
         let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
@@ -624,7 +603,7 @@ impl Game<'_> {
         } else {
             y - 1
         };
-        if self.rail(x, below, z).is_some() {
+        if self.rail(None, x, below, z).is_some() {
             [x, below, z]
         } else {
             [x, y, z]
@@ -640,7 +619,7 @@ impl Game<'_> {
     /// `OldMinecartBehavior.getPos`: the point on the rail under (x, y, z).
     fn rail_pos(&self, x: f64, y: f64, z: f64) -> Option<[f64; 3]> {
         let [xt, yt, zt] = self.rail_block(Vec3::new(x, y, z));
-        let rail = self.rail(xt, yt, zt)?;
+        let rail = self.rail(None, xt, yt, zt)?;
         let (e0, e1) = rail.shape.exits();
         let (fx, fy, fz) = (f64::from(xt), f64::from(yt), f64::from(zt));
         let x0 = fx + 0.5 + f64::from(e0[0]) * 0.5;
@@ -668,7 +647,7 @@ impl Game<'_> {
     /// `OldMinecartBehavior.getPosOffs`.
     fn rail_pos_offs(&self, mut x: f64, y: f64, mut z: f64, offs: f64) -> Option<[f64; 3]> {
         let [xt, yt, zt] = self.rail_block(Vec3::new(x, y, z));
-        let rail = self.rail(xt, yt, zt)?;
+        let rail = self.rail(None, xt, yt, zt)?;
         let mut y = f64::from(yt) + if rail.shape.is_slope() { 1.0 } else { 0.0 };
         let (e0, e1) = rail.shape.exits();
         let (mut xd, mut zd) = (f64::from(e1[0] - e0[0]), f64::from(e1[2] - e0[2]));
@@ -1196,7 +1175,7 @@ impl Game<'_> {
         while first || movement_left > f64::from(1.0e-5_f32) {
             let initial = c.velocity;
             let pos = self.rail_block(c.position);
-            let Some(rail) = self.rail(pos[0], pos[1], pos[2]) else {
+            let Some(rail) = self.rail(Some(c.id), pos[0], pos[1], pos[2]) else {
                 c.on_rails = false;
                 self.come_off_track(c);
                 self.finish_cart_step(c, step_start, initial);
@@ -1368,7 +1347,8 @@ impl Game<'_> {
                 new_pos.y.floor() as i32,
                 new_pos.z.floor() as i32,
             ];
-            if let Some(new_rail) = self.rail(new_block[0], new_block[1], new_block[2]) {
+            if let Some(new_rail) = self.rail(Some(c.id), new_block[0], new_block[1], new_block[2])
+            {
                 // restAtVShape: opposing slopes rest a slow cart.
                 if c.velocity.length_squared() < 0.005
                     && new_rail.shape.is_slope()
@@ -1512,7 +1492,7 @@ impl Game<'_> {
         // NewMinecartBehavior.tick snaps a newly created cart before gravity.
         if self.minecart_improvements() && c.first_tick {
             let pos = self.rail_block(c.position);
-            if let Some(rail) = self.rail(pos[0], pos[1], pos[2]) {
+            if let Some(rail) = self.rail(Some(c.id), pos[0], pos[1], pos[2]) {
                 c.on_rails = true;
                 Self::adjust_cart_to_rails(c, pos, rail.shape);
             } else {
@@ -1524,7 +1504,7 @@ impl Game<'_> {
         let pos = self.rail_block(c.position);
         if self.minecart_improvements() {
             self.move_along_track_new(c, intent);
-        } else if let Some(rail) = self.rail(pos[0], pos[1], pos[2]) {
+        } else if let Some(rail) = self.rail(Some(c.id), pos[0], pos[1], pos[2]) {
             self.move_along_track(c, pos, &rail, intent, slot);
             self.note_cart_pass(c, pos);
             if &*rail.name == "minecraft:activator_rail" {
@@ -2362,7 +2342,7 @@ impl Game<'_> {
         let Some(kind) = CartKind::from_id(&stack.item) else {
             return false;
         };
-        let Some(rail) = self.rail(hit.pos[0], hit.pos[1], hit.pos[2]) else {
+        let Some(rail) = self.rail(None, hit.pos[0], hit.pos[1], hit.pos[2]) else {
             return false;
         };
         let offset = if rail.shape.is_slope() { 0.5 } else { 0.0 };
