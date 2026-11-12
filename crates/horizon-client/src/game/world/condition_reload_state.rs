@@ -28,16 +28,13 @@ pub(super) fn registry_versions(
             if bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES {
                 return Some((pack, bytes));
             }
-            let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                 return Some((pack, bytes));
             };
             if !conditions.allows_file(&json, path) {
                 return None;
             }
-            if let Some(object) = json.as_object_mut() {
-                object.remove("neoforge:conditions");
-            }
-            serde_json::to_vec(&json).ok().map(|bytes| (pack, bytes))
+            Some((pack, bytes))
         })
         .collect()
 }

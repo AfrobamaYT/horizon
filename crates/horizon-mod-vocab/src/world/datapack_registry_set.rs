@@ -163,8 +163,16 @@ impl DatapackCandidate {
                 }
                 let text =
                     std::str::from_utf8(bytes).map_err(|_| fail(DatapackLoadReason::NotUtf8))?;
+                // Account raw source bytes above; conditions belong to the engine,
+                // not to the declaring mod's schema.
+                let stripped = serde_json::from_str::<serde_json::Value>(text)
+                    .ok()
+                    .and_then(|mut json| {
+                        json.as_object_mut()?.remove("neoforge:conditions")?;
+                        serde_json::to_string(&json).ok()
+                    });
                 let decoded = declaration
-                    .decode_entry(text)
+                    .decode_entry(stripped.as_deref().unwrap_or(text))
                     .map_err(|error| fail(DatapackLoadReason::Decode(error)))?;
                 entries.insert(entry, decoded);
             }
