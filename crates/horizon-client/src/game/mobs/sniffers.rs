@@ -74,7 +74,8 @@ impl Game<'_> {
                 }
                 if ms > 1700 && ms < 6000 {
                     let head = sniffer::head_block(&self.mobs[i]);
-                    let below = self.world.block(head[0], head[1] - 1, head[2]);
+                    let ground = [head[0], head[1] - 1, head[2]];
+                    let below = self.world.block(ground[0], ground[1], ground[2]);
                     // `stateBelow.getRenderShape() != RenderShape.INVISIBLE`.
                     if self.res.facts().get(below).render_shape
                         != horizon_client::blocks::RenderShape::Invisible
@@ -95,7 +96,15 @@ impl Game<'_> {
                         }
                         // The hit sound is playLocalSound too: silence does not mute it.
                         if age.is_multiple_of(10) {
-                            let hit = self.res.facts().get(below).sounds.hit.clone();
+                            let sniffer = Some((id, self.mobs[i].kind.id.as_str()));
+                            let hit = self
+                                .block_sound_type(
+                                    ground,
+                                    below,
+                                    sniffer,
+                                    mod_api::BlockSoundCause::Dig,
+                                )
+                                .hit;
                             self.audio.play(&hit, Some(at), 0.5, 0.5);
                         }
                     }

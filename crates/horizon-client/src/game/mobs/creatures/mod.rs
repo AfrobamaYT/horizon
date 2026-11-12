@@ -7745,14 +7745,7 @@ impl Game<'_> {
         self.post_block_game_event("minecraft:entity_place", p, Some(Who::Player), None);
         self.award_stat("used", &stack.item, 1);
         self.swing_arm();
-        if !self.creative
-            && let Some(s) = self.held_mut().as_mut()
-        {
-            s.count -= 1;
-            if s.count == 0 {
-                *self.held_mut() = None;
-            }
-        }
+        self.consume_held();
         Ok(true)
     }
     /// `EntityType.updateCustomEntityTag`: the egg's `minecraft:entity_data` on

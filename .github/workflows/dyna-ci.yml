@@ -508,6 +508,8 @@ jobs:
             echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
           fi
           bash tools/ci/rustup_install.sh stable --profile minimal --component rustfmt --component clippy
+      - name: Vocabulary state has explicit ownership
+        run: python3 tools/check_mod_vocabulary_state.py
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: needs.changes.outputs.rust_required != 'false'

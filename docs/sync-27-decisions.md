@@ -59,3 +59,12 @@ Remove `Entity::dimension_changing_delay` and its overrides,
 its own active portal-delay lookups and creature owner resolution, leaving
 these upstream helpers unreferenced here. Removing them preserves the active
 behavior without dead code or suppression attributes.
+
+## Main after rollup 45: combined resolutions
+
+Merge main `8a5ab873d5` once. Lighting retains upstream reusable relight
+scratch alongside main's dynamic-light-aware section lookup and emission
+calculation. Sniffer digging retains upstream animation timing, render-shape
+gating, local-sound silence behavior and whole-dig game events, while routing
+the block hit sound through main's typed block-sound hook. The hook remains
+inside the existing sound window; particle sprite availability gates dust only.
