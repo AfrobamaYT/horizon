@@ -14,10 +14,10 @@ mod boundary {
 mod biome_region_registration;
 #[path = "wire_loopback/block_entity_transform.rs"]
 mod block_entity_transform;
-#[path = "wire_loopback/entity_renderers.rs"]
-mod entity_renderers;
 #[path = "wire_loopback/crash_sections.rs"]
 mod crash_sections;
+#[path = "wire_loopback/entity_renderers.rs"]
+mod entity_renderers;
 #[path = "wire_loopback/item_drop_state.rs"]
 mod item_drop_state;
 #[path = "wire_loopback/load_conditions.rs"]
