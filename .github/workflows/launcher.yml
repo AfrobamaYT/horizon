@@ -298,7 +298,7 @@ jobs:
           fi
           rm -rf "$HORIZON_LAUNCHER_HOME"
       - name: The signing keychain, unlocked
-        if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != ''
+        if: runner.os == 'macOS' && github.repository != 'arismoko/horizon' && vars.MACOS_SIGN_IDENTITY != ''
         env:
           MACOS_SIGN_IDENTITY: ${{ vars.MACOS_SIGN_IDENTITY }}
         run: ../packaging/macos/keychain.sh unlock
@@ -343,7 +343,7 @@ jobs:
           path: launcher/out/*
           retention-days: 3
       - name: The signing keychain, locked again
-        if: always() && runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != ''
+        if: always() && runner.os == 'macOS' && github.repository != 'arismoko/horizon' && vars.MACOS_SIGN_IDENTITY != ''
         run: ../packaging/macos/keychain.sh lock
 
   sign:
