@@ -1430,21 +1430,40 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     use mod_api::*;
     struct Table;
     impl CapabilityProviders for Table {}
-    impl BlockEntitiesCapabilityProviders for Table {
-        fn block_entity_provider(
+    impl BlocksCapabilityProviders for Table {
+        fn block_provider(
             &self,
             _: &str,
-            _: BlockEntityTypeKey,
+            kind: Option<BlockEntityTypeKey>,
+            block: Option<BlockKey>,
             index: &mut u32,
         ) -> Option<(BlockProviderOf, &'static str, bool)> {
-            *index += 1;
-            Some((
-                BlockProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: BlockSide| {
-                    None::<Box<dyn EnergyHandler>>
-                })),
-                "test:block",
-                true,
-            ))
+            // Which of the position's two keys crossed picks the answer.
+            match (kind, block) {
+                (Some(_), None) => {
+                    *index += 1;
+                    Some((
+                        BlockProviderOf::EnergyHandler(Arc::new(
+                            |_: &mut dyn ServerHost, _: BlockSide| None::<Box<dyn EnergyHandler>>,
+                        )),
+                        "test:block",
+                        true,
+                    ))
+                }
+                (None, Some(_)) => {
+                    *index += 4;
+                    Some((
+                        BlockProviderOf::ResourceHandlerItemResource(Arc::new(
+                            |_: &mut dyn ServerHost, _: BlockSide| {
+                                None::<Box<dyn ResourceHandler<ItemResource>>>
+                            },
+                        )),
+                        "test:plain_block",
+                        false,
+                    ))
+                }
+                _ => None,
+            }
         }
     }
     impl EntitiesCapabilityProviders for Table {
@@ -1543,7 +1562,12 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     let _reset = Reset;
     let mut index = 5;
     let (block, owner, before) = guest::Guest
-        .block_entity_provider("test:energy", REGISTERED_KIND.get().unwrap(), &mut index)
+        .block_provider(
+            "test:energy",
+            Some(REGISTERED_KIND.get().unwrap()),
+            None,
+            &mut index,
+        )
         .unwrap();
     assert!(matches!(block, BlockProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (6, "test:block", true));
@@ -1560,6 +1584,19 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         .unwrap();
     assert!(matches!(item, ItemProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (11, "test:item", true));
+    let (block, owner, before) = guest::Guest
+        .block_provider(
+            "test:items",
+            None,
+            Some(REGISTERED_BLOCK.get().unwrap()),
+            &mut index,
+        )
+        .unwrap();
+    assert!(matches!(
+        block,
+        BlockProviderOf::ResourceHandlerItemResource(_)
+    ));
+    assert_eq!((index, owner, before), (15, "test:plain_block", false));
     corrupt.set(true);
     index = 42;
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
