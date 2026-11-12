@@ -747,7 +747,7 @@ fn world_narration(world: &WorldEntry) -> String {
     };
     narration_text("narrator.select", &[&entry])
 }
-fn choose_splash(text: &str, index: usize, date: (u32, u32)) -> Option<String> {
+pub(crate) fn choose_splash(text: &str, index: usize, date: (u32, u32)) -> Option<String> {
     // SplashManager checks SpecialDates before the resource list (local date).
     let special = match date {
         (12, 24) => Some("Merry X-mas!"),
@@ -862,17 +862,15 @@ impl Title {
         }
         self
     }
-    pub fn new(saves: PathBuf, resources: &Path) -> Self {
+    /// `splashes` is the pool `crate::splashes::pool` built for the current resources.
+    pub fn new(saves: PathBuf, resources: &Path, splashes: &str) -> Self {
         use chrono::Datelike;
         let today = chrono::Local::now();
-        let splashes =
-            std::fs::read_to_string(resources.join("assets/minecraft/texts/splashes.txt"))
-                .unwrap_or_default();
         // `SplashManager.RANDOM`: `RandomSource.create()`. `getSplash` rolls for
         // the player's name first, then picks the splash with `nextInt(size)`.
         let mut random = crate::random_source::create();
-        let splash_you = rolls_user_splash(&splashes, &mut random, (today.month(), today.day()));
-        let splash_index = i32::try_from(splash_lines(&splashes).count())
+        let splash_you = rolls_user_splash(splashes, &mut random, (today.month(), today.day()));
+        let splash_index = i32::try_from(splash_lines(splashes).count())
             .ok()
             .filter(|&size| size > 0)
             .map_or(0, |size| random.next_int_bound(size).unwrap_or(0) as usize);
@@ -914,7 +912,7 @@ impl Title {
             toast: None,
             pending_toast: None,
             icons: RefCell::new(std::collections::HashMap::new()),
-            splash: choose_splash(&splashes, splash_index, (today.month(), today.day())),
+            splash: choose_splash(splashes, splash_index, (today.month(), today.day())),
             splash_you,
             recent: std::cell::RefCell::new(None),
             rules: RefCell::new(None),
@@ -4677,6 +4675,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         title.mode = Mode::Select {
             worlds: Vec::new(),
@@ -4704,6 +4703,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         let mut screen = crate::realms::Screen::with_saves(None);
         screen.state = crate::realms::FetchState::Loaded(Vec::new());
@@ -4727,6 +4727,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         let mut screen = crate::realms::Screen::with_saves(None);
         screen.state = crate::realms::FetchState::Loaded(Vec::new());
@@ -4750,6 +4751,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         let mut screen = crate::realms::Screen::with_saves(None);
         screen.state = crate::realms::FetchState::Loaded(Vec::new());
@@ -4775,6 +4777,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         let mut screen = crate::realms::Screen::with_saves(None);
         screen.state = crate::realms::FetchState::Loaded(Vec::new());
@@ -4805,6 +4808,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         let mut screen = crate::realms::Screen::with_saves(None);
         screen.state = crate::realms::FetchState::Loaded(Vec::new());
@@ -4831,6 +4835,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         title.mode = Mode::Create {
             name: String::new(),
@@ -4859,6 +4864,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         let multiplayer = |title: &Title| {
             title
@@ -4894,6 +4900,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         title.credits_button.set([300.0, 230.0, 120.0, 10.0]);
         assert_eq!(
@@ -4912,6 +4919,7 @@ mod classic_tests {
         let mut title = Title::new(
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
+            "",
         );
         for (w, h) in [(960.0, 523.0), (480.0, 320.0), (427.0, 240.0)] {
             let buttons = title.buttons(w, h);
@@ -5032,7 +5040,7 @@ mod classic_tests {
                 },
             );
         }
-        let mut title = Title::new(PathBuf::new(), root);
+        let mut title = Title::new(PathBuf::new(), root, "");
         title.splash = Some("Visible splash!".into());
         let mut batch = HudBatch::scratch([1920, 1080]);
         title.draw(&atlas, &mut batch, (0.0, 0.0), false);

@@ -163,6 +163,7 @@ pub mod stand_up;
 pub mod stations;
 pub mod stopwatches;
 pub mod structure_blocks;
+pub mod splashes;
 pub mod studio;
 pub mod telemetry;
 #[cfg(test)]
