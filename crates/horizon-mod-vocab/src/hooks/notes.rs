@@ -80,7 +80,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`Hooks::player_game_mode_changed`**: a server player's game mode is about to change, from `event.from` to
   `event.to`, both `GameMode` (`Survival`, `Creative`, `Adventure`, `Spectator`): the `/gamemode` command, the
   F3+F4 switcher's packet and a hardcore world's respawn into spectator, once per change to a different mode. The mode a
-  player joins with (`defaultgamemode`) is not heard. Return `Flow::Cancel` and the player keeps their mode. Inside the
+  player joins with (`defaultgamemode`) is not heard. Write `*event.to` to send the player to another mode instead (each listener sees the previous one's choice); return `Flow::Cancel`, or leave `to` at the current mode, and the player keeps their mode. Inside the
   command and the switcher the player's state is swapped in; for the hardcore respawn it is not. The hook receives a
   `&mut dyn ServerHost`, and `event.player` identifies the player by UUID.
 - **`native_player_changed_dimension(player, name, from, to)`**: a player changed dimension, once per move
@@ -2336,7 +2336,7 @@ registration path.
   Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. The deprecated in-frame
   path fires neither.
 
-- A server player's game mode about to change: `Hooks::player_game_mode_changed` receives a `PlayerGameModeChangedEvent` before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode, on a server; not for the default mode a player joins with. Its `from` and `to` are `GameMode` values, the same type used by command parsing and `PlayerRef::game_mode`, `set_game_mode` and `previous_game_mode`. Return `Flow::Cancel` to keep the old mode; numeric ids are only for network and save boundaries.
+- A server player's game mode about to change: `Hooks::player_game_mode_changed` receives a `PlayerGameModeChangedEvent` before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode, on a server; not for the default mode a player joins with. Its `from` and `to` are `GameMode` values, the same type used by command parsing and `PlayerRef::game_mode`, `set_game_mode` and `previous_game_mode`. Write `*event.to` to redirect the change, or return `Flow::Cancel` to keep the old mode; numeric ids are only for network and save boundaries.
 
 - The server's difficulty changed, from one of `peaceful`, `easy`, `normal`, `hard` to another, through `native_difficulty_changed` (NeoForge's `DifficultyChangeEvent`). It is vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a dedicated server's management and a test environment's difficulty all go through, and it is told only when the difficulty is another one. It only hears: the change has already happened.
 
