@@ -529,6 +529,7 @@ impl Game<'_> {
             format.has_skylight,
         );
         Streaming::light_updated(&mut self.world, p.x, p.z, &changed);
+        self.ask_updated_light_emission((p.x, p.z), &changed);
     }
 }
 
