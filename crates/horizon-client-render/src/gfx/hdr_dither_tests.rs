@@ -265,7 +265,10 @@ fn hdr10s_dither_keeps_both_ends_exact_and_leans_to_them_in_their_last_code() {
     assert!(near_black.iter().flatten().all(|c| *c <= 1));
     let mean = mean_from(&near_black, 0.0);
     eprintln!("HDR10 dither GPU: a third of a code above black shows as {mean:.3}");
-    assert!(leans(mean), "{mean} above black");
+    assert!(
+        leans(mean),
+        "HDR10 near-black dither: measured mean {mean} codes above black, expected 0.015 <= mean < 0.325; undithered target {meant} codes, input grey {dim}"
+    );
 
     // The top of the range, PQ's 10 000 nits, stays the top: nothing wraps or dims. Light past
     // the peak is held at it, so the Peak setting is the signal here.

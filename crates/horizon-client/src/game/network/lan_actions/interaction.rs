@@ -568,13 +568,12 @@ impl Game<'_> {
                 && self.pvp_land(victim, &strike)
             {
                 let on_ground = self.pvp_victim_on_ground(victim);
-                let _ = self.as_guest_at(gi, conn, |g| {
-                    g.weapon_hit_player(on_ground);
-                    g.pvp_exhaustion();
-                    if strike.stops_sprint() {
-                        g.stop_sprint_after_extra_knockback();
-                    }
-                });
+                let stops_sprint = strike.stops_sprint();
+                let sent = self
+                    .as_guest_at(gi, conn, |g| g.pvp_hit_after(on_ground, stops_sprint))
+                    .ok()
+                    .flatten();
+                self.send_guest_motion(conn, sent);
                 return Ok(true);
             }
             return Ok(false);

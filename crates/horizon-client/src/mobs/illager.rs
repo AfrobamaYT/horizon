@@ -684,8 +684,7 @@ fn shoot_crossbow(m: &mut Mob, who: Who, cx: &mut Cx) {
         }
     }
     // rangedAttackUncertainty: 14 - 4 * difficulty.
-    p.shoot(
-        &mut crate::random_source::entity(),
+    p.shoot_own(
         [dx, dy, dz],
         1.6,
         (14 - i32::from(cx.w.difficulty.id) * 4) as f32,

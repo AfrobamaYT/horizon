@@ -427,7 +427,7 @@ jobs:
         run: cargo +stable build $JOBS --profile test -p horizon-mod-package --features runtime-process --example holder_actor
       - name: Test Rust core and voxel kernel correctness
         if: needs.changes.outputs.rust_required != 'false'
-        run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests
+        run: cargo +stable test $JOBS --no-fail-fast --profile test --workspace --lib --bins --tests
       # Prepared-data content-root tests stay in the existing client-lib data leg.
       # Running them again here without the data only rebuilds targets before they return early.
       # One genuine pinned export also validates source staging and listed slots.
@@ -463,7 +463,7 @@ jobs:
         run: python3 tools/ci/test_stage_catalog.py -v
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
-        run: cargo +stable test $JOBS --profile test --workspace --doc
+        run: cargo +stable test $JOBS --no-fail-fast --profile test --workspace --doc
       - name: No Rust work selected
         if: needs.changes.outputs.rust_required == 'false'
         run: echo 'No Rust work selected; static checks report independently.'
@@ -753,10 +753,10 @@ jobs:
         run: |
           cargo +stable fmt --check
           cargo +stable clippy $JOBS --all-targets --locked -- -D warnings
-          cargo +stable test $JOBS --locked --lib --bins
-          cargo +stable test $JOBS --locked --test storage
+          cargo +stable test $JOBS --no-fail-fast --locked --lib --bins
+          cargo +stable test $JOBS --no-fail-fast --locked --test storage
           cargo +stable build $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --example holder_actor
-          cargo +stable test $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
+          cargo +stable test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'

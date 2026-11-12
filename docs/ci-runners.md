@@ -43,7 +43,7 @@ for):
 
 | `SELF_HOSTED_CI` | Bots (`horizon-light`) | `checks`, `mod-registry`, `pack load bench` (`horizon-checks`) |
 | --- | --- | --- |
-| unset (default) | ours | `verify`, `launcher`: ours for the pull requests ending in 0 or 1, GitHub's for the others and main's pushes; the rest ours |
+| unset (default) | ours | `verify`, `launcher`: ours for this repository's own pull requests ending in 0 or 1, GitHub's for the others, forks' and main's pushes; the rest ours, forks' pull requests excepted |
 | `all` | ours | ours, every pull request |
 | `light` | ours | GitHub's: the desktop is paused |
 | `off` | GitHub's | GitHub's: everything back, in one switch |
@@ -60,7 +60,14 @@ The Python step uses `unittest --durations` (Python 3.12+); the self-hosted `all
 
 ## Forks
 
-A fork's pull request is code nobody here wrote. It may run on the checks runners only:
+A fork's pull request runs on GitHub's runners (since 2026-11-10). GitHub gives it no repository variable, so
+`SELF_HOSTED_CI` can't move it: when the desktop was off or paused, the required `verify` of every fork's pull
+request ending in 0 or 1 waited for it until GitHub failed the job a day later, and re-running it waited again
+(#14131 sat on `horizon-checks` with `SELF_HOSTED_CI=light`). The jobs check
+`github.event.pull_request.head.repo.full_name == github.repository` before they pick our runners.
+
+A fork's pull request is code nobody here wrote. Its own copy of the workflows could still name our labels, so the
+checks runners are the only ones it may reach:
 
 1. The checks runners are an isolated system user on the desktop (`gha`: no sudo, no logins, no SSH keys, `/home`
    invisible, the rest of the system read-only, no GPU or device), and their jobs' tokens write nothing and see no
