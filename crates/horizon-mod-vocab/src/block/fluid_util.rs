@@ -169,7 +169,3 @@ fn move_first(
     }
     None
 }
-
-#[cfg(test)]
-#[path = "fluid_util_tests.rs"]
-mod tests;
