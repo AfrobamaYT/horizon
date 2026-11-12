@@ -125,5 +125,7 @@ the launcher pins; that is protection against a damaged download, the same as th
 signature. Where the release has no build for your platform (an Intel Mac, a pin not released yet), the launcher
 downloads the tool's source and builds it instead, which took about a minute on a test machine, and the build log
 says so: `horizon-mixins tool: no prebuilt for <target>; building from source (once per pin)`. A download that
-fails is an error to retry, never a source build. Later builds reuse the tool, and a build with a mixin, a loop
+fails is an error to retry, never a source build. A newly pinned tool's prebuilt is published by a run on
+main; a pin replaced while its run waited gets its prebuilt from a manual dispatch, and until then the launcher
+builds the tool from source. Later builds reuse the tool, and a build with a mixin, a loop
 slot, a bridge and a module took a few seconds on that machine.

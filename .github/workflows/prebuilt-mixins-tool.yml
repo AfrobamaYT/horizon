@@ -4,7 +4,7 @@ name: prebuilt mixins tool
 # tool is decided by the pinned horizon-mixins commit and the one carried patch
 # (crates/horizon-mod-package/src/mixins_tool.rs), so one prerelease per pair, tagged
 # mixins-tool-<commit>-<patch hash>, never marked latest and never deleted: older launchers keep
-# finding theirs. A run whose pair already has a release stops early. The source is patched by
+# finding theirs. A run whose pair already has a release stops early, unless a dispatch forces the build. The source is patched by
 # `xtask mixins-tool patch`, the applier the launcher uses where no prebuilt exists. A dispatch on
 # another branch builds and smokes every platform and publishes nothing.
 on:
@@ -15,8 +15,15 @@ on:
       - crates/horizon-mod-package/src/mixins_tool.rs
       - .github/workflows/prebuilt-mixins-tool.yml
   workflow_dispatch:
+    inputs:
+      force:
+        description: Build and smoke every platform even when this pin already has a release (nothing is published then)
+        type: boolean
+        default: false
 permissions:
   contents: read
+# One run at a time, the newest waiting one kept: a pin replaced while its run waited gets its prebuilt
+# from a manual dispatch, and until then the launcher builds the tool from source.
 concurrency:
   group: prebuilt-mixins-tool
   cancel-in-progress: false
@@ -25,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       needed: ${{ steps.release.outputs.needed }}
+      released: ${{ steps.release.outputs.released }}
       tag: ${{ steps.release.outputs.tag }}
       rev: ${{ steps.release.outputs.rev }}
       source: ${{ steps.release.outputs.source }}
@@ -39,11 +47,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force }}
         run: |
           set -euo pipefail
           cargo run --locked -p xtask -- mixins-tool release | tee -a "$GITHUB_OUTPUT"
           tag=$(sed -n 's/^tag=//p' "$GITHUB_OUTPUT")
-          if gh release view "$tag" > /dev/null 2>&1; then echo needed=false; else echo needed=true; fi >> "$GITHUB_OUTPUT"
+          # Only "no such release" means there is none: any other answer stops the run.
+          if answer=$(gh api "repos/$GH_REPO/releases/tags/$tag" --silent 2>&1); then released=true
+          elif grep -q 'HTTP 404' <<< "$answer"; then released=false
+          else echo "$answer"; exit 1; fi
+          echo "released=$released" >> "$GITHUB_OUTPUT"
+          if [ "$released" = false ] || [ "$FORCE" = true ]; then echo needed=true; else echo needed=false; fi >> "$GITHUB_OUTPUT"
 
   build:
     needs: fresh
@@ -108,9 +122,14 @@ jobs:
           tool/bin/horizon-mixins apply --workspace source/fixtures/game --mods source/fixtures/mods \
             --out "$RUNNER_TEMP/staged" > /dev/null
           test -f "$RUNNER_TEMP/staged/Cargo.toml"
+      # The archive's flags are GNU tar's; macOS's own tar is BSD.
+      - name: GNU tar on macOS
+        if: runner.os == 'macOS'
+        run: command -v gtar > /dev/null || brew install gnu-tar
       - name: Archive
         run: |
-          tar --sort=name --mtime="@0" --owner=0 --group=0 --numeric-owner -cf - -C tool . | gzip -n > "$ARCHIVE"
+          tar=tar; if [ "$RUNNER_OS" = macOS ]; then tar=gtar; fi
+          "$tar" --sort=name --mtime="@0" --owner=0 --group=0 --numeric-owner -cf - -C tool . | gzip -n > "$ARCHIVE"
           echo "$(du -h "$ARCHIVE" | cut -f1) $ARCHIVE" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
@@ -121,8 +140,9 @@ jobs:
 
   publish:
     needs: [fresh, build]
-    # A dispatch on any other branch builds and smokes every platform but releases nothing.
-    if: github.ref == 'refs/heads/main'
+    # A dispatch on any other branch, or a forced one for a pin already released, builds and smokes
+    # every platform but releases nothing.
+    if: github.ref == 'refs/heads/main' && needs.fresh.outputs.released == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -13,17 +13,25 @@ use horizon_mod_package::mixins_tool::{self, PATCH, PATCH_NAME};
 use sha2::{Digest, Sha256};
 
 use super::{root, run, Step, MIXINS_REV};
-use crate::i18n::trf;
+use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
 
 const SUMS: &str = "SHA256SUMS";
 /// The archive's largest plausible size, packed or unpacked: a corrupt or hostile one stops there.
 const LIMIT: u64 = 512 << 20;
+/// A checksum list holds a line per platform.
+const SUMS_LIMIT: u64 = 1 << 20;
 /// Set by `native-build --mixins-from-source`: the prebuilt tool is not looked for.
 pub(super) static FROM_SOURCE: AtomicBool = AtomicBool::new(false);
 
 /// One file of the tool's release; `None` when the release has no such file.
 type Get<'a> = &'a dyn Fn(&str) -> Result<Option<Box<dyn Read>>, String>;
+
+/// The tool's executable inside its folder.
+fn executable(dir: &Path) -> PathBuf {
+    dir.join("bin")
+        .join(format!("horizon-mixins{}", std::env::consts::EXE_SUFFIX))
+}
 
 /// The patched tool at [`MIXINS_REV`], fetched once per pin and patch.
 pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf, String> {
@@ -32,9 +40,7 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
         .join("tools")
         .join(&MIXINS_REV[..12])
         .join(format!("patched-{}", &mixins_tool::patch_hash()[..12]));
-    let bin = dir
-        .join("bin")
-        .join(format!("horizon-mixins{}", std::env::consts::EXE_SUFFIX));
+    let bin = executable(&dir);
     if bin.is_file() {
         return Ok(bin);
     }
@@ -42,29 +48,76 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
     let started = std::time::Instant::now();
     let seconds = || format!("{:.1}", started.elapsed().as_secs_f64());
     let target = rust.host.target;
-    if !FROM_SOURCE.load(Ordering::Relaxed) {
-        let release = format!(
-            "https://github.com/{PREBUILT_REPO}/releases/download/{}",
-            mixins_tool::release_tag()
-        );
-        let found = prebuilt(&dir, target, &|name| {
-            Ok(
-                crate::backend::get_unless_missing(&format!("{release}/{name}"))?
-                    .map(|response| Box::new(response.into_reader()) as Box<dyn Read>),
-            )
-        })?;
-        if found && bin.is_file() {
+    let release = format!(
+        "https://github.com/{PREBUILT_REPO}/releases/download/{}",
+        mixins_tool::release_tag()
+    );
+    let get = |name: &str| {
+        Ok(
+            crate::backend::get_unless_missing(&format!("{release}/{name}"))?
+                .map(|response| Box::new(response.into_reader()) as Box<dyn Read>),
+        )
+    };
+    let from_source = FROM_SOURCE.load(Ordering::Relaxed);
+    let get: Get = &get;
+    let got = install(&dir, target, (!from_source).then_some(get), &|| {
+        if !from_source {
             super::append_log(&trf(
-                "horizon-mixins tool: downloaded in {seconds} s (once per pin)",
-                &[("seconds", &seconds())],
+                "horizon-mixins tool: no prebuilt for {target}; building from source (once per pin)",
+                &[("target", target)],
             ))?;
-            return Ok(bin);
         }
-        super::append_log(&trf(
-            "horizon-mixins tool: no prebuilt for {target}; building from source (once per pin)",
-            &[("target", target)],
-        ))?;
+        build(rust, &dir)
+    })?;
+    match got {
+        Got::Cached => {}
+        Got::Downloaded => super::append_log(&trf(
+            "horizon-mixins tool: downloaded in {seconds} s (once per pin)",
+            &[("seconds", &seconds())],
+        ))?,
+        Got::Built => super::append_log(&trf(
+            "horizon-mixins tool: fetched and built in {seconds} s (once per pin)",
+            &[("seconds", &seconds())],
+        ))?,
     }
+    Ok(bin)
+}
+
+/// How [`install`] left the tool in its folder.
+#[derive(Debug, PartialEq)]
+enum Got {
+    /// Another launcher put it there while this one waited.
+    Cached,
+    Downloaded,
+    Built,
+}
+
+/// Makes `dir` hold the tool, one launcher at a time: the folder's lock is held across processes
+/// until the tool is in place, and a launcher that waited finds it there. With `release`, the
+/// prebuilt tool is looked for first; `build` runs only where there is none.
+fn install(
+    dir: &Path,
+    target: &str,
+    release: Option<Get>,
+    build: &dyn Fn() -> Result<(), String>,
+) -> Result<Got, String> {
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let lock = fs::File::create(dir.join(".lock")).map_err(|e| e.to_string())?;
+    lock.lock().map_err(|e| e.to_string())?;
+    if executable(dir).is_file() {
+        return Ok(Got::Cached);
+    }
+    if let Some(get) = release {
+        if prebuilt(dir, target, get)? {
+            return Ok(Got::Downloaded);
+        }
+    }
+    build()?;
+    Ok(Got::Built)
+}
+
+/// The tool built from its pinned source with the carried patch, into `dir`.
+fn build(rust: &Toolchain, dir: &Path) -> Result<(), String> {
     let partial = dir.join(".source");
     let top = super::unpack_archive(
         &format!("{}/{MIXINS_REV}", horizon_addresses::HORIZON_MIXINS_SOURCE),
@@ -80,21 +133,17 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
     cmd.args(["install", "--locked", "--path"])
         .arg(top.join("crates/horizon-mixins-cli"))
         .arg("--root")
-        .arg(&dir);
+        .arg(dir);
     let built = run(cmd, "Building horizon-mixins", |_| {});
     let _ = fs::remove_dir_all(&partial);
-    built?;
-    super::append_log(&trf(
-        "horizon-mixins tool: fetched and built in {seconds} s (once per pin)",
-        &[("seconds", &seconds())],
-    ))?;
-    Ok(bin)
+    built
 }
 
-/// Puts the release's prebuilt tool for `target` in `dir/bin`. `Ok(false)` when the release, or
-/// its archive for this target, does not exist: the caller builds from source. A download that
-/// fails, an archive that does not match the release's `SHA256SUMS`, and one built from another
-/// source, patch or target are errors, never a source build.
+/// Puts the release's prebuilt tool for `target` in `dir/bin`, under [`install`]'s lock.
+/// `Ok(false)` only when the release, or its archive for this target, does not exist: the caller
+/// builds from source. A download that fails, an archive the release's `SHA256SUMS` does not list
+/// or does not match, one built from another source, patch or target, and one without the
+/// executable are errors, never a source build.
 fn prebuilt(dir: &Path, target: &str, get: Get) -> Result<bool, String> {
     let name = mixins_tool::archive(target);
     let download = |why: String| {
@@ -103,17 +152,27 @@ fn prebuilt(dir: &Path, target: &str, get: Get) -> Result<bool, String> {
             &[("why", &why)],
         )
     };
-    let Some(mut sums) = get(SUMS).map_err(download)? else {
-        return Ok(false);
+    let invalid = |why: &str| {
+        trf(
+            "The horizon-mixins tool {name} can't be used: {why}. Its release is invalid; report it on the game.",
+            &[("name", &name), ("why", why)],
+        )
     };
-    let mut listing = String::new();
-    sums.read_to_string(&mut listing)
-        .map_err(|e| download(e.to_string()))?;
-    let Some(expected) = super::prebuilt::expected_sum(&listing, &name) else {
+    let Some(sums) = get(SUMS).map_err(download)? else {
         return Ok(false);
     };
     let Some(body) = get(&name).map_err(download)? else {
         return Ok(false);
+    };
+    let mut listing = String::new();
+    sums.take(SUMS_LIMIT + 1)
+        .read_to_string(&mut listing)
+        .map_err(|e| download(e.to_string()))?;
+    if listing.len() as u64 > SUMS_LIMIT {
+        return Err(invalid(&tr("its checksum list is too large")));
+    }
+    let Some(expected) = super::prebuilt::expected_sum(&listing, &name) else {
+        return Err(invalid(&tr("its release lists no checksum for it")));
     };
     let mut bytes = Vec::new();
     body.take(LIMIT)
@@ -125,51 +184,58 @@ fn prebuilt(dir: &Path, target: &str, get: Get) -> Result<bool, String> {
             &[("name", &name)],
         ));
     }
-    let partial = dir.join(".prebuilt");
-    let _ = fs::remove_dir_all(&partial);
-    // `unpack_in` writes inside a folder that exists.
-    fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
+    // This launcher's own folder, removed however this returns.
+    let staging = tempfile::Builder::new()
+        .prefix(".prebuilt-")
+        .tempdir_in(dir)
+        .map_err(|e| e.to_string())?;
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(&bytes[..]).take(LIMIT));
     for entry in tar.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
         let kind = entry.header().entry_type();
         if kind.is_file() || kind.is_dir() {
-            entry
-                .unpack_in(&partial)
-                .map_err(|e| format!("Could not unpack the horizon-mixins tool: {e}"))?;
+            entry.unpack_in(staging.path()).map_err(|e| {
+                trf(
+                    "Could not unpack the horizon-mixins tool: {why}",
+                    &[("why", &e.to_string())],
+                )
+            })?;
         }
     }
-    let identity = fs::read_to_string(partial.join(mixins_tool::IDENTITY)).unwrap_or_default();
+    let identity =
+        fs::read_to_string(staging.path().join(mixins_tool::IDENTITY)).unwrap_or_default();
     if !identity.starts_with(&mixins_tool::identity(target)) {
-        let _ = fs::remove_dir_all(&partial);
-        return Err(trf(
-            "The horizon-mixins tool {name} was not built from the source, patch and target this launcher pins.",
-            &[("name", &name)],
-        ));
+        return Err(invalid(&tr(
+            "it was not built from the source, patch and target this launcher pins",
+        )));
     }
+    if !executable(staging.path()).is_file() {
+        return Err(invalid(&tr("it holds no executable")));
+    }
+    // Under the lock, with no executable in it: what an interrupted source build left, never
+    // another launcher's tool.
     let bin = dir.join("bin");
     let _ = fs::remove_dir_all(&bin);
-    fs::rename(partial.join("bin"), &bin).map_err(|e| e.to_string())?;
-    let _ = fs::remove_dir_all(&partial);
+    fs::rename(staging.path().join("bin"), &bin).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     const TARGET: &str = "x86_64-unknown-linux-gnu";
 
-    /// A release archive holding the tool and `identity`.
-    fn archive(identity: &str) -> Vec<u8> {
+    /// A release archive holding `identity` and, with `tool`, the executable.
+    fn archive(identity: &str, tool: bool) -> Vec<u8> {
         let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
             Vec::new(),
             flate2::Compression::fast(),
         ));
-        for (path, text) in [
-            ("bin/horizon-mixins", "the tool"),
-            (mixins_tool::IDENTITY, identity),
-        ] {
+        let exe = format!("bin/horizon-mixins{}", std::env::consts::EXE_SUFFIX);
+        let name = if tool { exe.as_str() } else { "bin/README" };
+        for (path, text) in [(name, "the tool"), (mixins_tool::IDENTITY, identity)] {
             let mut header = tar::Header::new_gnu();
             header.set_size(text.len() as u64);
             header.set_mode(0o755);
@@ -177,6 +243,10 @@ mod tests {
             tar.append_data(&mut header, path, text.as_bytes()).unwrap();
         }
         tar.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn good() -> Vec<u8> {
+        archive(&mixins_tool::identity(TARGET), true)
     }
 
     fn sums(archive: &[u8]) -> String {
@@ -203,33 +273,54 @@ mod tests {
         }
     }
 
+    /// No staging folder outlives a call, whatever it returned.
+    fn left(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
     #[test]
     fn the_prebuilt_tool_is_checked_then_put_in_place() {
         let dir = tempfile::tempdir().unwrap();
         // The compiler's line after the checked ones is information only.
-        let packed = archive(&format!("{}rustc = any\n", mixins_tool::identity(TARGET)));
+        let packed = archive(
+            &format!("{}rustc = any\n", mixins_tool::identity(TARGET)),
+            true,
+        );
         let get = release(Some(sums(&packed)), Some(packed));
         assert_eq!(prebuilt(dir.path(), TARGET, &get), Ok(true));
         assert_eq!(
-            fs::read_to_string(dir.path().join("bin/horizon-mixins")).unwrap(),
+            fs::read_to_string(executable(dir.path())).unwrap(),
             "the tool"
         );
-        assert!(!dir.path().join(".prebuilt").exists());
+        assert_eq!(left(dir.path()), ["bin"]);
     }
 
     #[test]
-    fn no_release_or_no_archive_for_this_computer_means_a_source_build() {
+    fn only_a_missing_release_or_archive_means_a_source_build() {
         let dir = tempfile::tempdir().unwrap();
-        let packed = archive(&mixins_tool::identity(TARGET));
-        let other = sums(&packed).replace(TARGET, "aarch64-apple-darwin");
-        for get in [
-            release(None, None),
-            release(Some(other), None),
-            release(Some(sums(&packed)), None),
-        ] {
+        let packed = good();
+        for get in [release(None, None), release(Some(sums(&packed)), None)] {
             assert_eq!(prebuilt(dir.path(), TARGET, &get), Ok(false));
         }
-        assert!(!dir.path().join("bin").exists());
+        assert!(left(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn an_archive_its_release_lists_no_checksum_for_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let packed = good();
+        let other = sums(&packed).replace(TARGET, "aarch64-apple-darwin");
+        let why = prebuilt(dir.path(), TARGET, &release(Some(other), Some(packed))).unwrap_err();
+        assert!(why.contains("lists no checksum for it"), "{why}");
+        let long = "0".repeat(SUMS_LIMIT as usize + 1);
+        let why = prebuilt(dir.path(), TARGET, &release(Some(long), Some(good()))).unwrap_err();
+        assert!(why.contains("checksum list is too large"), "{why}");
+        assert!(left(dir.path()).is_empty());
     }
 
     #[test]
@@ -245,14 +336,13 @@ mod tests {
     #[test]
     fn an_archive_that_is_not_the_releases_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let packed = archive(&mixins_tool::identity(TARGET));
-        let get = release(Some(sums(b"another archive")), Some(packed));
+        let get = release(Some(sums(b"another archive")), Some(good()));
         let why = prebuilt(dir.path(), TARGET, &get).unwrap_err();
         assert!(
             why.contains("doesn't match its release's checksum"),
             "{why}"
         );
-        assert!(!dir.path().join("bin").exists());
+        assert!(left(dir.path()).is_empty());
     }
 
     #[test]
@@ -263,14 +353,74 @@ mod tests {
             mixins_tool::identity(TARGET).replace(MIXINS_REV, &"0".repeat(40)),
             String::new(),
         ] {
-            let packed = archive(&identity);
+            let packed = archive(&identity, true);
             let get = release(Some(sums(&packed)), Some(packed));
             let why = prebuilt(dir.path(), TARGET, &get).unwrap_err();
             assert!(
                 why.contains("was not built from the source, patch and target"),
                 "{why}"
             );
-            assert!(!dir.path().join("bin").exists());
+            assert!(left(dir.path()).is_empty());
         }
+    }
+
+    #[test]
+    fn an_archive_without_the_executable_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let packed = archive(&mixins_tool::identity(TARGET), false);
+        let get = release(Some(sums(&packed)), Some(packed));
+        let why = prebuilt(dir.path(), TARGET, &get).unwrap_err();
+        assert!(why.contains("it holds no executable"), "{why}");
+        assert!(left(dir.path()).is_empty());
+    }
+
+    /// Two launchers at once: one downloads, the other waits for the lock and finds the tool.
+    #[test]
+    fn two_installers_download_once_and_both_find_the_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join("tool");
+        let packed = good();
+        let listing = sums(&packed);
+        let downloads = AtomicUsize::new(0);
+        let get = |name: &str| {
+            if name != SUMS {
+                downloads.fetch_add(1, Ordering::SeqCst);
+                // Long enough for the other installer to reach the lock.
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            release(Some(listing.clone()), Some(packed.clone()))(name)
+        };
+        let never = || -> Result<(), String> { panic!("a prebuilt exists") };
+        let got = std::thread::scope(|scope| {
+            let run = || install(&tool, TARGET, Some(&get), &never).unwrap();
+            let first = scope.spawn(run);
+            let second = scope.spawn(run);
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        assert!(
+            got == [Got::Downloaded, Got::Cached] || got == [Got::Cached, Got::Downloaded],
+            "{got:?}"
+        );
+        assert_eq!(downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(fs::read_to_string(executable(&tool)).unwrap(), "the tool");
+        assert_eq!(left(&tool), [".lock", "bin"]);
+    }
+
+    #[test]
+    fn without_a_release_the_tool_is_built() {
+        let dir = tempfile::tempdir().unwrap();
+        let built = AtomicUsize::new(0);
+        let build = || {
+            built.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+        let none = release(None, None);
+        assert_eq!(
+            install(dir.path(), TARGET, Some(&none), &build),
+            Ok(Got::Built)
+        );
+        // `--mixins-from-source`: no release is asked.
+        assert_eq!(install(dir.path(), TARGET, None, &build), Ok(Got::Built));
+        assert_eq!(built.load(Ordering::SeqCst), 2);
     }
 }
