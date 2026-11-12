@@ -30,6 +30,11 @@ mod content {
                 _ => None,
             }
         }
+        pub(in crate::tests) fn block_entity_type_name(
+            _: super::super::BlockEntityTypeKey,
+        ) -> Option<&'static str> {
+            Some("test:counter")
+        }
         pub(in crate::tests) fn item_id(key: super::super::ItemKey<'_>) -> Option<&str> {
             Some(key.0)
         }
