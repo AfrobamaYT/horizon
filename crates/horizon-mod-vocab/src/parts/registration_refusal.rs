@@ -64,6 +64,7 @@ impl PartRegistrar {
             game_rules,
             block_entity_types,
             entity_attributes,
+            general_entity_types,
             world_fluids,
             entity_attribute_modifications,
             attributes,

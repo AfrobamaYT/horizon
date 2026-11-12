@@ -131,6 +131,14 @@ pub mod recipe_book;
 pub mod recipe_book_screen;
 pub mod reconnect;
 pub mod save;
+// The carrier ownership store: an internal storage layer of this
+// library, used by the game crate's transfers (game/world/), like
+// save.rs below it. Not part of the mods' API surface.
+#[cfg(test)]
+mod carrier_recover_tests;
+pub mod carrier_store;
+#[cfg(test)]
+mod carrier_store_tests;
 pub mod scoreboard_cmd;
 pub mod screen_layout;
 pub mod screen_narrator;
