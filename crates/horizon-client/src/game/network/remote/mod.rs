@@ -7,6 +7,7 @@
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
 mod attack_target;
+mod fall_sound;
 mod interaction_actions;
 mod raw_ingress;
 mod recipe_properties;
@@ -7017,21 +7018,7 @@ impl Game<'_> {
                 // client's own level: the fall and honey sounds are heard here
                 // (LocalPlayer.playSound); the server's copy skips this player
                 // (Player.playSound).
-                horizon_client::motion::MotionEvent::Fall(
-                    horizon_client::landing::FallEvent::Sound {
-                        sound,
-                        volume,
-                        pitch,
-                        ..
-                    },
-                ) => {
-                    if let Some(name) = sound
-                        .player_fall_sound()
-                        .or_else(|| sound.honey_landing_sound())
-                    {
-                        self.play_client_player_sound(name, volume, pitch);
-                    }
-                }
+                horizon_client::motion::MotionEvent::Fall(event) => self.block_fall(event),
                 _ => {}
             }
         }

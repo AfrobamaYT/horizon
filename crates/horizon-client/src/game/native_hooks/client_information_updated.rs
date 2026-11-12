@@ -33,11 +33,12 @@ impl Game<'_> {
         {
             let entity_id = g.entity_id;
             let new = crate::game::lan::client_info(&g.info);
-            // `createDefault`: the packet's constructor gives the join's view distance, and
-            // shows every skin layer and lists the player.
-            let mut defaults = horizon_protocol::packets::configuration::ClientInformation::new(2);
-            defaults.model_customisation = 0;
-            defaults.allows_listing = false;
+            // `ClientInformation.createDefault`: no skin parts, not listed.
+            let defaults = horizon_protocol::packets::configuration::ClientInformation {
+                model_customisation: 0,
+                allows_listing: false,
+                ..horizon_protocol::packets::configuration::ClientInformation::new(2)
+            };
             let old = crate::game::lan::client_info(&defaults);
             self.native_client_information_updated(player, entity_id, name, &old, &new);
         }
@@ -53,9 +54,9 @@ mod client_information_updated_tests {
     };
     use std::sync::{Arc, Mutex};
 
-    /// What was heard, in order: the information's old and new view
+    /// What was heard, in order: the information's old value and new view
     /// distance and main hand, or the login.
-    type Heard = Arc<Mutex<Vec<Option<(i8, i8, MainHand)>>>>;
+    type Heard = Arc<Mutex<Vec<Option<(ClientInfo, i8, MainHand)>>>>;
     struct Listen(Heard);
     #[mod_api::__subscriptions]
     impl Hooks for Listen {
@@ -65,7 +66,7 @@ mod client_information_updated_tests {
             event: &mut ClientInformationUpdatedEvent<'_>,
         ) {
             let seen = (
-                event.old.view_distance,
+                event.old.clone(),
                 event.new.view_distance,
                 event.new.main_hand,
             );
@@ -96,54 +97,21 @@ mod client_information_updated_tests {
                     })
                     .unwrap();
                 game.announce_login(uuid, &name);
+                // Vanilla's `ClientInformation.createDefault()`.
+                let defaults = ClientInfo {
+                    language: "en_us".into(),
+                    view_distance: 2,
+                    chat_visibility: ChatVisibility::Full,
+                    chat_colors: true,
+                    model_customisation: 0,
+                    main_hand: MainHand::Right,
+                    text_filtering: false,
+                    allows_listing: false,
+                    particle_status: ParticleStatus::All,
+                };
                 assert_eq!(
                     *heard.lock().unwrap(),
-                    [Some((2, 12, MainHand::Left)), None]
-                );
-            });
-        });
-    }
-
-    /// Records the whole `old` information of each update.
-    struct Olds(Arc<Mutex<Vec<ClientInfo>>>);
-    #[mod_api::__subscriptions]
-    impl Hooks for Olds {
-        fn client_information_updated(
-            &self,
-            _: &mut dyn ServerHost,
-            event: &mut ClientInformationUpdatedEvent<'_>,
-        ) {
-            self.0.lock().unwrap().push(event.old.clone());
-        }
-    }
-
-    /// The `old` side of the join's own report is `ClientInformation.createDefault`, every field.
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn the_joined_information_is_reported_against_all_the_vanilla_defaults() {
-        let heard = Arc::new(Mutex::new(Vec::new()));
-        let mods: mod_api::Mods = vec![ModEntry::new("olds", Box::new(Olds(heard.clone())))].into();
-        mod_platform::testing::with_mods(mods, || {
-            crate::game::native_guest_turn_tests::with_guests(|game| {
-                let host = game.lan.as_mut().unwrap();
-                let (uuid, name) = host
-                    .hub
-                    .update_guest(12, |g| (g.uuid, g.name.clone()))
-                    .unwrap();
-                game.announce_login(uuid, &name);
-                assert_eq!(
-                    *heard.lock().unwrap(),
-                    [ClientInfo {
-                        language: "en_us".to_owned(),
-                        view_distance: 2,
-                        chat_visibility: ChatVisibility::Full,
-                        chat_colors: true,
-                        model_customisation: 0,
-                        main_hand: MainHand::Right,
-                        text_filtering: false,
-                        allows_listing: false,
-                        particle_status: ParticleStatus::All,
-                    }]
+                    [Some((defaults, 12, MainHand::Left)), None]
                 );
             });
         });

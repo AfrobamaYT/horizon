@@ -29,16 +29,9 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 ## Counts
 
-| Interface | Public methods | Covered | Partial | Missing | n/a |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 22 | 12 | 26 | 0 |
-| `IBlockStateExtension` | 57 | 21 | 11 | 25 | 0 |
-| `IItemExtension` | 46 | 16 | 12 | 18 | 0 |
-| `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
-| `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
-| `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
-| `IFluidExtension` | 9 | 0 | 6 | 3 | 0 |
-| `IMenuTypeExtension` | 2 | 0 | 2 | 0 | 0 |
+<!-- extension-counts -->
+
+The book build computes this table from the method verdicts below; there is no snapshot to update.
 
 Of the 60 block methods, 57 exist a second time with the state as receiver, so the state-extension counts are
 the block counts minus three; see [`IBlockStateExtension`](#iblockstateextension). The block follow-up is
@@ -131,7 +124,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 21 covered, 11 partial, 25 missing among the 57. The handful of signature differences (`canStickTo` takes
+The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -257,7 +250,7 @@ are reachable through `BlockEntityRef`.
 | `onLoad()` | Partial | `BlockEntityPart::block_entity` (`hooks/base.rs`) | Initial saved data is set at creation, before the saved NBT is applied; no after-load notice. |
 | `requestModelDataUpdate()` | Missing | — | No model-data invalidation API. |
 | `getModelData()` | Missing | — | No `ModelData`; drawing uses `block_entity_submit` and the model path. |
-| `invalidateCapabilities()` | Partial | `BlockCapabilityCache::invalidate` (`crates/horizon-mod-vocab/src/item/capability_cache.rs`) | Providers are queried per lookup; a `BlockCapabilityCache` keeps one and checks it by polling. A provider whose answer changes with nothing the cache compares asks its caches' owners to `invalidate`; there is no broadcast to every cache. |
+| `invalidateCapabilities()` | Partial | `BlockCapabilityCache::invalidate` (`crates/horizon-mod-vocab/src/item/capability_cache.rs`) | Providers are queried per lookup; a `BlockCapabilityCache` keeps one and checks it by polling. When a provider's answer changes with nothing the cache compares, the cache's owner calls `invalidate`; there is no broadcast to every cache. |
 | `applyStructureRotation(mirror, rotation)` | Missing | — | Structure rotation is engine-owned; no callback. |
 
 ## `IFluidExtension`
