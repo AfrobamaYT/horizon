@@ -10588,7 +10588,7 @@ impl Game<'_> {
         let book = &mut self.level.recipe_book;
         book.recipes.retain(|r| index.contains(r));
         book.to_be_displayed.retain(|r| index.contains(r));
-        self.dim = dim;
+        self.enter_opened_dim(dim);
         self.audio.set_world(dim.id());
         // LevelStorageAccess.getIconFile: this save's icon.png is what the
         // Select World list shows.

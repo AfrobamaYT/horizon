@@ -2856,7 +2856,7 @@ impl Game<'_> {
         if let Some(profile) = self.remote.as_ref().map(|remote| remote.profile) {
             self.initialize_entity(Holder::Player(profile), "minecraft:player");
         }
-        self.apply_settings();
+        self.finish_remote_level();
     }
 
     /// `ClientChunkCache.Storage.inRange`: within the storage around the
