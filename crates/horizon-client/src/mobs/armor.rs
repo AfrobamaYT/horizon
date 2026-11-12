@@ -298,9 +298,12 @@ mod tests {
                 map.value(key).unwrap()
             );
         }
-        // No map yet: the type default with the bonus, in range.
-        assert_eq!(max_absorption_of(None, 0.0, 8.0), 8.0);
-        assert_eq!(max_absorption_of(None, 0.0, -4.0), 0.0);
+        // No map yet: the type default with the bonus, in the bounds its
+        // type took from the catalog.
+        let bounds = finalize::AttrBounds::of(&catalog);
+        assert_eq!(bounds.sanitize_max_absorption(8.0), 8.0);
+        assert_eq!(bounds.sanitize_max_absorption(-4.0), 0.0);
+        assert_eq!(bounds.sanitize_max_absorption(2052.0), 2048.0);
     }
 
     fn magma_cube(size: i32) -> Mob {
