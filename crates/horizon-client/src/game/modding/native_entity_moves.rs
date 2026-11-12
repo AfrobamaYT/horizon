@@ -44,13 +44,13 @@ impl Game<'_> {
         self.teleport_stops(t);
         true
     }
-    /// Sends the entity to `pos` in the level `dimension`
-    /// (`Entity.teleportTo(ServerLevel, ..)`), as `/execute in <dimension> run
-    /// tp` does: the level opens if it isn't, a player arrives after the
+    /// Sends the entity to `pos` in the level `dimension` (`Entity.teleport`
+    /// with a portal's transition, `TeleportMotion::Keep`): the level opens if
+    /// it isn't, the entity keeps its motion, a player arrives after the
     /// current tick, a vehicle takes its passengers along. In the entity's own
-    /// level it is `entity_teleport_to`. False for what `entity_teleport_to`
-    /// refuses, a dimension that isn't registered, and kinds that cannot change
-    /// level here (anything but a server guest, a mob, a boat or a minecart).
+    /// level it is `entity_teleport_to` with the motion kept. False for what
+    /// `entity_teleport_to` refuses, a dimension that isn't registered, and
+    /// kinds that cannot change level here (`teleport_target_across`).
     pub(super) fn entity_teleport_to_level(
         &mut self,
         entity: EntityRef,

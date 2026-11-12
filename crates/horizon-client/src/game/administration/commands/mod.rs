@@ -115,6 +115,17 @@ pub(super) fn entity_pitch(pitch: f32) -> f32 {
     (pitch % 360.0).clamp(-90.0, 90.0)
 }
 
+/// What a teleport's `TeleportTransition` does with the entity's motion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::game) enum TeleportMotion {
+    /// `Entity.teleportTo(ServerLevel, ..)`, as `/tp` calls it: no delta and no
+    /// `Relative.DELTA`, so the entity arrives still.
+    Stop,
+    /// A portal's `Relative.DELTA` with no delta of its own: the entity keeps
+    /// the motion it had (`PositionMoveRotation.of(this)`), unturned.
+    Keep,
+}
+
 /// `PositionMoveRotation.calculateAbsolute` and `TeleportCommand.performTeleport`.
 pub(super) fn teleport_velocity(velocity: Vec3, relative: [bool; 3], fall_flying: bool) -> Vec3 {
     Vec3::new(
@@ -1442,6 +1453,34 @@ impl Game<'_> {
             }
         });
     }
+    /// `PositionMoveRotation.of(entity).deltaMovement()`: the motion a
+    /// transition that keeps it (`TeleportMotion::Keep`) carries over, a
+    /// minecart's clamped (`minecarts::known_movement`). None for a player,
+    /// whose client holds its motion, and an entity no level holds.
+    pub(super) fn transition_motion(&mut self, t: Target) -> Option<Vec3> {
+        if matches!(t, Target::Player | Target::Guest(_)) {
+            return None;
+        }
+        let motion = self
+            .in_target_level(t, |g| {
+                let mut motion = None;
+                target_entity_mut!(g, t, e => motion = Some(e.velocity()));
+                motion
+            })
+            .flatten()?;
+        Some(if matches!(t, Target::Cart(_)) {
+            super::minecarts::known_movement(motion)
+        } else {
+            motion
+        })
+    }
+    /// After a teleport placed `t` in its level: `motion` is its motion again
+    /// (`Entity.teleportSetPosition` with `Relative.DELTA`).
+    pub(super) fn restore_transition_motion(&mut self, t: Target, motion: Vec3) {
+        let _ = self.in_target_level(t, |g| {
+            target_entity_mut!(g, t, e => *e.velocity_mut() = motion);
+        });
+    }
     /// `TeleportCommand.performTeleport` after a successful `teleportTo` in
     /// the target's own level: unless it is a fall-flying living entity, its
     /// vertical motion is zeroed and it is on the ground; a mob's navigation
@@ -1812,11 +1851,13 @@ impl Game<'_> {
         from
     }
 
-    /// A mod sends `t` to `pos` in `level` (`Entity.teleportTo(ServerLevel, ..)`):
-    /// as `/tp` into another level does, or in its own level when that is
-    /// `level`. False for a kind that only moves within its level (items,
-    /// orbs, projectiles, ...), a player who is not a server guest, or a
-    /// transfer the game could not make. A fake player stays, and the call is true.
+    /// A mod sends `t` to `pos` in `level` (`Entity.teleport` with a
+    /// `TeleportTransition` that keeps the motion, `TeleportMotion::Keep`): in
+    /// its own level when that is `level`, else as `/tp` into another level
+    /// does. False for a kind that only moves within its level (armor stands,
+    /// falling blocks, ...; `teleport_target_across`), a player who is not a
+    /// server guest, or a transfer the game could not make. A fake player
+    /// stays, and the call is true.
     pub(in crate::game) fn teleport_to_level(
         &mut self,
         t: Target,
@@ -1825,15 +1866,20 @@ impl Game<'_> {
         rotation: Option<[f32; 2]>,
     ) -> bool {
         if self.target_level(t) == level {
+            let motion = self.transition_motion(t);
             self.teleport_to(t, pos, rotation, true);
+            if let Some(motion) = motion {
+                self.restore_transition_motion(t, motion);
+            }
             return true;
         }
-        self.teleport_across(t, level, pos, rotation, true)
+        self.teleport_across(t, level, pos, rotation, true, TeleportMotion::Keep)
             .unwrap_or(false)
     }
-    /// A server's player teleported into another level than theirs
-    /// (ServerPlayer.teleport): queued to move after the command. False
-    /// when `t` is not a player in another level.
+    /// `t` teleported into another level than its own: an entity crosses at
+    /// once (`teleport_target_across`), a server's player is queued to move
+    /// after the command (ServerPlayer.teleport). False when `t` cannot
+    /// change level or is already in `level`.
     fn teleport_across(
         &mut self,
         t: Target,
@@ -1841,8 +1887,9 @@ impl Game<'_> {
         pos: [f64; 3],
         rotation: Option<[f32; 2]>,
         turn_riders: bool,
+        motion: TeleportMotion,
     ) -> R<bool> {
-        match self.teleport_target_across(t, level, pos, rotation, turn_riders) {
+        match self.teleport_target_across(t, level, pos, rotation, turn_riders, motion) {
             Ok(Some(moved)) => return Ok(moved),
             Ok(None) => {}
             Err(error) => {
@@ -1985,7 +2032,7 @@ impl Game<'_> {
                 let Some(pos) = self.teleport_command_target(t, level, pos) else {
                     continue;
                 };
-                if !self.teleport_across(t, level, pos, rotation, true)? {
+                if !self.teleport_across(t, level, pos, rotation, true, TeleportMotion::Stop)? {
                     // TeleportCommand.teleportToEntity: the destination's angles,
                     // which the riders turn to as well.
                     self.teleport_to(t, pos, rotation, true);
@@ -2093,7 +2140,14 @@ impl Game<'_> {
                     }
                 }))
             });
-            if self.teleport_across(t, source_level, pos, rotation, turn_riders)? {
+            if self.teleport_across(
+                t,
+                source_level,
+                pos,
+                rotation,
+                turn_riders,
+                TeleportMotion::Stop,
+            )? {
                 continue;
             }
             self.teleport_to_relative(t, pos, rotation, relative, turn_riders);
@@ -4767,7 +4821,14 @@ mod fake_travel_tests {
             let (fake, real) = (conn(2), conn(1));
             let to_nether = |game: &mut super::super::Game<'_>, conn| {
                 game.as_guest(conn, |g| {
-                    g.teleport_across(Target::Player, Dim::Nether, [0.0, 64.0, 0.0], None, false)
+                    g.teleport_across(
+                        Target::Player,
+                        Dim::Nether,
+                        [0.0, 64.0, 0.0],
+                        None,
+                        false,
+                        super::TeleportMotion::Stop,
+                    )
                 })
             };
             // Taken (true), so no same-level teleport stands in for it, and nothing queued.
@@ -4780,10 +4841,10 @@ mod fake_travel_tests {
     }
 
     /// A mod's `teleport_to_level`: a player to another level goes on the queue; to their own
-    /// level, nothing is queued; what cannot change level is refused.
+    /// level, nothing is queued; an entity no level holds is refused.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_mod_sends_a_player_to_another_level_and_not_an_item() {
+    fn a_mod_sends_a_player_to_another_level_and_not_a_missing_entity() {
         super::super::native_entity_refs::tests::with_game(|game| {
             super::super::bossbars::audience_tests::add_real_and_fake(game);
             let conn = game
@@ -4807,8 +4868,226 @@ mod fake_travel_tests {
             let home = game.target_level(Target::Guest(conn));
             assert_eq!(sent(game, home), Some(true));
             assert_eq!(game.level_teleports.len(), 1);
-            // An item only moves within its level.
+            // No level holds this item.
             assert!(!game.teleport_to_level(Target::Item(9_999), Dim::Nether, [0.0; 3], None));
+        });
+    }
+
+    /// A mod's `teleport_to_level` into another level carries an item and an arrow there as
+    /// vanilla's `Entity.teleportCrossDimension` does: recreated with their stack, thrower, owner
+    /// and motion (`Relative.DELTA`), gone from the source, and the old handle refused as a
+    /// removed entity's is (`Entity.teleport` returns null when `isRemoved`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_an_item_and_an_arrow_to_another_level_with_their_motion() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.native_lifecycle.world_open_ready().unwrap();
+            game.summon_with_nbt(
+                "minecraft:item",
+                [0.5, 80.0, 0.5],
+                r#"{Item:{id:"minecraft:diamond",count:7},Thrower:[I;1,2,3,4],Motion:[0.1d,0.2d,-0.3d]}"#,
+            )
+            .unwrap();
+            game.summon_with_nbt(
+                "minecraft:arrow",
+                [2.5, 80.0, 0.5],
+                "{Owner:[I;5,6,7,8],Motion:[0.5d,0.0d,0.25d]}",
+            )
+            .unwrap();
+            game.lan_assign_ids();
+            let thrower = Some([1, 2, 3, 4]);
+            let owner = Some([5, 6, 7, 8]);
+            let item = game.dropped.iter().find(|e| e.thrower == thrower).unwrap().id;
+            let arrow = game
+                .creatures
+                .projectiles
+                .iter()
+                .find(|p| p.owner_uuid == owner)
+                .unwrap()
+                .id;
+            let (item, arrow) = (game.entity(item).unwrap(), game.entity(arrow).unwrap());
+            let nether = "minecraft:the_nether";
+            assert!(game.entity_teleport_to_level(item, nether, [3.5, 70.0, -2.5], None));
+            assert!(game.entity_teleport_to_level(arrow, nether, [4.5, 71.0, -2.5], None));
+            assert_eq!(game.dim, Dim::Overworld);
+            assert!(!game.dropped.iter().any(|e| e.thrower == thrower));
+            assert!(!game.creatures.projectiles.iter().any(|p| p.owner_uuid == owner));
+            assert!(!game.entity_teleport_to_level(item, nether, [0.5, 70.0, 0.5], None));
+
+            game.enter_level(Dim::Nether).unwrap();
+            let e = game.dropped.iter().find(|e| e.thrower == thrower).unwrap();
+            assert_eq!(
+                (&*e.stack.item, e.stack.count),
+                ("minecraft:diamond", 7)
+            );
+            assert_eq!(e.position, Vec3::new(3.5, 70.0, -2.5));
+            assert_eq!(e.velocity, Vec3::new(0.1, 0.2, -0.3));
+            let p = game
+                .creatures
+                .projectiles
+                .iter()
+                .find(|p| p.owner_uuid == owner)
+                .unwrap();
+            assert_eq!(p.position, Vec3::new(4.5, 71.0, -2.5));
+            assert_eq!(p.velocity, Vec3::new(0.5, 0.0, 0.25));
+        });
+    }
+
+    /// A mod's minecart keeps its motion into another level as `PositionMoveRotation.of(this)`
+    /// has it: `OldMinecartBehavior.getKnownMovement`, 0.4 at most along x and z.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_a_minecart_to_another_level_with_its_known_movement() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.native_lifecycle.world_open_ready().unwrap();
+            game.summon_with_nbt(
+                "minecraft:minecart",
+                [0.5, 80.0, 0.5],
+                "{Motion:[0.3d,0.1d,-0.6d]}",
+            )
+            .unwrap();
+            game.lan_assign_ids();
+            let cart = game.entity(game.carts[0].id).unwrap();
+            assert!(game.entity_teleport_to_level(
+                cart,
+                "minecraft:the_nether",
+                [3.5, 70.0, -2.5],
+                None
+            ));
+            assert!(game.carts.is_empty());
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(game.carts.len(), 1);
+            assert_eq!(game.carts[0].velocity, Vec3::new(0.3, 0.1, -0.4));
+        });
+    }
+
+    /// Summons `kind` with `nbt` at 0.5 80 0.5 in the Overworld, where `id` finds it, and sends
+    /// it to 3.5 70 -2.5 in the Nether by a mod's `teleport_to_level`: the call is true and the
+    /// Overworld holds it no more. The Nether is left in place.
+    fn sent_to_the_nether(
+        game: &mut super::super::Game<'_>,
+        kind: &str,
+        nbt: &str,
+        id: impl Fn(&super::super::Game<'_>) -> Option<u32>,
+    ) {
+        game.native_lifecycle.world_open_ready().unwrap();
+        game.summon_with_nbt(kind, [0.5, 80.0, 0.5], nbt).unwrap();
+        game.lan_assign_ids();
+        let entity = game.entity(id(game).expect("summoned")).unwrap();
+        assert!(game.entity_teleport_to_level(
+            entity,
+            "minecraft:the_nether",
+            [3.5, 70.0, -2.5],
+            None
+        ));
+        assert!(id(game).is_none(), "the Overworld still holds it");
+        game.enter_level(Dim::Nether).unwrap();
+    }
+
+    /// A primed TNT is recreated in the other level with its fuse and motion
+    /// (`PrimedTnt.restoreFrom`, `Relative.DELTA`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_a_primed_tnt_to_another_level_with_its_fuse_and_motion() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            sent_to_the_nether(
+                game,
+                "minecraft:tnt",
+                "{fuse:200s,Motion:[0.1d,0.2d,-0.3d]}",
+                |g| g.tnts.first().map(|t| t.id),
+            );
+            assert_eq!(game.tnts.len(), 1);
+            let tnt = &game.tnts[0];
+            assert_eq!(tnt.fuse, 200);
+            assert_eq!(tnt.position, Vec3::new(3.5, 70.0, -2.5));
+            assert_eq!(tnt.velocity, Vec3::new(0.1, 0.2, -0.3));
+        });
+    }
+
+    /// An experience orb is recreated in the other level with its value, count and motion.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_an_experience_orb_to_another_level_with_its_value_and_motion() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            sent_to_the_nether(
+                game,
+                "minecraft:experience_orb",
+                "{Value:7s,Count:2,Motion:[0.1d,0.2d,-0.3d]}",
+                |g| g.orbs.first().map(|o| o.id),
+            );
+            assert_eq!(game.orbs.len(), 1);
+            let orb = &game.orbs[0];
+            assert_eq!((orb.value, orb.count), (7, 2));
+            assert_eq!(orb.position, Vec3::new(3.5, 70.0, -2.5));
+            assert_eq!(orb.velocity, Vec3::new(0.1, 0.2, -0.3));
+        });
+    }
+
+    /// A firework rocket is recreated in the other level with its stack, owner and motion
+    /// (`Projectile.restoreFrom`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_a_firework_to_another_level_with_its_owner_and_motion() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            sent_to_the_nether(
+                game,
+                "minecraft:firework_rocket",
+                r#"{LifeTime:40,Owner:[I;5,6,7,8],Motion:[0.1d,0.2d,-0.3d],FireworksItem:{id:"minecraft:firework_rocket",count:1}}"#,
+                |g| g.rockets.first().map(|r| r.id),
+            );
+            assert_eq!(game.rockets.len(), 1);
+            let rocket = &game.rockets[0];
+            assert_eq!(&*rocket.item.item, "minecraft:firework_rocket");
+            assert_eq!(rocket.owner_uuid, Some([5, 6, 7, 8]));
+            assert_eq!(rocket.position, Vec3::new(3.5, 70.0, -2.5));
+            assert_eq!(rocket.velocity, Vec3::new(0.1, 0.2, -0.3));
+        });
+    }
+
+    /// A thrown trident is recreated in the other level with its stack and motion.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_a_trident_to_another_level_with_its_stack_and_motion() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            sent_to_the_nether(
+                game,
+                "minecraft:trident",
+                r#"{Motion:[0.1d,0.2d,-0.3d],item:{id:"minecraft:trident",count:1}}"#,
+                |g| g.tridents.first().map(|t| t.id),
+            );
+            assert_eq!(game.tridents.len(), 1);
+            let trident = &game.tridents[0];
+            assert_eq!(&*trident.stack.item, "minecraft:trident");
+            assert_eq!(trident.position, Vec3::new(3.5, 70.0, -2.5));
+            assert_eq!(trident.velocity, Vec3::new(0.1, 0.2, -0.3));
+        });
+    }
+
+    /// A kind this call cannot move into another level (an armor stand) answers false and stays.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_cannot_send_an_armor_stand_to_another_level() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.native_lifecycle.world_open_ready().unwrap();
+            game.summon_with_nbt("minecraft:armor_stand", [0.5, 80.0, 0.5], "{}")
+                .unwrap();
+            game.lan_assign_ids();
+            let stand = game.entity(game.armor_stands[0].id).unwrap();
+            assert!(!game.entity_teleport_to_level(
+                stand,
+                "minecraft:the_nether",
+                [3.5, 70.0, -2.5],
+                None
+            ));
+            assert_eq!(game.armor_stands.len(), 1);
+            game.enter_level(Dim::Nether).unwrap();
+            assert!(game.armor_stands.is_empty());
         });
     }
 }
