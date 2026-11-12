@@ -132,7 +132,9 @@ load order and on the main thread; one mod's error is logged and rolls back its
 own work only. The serverbound limit stays vanilla's 32,767 bytes. An
 undeclared channel is ignored as before. `minecraft:` and `horizon:` ids cannot
 be declared, and a raw id that a typed payload also registers refuses load,
-naming both mods. Raw channels
+naming both mods. `PlayerRef::announced_channels` reads what the client
+announced in `minecraft:register` (less `minecraft:unregister`), in
+configuration and play: at most 128 channels of up to 64 bytes. Raw channels
 are server-side only and take exact ids; a namespace wildcard may follow.
 
 ## Stage 2: the value codec

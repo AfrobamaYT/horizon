@@ -287,6 +287,8 @@ pub struct PlayerSender {
     wire: Option<Arc<Counters>>,
     /// Registry negotiation belongs to this live connection, never a process-wide UUID cache.
     pub datapack_offer: Option<Arc<[u8]>>,
+    /// The plugin channels the client announced, in configuration and play.
+    pub announced: Arc<super::announced_channels::AnnouncedChannels>,
 }
 #[derive(Clone)]
 enum To {
@@ -356,6 +358,7 @@ impl PlayerSender {
             wire: None,
             payload_transport: Transport::empty(),
             datapack_offer: None,
+            announced: Arc::default(),
         }
     }
     #[cfg(test)]
@@ -391,6 +394,7 @@ impl PlayerSender {
             ),
             wire: None,
             datapack_offer: None,
+            announced: Arc::default(),
         };
         (sender, move || inspect.queued_contents())
     }
@@ -405,6 +409,7 @@ impl PlayerSender {
             wire: None,
             payload_transport: Transport::empty(),
             datapack_offer: None,
+            announced: Arc::default(),
         }
     }
     /// The bytes received from and sent to the client on the wire so far.
@@ -1160,6 +1165,7 @@ struct Parts {
     info: ClientInformation,
     brand: String,
     datapack_offer: Option<Vec<u8>>,
+    announced: Arc<super::announced_channels::AnnouncedChannels>,
 }
 
 fn login_and_configure(
@@ -1544,8 +1550,10 @@ fn login_and_configure(
         }
     }
     payload_transport.finish_configuration()?;
+    let announced = c.announced.clone();
     c.finish()?;
     Ok(Some(Parts {
+        announced,
         payload_transport,
         uuid,
         name: name.to_owned(),
@@ -1603,6 +1611,13 @@ fn receive_configuration(
         return Ok(None);
     }
     match packet {
+        // ServerCommonPacketListenerImpl hands these to the plugin messenger, in
+        // configuration as in play: the list stays on the connection.
+        cfg::Serverbound::CustomPayload(payload)
+            if c.announced.apply(&payload.channel, &payload.data) =>
+        {
+            Ok(None)
+        }
         cfg::Serverbound::CustomPayload(payload) => c
             .application(payload)
             .map(|payload| payload.map(cfg::Serverbound::CustomPayload)),
@@ -1926,6 +1941,7 @@ fn play(
         wire: Some(c.reader.counters.clone()),
         payload_transport: parts.payload_transport.clone(),
         datapack_offer: parts.datapack_offer.map(Into::into),
+        announced: parts.announced.clone(),
     };
     let required_pack = shared
         .config
@@ -2092,6 +2108,14 @@ impl io_pool::Session for PlayConn {
                                         },
                                     );
                                 }
+                                return Verdict::Go;
+                            }
+                            Ok(crate::raw_payloads::Classified::Other(payload))
+                                if self
+                                    .payload_sender
+                                    .announced
+                                    .apply(&payload.channel, &payload.data) =>
+                            {
                                 return Verdict::Go;
                             }
                             Ok(crate::raw_payloads::Classified::Other(payload)) => {
@@ -3274,6 +3298,7 @@ mod outgoing_budget_tests {
             ),
             wire: None,
             datapack_offer: None,
+            announced: Arc::default(),
         }
     }
     #[test]

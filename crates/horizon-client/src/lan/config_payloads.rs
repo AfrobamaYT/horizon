@@ -46,6 +46,8 @@ pub(super) struct ConfigIo<'a> {
     pub sender: Option<ConfigSender>,
     events: crate::net::ingress::Producer<super::NetEvent>,
     handed_off: bool,
+    /// What the client announced in `minecraft:register`, kept into play.
+    pub announced: Arc<super::announced_channels::AnnouncedChannels>,
 }
 impl<'a> ConfigIo<'a> {
     pub fn new(
@@ -66,6 +68,7 @@ impl<'a> ConfigIo<'a> {
             sender,
             events,
             handed_off: false,
+            announced: Arc::default(),
         })
     }
     pub fn send(&mut self, body: &[u8]) -> horizon_protocol::Result<()> {
