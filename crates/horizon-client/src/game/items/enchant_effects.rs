@@ -1747,6 +1747,51 @@ mod tests {
     /// Mending items in `EquipmentSlot.VALUES` order using the player's RNG,
     /// leaving the world RNG untouched.
     #[test]
+    fn mixed_repair_enchantments_weight_each_entry() {
+        let definition = serde_json::json!({
+            "description": "Repair", "supported_items": "minecraft:diamond_pickaxe",
+            "weight": 1, "max_level": 1, "anvil_cost": 1,
+            "min_cost": {"base": 1, "per_level_above_first": 0},
+            "max_cost": {"base": 1, "per_level_above_first": 0},
+            "slots": ["any"],
+            "effects": {"minecraft:repair_with_xp": [{"effect": {"type": "minecraft:multiply", "factor": 2}}]}
+        });
+        let enchantments = super::Enchantments::default()
+            .with_entries([("test:first", &definition), ("test:second", &definition)])
+            .unwrap()
+            .unwrap();
+        let mut main = ItemStack::new("minecraft:diamond_pickaxe", 1);
+        main.damage = 20;
+        main.set_crafting_enchantments(vec![("test:first".into(), 1), ("test:second".into(), 1)]);
+        let mut off = ItemStack::new("minecraft:diamond_pickaxe", 1);
+        off.damage = 20;
+        off.set_crafting_enchantments(vec![("test:first".into(), 1)]);
+        let main = Some(main);
+        let off = Some(off);
+        let none = None;
+        use super::PlayerSlot::{Armor, Main, Off};
+        let slots = [
+            (Main, &main),
+            (Off, &off),
+            (Armor(3), &none),
+            (Armor(2), &none),
+            (Armor(1), &none),
+            (Armor(0), &none),
+        ];
+        let expected_candidates = [Main, Main, Off];
+        let mut actual_rng = LegacyRandom::new(20_002);
+        let mut expected_rng = LegacyRandom::new(20_002);
+        for _ in 0..32 {
+            let index = expected_rng.next_int_bound(3).unwrap() as usize;
+            assert_eq!(
+                pick_mending_slot(slots, &enchantments, &mut actual_rng),
+                Some(expected_candidates[index])
+            );
+        }
+        assert_eq!(actual_rng.next_long(), expected_rng.next_long());
+    }
+
+    #[test]
     fn mending_picks_damaged_candidate_in_equipment_slot_order_from_player_rng() {
         let enchantments = super::Enchantments::default().with_entries([("minecraft:mending", &serde_json::json!({
             "description": "Mending", "supported_items": "minecraft:diamond_pickaxe", "weight": 1,
