@@ -388,6 +388,62 @@ fn a_row_joined_during_the_tick_span_ticks_the_next_phase() {
     });
 }
 
+/// A shrunken row list leaves no stale rider link: removing the last rider
+/// of a two-rider tree (the sweep's effect, reproduced by taking the row
+/// out of the list) leaves the first rider's sibling chain pointing past
+/// the list's end unless the index's buffers are cleared before the
+/// rebuild — the next pass would walk off it. Without the panic, the root
+/// and the remaining rider each tick once.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_removed_last_rider_leaves_no_stale_index_link() {
+    with_counter(|game, l| {
+        let first = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], Vec::new());
+        let second = record_at("mymod:robot", [7, 7, 7, 7], [0.5, 64.0, 0.5], Vec::new());
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![first, second]);
+        let ids = row_ids(game);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [root, ids[1], ids[2]]);
+        l.trace.lock().unwrap().clear();
+        // The sweep took the last-joined rider out of the list.
+        let gone = game
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .position(|row| row.id == ids[2])
+            .unwrap();
+        game.resident_entities.general.rows.remove(gone);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [root, ids[1]]);
+    });
+}
+
+/// The same shrink with the tree's only rider: the root's own first-child
+/// link pointed at the removed place, and a reused buffer keeps it.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_removed_only_rider_leaves_no_stale_index_link() {
+    with_counter(|game, l| {
+        let rider = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], Vec::new());
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![rider]);
+        let ids = row_ids(game);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [root, ids[1]]);
+        l.trace.lock().unwrap().clear();
+        let gone = game
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .position(|row| row.id == ids[1])
+            .unwrap();
+        game.resident_entities.general.rows.remove(gone);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [root]);
+    });
+}
+
 /// A row a listener discarded from an earlier row's callback gets no
 /// callback of its own: `entity_remove` queues the removal and invalidates
 /// the handle, and the row stays in the list until the sweep — the walk

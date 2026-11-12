@@ -627,9 +627,13 @@ impl RiderIndex {
         self.stamp = Some(stamp);
         self.length = rows.len();
         self.mounts = mounts;
-        // The buffers are reused: resize keeps their capacity and only
-        // extends or truncates the tail.
+        // The buffers are reused — clear first and resize back, keeping the
+        // capacity: a plain resize keeps the surviving slots' old links too,
+        // so a row list that shrank leaves links to places that no longer
+        // exist, and the next pass would walk off the end.
+        self.first_child.clear();
         self.first_child.resize(rows.len(), None);
+        self.next_sibling.clear();
         self.next_sibling.resize(rows.len(), None);
         self.last_child.clear();
         self.last_child.resize(rows.len(), None);
