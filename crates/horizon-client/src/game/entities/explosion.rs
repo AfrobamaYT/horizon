@@ -1153,12 +1153,6 @@ impl Game<'_> {
         self.explosion_breaks_decorations(center, diameter, interaction);
         pushed
     }
-    fn blast_damage_caused_by_mob(&self) -> bool {
-        self.combat.explicit_explosion_cause.as_ref().map_or_else(
-            || self.blast_attacker().is_some(),
-            |cause| cause.as_ref().is_some_and(|c| c.species.is_some()),
-        )
-    }
 
     /// Decoration kills credit `DamageSource.getEntity`: the explicit blast
     /// cause, including a TNT igniter or the player who broke an end crystal.
@@ -1195,8 +1189,24 @@ impl Game<'_> {
     /// A mob causes the blast (`source.getEntity() instanceof Mob`) and
     /// `canEntityGrief` refuses it: decorations take no harm.
     fn blast_mob_refused(&self) -> bool {
-        self.blast_damage_caused_by_mob()
-            && !self.can_entity_grief(self.blast_attacker().map(|(id, _)| id))
+        // No listener and the rule on: no mob is refused, and no cause is looked up.
+        if !Game::grief_hooked(self)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+        {
+            return false;
+        }
+        // The mob the damage names (an explicit cause only when it is a mob), found once.
+        let mob = match &self.combat.explicit_explosion_cause {
+            Some(cause) => cause
+                .as_ref()
+                .filter(|c| c.species.is_some())
+                .map(|c| c.entity.0),
+            None => self.blast_attacker().map(|(id, _)| id),
+        };
+        mob.is_some_and(|id| !self.can_entity_grief(Some(id)))
     }
     /// `Entity.isInWater` for an entity box: `updateFluidInteraction` over the box.
     pub(super) fn bounds_in_water(&self, bounds: horizon_core::geometry::Aabb) -> bool {
