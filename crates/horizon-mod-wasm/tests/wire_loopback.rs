@@ -14,8 +14,12 @@ mod boundary {
 mod biome_region_registration;
 #[path = "wire_loopback/block_entity_transform.rs"]
 mod block_entity_transform;
+#[path = "wire_loopback/crash_sections.rs"]
+mod crash_sections;
 #[path = "wire_loopback/entity_renderers.rs"]
 mod entity_renderers;
+#[path = "wire_loopback/item_drop_state.rs"]
+mod item_drop_state;
 #[path = "wire_loopback/load_conditions.rs"]
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
@@ -256,6 +260,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             use_item_hand::register(registrar);
             piglin_answers::register(registrar);
             block_entity_transform::register(registrar);
+            crash_sections::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
@@ -414,6 +419,21 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 )
             });
             event.drops.clear();
+        }
+        fn living_drops(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::LivingDropsEvent<'_>,
+        ) -> mod_api::Flow {
+            if event.kind != "test:state_drops" {
+                return mod_api::Flow::Continue;
+            }
+            use item_drop_state::{TARGET, THROWER, state_drop};
+            let full = state_drop(Some(THROWER), Some(TARGET), true, -32768);
+            let plain = state_drop(None, None, false, 0);
+            assert_eq!(*event.drops, vec![plain.clone(), full.clone()]);
+            *event.drops = vec![full, plain];
+            mod_api::Flow::Continue
         }
         fn item_stacked_on_other(
             &self,

@@ -210,19 +210,42 @@ fn movement_input_writes_back_all_fields() {
             event.strafe = 0.25;
             event.jump = true;
             event.sneak = true;
+            assert!(!event.forward_key);
+            assert!(event.backward_key);
+            assert!(!event.left_key);
+            assert!(event.right_key);
+            assert!(!event.sprint);
+            event.forward_key = true;
+            event.backward_key = false;
+            event.left_key = true;
+            event.right_key = false;
+            event.sprint = true;
         }
     }
     let mods = [ModEntry::new("movement", Box::new(Movement))];
     install(mods.into());
     let (mut forward, mut strafe, mut jump, mut sneak) = (1.0, 0.0, false, false);
+    let (mut forward_key, mut backward_key, mut left_key, mut right_key, mut sprint) =
+        (false, true, false, true, false);
     dispatch_movement_input(
         &FakeHost::new(),
-        &mut forward,
-        &mut strafe,
-        &mut jump,
-        &mut sneak,
+        crate::__private::MovementInputCall {
+            forward: &mut forward,
+            strafe: &mut strafe,
+            jump: &mut jump,
+            sneak: &mut sneak,
+            forward_key: &mut forward_key,
+            backward_key: &mut backward_key,
+            left_key: &mut left_key,
+            right_key: &mut right_key,
+            sprint: &mut sprint,
+        },
     );
     assert_eq!((forward, strafe, jump, sneak), (-0.5, 0.25, true, true));
+    assert_eq!(
+        (forward_key, backward_key, left_key, right_key, sprint),
+        (true, false, true, false, true),
+    );
 }
 
 #[test]
