@@ -304,7 +304,16 @@ pub(super) fn emit<'a>(
                     "& ItemStack" => {
                         format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
                     }
+                    "BlockEntityTypeKey" if table == "block_entity" => format!(
+                        "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
+                    ),
                     "& str" => format!("{table}(|| Some({key}))"),
+                    "BlockEntityRef" if table == "block_entity" => {
+                        let host = &host.as_ref().ok_or("block entity handle needs a Host")?.0;
+                        format!(
+                            "block_entity_kind(|| {key}.kind({host}).and_then(super::content::registry_keys::block_entity_type_name))"
+                        )
+                    }
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
                         format!("block_entity_kind(|| Some({key}.id()))")
@@ -531,7 +540,7 @@ pub(super) fn emit<'a>(
                     ty.to_token_stream()
                         .to_string()
                         .split(|c: char| !c.is_alphanumeric())
-                        .any(|word| matches!(word, "BlockState" | "LandingWrite"))
+                        .any(|word| matches!(word, "BlockState" | "LandingWrite" | "InsideWrite"))
                 });
             if block_carrier {
                 let engine: Vec<_> = carried
@@ -548,6 +557,9 @@ pub(super) fn emit<'a>(
                                     }
                                     "LandingWrite" => {
                                         *ty = syn::parse_quote!(horizon_world::level::LandingWrite)
+                                    }
+                                    "InsideWrite" => {
+                                        *ty = syn::parse_quote!(horizon_world::level::InsideWrite)
                                     }
                                     _ => syn::visit_mut::visit_type_mut(self, ty),
                                 }
@@ -895,7 +907,7 @@ fn stack_crossing_routed(
         "LootContext",
         "ParticleOptions",
     ];
-    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite"];
+    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite", "InsideWrite"];
     const INFALLIBLE_VALUES: &[&str] = &["GuiDraw", "Text"];
     fn contains_boundary(ty: &Type, names: &[&str]) -> bool {
         use syn::visit::Visit;
