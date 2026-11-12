@@ -1,4 +1,4 @@
-//! Breeding credit, cooldown and heart finalization.
+//! Breeding completion: credit, partner cooldown and heart delivery.
 use super::*;
 
 impl Game<'_> {
@@ -20,8 +20,8 @@ impl Game<'_> {
                 .unwrap_or_else(|| parent_view.clone());
             let child_view = child.map(|child| self.mob_entity(child));
             let who = cause.map_or(
-                super::commands::Target::Player,
-                super::commands::Target::Guest,
+                super::super::commands::Target::Player,
+                super::super::commands::Target::Guest,
             );
             self.for_player(who, |g| {
                 g.award_custom_stat("animals_bred", 1);
