@@ -374,7 +374,7 @@ impl PlayerSender {
         transport: Arc<Transport>,
     ) -> (Self, impl Fn() -> Vec<Vec<u8>>) {
         let pending = Arc::default();
-        let outbox = io_pool::Outbox::new(Arc::clone(&pending)).unwrap();
+        let outbox = io_pool::Outbox::new(Arc::clone(&pending), false).unwrap();
         let inspect = outbox.clone();
         let sender = Self {
             payload_transport: transport,
@@ -3194,6 +3194,8 @@ mod tests {
         };
         let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
         let conn = |uuid: u128, pending: Option<i64>| PlayConn {
+            payload_sender: PlayerSender::disabled(),
+            payload_transport: Transport::empty(),
             conn: 1,
             shared: lan.shared.clone(),
             uuid,
@@ -3237,7 +3239,9 @@ mod outgoing_budget_tests {
     use horizon_protocol::connection::Framing;
     fn sender(framing: Framing) -> PlayerSender {
         let pending = Arc::default();
-        let outbox = io_pool::Outbox::new(Arc::clone(&pending)).unwrap();
+        let outbox =
+            io_pool::Outbox::new(Arc::clone(&pending), !matches!(framing, Framing::Memory))
+                .unwrap();
         PlayerSender {
             payload_transport: Transport::empty(),
             undrained: Arc::default(),
