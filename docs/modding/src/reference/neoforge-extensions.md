@@ -346,3 +346,9 @@ Horizon, as #3425 asks.
 
 Both are client-only, so the server's `chunk_load` and `chunk_unload` listeners are not called on a client. An
 integrated world's own chunks are told only through the server hooks.
+
+## IFallableExtension: falling tick
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `IFallableExtension.fallingTick(level, currentPosition, entity)` | **Partial** | Server `BlockPart::falling_tick` (`hooks/falling_tick.rs`) on the falling block's state, with its block position and entity handle and a `&mut dyn ServerHost`, for each tick that ends with it still in the air; not the landing, drop or removal tick. It is delivered after the ordered pass that ticked the falling block, so a write lands on the stored entity. NeoForge also calls it on the client; Horizon calls it only on the server. |

@@ -695,6 +695,39 @@ pub mod tests {
         mark_game_thread();
     }
 
+    std::thread_local! {
+        static FALLING_TICKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    /// How many falling ticks the sand part heard on this thread since the last call.
+    pub fn falling_ticks_heard() -> u32 {
+        FALLING_TICKS.with(|heard| heard.replace(0))
+    }
+
+    /// Install a falling part: falling sand counts its airborne ticks.
+    pub fn falling_tick_game_thread() {
+        struct Sand;
+        #[mod_api::horizon_part]
+        impl BlockPart for Sand {
+            fn falling_tick(&self, _: &mut dyn ServerHost, _: &mut FallingTickEvent) {
+                FALLING_TICKS.with(|heard| heard.set(heard.get() + 1));
+            }
+        }
+        struct FallingMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for FallingMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let sand = r.block_key("minecraft:sand");
+                r.block_part(sand, Sand);
+            }
+        }
+        FALLING_TICKS.with(|heard| heard.set(0));
+        let mods: crate::Mods = vec![ModEntry::new("falling_test", Box::new(FallingMod))].into();
+        crate::__private::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+    }
+
     /// Install soil parts: glass sustains any plant, and grass sustains none.
     pub fn sustain_plant_game_thread() {
         struct Soil(bool);
