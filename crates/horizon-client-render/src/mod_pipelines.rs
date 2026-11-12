@@ -93,6 +93,8 @@ fn registered() -> &'static [RenderPipeline] {
 /// A registered pipeline one resource load built: a shader that compiles and its fixed state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Built {
+    /// The owning mod, not necessarily the pipeline namespace.
+    pub owner: String,
     /// The pipeline's id, for the log.
     pub id: Identifier,
     /// The whole shader: prelude, the mod's file, entry points.
@@ -139,6 +141,7 @@ impl Pipelines {
                 let file = fragment_file(&pipeline.fragment);
                 match read(&file).and_then(|text| compose(&text)) {
                     Ok(shader) => Some(Built {
+                        owner: pipeline.owner().to_owned(),
                         id: pipeline.id.clone(),
                         shader,
                         blend: pipeline.blend,
@@ -146,8 +149,11 @@ impl Pipelines {
                         optional: pipeline.optional,
                     }),
                     Err(reason) => {
-                        let refusal =
-                            format!("render pipeline {} refused: {file}: {reason}", pipeline.id);
+                        let refusal = format!(
+                            "render pipeline {} from mod {} refused: {file}: {reason}",
+                            pipeline.id,
+                            pipeline.owner()
+                        );
                         if pipeline.optional {
                             log::warn!("Horizon: {refusal}");
                         } else {
@@ -505,13 +511,23 @@ fn pipeline_fragment(input: PipelineInput) -> vec4<f32> {
         .unwrap_err();
         assert!(
             error.starts_with(
-                "required render pipeline example:beam refused: assets/example/shaders/pipeline/beam.wgsl: "
+                "required render pipeline example:beam from mod  refused: assets/example/shaders/pipeline/beam.wgsl: "
             ),
             "{error}"
         );
         assert!(!error.contains("example:glow"), "{error}");
         assert!(!error.contains("example:extra"), "{error}");
         assert_eq!(before.slot(handle), Ok(1));
+    }
+
+    #[test]
+    fn initial_required_failure_has_a_literal_message() {
+        let registered = [pipeline("example:glow", "example:glow")];
+        let error = Pipelines::build(&registered, 7, |_| Err("not found".to_owned())).unwrap_err();
+        assert_eq!(
+            error,
+            "required render pipeline example:glow from mod  refused: assets/example/shaders/pipeline/glow.wgsl: not found"
+        );
     }
 
     #[test]

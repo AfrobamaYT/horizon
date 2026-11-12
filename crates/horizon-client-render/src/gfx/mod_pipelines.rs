@@ -245,22 +245,14 @@ impl ModPipelines {
         let required: Vec<_> = refused
             .iter()
             .filter(|(_, built, _)| !built.optional)
-            .map(|(_, built, error)| {
-                format!(
-                    "required render pipeline {} refused by the GPU: {error}",
-                    built.id
-                )
-            })
+            .map(|(_, built, error)| format!("required {}", gpu_refusal(built, error)))
             .collect();
         if !required.is_empty() {
             return Err(required.join("; "));
         }
         for (slot, built, error) in refused {
             if set.invalidate(slot) {
-                log::warn!(
-                    "Horizon: render pipeline {} refused by the GPU: {error}",
-                    built.id
-                );
+                log::warn!("Horizon: {}", gpu_refusal(built, &error));
             }
         }
         self.generation = set.generation();
@@ -356,6 +348,13 @@ impl ModPipelines {
             pass.draw_indexed(run.quads.start * 6..run.quads.end * 6, 0, 0..1);
         }
     }
+}
+
+fn gpu_refusal(built: &Built, error: &str) -> String {
+    format!(
+        "render pipeline {} from mod {} refused by the GPU: {error}",
+        built.id, built.owner
+    )
 }
 
 impl super::Renderer {
@@ -589,6 +588,11 @@ mod tests {
         let handle = set.resolve(&id).unwrap();
         let renderer = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
         let mut broken = set.built()[0].clone().unwrap();
+        broken.owner = "owning_mod".into();
+        assert_eq!(
+            gpu_refusal(&broken, "compiler refusal"),
+            "render pipeline test:p0 from mod owning_mod refused by the GPU: compiler refusal"
+        );
         broken.shader = "not wgsl".into();
         assert!(renderer.pipeline(&device, &broken).is_err());
         assert!(set.invalidate(0));

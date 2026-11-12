@@ -9,6 +9,7 @@ use crate::{Identifier, WorldDepth};
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct RenderPipeline {
+    owner: String,
     /// The pipeline's own name (`mymod:glow`), in a namespace the mod owns.
     pub id: Identifier,
     /// The fragment shader (`mymod:glow` is `assets/mymod/shaders/pipeline/glow.wgsl`), as the
@@ -37,6 +38,7 @@ impl RenderPipeline {
         depth: WorldDepth,
     ) -> Self {
         Self {
+            owner: String::new(),
             id,
             fragment,
             vertex_format: PipelineVertexFormat::PositionTexColor,
@@ -45,6 +47,11 @@ impl RenderPipeline {
             optional: false,
         }
     }
+    /// The owning mod, assigned by the host after registration.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
     /// Let a resource load that cannot build this pipeline go on without it (NeoForge's
     /// `registerOptionalPipeline`).
     pub fn optional(mut self) -> Self {
@@ -167,7 +174,7 @@ fn validate_in(
     owns: &dyn Fn(&str) -> bool,
 ) {
     let added = pipelines.split_off(previous.len().min(pipelines.len()));
-    for pipeline in added {
+    for mut pipeline in added {
         let refusal = if !owns(pipeline.id.namespace()) {
             Some("its id is outside the mod's namespaces")
         } else if pipelines.iter().any(|kept| kept.id == pipeline.id) {
@@ -181,6 +188,7 @@ fn validate_in(
                 pipeline.id
             ),
             None => {
+                pipeline.owner = owner.to_owned();
                 pipelines.push(pipeline);
             }
         }
@@ -214,10 +222,11 @@ mod tests {
             pipeline("mine:glow"),
             pipeline("mine:beam"),
         ]);
-        validate_in("mine", &previous, &mut pipelines, &|namespace| {
+        validate_in("owning_mod", &previous, &mut pipelines, &|namespace| {
             namespace == "mine"
         });
         assert_eq!(ids(&pipelines), ["other:glow", "mine:glow", "mine:beam"]);
+        assert_eq!(pipelines[1].owner(), "owning_mod");
     }
 
     #[test]
