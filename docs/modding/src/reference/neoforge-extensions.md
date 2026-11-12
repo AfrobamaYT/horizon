@@ -110,7 +110,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `canBeHydrated(state, level, pos, fluid)` | Missing | — | Farmland hydration is engine-owned; fluid `canHydrate` is data. |
 | `getMapColor(state, level, pos, defaultColor)` | Partial | `BlockProperties.map_color` → `StateFacts.map_color` | Static; no position. |
 | `getAppearance(state, level, pos, direction, neighborState, neighborPos)` | Missing | — | No appearance query. |
-| `getPistonPushReaction(state)` | Covered | `BlockProperties.push_reaction` | Static; `PUSH_PULL`, `PUSH`, `POPPED`, `IMMOVEABLE`, `IGNORE_ENTITY`. |
+| `getPistonPushReaction(state)` | Covered | `BlockPart::piston_push_reaction`, `BlockProperties.push_reaction` | State-only override cached on both sides at load and reload; `None` preserves properties. |
 | `isEmpty(state)` | Missing | — | Air/replaceable facts exist (`block_states().replaceable`), but no `isEmpty` answer for a state. |
 | `getBubbleColumnDirection(state)` | Missing | — | Bubble-column rules are engine-owned. |
 | `shouldHideAdjacentFluidFace(state, direction, fluid)` | Missing | — | Fluid-face culling is engine-owned. |
@@ -127,7 +127,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 
 | Block-only method | Verdict there |
 | --- | --- |
-| `getPistonPushReaction(state)` | Covered (content `push_reaction`) |
+| `getPistonPushReaction(state)` | Covered (`BlockPart::piston_push_reaction`, content `push_reaction`) |
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
