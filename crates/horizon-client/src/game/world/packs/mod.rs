@@ -100,6 +100,7 @@ fn info(p: &Pack) -> PackInfo {
         required: false,
         position: Position::Top,
         fixed: false,
+        hidden: false,
     }
 }
 /// A pack from `DownloadedPackSource.loadRequestedPacks`: fixed at the top of
@@ -124,6 +125,7 @@ fn downloaded_info(p: &Pack) -> PackInfo {
         required: true,
         position: Position::Top,
         fixed: true,
+        hidden: false,
     }
 }
 /// The vanilla pack: required, at the bottom (`BuiltInPackSource`), with the
@@ -143,6 +145,7 @@ fn vanilla_info(vanilla: &Path) -> PackInfo {
         required: true,
         position: Position::Bottom,
         fixed: false,
+        hidden: false,
     }
 }
 /// Packs the Resource Packs screen lists: folder and built-in packs, then any

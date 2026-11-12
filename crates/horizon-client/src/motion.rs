@@ -47,6 +47,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
+mod restitution;
 
 /// A living entity jumped (`LivingEvent.LivingJumpEvent`).
 #[inline(never)]
@@ -706,13 +707,11 @@ impl PlayerMotion {
         !self.spectator && !self.freeze_immune
     }
     /// What powder snow's contextual collision asks of the player.
-    pub fn powder_snow_subject(&self) -> crate::collisions::PowderSnowSubject {
+    pub fn powder_snow_subject(&self) -> crate::collisions::PowderSnowSubject<'static> {
         crate::collisions::PowderSnowSubject {
             fall_distance: self.fall_distance,
-            falling_block: false,
             leather_boots: self.leather_boots,
-            walkable_type: false,
-            lava_walker: false,
+            ..Default::default()
         }
     }
     /// `LivingEntity.tryAddFrost`: the frozen slowdown, on anything but air.
@@ -2649,12 +2648,7 @@ impl RestitutionWorld for MotionWorld<'_, '_, '_> {
         Ok(self.resources.blocks.get(state)?.suppresses_bounce)
     }
     fn block_bounce_restitution(&mut self, state: BlockStateId) -> Result<f32> {
-        Ok(self
-            .resources
-            .blocks
-            .get(state)?
-            .coefficients
-            .bounce_restitution)
+        self.part_bounce_restitution(state)
     }
     fn air_drag(&mut self) -> Result<f32> {
         living_motion::air_drag(self)

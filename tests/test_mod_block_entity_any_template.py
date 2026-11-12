@@ -132,12 +132,13 @@ fn the_render_list_holds_mod_entities_of_templates_without_one() {
 class ModBlockEntityAnyTemplateTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_removal_piston_and_render_list(self):
-        game = (CLIENT / "game.rs").read_text(encoding="utf-8")
+        game = ((CLIENT / "game.rs").read_text(encoding="utf-8")
+                + (CLIENT / "game/blocks/level_access.rs").read_text(encoding="utf-8"))
         draw = (next(CLIENT.glob('game/*/native_block_entity_draw.rs'))).read_text(encoding="utf-8")
         update = (LEVEL / "update.rs").read_text(encoding="utf-8")
         pistons = (LEVEL / "pistons.rs").read_text(encoding="utf-8")
         removal = between(update, "} else if block_changed\n", "        {\n            // BlockEntity.preRemoveSideEffects")
-        tail = between(pistons, "        } else if b.table.bool(state, b.props.extended) {\n            return false;\n        }\n", "    }\n    fn is_slime_or_honey")
+        tail = between(pistons, "        } else if b.table.bool(state, b.props.extended) {\n            return false;\n        }\n", "    }\n    /// `IBlockExtension.isSlimeBlock`")
         fixture = (FIXTURE.replace("HAS_MOD", method(game, "has_mod_block_entity"))
                    .replace("HAS_NATIVE", method(game, "has_native_block_entity"))
                    .replace("UNTEMPLATED", method(draw.replace("pub(super) fn", "fn"), "untemplated_mod_block_entities"))

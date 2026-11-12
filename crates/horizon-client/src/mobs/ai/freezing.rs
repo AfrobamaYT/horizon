@@ -53,3 +53,12 @@ pub fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     .flatten()
     .any(|item| immune.is_some_and(|t| t.contains(item)))
 }
+
+/// The player's HEAD item belongs to vanilla's gaze disguise tag.
+pub fn wears_gaze_disguise(head: Option<&str>, w: &MobWorld) -> bool {
+    head.is_some_and(|item| {
+        w.items
+            .and_then(|items| items.item_tags.get("minecraft:gaze_disguise_equipment"))
+            .is_some_and(|tag| tag.contains(item))
+    })
+}
