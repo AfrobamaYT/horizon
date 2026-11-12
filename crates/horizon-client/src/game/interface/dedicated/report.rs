@@ -778,9 +778,28 @@ mod tests {
         assert_eq!(text(stop.dims[0].dimension), "minecraft:overworld");
         assert_eq!(types(&stop.dims[0].entities), [("minecraft:cow", 1)]);
         assert_eq!(types(&stop.dims[0].block_entities).len(), 1);
-        // Sampling also interns Rust symbols and source filenames, not just registry IDs.
-        // The full decompressed capture above is checked for the fixture's private values;
-        // restricting every interned string's alphabet would reject legitimate symbols.
+        // Symbols and source filenames are free text by design; the secret scan above
+        // still covers them. Every other string is a registry ID, span/job name or thread.
+        let symbols: std::collections::HashSet<u32> = c
+            .samples
+            .iter()
+            .filter_map(|profile| profile.functions.as_ref())
+            .flat_map(|functions| {
+                functions
+                    .name
+                    .iter()
+                    .chain(&functions.file)
+                    .chain(&functions.crate_)
+                    .copied()
+            })
+            .collect();
+        for s in c.strings.iter().filter(|s| !symbols.contains(&s.id)) {
+            let plain = s
+                .text
+                .chars()
+                .all(|ch| matches!(ch, 'a'..='z' | '0'..='9' | '_' | '.' | ':' | '/' | '-'));
+            assert!(plain || s.text == "Server thread", "{}", s.text);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
