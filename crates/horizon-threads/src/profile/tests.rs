@@ -535,19 +535,58 @@ fn samples_and_ticks_fall_in_the_time_block_current_when_they_were_added() {
     assert_eq!(agg.time_blocks(), MAX_TIME_BLOCKS);
 }
 
-fn long_spin() {
-    spin_fast(450);
-}
-
 #[test]
 fn a_live_session_cuts_its_samples_into_blocks_of_block_s() {
+    use std::sync::{Arc, Mutex, atomic::AtomicBool};
+
+    // CPU-budgeted work has no wall-time upper bound when the thread is descheduled.
+    // Advance a controlled elapsed clock only after the live sampler filled each bucket.
+    // Keep the production elapsed / block_s calculation, and wait for a notification
+    // rather than sleeping or polling session status for an assumed duration.
+    let (complete, completed) = mpsc::channel();
+    let progress = Mutex::new((0u16, Some(complete)));
+    let block_s = 0.1;
+    let block = Duration::from_secs_f32(block_s);
     let config = Config {
-        block_s: 0.1,
+        block_s,
+        test_clock: Some(Arc::new(move |_: Instant, agg: &Aggregate| {
+            let mut progress = progress.lock().unwrap();
+            if agg.counts.keys().any(|k| k.time_block == progress.0) {
+                if progress.0 < 5 {
+                    progress.0 += 1;
+                } else if let Some(complete) = progress.1.take() {
+                    complete.send(()).unwrap();
+                }
+            }
+            // Stay within each bucket, away from floating-point boundary rounding.
+            block * u32::from(progress.0) + block / 2
+        })),
+        threads: vec!["p-blocks".into()],
         ..config(false)
     };
-    let (profile, _) = profiled("p-blocks", config, long_spin);
+    let running = Arc::new(AtomicBool::new(true));
+    let work = running.clone();
+    let (ready, registered) = mpsc::channel();
+    let (go, start) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        assert!(sampler::sampled_thread("p-blocks"));
+        ready.send(()).unwrap();
+        start.recv().unwrap();
+        // This is the CPU workload being sampled, not a wait for test progress.
+        while work.load(Relaxed) {
+            spin_fast(1);
+        }
+    });
+    registered.recv().unwrap();
+    let session = super::start(config).expect("start profiling");
+    go.send(()).unwrap();
+    let completion = completed.recv_timeout(Duration::from_secs(10));
+    // Always release and join the workload, including on a notification timeout.
+    running.store(false, Relaxed);
+    worker.join().unwrap();
+    let profile = session.stop().expect("stop profiling");
+    completion.expect("live samples in every controlled time block");
     let blocks: std::collections::BTreeSet<u16> =
         profile.agg.counts.keys().map(|k| k.time_block).collect();
-    assert!(blocks.len() >= 3, "{blocks:?}");
-    assert!(blocks.iter().all(|&b| b <= 6), "{blocks:?}");
+    assert_eq!(blocks, (0..=5).collect());
 }
