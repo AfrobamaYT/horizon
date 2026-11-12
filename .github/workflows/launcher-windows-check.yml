@@ -52,10 +52,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: "cargo test --release --locked -p horizon-mod-package --features runtime-process --lib output::"
         working-directory: .
-      # The carrier ownership store's durable-publication tests (Windows
-      # write-through path included).
-      - run: "cargo test --release --locked -p horizon-client-lib --lib carrier_store"
-        working-directory: .
       # Every test target (the library, the binary, tests/), as launcher.yml runs them.
       - run: cargo test --release --locked
 
