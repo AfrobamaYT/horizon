@@ -5,7 +5,7 @@ use mod_api::DimensionKey;
 use std::{
     num::NonZeroU32,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -165,6 +165,7 @@ struct Pending {
     events: Mutex<Batches>,
     ready: AtomicBool,
     retired: AtomicBool,
+    observer: OnceLock<Journal>,
 }
 
 /// Shared only by the owners of one game instance and its parked dimensions.
@@ -175,6 +176,13 @@ impl Journal {
     /// Whether these bindings share the same epoch's event sink.
     pub fn same_epoch(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// Observe structural events without consuming the authoritative queue.
+    /// The returned journal is diagnostic only and receives no saved UUID writes.
+    /// Repeated calls share the same observation queue for this epoch.
+    pub fn observe_structural_events(&self) -> Self {
+        self.0.observer.get_or_init(Self::default).clone()
     }
 
     /// Record an operation at the storage boundary, in mutation order.
@@ -188,6 +196,9 @@ impl Journal {
             "entity journal was not drained"
         );
         events.structural.push(event);
+        if let Some(observer) = self.0.observer.get() {
+            observer.push(event);
+        }
         self.0.ready.store(true, Ordering::Release);
     }
 
@@ -405,6 +416,25 @@ mod tests {
             owner: Owner { dimension, kind },
             change,
         }
+    }
+
+    #[test]
+    fn observation_survives_authoritative_drains_without_stealing_events() {
+        let journal = Journal::default();
+        let observation = journal.observe_structural_events();
+        let lifted = event(DimensionKey::OVERWORLD, Kind::Mob, Change::Lifted);
+        let restored = event(DimensionKey::OVERWORLD, Kind::Mob, Change::Restored);
+        journal.push(lifted);
+        let mut actual = Vec::new();
+        journal.drain_into(&mut actual);
+        assert_eq!(actual, [lifted]);
+        journal.push(restored);
+        let mut observed = Vec::new();
+        observation.drain_into(&mut observed);
+        assert_eq!(observed, [lifted, restored]);
+        actual.clear();
+        journal.drain_into(&mut actual);
+        assert_eq!(actual, [restored]);
     }
 
     #[test]
