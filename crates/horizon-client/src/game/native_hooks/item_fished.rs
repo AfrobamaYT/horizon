@@ -13,6 +13,9 @@ impl Game<'_> {
     /// items, experience and statistic; the rod still takes `rod_damage` last.
     /// An emptied list without cancel gives no items, experience or statistic; the trigger
     /// still fires with an empty list and the rod is still damaged.
+    /// An invalid `drops` write (a stack the game refuses, such as a count over the item's
+    /// maximum) discards the whole event's write-back, every listener's `cancel` and
+    /// `rod_damage` included, and logs a warning naming the hook and the conversion error.
     /// Diverges: Horizon lets a listener change the drop list itself; the reference lets a
     /// listener change the stacks but not the list.
     pub(in crate::game) fn native_item_fished(

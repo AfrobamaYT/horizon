@@ -1034,7 +1034,10 @@ fn stack_crossing_routed(
                 } else {
                     validations.push_str(&format!("let {result}: Result<_, mod_api::StackWriteError> = self.boundary_items().ok_or(mod_api::StackWriteError::Unavailable).and_then(|items| {local}.try_into_engine(items)); "));
                 }
-                format!("match {result} {{ Ok(value) => value, Err(_) => return }}")
+                format!(
+                    "match {result} {{ Ok(value) => value, Err(error) => {{ log::warn!(\"mod {} write refused: {{error:?}}\"); return; }} }}",
+                    hook_id.to_snake_case()
+                )
             } else {
                 local
             };

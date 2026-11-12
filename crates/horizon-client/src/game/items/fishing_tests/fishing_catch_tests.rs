@@ -33,6 +33,28 @@ impl mod_api::Hooks for Catch {
         mod_api::Flow::Continue
     }
 }
+struct InvalidCatch;
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for InvalidCatch {
+    #[listener(receive_cancelled)]
+    fn item_fished(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::ItemFishedEvent<'_>,
+    ) -> mod_api::Flow {
+        assert!(event.cancelled);
+        assert_eq!(event.rod_damage, 5);
+        let key = host
+            .item_key(&mod_api::Identifier::parse("minecraft:diamond").unwrap())
+            .unwrap();
+        let mut stack = mod_api::ItemStack::new(key, 1).unwrap();
+        stack.set_count(65).unwrap();
+        event.drops.clear();
+        event.drops.push(stack);
+        mod_api::Flow::Continue
+    }
+}
+
 fn run(mode: Option<u8>) -> (Vec<(String, u32)>, usize, i32, u32, i64, bool) {
     let mut result = None;
     mod_platform::testing::with_mods(Default::default(), || {
@@ -93,7 +115,19 @@ fn run(mode: Option<u8>) -> (Vec<(String, u32)>, usize, i32, u32, i64, bool) {
                 random: LegacyRandom::new(42),
             };
             let mods = mode
-                .map(|m| vec![mod_api::ModEntry::new("catch", Box::new(Catch(m)))])
+                .map(|m| {
+                    let mut mods = vec![mod_api::ModEntry::new(
+                        "catch",
+                        Box::new(Catch(if m == 4 { 2 } else { m })),
+                    )];
+                    if m == 4 {
+                        mods.push(mod_api::ModEntry::new(
+                            "invalid_catch",
+                            Box::new(InvalidCatch),
+                        ));
+                    }
+                    mods
+                })
                 .unwrap_or_default()
                 .into();
             let before_items = game.dropped.len();
@@ -156,4 +190,53 @@ fn fishing_catch_noop_listener_preserves_randomness() {
     let absent = run(None);
     assert!(!absent.0.is_empty());
     assert_eq!(absent, run(Some(0)));
+}
+
+struct Capture(std::sync::Mutex<Vec<String>>);
+impl log::Log for Capture {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        if record.level() == log::Level::Warn {
+            self.0.lock().unwrap().push(record.args().to_string());
+        }
+    }
+    fn flush(&self) {}
+}
+static LOG: Capture = Capture(std::sync::Mutex::new(Vec::new()));
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn fishing_catch_invalid_drops_discards_all_listeners_outputs() {
+    // Isolate the process-global logger, as the structure-transform tests do.
+    if std::env::var_os("HORIZON_FISHING_REFUSAL_LOG_CHILD").is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "game::fishing::fishing_catch_tests::fishing_catch_invalid_drops_discards_all_listeners_outputs", "--include-ignored", "--nocapture"])
+            .env("HORIZON_FISHING_REFUSAL_LOG_CHILD", "1")
+            .status().unwrap();
+        assert!(status.success());
+        return;
+    }
+    log::set_logger(&LOG).unwrap();
+    log::set_max_level(log::LevelFilter::Warn);
+    let absent = run(None);
+    LOG.0.lock().unwrap().clear();
+    let refused = run(Some(4));
+    assert_eq!(refused, absent);
+    assert!(!refused.0.is_empty());
+    assert_eq!(refused.3, 1);
+    assert!(refused.5);
+    let warnings: Vec<_> = LOG
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|line| line.starts_with("mod item_fished write refused:"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        warnings,
+        ["mod item_fished write refused: CountExceeded { maximum: 64 }"]
+    );
 }
