@@ -143,6 +143,10 @@ block is yours, and another mod's on your block is not. Every mod block entity c
 wire ID, looked up once when it is made or loaded. The first `contains` resolves your ids once into a flag
 for each of those IDs; every call after it reads one flag, with no string compare, no hashing and no
 allocation, so it costs the same on every tick. Vanilla block entities answer `false`.
+The IDs and flags assume the block entity types are frozen for the process, which they are once the
+game has registered them; a block entity made before that (only possible in a test that builds one without
+the type table) carries no ID and matches nothing. In the game, every mod's types are registered before any
+world loads, so no loaded or placed block entity misses its ID.
 
 An id the game has no block entity type of (misspelt, or a mod that is not loaded) matches nothing. The first
 `contains` logs a warning naming it: ``Published loop block_entities.tick: OwnBlockEntities names
@@ -155,6 +159,9 @@ Its saved data is `entity.nbt`, its item slots `entity.items` and its menu data 
 
 - Slots are asked in priority order. The first answer that is not `Continue` wins, and later slots are not
   asked about that entity. For an entity that ticked, `after` runs for every slot.
+- Within one entry, every slot's `before` gets the same cursor: if an earlier slot replaced the entity and
+  continued, a later slot's `before` still sees the `kind` and type from before that edit (the loop then
+  rechecks and skips the replaced entity, so it doesn't tick as the old one).
 - Your slot value is made with `Default` on the loop's first run and kept. There is one per `Game`, the
   game state of one running server, which ticks every dimension in turn: read `tick.game.dim` to tell them apart.
 - A slot may add, remove or replace block entities. If it removes the visited one, or replaces it with another
