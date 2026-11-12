@@ -26,6 +26,7 @@
 - [Villager profession resources and clients](concepts/villager-professions-client.md)
 - [Design: decide, fire, apply](concepts/decide-fire-apply.md)
 - [Design: decide, fire, apply: route inventory](concepts/decide-fire-apply-routes.md)
+- [Design: tooltip components in full](concepts/tooltip-components.md)
 
 # How-to
 
