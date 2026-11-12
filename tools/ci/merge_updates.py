@@ -2,7 +2,7 @@
 """Posts a rollup or sync pull request, opened or merged, to the team's Discord channel.
 
 The workflow `merge-updates.yml` passes the pull request through the environment; the message
-is one embed with the title, the link and the body's `## Summary` section.
+is one embed with the state and title ("Merged: Rollup 62"), the link and the body's `## Summary` section.
 """
 import json
 import os
@@ -46,8 +46,9 @@ def cut(text, limit):
 
 def payload(kind, state, title, url, body):
     """The webhook message: one embed, no pings."""
+    prefix = f"{state.capitalize()}: "
     embed = {
-        "title": cut(title, TITLE_LIMIT),
+        "title": prefix + cut(title, TITLE_LIMIT - len(prefix)),
         "url": url,
         "color": COLOURS[state],
         "footer": {"text": f"{kind.capitalize()} {state}"},
