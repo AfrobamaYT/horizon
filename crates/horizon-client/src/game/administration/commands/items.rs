@@ -2156,7 +2156,7 @@ mod mob_equipment_command_tests {
                 m.and_then(|m| {
                     m.extra.equipment[horizon_items::equipment::BODY]
                         .as_ref()
-                        .map(|stack| stack.id.clone())
+                        .map(|stack| stack.item.clone())
                 })
             };
             let replace = "item replace entity @e[tag=cube,limit=1] armor.body with";
