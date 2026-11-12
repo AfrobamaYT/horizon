@@ -231,6 +231,7 @@ pub(super) struct Creatures {
     /// what the passes after the loop do for a mob's `aiStep`, goals or brain
     /// (pickups, item searches) is for these alone.
     pub ticked: horizon_client::fast_hash::FxHashSet<u32>,
+    pub deferred_hits: bool,
     /// The wandering trader spawner's clock.
     pub trader: super::wandering_trader::Spawner,
     /// When each player last put a parrot on a shoulder (`timeEntitySatOnShoulder`).
@@ -1514,7 +1515,10 @@ impl Game<'_> {
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let delivery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
             while let Some(batch) = pending.batches.front_mut() {
-                self.handle_mob_events_pending(&mut batch.normal)?;
+                self.creatures.deferred_hits = true;
+                let result = self.handle_mob_events_pending(&mut batch.normal);
+                self.creatures.deferred_hits = false;
+                result?;
                 self.lan_guest_mob_events(&mut batch.guests);
                 self.creatures.event_buf = pending
                     .batches
@@ -2004,10 +2008,12 @@ impl Game<'_> {
         let mut killed = false;
         let mut hurt = false;
         let mut infested = Vec::new();
+        let catch_up = self.catch_up_countdowns(source.attacker, target);
         let aim = self.attacker_aim(source.attacker);
         // So `living_knockback` sees who hit and what they hold.
         let attack = self.attack_of_who(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
+            let previous_invulnerable = t.invulnerable;
             let hit = t.damage_aimed(
                 crate::game::entity::damage_level_of!(self, &attack),
                 amount,
@@ -2015,6 +2021,10 @@ impl Game<'_> {
                 aim,
             );
             hurt = hit;
+            if hit && catch_up && t.invulnerable > previous_invulnerable {
+                t.hurt_time = (t.hurt_time - 1).max(0);
+                t.invulnerable = (t.invulnerable - 1).max(0);
+            }
             if hit {
                 killed = !t.alive();
                 // The hurt or death sound the mob raised.
@@ -4112,6 +4122,13 @@ impl Game<'_> {
                     );
                     child.extra.color = mixed;
                 }
+                let voices = horizon_client::mobs::finalize::sound_variants(Species::Wolf);
+                child.extra.sound_variant = self
+                    .mobs
+                    .iter_mut()
+                    .find(|m| m.id == parent)
+                    .and_then(|m| m.random.next_int_bound(voices.len() as i32).ok())
+                    .map(|i| i as u8);
                 break 'offspring;
             }
             // Panda.getBreedOffspring: genes from both parents.
@@ -4559,6 +4576,7 @@ impl Game<'_> {
         // The impacts the mods may cancel (`native_projectile_impact`), on a server.
         let hear = self.native_hears_impacts();
         let mut impacts: Vec<Impact> = Vec::new();
+        let mut vehicle_winds = self.vehicle_winds();
         {
             let targets = self.projectile_targets();
             let breezes: Vec<u32> = self
@@ -4645,6 +4663,7 @@ impl Game<'_> {
                     }
                     // The projectile as it was, to fly on if a mod cancels its impact.
                     let before = (hear && !p.stuck).then(|| p.clone());
+                    let wind_before = vehicle_winds.before(p);
                     let mob_shot = !matches!(p.owner, Some(Who::Player));
                     // A player's arrows, snowballs and eggs meet every player; a
                     // guest's flies from that guest (Projectile.getOwner), not
@@ -4780,6 +4799,7 @@ impl Game<'_> {
                         keep_flags[i] = false;
                         return;
                     }
+                    vehicle_winds.met(wind_before, hit);
                     if hit != Hit::None {
                         if let Some(before) = before {
                             impacts.push(Impact {
@@ -4866,6 +4886,9 @@ impl Game<'_> {
             horizon_client::join_seq::RestoreOrder::SpawnsFirst,
         );
         for (p, hit) in hits {
+            let Some((p, hit)) = self.broken_vehicle_retick(p, hit, &mut vehicle_winds) else {
+                continue;
+            };
             // A player's arrow on another player lands as the victim's hurt.
             if let Some(victim) = self.projectile_pvp_victim(&p, hit) {
                 self.projectile_hits_player(&p, hit, victim)?;
