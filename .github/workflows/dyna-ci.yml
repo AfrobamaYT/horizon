@@ -386,6 +386,11 @@ jobs:
           done | tee -a "$GITHUB_STEP_SUMMARY"
           # What takes the room, toward the size at which Dyna empties the slot whole.
           du -sh "${DYNA_CI_BUILD:-/build}"/* "${CARGO_TARGET_DIR:-/nonexistent}"/* 2>/dev/null | sort -rh | head -12 | sed 's/^/build-folder part /' | tee -a "$GITHUB_STEP_SUMMARY"
+          # Each kept toolchain and its components: a test runs rustfmt under whichever toolchain it selects.
+          for toolchain in "${DYNA_CI_BUILD:-/build}"/rustup/toolchains/*/; do
+            [ -f "$toolchain/lib/rustlib/components" ] || continue
+            echo "build-folder toolchain $(basename "$toolchain"): $(sed 's/-x86_64.*//;s/-aarch64.*//' "$toolchain/lib/rustlib/components" | sort -u | tr '\n' ' ')"
+          done | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
