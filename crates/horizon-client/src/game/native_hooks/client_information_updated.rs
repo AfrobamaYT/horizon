@@ -33,9 +33,13 @@ impl Game<'_> {
         {
             let entity_id = g.entity_id;
             let new = crate::game::lan::client_info(&g.info);
-            let old = crate::game::lan::client_info(
-                &horizon_protocol::packets::configuration::ClientInformation::new(2),
-            );
+            // `ClientInformation.createDefault`: no skin parts, not listed.
+            let defaults = horizon_protocol::packets::configuration::ClientInformation {
+                model_customisation: 0,
+                allows_listing: false,
+                ..horizon_protocol::packets::configuration::ClientInformation::new(2)
+            };
+            let old = crate::game::lan::client_info(&defaults);
             self.native_client_information_updated(player, entity_id, name, &old, &new);
         }
         self.native_player_logged_in(player, name);
@@ -45,13 +49,14 @@ impl Game<'_> {
 #[cfg(test)]
 mod client_information_updated_tests {
     use mod_api::{
-        ClientInformationUpdatedEvent, Hooks, MainHand, ModEntry, PlayerLoggedInEvent, ServerHost,
+        ChatVisibility, ClientInfo, ClientInformationUpdatedEvent, Hooks, MainHand, ModEntry,
+        ParticleStatus, PlayerLoggedInEvent, ServerHost,
     };
     use std::sync::{Arc, Mutex};
 
-    /// What was heard, in order: the information's old and new view
+    /// What was heard, in order: the information's old value and new view
     /// distance and main hand, or the login.
-    type Heard = Arc<Mutex<Vec<Option<(i8, i8, MainHand)>>>>;
+    type Heard = Arc<Mutex<Vec<Option<(ClientInfo, i8, MainHand)>>>>;
     struct Listen(Heard);
     #[mod_api::__subscriptions]
     impl Hooks for Listen {
@@ -61,7 +66,7 @@ mod client_information_updated_tests {
             event: &mut ClientInformationUpdatedEvent<'_>,
         ) {
             let seen = (
-                event.old.view_distance,
+                event.old.clone(),
                 event.new.view_distance,
                 event.new.main_hand,
             );
@@ -92,9 +97,21 @@ mod client_information_updated_tests {
                     })
                     .unwrap();
                 game.announce_login(uuid, &name);
+                // Vanilla's `ClientInformation.createDefault()`.
+                let defaults = ClientInfo {
+                    language: "en_us".into(),
+                    view_distance: 2,
+                    chat_visibility: ChatVisibility::Full,
+                    chat_colors: true,
+                    model_customisation: 0,
+                    main_hand: MainHand::Right,
+                    text_filtering: false,
+                    allows_listing: false,
+                    particle_status: ParticleStatus::All,
+                };
                 assert_eq!(
                     *heard.lock().unwrap(),
-                    [Some((2, 12, MainHand::Left)), None]
+                    [Some((defaults, 12, MainHand::Left)), None]
                 );
             });
         });
