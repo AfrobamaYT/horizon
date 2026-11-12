@@ -12,6 +12,8 @@ HARNESS = r"""
 const scenario = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const sync = require(process.argv[1]);
 const edits = [];
+const pr = (id, number, extra) => ({ id, number, isDraft: false, body: '', author: { login: 'author' }, assignees: { nodes: [] },
+  closingIssuesReferences: { nodes: [] }, ...extra });
 const issue = (id, number, extra) => ({ id, number, body: '', labels: { nodes: [] }, assignees: { nodes: [] }, ...extra });
 const github = { graphql: async (query, vars) => {
   if (query.includes('projectV2(number')) return { user: { projectV2: { id: 'P', fields: { nodes: [
@@ -21,7 +23,8 @@ const github = { graphql: async (query, vars) => {
   if (query.includes('items(first:50')) return { node: { items: { pageInfo: { hasNextPage: false }, nodes: [] } } };
   if (query.includes('issues(first:40')) return { repository: { issues: { pageInfo: { hasNextPage: false },
     nodes: query.includes('states:[OPEN]') ? scenario.issues.map(([id, number, extra]) => issue(id, number, extra)) : [] } } };
-  if (query.includes('pullRequests(first:40')) return { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [] } } };
+  if (query.includes('pullRequests(first:40')) return { repository: { pullRequests: { pageInfo: { hasNextPage: false },
+    nodes: query.includes('states:[OPEN]') ? (scenario.prs || []).map(([id, number, extra]) => pr(id, number, extra)) : [] } } };
   if (query.includes('addProjectV2ItemById')) {
     const ids = [...query.matchAll(/(a\d+):addProjectV2ItemById\(input:\{projectId:"P",contentId:"(\w+)"/g)];
     const data = Object.fromEntries(ids.map(([, alias, id]) => [alias, scenario.refused.includes(id) ? null : { item: { id: `new:${id}` } }]));
@@ -30,7 +33,11 @@ const github = { graphql: async (query, vars) => {
     if (!errors.length) return data;
     throw Object.assign(new Error(errors.map(e => e.message).join('; ')), { data, errors });
   }
-  if (query.includes('projectItems')) return { node: { projectItems: scenario.existing[vars.id][vars.a || 'first'] } };
+  if (query.includes('projectItems')) {
+    // Only the fragment for the content's own type reads its project items, as on GitHub.
+    const type = vars.id.startsWith('PR') ? 'PullRequest' : 'Issue';
+    return { node: query.includes(`... on ${type}{projectItems`) ? { projectItems: scenario.existing[vars.id][vars.a || 'first'] } : {} };
+  }
   if (query.startsWith('mutation{e0')) { edits.push(...query.match(/updateProjectV2ItemFieldValue\(.*?\)\{clientMutationId\}/g)); return {}; }
   throw new Error(`unexpected query ${query.slice(0, 60)}`);
 } };
@@ -72,6 +79,17 @@ class BoardSyncTests(unittest.TestCase):
             self.update("new:I2", "H", '{singleSelectOptionId:"phase:Infra"}'),
             self.update("new:I2", "O", '{text:"alice"}'),
         ]))
+
+    def test_a_pull_request_already_on_the_board_keeps_its_hand_set_owner_and_phase(self):
+        result = self.run_sync({
+            "issues": [],
+            "prs": [["PR1", 7, {"author": {"login": "carol"}, "body": "**Phase.** Infra"}]],
+            "refused": ["PR1"],
+            "existing": {"PR1": {"first": {"pageInfo": {"hasNextPage": False},
+                                           "nodes": [board_item("E7", "Todo", "bob", "Design")]}}},
+        })
+        self.assertEqual(result, {"edits": [
+            self.update("E7", "S", '{singleSelectOptionId:"status:In review"}') + "{clientMutationId}"]})
 
     def test_a_batch_with_any_other_error_still_fails(self):
         result = self.run_sync({"issues": [["I1", 1, {}]], "refused": ["I1"], "otherErrors": ["Resource not accessible"],
