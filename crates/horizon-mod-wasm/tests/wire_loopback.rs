@@ -2204,3 +2204,5 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
         );
     }
 }
+#[path = "wire_loopback/chunk_queries.rs"]
+mod chunk_queries;
