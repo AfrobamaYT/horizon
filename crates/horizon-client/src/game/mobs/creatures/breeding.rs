@@ -32,7 +32,8 @@ impl Game<'_> {
             q.extra.age = 6000;
             q.extra.in_love = 0;
         }
-        if order == OrbOrder::BeforeChild {
+        // TurtleBreedGoal overrides Animal's finalization and never broadcasts hearts.
+        if order == OrbOrder::BeforeChild && parent.species() != Species::Turtle {
             self.mob_event_particles(parent.id, 18);
         }
     }
