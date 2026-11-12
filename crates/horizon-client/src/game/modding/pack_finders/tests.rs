@@ -1,7 +1,8 @@
 use super::*;
 use horizon_client::datapack::{DataStore, FunctionLine};
 use horizon_client::text::Text;
-use mod_api::{AddPackFindersEvent, Hooks, Identifier, ModEntry, testing::with_mods};
+use mod_api::{AddPackFindersEvent, Hooks, Identifier, ModEntry};
+use mod_platform::testing::with_mods;
 use std::{fs, io::Write, path::PathBuf};
 
 const ASSET_PACK: &str = "assets/packmod/resourcepacks/optional";

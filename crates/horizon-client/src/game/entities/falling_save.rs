@@ -80,7 +80,7 @@ mod tests {
                         Vec::new()
                     }
                     .into();
-                    mod_api::testing::with_mods(mods, || {
+                    mod_platform::testing::with_mods(mods, || {
                         with_game(|game| {
                             game.options.dedicated = Some(Vec::new());
                             prepare_entity_ticking_neighborhood(game, ChunkPos::new(0, 0));
