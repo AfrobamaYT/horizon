@@ -1857,20 +1857,9 @@ impl Game<'_> {
         rotation: Option<[f32; 2]>,
         turn_riders: bool,
     ) -> R<bool> {
-        // A general entity tree carries itself across (identity kept, join
-        // identity new); vehicles keep their own path below.
-        if let Target::General(id) = t {
-            return match self.teleport_general_tree_across(id, level, pos) {
-                Ok(moved) => Ok(moved),
-                Err(error) => {
-                    log::error!("entity teleport into {}: {error}", level.id());
-                    Err(err("commands.generic.exception", &[]))
-                }
-            };
-        }
-        match self.teleport_vehicle_across(t, level, pos, rotation, turn_riders) {
-            Ok(true) => return Ok(true),
-            Ok(false) => {}
+        match self.teleport_target_across(t, level, pos, rotation, turn_riders) {
+            Ok(Some(moved)) => return Ok(moved),
+            Ok(None) => {}
             Err(error) => {
                 log::error!("entity teleport into {}: {error}", level.id());
                 return Err(err("commands.generic.exception", &[]));
