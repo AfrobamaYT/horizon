@@ -63,6 +63,9 @@ The first build with a `[[native.mixin]]` row gets the horizon-mixins tool once 
 a prebuilt download where one is published, otherwise a build from source that takes about a minute. Later
 builds take a few seconds.
 
+The prebuilt tool is checked against its release's `SHA256SUMS` and against the commit, patch and platform the
+launcher pins. Where no prebuilt exists for your platform or pin, the launcher builds the tool from source.
+
 When it works, the launcher's [build log](how-to/native-mods/029-build-log.md#build-log) (`native/build.log`, also
 the **Build log** button) shows the number of patched functions and mixin rows:
 

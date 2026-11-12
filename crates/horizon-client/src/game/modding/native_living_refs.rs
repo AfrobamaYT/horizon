@@ -2565,12 +2565,12 @@ mod tests {
             );
             game.yaw = 37.0;
             game.pitch = -21.0;
-            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            *game.world.random = horizon_core::random::LegacyRandom::new(12345);
             let item = ItemStack::new("minecraft:apple", 1);
             game.inventory[game.selected] = Some(item.clone());
             game.drop_held(true);
             let key_velocity = game.dropped.last().unwrap().velocity;
-            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            *game.world.random = horizon_core::random::LegacyRandom::new(12345);
             crate::game::native_entity_refs::tests::bind_local_player(game, 42, 123);
             let player = game.living(game.entity(42).unwrap()).unwrap();
             let id = game.living_drop(player, item, false, true).unwrap().id();

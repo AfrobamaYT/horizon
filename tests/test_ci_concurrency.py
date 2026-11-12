@@ -44,10 +44,10 @@ def expression_value(expression, github):
     return evaluate(ast.parse(expression.replace("&&", " and ").replace("||", " or ").strip(), mode="eval").body)
 
 
-def concurrency_for(path, event, sha, number=None):
+def concurrency_for(path, event, sha, number=None, ref="refs/heads/main"):
     workflow = yaml.safe_load(path.read_text())
     policy = workflow["concurrency"]
-    github = {"event_name": event, "sha": sha, "ref": "refs/heads/main",
+    github = {"event_name": event, "sha": sha, "ref": ref,
               "event": {"pull_request": {"number": number or ""}}}
     if number is not None:
         github["ref"] = f"refs/pull/{number}/merge"
@@ -95,18 +95,18 @@ class ConcurrencyTests(unittest.TestCase):
                 self.assertEqual(set(triggers), {"push", "workflow_dispatch"})
                 self.assertEqual(triggers["push"], {"branches": ["main"]})
 
-    def test_main_only_checks_run_once_per_commit(self):
+    def test_main_only_checks_coalesce_main_and_keep_dispatches_apart(self):
         for path in MAIN_ONLY:
             with self.subTest(workflow=path.name):
                 first = concurrency_for(path, "push", "a" * 40)
                 next_push = concurrency_for(path, "push", "b" * 40)
-                dispatch = concurrency_for(path, "workflow_dispatch", "c" * 40)
-                self.assertNotEqual(first[0], next_push[0], "a newer main push must not replace a queued run")
-                self.assertEqual(first[0], concurrency_for(path, "workflow_dispatch", "a" * 40)[0],
-                                 "a dispatch of the same commit queues behind its run")
-                for _, cancel in (first, next_push, dispatch):
-                    self.assertIs(cancel, False, "no run of these checks is cancelled")
-
+                dispatch_main = concurrency_for(path, "workflow_dispatch", "c" * 40)
+                dispatch_branch = concurrency_for(path, "workflow_dispatch", "d" * 40, ref="refs/heads/suspect")
+                self.assertEqual(first[0], next_push[0], "main pushes share one group: only the newest waits")
+                self.assertNotIn(dispatch_main[0], (first[0], dispatch_branch[0]),
+                                 "a dispatch never displaces a main push run or another ref's dispatch")
+                for _, cancel in (first, next_push, dispatch_main, dispatch_branch):
+                    self.assertIs(cancel, False, "a started run always finishes")
 
 if __name__ == "__main__":
     unittest.main()

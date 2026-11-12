@@ -745,7 +745,7 @@ mod tests {
             time: 1.0,
         };
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut primitives = WorldPrimitives::new(&gpu.0, format);
+        let mut primitives = WorldPrimitives::new(&gpu.0, (format, false));
 
         let at = render(&gpu, &mut primitives, format, batch, STAGES - 1);
         let clear = [64.0, 64.0, 64.0, 255.0];
@@ -820,7 +820,7 @@ mod tests {
             quads: 1,
         }];
         let format = wgpu::TextureFormat::Rgba16Float;
-        let mut primitives = WorldPrimitives::new(&gpu.0, format);
+        let mut primitives = WorldPrimitives::new(&gpu.0, (format, false));
         let mut draw = |set: &Pipelines| {
             let batch = Batch {
                 set: Some(set),

@@ -408,6 +408,10 @@ pub enum MotionEvent {
 }
 #[derive(Clone)]
 pub struct PlayerMotion {
+    /// Entity-owned random stream, independent of the level. Like mobs, a new
+    /// body seeds it from its initial identity/position without drawing from the
+    /// level. It lives with this body (including guest turns), not player NBT.
+    pub random: horizon_core::random::EntityRandom,
     pub swimming: bool,
     /// `Entity.isPassenger()`: this body rides a vehicle. `Entity.updateSwimming`
     /// needs it false, so the server's copy of a guest who boards a boat while
@@ -4089,7 +4093,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, at).unwrap();
         let mut found = 0;
         for seed in 0..64 {
-            scene.random = horizon_core::random::LegacyRandom::new(seed);
+            scene.random.set_seed(seed);
             player.events.clear();
             MotionWorld {
                 tag_items: None,
@@ -4125,7 +4129,7 @@ mod tests {
             assert_eq!(velocity.y, f64::from(0.05_f32));
         }
         player.events.clear();
-        scene.random = horizon_core::random::LegacyRandom::new(1);
+        scene.random.set_seed(1);
         MotionWorld {
             tag_items: None,
             block_registries: None,
