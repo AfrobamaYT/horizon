@@ -100,7 +100,7 @@ reload answers `Stale`.
 | Error | When |
 | --- | --- |
 | `RenderPipelineError::Unknown` | No mod registered that id. |
-| `RenderPipelineError::Invalid` | The pipeline is optional and its shader file is missing, was refused or was turned down by the GPU. The log has a line `render pipeline <id> refused: <file>: <reason>`, with the file's line number for a syntax or type error, or `render pipeline <id> refused by the GPU: <reason>`. |
+| `RenderPipelineError::Invalid` | The pipeline is optional and its shader file is missing, was refused or was turned down by the GPU. The log has a line `render pipeline <id> from mod <owner> refused: <file>: <reason>`, with the file's line number for a syntax or type error, or `render pipeline <id> from mod <owner> refused by the GPU: <reason>`. |
 | `RenderPipelineError::Stale` | The handle is from before a resource reload. |
 | `PipelineDrawError::NonFinite` | A corner or texture coordinate is not finite. |
 | `PipelineDrawError::CapacityExceeded` | The view's 4,096 quads, shared with `WorldDrawContext::quads`, are used up. |
