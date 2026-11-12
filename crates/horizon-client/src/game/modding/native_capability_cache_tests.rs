@@ -65,8 +65,8 @@ fn with_cache_mod(name: &str, test: impl FnOnce(&mut super::Game<'_>, mod_api::L
     }
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("cache_bench", Box::new(CacheBench))].into();
-    mod_api::testing::with_mods(mods.clone(), || {
-        crate::game::api_values::install_parts(&mods).unwrap();
+    mod_platform::testing::with_mods(mods.clone(), || {
+        super::api_values::install_parts(&mods).unwrap();
         mod_api::__private::mark_game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::mods::content_root(&base, &Default::default())
