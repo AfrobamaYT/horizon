@@ -389,8 +389,9 @@ impl Game<'_> {
                     self.as_guest(conn, |g| {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
-                        if let Some(stack) = used {
-                            g.stop_using_item(&stack);
+                        match used {
+                            Some(stack) => g.stop_using_item(&stack),
+                            None => g.using = None,
                         }
                     });
                     if mod_api::__private::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
@@ -448,13 +449,6 @@ impl Game<'_> {
                         return;
                     }
                 }
-                let Some(host) = self.lan.as_mut() else {
-                    return;
-                };
-                {
-                    let value = p.slot as usize;
-                    host.hub.guests.update(gi, |guest| guest.selected = value);
-                }
                 self.as_guest(conn, |g| {
                     if changed
                         && g.using
@@ -463,6 +457,13 @@ impl Game<'_> {
                         g.stop_active_item_use();
                     }
                 });
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
+                {
+                    let value = p.slot as usize;
+                    host.hub.guests.update(gi, |guest| guest.selected = value);
+                }
                 if changed {
                     self.native_player_switch_hotbar_slot_post(
                         uuid,

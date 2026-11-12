@@ -1160,7 +1160,6 @@ impl Game<'_> {
         };
         let changed = self.player_selected_slot(player) != Some(slot);
         if !self.native_as_player_handle(player, |game| {
-            game.selected = slot;
             if changed
                 && game
                     .using
@@ -1168,6 +1167,7 @@ impl Game<'_> {
             {
                 game.stop_active_item_use();
             }
+            game.selected = slot;
         }) {
             return false;
         }
