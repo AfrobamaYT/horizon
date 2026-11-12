@@ -312,6 +312,24 @@ impl Game<'_> {
         }
     }
 
+    /// `Entity.teleport` placed as `/tp` places it ([`Game::place_teleport_in_level`]), then filed
+    /// and told as one position update (`/tp`, a mob's ender pearl). Its old position, as the
+    /// placement returns it.
+    pub(super) fn place_teleport_filed(
+        &mut self,
+        t: super::commands::Target,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+        relative: [bool; 3],
+        turn_riders: bool,
+    ) -> Option<[f64; 3]> {
+        let from = self.place_teleport_in_level(t, pos, rotation, relative, turn_riders);
+        if let (Some(entity), Some(to)) = (self.network_entity_id(t), self.target_position(t)) {
+            self.entity_section_moved(entity as u32, from, to);
+        }
+        from
+    }
+
     /// An entity joined (`addEntity`): filed untold where it is now, which a join listener may
     /// have changed from `at`, where it joined.
     pub(super) fn entity_section_joined(&mut self, id: u32, at: [f64; 3]) {

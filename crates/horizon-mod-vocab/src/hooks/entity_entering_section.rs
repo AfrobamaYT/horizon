@@ -24,8 +24,9 @@ pub trait Hooks {
     ///
     /// Timing differs from vanilla for an entity's moves in its own tick (mobs, items and the
     /// other kinds that tick as a family): they are told at the end of its family's tick, the
-    /// same crossings in the same order, later than the write. Teleports, pushes, a player's
-    /// moves and a client's packets are told at once.
+    /// same crossings in the same order, later than the write, so a listener reads such an
+    /// entity where the round left it, not at the destination of the crossing it is told.
+    /// Teleports, pushes, a player's moves and a client's packets are told at once.
     #[notes = r#"## Entering a section
 
 `Hooks::entity_entering_section` (NeoForge's `EntityEvent.EnteringSection`) tells a mod each time an entity's
@@ -60,7 +61,8 @@ or a shulker's teleport when hurt), a piston or shulker push, a server player's 
 that places an entity. A listener's own moves are told at the next update, never from inside its call.
 
 Timing differs from vanilla for an entity's moves in its own tick (mobs, items and the other kinds that tick as a
-family): they are told at the end of its family's tick, the same crossings in the same order, later than the write."#]
+family): they are told at the end of its family's tick, the same crossings in the same order, later than the write, so
+a listener reads such an entity where the round left it, not at the destination of the crossing it is told."#]
     #[hook(
         side = "both",
         contract = "listen",

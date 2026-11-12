@@ -373,6 +373,71 @@ fn a_mob_that_teleports_twice_in_its_tick_then_walks_is_three_crossings() {
     });
 }
 
+/// A goal that, when it starts, runs `LivingEntity.refreshDimensions`' nudge for a mob that grew
+/// from a 0.1 by 0.1 box (`fudgePositionAfterSizeChange`, a `setPos`), then sets the mob moving
+/// up at 0.6, once.
+#[derive(Clone, Debug)]
+struct Grows(bool);
+
+impl horizon_client::mobs::goals::Goal for Grows {
+    fn flags(&self) -> u8 {
+        0
+    }
+    fn can_use(
+        &mut self,
+        _: &mut horizon_client::mobs::Mob,
+        _: &mut horizon_client::mobs::goals::Cx<'_, '_, '_>,
+    ) -> bool {
+        !self.0
+    }
+    fn start(
+        &mut self,
+        m: &mut horizon_client::mobs::Mob,
+        cx: &mut horizon_client::mobs::goals::Cx<'_, '_, '_>,
+    ) {
+        self.0 = true;
+        m.fudge_position_after_size_change(cx.w, 0.1, 0.1);
+        m.velocity = horizon_core::geometry::Vec3::new(0.0, 0.6, 0.0);
+    }
+    fn box_clone(&self) -> Box<dyn horizon_client::mobs::goals::Goal> {
+        Box::new(self.clone())
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_size_change_nudge_in_a_mobs_tick_then_its_walk_are_two_crossings() {
+    observe(|calls| {
+        with_game(|game| {
+            // y 7, 0.3 over its floor. Growing to an adult cow's 1.4 from 0.1 keeps its centre, so
+            // the nudge sets it 0.65 lower, into y 6; the same tick walks it 0.6 up, back into y 7.
+            // Told only where the tick ended, it would be no crossing at all.
+            let id = floating_cow(game, [8.5, 112.3, 8.5]);
+            game.tick_creature_entities().unwrap();
+            let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+            game.mobs.update(i, |m| m.ai.goals.add(0, Grows(false)));
+            for _ in 0..4 {
+                game.tick_creature_entities().unwrap();
+                if !calls.lock().unwrap().is_empty() {
+                    break;
+                }
+            }
+            let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
+            assert!(
+                (at.y - 112.25).abs() < 1e-3,
+                "nudged to 111.65, walked to 112.25: {at:?}"
+            );
+            assert_eq!(
+                calls.lock().unwrap().as_slice(),
+                &[
+                    (false, id, [0, 7, 0], [0, 6, 0], false),
+                    (false, id, [0, 6, 0], [0, 7, 0], false),
+                ]
+            );
+        })
+    });
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_mods_random_teleport_of_a_mob_is_told_at_once() {

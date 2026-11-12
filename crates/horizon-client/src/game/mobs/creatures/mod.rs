@@ -5345,7 +5345,7 @@ impl Game<'_> {
             if !super::native_entity_moves::in_bounds(target) {
                 return Ok(());
             }
-            let _ = game.place_teleport_in_level(
+            let _ = game.place_teleport_filed(
                 super::commands::Target::Mob(id),
                 target,
                 None,
