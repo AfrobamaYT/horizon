@@ -21,6 +21,17 @@ an entity's or an item's slot into that container's other slots (`forHandlerInde
 with an `exchange` of one. An exchange inside one of two backpacks is done in one of them: that one is rewritten
 holding the change and splits off, and the other stays as it was.
 
+Four places wrap or stand in for these, as NeoForge's other `ItemAccess`es. `host.scratch_stack(tx, stack)`
+(`forStack`) holds a stack outside the world, a crafting result or a preview, and gives its `ItemPlace::Scratch`;
+`host.scratch_take(tx, &place)` takes it back. It lives until the outermost transaction closes, an abort of the one
+that made it drops it, and as `StackItemAccess` a write never changes its item: a bucket in one can't become a
+water bucket, while its count and components can change. `ItemPlace::Strict(place)` (`forHandlerIndexStrict`)
+refuses, around a block entity's, an entity's or an item's slot, what the slot doesn't take, where the plain place
+spreads it. `ItemPlace::OneByOne(place)` (`oneByOne`) reads at most one item and gives at most one, so a handler
+that acts on the whole stack acts on one. `ItemPlace::InfiniteMaterials { player, inner }` (`forInfiniteMaterials`)
+reaches `inner` as a creative player does while `player` has infinite materials: extracts give without taking, and
+an insert is taken whole, one of it going into the player's inventory only if they have none.
+
 A stack's components change the same way, where it lives (NeoForge's `ItemResource.with` and `without`). A component
 is named by a `ComponentId`, checked once as a namespaced id (`ComponentId::new("minecraft:damage")`, None for
 `Damage` or `!minecraft:food`). `resource.component(&id)` reads the stack's own value in its patch as saved;

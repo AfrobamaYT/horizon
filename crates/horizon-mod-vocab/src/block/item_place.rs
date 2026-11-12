@@ -107,6 +107,33 @@ pub enum ItemPlace {
         /// The provider's own key for the place.
         key: u64,
     },
+    /// A stack outside the world (`ItemAccess.forStack`): a crafting result, a preview, a stack
+    /// about to be given. [`ItemsServerHost::scratch_stack`](crate::prelude::ItemsServerHost::scratch_stack)
+    /// makes one in a transaction and
+    /// [`scratch_take`](crate::prelude::ItemsServerHost::scratch_take) takes it back out. It
+    /// lives until the outermost transaction closes; an abort puts it back as it was, or drops
+    /// it if the aborted transaction made it. A write never changes its item, only its count and
+    /// components, as `StackItemAccess`: what doesn't fit, or is another item, is refused.
+    Scratch(u64),
+    /// The place inside, where an insert goes into that slot only
+    /// (`ItemAccess.forHandlerIndexStrict`): around a [`BlockEntity`](Self::BlockEntity),
+    /// [`EntitySlot`](Self::EntitySlot) or [`Nested`](Self::Nested) slot, what doesn't fit is
+    /// refused instead of spread to the other slots. Around any other place it is that place.
+    Strict(Box<ItemPlace>),
+    /// One item at a time of the place inside (`ItemAccess.oneByOne`): its count reads at most
+    /// 1 and an extract takes at most 1, so a handler acting on the whole stack acts on one.
+    /// Inserts go to the place inside as they would.
+    OneByOne(Box<ItemPlace>),
+    /// The place inside, as a player with infinite materials reaches it
+    /// (`ItemAccess.forInfiniteMaterials`): while `player` has them (creative's `instabuild`),
+    /// an extract gives without taking and an insert is taken whole, one of it going into the
+    /// player's inventory only if they have none. Otherwise it is the place inside.
+    InfiniteMaterials {
+        /// The player's UUID.
+        player: u128,
+        /// The place the player reaches.
+        inner: Box<ItemPlace>,
+    },
 }
 
 /// A mod's own places ([`ItemPlace::Mod`]), registered with
@@ -304,6 +331,14 @@ impl ItemPlace {
                 provider.stack(host, *key)
             }
             ItemPlace::MenuSlot { menu, slot } => menu.slot(host, *slot)?,
+            ItemPlace::Strict(inner) | ItemPlace::InfiniteMaterials { inner, .. } => {
+                inner.stack(host)
+            }
+            ItemPlace::OneByOne(inner) => {
+                let mut stack = inner.stack(host)?;
+                stack.set_count(1).ok()?;
+                Some(stack)
+            }
             _ => backend_mut_of(host).and_then(|backend| backend.game_stack(self)),
         }
     }
@@ -324,7 +359,8 @@ impl ItemPlace {
     /// root commit (a creative player's hand takes anything, and gives them one if they have
     /// none, as `forInfiniteMaterials`); an item entity's dropped beside it at the root commit; a
     /// block entity's, an entity's or an item's slot's into that container's other slots
-    /// (`forHandlerIndex`); a mod's place's where its [`PlaceProvider`] puts it.
+    /// (`forHandlerIndex`, refused instead around [`Strict`](Self::Strict)); a mod's place's
+    /// where its [`PlaceProvider`] puts it; a [`Scratch`](Self::Scratch) stack's nowhere.
     pub fn insert(
         &self,
         host: &mut dyn ServerHost,
@@ -332,7 +368,7 @@ impl ItemPlace {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        self.moved(host, tx, resource, amount, true)
+        self.moved(host, tx, resource, amount, true, true)
     }
 
     /// Takes up to `amount` of `resource` from here, in transaction `tx`: how much came
@@ -344,7 +380,7 @@ impl ItemPlace {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        self.moved(host, tx, resource, amount, false)
+        self.moved(host, tx, resource, amount, false, true)
     }
 
     /// Takes `amount` of what is here and puts as many of `resource` in their place
@@ -375,7 +411,8 @@ impl ItemPlace {
     }
 
     /// `insert` or `extract`, in a transaction of its own: a handler answering more than it was
-    /// asked has it undone, and its mod named.
+    /// asked has it undone, and its mod named. An insert into a handler slot that `spills` sends
+    /// what the slot doesn't take to the handler's other slots.
     fn moved(
         &self,
         host: &mut dyn ServerHost,
@@ -383,8 +420,44 @@ impl ItemPlace {
         resource: &ItemResource,
         amount: u32,
         insert: bool,
+        spills: bool,
     ) -> u32 {
-        let _ = tx;
+        match self {
+            ItemPlace::Strict(inner) => {
+                return inner.moved(host, tx, resource, amount, insert, false);
+            }
+            ItemPlace::OneByOne(inner) => {
+                let amount = if insert { amount } else { amount.min(1) };
+                return inner.moved(host, tx, resource, amount, insert, spills);
+            }
+            ItemPlace::InfiniteMaterials { player, inner } => {
+                let infinite = host
+                    .player(*player)
+                    .and_then(|player| host.player_has_infinite_materials(player));
+                if infinite != Some(true) {
+                    return inner.moved(host, tx, resource, amount, insert, spills);
+                }
+                if !insert {
+                    return inner
+                        .stack(host)
+                        .filter(|held| resource.matches(held))
+                        .map_or(0, |held| amount.min(held.count()));
+                }
+                let had = host
+                    .player(*player)
+                    .and_then(|player| host.player_inventory(player))
+                    .is_some_and(|items| items.iter().any(|held| resource.matches(held)));
+                if !had && let Some(player) = host.player(*player) {
+                    // shortcut: a full inventory keeps none, where vanilla drops the one; drop
+                    // it here once a handle can drop for a player.
+                    if let Some(items) = player.entity().capability(host, &ENTITY_ITEMS, ()) {
+                        items.insert_any(host, tx, resource, 1);
+                    }
+                }
+                return amount;
+            }
+            _ => {}
+        }
         // A menu slot's own rules come before its storage's: `Slot.mayPlace` and
         // `getMaxStackSize` for what goes in, `Slot.mayPickup` for what comes out.
         let amount = match self {
@@ -437,11 +510,17 @@ impl ItemPlace {
                 slot,
             } => {
                 let handler = level.capability(host, &ITEMS, *pos, *side).ok_or(())?;
-                through(handler, host, tx, *slot, true)
+                through(handler, host, tx, *slot, spills)
             }
             ItemPlace::Nested { parent, slot } => {
                 let handler = parent.capability(host, &ITEM_ITEMS).ok_or(())?;
-                through(handler, host, tx, *slot, true)
+                through(handler, host, tx, *slot, spills)
+            }
+            // The game's own write spreads; a strict one goes through the entity's handler.
+            ItemPlace::EntitySlot { entity, slot } if !spills => {
+                let entity = host.entity(*entity).ok_or(())?;
+                let handler = entity.capability(host, &ENTITY_ITEMS, ()).ok_or(())?;
+                through(handler, host, tx, *slot, false)
             }
             ItemPlace::MenuSlot { menu, slot } => {
                 let (handler, index) = match menu.slot_backing(host, *slot).ok_or(())? {

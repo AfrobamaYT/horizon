@@ -66,6 +66,22 @@ pub trait ItemsServerHost {
         facing: Direction,
         stack: ItemStack,
     ) -> Result<Option<ItemStack>, StackWriteError>;
+    /// Side: server.
+    /// Holds `stack` outside the world, in the open transaction `tx` (`ItemAccess.forStack`):
+    /// the [`ItemPlace::Scratch`] to run item capabilities against. It lives until the
+    /// outermost transaction closes, and an abort of the one that made it drops it. None
+    /// where `tx` is not open.
+    #[access(WorldOnly)]
+    fn scratch_stack(
+        &mut self,
+        tx: &Transaction,
+        stack: ItemStack,
+    ) -> Result<Option<ItemPlace>, StackWriteError>;
+    /// Side: server.
+    /// Takes the stack out of scratch place `place`, in `tx`, ending the place: none where it
+    /// is empty, no longer held, or not a scratch place.
+    #[access(WorldOnly)]
+    fn scratch_take(&mut self, tx: &Transaction, place: &ItemPlace) -> Option<ItemStack>;
 }
 /// The client host's methods of the `items` area, implemented by the game and reached through [`crate::ClientHost`].
 #[horizon_mod_api_macros::host_area]

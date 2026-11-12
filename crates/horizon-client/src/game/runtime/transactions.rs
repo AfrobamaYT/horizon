@@ -32,6 +32,8 @@ use std::collections::HashMap;
 
 #[path = "transactions/decision.rs"]
 pub(in crate::game) mod decision;
+#[path = "transactions/scratch.rs"]
+mod scratch;
 
 type Pos = (i32, i32, i32);
 
@@ -79,6 +81,10 @@ pub(super) struct Level {
     /// Internal decide/fire/apply state. No menu route uses this yet.
     actions: decision::Journal,
     action: Option<decision::ActiveAction>,
+    /// The scratch stacks (`ItemPlace::Scratch`), live: kept by the outermost transaction only.
+    scratch: HashMap<u64, scratch::Scratch>,
+    /// Each scratch stack before this transaction first wrote it; none where it didn't exist.
+    scratch_kept: HashMap<u64, Option<scratch::Scratch>>,
 }
 
 /// A slot's stack before a transaction first wrote it, and the generation of the block entity
@@ -335,6 +341,9 @@ impl Game<'_> {
                 }
                 for (holder, kept) in level.attachments {
                     outer.attachments.entry(holder).or_insert(kept);
+                }
+                for (id, kept) in level.scratch_kept {
+                    outer.scratch_kept.entry(id).or_insert(kept);
                 }
                 outer.after.extend(level.after);
             }
@@ -676,6 +685,7 @@ impl Game<'_> {
         }
     }
     fn roll_back(&mut self, mut level: Level) {
+        self.scratch_roll_back(std::mem::take(&mut level.scratch_kept));
         // Discard deferred effects before undoing tentative action storage.
         level.after.clear();
         // Each mob's equipment goes back as it was, and the attribute map is
