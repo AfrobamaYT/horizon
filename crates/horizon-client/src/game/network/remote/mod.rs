@@ -16478,10 +16478,10 @@ mod tests {
 }
 
 #[cfg(test)]
+mod movement_input_tests;
+#[cfg(test)]
 #[path = "player_tick_tests.rs"]
 mod player_tick_tests;
-#[cfg(test)]
-mod movement_input_tests;
 
 /// Whether a synchronized dimension type's values are inside the codec's ranges
 /// (`DimensionType.java`: a coordinate scale of `1.0E-5F` to `3.0E7`, a monster spawn block light
