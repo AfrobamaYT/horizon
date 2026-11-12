@@ -1169,59 +1169,34 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// The armor stands' share of `Shulker.onPeekAmountChange`: the opening
-    /// lid of mob `shulker` moves every stand with physics (vanilla's
-    /// `!noPhysics`: not a marker, not `NoGravity`) whose box meets `area` by
-    /// `delta`, through the stand's `shove`. The stand the shulker
-    /// rides is left out (`isPassengerOfSameVehicle`). Stands tick before mobs
-    /// here, while vanilla ticks a stand that joined after the shulker (one
-    /// placed on it) after the shulker: `shove` makes up for the order.
-    pub(super) fn lid_pushes_armor_stands(&mut self, shulker: u32, area: Aabb, delta: [f64; 3]) {
-        if self.armor_stands.is_empty() {
-            return;
-        }
-        let delta = Vec3::new(delta[0], delta[1], delta[2]);
-        let mut obstacles: Option<horizon_client::entities::ObstacleGrid> = None;
-        // (the stand the shulker rides, when it joined), worked out at the first stand it meets.
-        let mut shell: Option<(Option<u32>, horizon_client::join_seq::JoinSeq)> = None;
+    /// A lid's `Entity.move` for armor stand `i`, one with physics (vanilla's
+    /// `!noPhysics`: not a marker, not `NoGravity`), from the game's one lid
+    /// push: the stand's own `shove` by `delta`. Stands tick
+    /// before mobs here, while vanilla ticks a stand that joined after the
+    /// pushing `shulker` (one placed on it) after the shulker: `shove` makes
+    /// up for the order. A shulker box's lid moves it after every entity's tick.
+    pub(super) fn lid_shoves_armor_stand(&mut self, i: usize, shulker: Option<u32>, delta: Vec3) {
+        let joined = shulker.and_then(|id| self.mobs.iter().find(|m| m.id == id).map(|m| m.join));
+        let mut grid = self.stand_entity_collisions();
         let mut nearby = Vec::new();
-        for i in 0..self.armor_stands.len() {
-            let a = &self.armor_stands[i];
-            if a.marker || a.no_gravity || a.health <= 0.0 || !a.bounds().intersects(area) {
-                continue;
-            }
-            let (ridden, joined) = *shell.get_or_insert_with(|| {
-                let j = self.mobs.iter().position(|m| m.id == shulker);
-                (
-                    j.and_then(|j| self.mob_root_vehicle(j)),
-                    j.map_or(horizon_client::join_seq::JoinSeq::UNJOINED, |j| {
-                        self.mobs[j].join
-                    }),
-                )
-            });
-            if Some(a.id) == ridden {
-                continue;
-            }
-            let grid = obstacles.get_or_insert_with(|| self.stand_entity_collisions());
-            let a = &mut self.armor_stands[i];
-            // Entity.collide: the entities meeting the box stretched by the push.
-            let reach = a.bounds().expand_towards(delta);
-            let reach = reach.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
-            grid.near_except(reach, Some(a.id), &mut nearby);
-            let scene = horizon_client::collisions::SceneCollisions {
-                world: &self.world,
-                binding: self.collision,
-                subject: None,
-            };
-            let travels_after = a.join > joined;
-            a.shove(
-                scene,
-                delta,
-                Some(self.border.geometry()),
-                &nearby,
-                travels_after,
-            );
-        }
+        let a = &mut self.armor_stands[i];
+        // Entity.collide: the entities meeting the box stretched by the push.
+        let reach = a.bounds().expand_towards(delta);
+        let reach = reach.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+        grid.near_except(reach, Some(a.id), &mut nearby);
+        let scene = horizon_client::collisions::SceneCollisions {
+            world: &self.world,
+            binding: self.collision,
+            subject: None,
+        };
+        let travels_after = joined.is_some_and(|joined| a.join > joined);
+        a.shove(
+            scene,
+            delta,
+            Some(self.border.geometry()),
+            &nearby,
+            travels_after,
+        );
     }
     /// `Ravager.roar` with `mob_griefing` on: every armor stand in `area` (the
     /// ravager's box grown by 4) takes `strongKnockback` from the ravager at
