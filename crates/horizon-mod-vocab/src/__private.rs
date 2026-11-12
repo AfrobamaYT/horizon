@@ -279,6 +279,16 @@ pub mod game {
         }
     }
 
+    pub fn original_player_ref(token: u64) -> OriginalPlayerRef {
+        OriginalPlayerRef { token }
+    }
+    impl Fields for OriginalPlayerRef {
+        type Fields<'a> = u64;
+        fn fields(&self) -> u64 {
+            self.token
+        }
+    }
+
     pub struct ModEntryFields<'a> {
         pub id: &'static str,
         pub hooks: &'a dyn Hooks,

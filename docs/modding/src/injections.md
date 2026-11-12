@@ -2,6 +2,10 @@
 
 An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points work on native and wasm, on engine functions.
 
+To change a call or value inside a function, replace its body, or run code inside a hot loop, a native mod
+takes [the native route](native-route.md): [`[[native.mixin]]`](mixins.md), [`[[native.loop]]`](loops.md),
+[`[[native.bridge]]`](bridges.md) and [`[[native.module]]`](support-modules.md).
+
 ## Declaration
 
 ```toml
