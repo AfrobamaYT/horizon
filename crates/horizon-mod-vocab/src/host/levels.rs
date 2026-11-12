@@ -1063,6 +1063,29 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
     /// Side: server.
+    /// Plays level event `id` at `pos` with `data` for every player on the
+    /// server, in every level and at any distance (`ServerLevel.globalLevelEvent`).
+    /// Vanilla's ids are the wither's spawn (`1023`), the dragon's death
+    /// (`1028`) and an End portal opening (`1038`): the client has a sound for
+    /// them only through this global form, played two blocks from the camera
+    /// towards the position the player is sent. Each player gets a position
+    /// of their own: `pos` in this level within 32 blocks of its centre, the
+    /// block 32 blocks from them towards that centre further away, and the
+    /// block they stand in for a player in another level.
+    /// With the `global_sound_events` game rule off it is a plain
+    /// [`level_event`](Self::level_level_event), as vanilla falls back: only
+    /// the players of this level near `pos` get it. False for the same events
+    /// and data `level_event` refuses, a parked level, a stale handle or a
+    /// client.
+    #[access(WorldOnly)]
+    fn level_global_level_event(
+        &mut self,
+        level: LevelRef,
+        id: i32,
+        pos: [i32; 3],
+        data: i32,
+    ) -> bool;
+    /// Side: server.
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
     /// `Level.gameEvent(event, at, context)` does: sculk sensors, shriekers,
     /// wardens and allays receive the optional source and affected state.
