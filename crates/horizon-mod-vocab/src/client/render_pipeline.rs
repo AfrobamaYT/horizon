@@ -20,9 +20,16 @@ pub struct RenderPipeline {
     pub blend: PipelineBlend,
     /// Whether nearer world surfaces hide the draw. No pipeline writes depth.
     pub depth: WorldDepth,
+    /// Whether a resource load may go on without this pipeline (NeoForge's
+    /// `registerOptionalPipeline`). A required pipeline (NeoForge's `registerPipeline`, the
+    /// default) that a load cannot build fails the load: the game does not start, and a reload
+    /// fails and keeps the previous resources. An optional one is logged once by id and resolves
+    /// to [`RenderPipelineError::Invalid`] while the other pipelines draw.
+    pub optional: bool,
 }
 impl RenderPipeline {
-    /// Describe a pipeline that draws [`PipelineVertexFormat::PositionTexColor`] geometry.
+    /// Describe a required pipeline that draws [`PipelineVertexFormat::PositionTexColor`]
+    /// geometry.
     pub fn new(
         id: Identifier,
         fragment: Identifier,
@@ -35,7 +42,14 @@ impl RenderPipeline {
             vertex_format: PipelineVertexFormat::PositionTexColor,
             blend,
             depth,
+            optional: false,
         }
+    }
+    /// Let a resource load that cannot build this pipeline go on without it (NeoForge's
+    /// `registerOptionalPipeline`).
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
     }
 }
 

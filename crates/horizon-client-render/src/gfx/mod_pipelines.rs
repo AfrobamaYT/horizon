@@ -2,7 +2,9 @@
 //! from a resource load's checked shaders (`crate::mod_pipelines`), and the quads a frame draws
 //! with them. They draw with the world primitives, at their stages and into the same targets,
 //! so they take the world's reversed depth, its draw resolution and TAA's jitter. Pipelines are
-//! built on the first world frame after a load, never while quads are being submitted.
+//! built with the renderer a load is applied with ([`super::Renderer::build_mod_pipelines`]),
+//! never while quads are being submitted, so a required pipeline the GPU refuses fails that
+//! load's renderer and the reload with it.
 
 use super::world_primitives::Upload;
 use crate::mod_pipelines::{Built, FRAGMENT_ENTRY, Pipelines, VERTEX_ENTRY};
@@ -136,9 +138,17 @@ impl ModPipelines {
         }
     }
 
-    /// One load's pipeline: its checked shader with the fixed state it registered.
-    fn pipeline(&self, device: &wgpu::Device, built: &Built) -> Option<wgpu::RenderPipeline> {
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    /// One load's pipeline: its checked shader with the fixed state it registered, or the
+    /// GPU's error.
+    fn pipeline(
+        &self,
+        device: &wgpu::Device,
+        built: &Built,
+    ) -> Result<wgpu::RenderPipeline, String> {
+        // The shader text is a mod's or a pack's: a backend failing to compile it is an
+        // internal error, and neither kind may reach the device's uncaptured handler.
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Mod pipeline"),
             source: wgpu::ShaderSource::Wgsl(built.shader.as_str().into()),
@@ -205,17 +215,62 @@ impl ModPipelines {
             multiview_mask: None,
             cache: None,
         });
-        if let Some(error) = pollster::block_on(scope.pop()) {
-            log::warn!("Mod render pipeline invalid: {error}");
-            None
-        } else {
-            Some(pipeline)
+        let internal = pollster::block_on(internal.pop());
+        let validation = pollster::block_on(validation.pop());
+        match internal.or(validation) {
+            None => Ok(pipeline),
+            Some(error) => Err(error.to_string()),
         }
     }
 
-    /// Builds the pipelines of a load this renderer has not built yet, then uploads the frame's
-    /// quads, drawn with `view_proj` into a frame `viewport` pixels big. The number of quads to
-    /// draw: the caller's quad indices must reach that far.
+    /// Builds the pipelines of `set` unless they are built already. A required pipeline the GPU
+    /// refuses is the error, by id, and leaves this renderer and `set` as they were; an optional
+    /// one is logged once, draws nothing and resolves invalid.
+    fn build(&mut self, device: &wgpu::Device, set: &Pipelines) -> Result<(), String> {
+        if set.generation() == self.generation {
+            return Ok(());
+        }
+        let mut refused = Vec::new();
+        let pipelines: Vec<_> = set
+            .built()
+            .iter()
+            .enumerate()
+            .map(|(slot, built)| {
+                let built = built.as_ref()?;
+                self.pipeline(device, built)
+                    .map_err(|error| refused.push((slot, built, error)))
+                    .ok()
+            })
+            .collect();
+        let required: Vec<_> = refused
+            .iter()
+            .filter(|(_, built, _)| !built.optional)
+            .map(|(_, built, error)| {
+                format!(
+                    "required render pipeline {} refused by the GPU: {error}",
+                    built.id
+                )
+            })
+            .collect();
+        if !required.is_empty() {
+            return Err(required.join("; "));
+        }
+        for (slot, built, error) in refused {
+            if set.invalidate(slot) {
+                log::warn!(
+                    "Horizon: render pipeline {} refused by the GPU: {error}",
+                    built.id
+                );
+            }
+        }
+        self.generation = set.generation();
+        self.pipelines = pipelines;
+        Ok(())
+    }
+
+    /// Uploads the frame's quads, drawn with `view_proj` into a frame `viewport` pixels big. The
+    /// number of quads to draw: the caller's quad indices must reach that far. A set this
+    /// renderer was not built with draws nothing.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -225,25 +280,11 @@ impl ModPipelines {
         viewport: [u32; 2],
     ) -> u32 {
         self.runs.clear();
-        let Some(set) = batch.set else {
+        if batch
+            .set
+            .is_none_or(|set| set.generation() != self.generation)
+        {
             return 0;
-        };
-        if set.generation() != self.generation {
-            self.generation = set.generation();
-            self.pipelines = set
-                .built()
-                .iter()
-                .enumerate()
-                .map(|(slot, built)| {
-                    built.as_ref().and_then(|built| {
-                        let pipeline = self.pipeline(device, built);
-                        if pipeline.is_none() {
-                            set.invalidate(slot);
-                        }
-                        pipeline
-                    })
-                })
-                .collect();
         }
         let mut next = 0;
         for run in batch.runs {
@@ -317,6 +358,14 @@ impl ModPipelines {
     }
 }
 
+impl super::Renderer {
+    /// Builds the mods' pipelines of the load this renderer is made for, before the load is
+    /// published: the required ones the GPU refuses are the error, by id.
+    pub fn build_mod_pipelines(&mut self, set: &Pipelines) -> Result<(), String> {
+        self.world_primitives.pipelines.build(&self.device, set)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,12 +390,12 @@ mod tests {
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }
 
-    /// The load of `generation` with one pipeline for each shader, in slot order.
+    /// The load of `generation` with one optional pipeline for each shader, in slot order.
     fn load(generation: u64, shaders: &[(&str, PipelineBlend, WorldDepth)]) -> Pipelines {
         let registered: Vec<_> = (0..shaders.len())
             .map(|slot| {
                 let id = Identifier::parse(&format!("test:p{slot}")).unwrap();
-                RenderPipeline::new(id.clone(), id, shaders[slot].1, shaders[slot].2)
+                RenderPipeline::new(id.clone(), id, shaders[slot].1, shaders[slot].2).optional()
             })
             .collect();
         Pipelines::build(&registered, generation, |file| {
@@ -358,6 +407,7 @@ mod tests {
                 .unwrap();
             Ok(shaders[slot].0.to_owned())
         })
+        .unwrap()
     }
 
     fn view_proj() -> Mat4 {
@@ -429,6 +479,9 @@ mod tests {
             wgpu::TextureUsages::TEXTURE_BINDING,
         );
         let wall = view_proj().project_point3(Vec3::new(0.0, 0.0, -5.0)).z;
+        if let Some(set) = batch.set {
+            primitives.pipelines.build(device, set).unwrap();
+        }
         let drawn = primitives.prepare(
             device,
             &mut |buffer, bytes| queue.write_buffer(buffer, 0, bytes),
@@ -537,8 +590,8 @@ mod tests {
         let renderer = ModPipelines::new(&device, wgpu::TextureFormat::Rgba8Unorm);
         let mut broken = set.built()[0].clone().unwrap();
         broken.shader = "not wgsl".into();
-        assert!(renderer.pipeline(&device, &broken).is_none());
-        set.invalidate(0);
+        assert!(renderer.pipeline(&device, &broken).is_err());
+        assert!(set.invalidate(0));
         assert_eq!(set.resolve(&id), Err(mod_api::RenderPipelineError::Invalid));
         assert_eq!(set.slot(handle), Err(mod_api::RenderPipelineError::Invalid));
     }
