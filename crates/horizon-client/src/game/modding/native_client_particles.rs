@@ -5,7 +5,7 @@ use mod_api::{FireworksRequest, client::particles::PositionSource};
 
 /// The most explosions one `create_fireworks` request draws (a crafted rocket holds at
 /// most 7 stars; a mod's show can be larger).
-const MAX_FIREWORK_EXPLOSIONS: usize = 64;
+const MAX_FIREWORK_EXPLOSIONS: usize = 256;
 
 fn finite_options(options: &ParticleOptions) -> bool {
     options.color.into_iter().all(f32::is_finite)
@@ -185,9 +185,12 @@ mod tests {
             let mut bad = request(true);
             bad.velocity[1] = f64::NAN;
             assert!(!host.create_fireworks(&bad), "non-finite input");
-            bad = request(true);
-            bad.explosions = vec![bad.explosions[0].clone(); MAX_FIREWORK_EXPLOSIONS + 1];
-            assert!(!host.create_fireworks(&bad), "too many explosions");
+            let mut most = request(false);
+            most.explosions = vec![most.explosions[0].clone(); 256];
+            assert!(host.create_fireworks(&most), "256 explosions, vanilla's most");
+            bad = request(false);
+            bad.explosions = vec![bad.explosions[0].clone(); 257];
+            assert!(!host.create_fireworks(&bad), "257 explosions");
             game.options.execution_role =
                 crate::game::execution_role::ExecutionRole::IntegratedServer;
             let host: &mut dyn ClientHost = game;

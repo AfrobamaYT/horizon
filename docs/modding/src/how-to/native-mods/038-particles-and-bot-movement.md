@@ -34,7 +34,7 @@ uses, so the explosions follow each other every other tick as a rocket's do. Wit
 false the sparks and flash still draw but the blast and twinkle sounds don't play, as for a
 silent rocket. Nothing reaches the server or other players: a mod's server half tells each
 client half to draw it. The request is refused on a server, without a loaded client player
-and world, for non-finite numbers and for more than 64 explosions.
+and world, for non-finite numbers and for more than 256 explosions.
 
 ### Bot movement and block collisions
 
