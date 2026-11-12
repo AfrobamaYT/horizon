@@ -10,6 +10,8 @@ mod block_entity_on_load;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/block_entity_transform.rs"]
+mod block_entity_transform;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
 #[path = "wire_loopback/use_item_hand.rs"]
@@ -202,6 +204,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
+            block_entity_transform::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
