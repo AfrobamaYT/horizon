@@ -754,7 +754,7 @@ fn piston_push_reaction_position_state_opens_ticks_and_saves() {
             },
             |game| {
                 use horizon_client::{
-                    chunk::{Chunk, RolledLoot},
+                    chunk::{Chunk, PendingContainerLoot},
                     containers::{BlockEntity, Furnace, FurnaceKind},
                     items::ItemStack,
                 };
@@ -849,11 +849,9 @@ fn piston_push_reaction_position_state_opens_ticks_and_saves() {
                 game.world.set_container_stack_limit(from, 13);
                 if case == "loot" {
                     let mut extras = game.world.block_entity_extras(from);
-                    extras.rolled_loot = Some(RolledLoot {
-                        pos: from,
-                        table: "minecraft:chests/simple_dungeon".into(),
-                        seed: Some(123),
-                        items: Tag::List(vec![]),
+                    extras.pending_loot = Some(PendingContainerLoot {
+                        table: Tag::String("minecraft:chests/simple_dungeon".into()),
+                        seed: Some(Tag::Long(123)),
                     });
                     game.world.set_block_entity_extras(from, extras);
                 }
@@ -1020,9 +1018,8 @@ fn piston_push_reaction_position_state_opens_ticks_and_saves() {
                 assert_eq!(tag.get("CustomName"), Some(&custom));
                 assert_eq!(tag.get("lock"), Some(&lock));
                 if case == "loot" {
-                    let roll = game.world.block_entity_extras(to).rolled_loot.unwrap();
-                    assert_eq!(roll.pos, to);
-                    assert_eq!(roll.seed, Some(123));
+                    let roll = game.world.block_entity_extras(to).pending_loot.unwrap();
+                    assert_eq!(roll.seed, Some(Tag::Long(123)));
                 } else if case == "furnace" {
                     let (_, BlockEntity::Furnace(saved_furnace)) =
                         horizon_client::save::decode_block_entity(tag).unwrap()

@@ -85,9 +85,9 @@ impl WorldRequest {
         upgrade: &horizon_world::datafix::progress::UpgradeProgress,
     ) -> Result<PreparedWorld> {
         let _prepare_step = startup::step("world.prepare");
-        // Before any chunk is read: a loaded container with a loot table is rolled as its chunk
-        // is decoded (`save::roll_loaded_loot`), and the spawn chunks are read while the world
-        // opens. Every world opens here: on the server thread, on a dedicated server.
+        // Prepare the shared loot snapshot before spawn chunks and server gameplay start.
+        // Container loading only installs pending tags; first inventory access uses this data.
+        // Every world opens here: on the server thread, on a dedicated server.
         let loot = || {
             horizon_client::structure_blocks::loot_data(
                 &options.resources,

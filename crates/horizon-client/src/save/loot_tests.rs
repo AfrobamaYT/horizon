@@ -59,7 +59,7 @@ fn reload_loot_case(
 ) -> Chunk {
     let pos = (1, 64, 2);
     let mut slots = vec![None; 27];
-    slots[0] = Some(crate::items::ItemStack::new("minecraft:gold_ingot", 2));
+
     let source = Tag::compound([
         ("id", string("minecraft:chest")),
         ("x", Tag::Int(pos.0)),
@@ -76,17 +76,19 @@ fn reload_loot_case(
         .expect("fixture's admitted external name");
     let mut extras = ChunkExtras {
         block_entity_sources: vec![(pos, source)],
-        rolled_loot: vec![RolledLoot {
+        pending_loot: [(
             pos,
-            table: table.into(),
-            seed: Some(seed),
-            items: encode_items(&slots),
-        }],
+            PendingContainerLoot {
+                table: string(table),
+                seed: Some(Tag::Long(seed)),
+            },
+        )]
+        .into(),
         ..Default::default()
     };
     // Exactly the production transition used when the player opens the chest.
     if mode != 0 {
-        consume_container_loot(&mut extras, pos);
+        extras.pending_loot.remove(&pos);
         slots.fill(None);
         if mode == 2 {
             slots[0] = Some(crate::items::ItemStack::new("minecraft:gold_ingot", 1));
@@ -127,39 +129,65 @@ fn emptied_opened_loot_stays_empty_after_chunk_save_and_reload() {
 }
 
 #[test]
-fn consuming_one_table_preserves_unopened_neighbors_and_other_fields() {
+fn unopened_loot_tags_round_trip_exactly() {
+    let (registry, biomes) = fixture();
     let pos = (1, 64, 2);
-    let other = (2, 64, 2);
-    let tag = Tag::compound([
-        ("LootTable", string("minecraft:chests/ruined_portal")),
-        ("LootTableSeed", Tag::Long(42)),
-        ("CustomName", string("keep")),
-    ]);
-    let rolled = |pos| RolledLoot {
-        pos,
-        table: "minecraft:chests/ruined_portal".into(),
-        seed: Some(42),
-        items: Tag::List(vec![]),
-    };
-    let mut extras = ChunkExtras {
-        block_entity_sources: vec![(pos, tag.clone()), (other, tag.clone())],
-        rolled_loot: vec![rolled(pos), rolled(other)],
-        ..Default::default()
-    };
-    consume_container_loot(&mut extras, pos);
-    assert_eq!(extras.rolled_loot, vec![rolled(other)]);
-    assert_eq!(extras.block_entity_sources[1].1, tag);
-    assert_eq!(
-        extras.block_entity_sources[0].1.get("CustomName"),
-        Some(&string("keep"))
-    );
-    let saved = extras.block_entity_sources.clone();
-    consume_container_loot(&mut extras, pos);
-    assert_eq!(extras.block_entity_sources, saved);
-    // No rolled marker means an unopened source is not consumed by accident.
-    extras.rolled_loot.clear();
-    consume_container_loot(&mut extras, other);
-    assert_eq!(extras.block_entity_sources[1].1, tag);
+    for seed in [Some(Tag::Long(37)), None, Some(Tag::Long(0))] {
+        let pending = PendingContainerLoot {
+            table: string("minecraft:chests/simple_dungeon"),
+            seed,
+        };
+        let expected = |p: &PendingContainerLoot| {
+            let mut map = Compound::new();
+            map.insert("LootTable".into(), p.table.clone());
+            if let Some(seed) = &p.seed {
+                map.insert("LootTableSeed".into(), seed.clone());
+            }
+            nbt::write_named(
+                &NamedTag {
+                    name: "".into(),
+                    tag: Tag::Compound(map),
+                },
+                Limits::default(),
+            )
+            .unwrap()
+        };
+        let bytes = expected(&pending);
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(1, 64, 2, 1);
+        chunk
+            .block_entities
+            .push((pos, crate::containers::BlockEntity::Chest(vec![None; 27])));
+        chunk.saved = Some(Arc::new(ChunkExtras {
+            pending_loot: [(pos, pending)].into(),
+            ..Default::default()
+        }));
+        for _ in 0..2 {
+            let encoded = encode(&chunk, &registry, &biomes);
+            let disk = nbt::write_named(&encoded, Limits::default()).unwrap();
+            let (encoded, _) = nbt::read_named(&disk, Limits::default()).unwrap();
+            let tag = &match encoded.tag.get("block_entities").unwrap() {
+                Tag::List(tags) => tags,
+                _ => panic!(),
+            }[0];
+            assert_eq!(
+                expected(&PendingContainerLoot::from_tag(tag).unwrap()),
+                bytes
+            );
+            assert!(tag.get("Items").is_none());
+            chunk = decode(&encoded, &registry, &biomes).unwrap();
+            assert!(
+                chunk.block_entities[0]
+                    .1
+                    .slots()
+                    .iter()
+                    .all(Option::is_none)
+            );
+            let extras = chunk.saved.as_ref().unwrap();
+            assert_eq!(expected(extras.pending_loot.get(&pos).unwrap()), bytes);
+            assert!(extras.block_entity_sources[0].1.get("LootTable").is_none());
+        }
+    }
 }
 
 #[test]
@@ -180,7 +208,11 @@ fn opened_loot_parity_fixture() {
             fields[1].parse().unwrap(),
             mode,
         );
-        let source = &chunk.saved.as_ref().unwrap().block_entity_sources[0].1;
+        let source = encode(&chunk, &registry, &biomes);
+        let Tag::List(tags) = source.tag.get("block_entities").unwrap() else {
+            panic!()
+        };
+        let source = &tags[0];
         let crate::containers::BlockEntity::Chest(slots) = &chunk.block_entities[0].1 else {
             panic!("chest");
         };

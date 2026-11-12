@@ -1215,7 +1215,7 @@ impl ChunkGenerator for VanillaTerrain {
         };
         let mut out = self.column(&chunk);
         let loot = self.loot.get();
-        let (block_entities, rolled_loot) =
+        let (block_entities, pending_loot) =
             crate::structure_blocks::block_entities(&chunk, loot.as_deref());
         out.block_entities = block_entities;
         // The block entities Horizon does not model (decorated pots with their
@@ -1242,14 +1242,14 @@ impl ChunkGenerator for VanillaTerrain {
             })
             .collect();
         add_default_block_entities(&self.block_entity_types, &mut out, &mut unmodelled);
-        if !unmodelled.is_empty() || !rolled_loot.is_empty() {
+        if !unmodelled.is_empty() || !pending_loot.is_empty() {
             let mut extras = out
                 .saved
                 .take()
                 .map(Arc::unwrap_or_clone)
                 .unwrap_or_default();
             extras.block_entities = unmodelled;
-            extras.rolled_loot = rolled_loot;
+            extras.pending_loot = pending_loot;
             out.saved = Some(Arc::new(extras));
         }
         let entities = std::mem::take(&mut chunk.entities);

@@ -10573,8 +10573,8 @@ impl Game<'_> {
             &self.health_resources.damage,
         )
         .map_err(|e| format!("world registries: {e}"))?;
-        // Warm the loot data with this world's packs before chunks decode
-        // (`save::roll_loaded_loot` reads the cached copy).
+        // Warm this world's pack-aware loot data before gameplay can unpack
+        // a container's pending table on its first inventory access.
         self.load_server_loot();
         // MinecraftServer's constructor reads CustomBossEvents before any
         // server event.

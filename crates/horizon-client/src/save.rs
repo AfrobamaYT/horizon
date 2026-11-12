@@ -559,27 +559,7 @@ impl SaveTables {
     }
 }
 
-pub use crate::chunk::{ChunkExtras, RolledLoot, SavedProto};
-
-/// A container was opened, or a command's tag dropped or replaced its roll: the
-/// table it was loaded with is no longer what it holds.
-pub fn consume_container_loot(extras: &mut ChunkExtras, pos: (i32, i32, i32)) {
-    let before = extras.rolled_loot.len();
-    extras.rolled_loot.retain(|r| r.pos != pos);
-    if extras.rolled_loot.len() == before {
-        return;
-    }
-    // The source compound participates in the save overlay. From here on,
-    // even an emptied chest must not inherit its old loot table from there.
-    for (source_pos, source) in &mut extras.block_entity_sources {
-        if *source_pos == pos
-            && let Tag::Compound(map) = source
-        {
-            map.remove(&"LootTable".into());
-            map.remove(&"LootTableSeed".into());
-        }
-    }
-}
+pub use crate::chunk::{ChunkExtras, PendingContainerLoot, SavedProto};
 
 fn tick_list(ticks: &[SavedTick], name: impl Fn(u32) -> Option<String>) -> Tag {
     Tag::List(
@@ -902,37 +882,6 @@ pub fn decode_banner(tag: &Tag) -> crate::containers::Banner {
             _ => Compound::new(),
         },
     }
-}
-/// A loaded container with a loot table and no items yet, rolled as
-/// generation rolls it (Horizon does not unpack on first open).
-fn roll_loaded_loot(
-    chunk: &Chunk,
-    biomes: &Biomes,
-    tag: &Tag,
-    be: &mut ((i32, i32, i32), crate::containers::BlockEntity),
-    loot: Option<&horizon_world::loot::LootData>,
-) -> Option<RolledLoot> {
-    let crate::containers::BlockEntity::Chest(slots) = &mut be.1 else {
-        return None;
-    };
-    // `tryLoadLootTable`: a key the codec rejects is no table at all.
-    let table = text(tag.get("LootTable"))
-        .and_then(|id| horizon_client_core::identifier::normalize_id(&id))?;
-    if slots.iter().any(Option::is_some) {
-        return None;
-    }
-    let loot = loot?;
-    let (x, y, z) = be.0;
-    let biome = &biomes.get(chunk.biome(x & 15, y, z & 15)).name;
-    let seed = crate::structure_blocks::loot_seed(tag);
-    Some(crate::structure_blocks::roll_container(
-        slots,
-        Some(loot),
-        table,
-        seed,
-        be.0,
-        biome,
-    ))
 }
 /// `TheEndGatewayBlockEntity.loadAdditional`.
 pub fn decode_end_gateway(tag: &Tag) -> crate::containers::EndGateway {
@@ -1620,13 +1569,17 @@ pub fn encode_with(
                     map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
                 }
             }
-            if let Some(r) = extras.and_then(|x| x.rolled_loot.iter().find(|r| r.pos == *p))
+            if matches!(e, crate::containers::BlockEntity::Chest(_))
                 && let Tag::Compound(map) = &mut saved
-                && !r.restore(map)
             {
-                // A loaded source still carries the table; kept, it rolls again on load.
                 map.remove(&"LootTable".into());
                 map.remove(&"LootTableSeed".into());
+                if let Some(pending) = extras.and_then(|x| x.pending_loot.get(p)) {
+                    pending.write_tags(map);
+                    if e.slots().iter().any(Option::is_some) {
+                        map.insert("Items".into(), encode_items(e.slots()));
+                    }
+                }
             }
             saved
         })
@@ -1798,7 +1751,7 @@ fn decode_column(
     biomes: &Biomes,
     tables: Option<&SaveTables>,
     layout: ColumnLayout,
-    loot: Option<&horizon_world::loot::LootData>,
+    _loot: Option<&horizon_world::loot::LootData>,
 ) -> Option<Chunk> {
     let tag = &root.tag;
     let Tag::Int(x) = tag.get("xPos")? else {
@@ -1896,7 +1849,7 @@ fn decode_column(
                 None
             };
             match decoded {
-                Some(mut be) => {
+                Some(be) => {
                     if let Ok(Some(data)) = attachment_compound(e.get(ATTACHMENTS_KEY)) {
                         extras.block_entity_attachments.push((
                             be.0,
@@ -1917,10 +1870,16 @@ fn decode_column(
                     if let Some(name) = name {
                         chunk.block_names.push((be.0, name));
                     }
-                    if let Some(rolled) = roll_loaded_loot(&chunk, biomes, e, &mut be, loot) {
-                        extras.rolled_loot.push(rolled);
+                    let randomizable = matches!(be.1, crate::containers::BlockEntity::Chest(_));
+                    if randomizable && let Some(pending) = PendingContainerLoot::from_tag(e) {
+                        extras.pending_loot.insert(be.0, pending);
                     }
-                    extras.block_entity_sources.push((be.0, e.clone()));
+                    let mut source = e.clone();
+                    if randomizable && let Tag::Compound(map) = &mut source {
+                        map.remove(&"LootTable".into());
+                        map.remove(&"LootTableSeed".into());
+                    }
+                    extras.block_entity_sources.push((be.0, source));
                     chunk.block_entities.push(be);
                 }
                 None => extras.block_entities.push(e.clone()),
@@ -6176,7 +6135,7 @@ mod tests {
     }
 
     #[test]
-    fn unopened_rolled_containers_save_their_loot_table() {
+    fn unopened_pending_containers_save_their_loot_table() {
         let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
             return;
         };
@@ -6196,14 +6155,13 @@ mod tests {
             (1, 64, 2),
             crate::containers::BlockEntity::Chest(slots.clone()),
         ));
-        let rolled = RolledLoot {
-            pos: (1, 64, 2),
-            table: "minecraft:chests/simple_dungeon".into(),
-            seed: Some(42),
-            items: encode_items(&slots),
+        let pending = PendingContainerLoot {
+            table: string("minecraft:chests/simple_dungeon"),
+            seed: Some(Tag::Long(42)),
         };
+        chunk.block_entities[0].1.slots_mut().fill(None);
         chunk.saved = Some(Arc::new(ChunkExtras {
-            rolled_loot: vec![rolled],
+            pending_loot: [((1, 64, 2), pending)].into(),
             ..ChunkExtras::default()
         }));
         let saved_chest = |chunk: &Chunk| -> Tag {
@@ -6226,7 +6184,10 @@ mod tests {
         );
         assert_eq!(number(unopened.get("LootTableSeed")), Some(42));
         assert!(unopened.get("Items").is_none());
-        // Taking an item makes the items the container's own.
+        Arc::make_mut(chunk.saved.as_mut().unwrap())
+            .pending_loot
+            .remove(&(1, 64, 2));
+        // The shared unpack transition consumes metadata before inventory changes.
         if let crate::containers::BlockEntity::Chest(s) = &mut chunk.block_entities[0].1 {
             s[3] = None;
             s[4] = Some(crate::items::ItemStack::new("minecraft:bone", 1));
@@ -7109,26 +7070,19 @@ mod tests {
         )
         .unwrap()
         .0;
-        let (_, mut chest) = decode_block_entity(&saved).expect("chest");
+        let (_, chest) = decode_block_entity(&saved).expect("chest");
         assert!(
             chest.slots().iter().all(Option::is_none),
             "ChestBlockEntity.loadAdditional ignores Items when a loot table loads"
         );
-        // The command path rolls an empty inventory and keeps the table/seed
+        // The command path keeps an empty inventory and the pending table/seed
         // for data get and saving. No loot resources are needed to keep that state.
-        let rolled = crate::structure_blocks::roll_container(
-            chest.slots_mut(),
-            None,
-            "minecraft:chests/simple_dungeon".into(),
-            Some(42),
-            (1, 2, 3),
-            "minecraft:plains",
-        );
+        let pending = PendingContainerLoot::from_tag(&saved).unwrap();
         let mut stored = block_entity_data((1, 2, 3), &chest, "minecraft:chest", None);
         let Tag::Compound(fields) = &mut stored else {
             panic!("compound");
         };
-        assert!(rolled.restore(fields));
+        pending.write_tags(fields);
         assert_eq!(stored.get("LootTable"), saved.get("LootTable"));
         assert_eq!(stored.get("LootTableSeed"), saved.get("LootTableSeed"));
         assert!(stored.get("Items").is_none());
@@ -7160,25 +7114,18 @@ mod tests {
             ))
             .unwrap()
             .0;
-            let (_, mut container) = decode_block_entity(&saved).expect(id);
+            let (_, container) = decode_block_entity(&saved).expect(id);
             assert_eq!(container.slots().len(), size, "{id}");
             assert!(
                 container.slots().iter().all(Option::is_none),
                 "{id}: loadAdditional ignores Items when a loot table loads"
             );
-            let rolled = crate::structure_blocks::roll_container(
-                container.slots_mut(),
-                None,
-                "minecraft:chests/simple_dungeon".into(),
-                Some(42),
-                (1, 2, 3),
-                "minecraft:plains",
-            );
+            let pending = PendingContainerLoot::from_tag(&saved).unwrap();
             let mut stored = block_entity_data((1, 2, 3), &container, id, None);
             let Tag::Compound(fields) = &mut stored else {
                 panic!("compound");
             };
-            assert!(rolled.restore(fields), "{id}");
+            pending.write_tags(fields);
             assert_eq!(stored.get("LootTable"), saved.get("LootTable"), "{id}");
             assert_eq!(
                 stored.get("LootTableSeed"),
