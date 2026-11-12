@@ -617,6 +617,34 @@ pub mod tests {
     }
 
     #[test]
+    fn block_provider_limits_accept_65535_and_refuse_the_next() {
+        for block_entity in [false, true] {
+            let mut r = super::PartRegistrar::new("limit_mod");
+            let block = r.block_key("test:target");
+            let entity = r.block_entity_type_key("test:target");
+            for _ in 0..65_535 {
+                let registrar = &mut r as &mut dyn Registrar;
+                if block_entity {
+                    registrar.block_entity_capability(&ITEMS, &entity, |_, _| None);
+                } else {
+                    registrar.block_capability(&ITEMS, &block, |_, _, _, _| None);
+                }
+            }
+            assert!(r.refused.is_empty(), "{:?}", r.refused);
+            if block_entity {
+                (&mut r as &mut dyn Registrar)
+                    .block_entity_capability(&ITEMS, &entity, |_, _| None);
+            } else {
+                (&mut r as &mut dyn Registrar).block_capability(&ITEMS, &block, |_, _, _, _| None);
+            }
+            assert_eq!(r.refused.len(), 1);
+            for expected in ["limit_mod", "test:target", "65535", "horizon:items"] {
+                assert!(r.refused[0].contains(expected), "{}", r.refused[0]);
+            }
+        }
+    }
+
+    #[test]
     pub(crate) fn disabled_capability_providers_are_skipped_and_resume() {
         struct Later;
         #[mod_api::__subscriptions]
