@@ -254,6 +254,8 @@ class DynaRoutingTests(unittest.TestCase):
         tools = static.split("- name: Install Rust tools for isolated tooling fixtures\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("if: needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'", tools)
         self.assertIn("--component rustfmt --component clippy", tools)
+        # GITHUB_PATH, not a shell-local export, carries Cargo into later steps.
+        self.assertIn('echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"', tools)
         self.assertLess(static.index("- name: Install Rust tools for isolated tooling fixtures"),
                         static.index("- name: Test offline research tooling"))
 
