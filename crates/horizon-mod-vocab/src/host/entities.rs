@@ -606,17 +606,30 @@ pub trait EntitiesBackendMut {
     ) -> bool;
     /// Side: server.
     /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
-    /// or a level a mod registered), as `/execute in <dimension> run tp` does
-    /// (`Entity.teleportTo(ServerLevel, ..)`): `pos` is in that level's own
-    /// coordinates (nothing scales it by `coordinate_scale`), a level nobody has
-    /// entered opens first, and a vehicle takes its passengers along. A player
-    /// arrives after the current tick, and `player_teleported` and
-    /// `player_changed_dimension` report the move. In the entity's own level
-    /// it is `entity_teleport_to`. False for what `entity_teleport_to` refuses,
-    /// a dimension that isn't registered, and kinds that cannot change level
-    /// (all but a player, a mob, a boat or a minecart). A fake player stays
-    /// where it is, and the call is still true. Nothing builds ground at the
-    /// destination.
+    /// or a level a mod registered), as `Entity.teleport` does with a portal's
+    /// transition: `pos` is in that level's own coordinates (nothing scales it
+    /// by `coordinate_scale`), a level nobody has entered opens first, and the
+    /// entity keeps its motion as it is, unturned (`Relative.DELTA`; a
+    /// minecart's is clamped to 0.4 along x and z, its `getKnownMovement`). A
+    /// mod that wants it stopped or turned sets its velocity first
+    /// (`entity_set_velocity`). It takes a player, a mob, a boat, a minecart (a
+    /// vehicle takes its passengers along), an item, a primed TNT, an experience
+    /// orb, an arrow, a trident, a firework and the thrown items and fireballs a
+    /// chunk saves. Into another level anything but a player is recreated there
+    /// with its stack, owner, thrower and portal cooldown, under a new handle:
+    /// the old one is stale. That move is a change of level, not a section
+    /// crossing: the section-crossing report (`entity_entering_section`) does not
+    /// tell it, the entity's later moves there are told as any entity's, and this
+    /// call adds no report of its own. A player arrives after the current tick,
+    /// still (its client holds its motion), and `player_teleported` and
+    /// `player_changed_dimension` report the move. In the entity's own level it
+    /// moves as `entity_teleport_to` does, keeping its motion. False for a stale
+    /// handle, what `entity_teleport_to` refuses, a dimension that isn't
+    /// registered, a primed TNT a mob rides, and the kinds it cannot move into
+    /// another level (armor stands, falling blocks, ender pearls, wind charges,
+    /// entities Horizon doesn't simulate). A fake player stays where it is, and
+    /// so does an entity whose travel a mod cancels (`entity_travel_to_dimension`);
+    /// the call is still true. Nothing builds ground at the destination.
     #[access(WorldOnly)]
     fn entity_teleport_to_level(
         &mut self,
