@@ -105,12 +105,13 @@ jobs:
           FNR_MODS="alpha beta one ten fdshape support registry lower loop" tools/ci/fn_replace_check.sh \
             "$launcher" "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/check" 2>&1 | tee "$FNR_SCRATCH/fnr-check.log"
           grep -F 'Function replacement:' "$FNR_SCRATCH/fnr-check.log" >> "$GITHUB_STEP_SUMMARY"
+      # It also builds horizon-mixins from source, where the runs before it download the prebuilt tool.
       # On its own: with no mod filling the loop, a mixin on the loop's function is compiled for the
       # empty slot. Beside the `loop` mod it would be compiled for that mod's slots instead.
       - name: A mixin on a published loop's function, no slot filled (build and link)
         run: |
           launcher="${CARGO_TARGET_DIR:-launcher/target}/release/horizon-launcher"
-          FNR_KEEP=1 FNR_MODS="loop_generic_head" tools/ci/fn_replace_check.sh \
+          FNR_KEEP=1 FNR_MIXINS_FROM_SOURCE=1 FNR_MODS="loop_generic_head" tools/ci/fn_replace_check.sh \
             "$launcher" "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/check"
       - name: Refusals by name
         run: |
