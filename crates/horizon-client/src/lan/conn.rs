@@ -501,9 +501,12 @@ impl PlayerSender {
     }
     /// Packets queued for the network thread or held by the tick, and their bytes.
     pub fn queued(&self) -> (usize, usize) {
+        if matches!(self.to, To::Disabled) {
+            return (0, 0);
+        }
         let waiting = match &self.to {
             To::Pool(outbox, _) => outbox.queued(),
-            To::Channel(_) => 0,
+            To::Channel(_) | To::Disabled => 0,
         };
         (
             waiting + self.held().len(),

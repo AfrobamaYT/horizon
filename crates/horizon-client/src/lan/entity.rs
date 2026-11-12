@@ -842,7 +842,6 @@ impl Tracker {
         use std::mem::size_of;
         self.seen.capacity() * (size_of::<(i32, Arc<Tracked>)>() + 1)
             + self.events.capacity() * size_of::<TrackEvent>()
-            + self.hidden.capacity() * (size_of::<i32>() + 1)
     }
     pub fn is_tracking(&self, id: i32) -> bool {
         self.seen.contains_key(&id)
