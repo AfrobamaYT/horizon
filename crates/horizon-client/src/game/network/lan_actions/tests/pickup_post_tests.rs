@@ -48,7 +48,13 @@ impl Hooks for Probe {
         host: &mut dyn ServerHost,
         event: &mut ItemPickedUpPartialEvent<'_>,
     ) {
-        self.heard(host, "partial", event.player, event.original, event.remaining);
+        self.heard(
+            host,
+            "partial",
+            event.player,
+            event.original,
+            event.remaining,
+        );
     }
 }
 

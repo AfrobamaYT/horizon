@@ -86,7 +86,9 @@ impl Game<'_> {
                 Some(rest) if rest.count >= before => continue,
                 // `item_picked_up_partial`: the remainder is the entity's while mods hear it, and
                 // the count after comes from the entity.
-                Some(rest) if mod_api::__private::listened(mod_api::HookId::ItemPickedUpPartial) => {
+                Some(rest)
+                    if mod_api::__private::listened(mod_api::HookId::ItemPickedUpPartial) =>
+                {
                     self.dropped[i].stack = rest.clone();
                     let told = self.as_guest(conn, |g| g.native_pickup_partial(&stack, rest));
                     let at = self.dropped.iter().position(|d| d.id == item_id);
