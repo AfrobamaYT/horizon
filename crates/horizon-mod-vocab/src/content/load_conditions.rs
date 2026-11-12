@@ -43,7 +43,8 @@ impl From<(Identifier, String)> for ConditionError {
 /// Registering a condition owns its namespace: unknown names there refuse the
 /// reload. Foreign unknown ids anywhere inside `not`, `and` or `or` omit the
 /// file, even in `or(true, unknown)`, with one ERROR-level log entry per file
-/// naming its distinct unknown ids.
+/// per candidate reload naming its distinct unknown ids. The vanilla view, which
+/// has no candidate store, logs on each evaluation instead.
 /// A returned error or native panic refuses the candidate reload, naming the
 /// file, condition and owner. Handlers must not mutate published data.
 pub trait LoadCondition: Send + Sync + 'static {

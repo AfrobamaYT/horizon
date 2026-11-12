@@ -34,8 +34,9 @@ to revisit once the shared codec foundation exists
 ([#811](https://github.com/arismoko/horizon/issues/811) and
 [#2332](https://github.com/arismoko/horizon/issues/2332)).
 Foreign unknown names leave the file
-absent and produce one ERROR-level log entry naming the file and its distinct
-unknown ids. Every branch of `not`, `and` and `or` is visited, at every depth:
+absent and produce one ERROR-level log entry per candidate reload naming the
+file and its distinct unknown ids (the vanilla view outside a reload logs per
+evaluation). Every branch of `not`, `and` and `or` is visited, at every depth:
 `or(true, othermod:unknown)` is absent even though its first branch is true.
 Foreign unknown ids do not themselves refuse the whole reload.
 A file without the conditions array loads normally. Successful reloads publish

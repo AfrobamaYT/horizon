@@ -64,7 +64,9 @@ the file is absent if the unknown id appears anywhere inside `not`, `and` or
 `or`, at any depth. Evaluation visits every branch, so `or(true, othermod:unknown)`
 also leaves the file absent. One ERROR-level log entry per file names that file
 and all its distinct unknown condition ids; repeated occurrences do not produce
-extra entries. Existing built-in
+extra entries within one candidate reload. The vanilla view used outside a
+candidate reload has no per-file store, so it logs once per evaluation.
+Existing built-in
 conditions and files without conditions continue to use the same evaluator.
 
 The public [NeoForge data load condition documentation](https://docs.neoforged.net/docs/resources/server/conditions/)
