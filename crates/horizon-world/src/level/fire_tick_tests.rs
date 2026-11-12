@@ -25,7 +25,7 @@ fn survival_shape_and_spread_ask_the_neighbours_position_and_inward_face() {
     let expected: Vec<_> = NEIGHBOURS
         .map(|(x, y, z, face)| (glass, at.offset(x, y, z), face))
         .into();
-    let mut sim = w.b().sim(&mut w.level, &mut w.ticks);
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
     assert!(!sim.is_valid_fire_location(at));
     assert_eq!(*sim.level.fire_asks.borrow(), expected);
     sim.level.fire_asks.borrow_mut().clear();
