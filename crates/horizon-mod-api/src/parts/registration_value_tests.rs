@@ -328,7 +328,7 @@ fn conversion_post_reports_both_entities_once() {
 }
 
 #[test]
-fn game_mode_change_dispatches_the_shared_type_and_honors_cancellation() {
+fn game_mode_change_dispatches_the_shared_type_and_honors_cancellation_and_redirects() {
     struct VetoSpectator;
     #[mod_api::__subscriptions]
     impl Hooks for VetoSpectator {
@@ -339,26 +339,33 @@ fn game_mode_change_dispatches_the_shared_type_and_honors_cancellation() {
         ) -> Flow {
             assert_eq!((event.player, event.name), (7, "Probe"));
             assert_eq!(event.from, horizon_core::game_mode::GameMode::Adventure);
-            if event.to == GameMode::Spectator {
-                Flow::Cancel
-            } else {
-                Flow::Continue
+            match *event.to {
+                GameMode::Spectator => Flow::Cancel,
+                GameMode::Creative => {
+                    *event.to = GameMode::Survival;
+                    Flow::Continue
+                }
+                _ => Flow::Continue,
             }
         }
     }
     install(vec![ModEntry::new("mode-veto", Box::new(VetoSpectator))].into());
     let mut host = FakeHost::new();
-    for (to, expected_cancel) in [(GameMode::Spectator, true), (GameMode::Survival, false)] {
+    for (mut to, expected_cancel, applied) in [
+        (GameMode::Spectator, true, GameMode::Spectator),
+        (GameMode::Survival, false, GameMode::Survival),
+        (GameMode::Creative, false, GameMode::Survival),
+    ] {
         let mut cancel = false;
         dispatch_player_game_mode_changed(
             &mut host,
             7,
             "Probe",
             horizon_core::game_mode::GameMode::Adventure,
-            to,
+            &mut to,
             &mut cancel,
         );
-        assert_eq!(cancel, expected_cancel);
+        assert_eq!((cancel, to), (expected_cancel, applied));
     }
 }
 

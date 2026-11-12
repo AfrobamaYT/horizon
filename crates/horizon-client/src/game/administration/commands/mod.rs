@@ -1157,16 +1157,16 @@ impl Game<'_> {
             _ => Ok(0),
         }
     }
-    pub(super) fn set_game_mode(&mut self, mode: GameMode) -> bool {
+    pub(super) fn set_game_mode(&mut self, mut mode: GameMode) -> bool {
         if self.mode == mode {
             return false;
         }
-        // A server player's change is heard by the mods first, who may keep it.
+        // A server player's change is heard by the mods first, who may keep or redirect it.
         if let Some(uuid) = self.lan_acting_uuid {
             let name = self.acting_player_name().to_owned();
             let mut cancel = false;
-            self.native_player_game_mode_changed(uuid, &name, self.mode, mode, &mut cancel);
-            if cancel {
+            self.native_player_game_mode_changed(uuid, &name, self.mode, &mut mode, &mut cancel);
+            if cancel || self.mode == mode {
                 return false;
             }
         }
