@@ -16182,8 +16182,7 @@ pub(crate) fn run_with(
     }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
-    mods::register_layer_definitions(options.execution_role);
-    mods::register_skull_models(options.execution_role, &vanilla_root);
+    mods::register_layer_definitions(options.execution_role, &vanilla_root);
     mods::register_debug_entries(options.execution_role);
     mods::register_gui_layers(options.execution_role);
     mods::register_map_decoration_types();
