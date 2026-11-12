@@ -86,7 +86,7 @@ pub(crate) fn code_refusal(id: &str) -> Option<String> {
     CODE_RUNTIME.get().and_then(|runtime| (runtime.refusal)(id))
 }
 
-/// Start with named mods and their function slots in installed dependency order.
+/// Start the engine with dependency-ordered code supplied by the host.
 pub fn start<G>(
     native: horizon_mod_package::runtime::Runtime,
     load: impl FnOnce(

@@ -675,3 +675,10 @@ by default), so the pipeline moves once. HDR off stays bit-exact.
 The mod API work on arismoko/horizon lands upstream as part of the platform. The API owns its types,
 `horizon-mod-runtime` gets no game dependency, and its CI property check stays as a stricter check inside the
 platform.
+
+The portable engine crate `horizon-engine-slots` owns the final registration seal socket.
+The host installs its provider unconditionally before engine startup and registers native
+API listeners after dependency ordering and installation. Listener records, replacement
+authority, activity flags and dispatch remain in the platform point registry. The socket
+refuses repeat or re-entrant sealing and late provider installation; it contains no game
+point identifiers or call-site routing.

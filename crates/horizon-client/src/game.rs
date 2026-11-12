@@ -67,7 +67,7 @@ macro_rules! arm_points {
     () => {};
 }
 
-/// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
+/// The game's side of the injection points (#589), whose slots and listeners live above the engine.
 #[doc(hidden)]
 pub mod points {
     /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
@@ -17477,7 +17477,7 @@ pub(crate) fn run_with(
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
         crate::entry::initialize_code(&inventory);
     }
-    mod_points::__private::seal();
+    horizon_engine_slots::seal().expect("engine registration seals once at startup");
     arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
