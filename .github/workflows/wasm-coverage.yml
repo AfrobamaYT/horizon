@@ -114,3 +114,8 @@ jobs:
             target/internals-catalog-coverage
             target/internals-catalog-check
           key: ${{ steps.coverage-cache.outputs.cache-primary-key }}
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh

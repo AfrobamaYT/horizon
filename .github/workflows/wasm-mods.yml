@@ -170,6 +170,11 @@ jobs:
           HORIZON_WASM_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench block_entity_ticks -- --ignored --nocapture
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
 
   guest-stack:
     name: Guest stack / ${{ matrix.os }}

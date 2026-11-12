@@ -337,6 +337,11 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
 
   verify:
     needs: changes
@@ -370,7 +375,8 @@ jobs:
         # A report only: an unreadable folder or a failed du/find/findmnt never fails the job.
         continue-on-error: true
         run: |
-          for dir in "${DYNA_CI_BUILD:-/build}" "${CARGO_TARGET_DIR:-}" "${CARGO_HOME:-}/registry" "${RUSTUP_HOME:-}/toolchains"; do
+          # RUSTUP_HOME is set by a later step (tools/ci/dyna_ci_deps.sh): read its folder directly.
+          for dir in "${DYNA_CI_BUILD:-/build}" "${CARGO_TARGET_DIR:-}" "${CARGO_HOME:-}/registry" "${DYNA_CI_BUILD:-/build}/rustup/toolchains"; do
             if [ ! -d "$dir" ]; then echo "build-folder $dir: absent"; continue; fi
             files=$(du -s --inodes "$dir" 2>/dev/null | cut -f1)
             size=$(du -sh "$dir" 2>/dev/null | cut -f1)
@@ -378,6 +384,8 @@ jobs:
             mount=$(findmnt -n -o SOURCE,TARGET -T "$dir" 2>/dev/null | head -1)
             echo "build-folder $dir: entries=${files:-?} size=${size:-?} oldest=${oldest:-none} mount=${mount:-?}"
           done | tee -a "$GITHUB_STEP_SUMMARY"
+          # What takes the room, toward the size at which Dyna empties the slot whole.
+          du -sh "${DYNA_CI_BUILD:-/build}"/* "${CARGO_TARGET_DIR:-/nonexistent}"/* 2>/dev/null | sort -rh | head -12 | sed 's/^/build-folder part /' | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -514,6 +522,11 @@ jobs:
           # The runner's CPU time and peak memory: what the build parallelism above has to fit.
           grep usage_usec /sys/fs/cgroup/cpu.stat || true
           echo "memory.peak $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unavailable)"
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
 
   # Source checks and isolated compiler fixtures, never a second game build or game target cache.
   verify-static:
@@ -625,6 +638,11 @@ jobs:
           echo '::warning::Optional mod-host-map artifact upload failed; inspect the upload step for details.'
           echo '### Optional mod-host-map artifact unavailable' >> "$GITHUB_STEP_SUMMARY"
           echo 'The upload failed. Map generation remains a required step; the optional download is unavailable.' >> "$GITHUB_STEP_SUMMARY"
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -722,6 +740,11 @@ jobs:
             echo "data-leg $field=$value"
           done
           sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
   # Never turn missing prepared-data coverage into a green main/nightly run.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
@@ -799,6 +822,11 @@ jobs:
           cargo +stable test $JOBS --no-fail-fast --locked --test storage
           cargo +stable build $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --example holder_actor
           cargo +stable test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'
@@ -840,6 +868,11 @@ jobs:
           expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/horizon-prepare/output-versions.txt)
           { echo "prepared output check: $([ "$result" -eq 0 ] && echo pass || echo fail)"; echo "actual: $actual"; echo "expected: $expected"; } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$result"
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
 
   vanilla-parity:
     if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check && !inputs.github-fallback
@@ -1224,3 +1257,8 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: stable
         run: python tools/test_float_log_parity.py
+      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
+      - name: Keep the build folder under Dyna's cap
+        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
+        continue-on-error: true
+        run: bash tools/ci/trim_build_folder.sh
