@@ -703,6 +703,7 @@ impl ConnWriter {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+    use std::sync::Mutex;
 
     #[test]
     fn ipv4_first_keeps_each_familys_order() {
