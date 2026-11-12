@@ -60,7 +60,11 @@ pub trait PlayersBackend {
     /// Original inventory slot: 0..35 main, 100..103 feet through head, -106 offhand.
     /// None for an empty or invalid slot or an expired clone hook.
     #[access(WorldOnly)]
-    fn original_player_inventory_slot(&self, original_player: OriginalPlayerRef, slot: i32) -> Option<ItemStack>;
+    fn original_player_inventory_slot(
+        &self,
+        original_player: OriginalPlayerRef,
+        slot: i32,
+    ) -> Option<ItemStack>;
     /// Side: server.
     /// Original health at death or End return; None after the clone hook.
     #[access(WorldOnly)]
@@ -68,11 +72,17 @@ pub trait PlayersBackend {
     /// Side: server.
     /// Original experience at death or End return; None after the clone hook.
     #[access(WorldOnly)]
-    fn original_player_experience(&self, original_player: OriginalPlayerRef) -> Option<PlayerExperience>;
+    fn original_player_experience(
+        &self,
+        original_player: OriginalPlayerRef,
+    ) -> Option<PlayerExperience>;
     /// Side: server.
     /// Original active effects at death or End return; None after the clone hook.
     #[access(WorldOnly)]
-    fn original_player_effects(&self, original_player: OriginalPlayerRef) -> Option<Vec<ActiveEffect>>;
+    fn original_player_effects(
+        &self,
+        original_player: OriginalPlayerRef,
+    ) -> Option<Vec<ActiveEffect>>;
     /// Side: server.
     /// Read one registered custom book's authoritative flags. A fresh book
     /// returns the default pair; an unavailable player or unregistered key
