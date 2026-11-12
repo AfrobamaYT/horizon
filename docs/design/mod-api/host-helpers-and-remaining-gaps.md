@@ -1,5 +1,4 @@
-<!-- chapter: Host helpers and remaining gaps -->
-<!-- separator: 1 -->
+# Host helpers and remaining gaps
 
 `Host` exposes the documented `Game` helpers declared by area in
 `crates/horizon-mod-vocab/src/host/<area>.rs`, one trait per area; `Host`, `ServerHost` and `ClientHost` are the
@@ -7,7 +6,7 @@ unions of those traits, so a mod calls through them and never names an area trai
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 For the per-method comparison with NeoForge's block, item, entity, block-entity and fluid extension interfaces,
-including which gaps are tracked, see [NeoForge extension coverage](../../reference/neoforge-extensions.md).
+including which gaps are tracked, see [NeoForge extension coverage](neoforge-extensions.md).
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
 plain remainder stack, or `None` when there is none or the item is unknown. Horizon
 currently stores only the remainder item id, not a template's count or components.
@@ -54,7 +53,7 @@ positive experience when picked up.
 Advancement triggers instead live on `PlayerRef::trigger_criterion`, with a mod-owned
 `CriterionTest` and the game's scoped `CriterionContext` resource. The context keeps real
 world-aware item predicates; it is not a conditions-only snapshot. See
-[advancement triggers](../../reference/hook-notes.md#advancement-triggers) for the contract and
+[advancement triggers](https://arismoko.github.io/horizon/reference/hook-notes.html#advancement-triggers) for the contract and
 the wasm runtime's current same-group callback limitation.
 
 A mod that consumes a block use can run vanilla advancement predicates and rewards

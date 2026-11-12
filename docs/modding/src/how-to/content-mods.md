@@ -53,7 +53,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
   and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
-  ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
+  ([trait mods](../concepts/trait-mods.md#writing-a-trait-mod)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; it does not compile code. Code requires both `Cargo.toml` and `[native]`; inconsistent
@@ -928,7 +928,7 @@ outside 1 to 1000, no points or an invalid point refuse the mods at startup, nam
 declared regions in `data/horizon/biome_regions.dat`, and from then on that record decides: a changed or added region
 reaches an existing world only when its owner opts in, and a world whose region's mod is missing asks before it opens
 (a dedicated server reads `[biome_regions] missing = "refuse" | "vanilla"` in `server.toml`). The full contract is in
-[the design](../concepts/mod-biome-regions.md).
+[the design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-biome-regions.md).
 
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A

@@ -3,7 +3,7 @@
 The registered **raw** transport implements [#2882](https://github.com/arismoko/horizon/issues/2882).
 Typed registration/token binding, configuration snapshots, and attachment migration remain work for
 [#813](https://github.com/arismoko/horizon/issues/813). They are not implemented by the raw API.
-The transport contract is detailed in [Registered raw custom payload transport](../../../design/raw-custom-payload-transport.md).
+The transport contract is detailed in [Registered raw custom payload transport](../raw-custom-payload-transport.md).
 
 ## Register raw payloads once
 

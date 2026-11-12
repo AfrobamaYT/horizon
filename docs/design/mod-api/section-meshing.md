@@ -109,7 +109,7 @@ Shader packs consume the same material attributes as vanilla terrain; a mod
 cannot choose a raw pipeline, blend mode or frame format here.
 
 Follow [#1498](https://github.com/arismoko/horizon/issues/1498) and
-[the colour design](../../../design/hdr-linear-light.md): shader API 0.2 colour
+[the colour design](../hdr-linear-light.md): shader API 0.2 colour
 is linear light with BT.709 primaries, paper white 1.0, and values above 1.0
 retained. Existing packed ARGB tint/light inputs remain vanilla-space inputs;
 renderer conversion happens once. Encoded tint 0.5 becomes approximately

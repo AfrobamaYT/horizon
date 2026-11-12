@@ -144,7 +144,7 @@ every owner of a shared missing file. The game never downloads jars.
 A code package contains root `Cargo.toml`, optional `build.rs`, `.rs` and `.toml` files under `src/`,
 and root text files named `README*`, `LICENSE*`, `LICENCE*`, `COPYING*` or `NOTICE*`.
 The marked root `impl Hooks` uses `#[mod_api::horizon_mod]`; the attribute generates the factory
-([Trait mods](../concepts/trait-mods.md#trait-mods-draft)).
+([Trait mods](../concepts/trait-mods.md#writing-a-trait-mod)).
 
 Folder packaging selects source and resource files, excluding `.git/` and `target/`. It validates selected
 files before copying them. Whole archives are checked, not treated as source folders with ignored extra entries.

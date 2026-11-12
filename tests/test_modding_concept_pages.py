@@ -87,6 +87,11 @@ class ConceptPages(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "how-to/broken.md: missing link target"):
             pages.expand(copy.deepcopy(self.book), self.src)
 
+    def test_design_page_dropped_into_concepts_fails(self):
+        (self.src / "concepts/next.md").write_text("# Design: what comes next\n\nA proposal.\n")
+        with self.assertRaisesRegex(AssertionError, "concepts/next.md: .* docs/design/"):
+            pages.expand(copy.deepcopy(self.book), self.src)
+
     def test_page_outside_the_discovered_folders_must_be_listed(self):
         (self.src / "reference").mkdir()
         (self.src / "reference/orphan.md").write_text("# Orphan\n")

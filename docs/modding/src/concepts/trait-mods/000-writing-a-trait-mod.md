@@ -1,7 +1,7 @@
-<!-- chapter: Trait mods (draft) -->
+<!-- chapter: Writing a trait mod -->
 <!-- separator: 1 -->
 
-## Trait mods (draft)
+## Writing a trait mod
 
 `cargo horizon-mod new <path> --template native` pins an exact Horizon commit (the newest prebuilt game's,
 or `--horizon <commit>`'s; `cargo horizon-mod update` repins) and writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`

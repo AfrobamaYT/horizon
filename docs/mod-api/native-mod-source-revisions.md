@@ -1,7 +1,4 @@
-<!-- chapter: Native mod source revisions -->
-<!-- separator: 1 -->
-
-## Native mod source revisions
+# Native mod source revisions
 
 A native mod targets one exact Horizon source revision: `horizon` in its `horizon-mod.toml` `[native]` section.
 The same section pins `game` and the exact `mixins` commit. Match the mod to the game revision it will run with,
