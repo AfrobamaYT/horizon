@@ -878,6 +878,7 @@ mod tests {
     fn fragmented_plain_frame_header_and_following_packet() {
         let (pipe, _peer) = Pipe::pair();
         let mut connection = Connection::local(pipe);
+        connection.reader.memory = false;
         let payload: Vec<u8> = (0..300).map(|i| i as u8).collect();
         let mut body = vec![0xac, 0x02]; // Packet id 300, two-byte VarInt.
         body.extend_from_slice(&payload);
@@ -918,6 +919,7 @@ mod tests {
         ] {
             let (pipe, _peer) = Pipe::pair();
             let mut connection = Connection::local(pipe);
+            connection.reader.memory = false;
             let mut input = header;
             assert_eq!(
                 connection.reader.read_from(&mut input).unwrap(),
@@ -962,6 +964,7 @@ mod tests {
                 for _ in 0..SAMPLES_PER_RUN {
                     let (pipe, _peer) = Pipe::pair();
                     let mut connection = Connection::local(pipe);
+                    connection.reader.memory = false;
                     let started = Instant::now();
 
                     for _ in 0..PACKETS_PER_SAMPLE {

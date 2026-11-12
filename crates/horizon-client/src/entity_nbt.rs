@@ -6228,7 +6228,12 @@ mod tests {
         assert_eq!(back[0].value, 7);
         assert_eq!(back[0].count, 3);
         // Entity.load keeps the saved Air; the orb writes it back unchanged.
+        assert_eq!(back[0].air, 32767);
         assert_eq!(tag.get("Air"), Some(&Tag::Short(32767)));
+        assert_eq!(
+            orb_to_nbt(&back[0], [0; 4]).get("Air"),
+            Some(&Tag::Short(32767))
+        );
     }
 }
 
