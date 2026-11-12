@@ -826,7 +826,7 @@ impl DataStore {
                     && let Some(bytes) = pack.read(&f)
                     && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
                 {
-                    if conditions.is_some_and(|conditions| !conditions.allows(&v)) {
+                    if conditions.is_some_and(|conditions| !conditions.allows_file(&v, &f)) {
                         continue;
                     }
                     let entries = tag_entries(&v);
@@ -864,8 +864,10 @@ impl DataStore {
             }
         }
         if let Some(conditions) = conditions {
-            s.predicates.retain(|_, value| conditions.allows(value));
-            s.item_modifiers.retain(|_, value| conditions.allows(value));
+            s.predicates
+                .retain(|id, value| conditions.allows_id(value, "predicate", id));
+            s.item_modifiers
+                .retain(|id, value| conditions.allows_id(value, "item_modifier", id));
         }
         s
     }

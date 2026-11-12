@@ -3829,7 +3829,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod fake_action_tests {
+pub(super) mod fake_action_tests {
     use super::super::Game;
     use super::{Acting, ActionOutcome, ActionRefused, FakeEffect, PlayerAction};
     use horizon_client::items::ItemStack;
@@ -3837,7 +3837,11 @@ mod fake_action_tests {
 
     /// A server with a real guest (uuid 1) and a fake (uuid 2) standing at (0.5, 64, 0.5) on
     /// a stone floor, holding `item`, in game mode `mode`: the fake's handle and both conns.
-    fn fake(game: &mut Game<'_>, item: Option<&str>, mode: i32) -> (PlayerRef, u32, u32) {
+    pub(in crate::game) fn fake(
+        game: &mut Game<'_>,
+        item: Option<&str>,
+        mode: i32,
+    ) -> (PlayerRef, u32, u32) {
         super::super::bossbars::audience_tests::add_real_and_fake(game);
         game.options.dedicated = Some(Vec::new());
         for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
