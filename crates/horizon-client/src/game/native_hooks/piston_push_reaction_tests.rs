@@ -483,7 +483,7 @@ fn piston_push_reaction_real_block_entity_payload_lifecycle() {
     )]
     .into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_game(|game| {
             use horizon_client::{chunk::Chunk, containers::BlockEntity};
             use horizon_items::items::ItemStack;
@@ -649,7 +649,7 @@ fn piston_push_reaction_client_received_tags_refresh_the_cache() {
     }
     let mods: Mods = vec![ModEntry::new("tagged", Box::new(TagUser))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_client_game(|game| {
             use horizon_protocol::packets::configuration::{RegistryTags, TagEntry, UpdateTags};
             let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
@@ -735,7 +735,7 @@ fn piston_push_reaction_position_state_opens_ticks_and_saves() {
     )]
     .into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_role(
             root,
@@ -1052,7 +1052,7 @@ fn piston_push_reaction_unowned_vanilla_data_stays_refused() {
     )]
     .into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_game(|game| {
             use horizon_client::chunk::Chunk;
             game.options.dedicated = Some(vec![]);
