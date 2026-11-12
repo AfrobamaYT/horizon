@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 15 | 16 | 29 | 0 |
-| `IBlockStateExtension` | 57 | 14 | 15 | 28 | 0 |
+| `IBlockExtension` | 60 | 20 | 13 | 27 | 0 |
+| `IBlockStateExtension` | 57 | 19 | 12 | 26 | 0 |
 | `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 14 covered, 15 partial, 28 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 19 covered, 12 partial, 26 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
