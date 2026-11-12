@@ -19,6 +19,12 @@ impl Iterator for Units<'_> {
             Self::Named(it) => it.next(),
         }
     }
+    fn count(self) -> usize {
+        match self {
+            Self::Saved(it) => it.len(),
+            Self::Named(it) => it.count(),
+        }
+    }
 }
 pub(super) trait Lookup {
     fn units(&self) -> (Units<'_>, Units<'_>);
