@@ -1126,8 +1126,8 @@ impl ChunkGenerator for VanillaTerrain {
             entities: chunk.entities.iter().cloned().map(Tag::Compound).collect(),
         })
     }
-    /// The saved state replaces what decoration can change; biomes, structure
-    /// starts and references are generated again as they were.
+    /// Restore saved blocks and decoration state. Biomes and structure lookups use the current
+    /// generator, including an adopted region layout; completed Features decoration stays done.
     fn restore_proto(&self, proto: &mut Proto, saved: SavedProto) {
         let Some(VanillaProto::Ready(chunk)) = proto.downcast_mut::<VanillaProto>() else {
             return;

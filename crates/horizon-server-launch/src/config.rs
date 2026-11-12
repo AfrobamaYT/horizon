@@ -4,6 +4,9 @@
 //! start the supervisor writes them into `server.properties`, which the game reads exactly as vanilla's
 //! server does; what the game changes there itself (`/whitelist on`) is copied back afterwards.
 
+use horizon_platform::server_files::biome_regions::BiomeRegions;
+#[cfg(test)]
+use horizon_platform::server_files::biome_regions::MissingRegions;
 use horizon_platform::server_files::{
     java_properties::{Properties, date_string, now_millis},
     properties::{DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy},
@@ -199,30 +202,6 @@ impl Combat {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
-}
-
-/// `[biome_regions]`: what an existing world does about its saved biome regions. `missing = "vanilla"` opens a
-/// world whose region mods are gone with vanilla's biomes there (`"refuse"`, the default, does not start);
-/// `adopt_installed = true` takes the installed mods' regions for new chunks.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct BiomeRegions {
-    pub missing: MissingRegions,
-    pub adopt_installed: bool,
-}
-impl BiomeRegions {
-    fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
-/// `[biome_regions] missing`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MissingRegions {
-    #[default]
-    Refuse,
-    Vanilla,
 }
 
 /// The game reads this section itself too (docs/chat-filter.md).

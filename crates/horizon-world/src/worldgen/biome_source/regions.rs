@@ -15,6 +15,7 @@ pub const REGION_SELECTOR_VERSION: u32 = 1;
 /// constants above at generation time, so a later version can exist beside version 1.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectorParams {
+    /// Version 1 fixes the 3x3 neighbourhood; a different neighbourhood needs a new version.
     pub version: u32,
     /// Cell width in quarts.
     pub cell: u32,

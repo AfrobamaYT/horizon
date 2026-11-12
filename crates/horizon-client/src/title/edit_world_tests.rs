@@ -87,7 +87,7 @@ fn a_failed_adoption_write_keeps_the_record_and_world_closed_until_retry() {
     );
     assert!(
         matches!(&f.title.mode, Mode::Error { message, return_to, .. }
-        if message.starts_with(&lang::get("horizon.biome_regions.save_failed").split("%s").next().unwrap_or_default())
+        if message.starts_with(lang::get("horizon.biome_regions.save_failed").split("%s").next().unwrap_or_default())
             && matches!(&**return_to, Mode::AdoptBiomeRegions { .. }))
     );
     assert_eq!(std::fs::read(&file).unwrap(), before);

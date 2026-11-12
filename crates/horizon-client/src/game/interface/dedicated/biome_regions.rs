@@ -4,23 +4,7 @@
 //! regions of mods no longer installed; `adopt_installed = true` takes the installed mods'
 //! regions for new chunks.
 
-/// The `[biome_regions]` section.
-#[derive(Debug, Default, PartialEq, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct Settings {
-    missing: Missing,
-    adopt_installed: bool,
-}
-
-#[derive(Debug, Default, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Missing {
-    /// The server does not start while a missing mod's region has no recorded choice.
-    #[default]
-    Refuse,
-    /// Those regions resolve through vanilla's layout from now on.
-    Vanilla,
-}
+use horizon_server_files::biome_regions::{BiomeRegions as Settings, MissingRegions as Missing};
 
 /// The section in `server.toml`'s text; the defaults without it.
 fn parse(text: &str) -> Result<Settings, String> {
@@ -38,7 +22,8 @@ fn parse(text: &str) -> Result<Settings, String> {
 pub(super) fn choose(world: &std::path::Path) -> horizon_client::Result<()> {
     let settings = match std::fs::read_to_string("server.toml") {
         Ok(text) => parse(&text).map_err(|e| format!("server.toml: {e}"))?,
-        Err(_) => Settings::default(),
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+        Err(why) => return Err(format!("server.toml: {why}").into()),
     };
     horizon_client::save::biome_regions::choose(
         world,
