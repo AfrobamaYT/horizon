@@ -167,6 +167,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub(crate) fn remove_moving_piston(&mut self, pos: BlockPos) -> Option<MovingPiston> {
         self.ticks.take_moving_piston(pos)
     }
+    /// The block entity the moving piston at `pos` carried, once it is done
+    /// (#3184): installed at `pos`, where `moved` lands, or, when the block
+    /// does not land (`lands` false), installed and removed again with its
+    /// removal side effects as for a broken block (`side_effects`), so a
+    /// container drops what it held instead of losing it.
+    pub(crate) fn land_carried(
+        &mut self,
+        pos: BlockPos,
+        moved: BlockStateId,
+        lands: bool,
+        side_effects: bool,
+    ) {
+        if self.level.land_block_entity(pos) && !lands {
+            self.level.remove_block_entity(pos, moved, side_effects);
+        }
+    }
     /// `PistonMovingBlockEntity.finalTick`.
     fn moving_piston_final_tick(&mut self, pos: BlockPos) {
         let Some(piston) = self.moving_piston(pos) else {
@@ -185,6 +201,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             } else {
                 self.update_from_neighbour_shapes(piston.moved_state, pos)
             };
+            self.land_carried(pos, piston.moved_state, !b.is_air(new), true);
             self.set_block_and_update(pos, new);
             let block = b.block(new);
             let orientation = self.initial_orientation(Some(piston.movement_direction()), None);
@@ -214,6 +231,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.remove_moving_piston(pos);
             if b.is_block(self.state(pos), b.named.moving_piston) {
                 let mut new = self.update_from_neighbour_shapes(piston.moved_state, pos);
+                // Before the block: one that `update_or_destroy` breaks takes
+                // its block entity with it, side effects and all.
+                self.land_carried(pos, piston.moved_state, true, true);
                 if b.is_air(new) {
                     self.set_block(pos, piston.moved_state, 340);
                     self.update_or_destroy(
@@ -328,18 +348,23 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             if b.facts(state).hardness == -1.0 {
                 return false;
             }
-            match b.facts(state).push {
+            match b.piston_reaction(state) {
                 PushReaction::Immoveable => return false,
                 PushReaction::Popped => return allow_destroyable,
-                PushReaction::Push => return direction == connection,
+                PushReaction::Push if direction != connection => return false,
                 _ => {}
             }
         } else if b.table.bool(state, b.props.extended) {
             return false;
         }
-        !b.has_flag(state, super::data::state_flags::BLOCK_ENTITY)
-            && !self.level.has_native_block_entity(state)
-            && !self.level.has_mod_block_entity(pos)
+        // One order for every moving reaction: reaction first, then the block-entity rule.
+        // Diverges from vanilla: push only never discards a block entity.
+        let has_entity = b.has_flag(state, super::data::state_flags::BLOCK_ENTITY)
+            || self.level.has_mod_block_entity(pos)
+            || self.level.has_native_block_entity(state);
+        self.level
+            .adjust_piston_carries_block_entity(pos, state)
+            .unwrap_or(!has_entity)
     }
     fn is_slime_or_honey(&self, state: BlockStateId) -> bool {
         self.b.is_block(state, self.b.named.slime_block)
@@ -386,7 +411,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         };
         let next = self.state(r.start);
         if !self.is_pushable(next, r.start, r.push_direction, false, r.piston_direction) {
-            if r.extending && self.b.facts(next).push == PushReaction::Popped {
+            if r.extending
+                && self.b.piston_reaction(next) == PushReaction::Popped
+                && self.is_pushable(next, r.start, r.push_direction, true, r.piston_direction)
+            {
                 r.to_destroy.push(r.start);
                 return Some((r.to_push, r.to_destroy, r.push_direction));
             }
@@ -474,7 +502,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             {
                 return false;
             }
-            if self.b.facts(next).push == PushReaction::Popped {
+            if self.b.piston_reaction(next) == PushReaction::Popped {
                 r.to_destroy.push(pos);
                 return true;
             }
@@ -552,19 +580,28 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         ) {
             return None;
         }
+        let move_direction = if extending {
+            direction
+        } else {
+            direction.opposite()
+        };
         let mut delete_after: JavaHashMap<PosKey, BlockStateId> = JavaHashMap::default();
         let mut shapes = Vec::with_capacity(to_push.len());
         for pos in &to_push {
             let state = self.state(*pos);
             shapes.push(state);
             delete_after.put(PosKey(*pos), state);
+            // An allowed block entity travels through the existing carry machinery,
+            // taken out before any source is overwritten (#3184).
+            if b.has_flag(state, super::data::state_flags::BLOCK_ENTITY)
+                || self.level.has_mod_block_entity(*pos)
+                || self.level.has_native_block_entity(state)
+            {
+                self.level
+                    .carry_block_entity(*pos, rel(*pos, move_direction));
+            }
         }
         let mut to_update = Vec::with_capacity(to_push.len() + to_destroy.len());
-        let move_direction = if extending {
-            direction
-        } else {
-            direction.opposite()
-        };
         for pos in to_destroy.iter().rev() {
             let state = self.state(*pos);
             self.drop_resources(state, *pos);
@@ -757,7 +794,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             false,
                             direction,
                         )
-                        || (b.facts(moving_state).push != PushReaction::PushPull && !is_piston)
+                        || (b.piston_reaction(moving_state) != PushReaction::PushPull && !is_piston)
                     {
                         self.remove_block(rel(pos, direction), false);
                     } else {
@@ -907,6 +944,7 @@ impl Behaviours {
                     sim.moving_piston_tick(pos);
                 } else {
                     sim.remove_moving_piston(pos);
+                    sim.level.discard_carried_block_entity(pos);
                 }
             }
             self.client_drain_block_events(level, ticks);

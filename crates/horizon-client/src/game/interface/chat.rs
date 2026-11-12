@@ -1823,7 +1823,7 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::ComponentHover) {
             return false;
         }
-        let Some(hover) = crate::game::api_values::style_hover(style) else {
+        let Some(hover) = horizon_client_lib::api_text::style_hover(style) else {
             return false;
         };
         let mut cancel = false;

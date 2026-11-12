@@ -95,7 +95,12 @@ if [ "$side" = server ]; then
   test -z "$(find "$data/versions" -type f -name 'horizon-client*' ! -path "$version/*")"
 fi
 log=$data/native/build.log
-grep -F 'Function replacement:' "$log"
+# Only a `[[native.*]]` row patches a function; a mod of hooks alone must not say it did.
+if grep -qs '^\[\[native\.' "$mods"/*/horizon-mod.toml; then
+  grep -F 'Function replacement:' "$log"
+elif grep -sF 'Function replacement:' "$log"; then
+  echo "a set with no [[native.*]] row logged a function replacement"; exit 1
+fi
 # The prebuilt route, and no game source compiled.
 grep -F '"route": "prebuilt"' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
 test ! -d "$data/native/stage/crates/horizon-client" || { echo "the game was staged for a source build"; exit 1; }

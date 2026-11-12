@@ -6,6 +6,7 @@ mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
 mod mob_metadata;
+mod raw_inbox;
 mod residency;
 
 use super::{
@@ -2078,7 +2079,7 @@ impl Game<'_> {
             .iter()
             .position(|g| g.uuid == uuid && g.placed)
         {
-            let live = Some(self.player_attachments.clone());
+            let live = Some(self.player_state.attachments.clone());
             host.hub.guests.update(i, |g| {
                 let held = live.map(|a| std::mem::replace(&mut g.attachments, a));
                 playerdata::store(g, &mut self.level, vehicle);
@@ -2460,6 +2461,10 @@ impl Game<'_> {
                 previous = Some((Instant::now(), event_kind(&event), detail));
             }
             match event {
+                HostEvent::InputCredits(credits) => drop(credits),
+                HostEvent::RawPayload(delivery) => {
+                    self.receive_server_payload(delivery.endpoint, delivery.incoming)
+                }
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
                 }
@@ -2921,9 +2926,7 @@ impl Game<'_> {
             }));
             events
         };
-        let Some(back) = horizon_client::spans::time("lan_events", || {
-            self.lan_process_events(host, events, entities.as_slice(), spawn)
-        }) else {
+        let Some(back) = self.drain_raw_turns(host, events, entities.as_slice(), spawn) else {
             return;
         };
         host = back;
@@ -3064,9 +3067,7 @@ impl Game<'_> {
     pub(super) fn tick_lan(&mut self, paused: bool) {
         // A frozen level does not reach tick_lan_packets through tick_world.
         // Apply its packets before taking the snapshot too.
-        if !paused {
-            self.tick_lan_packets();
-        }
+        self.tick_lan_packets();
         if self.lan.is_none() {
             if self.level_pass.running.is_none() {
                 self.level_pass.packets_drained = false;
@@ -3286,14 +3287,9 @@ impl Game<'_> {
                 // scheduled block ticks (`tick_lan_packets`).
                 host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
                 let pass = self.level_pass;
-                let mut events = if pass.first && !pass.packets_drained {
-                    host.hub.poll(&mut ctx)
-                } else {
-                    Vec::new()
-                };
-                if !pass.packets_drained {
-                    events.extend(host.hub.drain_packets(&mut ctx));
-                }
+                // Even paused worlds completed their ordered input segments at
+                // entry, before world sync/physics or any scheduled work.
+                let mut events = Vec::new();
                 events.extend(horizon_client::spans::time("lan_tick_level", || {
                     host.hub.tick_level(&mut ctx)
                 }));
@@ -3320,9 +3316,6 @@ impl Game<'_> {
         }
         if self.lan.as_ref().is_some_and(|host| !host.quiet.is_empty()) {
             self.run_quiet_commands();
-        }
-        if self.native_net_waiting() {
-            self.run_native_net();
         }
         if self
             .lan
@@ -3379,7 +3372,6 @@ impl Game<'_> {
         }
         drop(holding);
         self.flush_attachment_sync();
-        self.flush_native_net();
         self.flush_far_terrain();
         if let Some(host) = self.lan.as_ref() {
             lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));
@@ -3491,8 +3483,8 @@ impl Game<'_> {
             return;
         };
         self.load_guest_records(conn);
-        // The mods say which commands the newcomer's tree keeps.
-        self.native_filter_commands(Some(conn));
+        // Collect the recipient's recipe types and filter their command tree.
+        self.prepare_recipe_join(conn);
         // A level that will not open, its generator gone with a mod, is one the
         // world no longer has: left in it, the player would fail the next tick.
         if elsewhere && let Err(e) = self.enter_level(level) {
@@ -4032,6 +4024,8 @@ fn event_kind(event: &HostEvent) -> EventKind {
         HostEvent::Joined(c) => ("join", Some(*c), None),
         HostEvent::Left(g) => ("leave", None, Some(g.name.clone())),
         HostEvent::Packet(c, p) => (p.name(), Some(*c), None),
+        HostEvent::InputCredits(_) => ("input credits", None, None),
+        HostEvent::RawPayload(_) => ("raw payload", None, None),
         HostEvent::ClientInformation(c, _, _) => ("client settings", Some(*c), None),
         HostEvent::ChatSubmitted { .. } => ("chat submitted", None, None),
         HostEvent::ChatSessionStarted(_) => ("chat session", None, None),
@@ -6110,7 +6104,7 @@ mod owner_attachment_save_tests {
         // While the owner plays, its attachments are the game's, not the guest's.
         PROGRESS
             .set(
-                &mut game.player_attachments,
+                &mut game.player_state.attachments,
                 horizon_mod_runtime::attachments::Holder::Level,
                 7,
             )
@@ -6130,7 +6124,7 @@ mod owner_attachment_save_tests {
         // A later change is what the next autosave writes.
         PROGRESS
             .set(
-                &mut game.player_attachments,
+                &mut game.player_state.attachments,
                 horizon_mod_runtime::attachments::Holder::Level,
                 9,
             )

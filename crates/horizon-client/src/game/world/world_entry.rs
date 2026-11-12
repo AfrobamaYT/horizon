@@ -242,7 +242,7 @@ impl Game<'_> {
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
         let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-        let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+        let conditions = self.registered_load_conditions(&inventory)?;
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
             files: &files,
@@ -323,6 +323,7 @@ impl Game<'_> {
             })
             .collect();
         let datapack_candidate = self.datapack_candidate(stack, &conditions)?;
+        conditions.check_errors()?;
         self.mods.datapack_candidate = datapack_candidate;
         Ok((
             Some(WorldTables {
@@ -365,23 +366,9 @@ impl Game<'_> {
             horizon_client::datapack::registry_files(&packs, &keys)
                 .into_iter()
                 .map(|(path, versions)| {
-                    let versions = versions
-                        .into_iter()
-                        .filter_map(|bytes| {
-                            let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes)
-                            else {
-                                // Malformed: the decoder reports it, naming the file.
-                                return Some(bytes);
-                            };
-                            if !conditions.allows(&json) {
-                                return None;
-                            }
-                            if let Some(object) = json.as_object_mut() {
-                                object.remove("neoforge:conditions");
-                            }
-                            serde_json::to_vec(&json).ok()
-                        })
-                        .collect();
+                    let versions = super::condition_reload_state::registry_versions(
+                        versions, conditions, &path,
+                    );
                     (path, versions)
                 })
                 .collect();
@@ -436,6 +423,7 @@ impl Game<'_> {
         let PreparedWorldReload {
             structure_spawns,
             tables,
+            advancements,
             health,
             parts,
             wire,
@@ -490,11 +478,7 @@ impl Game<'_> {
         {
             self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
         }
-        let overlay = pack_files(&self.world_tables);
-        self.adv.tree = Arc::new(horizon_client::advancements::Tree::load_with(
-            &self.options.resources.join("data"),
-            &overlay,
-        ));
+        self.adv.tree = advancements;
         self.adv.reset_tree();
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
@@ -580,7 +564,7 @@ impl Game<'_> {
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
         let block_tags = &items.block_tags;
-        let tags = native_world_read::prepare_block_tags(block_tags);
+        let tags = self.block_tag_sets(items);
         let parts = mod_api::__private::prepare_parts(
             block_tags,
             &items.item_tags,
@@ -660,7 +644,13 @@ impl Game<'_> {
         } else {
             None
         };
+        let advancements = Arc::new(horizon_client::advancements::Tree::load_with(
+            &root.join("data"),
+            &overlay,
+        ));
+        overlay.conditions.check_errors()?;
         Ok(PreparedWorldReload {
+            advancements,
             structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns::load(root),
             tables,
             health,
@@ -685,6 +675,7 @@ impl Game<'_> {
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);
         self.resolve_pathfindable();
+        self.resolve_piston_reactions();
     }
     pub(super) fn resolve_pathfindable(&self) {
         let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::IsPathfindable);

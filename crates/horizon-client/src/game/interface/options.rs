@@ -802,7 +802,7 @@ impl Game<'_> {
     pub(super) fn hold_fullbright(&mut self) {
         let held = fullbright_held(
             self.remote.as_ref().map(|_| self.integrated.is_some()),
-            self.replay.driver.is_some(),
+            self.replay.playing(),
         );
         self.settings.fullbright_held = held;
         if let Some(r) = self.renderer.as_mut() {

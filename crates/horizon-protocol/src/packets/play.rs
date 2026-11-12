@@ -22,7 +22,9 @@ use crate::{
 };
 use horizon_core::nbt::Tag;
 
+mod advancements;
 mod commands;
+pub use advancements::{Advancement, AdvancementDisplay, SeenAdvancements, UpdateAdvancements};
 pub use commands::{ARGUMENT_TYPES, ArgumentProperties, CommandNode, Commands};
 
 // ---- shared structures -------------------------------------------------
@@ -530,6 +532,11 @@ macro_rules! move_entity {
     ($name:ident, pos: $pos:expr, rot: $rot:expr) => {
         #[derive(Clone, Debug, PartialEq)]
         pub struct $name(pub MoveEntity);
+        impl crate::retained::OwnedHeap for $name {
+            fn owned_heap_bytes(&self) -> usize {
+                crate::retained::OwnedHeap::owned_heap_bytes(&self.0)
+            }
+        }
         impl Codec<$name> for $name {
             fn read(r: &mut Reader) -> Result<$name> {
                 Self::read_inner(r).map($name)
@@ -1337,172 +1344,6 @@ impl Codec<StopSound> for StopSound {
         }
     }
 }
-/// `DisplayInfo` of an advancement as sent.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AdvancementDisplay {
-    pub title: Tag,
-    pub description: Tag,
-    pub icon: crate::item::Stack,
-    /// `AdvancementType` ordinal: task, challenge, goal.
-    pub frame: i32,
-    pub show_toast: bool,
-    pub hidden: bool,
-    pub background: Option<String>,
-}
-/// `ClientboundUpdateAdvancementsPacket.PositionedAdvancement`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Advancement {
-    pub id: String,
-    pub parent: Option<String>,
-    pub display: Option<AdvancementDisplay>,
-    pub requirements: Vec<Vec<String>>,
-    pub telemetry: bool,
-    pub x: f32,
-    pub y: f32,
-}
-/// `ClientboundUpdateAdvancementsPacket`: whether it replaces what the
-/// client has, the advancements added and removed, the progress of each
-/// changed one (criterion, when obtained in epoch milliseconds), and whether
-/// to show toasts.
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdateAdvancements {
-    pub reset: bool,
-    pub added: Vec<Advancement>,
-    pub removed: Vec<String>,
-    pub progress: Vec<(String, Vec<(String, Option<i64>)>)>,
-    pub show: bool,
-}
-impl Codec<UpdateAdvancements> for UpdateAdvancements {
-    fn read(r: &mut Reader) -> Result<Self> {
-        let reset = r.bool()?;
-        let n = r.count(r.remaining())?;
-        let mut added = Vec::with_capacity(n.min(1024));
-        for _ in 0..n {
-            let id = r.string(32767)?;
-            let parent = if r.bool()? {
-                Some(r.string(32767)?)
-            } else {
-                None
-            };
-            let display = if r.bool()? {
-                let title = r.nbt()?;
-                let description = r.nbt()?;
-                let icon = crate::item::Template::read(r)?;
-                let frame = r.varint()?;
-                let flags = r.i32()?;
-                let background = if flags & 1 != 0 {
-                    Some(r.string(32767)?)
-                } else {
-                    None
-                };
-                Some(AdvancementDisplay {
-                    title,
-                    description,
-                    icon,
-                    frame,
-                    show_toast: flags & 2 != 0,
-                    hidden: flags & 4 != 0,
-                    background,
-                })
-            } else {
-                None
-            };
-            let groups = r.count(r.remaining())?;
-            let mut requirements = Vec::with_capacity(groups.min(256));
-            for _ in 0..groups {
-                let k = r.count(r.remaining())?;
-                requirements.push((0..k).map(|_| r.string(32767)).collect::<Result<_>>()?);
-            }
-            let telemetry = r.bool()?;
-            let (x, y) = (r.f32()?, r.f32()?);
-            added.push(Advancement {
-                id,
-                parent,
-                display,
-                requirements,
-                telemetry,
-                x,
-                y,
-            });
-        }
-        let n = r.count(r.remaining())?;
-        let removed = (0..n).map(|_| r.string(32767)).collect::<Result<_>>()?;
-        let n = r.count(r.remaining())?;
-        let mut progress = Vec::with_capacity(n.min(1024));
-        for _ in 0..n {
-            let id = r.string(32767)?;
-            let k = r.count(r.remaining())?;
-            let mut criteria = Vec::with_capacity(k.min(256));
-            for _ in 0..k {
-                let name = r.string(32767)?;
-                let at = if r.bool()? { Some(r.i64()?) } else { None };
-                criteria.push((name, at));
-            }
-            progress.push((id, criteria));
-        }
-        let show = r.bool()?;
-        Ok(Self {
-            reset,
-            added,
-            removed,
-            progress,
-            show,
-        })
-    }
-    fn write(v: &Self, w: &mut Writer) {
-        w.bool(v.reset);
-        w.varint(v.added.len() as i32);
-        for a in &v.added {
-            w.string(&a.id);
-            w.bool(a.parent.is_some());
-            if let Some(p) = &a.parent {
-                w.string(p);
-            }
-            w.bool(a.display.is_some());
-            if let Some(d) = &a.display {
-                w.nbt(&d.title);
-                w.nbt(&d.description);
-                crate::item::Template::write(&d.icon, w);
-                w.varint(d.frame);
-                w.i32(
-                    i32::from(d.background.is_some())
-                        | i32::from(d.show_toast) << 1
-                        | i32::from(d.hidden) << 2,
-                );
-                if let Some(b) = &d.background {
-                    w.string(b);
-                }
-            }
-            w.varint(a.requirements.len() as i32);
-            for g in &a.requirements {
-                w.varint(g.len() as i32);
-                for c in g {
-                    w.string(c);
-                }
-            }
-            w.bool(a.telemetry);
-            w.f32(a.x);
-            w.f32(a.y);
-        }
-        w.varint(v.removed.len() as i32);
-        for id in &v.removed {
-            w.string(id);
-        }
-        w.varint(v.progress.len() as i32);
-        for (id, criteria) in &v.progress {
-            w.string(id);
-            w.varint(criteria.len() as i32);
-            for (name, at) in criteria {
-                w.string(name);
-                w.bool(at.is_some());
-                if let Some(at) = at {
-                    w.i64(*at);
-                }
-            }
-        }
-        w.bool(v.show);
-    }
-}
 packet!(
     /// ClientboundAwardStatsPacket: (stat type, value, count) by network id.
     AwardStats { stats: Vec<(i32, i32, i32)> => StatList }
@@ -2010,30 +1851,6 @@ packet!(
         carried: Option<Hashed> => HashedSlot,
     }
 );
-/// ServerboundSeenAdvancementsPacket: the tab the player opened (action 0, `OPENED_TAB`), or
-/// that its screen closed (1, `CLOSED_SCREEN`, which carries no tab).
-#[derive(Clone, Debug, PartialEq)]
-pub struct SeenAdvancements {
-    pub action: i32,
-    pub tab: Option<String>,
-}
-impl Codec<SeenAdvancements> for SeenAdvancements {
-    fn read(r: &mut Reader) -> Result<SeenAdvancements> {
-        let action = r.varint()?;
-        // The identifier is there for OPENED_TAB only (`readIdentifier` in the other branch).
-        let tab = match action {
-            0 => Some(r.string(32767)?),
-            _ => None,
-        };
-        Ok(SeenAdvancements { action, tab })
-    }
-    fn write(v: &SeenAdvancements, w: &mut Writer) {
-        w.varint(v.action);
-        if v.action == 0 {
-            w.string(v.tab.as_deref().unwrap_or_default());
-        }
-    }
-}
 packet!(SelectTrade { item: i32 => VarInt });
 packet!(
     /// ServerboundBlockEntityTagQueryPacket: an operator's F3+I asks for the
@@ -2410,6 +2227,584 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
     UseItem(UseItem) = USE_ITEM,
     UseItemOn(UseItemOn) = USE_ITEM_ON,
 });
+
+// Generated retained-allocation traversals; regenerate with protocol-retained-gen.
+impl crate::retained::OwnedHeap for NetCost {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            item,
+            count,
+            components,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(item))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(components))
+    }
+}
+impl crate::retained::OwnedHeap for NetOffer {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            cost_a,
+            result,
+            cost_b,
+            out_of_stock,
+            uses,
+            max_uses,
+            xp,
+            special_price,
+            price_multiplier,
+            demand,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(cost_a))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(result))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(cost_b))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(out_of_stock))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(uses))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(max_uses))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(xp))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(special_price))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                price_multiplier,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(demand))
+    }
+}
+impl crate::retained::OwnedHeap for Offers {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for HolderId {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for DialogHolder {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Registry(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Direct(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for PositionPath {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Linear(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Stepped(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for MapPatch {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            start_x,
+            start_y,
+            width,
+            height,
+            colors,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(start_x))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(start_y))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(width))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(height))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(colors))
+    }
+}
+impl crate::retained::OwnedHeap for MapPatchOpt {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for VecDelta {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Linear(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Stepped(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for MoveEntity {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            id,
+            delta,
+            rotation,
+            on_ground,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(delta))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(rotation))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(on_ground))
+    }
+}
+impl crate::retained::OwnedHeap for PackedSignature {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Signature {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for FilterMask {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for PlayerInfo {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            uuid,
+            name,
+            properties,
+            chat_session,
+            game_mode,
+            listed,
+            latency,
+            display_name,
+            list_order,
+            show_hat,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(uuid))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(properties))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(chat_session))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(game_mode))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(listed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(latency))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display_name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(list_order))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(show_hat))
+    }
+}
+impl crate::retained::OwnedHeap for PlayerInfoUpdate {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { actions, entries } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(actions))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(entries))
+    }
+}
+impl crate::retained::OwnedHeap for Equipment {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SoundHolder {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for NumberFormat {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Blank => 0usize,
+            Self::Styled(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Fixed(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for SetObjective {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            name,
+            method,
+            display,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(method))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display))
+    }
+}
+impl crate::retained::OwnedHeap for LevelParticles {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            particle,
+            override_limiter,
+            always_show,
+            pos,
+            dist,
+            max_speed,
+            count,
+            randomization,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(particle))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                override_limiter,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(always_show))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(pos))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(dist))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(max_speed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(randomization))
+    }
+}
+impl crate::retained::OwnedHeap for ExplosionParticle {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            particle,
+            scaling,
+            speed,
+            weight,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(particle))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(scaling))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(speed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(weight))
+    }
+}
+impl crate::retained::OwnedHeap for Explode {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            center,
+            radius,
+            block_count,
+            knockback,
+            particle,
+            sound,
+            block_particles,
+            play_sound,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(center))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(radius))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(block_count))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(knockback))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(particle))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(sound))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                block_particles,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(play_sound))
+    }
+}
+impl crate::retained::OwnedHeap for TeamParameters {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            display_name,
+            prefix,
+            suffix,
+            name_tag_visibility,
+            collision_rule,
+            color,
+            options,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display_name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(prefix))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(suffix))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                name_tag_visibility,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(collision_rule))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(options))
+    }
+}
+impl crate::retained::OwnedHeap for SetPlayerTeam {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            name,
+            method,
+            parameters,
+            players,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(method))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(parameters))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(players))
+    }
+}
+impl crate::retained::OwnedHeap for StopSound {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { source, sound } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(source))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(sound))
+    }
+}
+impl crate::retained::OwnedHeap for AdvancementDisplay {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            title,
+            description,
+            icon,
+            frame,
+            show_toast,
+            hidden,
+            background,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(title))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(description))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(icon))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(frame))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(show_toast))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(hidden))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(background))
+    }
+}
+impl crate::retained::OwnedHeap for Advancement {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            id,
+            parent,
+            display,
+            requirements,
+            telemetry,
+            x,
+            y,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(parent))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(display))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(requirements))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(telemetry))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(x))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(y))
+    }
+}
+impl crate::retained::OwnedHeap for UpdateAdvancements {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            reset,
+            added,
+            removed,
+            progress,
+            show,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(reset))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(added))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(removed))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(progress))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(show))
+    }
+}
+impl crate::retained::OwnedHeap for StatList {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for BossAction {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Add {
+                name,
+                progress,
+                color,
+                overlay,
+                darken,
+                music,
+                fog,
+            } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(progress))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(overlay))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(darken))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(music))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(fog)),
+            Self::Remove => 0usize,
+            Self::UpdateProgress { progress } => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(progress))
+            }
+            Self::UpdateName { name } => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            }
+            Self::UpdateStyle { color, overlay } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(overlay)),
+            Self::UpdateProperties { darken, music, fog } => 0usize
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(darken))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(music))
+                .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(fog)),
+        }
+    }
+}
+impl crate::retained::OwnedHeap for BossEvent {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { id, action } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(action))
+    }
+}
+impl crate::retained::OwnedHeap for WaypointId {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Uuid(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Name(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for WaypointTarget {
+    fn owned_heap_bytes(&self) -> usize {
+        match self {
+            Self::Empty => 0usize,
+            Self::Block(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Chunk(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+            Self::Azimuth(field_0) => {
+                0usize.saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(field_0))
+            }
+        }
+    }
+}
+impl crate::retained::OwnedHeap for TrackedWaypoint {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            operation,
+            id,
+            style,
+            color,
+            target,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(operation))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(id))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(style))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(color))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(target))
+    }
+}
+impl crate::retained::OwnedHeap for Fixed3 {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for ArgumentSignatures {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for ChangedSlots {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SeenAdvancements {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self { action, tab } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(action))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(tab))
+    }
+}
+impl crate::retained::OwnedHeap for SetStructureBlock {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self {
+            pos,
+            update_type,
+            mode,
+            name,
+            offset,
+            size,
+            mirror,
+            rotation,
+            data,
+            ignore_entities,
+            strict,
+            show_air,
+            show_bounding_box,
+            integrity,
+            seed,
+        } = self;
+        0usize
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(pos))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(update_type))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(mode))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(name))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(offset))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(size))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(mirror))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(rotation))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(data))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                ignore_entities,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(strict))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(show_air))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(
+                show_bounding_box,
+            ))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(integrity))
+            .saturating_add(crate::retained::OwnedHeap::owned_heap_bytes(seed))
+    }
+}
+impl crate::retained::OwnedHeap for BookPages {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SignSide {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for SignLines {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+impl crate::retained::OwnedHeap for Cursor {
+    fn owned_heap_bytes(&self) -> usize {
+        let Self = self;
+        0usize
+    }
+}
+// End generated retained traversals.
 
 #[cfg(test)]
 mod tests {

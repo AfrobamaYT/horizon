@@ -4,6 +4,21 @@ use super::TryIntoEngine;
 mod arm_pose;
 use horizon_mod_package::content as engine;
 
+/// One vocabulary mapping for the content draft and the resolved simulation facts.
+pub(in crate::game) fn push_reaction(
+    value: &mod_api::PushReaction,
+) -> (engine::PushReaction, horizon_world::level::PushReaction) {
+    use engine::PushReaction as Content;
+    use horizon_world::level::PushReaction as World;
+    match value {
+        mod_api::PushReaction::PushPull => (Content::PushPull, World::PushPull),
+        mod_api::PushReaction::Push => (Content::Push, World::Push),
+        mod_api::PushReaction::Popped => (Content::Popped, World::Popped),
+        mod_api::PushReaction::Immoveable => (Content::Immoveable, World::Immoveable),
+        mod_api::PushReaction::IgnoreEntity => (Content::IgnoreEntity, World::IgnoreEntity),
+    }
+}
+
 impl TryIntoEngine<()> for mod_api::BlockProperties {
     type Engine = engine::BlockProperties;
     type Error = String;
@@ -12,6 +27,7 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
             hardness: self.hardness,
             explosion_resistance: self.explosion_resistance,
             light: self.light,
+            dynamic_light: self.dynamic_light,
             requires_tool: self.requires_tool,
             friction: self.friction,
             map_color: self.map_color,
@@ -30,13 +46,10 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
                 }
                 mod_api::RenderShape::Invisible => engine::RenderShape::Invisible,
             }),
-            push_reaction: self.push_reaction.as_ref().map(|v| match v {
-                mod_api::PushReaction::PushPull => engine::PushReaction::PushPull,
-                mod_api::PushReaction::Push => engine::PushReaction::Push,
-                mod_api::PushReaction::Popped => engine::PushReaction::Popped,
-                mod_api::PushReaction::Immoveable => engine::PushReaction::Immoveable,
-                mod_api::PushReaction::IgnoreEntity => engine::PushReaction::IgnoreEntity,
-            }),
+            push_reaction: self
+                .push_reaction
+                .as_ref()
+                .map(|value| push_reaction(value).0),
             occludes: self.occludes,
             destroy_overlay: self.destroy_overlay,
         })
@@ -71,7 +84,12 @@ impl TryIntoEngine<()> for mod_api::Block {
     type Error = String;
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
         Ok(engine::Block {
-            state_light: None,
+            state_light: self.state_light.as_ref().map(|light| engine::StateValues {
+                property: String::new(),
+                properties: light.properties.clone(),
+                values: light.values.clone(),
+                default: light.default,
+            }),
             id: self.id.clone(),
             template: self.template.clone(),
             pick_item: self.pick_item.clone(),
@@ -198,6 +216,34 @@ mod tests {
     use super::*;
     use mod_api::{Block, BlockProperties, Item, Tag};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn state_light_matches_json_and_preserves_emission() {
+        let mut draft = Block::new("test:lamp", "minecraft:stone");
+        draft
+            .state_properties
+            .insert("lit".into(), mod_api::BlockStateProperty::Boolean);
+        draft.properties.light = Some(3);
+        draft.state_light = Some(mod_api::StateLight {
+            properties: vec!["lit".into()],
+            values: BTreeMap::from([("true".into(), 15)]),
+            default: Some(0),
+        });
+        let converted = draft.try_into_engine(&()).unwrap();
+        let json: engine::StateLight =
+            serde_json::from_str(r#"{"properties":["lit"],"values":{"true":15},"default":0}"#)
+                .unwrap();
+        assert_eq!(converted.state_light.as_ref(), Some(&json));
+        let table = converted.state_light.unwrap();
+        assert_eq!(
+            table.values.get("false").copied().or(table.default),
+            Some(0)
+        );
+        assert_eq!(
+            table.values.get("true").copied().or(table.default),
+            Some(15)
+        );
+    }
 
     #[test]
     fn duplicate_component_ids_refuse_blocks_and_items() {
@@ -441,6 +487,7 @@ mod tests {
                 push_reaction: Some(mod_api::PushReaction::Popped),
                 occludes: Some(false),
                 destroy_overlay: Some(false),
+                dynamic_light: Some(true),
                 ..Default::default()
             };
             draft.state_properties =
@@ -470,6 +517,7 @@ mod tests {
                 push_reaction: Some(engine::PushReaction::Popped),
                 occludes: Some(false),
                 destroy_overlay: Some(false),
+                dynamic_light: Some(true),
                 ..Default::default()
             }
         );

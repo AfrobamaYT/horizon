@@ -41,13 +41,29 @@ pub(super) struct Pending {
     pub(super) copied: HashMap<[i32; 3], (String, Compound)>,
 }
 impl Pending {
-    /// Remember what the block entity at `pos` copies into the drops of `block`.
+    /// `record` for the block entity at `pos` while it is still in `world`:
+    /// its custom name and lock come from there.
+    pub(super) fn record_from(
+        &mut self,
+        world: &horizon_client::world::World,
+        pos: [i32; 3],
+        entity: &BlockEntity,
+        block: &str,
+    ) {
+        let key = (pos[0], pos[1], pos[2]);
+        let name = world.block_names.get(&key).cloned();
+        self.record(pos, entity, block, name, world.block_lock(key));
+    }
+    /// Remember what the block entity at `pos` copies into its own drop.
+    /// Name and lock live outside the model: snapshot the actual lock before
+    /// removal forgets its source. Only the supported shulker copy policy takes it.
     pub(super) fn record(
         &mut self,
         pos: [i32; 3],
         entity: &BlockEntity,
         block: &str,
         name: Option<Tag>,
+        lock: Option<&Tag>,
     ) {
         if let BlockEntity::Banner(banner) = entity {
             self.banner.insert(pos, banner.clone());
@@ -61,8 +77,10 @@ impl Pending {
         }
         // `copy_components` from the block entity: the head tables copy the
         // profile (player heads), note block sound and name, the hive tables
-        // the bees.
+        // the bees, and shulker tables the actual external lock. This is the
+        // supported vanilla class policy, not a selected-table include filter.
         let include: &[&str] = match entity {
+            BlockEntity::Chest(_) if is_shulker_box(block) => &["minecraft:lock"],
             BlockEntity::Skull(_) if block.starts_with("minecraft:player_") => &[
                 "minecraft:profile",
                 "minecraft:note_block_sound",
@@ -75,7 +93,12 @@ impl Pending {
             _ => &[],
         };
         if !include.is_empty() {
-            let saved = save::encode_block_entity((pos[0], pos[1], pos[2]), entity, block);
+            let mut saved = save::encode_block_entity((pos[0], pos[1], pos[2]), entity, block);
+            if is_shulker_box(block)
+                && let (Some(lock), Tag::Compound(tag)) = (lock, &mut saved)
+            {
+                tag.insert("lock".into(), lock.clone());
+            }
             let mut patch = block_entity_nbt::canonical(&saved)
                 .map(|saved| block_entity_item::pick(&saved))
                 .unwrap_or_default();
@@ -271,6 +294,7 @@ pub(super) struct BlockDrops {
 
 #[derive(Default)]
 pub(super) struct Spill {
+    pub(super) piston_positions: Vec<super::piston_carry_state::PositionChange>,
     pub(super) spawns: Vec<Spawn>,
     /// Experience orbs (`ExperienceOrb.award`): where and how much, each
     /// and the merge id it drew from the level random.
@@ -294,7 +318,8 @@ pub(super) struct UsedDrops {
 
 impl Spill {
     pub(super) fn is_empty(&self) -> bool {
-        self.spawns.is_empty()
+        self.piston_positions.is_empty()
+            && self.spawns.is_empty()
             && self.orbs.is_empty()
             && self.removed.is_empty()
             && self.used.is_empty()
@@ -520,9 +545,8 @@ impl GameLevel<'_> {
         let at = [pos.x, pos.y, pos.z];
         if let Some(entity) = self.world.block_entities.get(&key) {
             let entity = entity.clone();
-            let name = self.world.block_names.get(&key).cloned();
             let block = self.facts.get(state).name.clone();
-            self.pending.record(at, &entity, &block, name);
+            self.pending.record_from(self.world, at, &entity, &block);
         } else if let Some(tag) = saved_entity(self.world, [pos.x, pos.y, pos.z]) {
             self.pending.record_saved(at, &tag);
         }
@@ -586,7 +610,13 @@ impl GameLevel<'_> {
         let mut copied = Pending::default();
         if let Some(block_entity) = self.world.block_entities.get(&key) {
             let name = self.world.block_names.get(&key).cloned();
-            copied.record(at, block_entity, &self.facts.get(state).name, name);
+            copied.record(
+                at,
+                block_entity,
+                &self.facts.get(state).name,
+                name,
+                self.world.block_lock(key),
+            );
         } else if let Some(tag) = saved_entity(self.world, at) {
             copied.record_saved(at, &tag);
         }
@@ -742,9 +772,10 @@ impl GameLevel<'_> {
         // A replacement is a new block entity, even at the same position.
         // Headless servers cannot rely on renderer visibility to discard this state.
         if &*self.facts.get(old).name == "minecraft:end_gateway" {
-            self.gateway_servers.remove(&[pos.x, pos.y, pos.z]);
+            self.positions.gateways.remove(&[pos.x, pos.y, pos.z]);
         }
         if self.remove_saved_entity(pos, old, side_effects) {
+            self.positions.hoppers.remove(&key);
             return 0;
         }
         // Sculk blocks and creaking hearts notice their removal on their own tick.
@@ -772,6 +803,7 @@ impl GameLevel<'_> {
                 .put(lease, BlockEntity::Mod(entity));
         }
         let entity = self.world.block_entities.remove(&key);
+        self.positions.hoppers.remove(&key);
         self.world.block_names.remove(&key);
         self.world.forget_block_entity_source(key);
         let name = self.facts.get(old).name.clone();
@@ -1052,6 +1084,7 @@ impl Game<'_> {
         }
         let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut spill = std::mem::take(&mut self.spill);
+        self.finish_piston_position_changes(std::mem::take(&mut spill.piston_positions));
         let used = std::mem::take(&mut spill.used);
         let tool = self.held().cloned();
         let player = Some(self.native_acting_id());
@@ -1374,7 +1407,7 @@ mod tests {
             };
             assert_eq!(banner.layers.len(), item_data::OMINOUS_LAYERS.len());
             let mut pending = Pending::default();
-            pending.record([pos.0, pos.1, pos.2], &loaded, block, None);
+            pending.record([pos.0, pos.1, pos.2], &loaded, block, None, None);
             let mut dropped = ItemStack::new("minecraft:white_banner", 1);
             pending.attach([pos.0, pos.1, pos.2], &mut dropped);
             assert!(dropped.data().unwrap().ominous_banner);

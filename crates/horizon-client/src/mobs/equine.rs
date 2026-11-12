@@ -694,12 +694,15 @@ pub fn play_step(
     ) {
         return;
     }
+    // The snow layer on the block, if any, steps for it; its parts answer, asked at the block
+    // below as NeoForge's `getSoundType(snow, level, pos, horse)` is.
     let above = w.world.block(pos[0], pos[1] + 1, pos[2]);
-    let sound_type = if &*w.facts.get(above).name == "minecraft:snow" {
-        &w.facts.get(above).sounds
+    let state = if &*w.facts.get(above).name == "minecraft:snow" {
+        above
     } else {
-        &w.facts.get(state).sounds
+        state
     };
+    let sound_type = &w.block_sound_type(m, pos, state, mod_api::BlockSoundCause::Step);
     let (volume, pitch) = (sound_type.volume, sound_type.pitch);
     let at = [m.position.x, m.position.y, m.position.z];
     let baby = m.is_baby();
@@ -749,7 +752,7 @@ pub fn play_step(
 }
 /// `AbstractHorse.isWoodSoundType`: WOOD, NETHER_WOOD, STEM, CHERRY_WOOD and
 /// BAMBOO_WOOD (not HARD_CROP, which only shares WOOD's step).
-fn is_wood_sound_type(sounds: &horizon_items::blocks::Sounds) -> bool {
+fn is_wood_sound_type(sounds: &mod_api::BlockSoundType) -> bool {
     let step = sounds
         .step
         .strip_prefix("minecraft:")
@@ -1185,6 +1188,17 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     }
 }
 
+/// The `horse_body` texture of a horse armour item (its id without the
+/// namespace): the item's `equippable.asset_id`, which names the
+/// `equipment/<asset>.json` whose `horse_body` layer is drawn. Only the golden
+/// armour's asset (`gold`) is not its item's material word.
+pub fn horse_armor_asset(item: &str) -> Option<&str> {
+    match item.strip_suffix("_horse_armor")? {
+        "golden" => Some("gold"),
+        material => Some(material),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1193,6 +1207,44 @@ mod tests {
     use crate::mobs::sensor_scan_tests::kind;
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
+
+    /// Every vanilla horse armour item draws the `horse_body` texture its
+    /// `equippable.asset_id` equipment names (`items.json`, `equipment/*.json`).
+    #[test]
+    fn horse_armor_draws_its_equipment_asset_texture() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        let Ok(items) = std::fs::read(root.join("items.json")) else {
+            return;
+        };
+        let items: serde_json::Value = serde_json::from_slice(&items).unwrap();
+        let mut seen = 0;
+        for (id, components) in items.as_object().unwrap() {
+            let Some(item) = id
+                .strip_prefix("minecraft:")
+                .filter(|i| i.ends_with("_horse_armor"))
+            else {
+                continue;
+            };
+            let asset = components["minecraft:equippable"]["asset_id"]
+                .as_str()
+                .unwrap();
+            let asset = asset.strip_prefix("minecraft:").unwrap();
+            let file = root.join(format!("assets/minecraft/equipment/{asset}.json"));
+            let equipment: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+            let texture = equipment["layers"]["horse_body"][0]["texture"]
+                .as_str()
+                .unwrap();
+            assert_eq!(
+                horse_armor_asset(item),
+                texture.strip_prefix("minecraft:"),
+                "{id}"
+            );
+            seen += 1;
+        }
+        assert!(seen >= 6, "the vanilla horse armours: {seen}");
+    }
 
     fn horse(species: Species) -> Mob {
         let mut kind = crate::mobs::sensor_scan_tests::kind();

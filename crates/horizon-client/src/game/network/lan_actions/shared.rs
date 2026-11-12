@@ -64,7 +64,7 @@ pub(super) struct GuestPlay {
     /// The inventory menu and the crafting table the guest crafts in.
     pub(super) crafting: super::lan_crafting::GuestCrafting,
     /// The workstation menu the guest has open (game/network/lan_stations.rs).
-    pub(super) station: Option<super::lan_stations::GuestStation>,
+    pub(super) station: MenuOwner<Option<super::lan_stations::GuestStation>>,
     /// The mount inventory the guest has open (game/network/lan_mount_menu.rs).
     pub(super) mount_window: Option<super::lan_mount_menu::GuestMount>,
     /// The lectern the guest reads (game/network/lan_stations.rs).

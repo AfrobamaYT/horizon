@@ -241,7 +241,7 @@ impl Store {
     pub fn open_with_capacity(world_root: &Path, capacity: usize) -> Result<Opened, Refusal> {
         let data = world_root.join("data");
         let flag = in_use_flag(world_root);
-        if read_slots(&data)?.is_none() {
+        let Some(records) = read_slots(&data)? else {
             if residual_files(&data)? {
                 // Leftover carrier files without a journal are a missing
                 // store whatever the flag says.
@@ -252,9 +252,6 @@ impl Store {
                 return Err(Refusal::MissingStore { flag: true });
             }
             return Ok(Opened::NeverUsed);
-        }
-        let Some(records) = read_slots(&data)? else {
-            unreachable!("slots were just read");
         };
         // A newer schema is reported even when the other slot is valid:
         // the newer record is what the world actually was.
@@ -424,7 +421,7 @@ impl Store {
             }
             (OpKind::Disassemble, false) => {
                 return Err(StoreIoError(format!(
-                    "carrier {uuid:032x} at generation {generation} is not held:                      a stale handle refuses"
+                    "carrier {uuid:032x} at generation {generation} is not held: a stale handle refuses"
                 )));
             }
             _ => {}
@@ -442,6 +439,7 @@ impl Store {
         self.entry_no
             .checked_add(1)
             .ok_or_else(|| StoreIoError("journal entry counter exhausted".into()))?;
+        let previous = self.journal.clone();
         self.journal.in_progress = Some(InProgress {
             op_id,
             kind,
@@ -450,7 +448,10 @@ impl Store {
             dimension: dimension.to_string(),
         });
         self.journal.next_op_id = next_op_id;
-        self.write_slot()?;
+        if let Err(error) = self.write_slot() {
+            self.journal = previous;
+            return Err(error);
+        }
         Ok(op_id)
     }
 
@@ -462,6 +463,7 @@ impl Store {
         let Some(op) = self.journal.in_progress.clone() else {
             return Err(StoreIoError("no operation in progress".into()));
         };
+        let previous = self.journal.clone();
         match op.kind {
             OpKind::Assemble => {
                 if !self.journal.lists(op.uuid, op.generation) {
@@ -478,7 +480,10 @@ impl Store {
             }
         }
         self.journal.in_progress = None;
-        self.write_slot()?;
+        if let Err(error) = self.write_slot() {
+            self.journal = previous;
+            return Err(error);
+        }
         durable::remove(&self.operation_path(op.op_id)).map_err(|e| StoreIoError(e.to_string()))?;
         Ok(())
     }
