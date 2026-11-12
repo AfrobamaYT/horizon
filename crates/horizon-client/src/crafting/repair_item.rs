@@ -34,6 +34,10 @@ pub(super) fn assemble(ctx: &Context, stacks: &[&ItemStack]) -> Option<ItemStack
     out.data_mut()
         .set_other("minecraft:max_damage", Some(Tag::Int(durability as i32)));
     out.damage = (durability - remaining).max(0) as u32;
+    // `setDamageValue(0)` still stores `minecraft:damage`: without it the result stops being damageable.
+    if out.damage == 0 {
+        out.data_mut().explicit_zero_damage = true;
+    }
     // Only the curses of both survive, at the higher level.
     let (a, b) = (
         first.crafting_enchantments(),
