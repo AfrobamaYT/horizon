@@ -84,7 +84,13 @@ impl Game<'_> {
             .unwrap_or(MIN_COST);
         let e = &world_stations!(self).enchantments;
         let pool = e.tag("minecraft:on_mob_spawn_equipment");
-        let picked = e.select(world_items!(self), random, item, cost, pool);
+        let picked = e.select(
+            world_items!(self),
+            random,
+            &horizon_client::items::ItemStack::new(item, 1),
+            cost,
+            pool,
+        );
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             for (enchantment, level) in picked {
                 gear::upgrade(m, slot, &enchantment, level);
