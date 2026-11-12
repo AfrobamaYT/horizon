@@ -2722,9 +2722,15 @@ mod tests {
                             saw_offer = true;
                         }
                     }
-                    cfg::Clientbound::SelectKnownPacks(p) => c
-                        .send(&cfg::Serverbound::SelectKnownPacks(p).encode())
-                        .unwrap(),
+                    cfg::Clientbound::SelectKnownPacks(p) => {
+                        // A required unmatched Offer is refused as soon as it is read.
+                        // The disconnect can close the peer before this crossed ACK;
+                        // still read and assert that named refusal below.
+                        let sent = c.send(&cfg::Serverbound::SelectKnownPacks(p).encode());
+                        if optional {
+                            sent.unwrap();
+                        }
+                    }
                     cfg::Clientbound::Disconnect(d) => {
                         assert!(!optional);
                         assert!(
