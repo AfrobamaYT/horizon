@@ -43,6 +43,10 @@ larger) and marks a metric whose noise is over 1% as noisy. It flags a step: a c
 more than 1% and more than three times the noise. A workload that changed (another checksum of its work, or
 another operation count) starts a new series.
 
+Not verified: that the instruction counts are the same on two hosts. The runs that measured the noise landed on
+one host, so until two hosts are compared, read a step that coincides with a change of host with that in mind (the
+page names each run's host).
+
 Not measured yet: chunk meshing, the render frame, packet encoding and handling, a wasm listener and the wasm
 boundary, a point or replaced function call, registry and tag lookups.
 
