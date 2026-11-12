@@ -8,7 +8,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use horizon_mod_package::index::native::PREBUILT_REPO;
 use horizon_mod_package::mixins_tool::{self, PATCH, PATCH_NAME};
 use sha2::{Digest, Sha256};
 
@@ -21,6 +20,8 @@ const SUMS: &str = "SHA256SUMS";
 const LIMIT: u64 = 512 << 20;
 /// A checksum list holds a line per platform.
 const SUMS_LIMIT: u64 = 1 << 20;
+/// What an unpacking launcher's own folder inside the tool's folder starts with.
+const STAGING: &str = ".prebuilt-";
 /// Set by `native-build --mixins-from-source`: the prebuilt tool is not looked for.
 pub(super) static FROM_SOURCE: AtomicBool = AtomicBool::new(false);
 
@@ -49,7 +50,8 @@ pub(super) fn tool(rust: &Toolchain, progress: &impl Fn(Step)) -> Result<PathBuf
     let seconds = || format!("{:.1}", started.elapsed().as_secs_f64());
     let target = rust.host.target;
     let release = format!(
-        "https://github.com/{PREBUILT_REPO}/releases/download/{}",
+        "{}/{}",
+        horizon_addresses::MIXINS_TOOL_RELEASES,
         mixins_tool::release_tag()
     );
     let get = |name: &str| {
@@ -104,6 +106,12 @@ fn install(
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let lock = fs::File::create(dir.join(".lock")).map_err(|e| e.to_string())?;
     lock.lock().map_err(|e| e.to_string())?;
+    // What a launcher that was killed while unpacking left: no other one is unpacking now.
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        if entry.file_name().to_string_lossy().starts_with(STAGING) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
     if executable(dir).is_file() {
         return Ok(Got::Cached);
     }
@@ -169,10 +177,10 @@ fn prebuilt(dir: &Path, target: &str, get: Get) -> Result<bool, String> {
         .read_to_string(&mut listing)
         .map_err(|e| download(e.to_string()))?;
     if listing.len() as u64 > SUMS_LIMIT {
-        return Err(invalid(&tr("its checksum list is too large")));
+        return Err(invalid(tr("its checksum list is too large")));
     }
     let Some(expected) = super::prebuilt::expected_sum(&listing, &name) else {
-        return Err(invalid(&tr("its release lists no checksum for it")));
+        return Err(invalid(tr("its release lists no checksum for it")));
     };
     let mut bytes = Vec::new();
     body.take(LIMIT)
@@ -186,7 +194,7 @@ fn prebuilt(dir: &Path, target: &str, get: Get) -> Result<bool, String> {
     }
     // This launcher's own folder, removed however this returns.
     let staging = tempfile::Builder::new()
-        .prefix(".prebuilt-")
+        .prefix(STAGING)
         .tempdir_in(dir)
         .map_err(|e| e.to_string())?;
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(&bytes[..]).take(LIMIT));
@@ -205,12 +213,12 @@ fn prebuilt(dir: &Path, target: &str, get: Get) -> Result<bool, String> {
     let identity =
         fs::read_to_string(staging.path().join(mixins_tool::IDENTITY)).unwrap_or_default();
     if !identity.starts_with(&mixins_tool::identity(target)) {
-        return Err(invalid(&tr(
+        return Err(invalid(tr(
             "it was not built from the source, patch and target this launcher pins",
         )));
     }
     if !executable(staging.path()).is_file() {
-        return Err(invalid(&tr("it holds no executable")));
+        return Err(invalid(tr("it holds no executable")));
     }
     // Under the lock, with no executable in it: what an interrupted source build left, never
     // another launcher's tool.
@@ -375,6 +383,8 @@ mod tests {
     }
 
     /// Two launchers at once: one downloads, the other waits for the lock and finds the tool.
+    /// Two threads of one process on this OS: it does not prove the lock between processes, or
+    /// on Windows.
     #[test]
     fn two_installers_download_once_and_both_find_the_tool() {
         let dir = tempfile::tempdir().unwrap();
@@ -391,8 +401,14 @@ mod tests {
             release(Some(listing.clone()), Some(packed.clone()))(name)
         };
         let never = || -> Result<(), String> { panic!("a prebuilt exists") };
+        let start = std::sync::Barrier::new(2);
+        // A killed launcher's leftover goes with the first installer.
+        fs::create_dir_all(tool.join(".prebuilt-left/bin")).unwrap();
         let got = std::thread::scope(|scope| {
-            let run = || install(&tool, TARGET, Some(&get), &never).unwrap();
+            let run = || {
+                start.wait();
+                install(&tool, TARGET, Some(&get), &never).unwrap()
+            };
             let first = scope.spawn(run);
             let second = scope.spawn(run);
             [first.join().unwrap(), second.join().unwrap()]
