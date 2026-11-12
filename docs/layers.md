@@ -720,3 +720,7 @@ API listeners after dependency ordering and installation. Listener records, repl
 authority, activity flags and dispatch remain in the platform point registry. The socket
 refuses repeat or re-entrant sealing and late provider installation; it contains no game
 point identifiers or call-site routing.
+
+Engine crates import `horizon-mod-vocab` as `mod_api`. Their test-only
+`mod_platform` dependency reaches `horizon-mod-api`; dev-dependencies are exempt
+from the layer rule because tests may exercise the platform, while shipped code may not.

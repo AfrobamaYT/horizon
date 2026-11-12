@@ -97,7 +97,7 @@ fn request(root: &std::path::Path) -> world_loading::WorldRequest {
 fn fixture(mods: mod_api::Mods, run: impl FnOnce(&mut Game<'_>)) {
     let scratch = tempfile::tempdir().unwrap();
     let root = resource_root(scratch.path());
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_game_at(root, |game| {
             game.load_world(request(&scratch.path().join("save")))
                 .unwrap();
@@ -164,7 +164,7 @@ fn villager_failed_reload_keeps_profession_poi_and_trade_snapshot() {
 fn refused(mods: mod_api::Mods, expected: &[&str]) {
     let scratch = tempfile::tempdir().unwrap();
     let root = resource_root(scratch.path());
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         crate::game::native_entity_refs::tests::with_game_at(root, |game| {
             let old = game.stations().professions.clone();
             let error = game
@@ -254,7 +254,7 @@ fn villager_overlapping_poi_publishes_zero_entries() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn villager_no_mods_world_retains_farmer_composter_and_five_levels() {
     let scratch = tempfile::tempdir().unwrap();
-    mod_api::testing::with_mods(vec![].into(), || {
+    mod_platform::testing::with_mods(vec![].into(), || {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.load_world(request(&scratch.path().join("save")))
                 .unwrap();

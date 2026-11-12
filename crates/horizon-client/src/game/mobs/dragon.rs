@@ -5243,7 +5243,7 @@ mod tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.dragon.discard();
                 game.native_joins_skip();
@@ -5330,7 +5330,7 @@ mod tests {
                         }),
                     )]
                     .into();
-                    let result = mod_api::testing::with_mods(mods, || {
+                    let result = mod_platform::testing::with_mods(mods, || {
                         game.spawn_dragon_spawned([4.5, 200.0, 4.5], SpawnSite::Finalizing(reason))
                     });
                     assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -5433,7 +5433,7 @@ mod tests {
                         }),
                     )]
                     .into();
-                    let result = mod_api::testing::with_mods(mods, || {
+                    let result = mod_platform::testing::with_mods(mods, || {
                         game.build_registries();
                         game.set_allow_commands(true);
                         let suffix = nbt.map(|tag| format!(" {tag}")).unwrap_or_default();
@@ -6146,7 +6146,7 @@ mod tests {
             Box::new(Probe(heard.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.dragon.replace(dragon(Phase::Scanning { time: 0 }));
                 let arrow = ProjectileKind::Trident;

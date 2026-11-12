@@ -7923,7 +7923,7 @@ mod tests {
         assert!(hub.chunk_watches.is_empty() && hub.guests[0].watched.is_empty());
 
         let mods = vec![mod_api::ModEntry::new("watch", Box::new(Watcher))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             let (mut hub, _rx) = hub_with_a_guest();
             {
                 let value = 2;

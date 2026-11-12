@@ -63,6 +63,7 @@ class CheckLayersTests(unittest.TestCase):
     def test_build_dependencies_count_and_dev_dependencies_do_not(self):
         self.assertEqual(len(run(package("core", ("mod-api", "build")))[0]), 1)
         self.assertEqual(run(package("core", ("mod-api", "dev"))), ([], []))
+        self.assertEqual(len(run(package("core", "mod-api"))[0]), 1)
 
     def test_an_exception_with_no_dependency_left_is_only_a_note(self):
         problems, notes = run(package("game", "core"), allowed=["game -> cosmetics"])

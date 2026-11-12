@@ -46,8 +46,9 @@ fn compiled_guest_observes_physical_provider_pressure() {
     loaded.initialize(&[info]).unwrap();
     let mut mods = loaded.mods;
     mods.push(mod_api::ModEntry::new("raw_probe", Box::new(Native)));
-    mod_api::testing::with_mods(mods.into(), || {
-        mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods()).unwrap();
+    mod_platform::testing::with_mods(mods.into(), || {
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
         let transport = Transport::capture(Side::Server).unwrap();
         transport
             .accept(transport.local.manifest.entries())

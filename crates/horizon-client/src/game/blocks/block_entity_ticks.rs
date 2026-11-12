@@ -880,7 +880,7 @@ mod add_blocks_tests {
             Box::new(listener)
         };
         let mods: Mods = vec![ModEntry::new("add_blocks_test", hooks)].into();
-        mod_api::__private::install(mods.clone());
+        mod_platform::__private::install(mods.clone());
         crate::game::api_values::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = crate::game::mods::content_root(&base, &Default::default());

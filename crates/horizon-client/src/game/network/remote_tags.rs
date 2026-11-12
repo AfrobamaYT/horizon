@@ -71,8 +71,8 @@ mod tests {
         play::{self, Clientbound as C},
     };
     use horizon_protocol::registry::Builtin;
-    use mod_api::__private::part_tests::block_key;
     use mod_api::{Hooks, HostSide, Identifier, ModEntry, TagsUpdateCause, TagsUpdatedEvent};
+    use mod_platform::__private::part_tests::block_key;
     use std::sync::{Arc, Mutex};
 
     /// What a listener read of the tags during its notice.
@@ -164,7 +164,7 @@ mod tests {
     fn a_client_notice_reads_each_applied_set_of_server_tags() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![ModEntry::new("tags_probe", Box::new(Probe(seen.clone())))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_client_game(|game| {
                 let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
                 game.connect_local(pipe, "Steve").unwrap();

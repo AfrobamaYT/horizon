@@ -84,7 +84,7 @@ fn consuming_cancellation_has_one_outer_on_local_and_packet_routes() {
         }
     }
     let mode = Arc::new(AtomicUsize::new(0));
-    mod_api::__private::install(Arc::from([mod_api::ModEntry::new(
+    mod_platform::__private::install(Arc::from([mod_api::ModEntry::new(
         "count-block-use",
         Box::new(Listener(mode.clone())),
     )]));
@@ -511,7 +511,7 @@ fn block_use_listener_replacements_keep_original_on_both_routes() {
         }
     }
     let mode = Arc::new(AtomicUsize::new(0));
-    mod_api::__private::install(Arc::from([mod_api::ModEntry::new(
+    mod_platform::__private::install(Arc::from([mod_api::ModEntry::new(
         "replace-original",
         Box::new(Replace(mode.clone())),
     )]));
@@ -633,7 +633,7 @@ fn block_use_nested_originals_and_replacements_are_isolated() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn block_use_registry_guard_final_hand_matches_original() {
-    mod_api::__private::install(Arc::from([]));
+    mod_platform::__private::install(Arc::from([]));
     let _recording = Recording::start();
     crate::game::native_guest_turn_tests::with_guests(|g| {
         g.build_registries();
@@ -791,7 +791,7 @@ fn run_block_use_regression(g: &mut Game<'_>, packet: bool, stack: ItemStack) {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn block_use_hive_bottles_report_shrink_and_exhaustion_on_both_routes() {
-    mod_api::__private::install(Arc::from([]));
+    mod_platform::__private::install(Arc::from([]));
     let _recording = Recording::start();
     crate::game::native_guest_turn_tests::with_guests(|g| {
         g.build_registries();
@@ -840,7 +840,7 @@ fn block_use_hive_bottles_report_shrink_and_exhaustion_on_both_routes() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn block_use_lodestone_reports_component_edit_on_both_routes() {
     use horizon_core::nbt::Tag;
-    mod_api::__private::install(Arc::from([]));
+    mod_platform::__private::install(Arc::from([]));
     let _recording = Recording::start();
     crate::game::native_guest_turn_tests::with_guests(|g| {
         g.build_registries();

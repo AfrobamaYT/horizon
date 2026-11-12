@@ -1507,7 +1507,7 @@ mod tests {
             Box::new(Observer(joins.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.native_joins_skip();
                 let base = game.next_entity;
@@ -1585,7 +1585,7 @@ mod tests {
                 Box::new(Constructed(calls.clone())),
             )]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 super::super::native_entity_refs::tests::with_game(|game| {
                     game.options.dedicated = Some(Vec::new());
                     let tag = horizon_core::nbt::parse_snbt(r#"{

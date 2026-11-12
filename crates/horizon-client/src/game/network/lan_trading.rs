@@ -1193,7 +1193,7 @@ mod tests {
             Box::new(Observer(seen.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let (villager, _rx, first) = open_trade(game, 1);
                 let second = offer("minecraft:coal", "minecraft:diamond");

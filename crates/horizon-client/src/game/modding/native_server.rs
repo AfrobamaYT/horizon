@@ -2676,7 +2676,7 @@ mod tests {
             Box::new(Watcher(std::sync::Arc::clone(&heard))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 super::super::native_item_places::tests::open_to_lan(game);
                 let here = game.dim.id();
@@ -3063,7 +3063,7 @@ mod tests {
 
     #[test]
     fn a_registered_argument_type_parses_and_completes_its_values() {
-        mod_api::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
+        mod_platform::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
             "test",
             Box::new(Machines),
         )])
@@ -3203,7 +3203,7 @@ mod tests {
         }
         let changed = Arc::new(AtomicBool::new(false));
         let registrations = Arc::new(AtomicUsize::new(0));
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new(
                 "refresh",
                 Box::new(ChangingCommands {
@@ -3325,7 +3325,7 @@ mod tests {
             }
         }
         let heard = Arc::new(Mutex::new(Vec::new()));
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new(
                 "typed_commands",
                 Box::new(Commands(heard.clone())),
@@ -3494,7 +3494,7 @@ mod tests {
             }
         }
         let heard = Arc::new(Mutex::new(Vec::new()));
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new(
                 "origins",
                 Box::new(Commands(heard.clone())),
@@ -3597,7 +3597,7 @@ mod tests {
             Box::new(Commands(heard.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 super::super::native_item_places::tests::open_to_lan(game);
                 game.register_native_commands();
@@ -4604,7 +4604,7 @@ pub(super) mod fake_action_tests {
             }
         }
         let heard = Arc::new(AtomicBool::new(false));
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new(
                 "deny",
                 Box::new(Deny(heard.clone())),
@@ -4779,7 +4779,7 @@ pub(super) mod fake_action_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             // Half a fist's cooldown (delay 5 ticks): the charge is (2 + 0.5) / 5 = 0.5.
             with_game(|game| {
                 let (player, fake_conn, _) = fake(game, None, 0);
@@ -4911,7 +4911,7 @@ pub(super) mod fake_action_tests {
             Box::new(ChargeWatcher(seen.clone())),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let (player, fake_conn, _) = fake(game, None, 0);
                 game.lan
@@ -5418,7 +5418,7 @@ mod player_rule_tests {
             }
         }
         let mods = vec![mod_api::ModEntry::new("veto", Box::new(Veto))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_guests(|game| {
                 let a = game.player(12).unwrap();
                 let overworld = "minecraft:overworld";

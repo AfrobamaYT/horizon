@@ -946,9 +946,10 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn conversion_post_reads_original_and_lightning_outcome() {
         use mod_api::{
-            __private::install, EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks,
-            LivingConversionPostEvent, LivingConversionPreEvent,
+            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, LivingConversionPostEvent,
+            LivingConversionPreEvent,
         };
+        use mod_platform::__private::install;
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -1310,7 +1311,7 @@ mod tests {
             Box::new(Spare(spared, Arc::clone(&heard))),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.ui.difficulty = 2;
