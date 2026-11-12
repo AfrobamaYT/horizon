@@ -18,6 +18,20 @@ fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a hand
 undone and tried again with that part, so a cauldron, which gives whole thirds and never more than asked, gives
 what fits: asked for a bucket with room for 500 mB, it gives one level, 334 mB.
 
+To inspect a cauldron without probing its capability, use the `fluids` host reads
+`host.cauldron_content_for_block(block_key)` and `host.cauldron_content_for_fluid(fluid_key)`.
+Both return `Option<CauldronContent>`: typed `block` and `fluid` keys, full `total` in
+millibuckets, `max_level`, and optional `level_property`. Water answers 1000, 3, and
+`Some("level")`; lava answers 1000, 1, and `None`. `host.cauldron_level(state)` reads a
+typed state's current level (water at level 2 answers 2); an always-full content
+answers its maximum. Unregistered contents, including powder snow, answer `None`.
+These `WorldOnly` reads work on both sides, over the existing registration table,
+including mods and rebuilt resource generations. A client that has not built that table
+answers `None`. Native and wasm consumers receive the same plain values; there is no
+work unless called. A content lookup scans the existing content table without a mod
+scan, clones its shared snapshot, and allocates only the returned level-property string
+when present; the scalar level read allocates no result.
+
 Fluid held by an item is `ITEM_FLUIDS` (NeoForge's `Capabilities.Fluid.ITEM`), found where its stack lives, as
 `ITEM_ITEMS` is: `place.capability(host, &ITEM_FLUIDS)` gives a `ResourceHandler<FluidResource>` for the item at
 that `ItemPlace`, and a write rewrites the item there by an exchange of one, so from a stack of more than one the
