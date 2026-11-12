@@ -2,7 +2,7 @@
 
 ## Pin and verification boundary
 
-The integration initially started at fork main `00561622057353a5e3fb83a557da68c3e2f856a3` and merges upstream `f24ee1accf1c816736e6e067939d04f3853f474e` directly. Fresh fork main `fe4a761329fe866327bd29f9a8d097b40fb6e90b`, including the slow-fixture follow-up, was then merged unchanged; that is the validation and generated-baseline base. Upstream's own `ci.yml` push-to-main run [43207155875](https://github.com/horizon-rust/horizon/actions/runs/43207155875) passed. The previous synced upstream pin is `ba91f75cb21a74026319d1393c17fc5061dbd725`.
+The integration initially started at fork main `00561622057353a5e3fb83a557da68c3e2f856a3` and merges upstream `f24ee1accf1c816736e6e067939d04f3853f474e` directly. Fork main `fe4a761329fe866327bd29f9a8d097b40fb6e90b`, including the slow-fixture follow-up, was merged unchanged. The immediate pre-push reread then found rollup 52 on main `21d47922bd0287c60b67d7aaa33c7d7990f7aa4c`; it too was merged unchanged and without conflicts. The latter is the final validation and generated-baseline base. Upstream's own `ci.yml` push-to-main run [43207155875](https://github.com/horizon-rust/horizon/actions/runs/43207155875) passed. The previous synced upstream pin is `ba91f75cb21a74026319d1393c17fc5061dbd725`.
 
 The pre-push upstream CI reread still found `f24ee1accf1c816736e6e067939d04f3853f474e` as the newest successful push-to-main head. A fresh fetch confirmed the validation base above is current fork main and already an ancestor of the integrated sync.
 
@@ -116,13 +116,13 @@ The ignored producer tests `a_capture_of_a_server_with_names_text_and_a_seed_hol
 
 ### Generated baseline justification
 
-The generated baseline is a separate commit, `98a17c12d6`, relative to fresh main `fe4a761329`. It was regenerated after the final lifecycle and provenance corrections and remained byte-for-byte unchanged. Its three increases correspond to retained incoming behavior in canonical modules, not restored obsolete implementations:
+The generated baseline was originally a separate commit, `98a17c12d6`, relative to main `fe4a761329`; final lifecycle and provenance corrections did not change it. After integrating fresh rollup 52 main `21d47922bd`, the generator wrote a separate regeneration commit, `003849ebaf`. The same three growth amounts remain justified; the absolute sizes now reflect the new main's reductions. Its increases correspond to retained incoming behavior in canonical modules, not restored obsolete implementations:
 
 | Canonical file | Before → after | Reason |
 |---|---|---|
-| `crates/horizon-client/src/game.rs` | 17,904 → 17,941 (+37 code lines) | Profiler state/options and work tracing within the existing canonical game implementation; no resurrected implementation block. |
+| `crates/horizon-client/src/game.rs` | 17,877 → 17,914 (+37 code lines) | Profiler state/options and work tracing within the existing canonical game implementation; no resurrected implementation block. |
 | `crates/horizon-client/src/game/entities/minecarts.rs` | 3,405 → 3,407 (+2 code lines) | Work attribution and clearing around canonical minecart processing. |
-| `crates/horizon-client/src/game/network/remote/mod.rs` | 11,871 → 11,882 (+11 code lines) | Profiler reply routing and chunk tracing ported from the retired remote polling path. |
+| `crates/horizon-client/src/game/network/remote/mod.rs` | 11,863 → 11,874 (+11 code lines) | Profiler reply routing and chunk tracing ported from the retired remote polling path. |
 
 ### Compile-only corrections and retired contracts
 
@@ -132,4 +132,4 @@ The packet tally APIs and storage stay deleted: their only upstream consumer was
 
 Server gauges sum typed collection lengths without building registry-name maps. One shared counting view covers active and parked families, while start snapshots build richer registry counts. Client and server entity gauges use the same all-family meaning. Tick timing discards between-tick span events and captures only events inside the measured tick, preserving the upstream `TickDetail` contract. The retired native timing hook does not justify including outside work in capture or slow-ring records.
 
-The final source head `8836d8196a` passed `CARGO_INCREMENTAL=0 cargo check --workspace --all-targets --keep-going -j 4` with zero compiler errors and zero warnings. All test targets were checked for compilation only; no tests, clippy, harnesses or game runs were executed. Producer classification and reader wasm-name coverage were added but not run locally. CI and resource-backed ignored runtime results remain separate evidence and are not claimed here.
+The final integrated head `003849ebaf`, including fresh rollup 52 main, passed `CARGO_INCREMENTAL=0 cargo check --workspace --all-targets --keep-going -j 4` with zero compiler errors and zero warnings. All test targets were checked for compilation only; no tests, clippy, harnesses or game runs were executed. Producer classification and reader wasm-name coverage were added but not run locally. CI and resource-backed ignored runtime results remain separate evidence and are not claimed here.
