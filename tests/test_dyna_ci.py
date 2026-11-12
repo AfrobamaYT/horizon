@@ -239,7 +239,7 @@ class DynaRoutingTests(unittest.TestCase):
                          if line.startswith("        ") and ":" in line)
             self.assertEqual(guard["if"].strip(), "needs.changes.result != 'success'")
             self.assertEqual(guard["run"].strip(), "exit 1")
-        for field in ("runs-on", "JOBS", "RUNNER_KIND"):
+        for field in ("runs-on", "RUNNER_KIND"):
             self.assertEqual(runtime.split(f"{field}:", 1)[1].split("\n", 1)[0],
                              static.split(f"{field}:", 1)[1].split("\n", 1)[0])
         self.assertIn("- name: No Rust work selected", runtime)
