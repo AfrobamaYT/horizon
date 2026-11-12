@@ -34,8 +34,69 @@ pub enum CallClass {
     Callback,
 }
 
+/// A group's linear memory when none of its mods declares one (`wasm_memory_mib`): 1 GiB.
+pub(crate) const DEFAULT_GROUP_MEMORY_MIB: u32 = 1024;
+/// The function table's ceiling: references, a pointer each.
+const TABLE_ELEMENTS: usize = 1 << 20;
+
+/// A group's ceilings. The memory limit is a ceiling, not committed memory: past it, or past what
+/// the system gives, `memory.grow` answers -1 inside the guest and the call goes on.
+pub(crate) struct Limits {
+    /// The group's mods, for the log.
+    group: Arc<str>,
+    memory: usize,
+    /// The size the last refused `memory.grow` asked for, for the reason of a call that then failed.
+    refused_growth: Option<usize>,
+}
+impl Limits {
+    pub(crate) fn new(group: Arc<str>, memory_mib: u32) -> Self {
+        Self {
+            group,
+            memory: usize::try_from(u64::from(memory_mib) << 20).unwrap_or(usize::MAX),
+            refused_growth: None,
+        }
+    }
+}
+impl wasmtime::ResourceLimiter for Limits {
+    fn memory_growing(
+        &mut self,
+        _current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        if desired <= self.memory && maximum.is_none_or(|maximum| desired <= maximum) {
+            return Ok(true);
+        }
+        if self.refused_growth.replace(desired).is_none() {
+            log::warn!(
+                "wasm group {}: memory.grow to {} MiB refused at the group's limit of {} MiB",
+                self.group,
+                desired >> 20,
+                self.memory >> 20
+            );
+        }
+        Ok(false)
+    }
+    fn memory_grow_failed(&mut self, error: wasmtime::Error) -> wasmtime::Result<()> {
+        log::warn!(
+            "wasm group {}: the system refused memory.grow below the group's limit of {} MiB: {error:#}",
+            self.group,
+            self.memory >> 20
+        );
+        Ok(())
+    }
+    fn table_growing(
+        &mut self,
+        _current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        Ok(desired <= TABLE_ELEMENTS && maximum.is_none_or(|maximum| desired <= maximum))
+    }
+}
+
 pub(crate) struct State {
-    limits: wasmtime::StoreLimits,
+    limits: Limits,
     cx: Box<Cx>,
     memory: Option<Memory>,
     replies: Vec<Writer>,
@@ -54,14 +115,10 @@ pub(crate) struct State {
 // locked store through a thread-local loan. The module pointer borrows call()'s self
 // under the same scope. Between threads the frame stack is empty and module is null.
 unsafe impl Send for State {}
-impl Default for State {
-    fn default() -> Self {
+impl State {
+    pub(crate) fn new(limits: Limits) -> Self {
         Self {
-            limits: wasmtime::StoreLimitsBuilder::new()
-                .trap_on_grow_failure(false)
-                .memory_size(256 << 20)
-                .table_elements(1 << 20)
-                .build(),
+            limits,
             cx: Box::default(),
             memory: None,
             replies: Vec::new(),
@@ -147,8 +204,8 @@ pub(crate) fn take_refusal() -> String {
         .with(|last| last.borrow_mut().take())
         .unwrap_or_else(|| "refused".into())
 }
-fn fault_reason(error: &wasmtime::Error, budget: u64) -> String {
-    match error.downcast_ref::<wasmtime::Trap>() {
+fn fault_reason(error: &wasmtime::Error, budget: u64, limits: &mut Limits) -> String {
+    let reason = match error.downcast_ref::<wasmtime::Trap>() {
         Some(wasmtime::Trap::Interrupt) => {
             format!(
                 "epoch deadline: the call ran past its budget of {budget} ticks (about {budget} ms)"
@@ -156,6 +213,15 @@ fn fault_reason(error: &wasmtime::Error, budget: u64) -> String {
         }
         Some(trap) => format!("{trap}"),
         None => format!("fault: {error:#}"),
+    };
+    match limits.refused_growth.take() {
+        Some(desired) => format!(
+            "{reason}, after memory.grow to {} MiB was refused at group {}'s limit of {} MiB",
+            desired >> 20,
+            limits.group,
+            limits.memory >> 20
+        ),
+        None => reason,
     }
 }
 /// Only faults may leave guest state half-updated. Refusals returned normally.
@@ -511,12 +577,23 @@ impl WasmMod {
     }
     pub(crate) fn instantiate(
         engine: &Engine,
-        _manifests: &[(&str, &horizon_mod_package::Manifest)],
+        memory_mib: u32,
         members: &[Member<'_>],
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
         horizon_guest_stack::check_current().map_err(|error| Refusal::Runtime(error.into()))?;
-        let mut store = Store::new(engine, State::default());
+        let group: Vec<_> = members
+            .iter()
+            .filter(|member| member.name != "libstd.so")
+            .map(|member| {
+                member
+                    .name
+                    .trim_start_matches("lib")
+                    .trim_end_matches(".so")
+            })
+            .collect();
+        let limits = Limits::new(group.join("+").into(), memory_mib);
+        let mut store = Store::new(engine, State::new(limits));
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
         let mut armed = false;
@@ -752,6 +829,10 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
+        let fault = match &result {
+            Err(CallError::Fault(e)) => Some(fault_reason(e, budget, &mut store.data_mut().limits)),
+            _ => None,
+        };
         if result.is_err() {
             horizon_mod_runtime::dispatch_failures::record_dispatch_failure();
         }
@@ -777,13 +858,14 @@ impl WasmMod {
                 None
             }
             Err(CallError::Fault(e)) => {
-                note(fault_reason(&e, budget));
+                let reason = fault.unwrap_or_default();
                 if first_failure {
                     log::error!(
-                        "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {e:#}",
+                        "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {reason}: {e:#}",
                         self.id
                     );
                 }
+                note(reason);
                 None
             }
         }
