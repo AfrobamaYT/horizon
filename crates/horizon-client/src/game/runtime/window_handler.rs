@@ -202,12 +202,9 @@ impl Game<'_> {
             self.update_modifiers(winit::keyboard::ModifiersState::empty());
             self.debug_keys.reset();
         }
-        // `PackSelectionScreen.onFilesDrop` on the Create New World screen.
-        if let WindowEvent::DroppedFile(path) = &event
-            && self.title_input_active()
-            && let Some(title) = &mut self.title
-        {
-            title.drop_file(path.clone());
+        // Pack drops on the resource-pack and Create New World screens.
+        if let WindowEvent::DroppedFile(path) = &event {
+            self.drop_pack_file(path);
         }
         // GLFW never hands a field the keys an input method consumes: while a
         // composition is open, and the Enter or Escape that ends it (winit on

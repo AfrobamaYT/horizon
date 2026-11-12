@@ -395,7 +395,7 @@ impl Game<'_> {
             block_overlay,
             water,
             on_fire: effects.on_fire,
-            fire_lower: f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,
+            fire_lower: self.pvp_fire_lower(),
             gui_overlays: &gui_overlays,
             custom: [&custom[0], &custom[1], &custom[2]],
         })

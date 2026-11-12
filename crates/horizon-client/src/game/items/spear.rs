@@ -473,7 +473,7 @@ impl Game<'_> {
 
     /// Synchronize look rotation before sending a spear jab so the server
     /// raycasts along the player's updated look direction.
-    pub(super) fn remote_sync_look(&mut self) {
+    pub(in crate::game) fn remote_sync_look(&mut self) {
         let (yaw, pitch) = (self.yaw, self.pitch);
         let (riding, controls) = (self.riding.is_some(), self.controls_camera());
         if let Some(p) = self.player.as_ref()

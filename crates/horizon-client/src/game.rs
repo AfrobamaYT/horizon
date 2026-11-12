@@ -3528,20 +3528,6 @@ impl Dim {
     fn sea_level_of_id(id: &str) -> i32 {
         horizon_core::LevelKey::parse(id).map_or(63, horizon_world::level::sea_level_of)
     }
-    /// `DimensionType.getTeleportationScale`: how a coordinate in `source` scales into `target`,
-    /// the source's `coordinate_scale` over the target's (8 into the Overworld from the Nether).
-    fn teleportation_scale(source: Self, target: Self) -> f64 {
-        use horizon_world::dimension_type::DimensionFacts;
-        let facts = |dim: Self| {
-            horizon_core::LevelKey::parse(dim.id())
-                .ok()
-                .map(DimensionFacts::of_level)
-        };
-        match (facts(source), facts(target)) {
-            (Some(from), Some(to)) => DimensionFacts::teleportation_scale(from, to),
-            _ => 1.0,
-        }
-    }
     /// The open world's dimension `id` past vanilla's three.
     fn extra(id: &str) -> Option<Self> {
         let extra = EXTRA_DIMS.read().unwrap();
@@ -8583,7 +8569,7 @@ impl Game<'_> {
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
         self.input_hud_begin();
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
-        batch.glint_colour = self.settings.extras.pvp.tweaks.glint_texel();
+        batch.glint_colour = self.pvp_glint_texel();
         // GlobalSettingsUniform's GameTime, for a resource pack's text shader.
         batch.game_time = ((self.world.game_time.rem_euclid(24000)) as f32
             + self.clock.fraction() as f32)

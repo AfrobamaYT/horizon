@@ -53,7 +53,7 @@ impl Game<'_> {
             (Some(_), None) => {}
             (None, _) => respawn.carried = None,
         }
-        self.player = None;
+        self.remove_local_player_body();
     }
 
     /// `ClientPacketListener.handleUpdateAttributes` of the player's own entity.
