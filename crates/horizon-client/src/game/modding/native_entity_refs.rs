@@ -1209,9 +1209,11 @@ pub(super) mod tests {
             game.options.dedicated = Some(Vec::new());
             let words = [7, 0, 0, 3];
             let uuid = (7u128 << 96) | 3;
-            assert!(game.run_command(
+            // Harness commands use the console boundary; setting dedicated
+            // options alone does not grant the command parser operator rights.
+            assert!(game.as_console(|game| game.run_command(
                 "execute in minecraft:the_nether run summon cow 8.5 70 8.5 {UUID:[I;7,0,0,3],NoAI:1b}"
-            ));
+            )));
             let original = game.dim;
             game.enter_command_level(super::super::Dim::Nether).unwrap();
             let id = *game

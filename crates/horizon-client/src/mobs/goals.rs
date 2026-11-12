@@ -3322,13 +3322,25 @@ mod breeding_variant_tests {
                         if ask_mods || id == "minecraft:fox" {
                             BreedExperience::Deferred
                         } else {
-                            BreedExperience::Drawn(mob_drops.then_some(3))
+                            // Computed with an independent implementation of the documented
+                            // java.util.Random algorithm, not from the game's output.
+                            // Seed 0: coat is draw 1, wolf voice draw 2,
+                            // XP draw 3 (bits31 = 516548029, remainder 4).
+                            BreedExperience::Drawn(mob_drops.then_some(if id == "minecraft:wolf" {
+                                5
+                            } else {
+                                3
+                            }))
                         },
                         "{id}"
                     );
                     assert_eq!(
                         parent.random.state(),
-                        if !ask_mods && mob_drops && id != "minecraft:fox" {
+                        if !ask_mods && id == "minecraft:wolf" && mob_drops {
+                            67_704_983_304_270 // Java LCG seed 0, draw 3.
+                        } else if !ask_mods
+                            && (id == "minecraft:wolf" || (mob_drops && id != "minecraft:fox"))
+                        {
                             234_029_835_660_143
                         } else {
                             205_749_139_540_596
@@ -3338,7 +3350,11 @@ mod breeding_variant_tests {
                     if !ask_mods && mob_drops && id != "minecraft:fox" {
                         assert_eq!(
                             parent.random.next_int(),
-                            1_033_096_058,
+                            if id == "minecraft:wolf" {
+                                -1_690_734_402 // Java LCG seed 0, signed upper 32 bits of draw 4.
+                            } else {
+                                1_033_096_058
+                            },
                             "{id}: same-tick later draw"
                         );
                     }

@@ -1091,6 +1091,17 @@ mod fox_consumption_hook_tests {
                     .expect("pause before effect draws and mouth replacement");
                     assert!(events.is_empty());
                     let mut expected_random = actor.random.clone();
+                    // Independent Java Random state-advance budget before the
+                    // teleport: emitParticlesAndSounds spends 1 boolean plus
+                    // 3 floats for sound, 16 crumbs spend 4 floats each, and
+                    // FoodProperties' sound triangle spends 2 floats: 70
+                    // advances total. Discarded nextFloat advances the same
+                    // 48-bit LCG state once, without copying emission logic.
+                    for _ in 0..70 {
+                        expected_random.next_float();
+                    }
+                    // The first teleport attempt consumes three doubles
+                    // before any listener can cancel or replace the actor.
                     for _ in 0..3 {
                         expected_random.next_double();
                     }

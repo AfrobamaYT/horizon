@@ -10211,8 +10211,13 @@ mod breeding_tests {
     #[ignore = "needs prepared resources"]
     fn wolf_breeding_selects_either_coat_from_the_parent_stream() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            // Different coats, both nextBoolean outcomes, followed by nextInt(7).
-            for (seed, coat, xp, next) in [(42, 1, 6, -1_360_544_799), (4096, 2, 4, -916_162_618)] {
+            // Computed with an independent implementation of the documented java.util.Random
+            // algorithm, not from the game's output.
+            // Java LCG: s0 = (seed ^ 0x5DEECE66D) & (2^48 - 1),
+            // s' = (25214903917*s + 11) mod 2^48. Draw 1 selects the coat;
+            // draw 2 selects one of 7 voices; draw 3 yields 1 + (s >> 17) % 7 XP;
+            // draw 4 is signed(s >> 16). Neither bounded draw rejects these seeds.
+            for (seed, coat, xp, next) in [(42, 1, 7, 205_897_768), (4096, 2, 3, 1_387_017_903)] {
                 let result = tick_breeding(game, "minecraft:wolf", "minecraft:wolf", seed, true);
                 assert_eq!(result.child.extra.variant, coat);
                 assert_eq!(result.experience, BreedExperience::Drawn(Some(xp)));
