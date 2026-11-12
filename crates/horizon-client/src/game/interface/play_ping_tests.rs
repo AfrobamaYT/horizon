@@ -284,7 +284,6 @@ fn server_ping_client_pong_keeps_the_existing_prediction_route() {
         .guests
         .update_connection(1, |guest| {
             let record = guest
-                .anticheat
                 .record
                 .as_deref_mut()
                 .expect("existing client Pong updates prediction");
