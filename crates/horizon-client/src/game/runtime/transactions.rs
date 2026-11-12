@@ -343,9 +343,14 @@ impl Game<'_> {
     /// what a test reads to tell a slot journal from a whole capture without timing it.
     #[cfg(test)]
     pub(in crate::game) fn journal_kept(&self) -> (usize, usize) {
-        self.transactions.iter().fold((0, 0), |(whole, slots), level| {
-            (whole + level.block_entities.len(), slots + level.slots.len())
-        })
+        self.transactions
+            .iter()
+            .fold((0, 0), |(whole, slots), level| {
+                (
+                    whole + level.block_entities.len(),
+                    slots + level.slots.len(),
+                )
+            })
     }
     /// Keeps item slot `slot` of the block entity at `pos` as it is, if a transaction is open
     /// and keeps neither it nor the whole entity yet. Only for a write that changes that slot
