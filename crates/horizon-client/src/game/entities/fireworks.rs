@@ -928,7 +928,7 @@ fn use_on_passes(fall_flying: bool) -> bool {
 }
 
 #[cfg(test)]
-#[path = "fireworks_events_tests.rs"]
+#[path = "tests/fireworks_events_tests.rs"]
 mod events_tests;
 
 #[cfg(test)]

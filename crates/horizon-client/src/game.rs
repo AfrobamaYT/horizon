@@ -18207,5 +18207,5 @@ mod destroyed_contents_tests {
     }
 }
 #[cfg(test)]
-#[path = "game/interface/sign_chain_tests.rs"]
+#[path = "game/interface/tests/sign_chain_tests.rs"]
 mod sign_chain_tests;

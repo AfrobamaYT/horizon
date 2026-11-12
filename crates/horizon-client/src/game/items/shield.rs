@@ -406,5 +406,5 @@ mod durability_tests {
 }
 
 #[cfg(test)]
-#[path = "shield_ram_tests.rs"]
+#[path = "tests/shield_ram_tests.rs"]
 mod ram_tests;
