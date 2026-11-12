@@ -501,11 +501,9 @@ mod tests {
                     .expect("native type");
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.push({
-                    let mut draft = mod_api::Block::new(CRATE, "minecraft:white_banner");
-                    draft.item = true;
-                    draft
-                });
+                event
+                    .blocks
+                    .push(mod_api::Block::new(CRATE, "minecraft:white_banner"));
             }
         }
         let mods: Mods = Arc::from([ModEntry::new("item_test", Box::new(TestMod))]);

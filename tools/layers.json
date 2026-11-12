@@ -36,6 +36,7 @@
     "horizon-server-files": "engine",
     "horizon-system": "engine",
     "horizon-threads": "engine",
+    "horizon-guest-stack": "engine",
     "horizon-world": "engine",
     "cargo-horizon-mod": "platform",
     "horizon-anticheat": "platform",
