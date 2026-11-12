@@ -1161,18 +1161,21 @@ mod tests {
             assert_eq!(read(game, 14, health), (Some(200.0), Some(200.0)));
 
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
-            let player = living(game, 20);
+            // The dragon owns its multipart IDs above 14; keep the fixture
+            // player outside that range and reserve it against later spawns.
+            game.next_entity = game.next_entity.max(100);
+            crate::game::native_entity_refs::tests::bind_local_player(game, 100, 123);
+            let player = living(game, 100);
             assert!(player.add_attribute_modifier(
                 game,
                 health,
                 modifier("test:hearty", 0.5, AddMultipliedBase),
                 Permanent
             ));
-            assert_eq!(read(game, 20, health), (Some(30.0), Some(20.0)));
+            assert_eq!(read(game, 100, health), (Some(30.0), Some(20.0)));
             let hearty = Identifier::parse("test:hearty").unwrap();
             assert!(player.remove_attribute_modifier(game, health, &hearty));
-            assert_eq!(read(game, 20, health), (Some(20.0), Some(20.0)));
+            assert_eq!(read(game, 100, health), (Some(20.0), Some(20.0)));
             // A stale handle writes nothing.
             let zombie = living(game, 12);
             game.mobs.clear();
