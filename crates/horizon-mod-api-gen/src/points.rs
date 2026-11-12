@@ -834,7 +834,7 @@ pub(crate) fn dependencies(
 
 /// `lock` with `added` in the dependency list of the package `name`, kept in the lock file's
 /// sorted order; none when the lock file has no entry for it.
-fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
+pub(crate) fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
     let header = format!("[[package]]\nname = \"{name}\"\n");
     let start = lock.find(&header)?;
     let end = lock[start + header.len()..]

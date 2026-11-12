@@ -1266,6 +1266,23 @@ fn prettyplease_or_tokens(tokens: proc_macro2::TokenStream) -> String {
 }
 
 /// The mirror of module `path` and its children in `tree`.
+/// The module `path` of the game's source as the patch crate names it: a lower crate's folder
+/// name gives the path's first segment, and its library's name (`[lib] name`) the extern.
+fn original_path(root: &Path, path: &str) -> Result<String, String> {
+    let (krate, rest) = path
+        .split_once("::")
+        .map_or((path, None), |(k, r)| (k, Some(r)));
+    let library = if krate == "horizon_client" {
+        krate.to_owned()
+    } else {
+        crate::replace::library_name(&crate::source::crate_root(root, krate)?.0)?
+    };
+    Ok(match rest {
+        Some(rest) => format!("::{library}::{rest}"),
+        None => format!("::{library}"),
+    })
+}
+
 fn mirror(
     source: &mut Source,
     path: &str,
@@ -1274,7 +1291,8 @@ fn mirror(
     used: Option<&BTreeSet<String>>,
 ) -> Result<proc_macro2::TokenStream, String> {
     let items = source.module(path)?.items.clone();
-    let original: syn::Path = syn::parse_str(&format!("::{path}")).expect("a module path");
+    let original: syn::Path =
+        syn::parse_str(&original_path(&source.root, path)?).expect("a module path");
     let reserved: BTreeSet<String> = tree
         .children
         .keys()
@@ -1546,6 +1564,26 @@ fn collect_names(tree: &syn::UseTree, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lower_crate_is_mirrored_through_its_library_name() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("crates/horizon-mod-render");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(
+            package.join("Cargo.toml"),
+            "[package]\nname = 'horizon-mod-render'\n[lib]\nname = 'mod_render'\n",
+        )
+        .unwrap();
+        assert_eq!(
+            original_path(root.path(), "horizon_mod_render::render").unwrap(),
+            "::mod_render::render"
+        );
+        assert_eq!(
+            original_path(root.path(), "horizon_client::game::autosave").unwrap(),
+            "::horizon_client::game::autosave"
+        );
+    }
 
     fn root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
