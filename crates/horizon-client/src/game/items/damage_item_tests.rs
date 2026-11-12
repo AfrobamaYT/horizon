@@ -273,3 +273,29 @@ fn a_mob_armour_wear_names_the_mob() {
         assert_eq!(wear.take_worn_by(), [Some(zombie)]);
     });
 }
+
+/// A part's `break_now` on a mob's glider breaks it through the vanilla
+/// break: the slot empties instead of keeping the stack at its maximum damage.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; process-wide parts, run this test alone"]
+fn a_part_breaks_a_mobs_glider_now() {
+    use crate::game::creatures::SpawnSite;
+    use horizon_core::equipment_slot::EquipmentSlot;
+    with_wear_part("minecraft:elytra", Rule::Break, |game, wear| {
+        let zombie = game
+            .spawn_mob("minecraft:zombie", [3.5, 64.0, 6.5], true, SpawnSite::Raw)
+            .unwrap();
+        let elytra = Some(ItemStack::new("minecraft:elytra", 1));
+        let mob = game.mobs.iter_mut().find(|m| m.id == zombie).unwrap();
+        mob.set_equipment_stack(EquipmentSlot::Chest as usize, elytra);
+        game.wear_mob_glider(zombie, EquipmentSlot::Chest);
+        assert_eq!(wear.take_asked(), [1]);
+        assert_eq!(wear.take_worn_by(), [Some(zombie)]);
+        let mob = game.mobs.iter().find(|m| m.id == zombie).unwrap();
+        assert_eq!(
+            mob.item_by_slot(EquipmentSlot::Chest),
+            None,
+            "the glider broke"
+        );
+    });
+}

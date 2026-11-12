@@ -709,35 +709,33 @@ impl Game<'_> {
     /// `LivingEntity.updateFallFlying`'s wear, `ItemStack.hurtAndBreak(1, this,
     /// slot)` on the glider `MobEvent::GliderWear` picked: Unbreaking (from the
     /// level's random, `Enchantment.modifyItemFilteredCount`) may save it, and
-    /// the rest goes on the stack where it is worn. A glider is only picked
-    /// while its next point of wear will not break it (`canGlideUsing`), so
-    /// this wear never breaks one.
-    fn wear_mob_glider(&mut self, id: u32, slot: horizon_core::equipment_slot::EquipmentSlot) {
-        use horizon_client::mobs::finalize;
-        use horizon_core::equipment_slot::EquipmentSlot as S;
+    /// the rest goes on the stack where it is worn. Only a part's `break_now`
+    /// breaks one (`canGlideUsing` picks none a point would break): emptied, with its event.
+    pub(in crate::game) fn wear_mob_glider(
+        &mut self,
+        id: u32,
+        slot: horizon_core::equipment_slot::EquipmentSlot,
+    ) {
         let Some(stack) = self
             .mobs
             .iter()
             .find(|m| m.id == id)
-            .and_then(|m| finalize::equipment_stack(m, slot))
+            .and_then(|m| horizon_client::mobs::finalize::equipment_stack(m, slot))
         else {
             return;
         };
         if !horizon_client::stations::is_damageable(self.res.items(), &stack) {
             return;
         }
-        let loss = self.durability_loss(&stack, 1, super::durability::Wearer::Living(id));
-        if loss == 0 {
-            return;
-        }
+        let (updated, broken) = self.damage_living_stack(&stack, 1, id);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
-        let damage = stack.damage + loss;
-        match slot {
-            S::Body => m.extra.set_body_damage(damage as i32),
-            S::Saddle => m.set_saddle(Some(ItemStack { damage, ..stack })),
-            _ => finalize::set_slot_damage(m, slot as usize, damage),
+        let at = [m.position.x, m.position.y, m.position.z];
+        m.set_equipment_stack(slot as usize, updated);
+        if broken.is_some() {
+            let event = horizon_client::mobs::item_break::equipment_break_event(slot);
+            self.lan_entity_event(id as i32, event, at);
         }
     }
     /// `LivingEntity.hurtArmor` -> `LivingEntity.doHurtEquipment`, from the hit

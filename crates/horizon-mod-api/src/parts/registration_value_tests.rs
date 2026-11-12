@@ -641,8 +641,8 @@ fn a_damage_reaches_only_the_parts_of_the_worn_item_and_changes_its_wear() {
             stack,
             None,
             &mut amount,
-            &mut canceled,
             &mut false,
+            &mut canceled,
         );
         (amount, canceled)
     };
