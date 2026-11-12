@@ -603,7 +603,7 @@ A mod's block entity carries its saved data on the item as vanilla's do: Ctrl + 
 
 A server mod reaches a block's items through its `ITEMS` capability ([parts](../concepts/trait-mods.md#parts)): `level.capability(host, &ITEMS, pos, side)` gives the block entity's slots as that side reaches them, by the rules hoppers follow (a furnace's sides, a double chest's two halves, a mod's `ModContainer` with its `faces`, `inputs` and `outputs`), and `move_resources(host, &from, &to, filter, max, tx)` moves items between two of them in a transaction. `side` is the side of the block being reached, so a pipe above a chest uses `Some(Direction::Up)`. A level not in place, a stale `LevelRef` and a client's copy of the world give none. `native_dimension()` names the level in place (`minecraft:overworld`) for a hook that isn't told it, such as `native_block_entity_tick`.
 
-During a machine's own tick its block entity is out of the world, so it has no capability then: it has its slots in hand, in the `items` it's given. A composter has no block entity, so it has no `ITEMS`: hoppers fill and empty it. Container entities (minecarts, chest boats) aren't reached this way yet.
+During a machine's own tick its block entity is out of the world, so it has no capability then: it has its slots in hand, in the `items` it's given. A composter has no block entity, so it has no `ITEMS`: hoppers fill and empty it. Container entities (minecarts, chest boats) aren't reached this way yet. A pipe keeps a neighbour's capability with `BlockCapabilityCache` instead of looking it up every tick ([keeping a block capability](../concepts/trait-mods.md#keeping-a-block-capability)). A provider whose answer changes with no block change (a machine's side configuration) calls `level.invalidate_capabilities(host, pos)` (NeoForge's `invalidateCapabilities`): the capability generation there moves on, at the root commit inside a transaction and not at all when it aborts, and every cache there looks up again at its next `get`. `level.capability_generation(host, pos)` reads it; only its change means anything.
 
 ### Entities
 
@@ -811,7 +811,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   Partial ticks are not clamped. A missing effect reads 0. The client keeps no other entity's effects, so they read `None`.
 - `host.fishing_hook(entity)` gives a `FishingHookRef` for a cast hook (`FishingHook`); `hook.entity()` goes back.
   `player_owner(host)` is the player who cast it, `hooked_in(host)` what it holds (None when nothing, or when that is
-  gone) and `open_water(host)` is `isOpenWaterFishing`. `item_fished` names a hook by id, and `LevelRef::entities_in`
+  gone) and `open_water(host)` is `isOpenWaterFishing`. `item_fished` exposes mutable catch drops, cancel and absolute rod damage, names a hook by id, and `LevelRef::entities_in`
   finds them. Discarding one takes it out. It is not a `ProjectileRef`, and selectors do not find it yet.
 - `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
   trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types), a trident a player

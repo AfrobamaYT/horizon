@@ -2,6 +2,9 @@
 use super::*;
 
 impl LevelAccess for GameLevel<'_> {
+    fn infiniburn(&self) -> Option<&horizon_world::level::data::BlockSet> {
+        self.world.infiniburn.as_deref()
+    }
     fn cake_can_eat(&self, vanilla: bool) -> bool {
         if self.cake_probe {
             self.cake_requested.set(true);

@@ -11,6 +11,37 @@ Each generated `Hooks` method, event and `Host` method carries its `doc`, with t
 catalog records. CI builds it with `-D warnings`, so a broken intra-doc link fails. The per-hook prose that predates
 the `doc` field is in [Hook notes](hook-notes.md) until it moves into the fragments.
 
+## Process environment
+
+`RegistrationContext` exposes `dist()`, `game_version()`, `horizon_version()` and
+`game_tests_enabled()` before declarations are registered. `Dist::Client` names the physical
+client process, including its integrated server; `Dist::DedicatedServer` names a dedicated
+server process. This is not the logical side of the current hook.
+
+The `Host` config area exposes the same distribution and versions on both sides, and
+`game_tests_enabled()` on the server host. Minecraft's version is exactly `horizon_core::VANILLA_VERSION`;
+Horizon's version is the string printed by crash reports. All values are captured once before
+mod registration and are transported identically to wasm.
+
+Game tests default to disabled. Pass `--game-tests` (before or after `--dedicated`), or set
+`HORIZON_GAME_TESTS=1` or `HORIZON_GAME_TESTS=true` for CI. Other environment values do not enable
+the mode. This flag lets mods declare test-only content; `register_game_tests` still runs on
+every world open regardless of the flag, and `/test` remains available.
+
+The switch is recognized only in an option position: `--dedicated --world --game-tests`
+opens the world named `--game-tests`, without enabling test mode. Dedicated `--universe`,
+`--port`, `--serverId` and `--pidFile` likewise retain their operands verbatim.
+
+The resource-backed acceptance tests
+`native_process_environment_in_registration_and_game_hosts` and
+`native_and_wasm_process_environment_in_registration_and_game_hosts` live under
+`game::native_hooks::runtime_environment::tests` in the `horizon-client` library test target.
+Set `HORIZON_TEST_RESOURCES` to prepared resources and run them with `--ignored`.
+The latter also needs `HORIZON_WASM_FIXTURE` and `HORIZON_WASM_STD` rebuilt from this tree
+([fixture build instructions](../how-to/wasm-mods.md)). It compares a real guest's registration
+snapshot and later generated Host replies with native values in client, dedicated and integrated
+Game harnesses, including disabled mode, both flag positions and CI environment opt-in.
+
 ## Plain-data source declarations
 
 The bindings generator reads the Rust type declaration; codecs are not maintained separately for native and
