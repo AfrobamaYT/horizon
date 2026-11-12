@@ -1784,8 +1784,8 @@ fn axolotl_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
         return;
     }
     let breathes = m.fluids.in_water || in_rain(m, w);
-    let max = super::axolotl::MAX_AIR;
-    if let Some(damage) = own_air(w.loop_context, m.id, &m.kind.id, &mut m.air, breathes, max) {
+    let (cx, max) = (w.loop_context, super::axolotl::MAX_AIR);
+    if let Some(damage) = own_air(cx, m.id, &m.kind.id, &mut m.air, breathes, max, false) {
         m.damage(level, damage, Damage::of(DamageKind::DryOut));
     }
 }
@@ -1805,7 +1805,7 @@ fn nautilus_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
         return;
     }
     let (cx, wet) = (w.loop_context, m.fluids.in_water);
-    if let Some(damage) = own_air(cx, m.id, &m.kind.id, &mut m.air, wet, MAX_AIR) {
+    if let Some(damage) = own_air(cx, m.id, &m.kind.id, &mut m.air, wet, MAX_AIR, false) {
         m.damage(level, damage, Damage::of(DamageKind::DryOut));
     }
 }
@@ -1969,7 +1969,7 @@ fn base_tick(
             nautilus_air_supply(m, w, level);
         } else if m.kind.flags.needs_water {
             let (cx, wet) = (w.loop_context, m.fluids.in_water);
-            if let Some(damage) = own_air(cx, m.id, &m.kind.id, &mut m.air, wet, 300) {
+            if let Some(damage) = own_air(cx, m.id, &m.kind.id, &mut m.air, wet, 300, true) {
                 m.damage(level, damage, Damage::of(DamageKind::Drown));
             }
         } else {
