@@ -5794,7 +5794,7 @@ mod tests {
         assert_eq!(back.sitting_damage, 12.5);
         // No key at all reads as no damage accumulated.
         let mut bare = tag.clone();
-        if let horizon_world::nbt::Tag::Compound(fields) = &mut bare {
+        if let horizon_core::nbt::Tag::Compound(fields) = &mut bare {
             fields.remove(&"sitting_damage_received".into());
         }
         assert_eq!(Dragon::from_nbt(&bare, 0).unwrap().sitting_damage, 0.0);

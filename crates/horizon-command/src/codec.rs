@@ -488,7 +488,7 @@ mod feature_tests {
         // codec; a `config` key is just another unread key.
         let reg = Registries::default();
         let decode_text = |text| {
-            let (tag, _) = horizon_world::nbt::parse_snbt(text).unwrap();
+            let (tag, _) = horizon_core::nbt::parse_snbt(text).unwrap();
             decode("minecraft:worldgen/feature", &tag, &reg)
         };
         assert_eq!(

@@ -39,7 +39,7 @@ fn guide_equippable(
     }
     if let Some(tag) = data.and_then(|d| d.other("minecraft:equippable")) {
         let slot = match tag.get("slot") {
-            Some(horizon_world::nbt::Tag::String(slot)) => slot.to_string_lossy(),
+            Some(horizon_core::nbt::Tag::String(slot)) => slot.to_string_lossy(),
             _ => return None,
         };
         let swappable = tag
@@ -709,9 +709,9 @@ mod guide_equippable_tests {
         );
         helmet.data_mut().set_other(
             "minecraft:equippable",
-            Some(horizon_world::nbt::Tag::compound([
-                ("slot", horizon_world::nbt::Tag::String("head".into())),
-                ("swappable", horizon_world::nbt::Tag::Byte(0)),
+            Some(horizon_core::nbt::Tag::compound([
+                ("slot", horizon_core::nbt::Tag::String("head".into())),
+                ("swappable", horizon_core::nbt::Tag::Byte(0)),
             ])),
         );
         assert_eq!(
@@ -720,9 +720,9 @@ mod guide_equippable_tests {
         );
         helmet.data_mut().set_other(
             "!minecraft:equippable",
-            Some(horizon_world::nbt::Tag::compound(Vec::<(
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
                 &str,
-                horizon_world::nbt::Tag,
+                horizon_core::nbt::Tag,
             )>::new())),
         );
         assert_eq!(guide_equippable(&helmet, default, true), None);
