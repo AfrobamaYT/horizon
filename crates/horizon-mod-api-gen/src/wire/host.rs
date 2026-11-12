@@ -715,6 +715,7 @@ impl Cx {
         .replace("mod_api::CallClass", "crate::CallClass")
         .replace("mod_api::refused", "crate::refused")
         .replace("mod_api::NoAnswer", "crate::NoAnswer")
+        .replace("mod_api::wasm_call_refusal", "crate::wasm_call_refusal")
         .replace(
             "use mod_api::{NoAnswer, call_refused}",
             "use crate::{NoAnswer, call_refused}",
