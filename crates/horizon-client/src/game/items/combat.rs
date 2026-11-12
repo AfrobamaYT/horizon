@@ -1107,3 +1107,7 @@ mod guest_hit_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "combat/zombie_ignite_tests.rs"]
+mod zombie_ignite_tests;

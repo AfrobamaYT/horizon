@@ -1999,5 +1999,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "gateway_cooldown_tests.rs"]
+#[path = "end/gateway_cooldown_tests.rs"]
 mod cooldown_tests;

@@ -5319,7 +5319,7 @@ mod tests {
             for reason in [Reason::SpawnItemUse, Reason::Dispenser] {
                 for answer in [Answer::Keep, Answer::Skip, Answer::Refuse] {
                     game.dragon.discard();
-                    game.world.random = LegacyRandom::new(42);
+                    game.world.random.set_seed(42);
                     let calls = Arc::new(AtomicUsize::new(0));
                     let mods: mod_api::Mods = vec![ModEntry::new(
                         "dragon-finalize",
@@ -5420,7 +5420,7 @@ mod tests {
                     Answer::RefuseJoin,
                 ] {
                     game.dragon.discard();
-                    game.world.random = LegacyRandom::new(42);
+                    game.world.random.set_seed(42);
                     let calls = Arc::new(AtomicUsize::new(0));
                     let joins = Arc::new(AtomicUsize::new(0));
                     let mods: mod_api::Mods = vec![ModEntry::new(

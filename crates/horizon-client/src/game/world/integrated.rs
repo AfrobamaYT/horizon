@@ -1545,50 +1545,51 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn integrated_tick_panic_saves_changed_world() {
-        let mut game = super::super::native_machines::tests::server_game();
-        let root = std::env::temp_dir().join(format!(
-            "horizon-integrated-crash-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        game.world_root = root.clone();
-        game.save = Arc::new(horizon_client::save::SaveDir::new(
-            root.clone(),
-            horizon_client::save::LevelShape::OVERWORLD,
-        ));
-        game.player = Some(
-            horizon_client::motion::PlayerMotion::new(
-                game.motion,
-                horizon_core::geometry::Vec3::new(8.5, 64.0, 8.5),
-            )
-            .unwrap(),
-        );
-        let flags = Arc::new(Flags::default());
-        flags.fail_tick.store(true, Ordering::Relaxed);
-        flags.published.store(1234, Ordering::Relaxed);
-        let (_sender, tasks) = channel();
-        game.serving = Some(Serving {
-            flags: flags.clone(),
-            tasks,
-            owner: 1,
-            pending: None,
-            load: LoadPhase::default(),
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let root = std::env::temp_dir().join(format!(
+                "horizon-integrated-crash-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            game.world_root = root.clone();
+            game.save = Arc::new(horizon_client::save::SaveDir::new(
+                root.clone(),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::new(8.5, 64.0, 8.5),
+                )
+                .unwrap(),
+            );
+            let flags = Arc::new(Flags::default());
+            flags.fail_tick.store(true, Ordering::Relaxed);
+            flags.published.store(1234, Ordering::Relaxed);
+            let (_sender, tasks) = channel();
+            game.serving = Some(Serving {
+                flags: flags.clone(),
+                tasks,
+                owner: 1,
+                pending: None,
+                load: LoadPhase::default(),
+            });
+            let error = game.integrated_tick_loop(&flags).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "the server thread panicked: integrated tick fixture"
+            );
+            let saved = horizon_client::save::Level::read(&root).unwrap();
+            assert_eq!(saved.name, "saved after integrated tick panic");
+            assert_eq!(saved.xp_total, 37);
+            assert_eq!(flags.published.load(Ordering::Relaxed), 0);
+            assert!(game.session_lock.is_none());
+            std::fs::remove_dir_all(&root).ok();
         });
-        let error = game.integrated_tick_loop(&flags).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "the server thread panicked: integrated tick fixture"
-        );
-        let saved = horizon_client::save::Level::read(&root).unwrap();
-        assert_eq!(saved.name, "saved after integrated tick panic");
-        assert_eq!(saved.xp_total, 37);
-        assert_eq!(flags.published.load(Ordering::Relaxed), 0);
-        assert!(game.session_lock.is_none());
-        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

@@ -280,7 +280,7 @@ impl StructureMobFinalizer {
     pub fn load_behind(&self) {
         let root = self.root.clone();
         let item_data = self.item_data.clone();
-        fill_behind(&self.data, "Structure mobs", move || {
+        let _ = fill_behind(&self.data, "Structure mobs", move || {
             load(&root, item_data.defaults())
         });
     }

@@ -258,7 +258,7 @@ fn check(id: u32, serial: &ItemEntity, expected: &Moved, ahead: &ItemEntity, got
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::native_machines::tests::server_game;
+    use super::super::native_machines::tests::server_game;
     use super::{AHEAD, TAKEN};
     use horizon_client::{chunk::Chunk, items::ItemStack};
     use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -315,7 +315,7 @@ mod tests {
         // Real solid-entity boxes, not a stubbed obstacle query. One item is
         // caught inside the boat; another falls onto its top this tick.
         game.next_entity += 1;
-        let boat = super::super::super::boats::Boat::new(
+        let boat = super::super::boats::Boat::new(
             game.next_entity,
             Arc::from("oak"),
             Vec3::new(8.5, 80.0, 8.5),

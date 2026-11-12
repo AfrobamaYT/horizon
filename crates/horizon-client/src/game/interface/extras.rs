@@ -2,6 +2,9 @@
 //! (`native_minimap`: its tiles, image and HUD) and zoom (`native_zoom`) on the camera; clicks
 //! and frame times for mods (`native_clicks`, `native_frame_rate`).
 //! Each hook does nothing while its extra is off and no mod uses it.
+#[path = "extras/reconnect.rs"]
+mod reconnect;
+
 use super::{Dim, Game, Screen};
 use horizon_client::{
     extras::{Corner, Cps, FpsCounter, fov_target},

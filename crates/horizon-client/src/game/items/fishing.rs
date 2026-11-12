@@ -2470,3 +2470,7 @@ mod tests {
 #[cfg(test)]
 #[path = "fishing_tests/block_hit.rs"]
 mod incoming_block_hit_tests;
+
+#[cfg(test)]
+#[path = "fishing_tests/fishing_air_tests.rs"]
+mod fishing_air_tests;

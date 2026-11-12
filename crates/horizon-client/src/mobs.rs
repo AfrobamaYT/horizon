@@ -3079,12 +3079,23 @@ pub fn take_mob_pushes(events: &mut Vec<MobEvent>, from: usize, pending: &mut Pe
 /// Pushes waiting for their mob's tick, in push order. A list while short;
 /// past [`PendingPushes::LIST_MAX`] (a crowd pushing each other) one list
 /// per mob, as scanning the whole list for each mob grows with its square.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PendingPushes {
     list: Vec<(u32, Vec3)>,
     by_mob: crate::fast_hash::FxHashMap<u32, Vec<Vec3>>,
 }
 impl PendingPushes {
+    /// `other`'s pushes after these, each mob's in their order.
+    pub fn append(&mut self, other: PendingPushes) {
+        for (id, v) in other.list {
+            self.push(id, v);
+        }
+        for (id, list) in other.by_mob {
+            for v in list {
+                self.push(id, v);
+            }
+        }
+    }
     const LIST_MAX: usize = 64;
     /// Whether every queued push has been consumed or retired with its target.
     pub fn is_empty(&self) -> bool {

@@ -15,7 +15,7 @@ impl Hub {
         events: &mut Vec<HostEvent>,
     ) {
         let recording = self.recording();
-        let g = &self.guests[i];
+        let g = &mut self.guests[i];
         if p.id != g.teleport_counter {
             return;
         }
@@ -32,15 +32,13 @@ impl Hub {
             self.kick(conn, invalid_movement());
             return;
         }
-        self.guests.update(i, |g| {
-            g.position = at;
-            g.awaiting_teleport = None;
-            // The prediction's replay starts again where the client now is.
-            if recording {
-                let kept = g.awaiting_keeps_motion;
-                g.record.get_or_insert_default().teleported(at, kept);
-            }
-        });
+        g.position = at;
+        g.awaiting_teleport = None;
+        // The prediction's replay starts again where the client now is.
+        if recording {
+            let kept = g.awaiting_keeps_motion;
+            g.record.get_or_insert_default().teleported(at, kept);
+        }
         let rot = (p.yaw, p.pitch);
         self.position_change(i, [p.x, p.y, p.z], rot, 0, ctx, events);
     }

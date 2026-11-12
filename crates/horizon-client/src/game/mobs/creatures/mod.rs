@@ -9291,7 +9291,7 @@ mod enchanted_entity_loot_tests {
                 game.next_entity = 1000;
                 zombie(game, Damage::mob(0, [0.0; 3]));
                 game.mobs.last_mut().unwrap().health = 20.0;
-                game.world.random = LegacyRandom::new(7);
+                game.world.random.set_seed(7);
                 let source = game.player_source();
                 game.command_source = Some(super::super::commands::execute::Source {
                     entity: None,
@@ -12505,7 +12505,7 @@ mod chorus_projectile_drop_tests {
                 );
                 source(game, 4, 4, "gravel");
                 game.level.seed = 116;
-                game.world.random = horizon_core::random::LegacyRandom::new(116);
+                game.world.random.set_seed(116);
                 game.rand_sequences = Default::default();
                 game.with_level(|b, level, ticks| {
                     level.items = items;
@@ -12600,11 +12600,7 @@ mod loaded_arrow_shot_tests {
         motion::PlayerMotion,
         projectiles::{Projectile, ProjectileKind},
     };
-    use horizon_core::{
-        geometry::Vec3,
-        position::ChunkPos,
-        random::{LegacyRandom, RandomSource},
-    };
+    use horizon_core::{geometry::Vec3, position::ChunkPos, random::RandomSource};
     use std::sync::Arc;
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -12666,7 +12662,7 @@ mod loaded_arrow_shot_tests {
         assert!(
             game.run_command("summon pig 13.5 200 2.5 {UUID:[I;114,0,0,99],NoAI:1b,NoGravity:1b}")
         );
-        game.world.random = LegacyRandom::new(114);
+        game.world.random.set_seed(114);
         test(&mut game);
     }
     fn start_events() {
@@ -13502,3 +13498,19 @@ mod breeding_heart_tests {
         }
     }
 }
+
+#[cfg(feature = "upstream-parallel-mobs")]
+#[path = "../../creatures/mob_group.rs"]
+mod mob_group;
+
+#[cfg(feature = "upstream-parallel-mobs")]
+#[path = "../../creatures/mob_islands.rs"]
+mod mob_islands;
+
+#[cfg(feature = "upstream-parallel-mobs")]
+#[path = "../../creatures/prep.rs"]
+mod prep;
+
+#[cfg(test)]
+#[path = "frame_projectile_tests.rs"]
+mod frame_projectile_tests;

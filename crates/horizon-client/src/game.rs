@@ -18120,13 +18120,6 @@ impl Game<'_> {
     }
 }
 
-#[path = "game/item_entities/ahead.rs"]
-mod ahead;
-
-#[cfg(test)]
-#[path = "game/block_ticks/random_order_tests.rs"]
-mod random_order_tests;
-
 // `destroy_stage_0` .. `destroy_stage_9`: the sprite name by stage, so the
 // lookup does not format a string per crack.
 const DESTROY_STAGES: [&str; 10] = [
@@ -18209,7 +18202,3 @@ mod crumbling_sprite_tests {
         );
     }
 }
-
-#[cfg(test)]
-#[path = "game/item_void_tests.rs"]
-mod item_void_tests;

@@ -1,8 +1,8 @@
 //! `Entity.checkBelowWorld`: a dropped item is discarded below its level's
 //! floor minus 64, so the Nether and the End lose one at y = -64 while the
 //! Overworld keeps it down to y = -128.
-use super::super::Dim;
-use super::super::native_machines::tests::server_game;
+use super::Dim;
+use super::native_machines::tests::server_game;
 use horizon_client::chunk::Chunk;
 use horizon_client::items::ItemStack;
 use horizon_client::motion::PlayerMotion;

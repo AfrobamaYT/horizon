@@ -27,6 +27,7 @@ use {
     },
 };
 
+#[path = "nether_portal/respawn_attributes.rs"]
 mod respawn_attributes;
 
 /// `Player.getDimensionChangingDelay`.

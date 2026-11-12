@@ -1604,5 +1604,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "pet_pose_meta_tests.rs"]
+#[path = "remote_mob_data/pet_pose_meta_tests.rs"]
 mod pet_pose_meta_tests;

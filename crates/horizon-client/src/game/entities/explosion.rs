@@ -1976,7 +1976,7 @@ mod tests {
             let blast = |game: &mut Game<'_>| {
                 game.dropped.clear();
                 game.orbs.clear();
-                game.world.random = LegacyRandom::new(7);
+                game.world.random.set_seed(7);
                 let mut drops = ExplosionDrops::default();
                 for pos in [[1, 64, 1], [2, 64, 1]] {
                     game.world.set(pos[0], pos[1], pos[2], dirt).unwrap();
@@ -2727,5 +2727,120 @@ mod shulker_lock_drop_tests {
             missing.is_empty(),
             "actual external lock lost at destruction capture sites: {missing:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod explicit_source_tests {
+    use super::*;
+    use horizon_client::{mobs::Mob, motion::PlayerMotion};
+
+    #[test]
+    #[ignore = "requires prepared resources"]
+    fn explicit_sources_keep_names_without_inventing_kill_credit() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.options.dedicated = None;
+            game.creative = false;
+            game.ui.difficulty = 2;
+            game.build_registries();
+            for mode in 0..5 {
+                let nested = mode == 4;
+                game.combat = Default::default();
+                game.mobs.clear();
+                game.orbs.clear();
+                game.dropped.clear();
+                game.player =
+                    Some(PlayerMotion::new(game.motion, Vec3::new(10.5, 64.0, 8.5)).unwrap());
+                let kind = game.res.mob_types().get("minecraft:husk").unwrap().clone();
+                let species = kind.species;
+                if mode == 2 || nested {
+                    game.mobs
+                        .push(Mob::new(43, kind, Vec3::new(40.0, 64.0, 40.0), 0.0));
+                }
+                // An enclosing blast must not leak its owner into an explicit source.
+                game.combat.explosion_owner = Some(99);
+                game.combat.exploded.push((99, Text::literal("Outer")));
+                let cause = (mode != 0).then(|| ExplosionCause {
+                    entity: (43, Text::literal("Igniter")),
+                    player: false,
+                    guest: None,
+                    species: (mode != 1).then_some(species),
+                });
+                if nested {
+                    game.options.dedicated = Some(Vec::new());
+                    game.combat.explicit_explosion_cause = Some(cause);
+                    game.combat.explicit_explosion_direct = Some(Text::literal("Outer"));
+                    game.combat.blast_owner = Some((99, Text::literal("Outer")));
+                    game.combat.blast_guest = Some(17);
+                    let center = [8.5, 64.0, 8.5];
+                    let level = game.level("minecraft:overworld").unwrap();
+                    assert!(game.level_explode(
+                        level,
+                        center,
+                        2.0,
+                        false,
+                        mod_api::ExplosionInteraction::None
+                    ));
+                    assert!(matches!(
+                        game.combat.explicit_explosion_cause,
+                        Some(Some(_))
+                    ));
+                    assert!(game.combat.explicit_explosion_direct.is_some());
+                    assert_eq!(
+                        game.combat.blast_owner.as_ref().map(|owner| owner.0),
+                        Some(99)
+                    );
+                    assert_eq!(game.combat.blast_guest, Some(17));
+                } else {
+                    game.server_explode_from_cause(
+                        [8.5, 64.0, 8.5],
+                        2.0,
+                        BlockInteraction::Keep,
+                        false,
+                        ExplosionSource::default()
+                            .with_entity(7, "minecraft:end_crystal")
+                            .with_silence(true),
+                        Some(cause),
+                    )
+                    .unwrap();
+                }
+                let events = std::mem::take(&mut game.player.as_mut().unwrap().events);
+                game.record_combat(&events);
+                assert_eq!(
+                    game.combat
+                        .last_blow()
+                        .map(|(kind, id)| (kind.to_owned(), id)),
+                    Some((
+                        if mode == 0 || nested {
+                            "minecraft:explosion"
+                        } else {
+                            "minecraft:player_explosion"
+                        }
+                        .into(),
+                        if mode == 0 || nested { 0 } else { 43 }
+                    ))
+                );
+                assert_eq!(
+                    game.combat.kill_credit(game.world.game_time),
+                    (mode == 2).then_some(43)
+                );
+                if mode == 1 || mode == 3 || nested {
+                    let death = game
+                        .combat_death_message_for(Text::literal("Victim"))
+                        .component();
+                    if nested {
+                        assert_eq!(death["with"].as_array().unwrap().len(), 1);
+                    } else {
+                        assert_eq!(death["with"][1]["text"].as_str(), Some("Igniter"));
+                    }
+                }
+                assert_eq!(game.combat.explosion_owner, Some(99));
+                assert_eq!(game.combat.explicit_explosion_cause.is_some(), nested);
+            }
+        });
     }
 }

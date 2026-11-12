@@ -1021,7 +1021,7 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "sign_edit_tests.rs"]
+#[path = "sign_edit/sign_edit_tests.rs"]
 mod sign_edit_tests;
 
 #[cfg(test)]
