@@ -976,6 +976,16 @@ pub(crate) fn crafting_station(kind: &str) -> &'static str {
 impl RecipeIndex {
     /// Indexes the same merged, conditioned recipe sources as crafting.
     pub fn load(root: &std::path::Path, overlay: &PackOverlay) -> Self {
+        match horizon_items::recipe_sources::sources(root, overlay) {
+            Ok(sources) => Self::load_from_sources(&sources),
+            Err(e) => {
+                log::warn!("Horizon: recipes not shown in the book: {e}");
+                Self::load_from_sources(&[])
+            }
+        }
+    }
+    /// Numbers displays over an already merged recipe snapshot, including server recipes.
+    pub fn load_from_sources(sources: &[(String, serde_json::Value)]) -> Self {
         let mut recipes = std::collections::BTreeMap::new();
         let mut insert = |id: String, v: &serde_json::Value| {
             let kind = v["type"].as_str().unwrap_or_default();
@@ -1011,13 +1021,8 @@ impl RecipeIndex {
                 },
             );
         };
-        match horizon_items::recipe_sources::sources(root, overlay) {
-            Ok(sources) => {
-                for (id, v) in sources {
-                    insert(crate::crafting::qualified(&id), &v);
-                }
-            }
-            Err(e) => log::warn!("Horizon: recipes not shown in the book: {e}"),
+        for (id, v) in sources {
+            insert(crate::crafting::qualified(id), v);
         }
         // RecipeManager.unpackRecipeInfo numbers the displays in registration
         // order (path, then namespace), not in the order of the ids' text.
