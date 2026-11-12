@@ -677,7 +677,7 @@ mod tests {
             };
             let session = sampler::start(config, |n| n == "spans-id-test").unwrap();
             // Match calibration's CPU-time denominator, not scheduler-dependent wall time.
-            let busy = |ms| {
+            let busy = |ms: u64| {
                 let until = sampler::thread_cpu_ns() + ms * 1_000_000;
                 while sampler::thread_cpu_ns() < until {
                     std::hint::black_box(0);
