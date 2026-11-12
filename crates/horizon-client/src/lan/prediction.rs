@@ -675,7 +675,7 @@ fn keys(input: u8) -> Keys {
         jump: key(16),
         shift: key(32),
         sprint: key(64),
-        analog: None,
+        ..Keys::default()
     }
 }
 
