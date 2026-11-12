@@ -510,7 +510,7 @@ impl Game<'_> {
     pub(in crate::game) fn capture_end(&self, recording: &Recording) -> CaptureEnd {
         let span_ns = span_cost_nanos();
         let mob_ns = tick_profile::sample_cost_nanos();
-        // Off unless `HORIZON_SPIKES` or a mod (`native_spans`) still wants them.
+        // Release this recording's span request; other recordings or HORIZON_SPIKES may remain.
         if recording.all_threads {
             tick_profile::want_spans(tick_profile::SPANS_REPORT, false);
         }

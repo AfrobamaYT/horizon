@@ -403,7 +403,7 @@ impl Default for Pass {
 pub(super) struct TickTiming {
     pub wall_ms: f32,
     pub cpu_ms: Option<f32>,
-    /// Recorded span events, including work between ticks, in observation order.
+    /// Spans recorded inside the tick only, in observation order.
     pub raw: Vec<horizon_client::spans::Span>,
 }
 
@@ -1270,9 +1270,8 @@ impl Game<'_> {
         if self.options.spikes.is_none() && !horizon_client::spans::recording_here() {
             return self.tick_server(paused);
         }
-        // Spans recorded since the last tick ran between ticks (the chunk pump of the wait): they
-        // stay in the tick's list, but only the tick's own count as recorded in it.
-        let between = horizon_client::spans::take_raw();
+        // Discard between-tick work (such as the chunk pump) before timing this tick.
+        horizon_client::spans::take_raw();
         let (started, cpu) = (Instant::now(), horizon_client::spans::thread_cpu());
         let result = self.tick_server(paused);
         let wall = started.elapsed().as_secs_f32() * 1000.0;
@@ -1280,10 +1279,7 @@ impl Game<'_> {
             .zip(cpu)
             .map(|(end, start)| (end - start).as_secs_f32() * 1000.0);
         // Taken every tick: nothing else takes this thread's spans.
-        let raw = between
-            .into_iter()
-            .chain(horizon_client::spans::take_raw())
-            .collect();
+        let raw = horizon_client::spans::take_raw();
         // The spans go to the slow ring; whose packets or events took the tick stays in the owner's log.
         let notes = horizon_client::spans::take_notes();
         if let Some(threshold) = self.options.spikes
