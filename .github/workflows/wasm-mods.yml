@@ -21,8 +21,6 @@ permissions:
 concurrency:
   group: wasm-mods-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-env:
-  RUST_MIN_STACK: "268435456"
 jobs:
   fixture:
     # Drafts skip it: the shared runners go to ready PRs (CI rule, 2026-11-08).

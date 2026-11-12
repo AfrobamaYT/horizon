@@ -277,7 +277,5 @@ main stack limit and re-execs before initialization, or refuses startup with
 executable linker stack reservations. These reserve address space; resident
 memory grows as stack pages are touched.
 
-When running wasm runtime tests directly, give libtest threads enough stack, for
-example `RUST_MIN_STACK=268435456 cargo test -p horizon-mod-wasm --lib`.
-CI uses this test-only reservation on Linux, Windows and macOS. Engine workers
-set their stack explicitly; player installations need no `RUST_MIN_STACK` setting.
+Wasm runtime tests reserve their guest stack through a shared test helper;
+local `cargo test` and CI need no `RUST_MIN_STACK` setting.
