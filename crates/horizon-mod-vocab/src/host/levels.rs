@@ -705,6 +705,16 @@ pub trait LevelsBackend {
     /// nothing. None on a client and for a stale handle.
     #[access(WorldOnly)]
     fn level_can_spawn_entities_in_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<bool>;
+    /// Side: server.
+    /// The capability generation at `pos`: a number that changes when a provider says its
+    /// answer there changed ([`LevelRef::invalidate_capabilities`]) and when the chunk of a
+    /// position a provider invalidated unloads, and never comes back to a number it was while
+    /// the level is open. [`BlockCapabilityCache`] compares it with the block entity and the
+    /// block state there. Only the change means anything, not the number. Reads parked
+    /// levels. None for a stale handle, a client, an unloaded position and one outside build
+    /// height. Constant time, no allocation.
+    #[access(WorldOnly)]
+    fn level_capability_generation(&self, level: LevelRef, pos: [i32; 3]) -> Option<u64>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -813,6 +823,17 @@ pub trait LevelsBackendMut {
     /// handle, on a client and for a position that isn't loaded.
     #[access(WorldOnly)]
     fn level_check_light(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
+    /// Tells kept capabilities at `pos` that a provider's answer there changed with no change
+    /// of block or block entity (NeoForge's `invalidateCapabilities`), such as a machine whose
+    /// side configuration changed: the capability generation there moves on
+    /// ([`LevelRef::capability_generation`]), so a [`BlockCapabilityCache`] there looks again
+    /// at its next `get`. Inside a transaction it happens at the root commit, and an aborted
+    /// one changes nothing. Block and block entity changes, chunk unloads and mod switches
+    /// need no call: the cache sees them itself. False, with nothing changed, off the level in
+    /// place, for a stale handle, on a client and for a position that isn't loaded.
+    #[access(WorldOnly)]
+    fn level_invalidate_capabilities(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally dropping
     /// resources with `tool` (None is an empty hand). With `collect`, return the dropped
