@@ -248,15 +248,7 @@ impl Game<'_> {
             KeyCode::KeyF if self.screen == Screen::Playing => {
                 // handleKeybinds: the number keys select before key.swapOffhand.
                 self.select_queued_hotbar();
-                // handlePlayerAction SWAP_ITEM_WITH_OFFHAND: setItemInHand for
-                // the off hand, then the main hand.
-                std::mem::swap(&mut self.offhand, &mut self.inventory[self.selected]);
-                self.hand_stack_replaced(self.selected);
-                self.hand_stack_replaced(shield::OFFHAND_SLOT);
-                let (offhand, main) = (self.offhand.clone(), self.inventory[self.selected].clone());
-                self.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
-                self.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
-                self.using = None;
+                self.own_swap_hands();
             }
             KeyCode::KeyQ if self.screen == Screen::Playing => {
                 // handleKeybinds: the number keys select before key.drop.
@@ -311,5 +303,101 @@ impl Game<'_> {
             _ => {}
         }
         Ok(())
+    }
+    /// handlePlayerAction SWAP_ITEM_WITH_OFFHAND for the window's own player
+    /// with no server: the mods hear it as a server's players
+    /// (`player_swap_hands`), and may stop it or change what each hand gets.
+    /// Then setItemInHand for the off hand, then the main hand. The stacks are
+    /// copied only for a listener: `heard` holds the old main and off hands.
+    fn own_swap_hands(&mut self) {
+        let heard = mod_api::__private::listened(mod_api::HookId::PlayerSwapHands)
+            .then(|| (self.inventory[self.selected].clone(), self.offhand.clone()));
+        if let Some((old_main, old_off)) = &heard {
+            let (mut to_main, mut to_off, mut cancel) = (old_off.clone(), old_main.clone(), false);
+            let (uuid, name) = (self.own_uuid(), self.own_profile_name());
+            self.native_player_swap_hands(uuid, &name, &mut to_main, &mut to_off, &mut cancel);
+            if cancel {
+                return;
+            }
+            (self.inventory[self.selected], self.offhand) = (to_main, to_off);
+        } else {
+            std::mem::swap(&mut self.offhand, &mut self.inventory[self.selected]);
+        }
+        self.hand_stack_replaced(self.selected);
+        self.hand_stack_replaced(shield::OFFHAND_SLOT);
+        let (offhand, main) = (self.offhand.clone(), self.inventory[self.selected].clone());
+        let (old_main, old_off) = match &heard {
+            Some((old_main, old_off)) => (old_main.as_ref(), old_off.as_ref()),
+            None => (offhand.as_ref(), main.as_ref()),
+        };
+        self.player_on_equip("offhand", old_off, offhand.as_ref());
+        self.player_on_equip("mainhand", old_main, main.as_ref());
+        self.using = None;
+    }
+}
+
+#[cfg(test)]
+mod swap_hands_tests {
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::items::ItemStack;
+    use mod_api::{Flow, Hooks, PlayerSwapHandsEvent, ServerHost};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+
+    /// Puts a torch in the off hand instead of the sword, or cancels; counts the calls.
+    struct Torch(Arc<AtomicBool>, Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Torch {
+        fn player_swap_hands(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut PlayerSwapHandsEvent<'_>,
+        ) -> Flow {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            if self.0.load(Ordering::SeqCst) {
+                return Flow::Cancel;
+            }
+            assert!(event.to_main_hand.is_none());
+            assert_eq!(event.to_off_hand.as_ref().map(|s| s.count()), Some(1));
+            let torch = mod_api::__private::item_key("minecraft:torch").unwrap();
+            *event.to_off_hand = Some(mod_api::ItemStack::new(torch, 1).unwrap());
+            Flow::Continue
+        }
+    }
+
+    /// `LivingSwapItemsEvent.Hands` for the window's own player: a cancel
+    /// keeps both hands, and a listener's stack lands in the off hand.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_own_player_swap_asks_the_listener_for_each_hand() {
+        let (cancel, calls) = (
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(AtomicUsize::new(0)),
+        );
+        let torch = Torch(Arc::clone(&cancel), Arc::clone(&calls));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("torch", Box::new(torch))].into();
+        mod_platform::testing::with_mods(mods, || {
+            with_game(|game| {
+                let selected = game.selected;
+                game.inventory[selected] = Some(ItemStack::new("minecraft:diamond_sword", 1));
+                game.offhand = None;
+                game.own_swap_hands();
+                assert_eq!(
+                    game.inventory[selected].as_ref().map(|s| &*s.item),
+                    Some("minecraft:diamond_sword")
+                );
+                assert!(game.offhand.is_none());
+                cancel.store(false, Ordering::SeqCst);
+                game.own_swap_hands();
+                assert!(game.inventory[selected].is_none());
+                assert_eq!(
+                    game.offhand.as_ref().map(|s| &*s.item),
+                    Some("minecraft:torch")
+                );
+            });
+        });
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

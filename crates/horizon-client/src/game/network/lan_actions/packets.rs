@@ -340,46 +340,70 @@ impl Game<'_> {
                 // SWAP_ITEM_WITH_OFFHAND: the hands swap and the item in use stops
                 // (ServerGamePacketListenerImpl.handlePlayerAction), not for spectators.
                 7 if !spectator => {
-                    // The mods hear the swap first, and may stop it: the
-                    // client, which swapped at once, gets its slots back.
-                    let (uuid, name) = {
+                    // The mods hear the swap first (LivingSwapItemsEvent.Hands):
+                    // they may stop it, and the client, which swapped at once,
+                    // gets its slots back, or change what each hand gets. The
+                    // stacks are copied only for a listener: `heard` holds the
+                    // vanilla (to main hand, to off hand), the old off and main.
+                    let (uuid, name, heard) = {
                         let Some(host) = self.lan.as_ref() else {
                             return;
                         };
                         let g = &host.hub.guests[gi];
-                        (g.uuid, g.name.clone())
+                        let heard = mod_api::__private::listened(mod_api::HookId::PlayerSwapHands)
+                            .then(|| (g.offhand.clone(), g.inventory[g.selected].clone()));
+                        (g.uuid, g.name.clone(), heard)
                     };
                     // With the player's state swapped in, so that the helpers
                     // reach them.
-                    let cancel = self
-                        .as_guest(conn, |g| {
-                            let mut cancel = false;
-                            g.native_player_swap_hands(uuid, &name, &mut cancel);
-                            cancel
-                        })
-                        .unwrap_or(false);
-                    if cancel {
-                        let Some(host) = self.lan.as_mut() else {
-                            return;
-                        };
-                        host.hub.send_inventory(gi);
-                        return;
-                    }
+                    let mut chosen = heard.clone();
+                    let cancel = match chosen.as_mut() {
+                        Some((to_main, to_off)) => self
+                            .as_guest(conn, |g| {
+                                let mut cancel = false;
+                                g.native_player_swap_hands(
+                                    uuid,
+                                    &name,
+                                    to_main,
+                                    to_off,
+                                    &mut cancel,
+                                );
+                                cancel
+                            })
+                            .unwrap_or(false),
+                        None => false,
+                    };
                     let Some(host) = self.lan.as_mut() else {
                         return;
                     };
+                    if cancel {
+                        host.hub.send_inventory(gi);
+                        return;
+                    }
+                    let changed = chosen != heard;
                     let (offhand, main) = host.hub.guests.update(gi, |g| {
                         let slot = g.selected;
                         std::mem::swap(&mut g.inventory[slot], &mut g.offhand);
+                        if let Some((to_main, to_off)) = chosen {
+                            (g.inventory[slot], g.offhand) = (to_main, to_off);
+                        }
                         (g.offhand.clone(), g.inventory[slot].clone())
                     });
+                    // A mod's stacks differ from the client's own swap: both slots go back.
+                    if changed {
+                        host.hub.send_inventory(gi);
+                    }
                     if let Some(play) = host.play.get_mut(&conn) {
                         play.using = None;
                     }
-                    // setItemInHand: the off hand, then the main hand.
+                    // setItemInHand: the off hand, then the main hand, from what each held.
+                    let (old_off, old_main) = match &heard {
+                        Some((old_off, old_main)) => (old_off.as_ref(), old_main.as_ref()),
+                        None => (main.as_ref(), offhand.as_ref()),
+                    };
                     self.as_guest(conn, |g| {
-                        g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
-                        g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
+                        g.player_on_equip("offhand", old_off, offhand.as_ref());
+                        g.player_on_equip("mainhand", old_main, main.as_ref());
                     });
                     if mod_api::__private::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
                         let Some(host) = self.lan.as_ref() else {
