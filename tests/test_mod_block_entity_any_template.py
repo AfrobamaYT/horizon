@@ -95,7 +95,7 @@ fn a_mod_block_entity_on_a_template_without_one_is_removed_and_not_pushed() {
     assert!(!sim.removes(true, stone, BlockStateId(9), at(5)));
 }
 #[test]
-fn a_part_lets_a_mod_block_entity_move_but_never_a_vanilla_one() {
+fn a_carry_answer_moves_mod_and_vanilla_block_entities_alike() {
     let stone = BlockStateId(0);
     let mut sim = Sim { b: Blocks { templated: vec![BlockStateId(1)] },
                         level: level(&[(5, BlockEntity::Mod(0)), (6, BlockEntity::Chest(0))]) };
@@ -103,9 +103,10 @@ fn a_part_lets_a_mod_block_entity_move_but_never_a_vanilla_one() {
     // a mod entity moves, whatever its template
     assert!(sim.pushable_tail(stone, at(5)));
     assert!(sim.pushable_tail(BlockStateId(1), at(5)));
-    // a vanilla one stays, and so does a template with one before it loaded
-    assert!(!sim.pushable_tail(BlockStateId(1), at(6)));
-    assert!(!sim.pushable_tail(BlockStateId(1), at(7)));
+    // #3453: one block-entity rule, so a vanilla one moves too, and so does a template
+    // with one before it loaded; the carry machinery moves their position-owned state
+    assert!(sim.pushable_tail(BlockStateId(1), at(6)));
+    assert!(sim.pushable_tail(BlockStateId(1), at(7)));
     // a native factory's state whose entity has not loaded is the mod's own
     assert!(sim.pushable_tail(BlockStateId(2), at(7)));
     // a refusal holds even a block without one
