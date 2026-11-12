@@ -188,7 +188,7 @@ def render(data, now, days=30, cap=12):
         if not labels and (pr["user"].get("type") == "Bot" or
                            re.match(r"^(ci|chore\(ci\)|build)(:|\()", pr["title"], re.I)):
             continue
-        text = f"[{escaped(pr['title'])} (#{n})]({WEB}/pull/{n}) — @{escaped(pr['user']['login'])}"
+        text = f"[{escaped(pr['title'])} (#{n})]({WEB}/pull/{n}) — &#64;{escaped(pr['user']['login'])}"
         if re.search(r"upstream.*sync|sync.*upstream|merge upstream", pr["title"], re.I):
             text += f" — upstream commit `{pr['head']['sha']}`"
         add(dates.get(n, pr["merged_at"]), "Merged", text, n)
@@ -226,7 +226,7 @@ def render(data, now, days=30, cap=12):
                 if contributors:
                     lines += ['### From contributors', '']
                     for login, items in sorted(contributors.items(), key=lambda pair: max((dates.get(n, prs[n]['merged_at']), n) for n, _ in pair[1]), reverse=True):
-                        lines += [f'#### @{escaped(login)} ({len(items)})', '']
+                        lines += [f'#### &#64;{escaped(login)} ({len(items)})', '']
                         lines += ['- ' + text for _, text in items]
                         lines.append('')
                 if maintenance:
@@ -235,8 +235,11 @@ def render(data, now, days=30, cap=12):
                     others = [(n, text) for n, text in maintenance if ' — upstream commit `' not in text]
                     lines += ['- ' + text for _, text in syncs + others[:5]]
                     if len(others) > 5:
-                        url = WEB + '/issues?q=' + quote(f'is:pr is:merged author:arismoko merged:{day}')
-                        lines.append(f'- [and {len(others) - 5} more maintenance PRs]({url})')
+                        # Exact links remain correct when the rollup landing date
+                        # differs from the member's merged_at. Avoid search length
+                        # and boolean-operator limits for large rollups.
+                        links = ', '.join(f'[#{n}]({WEB}/pull/{n})' for n, _ in others[5:])
+                        lines += ['<details>', f'<summary>and {len(others) - 5} more maintenance PRs</summary>', '', links, '', '</details>']
                     lines.append('')
                 continue
             lines += [f"### {section}", ""]

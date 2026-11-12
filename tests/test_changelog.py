@@ -113,24 +113,31 @@ class ChangelogTests(unittest.TestCase):
         self.assertIn('(tool pre-release)', render(self.data, self.now))
 
     def test_readable_hostile_title(self):
-        title = "# Hello_foo: 'x' (#12), a-b [link](bad) <img> `code` | @all"
-        output = escaped(title)
-        self.assertIn("Hello_foo: 'x' (#12), a-b", output)
-        for char in '[]<>`|@':
-            self.assertNotIn(char, output)
+        title = "# Hello_foo: 'x' (#12), a-b [link](bad) <img> `code` |\n> @all"
+        self.assertEqual(escaped(title),
+            "&#35; Hello_foo: 'x' (#12), a-b &#91;link&#93;(bad) &#60;img&#62; &#96;code&#96; &#124; &#62; &#64;all")
 
     def test_contributors_are_uncapped_and_maintenance_is_separate(self):
         base = self.data['prs'][0]
         self.data['prs'] = [dict(copy.deepcopy(base), number=n) for n in range(20)]
         output = render(self.data, self.now)
-        self.assertIn('#### @author (20)', output)
+        self.assertIn('#### &#64;author (20)', output)
         self.assertEqual(output.count('/pull/'), 20)
         for pr in self.data['prs']:
             pr['user']['login'] = 'arismoko'
+        rollup = dict(copy.deepcopy(base), number=1000,
+            head={'ref': 'fork-review-rollup-1', 'sha': 'b' * 40},
+            merged_at='2026-11-13T01:00:00Z',
+            body='\n'.join(f'| #{n} | author |' for n in range(20)))
+        self.data['prs'].append(rollup)
         output = render(self.data, self.now)
         self.assertIn('### Maintenance', output)
-        self.assertEqual(output.count('/pull/'), 5)
+        self.assertEqual(output.count('/pull/'), 20)
+        self.assertEqual(output.split('<details>')[0].count('/pull/'), 5)
         self.assertIn('15 more maintenance', output)
+        for number in range(15):
+            self.assertIn(f'[#{number}](https://github.com/arismoko/horizon/pull/{number})', output)
+        self.assertNotIn('merged%3A', output)
 
     def test_bot_filter_and_label_override(self):
         self.data['prs'] = [self.data['prs'][0]]

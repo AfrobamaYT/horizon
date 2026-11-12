@@ -3,12 +3,6 @@ on:
   schedule:
     - cron: '17 */12 * * *'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - tools/changelog.py
-      - tests/test_changelog.py
-      - tests/fixtures/changelog.json
-      - .github/workflows/changelog.yml
 permissions: {}
 concurrency:
   group: changelog-${{ github.event_name }}
@@ -22,7 +16,6 @@ jobs:
       - uses: actions/checkout@v6
       - run: python3 -m unittest discover -s tests -p test_changelog.py
   publish:
-    if: github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -45,7 +38,14 @@ jobs:
           git remote add origin "$GITHUB_WORKSPACE"
           # Read the published history via the authenticated checkout remote.
           git -C "$GITHUB_WORKSPACE" fetch origin refs/heads/changelog:refs/remotes/origin/changelog || {
-            if git -C "$GITHUB_WORKSPACE" ls-remote --exit-code origin refs/heads/changelog; then exit 1; fi
+            status=0
+            git -C "$GITHUB_WORKSPACE" ls-remote --exit-code origin refs/heads/changelog || status=$?
+            # Exit 2 means a successful query with no matching branch; all other
+            # outcomes are unexpected after fetch failed, including network errors.
+            if [ "$status" -ne 2 ]; then
+              echo "Could not fetch the published changelog branch" >&2
+              exit 1
+            fi
           }
           if git -C "$GITHUB_WORKSPACE" show-ref --verify --quiet refs/remotes/origin/changelog; then
             git fetch origin refs/remotes/origin/changelog
