@@ -36,7 +36,7 @@ fn real_library_dependency() {
                 mod_api::PackageKind::Code,
                 mod_api::Side::Both,
                 vec![manifest.id.clone()],
-                manifest.dependencies.keys().cloned().collect(),
+                Vec::new(),
             ));
             packages.push(WasmPackage {
                 manifest,

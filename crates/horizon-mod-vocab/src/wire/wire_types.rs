@@ -295,8 +295,19 @@ mod resource_wire_tests {
             crate::PackageKind::Content,
             crate::Side::Both,
             vec!["test".into()],
-            vec!["other".into()],
-        );
+            vec![crate::PackageDependency::new(
+                "other".into(),
+                "^1".into(),
+                true,
+            )],
+        )
+        .with_details(crate::PackageDetails {
+            name: "Test".into(),
+            homepage: Some("https://example.org".into()),
+            runtime: Some(crate::PackageRuntime::Wasm),
+            properties: [("tier".into(), crate::PropertyValue::Integer(3))].into(),
+            ..Default::default()
+        });
         let mut out = Writer::new();
         out.put(&package);
         let decoded: crate::PackageInfo = Reader::new(out.bytes()).take().unwrap();
@@ -305,6 +316,16 @@ mod resource_wire_tests {
         assert_eq!(decoded.kind(), crate::PackageKind::Content);
         assert_eq!(decoded.side(), crate::Side::Both);
         assert!(decoded.depends_on("other"));
+        assert_eq!(decoded.dependencies()[0].version(), "^1");
+        assert!(decoded.dependencies()[0].optional());
+        assert_eq!(decoded.name(), "Test");
+        assert_eq!(decoded.homepage(), Some("https://example.org"));
+        assert_eq!(decoded.runtime(), Some(crate::PackageRuntime::Wasm));
+        assert_eq!(
+            decoded.property("tier"),
+            Some(&crate::PropertyValue::Integer(3))
+        );
+        assert_eq!(decoded.property("missing"), None);
         for end in 0..out.bytes().len() {
             assert!(
                 Reader::new(&out.bytes()[..end])

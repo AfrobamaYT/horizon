@@ -85,6 +85,9 @@ api = "0.2"                  # content mods
 side = "both"
 capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
+
+[properties]                 # optional: values other mods read (reference/manifest.md)
+tier = 3
 ```
 
 The optional fields fill the game's Mods screen, which lists every mod with its icon, name, version, id, license,

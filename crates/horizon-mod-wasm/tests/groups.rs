@@ -89,7 +89,7 @@ fn capability_is_answered_only_within_its_group() {
                 mod_api::PackageKind::Code,
                 mod_api::Side::Both,
                 vec![manifest.id.clone()],
-                manifest.dependencies.keys().cloned().collect(),
+                Vec::new(),
             ));
             horizon_mod_wasm::WasmPackage {
                 manifest,
