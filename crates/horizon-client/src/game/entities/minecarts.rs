@@ -616,10 +616,11 @@ impl Game<'_> {
             & horizon_world::level::data::state_flags::CONDUCTOR
             != 0
     }
-    /// `OldMinecartBehavior.getPos`: the point on the rail under (x, y, z).
-    fn rail_pos(&self, x: f64, y: f64, z: f64) -> Option<[f64; 3]> {
+    /// `OldMinecartBehavior.getPos`: the point on the rail under (x, y, z), on the track the
+    /// rail lays for `cart`.
+    fn rail_pos(&self, cart: Option<u32>, x: f64, y: f64, z: f64) -> Option<[f64; 3]> {
         let [xt, yt, zt] = self.rail_block(Vec3::new(x, y, z));
-        let rail = self.rail(None, xt, yt, zt)?;
+        let rail = self.rail(cart, xt, yt, zt)?;
         let (e0, e1) = rail.shape.exits();
         let (fx, fy, fz) = (f64::from(xt), f64::from(yt), f64::from(zt));
         let x0 = fx + 0.5 + f64::from(e0[0]) * 0.5;
@@ -645,9 +646,16 @@ impl Game<'_> {
         Some(out)
     }
     /// `OldMinecartBehavior.getPosOffs`.
-    fn rail_pos_offs(&self, mut x: f64, y: f64, mut z: f64, offs: f64) -> Option<[f64; 3]> {
+    fn rail_pos_offs(
+        &self,
+        cart: Option<u32>,
+        mut x: f64,
+        y: f64,
+        mut z: f64,
+        offs: f64,
+    ) -> Option<[f64; 3]> {
         let [xt, yt, zt] = self.rail_block(Vec3::new(x, y, z));
-        let rail = self.rail(None, xt, yt, zt)?;
+        let rail = self.rail(cart, xt, yt, zt)?;
         let mut y = f64::from(yt) + if rail.shape.is_slope() { 1.0 } else { 0.0 };
         let (e0, e1) = rail.shape.exits();
         let (mut xd, mut zd) = (f64::from(e1[0] - e0[0]), f64::from(e1[2] - e0[2]));
@@ -662,7 +670,7 @@ impl Game<'_> {
         } else if e1[1] != 0 && at(e1) {
             y += f64::from(e1[1]);
         }
-        self.rail_pos(x, y, z)
+        self.rail_pos(cart, x, y, z)
     }
     /// `AbstractMinecart.canCollideWith`, for `Entity.collide`'s `getEntityCollisions`:
     /// `AbstractBoat.canVehicleCollide` takes any other cart, boat, shulker or pushable mob and
@@ -849,7 +857,7 @@ impl Game<'_> {
         c.fall_distance = 0.0;
         let ridden = self.cart_is_vehicle(c.id);
         let (x, z) = (c.position.x, c.position.z);
-        let old = self.rail_pos(x, c.position.y, z);
+        let old = self.rail_pos(Some(c.id), x, c.position.y, z);
         let mut y = f64::from(pos[1]);
         let (mut power, mut halt) = (false, false);
         if &*rail.name == "minecraft:powered_rail" {
@@ -931,9 +939,10 @@ impl Game<'_> {
             c.position.y += f64::from(e1[1]);
         }
         c.velocity = self.natural_slowdown(c, ridden, 0.96);
-        if let (Some(new), Some(old)) =
-            (self.rail_pos(c.position.x, c.position.y, c.position.z), old)
-        {
+        if let (Some(new), Some(old)) = (
+            self.rail_pos(Some(c.id), c.position.x, c.position.y, c.position.z),
+            old,
+        ) {
             let speed = (old[1] - new[1]) * 0.05;
             let h = c.horizontal();
             if h > 0.0 {
@@ -2845,11 +2854,11 @@ impl Game<'_> {
             let mut offset = glam::DVec3::ZERO;
             if new_render {
                 (yaw, pitch) = lerp.map_or((c.yaw, c.pitch), |(_, yaw, pitch)| (yaw, pitch));
-            } else if let Some(on) = self.rail_pos(x, y, z) {
+            } else if let Some(on) = self.rail_pos(Some(c.id), x, y, z) {
                 // getPosOffs(..., 0.3F): the float widened.
                 let half = f64::from(0.3_f32);
-                let front = self.rail_pos_offs(x, y, z, half).unwrap_or(on);
-                let back = self.rail_pos_offs(x, y, z, -half).unwrap_or(on);
+                let front = self.rail_pos_offs(Some(c.id), x, y, z, half).unwrap_or(on);
+                let back = self.rail_pos_offs(Some(c.id), x, y, z, -half).unwrap_or(on);
                 offset = glam::DVec3::new(on[0] - x, (front[1] + back[1]) / 2.0 - y, on[2] - z);
                 let d =
                     glam::DVec3::new(back[0] - front[0], back[1] - front[1], back[2] - front[2]);

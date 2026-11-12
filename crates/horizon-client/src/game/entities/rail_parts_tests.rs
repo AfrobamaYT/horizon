@@ -68,6 +68,12 @@ fn rail_parts_decide_the_track_carts_and_connections_follow() {
         assert!(game.run_command("setblock 3 64 12 minecraft:activator_rail"));
         assert_eq!(shape(game, [3, 64, 12]), "north_south");
         assert_eq!(shape(game, [2, 64, 12]), "north_south");
+        // An activator rail that refuses east-west lays no connection toward the detector rail
+        // east of it, so the detector keeps its own shape too.
+        assert!(game.run_command("setblock 9 64 12 minecraft:detector_rail"));
+        assert!(game.run_command("setblock 8 64 12 minecraft:activator_rail"));
+        assert_eq!(shape(game, [8, 64, 12]), "north_south");
+        assert_eq!(shape(game, [9, 64, 12]), "north_south");
         std::fs::remove_dir_all(scratch).ok();
     });
 }

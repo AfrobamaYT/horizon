@@ -207,9 +207,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         shape
     }
-    /// `state` with `shape`, or `state` unchanged when its `shape` property lacks that value or
-    /// the rail refuses it (`IBaseRailBlockExtension.isValidRailShape`).
-    fn rail_set_shape(&self, state: BlockStateId, shape: RailShape) -> BlockStateId {
+    /// `state` with `shape` (`state` itself when its `shape` property lacks that value), or none
+    /// when the rail refuses the shape (`IBaseRailBlockExtension.isValidRailShape`): the caller
+    /// then keeps the rail's state and connections as they were.
+    fn rail_set_shape(&self, state: BlockStateId, shape: RailShape) -> Option<BlockStateId> {
         let shaped = self
             .b
             .table
@@ -219,9 +220,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 .level
                 .adjust_rail_valid_shape(state, shape, shaped.is_some())
         {
-            return state;
+            return None;
         }
-        shaped.unwrap_or(state)
+        Some(shaped.unwrap_or(state))
     }
     fn rail_connect_to(&mut self, rail: &mut Rail, other_pos: BlockPos) {
         rail.connections.push(other_pos);
@@ -254,7 +255,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let shape = self
             .rail_slopes(pos, rail.state, shape)
             .unwrap_or(RailShape::NorthSouth);
-        rail.state = self.rail_set_shape(rail.state, shape);
+        let Some(state) = self.rail_set_shape(rail.state, shape) else {
+            // A refused shape keeps the rail as it was, without the new connection.
+            rail.connections.pop();
+            return;
+        };
+        rail.state = state;
         self.set_block_and_update(pos, rail.state);
     }
     /// `RailState.place`; returns the resulting state.
@@ -330,8 +336,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
         }
         let shape = self.rail_slopes(pos, rail.state, shape).unwrap_or(default);
-        rail.connections = Self::rail_connections(pos, shape);
-        rail.state = self.rail_set_shape(rail.state, shape);
+        // A refused shape keeps the state and the connections the rail already lays.
+        if let Some(state) = self.rail_set_shape(rail.state, shape) {
+            rail.connections = Self::rail_connections(pos, shape);
+            rail.state = state;
+        }
         if first || self.state(pos) != rail.state {
             self.set_block_and_update(pos, rail.state);
             for i in 0..rail.connections.len() {
