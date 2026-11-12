@@ -2555,6 +2555,9 @@ mod trap_scatter_tests {
 
         let mut resources = None;
         let mut game = super::super::game_tests::tests::server_game(&mut resources);
+        // Mounting resolves epoch-scoped resident handles, just as in an open world.
+        game.native_lifecycle
+            .begin_open(super::super::native_lifecycle::Authority::IntegratedServer);
         game.world
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));

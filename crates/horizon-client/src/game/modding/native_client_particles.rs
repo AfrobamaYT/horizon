@@ -187,7 +187,10 @@ mod tests {
             assert!(!host.create_fireworks(&bad), "non-finite input");
             let mut most = request(false);
             most.explosions = vec![most.explosions[0].clone(); 256];
-            assert!(host.create_fireworks(&most), "256 explosions, vanilla's most");
+            assert!(
+                host.create_fireworks(&most),
+                "256 explosions, vanilla's most"
+            );
             bad = request(false);
             bad.explosions = vec![bad.explosions[0].clone(); 257];
             assert!(!host.create_fireworks(&bad), "257 explosions");

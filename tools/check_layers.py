@@ -196,7 +196,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base", help="refuse 'allowed' entries added since this git ref")
     parser.add_argument("--list", action="store_true", help="print each crate's layer and the exceptions")
+    if __package__:
+        from . import check_file_size
+    else:
+        import check_file_size
+    parser.add_argument("--pull-request-merge", action="store_true", help=check_file_size.PULL_REQUEST_MERGE_HELP)
     args = parser.parse_args(argv)
+    if args.base:
+        args.base, error = check_file_size.pull_request_base(args.base, args.pull_request_merge)
+        if error:
+            print(f"Layer check failed: {error}")
+            return 1
     config = load_config()
     packages = workspace_packages(config)
     graph = edges(packages)
@@ -209,10 +219,6 @@ def main(argv=None):
             print(f"  {edge}")
         return 0
     if args.base:
-        if __package__:
-            from . import check_file_size
-        else:
-            import check_file_size
         upstream, provenance = check_file_size.verified_sync_config(args.base, CONFIG_PATH)
     else:
         upstream, provenance = None, []

@@ -1564,6 +1564,9 @@ pub(super) mod tests {
                 root.clone(),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
+            // Crash shutdown only saves an adopted world whose storage is owned.
+            game.session_lock = Some(horizon_client::save::SessionLock::acquire(&root).unwrap());
+            game.world_adopted = true;
             game.player = Some(
                 horizon_client::motion::PlayerMotion::new(
                     game.motion,
