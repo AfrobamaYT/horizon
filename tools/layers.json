@@ -173,7 +173,6 @@
     "horizon-mod-registry -> horizon-mod-package",
     "horizon-client -> horizon-cosmetics",
     "horizon-client -> horizon-telemetry",
-    "horizon-client-lib -> horizon-telemetry",
     "horizon-client-render -> horizon-cosmetics"
   ],
   "_fork_baselines": {

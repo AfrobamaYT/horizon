@@ -252,3 +252,7 @@ The other seven deletions are rechecked against their active owners: graphics sl
 ## Current-main integration after delta carry
 
 Merge main through `66a48904198` once after the C1–C4 carry. The sole textual conflict is the post-removal harvest check in game.rs: retain main's `player_destroy_block_removal` result, whose `harvest_after_removal` already evaluates the current held tool and typed mod harvest check. Do not run that check a second time. All other main changes merge directly, including its CI configuration and rendering/mod architecture updates.
+
+## CI repair: lint and static tool contracts
+
+Read current-head lint and verify-static logs before repair. Remove the redundant i8 item-frame rotation cast, apply current rustfmt to remote projectile dispatch, and remove the repeated telemetry edge from the layer allowlist. The entity-lift source check excludes exactly `game/creatures/mob_islands.rs`: it is byte-identical retained upstream source behind the unsupported nondefault feature, excluded from active module discovery. Its raw take is not changed, and no active entity-list mutation is exempted. Python tool tests follow the actual retained tool contracts rather than obsolete fixture argument shapes. No local tests or clippy run for the repair; CI is the check.

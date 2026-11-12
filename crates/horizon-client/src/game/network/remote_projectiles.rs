@@ -765,21 +765,19 @@ impl Game<'_> {
                 targets: Vec::new(),
                 border: Some(self.border.bounds()),
             };
-            projectiles.for_each_mut(|p| {
-                match p.kind {
-                    ProjectileKind::Arrow { .. } => {
-                        let _ = horizon_client::arrows::tick_client(p, &arrow_scene);
-                        if let Some(a) = p.arrow.as_mut() {
-                            arrow_events.extend(
-                                std::mem::take(&mut a.events)
-                                    .into_iter()
-                                    .map(|event| (p.position, event)),
-                            );
-                        }
+            projectiles.for_each_mut(|p| match p.kind {
+                ProjectileKind::Arrow { .. } => {
+                    let _ = horizon_client::arrows::tick_client(p, &arrow_scene);
+                    if let Some(a) = p.arrow.as_mut() {
+                        arrow_events.extend(
+                            std::mem::take(&mut a.events)
+                                .into_iter()
+                                .map(|event| (p.position, event)),
+                        );
                     }
-                    ProjectileKind::ShulkerBullet { .. } => remote_bullet_tick(p, &world),
-                    _ => remote_projectile_tick(p, &world),
                 }
+                ProjectileKind::ShulkerBullet { .. } => remote_bullet_tick(p, &world),
+                _ => remote_projectile_tick(p, &world),
             });
             for t in &mut tridents {
                 t.remote_tick(&world, self.remote_eye(t.owner));
