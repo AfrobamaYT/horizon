@@ -10,7 +10,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
 
@@ -32,17 +32,53 @@ impl Raised {
     }
 }
 impl EntityRenderer for Raised {
-    fn submit(&self, _: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext) {
-        let (low, high) = (self.height, self.height + 1.0);
-        let corners = [
-            [0.0, high, 0.0],
-            [0.0, low, 0.0],
-            [1.0, low, 0.0],
-            [1.0, high, 0.0],
-        ];
-        let drew = draw.quad("block/stone", corners, [0.0, 0.0, 16.0, 16.0], 0xFF_FFFF);
+    fn submit(
+        &self,
+        _: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String> {
+        let drew = raised_quad(draw, self.height);
         self.drew.store(drew, Ordering::Relaxed);
+        Ok(())
     }
+}
+
+/// Refuses its first call with an `Err`, then draws one stone quad 400 blocks above the entity;
+/// `calls` counts the calls.
+#[derive(Default)]
+struct Flaky {
+    calls: AtomicU32,
+}
+impl Flaky {
+    fn calls(&self) -> u32 {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
+impl EntityRenderer for Flaky {
+    fn submit(
+        &self,
+        _: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String> {
+        let first = self.calls.fetch_add(1, Ordering::Relaxed) == 0;
+        raised_quad(draw, 400.0);
+        if first {
+            return Err("refused its first frame".into());
+        }
+        Ok(())
+    }
+}
+
+/// One stone quad a block wide, `height` blocks above the entity; whether the sprite was there.
+fn raised_quad(draw: &mut dyn BlockEntityDrawContext, height: f32) -> bool {
+    let (low, high) = (height, height + 1.0);
+    let corners = [
+        [0.0, high, 0.0],
+        [0.0, low, 0.0],
+        [1.0, low, 0.0],
+        [1.0, high, 0.0],
+    ];
+    draw.quad("block/stone", corners, [0.0, 0.0, 16.0, 16.0], 0xFF_FFFF)
 }
 
 static TYPES: [ThrownType; 2] = [
@@ -101,11 +137,13 @@ fn a_registration_for_a_vanilla_type_is_kept_silently() {
 }
 
 /// The renderers the scene's mod registers: `ruby:bolt` twice (`first` 100 blocks up, then
-/// `second` 200 up) and `minecraft:oak_boat` (`boat`, 300 up). `ruby:dart` has none.
+/// `second` 200 up), `minecraft:oak_boat` (`boat`, 300 up) and `ruby:spike` (`spike`, failing its
+/// first call). `ruby:dart` has none.
 struct Scene {
     first: Arc<Raised>,
     second: Arc<Raised>,
     boat: Arc<Raised>,
+    spike: Arc<Flaky>,
 }
 
 /// The camera, south of the entities and looking at them.
@@ -137,8 +175,8 @@ fn thrown_frame(game: &mut Game<'_>, kinds: &[&str]) -> Vec<Vertex> {
     out
 }
 
-/// Runs `check` on a client game with prepared resources, the thrown types `ruby:bolt` and
-/// `ruby:dart` and the [`Scene`]'s registrations, resolved as the first load does. In a child
+/// Runs `check` on a client game with prepared resources, the thrown types `ruby:bolt`,
+/// `ruby:dart` and `ruby:spike` and the [`Scene`]'s registrations, resolved as the first load does. In a child
 /// process running only `test`: the thrown types and the registrations are kept once per process.
 fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
     if std::env::var_os("HORIZON_ENTITY_RENDERERS_CHILD").is_none() {
@@ -159,13 +197,15 @@ fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
     assert!(horizon_client::projectiles::register_thrown_types([
         ("ruby:bolt".into(), "minecraft:snowball".into(), 0.0),
         ("ruby:dart".into(), "minecraft:snowball".into(), 0.0),
+        ("ruby:spike".into(), "minecraft:snowball".into(), 0.0),
     ]));
     let scene = Scene {
         first: Raised::new(100.0),
         second: Raised::new(200.0),
         boat: Raised::new(300.0),
+        spike: Arc::default(),
     };
-    struct Renderers(Arc<Raised>, Arc<Raised>, Arc<Raised>);
+    struct Renderers(Arc<Raised>, Arc<Raised>, Arc<Raised>, Arc<Flaky>);
     #[mod_api::__subscriptions]
     impl Hooks for Renderers {
         fn register_entity_renderers(
@@ -178,12 +218,16 @@ fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
             event
                 .renderers
                 .register("minecraft:oak_boat".into(), self.2.clone());
+            event
+                .renderers
+                .register("ruby:spike".into(), self.3.clone());
         }
     }
     let renderers = Renderers(
         scene.first.clone(),
         scene.second.clone(),
         scene.boat.clone(),
+        scene.spike.clone(),
     );
     let mods = vec![mod_api::ModEntry::new("ruby", Box::new(renderers))].into();
     mod_platform::testing::with_mods(mods, || {
@@ -251,16 +295,28 @@ fn a_vanilla_boat_is_unchanged_by_a_registration_for_its_type() {
     );
 }
 
+/// A failing renderer falls back to the item and is asked no more; only a reload's fresh table asks
+/// it again, so this also fails when a reload does not rebuild the table (or does not finish).
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn a_resource_reload_keeps_the_registered_renderer_in_use() {
+fn a_failed_renderer_draws_the_item_until_a_resource_reload_resolves_it_again() {
     in_scene(
-        "a_resource_reload_keeps_the_registered_renderer_in_use",
-        |game, _| {
+        "a_failed_renderer_draws_the_item_until_a_resource_reload_resolves_it_again",
+        |game, scene| {
+            for frame in ["the failing frame", "the next frame"] {
+                let spike = thrown_frame(game, &["ruby:spike"]);
+                assert!(!spike.is_empty(), "{frame}: its snowball item");
+                assert!(
+                    spike.iter().all(|v| above(v) < 2.0),
+                    "{frame}: no quad kept: {spike:?}"
+                );
+                assert_eq!(scene.spike.calls(), 1, "{frame}: asked once, then no more");
+            }
             super::model_baking_completed_tests::reload(game);
-            let bolt = thrown_frame(game, &["ruby:bolt"]);
-            assert_eq!(bolt.len(), 4, "one quad and no item: {bolt:?}");
-            assert!(bolt.iter().all(|v| (200.0..=201.0).contains(&above(v))));
+            let spike = thrown_frame(game, &["ruby:spike"]);
+            assert_eq!(scene.spike.calls(), 2, "the reload resolved it again");
+            assert_eq!(spike.len(), 4, "one quad and no item: {spike:?}");
+            assert!(spike.iter().all(|v| (400.0..=401.0).contains(&above(v))));
         },
     );
 }

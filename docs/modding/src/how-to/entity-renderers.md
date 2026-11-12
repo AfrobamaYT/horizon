@@ -17,12 +17,17 @@ use std::sync::Arc;
 
 struct Bolt;
 impl EntityRenderer for Bolt {
-    fn submit(&self, entity: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext) {
+    fn submit(
+        &self,
+        entity: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String> {
         // The pose starts at the entity, not turned: face the way it flies.
         draw.rotate_about([0.0, 1.0, 0.0], -entity.yaw, [0.0; 3]);
         draw.rotate_about([1.0, 0.0, 0.0], entity.pitch, [0.0; 3]);
         let face = Some(CubeFace::new("example:entity/bolt"));
         draw.cube([-1.0, -1.0, -4.0], [1.0, 1.0, 4.0], [face; 6], 0xFFFFFF);
+        Ok(())
     }
 }
 ```
@@ -61,8 +66,10 @@ scan over the mods.
 - A later registration for a type replaces the earlier one silently, whichever mod made it, as in
   NeoForge, also for a vanilla type.
 - A type the game does not know is logged with its id and left out; nothing panics.
-- A renderer that panics is asked no more until the next resource load (a reload resolves it again),
-  and until then its type draws as it would without one.
+- `submit` returns `Ok(())` to keep what it drew. A renderer that returns an `Err`, panics, or (in a
+  wasm mod) has its call refused or trapped is logged once and asked no more until the next resource
+  load (a reload resolves it again); what it drew that frame is dropped, and until then its type draws
+  as it would without one.
 
 ## What draws through registered renderers
 

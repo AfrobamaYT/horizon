@@ -40,10 +40,15 @@ pub trait EntityRenderer: Send + Sync + 'static {
     /// turned: turn it by `entity.yaw` and `entity.pitch` as the model needs. `draw` also has
     /// the partial tick, the game time and the entity's light. Asked once a frame for each entity
     /// of the type in view; what it draws replaces the type's own drawing. A frame is drawn
-    /// afresh: `draw.keep()` does nothing here. A renderer that panics is asked no more until the
-    /// next resource load resolves it again, and until then its type draws as it would without
-    /// one.
-    fn submit(&self, entity: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext);
+    /// afresh: `draw.keep()` does nothing here. `Ok(())` keeps what it drew. An `Err`, a panic,
+    /// and a wasm call that is refused or traps all mean the same: what it drew this frame is
+    /// dropped, the error is logged once, and the renderer is asked no more until the next
+    /// resource load resolves it again; until then its type draws as it would without one.
+    fn submit(
+        &self,
+        entity: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String>;
 }
 
 crate::wire::wire_handlers::handler!(dyn EntityRenderer, "EntityRenderer");
@@ -85,8 +90,13 @@ mod tests {
 
     struct Marked(u32);
     impl EntityRenderer for Marked {
-        fn submit(&self, _entity: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext) {
+        fn submit(
+            &self,
+            _entity: &EntityRenderState,
+            draw: &mut dyn BlockEntityDrawContext,
+        ) -> Result<(), String> {
             draw.set_light(self.0);
+            Ok(())
         }
     }
 
@@ -114,8 +124,8 @@ mod tests {
             pitch: 0.0,
         };
         let (mut bolt, mut dart) = (Light::default(), Light::default());
-        renderers["mymod:bolt"].submit(&state, &mut bolt);
-        renderers["mymod:dart"].submit(&state, &mut dart);
+        renderers["mymod:bolt"].submit(&state, &mut bolt).unwrap();
+        renderers["mymod:dart"].submit(&state, &mut dart).unwrap();
         assert_eq!((bolt.0, dart.0), (3, 2));
     }
 }

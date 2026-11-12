@@ -7,10 +7,15 @@ use mod_api::{
 /// Lights what it draws `base` plus the entity's id, after moving up by its age.
 struct Marked(u32);
 impl EntityRenderer for Marked {
-    fn submit(&self, entity: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext) {
+    fn submit(
+        &self,
+        entity: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String> {
         draw.translate([0.0, entity.age, 0.0]);
         draw.rotate_about([0.0, 1.0, 0.0], -entity.yaw, [0.0; 3]);
         draw.set_light(self.0 + entity.id);
+        Ok(())
     }
 }
 pub(super) fn register(renderers: &mut dyn EntityRenderers) {
@@ -85,7 +90,7 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                 .into();
                 for (kind, light) in [("wire_test:bolt", 307), ("wire_test:dart", 207)] {
                     let mut draw = Draw::default();
-                    renderers[kind].submit(&entity, &mut draw);
+                    assert_eq!(renderers[kind].submit(&entity, &mut draw), Ok(()));
                     assert_eq!(
                         draw,
                         Draw {
@@ -95,6 +100,15 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                         },
                         "{kind}, guest {guest}"
                     );
+                }
+                if guest {
+                    // A guest call whose reply doesn't decode (as a refused or trapped call
+                    // leaves none) is an `Err`, never a silent `Ok`: the game then draws the
+                    // type's own geometry.
+                    APPEND_ATTACK.set(3);
+                    let refused = renderers["wire_test:bolt"].submit(&entity, &mut Draw::default());
+                    APPEND_ATTACK.set(0);
+                    assert_eq!(refused, Err("wasm call refused or trapped".into()));
                 }
             },
         );

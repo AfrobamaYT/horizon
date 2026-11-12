@@ -35,7 +35,7 @@ pub(super) fn register(renderers: BTreeMap<String, Arc<dyn EntityRenderer>>) -> 
     REGISTERED.set(renderers).is_ok()
 }
 
-/// One type's resolved renderer, and whether it has panicked (then it is asked no more until the
+/// One type's resolved renderer, and whether it has failed (then it is asked no more until the
 /// next resource load resolves the table again).
 pub(in crate::game) struct Resolved {
     renderer: Arc<dyn EntityRenderer>,
@@ -111,7 +111,9 @@ impl Game<'_> {
 
     /// Draws `entity` with `resolved`'s renderer, at `at` relative to the camera (`block` the
     /// block it stands in), lit by `light` as the entity pass packs it: true when it drew, and the
-    /// type's own drawing is left out. False, with nothing added, once the renderer has panicked.
+    /// type's own drawing is left out. False, with nothing it drew kept, when it fails this frame
+    /// (an `Err`, a panic, a refused or trapped wasm call) and from then until the next resource
+    /// load resolves it again.
     pub(in crate::game) fn mod_entity_renderer_geometry(
         &self,
         resolved: &Resolved,
@@ -135,23 +137,24 @@ impl Game<'_> {
             std::mem::take(out),
         )
         .animated(self.animation_time());
-        let drew = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut draw = GameBlockEntityDrawContext {
                 game: self,
                 surface: &mut surface,
             };
-            resolved.renderer.submit(entity, &mut draw);
+            resolved.renderer.submit(entity, &mut draw)
         }))
-        .is_ok();
+        .unwrap_or_else(|_| Err("it panicked".into()));
         *out = surface.into_vertices();
-        if !drew {
-            out.truncate(start);
-            if !resolved.failed.swap(true, Ordering::Relaxed) {
-                log::warn!(
-                    "Horizon: an entity renderer panicked; it is asked no more until resources reload"
-                );
-            }
+        let Err(error) = result else {
+            return true;
+        };
+        out.truncate(start);
+        if !resolved.failed.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "Horizon: an entity renderer failed ({error}); it is asked no more until resources reload"
+            );
         }
-        drew
+        false
     }
 }

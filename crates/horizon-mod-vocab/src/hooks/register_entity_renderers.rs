@@ -20,12 +20,17 @@ lookup by name, no scan over the mods.
 ```rust,ignore
 struct Bolt;
 impl EntityRenderer for Bolt {
-    fn submit(&self, entity: &EntityRenderState, draw: &mut dyn BlockEntityDrawContext) {
+    fn submit(
+        &self,
+        entity: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String> {
         // The pose starts at the entity, not turned: face the way it flies.
         draw.rotate_about([0.0, 1.0, 0.0], -entity.yaw, [0.0; 3]);
         draw.rotate_about([1.0, 0.0, 0.0], entity.pitch, [0.0; 3]);
         let face = Some(CubeFace::new("example:entity/bolt"));
         draw.cube([-1.0, -1.0, -4.0], [1.0, 1.0, 4.0], [face; 6], 0xFFFFFF);
+        Ok(())
     }
 }
 
@@ -53,8 +58,10 @@ out; one for a known type whose family does not draw through registered renderer
 and the type keeps its own drawing until its family does. Today the content mods' thrown types (a
 `data/<id>/horizon/entity_type/<name>.json` with the `minecraft:snowball` template) draw through their
 registered renderer; boats, displays, the other projectiles and the mobs come in follow-ups of #860, and
-a mod's general entity types (#792) will register the same way. A renderer that panics is asked no more
-until the next resource load resolves it again, and until then its type draws as it would without one."#]
+a mod's general entity types (#792) will register the same way. A renderer that returns an `Err`,
+panics, or (in a wasm mod) has its call refused or trapped is logged once with the error and asked no
+more until the next resource load resolves it again; what it drew that frame is dropped, and until then
+its type draws as it would without one."#]
     #[hook(
         side = "client",
         contract = "listen",
