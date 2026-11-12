@@ -9,6 +9,22 @@ pub fn builder() -> std::thread::Builder {
     std::thread::Builder::new().stack_size(GUEST_STACK_BYTES + HOST_HEADROOM)
 }
 
+/// Starts a thread that may enter a guest: guest-sized and named `name`, and in debug builds it
+/// asserts at its start that the reservation took, so a test that starts it fails loudly if not.
+pub fn spawn<T: Send + 'static>(
+    name: String,
+    body: impl FnOnce() -> T + Send + 'static,
+) -> std::io::Result<std::thread::JoinHandle<T>> {
+    builder().name(name).spawn(move || {
+        debug_assert_eq!(
+            check_current(),
+            Ok(()),
+            "a guest-capable thread must start on the guest stack"
+        );
+        body()
+    })
+}
+
 /// Runs `test` on a guest-sized worker named like the calling thread, so libtest reports it under
 /// its own name, and resumes its panic with the original payload. For tests that enter a guest:
 /// libtest's own threads are too small.
