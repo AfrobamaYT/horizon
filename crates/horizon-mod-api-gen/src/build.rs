@@ -2,6 +2,19 @@
 use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
+mod vocab_boundary;
+
+fn write_vocab_output(
+    out_dir: &Path,
+    name: &str,
+    code: &str,
+    inventory: &vocab_boundary::Inventory,
+    sources: &std::collections::BTreeSet<std::path::PathBuf>,
+) -> Result<(), String> {
+    vocab_boundary::validate_with_modules(name, code, inventory, sources)
+        .map_err(|e| format!("{name}: {e}"))?;
+    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())
+}
 
 /// Preserve output timestamps when generation produces identical bytes.
 pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
@@ -20,6 +33,18 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
     track(root, !matches!(&target, Target::Vocab))?;
+    let inventory = if matches!(target, Target::Vocab) {
+        let path = root.join("tools/layering/mod_vocab_state.json");
+        crate::rerun_if_changed(&path.display());
+        vocab_boundary::inventory(root)?
+    } else {
+        vocab_boundary::Inventory::new()
+    };
+    let vocab_sources = if matches!(target, Target::Vocab) {
+        vocab_boundary::modules::sources(root)?
+    } else {
+        std::collections::BTreeSet::new()
+    };
     if matches!(&target, Target::Client) {
         println!(
             "cargo:rerun-if-changed={}",
@@ -43,14 +68,23 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api | Target::Vocab => {
-            if matches!(target, Target::Vocab) {
+            if matches!(target, Target::Api) {
                 write_if_changed(
-                    out_dir.join(super::parts::OUTPUT),
-                    super::parts::source(root)?,
+                    out_dir.join("parts_registration_modules.rs"),
+                    super::parts::registration_source(root)?,
                 )
                 .map_err(|e| e.to_string())?;
+            }
+            if matches!(target, Target::Vocab) {
+                write_vocab_output(
+                    out_dir,
+                    super::parts::OUTPUT,
+                    &super::parts::source(root)?,
+                    &inventory,
+                    &vocab_sources,
+                )?;
                 for (name, code) in super::exports::sources(root)? {
-                    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                    write_vocab_output(out_dir, &name, &code, &inventory, &vocab_sources)?;
                 }
             }
             let hooks = generated.hooks;
@@ -92,7 +126,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     };
     for (name, code) in outputs {
         let code = generated_source(root, &target, name, code)?;
-        write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        if matches!(target, Target::Vocab) {
+            write_vocab_output(out_dir, name, &code, &inventory, &vocab_sources)?;
+        } else {
+            write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        }
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
@@ -337,7 +375,7 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
         }
         Ok(())
     }
-    crate::rerun_if_changed(&root.join("crates/horizon-mod-vocab/src/lib.rs").display());
+    crate::rerun_if_changed(&root.join("crates/horizon-mod-vocab/src").display());
     for retired in super::catalog::RETIRED {
         // Only while present: Cargo reruns a build script on every build for a path that doesn't
         // exist. One that appears fails the next generation, and every fresh build, such as CI's.
