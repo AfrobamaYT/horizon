@@ -657,7 +657,11 @@ impl Game<'_> {
     }
 
     /// `GameEvent.Context.of(entity, state)` for a non-living entity.
-    pub(super) fn entity_event_context(&self, id: u32, state: Option<BlockStateId>) -> Context {
+    pub(in crate::game) fn entity_event_context(
+        &self,
+        id: u32,
+        state: Option<BlockStateId>,
+    ) -> Context {
         let dampens = self
             .dropped
             .iter()
@@ -702,7 +706,12 @@ impl Game<'_> {
     // ---- posting ----
 
     /// `Level.gameEvent`: tell the listeners within reach.
-    pub(super) fn post_game_event(&mut self, event: &'static str, pos: [f64; 3], ctx: Context) {
+    pub(in crate::game) fn post_game_event(
+        &mut self,
+        event: &'static str,
+        pos: [f64; 3],
+        ctx: Context,
+    ) {
         #[cfg(test)]
         TEST_POSTED_EVENTS.with(|events| {
             if let Some(events) = events.borrow_mut().as_mut() {
@@ -1171,6 +1180,23 @@ impl Game<'_> {
                 if let Some((info, travel)) = tick.started {
                     let source = PositionSource::Block([key.0, key.1, key.2]);
                     self.vibration_particle(source, info.pos, center(key), travel);
+                }
+                if let Some((info, travel)) = tick.resumed {
+                    let source = PositionSource::Block([key.0, key.1, key.2]);
+                    let dest = center(key);
+                    let initial = info.distance.floor() as i32;
+                    // `tryReloadVibrationParticle` works in doubles.
+                    let alpha = if initial > 0 {
+                        1.0 - f64::from(travel) / f64::from(initial)
+                    } else {
+                        0.0
+                    };
+                    let current_pos = [
+                        info.pos[0] + (dest[0] - info.pos[0]) * alpha,
+                        info.pos[1] + (dest[1] - info.pos[1]) * alpha,
+                        info.pos[2] + (dest[2] - info.pos[2]) * alpha,
+                    ];
+                    self.vibration_particle(source, current_pos, dest, travel);
                 }
                 if let Some(info) = tick.received {
                     self.sculk_receive(key, info)?;
@@ -1925,7 +1951,12 @@ impl Game<'_> {
     }
     /// Retain the projectile as the landing event source and the
     /// shooter as its owner, even when the projectile is held out for ticking.
-    pub(super) fn projectile_landed_event(&mut self, id: u32, owner: Option<Who>, at: [f64; 3]) {
+    pub(in crate::game) fn projectile_landed_event(
+        &mut self,
+        id: u32,
+        owner: Option<Who>,
+        at: [f64; 3],
+    ) {
         let ctx = Context {
             source: (id != 0).then_some(EventSource::Entity(id)),
             owner,
@@ -1999,7 +2030,12 @@ impl Game<'_> {
     }
 
     /// `Entity.checkFallDamage` emits HIT_GROUND after the block's fallOn.
-    pub(super) fn post_landing_event(&mut self, position: Vec3, bounds: Aabb, living: bool) {
+    pub(in crate::game) fn post_landing_event(
+        &mut self,
+        position: Vec3,
+        bounds: Aabb,
+        living: bool,
+    ) {
         if self.remote.is_some() || self.options.execution_role.is_client() {
             return;
         }
@@ -2334,7 +2370,7 @@ impl Game<'_> {
             == horizon_client::blocks::Fluid::Water
     }
     /// `Entity.checkSupportingBlock`: the block under this box closest to the
-    /// entity. Everything but the player works it out when it asks.
+    /// entity. Everything but the player works it out when it asks (Breeze ground dust too).
     pub(in crate::game) fn supporting_block(
         &self,
         position: Vec3,
@@ -2562,7 +2598,10 @@ fn darkness_target(e: &EffectInstance) -> f32 {
 /// `MobEffectInstance.BlendState.tick` for the darkness effect: from the
 /// (previous, current) factors, the next ones. It fades in and out over 22
 /// ticks; with no darkness it is gone.
-pub(super) fn darkness_blend_tick(effects: &PlayerEffects, (_, current): (f32, f32)) -> (f32, f32) {
+pub(in crate::game) fn darkness_blend_tick(
+    effects: &PlayerEffects,
+    (_, current): (f32, f32),
+) -> (f32, f32) {
     let next = match effects.get("darkness") {
         Some(e) => {
             let step = 1.0 / DARKNESS_BLEND as f32;
@@ -3169,3 +3208,8 @@ mod shriek_capture_tests {
         }
     }
 }
+
+// Milking and shearing farm animals; lives here for `TEST_POSTED_EVENTS`.
+#[cfg(test)]
+#[path = "tests/farm_animal_interaction_tests.rs"]
+mod farm_animal_interaction_tests;
