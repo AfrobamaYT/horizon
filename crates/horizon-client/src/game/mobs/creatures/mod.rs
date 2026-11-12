@@ -4776,8 +4776,6 @@ impl Game<'_> {
         for (block, position, movement) in snow_contacts {
             self.powder_snow_particle(block, position, movement);
         }
-        // Settlement may remove rows or append hook-spawned projectiles. Remember
-        // the ticked cohort by identity, not by its pre-settlement row indices.
         let last_ticked_join = projectiles.iter().map(|p| p.join).max();
         let listed = keep_flags.clone();
         let mut idx = 0;
@@ -4825,10 +4823,9 @@ impl Game<'_> {
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
         }
-        // `Entity.applyEffectsFromBlocks`' checkInsideBlocks for every
-        // projectile that ticked, at the batch: the borrow block above held the
-        // world read-only, and a part's contact needs the lent level, so the
-        // sweeps run here, each still inside this batch and its own tick.
+        // `Entity.applyEffectsFromBlocks` sweeps the original cohort by join identity:
+        // settlement can remove rows or append hook spawns. Contacts need the lent
+        // level here, after the read-only borrow, each still in this batch's tick.
         for i in 0..projectiles.len() {
             if last_ticked_join.is_none_or(|last| projectiles[i].join > last) {
                 continue;
