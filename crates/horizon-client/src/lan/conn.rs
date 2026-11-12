@@ -1165,7 +1165,7 @@ struct Parts {
     info: ClientInformation,
     brand: String,
     datapack_offer: Option<Vec<u8>>,
-    announced: Arc<super::announced_channels::AnnouncedChannels>,
+    announced: Option<Arc<super::announced_channels::AnnouncedChannels>>,
 }
 
 fn login_and_configure(
@@ -1614,8 +1614,11 @@ fn receive_configuration(
         // ServerCommonPacketListenerImpl hands these to the plugin messenger, in
         // configuration as in play: the list stays on the connection.
         cfg::Serverbound::CustomPayload(payload)
-            if c.announced.apply(&payload.channel, &payload.data) =>
+            if super::announced_channels::is_list_channel(&payload.channel) =>
         {
+            c.announced
+                .get_or_insert_with(Arc::default)
+                .apply(&payload.channel, &payload.data);
             Ok(None)
         }
         cfg::Serverbound::CustomPayload(payload) => c
@@ -1941,7 +1944,7 @@ fn play(
         wire: Some(c.reader.counters.clone()),
         payload_transport: parts.payload_transport.clone(),
         datapack_offer: parts.datapack_offer.map(Into::into),
-        announced: parts.announced.clone(),
+        announced: parts.announced.clone().unwrap_or_default(),
     };
     let required_pack = shared
         .config

@@ -15,6 +15,11 @@ pub const MAX_CHANNEL_LEN: usize = 64;
 #[derive(Debug, Default)]
 pub struct AnnouncedChannels(Mutex<Vec<String>>);
 
+/// Whether `channel` is one of the two list channels the engine consumes.
+pub fn is_list_channel(channel: &str) -> bool {
+    channel == REGISTER || channel == UNREGISTER
+}
+
 impl AnnouncedChannels {
     /// Applies a `minecraft:register` / `minecraft:unregister` body; another channel
     /// is not this list's (false). Malformed entries (not UTF-8, too long, not a
@@ -67,6 +72,15 @@ fn valid(entry: &[u8]) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_two_list_channels_are_consumed() {
+        assert!(is_list_channel("minecraft:register"));
+        assert!(is_list_channel("minecraft:unregister"));
+        for other in ["minecraft:brand", "voicechat:secret", "register"] {
+            assert!(!is_list_channel(other), "{other}");
+        }
+    }
 
     #[test]
     fn register_and_unregister_keep_an_ordered_set() {
