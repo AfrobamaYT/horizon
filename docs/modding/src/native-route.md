@@ -63,13 +63,8 @@ The first build with a `[[native.mixin]]` row gets the horizon-mixins tool once 
 a prebuilt download where one is published, otherwise a build from source that takes about a minute. Later
 builds take a few seconds.
 
-The prebuilt tool comes from this repository's `mixins-tool-…` release and is checked against that release's
-`SHA256SUMS` and against the commit, patch and platform the launcher pins. That protects against a damaged
-download, as for the prebuilt game; it is not a signature. Where the release has no build for your platform (an
-Intel Mac, a pin not released yet), the build log says `horizon-mixins tool: no prebuilt for <target>; building
-from source (once per pin)`. A download that fails is an error to retry, never a source build. A newly pinned
-tool's prebuilt is published by a run on main; a pin replaced while its run waited gets its prebuilt from a
-manual dispatch, and until then the launcher builds the tool from source.
+The prebuilt tool is checked against its release's `SHA256SUMS` and against the commit, patch and platform the
+launcher pins. Where no prebuilt exists for your platform or pin, the launcher builds the tool from source.
 
 When it works, the launcher's [build log](how-to/native-mods/029-build-log.md#build-log) (`native/build.log`, also
 the **Build log** button) shows the number of patched functions and mixin rows:
