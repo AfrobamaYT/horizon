@@ -18,6 +18,8 @@ mod load_conditions;
 mod loot_tags_wire;
 #[path = "wire_loopback/piston_push_reaction.rs"]
 mod piston_push_reaction;
+#[path = "wire_loopback/piglin_answers.rs"]
+mod piglin_answers;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 thread_local! {
@@ -236,6 +238,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
+            piglin_answers::register(registrar);
             block_entity_transform::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
