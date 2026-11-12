@@ -175,8 +175,13 @@ impl Game<'_> {
         if self.cmds.guest_cameras.get(&conn).map(|c| c.id) == camera {
             return;
         }
+        // A target with no state (gone, dead, in another level) is no camera: nothing changes
+        // and nobody is told.
         let at = match camera {
-            Some(id) => self.camera_state(id).map(|s| s.0),
+            Some(id) => match self.camera_state(id) {
+                Some((position, _)) => Some(position),
+                None => return,
+            },
             None => Some(host.hub.guests[gi].position),
         };
         match camera {
