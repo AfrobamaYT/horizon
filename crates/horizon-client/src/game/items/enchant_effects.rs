@@ -969,7 +969,11 @@ impl Game<'_> {
             // EnchantmentHelper.getRandomItemWith(REPAIR_WITH_XP, damaged), in
             // EquipmentSlot order, drawn from the player's own random.
             let slots = PLAYER_SLOTS.map(|slot| (slot, self.player_slot(slot)));
-            let Some(slot) = pick_mending_slot(slots, &mut random_source::entity()) else {
+            let Some(slot) = pick_mending_slot(
+                slots,
+                &world_stations!(self).enchantments,
+                &mut random_source::entity(),
+            ) else {
                 return amount;
             };
             let Some(stack) = self.player_slot(slot).clone() else {
@@ -993,15 +997,15 @@ impl Game<'_> {
             }
             // A hook can re-enter experience granting or replace the slot. Only
             // repair the same eligible stack, using its current damage.
+            let eligible = self.player_slot(slot).as_ref().is_some_and(|current| {
+                mending_entries(current, slot, &world_stations!(self).enchantments) > 0
+            });
             let Some(current) = self.player_slot_mut(slot).as_mut() else {
                 return amount;
             };
             let mut original = stack.clone();
             original.damage = current.damage;
-            if *current != original
-                || current.damage == 0
-                || current.enchantment_level("minecraft:mending") == 0
-            {
+            if *current != original || current.damage == 0 || !eligible {
                 return amount;
             }
             if to_repair_xp == 0 {
@@ -1559,21 +1563,43 @@ fn armor_changes(
     changed
 }
 
+fn mending_entries(stack: &ItemStack, slot: PlayerSlot, enchantments: &Enchantments) -> usize {
+    if stack.damage == 0 {
+        return 0;
+    }
+    stack
+        .enchantments()
+        .iter()
+        .filter(|(id, _)| {
+            enchantments.get(id).is_some_and(|def| {
+                def.effects.get("minecraft:repair_with_xp").is_some()
+                    && def
+                        .slots
+                        .iter()
+                        .any(|group| crate::game::equipment_modifier_applies(group, slot.name()))
+            })
+        })
+        .count()
+}
+
 /// `EnchantmentHelper.getRandomItemWith(REPAIR_WITH_XP, player, ItemStack::isDamaged)`:
-/// collects damaged Mending pieces in `EquipmentSlot.VALUES` order and picks
+/// collects damaged effect-bearing pieces in `EquipmentSlot.VALUES` order and picks
 /// one with the player's own random (`Entity.random`), never the level's.
 fn pick_mending_slot(
     slots: [(PlayerSlot, &Option<ItemStack>); 6],
+    enchantments: &Enchantments,
     random: &mut impl RandomSource,
 ) -> Option<PlayerSlot> {
-    let mending = |s: &Option<ItemStack>| {
-        s.as_ref()
-            .is_some_and(|s| s.damage > 0 && s.enchantment_level("minecraft:mending") > 0)
-    };
     let candidates: Vec<PlayerSlot> = slots
         .into_iter()
-        .filter(|(_, s)| mending(s))
-        .map(|(slot, _)| slot)
+        .flat_map(|(slot, stack)| {
+            std::iter::repeat_n(
+                slot,
+                stack
+                    .as_ref()
+                    .map_or(0, |stack| mending_entries(stack, slot, enchantments)),
+            )
+        })
         .collect();
     if candidates.is_empty() {
         return None;
@@ -1722,6 +1748,12 @@ mod tests {
     /// leaving the world RNG untouched.
     #[test]
     fn mending_picks_damaged_candidate_in_equipment_slot_order_from_player_rng() {
+        let enchantments = super::Enchantments::default().with_entries([("minecraft:mending", &serde_json::json!({
+            "description": "Mending", "supported_items": "minecraft:diamond_pickaxe", "weight": 1,
+            "max_level": 1, "min_cost": {"base": 1, "per_level_above_first": 0},
+            "max_cost": {"base": 1, "per_level_above_first": 0}, "anvil_cost": 1,
+            "slots": ["any"], "effects": {"minecraft:repair_with_xp": [{"effect": {"type": "minecraft:multiply", "factor": 2}}]}
+        }))]).unwrap().unwrap();
         let mending_item = |id: &str, damage: u32| {
             let mut stack = ItemStack::new(id, 1);
             stack.damage = damage;
@@ -1760,7 +1792,7 @@ mod tests {
             super::PlayerSlot::Armor(0),
         ];
         for _ in 0..16 {
-            let picked = pick_mending_slot(slots, &mut player_rng);
+            let picked = pick_mending_slot(slots, &enchantments, &mut player_rng);
             let idx = expected_player.next_int_bound(4).unwrap() as usize;
             assert_eq!(picked, Some(expected_candidates[idx]));
         }
@@ -1776,7 +1808,10 @@ mod tests {
             (super::PlayerSlot::Armor(1), &chest),
             (super::PlayerSlot::Armor(0), &none),
         ];
-        assert_eq!(pick_mending_slot(empty, &mut player_rng), None);
+        assert_eq!(
+            pick_mending_slot(empty, &enchantments, &mut player_rng),
+            None
+        );
         assert_eq!(player_rng.next_long(), expected_player.next_long());
     }
 
