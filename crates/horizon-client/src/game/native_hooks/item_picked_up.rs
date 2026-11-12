@@ -31,10 +31,11 @@ impl Game<'_> {
     /// count less `remaining`'s. A mod that removes the item entity meanwhile
     /// keeps it removed: no take animation, the stat and criteria still run.
     /// Not called on a partial pickup, where some of the stack went in and
-    /// the rest stayed on the ground, nor when
-    /// `item_picked_up` refused the pickup or the inventory took nothing; a
-    /// forced `True` from `item_picked_up` changes none of this. A creative
-    /// player always takes the whole stack. Server-side.
+    /// the rest stayed on the ground: `item_picked_up_partial` hears that one,
+    /// and a pickup is never told to both. Nor when `item_picked_up` refused
+    /// the pickup or the inventory took nothing; a forced `True` from
+    /// `item_picked_up` changes none of this. A creative player always takes
+    /// the whole stack. Server-side.
     pub(in crate::game) fn native_item_picked_up_post(
         &mut self,
         player: u128,
@@ -42,6 +43,29 @@ impl Game<'_> {
         remaining: &mut Option<ItemStack>,
     ) {
         self.fire_item_picked_up_post(player, original, remaining);
+    }
+
+    /// `player` picked up part of a ground stack (`ItemEntity.playerTouch`,
+    /// right after `Inventory.add` took some of it and left the rest).
+    /// `original` is a copy of the stack as it lay before the pickup:
+    /// changing it does nothing. `remaining` is what the item entity still
+    /// holds, so it starts as the part that did not fit. Set another stack
+    /// there to leave the entity holding it, or `None` to empty it: the
+    /// pickup then counts `original`'s count less what is left. The amount
+    /// taken is `original`'s count less `remaining`'s. A mod that removes the
+    /// item entity meanwhile keeps it removed: no take animation, the stat
+    /// and criteria still run. Of the two notices, this one hears a partial
+    /// pickup and `item_picked_up_post` a whole one; a pickup is never told
+    /// to both. Not called when `item_picked_up` refused the pickup or the
+    /// inventory took nothing. A creative player always takes the whole
+    /// stack. Server-side; no NeoForge counterpart.
+    pub(in crate::game) fn native_item_picked_up_partial(
+        &mut self,
+        player: u128,
+        original: &ItemStack,
+        remaining: &mut Option<ItemStack>,
+    ) {
+        self.fire_item_picked_up_partial(player, original, remaining);
     }
 
     /// `Inventory.add` of the ground `stack` the acting player picks up: what
@@ -62,6 +86,22 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::ItemPickedUpPost) {
             let player = self.native_acting_id();
             self.native_item_picked_up_post(player, original, &mut remaining);
+        }
+        remaining
+    }
+
+    /// `item_picked_up_partial` for the acting player, who took part of
+    /// `original` and left `rest`: the stack the item entity then holds,
+    /// `None` when a mod emptied it, `rest` when no mod listens.
+    pub(in crate::game) fn native_pickup_partial(
+        &mut self,
+        original: &ItemStack,
+        rest: ItemStack,
+    ) -> Option<ItemStack> {
+        let mut remaining = Some(rest);
+        if mod_api::__private::listened(mod_api::HookId::ItemPickedUpPartial) {
+            let player = self.native_acting_id();
+            self.native_item_picked_up_partial(player, original, &mut remaining);
         }
         remaining
     }

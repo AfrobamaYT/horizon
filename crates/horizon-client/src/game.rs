@@ -5338,19 +5338,18 @@ impl Game<'_> {
                 let before = item.stack.count;
                 let kind = item.stack.item.clone();
                 let thrower = item.thrower;
+                // The post or partial notice's `remaining` is all mods reach of the lifted item.
                 let left = match game.native_pickup_insert(&item.stack) {
-                    Some(rest) => rest,
-                    // ItemEntityPickupEvent.Post: `remaining` is all mods reach of the lifted item.
-                    None => match game.native_pickup_post(&item.stack) {
-                        None => {
-                            game.award_stat("picked_up", &kind, before as i32);
-                            if let Some(thrower) = thrower {
-                                game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                            }
-                            return true;
-                        }
-                        Some(raised) => raised,
-                    },
+                    Some(rest) if rest.count >= before => Some(rest),
+                    Some(rest) => game.native_pickup_partial(&item.stack, rest),
+                    None => game.native_pickup_post(&item.stack),
+                };
+                let Some(left) = left else {
+                    game.award_stat("picked_up", &kind, before as i32);
+                    if let Some(thrower) = thrower {
+                        game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
+                    }
+                    return true;
                 };
                 let taken = before.saturating_sub(left.count);
                 if taken > 0 {
