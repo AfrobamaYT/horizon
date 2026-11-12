@@ -100,6 +100,7 @@ fn info(p: &Pack) -> PackInfo {
         required: false,
         position: Position::Top,
         fixed: false,
+        hidden: false,
     }
 }
 /// A pack from `DownloadedPackSource.loadRequestedPacks`: fixed at the top of
@@ -124,6 +125,7 @@ fn downloaded_info(p: &Pack) -> PackInfo {
         required: true,
         position: Position::Top,
         fixed: true,
+        hidden: false,
     }
 }
 /// The vanilla pack: required, at the bottom (`BuiltInPackSource`), with the
@@ -143,6 +145,7 @@ fn vanilla_info(vanilla: &Path) -> PackInfo {
         required: true,
         position: Position::Bottom,
         fixed: false,
+        hidden: false,
     }
 }
 /// Packs the Resource Packs screen lists: folder and built-in packs, then any
@@ -548,7 +551,11 @@ impl Game<'_> {
         self.options.resources = root.clone();
         self.falling_vertices.get_mut().clear();
         self.pack = pack;
-        self.gui = gui;
+        let skip = self
+            .settings
+            .extras
+            .skip_modded_splashes_if_vanilla_modified;
+        self.gui = gui.with_splashes(&self.pack.source, &self.vanilla_root(), skip);
         self.standalone_geometry = standalone_geometry;
         self.instance_groups.borrow_mut().clear();
         // The new atlas's skin and map slots are blank: players and maps
@@ -729,6 +736,8 @@ pub(super) fn stage_pack(
     let gui = UiResources {
         atlas,
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
+        // `Game::apply_staged_pack` fills it with the client's setting.
+        splashes: Arc::from(""),
     };
     progress.set(2);
     let mut pack = PackResources::load(
