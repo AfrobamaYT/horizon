@@ -5222,13 +5222,8 @@ impl Game<'_> {
                 continue;
             }
             let item_id = item.id;
-            let saved = [
-                "minecraft:on_fire",
-                "minecraft:lava",
-                "minecraft:in_fire",
-                "minecraft:cactus",
-            ]
-            .map(|damage| self.saved_refuses_damage(item_id, damage, false));
+            let saved = native_components::ITEM_ENVIRONMENT_DAMAGE
+                .map(|damage| self.saved_refuses_damage(item_id, damage, false));
             let tags = world_items!(self);
             let registry = self.pack.assets.registry;
             let block_registries = &self.pack.block_registries;
@@ -5237,7 +5232,10 @@ impl Game<'_> {
                 &mut self.world,
                 self.res.facts(),
                 registry,
-                tags,
+                &native_components::item_damage_resolver(
+                    &self.pack.item_renderer.models,
+                    &self.health_resources.damage,
+                ),
                 |world, damage| {
                     let vanilla = match damage {
                         "minecraft:on_fire" => saved[0],
@@ -10401,10 +10399,9 @@ impl Game<'_> {
         laps.lap("eg_fire_mobs");
         for item in &self.dropped {
             if item.fire_ticks > 0
-                && !self
-                    .res
-                    .items()
-                    .resists_fire(&item.stack, "minecraft:in_fire")
+                && self
+                    .stack_can_be_hurt_by(&item.stack, "minecraft:in_fire")
+                    .unwrap_or(true)
             {
                 let at = item.previous.lerp(item.position, alpha);
                 if !fire_visible([at.x, at.y, at.z], 0.25, 0.25) {
