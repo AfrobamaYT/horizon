@@ -88,8 +88,9 @@ mod tests {
             e.items.push(item);
         }
         fn blocks(&self, _: &RegistrationContext, e: &mut BlocksEvent<'_>) {
+            // Its item is the shulker box item above, not a block item of its own.
             e.blocks
-                .push(Block::new("test:box_shulker_box", "minecraft:barrel"));
+                .push(Block::new("test:box_shulker_box", "minecraft:barrel").with_item(false));
             e.blocks
                 .extend(["test:a", "test:b"].map(|id| Block::new(id, "minecraft:white_banner")));
         }

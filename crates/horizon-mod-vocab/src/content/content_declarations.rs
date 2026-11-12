@@ -145,7 +145,9 @@ pub enum BlockStateProperty {
 /// An unvalidated draft; `Content::declare` validates it at load.
 /// Refused drafts are reported by the content admission path as
 /// `native blocks and items of <namespace>: <reason>`, without admitting part of that namespace.
-#[derive(Clone, Debug, PartialEq, Default)]
+/// `Default` and [`Block::new`] leave out what a content file leaves out: every field is empty
+/// except `item`, true, as in a file.
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct Block {
@@ -172,7 +174,7 @@ pub struct Block {
     pub state_properties: BTreeMap<String, BlockStateProperty>,
     /// State properties overlaid on the template default.
     pub default_state: BTreeMap<String, String>,
-    /// Also add a block item with the same id.
+    /// Also add a block item with the same id; true unless set false, as in a file.
     pub item: bool,
     /// The sound event a fence gate plays opening, instead of its wood's
     /// (`WoodType.fenceGateOpen`); needs a `*_fence_gate` template.
@@ -257,8 +259,38 @@ pub struct Item {
     pub arm_pose: Option<ArmPose>,
 }
 
+impl Default for Block {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            template: String::new(),
+            properties: BlockProperties::default(),
+            state_light: None,
+            shapes: None,
+            collision_shapes: None,
+            outline_context_shapes: BTreeMap::new(),
+            collision_context_shapes: BTreeMap::new(),
+            interaction_shapes: None,
+            state_properties: BTreeMap::new(),
+            default_state: BTreeMap::new(),
+            item: true,
+            open_sound: None,
+            close_sound: None,
+            block_item: None,
+            pick_item: None,
+            components: Vec::new(),
+            connects_to: None,
+            thickness: None,
+            wood_type: None,
+            wall_block: None,
+            sign_text_color: None,
+            sign_text_glow: None,
+            base_block: None,
+        }
+    }
+}
 impl Block {
-    /// Request a block item with the same identifier.
+    /// Whether to add a block item with the same identifier; a block has one unless told not to.
     pub fn with_item(mut self, item: bool) -> Self {
         self.item = item;
         self
