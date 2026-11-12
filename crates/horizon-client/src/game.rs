@@ -1831,10 +1831,8 @@ impl LevelAccess for GameLevel<'_> {
             binding: self.collision,
             subject: player.map(|player| horizon_client::collisions::PowderSnowSubject {
                 fall_distance: player.fall_distance,
-                falling_block: false,
                 leather_boots: player.leather_boots,
-                walkable_type: false,
-                lava_walker: false,
+                ..Default::default()
             }),
         };
         let Ok(shape) = self

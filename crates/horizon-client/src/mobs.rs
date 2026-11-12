@@ -193,31 +193,11 @@ pub use species::Species;
 mod breeding;
 pub use breeding::{draws_parent_variant, orb_after_child};
 
-/// Per-type behaviour switches derived from vanilla classes and tags.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Flags {
-    /// WaterAnimal / fish: not affected by fluid physics (swims with its own control).
-    pub aquatic_swimmer: bool,
-    pub fall_immune: bool,
-    /// FlyingMob-style travel (ghast, phantom): travelFlying without gravity.
-    pub flying: bool,
-    /// Spiders: onClimbable while colliding horizontally.
-    pub climber: bool,
-    /// Striders stand on lava.
-    pub lava_walker: bool,
-    /// LivingEntity.omnidirectionalAirMover (bees and parrots).
-    pub omnidirectional: bool,
-    pub fire_immune: bool,
-    /// EntityTypeTags.BURN_IN_DAYLIGHT
-    pub burns_in_day: bool,
-    pub undead: bool,
-    pub breathes_water: bool,
-    /// Drowns out of water (fish, squid, dolphins after their air runs out).
-    pub needs_water: bool,
-    /// Hurt by water (endermen, blazes, striders out of lava, snow golems).
-    pub water_sensitive: bool,
-    pub animal: bool,
-}
+mod collision_subject;
+mod flags;
+pub use flags::Flags;
+#[cfg(test)]
+mod powder_snow_move_tests;
 
 /// The fields of [`MobType`] its type's attribute row gives, built by
 /// [`MobType::attribute_fields`]: the one map from an attribute to the
@@ -467,6 +447,8 @@ impl MobTypes {
                 }
             })
             .transpose()?;
+        let entity_type_tags =
+            crate::items::load_tags(root, "entity_type", &horizon_world::loot::PackOverlay::NONE)?;
         let empty_model = Arc::new(Part::parse("root", &Value::Null));
         let item_tags =
             crate::items::load_tags(root, "item", &horizon_world::loot::PackOverlay::NONE)
@@ -568,7 +550,10 @@ impl MobTypes {
                 }
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
-            let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
+            let mut flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
+            flags.powder_snow_walkable = entity_type_tags
+                .get("minecraft:powder_snow_walkable_mobs")
+                .is_some_and(|members| members.contains(&id));
             let passenger_attachments =
                 riders::parse_passenger_attachments(&t["passenger_attachments"]);
             out.insert(
