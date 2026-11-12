@@ -2169,6 +2169,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 // `ZombieVillager.finalizeSpawn` chooses the villager type and
                 // nothing else: the profession came from the constructor.
                 self.villager_type(m);
+                // The profession is drawn at construction, not finalizeSpawn.
                 self.zombie(m, g, reason)
             }
             S::Husk => self.husk(m, g, reason),
