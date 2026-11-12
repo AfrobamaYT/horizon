@@ -148,6 +148,7 @@ impl GameLevel<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
+    use super::playable;
     use horizon_client::mobs::{Mob, MobEvent, equine};
     use horizon_core::{geometry::Vec3, position::BlockPos};
     use horizon_world::level::LevelAccess;
