@@ -361,17 +361,26 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
     /// Side: server.
-    /// Whether entities can tick at this block position, using the server's current
-    /// ticket and loaded-neighbourhood decision. False for unloaded or out-of-bounds
-    /// positions. None for stale handles, a client or a level not currently in place.
-    /// Does not load chunks; may refresh the engine's resident-chunk cache.
+    /// `Some(true)` when this resident, in-bounds position has entity-ticking tickets.
+    /// `Some(false)` for unloaded or out-of-bounds positions or tickets that forbid ticking.
+    /// With no ticket system, resident in-bounds chunks tick; an active but empty ticket
+    /// system permits none. This reads the current ticket decision, not a tick guarantee.
+    /// `None` for stale handles, a client or a level not currently in place. Parked
+    /// levels cannot answer because the live ticket state belongs to the level in place.
+    /// Does not load chunks. Each call shares the ticket map through a reference count;
+    /// it does not allocate a memo table or refresh a resident-chunk cache.
     #[access(WorldOnly)]
     fn level_entity_ticking(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
     /// Side: server.
-    /// Whether scheduled blocks, block events and block entities can tick here,
-    /// using the server's ticket decision and waiting for pending entities to load.
-    /// False for unloaded or out-of-bounds positions. None for stale handles, a
-    /// client or a level not currently in place. Does not load chunks.
+    /// `Some(true)` when scheduled blocks, block events and block entities can tick here:
+    /// a resident, in-bounds position with block-ticking tickets and no pending entities.
+    /// `Some(false)` for unloaded or out-of-bounds positions, tickets that forbid ticking,
+    /// or a chunk waiting for its entities. With no ticket system, resident in-bounds
+    /// chunks with no pending entities tick; an active but empty ticket system permits none.
+    /// `None` for stale handles, a client or a level not currently in place. Parked
+    /// levels cannot answer because the live ticket state belongs to the level in place.
+    /// Does not load chunks. Each call shares the ticket map through a reference count
+    /// and borrows the pending-entity set without copying it or allocating a memo table.
     #[access(WorldOnly)]
     fn level_should_tick_blocks_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
 
