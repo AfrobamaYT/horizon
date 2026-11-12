@@ -30,16 +30,17 @@ module.exports = async ({ github, context, core }) => {
   const option = Object.fromEntries(status.options.map(o => [o.name, o.id]));
   const phaseOption = Object.fromEntries((phase?.options || []).map(o => [o.name.toLowerCase(), o.id]));
 
-  // Board items, keyed by content node id.
+  // Board items, keyed by content node id, with the field values the sync compares or fills.
+  const VALUES = `s:fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}
+        o:fieldValueByName(name:"Owner"){... on ProjectV2ItemFieldTextValue{text}}
+        p:fieldValueByName(name:"Phase"){... on ProjectV2ItemFieldSingleSelectValue{name}}`;
+  const known = n => ({ item: n.id, status: n.s?.name, owner: n.o?.text, phase: n.p?.name });
   const items = new Map();
   for (let after = null; ;) {
     const page = (await q(`query($id:ID!,$a:String){node(id:$id){... on ProjectV2{items(first:50,after:$a){
       pageInfo{hasNextPage endCursor}
-      nodes{id content{... on Issue{id} ... on PullRequest{id}}
-        s:fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}
-        o:fieldValueByName(name:"Owner"){... on ProjectV2ItemFieldTextValue{text}}
-        p:fieldValueByName(name:"Phase"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}`, { id: proj.id, a: after })).node.items;
-    for (const n of page.nodes) if (n.content) items.set(n.content.id, { item: n.id, status: n.s?.name, owner: n.o?.text, phase: n.p?.name });
+      nodes{id content{... on Issue{id} ... on PullRequest{id}} ${VALUES}}}}}`, { id: proj.id, a: after })).node.items;
+    for (const n of page.nodes) if (n.content) items.set(n.content.id, known(n));
     if (!page.pageInfo.hasNextPage) break;
     after = page.pageInfo.endCursor;
   }
@@ -84,12 +85,19 @@ module.exports = async ({ github, context, core }) => {
   // An add can answer "Content already exists in this project" when the item is on the board but was not
   // listed above (an archived item, or one another run added meanwhile). That is the state we want: the
   // other adds in the batch still succeed, and the existing item is looked up from the content's side.
+  // The content's own board items, page by page, with their field values, so a recovered item keeps
+  // the Owner and Phase set on it by hand exactly as a listed one does.
   const existingItem = async contentId => {
-    const node = (await q(`query($id:ID!){node(id:$id){... on Issue{projectItems(first:50){nodes{id project{id}}}}
-      ... on PullRequest{projectItems(first:50){nodes{id project{id}}}}}}`, { id: contentId })).node;
-    const found = node?.projectItems.nodes.find(n => n.project.id === proj.id);
-    if (!found) throw new Error(`board add refused ${contentId} as already present, but no board item holds it`);
-    return found.id;
+    const items = `projectItems(first:50,after:$a){pageInfo{hasNextPage endCursor} nodes{id project{id} ${VALUES}}}`;
+    for (let after = null; ;) {
+      const page = (await q(`query($id:ID!,$a:String){node(id:$id){... on Issue{${items}} ... on PullRequest{${items}}}}`,
+        { id: contentId, a: after })).node?.projectItems;
+      const found = page?.nodes.find(n => n.project.id === proj.id);
+      if (found) return known(found);
+      if (!page?.pageInfo.hasNextPage) break;
+      after = page.pageInfo.endCursor;
+    }
+    throw new Error(`board add refused ${contentId} as already present, but no board item holds it`);
   };
   const missing = [...want.keys()].filter(id => !items.has(id));
   for (let i = 0; i < missing.length; i += 25) {
@@ -101,7 +109,10 @@ module.exports = async ({ github, context, core }) => {
       if (!e.data || !e.errors?.length || !e.errors.every(x => /content already exists in this project/i.test(x.message))) throw e;
       r = e.data;
     }
-    for (const [j, c] of chunk.entries()) items.set(c, { item: r[`a${j}`]?.item?.id ?? await existingItem(c) });
+    for (const [j, c] of chunk.entries()) {
+      const added = r[`a${j}`]?.item?.id;
+      items.set(c, added ? { item: added } : await existingItem(c));
+    }
   }
   const edits = [];
   for (const [id, w] of want) {
