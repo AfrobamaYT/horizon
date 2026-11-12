@@ -3940,12 +3940,10 @@ pub fn entity_random(id: u32, position: Vec3) -> LegacyRandom {
 }
 /// The own random (`Entity.random`) of a living entity the server makes, as
 /// `LivingEntity.<init>` leaves it: its first two draws made the UUID
-/// (`Mth.createInsecureUUID`), returned here, and the next one the yaw, which
-/// every spawn path then replaces. Constructor draws of the kind come after.
+/// (`Mth.createInsecureUUID`), returned here, then the kind's constructor draws its synced data and yaw in `constructor_draws`.
 pub fn living_random() -> (LegacyRandom, [i32; 4]) {
     let mut random = crate::random_source::entity();
     let uuid = crate::save::insecure_uuid(&mut random);
-    let _yaw = random.next_float();
     (random, uuid)
 }
 impl Mob {
@@ -4108,6 +4106,7 @@ impl Mob {
         if mob.species() == Species::Salmon {
             mob.extra.variant = 1;
         }
+        zombie_villager::constructor_draws(&mut mob);
         neutral_anger::init(&mut mob);
         // `Creeper.explosionRadius = 3` until a save or a command sets it.
         mob.extra.explosion_radius = 3;
