@@ -2254,3 +2254,5 @@ mod chunk_queries;
 mod client_fireworks;
 #[path = "wire_loopback/play_hit_sound.rs"]
 mod play_hit_sound;
+#[path = "wire_loopback/datafix_upgrades.rs"]
+mod datafix_upgrades;
