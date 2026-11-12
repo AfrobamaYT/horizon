@@ -67,6 +67,9 @@ pub struct World {
     /// Block entities a moving piston landed since the last flush, whose
     /// synced attachments `flush_attachment_sync` sends whole (#3184).
     pub attachment_landings: FxHashSet<horizon_mod_runtime::attachments::Holder>,
+    /// The capability generations mods' providers advanced here
+    /// (`level_invalidate_capabilities`), which kept capabilities compare.
+    pub capability_generations: horizon_mod_runtime::capability_generations::CapabilityGenerations,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -270,6 +273,7 @@ impl World {
             attachments: Default::default(),
             attachment_syncs: FxHashSet::default(),
             attachment_landings: FxHashSet::default(),
+            capability_generations: Default::default(),
             block_entities: Default::default(),
             carrier_fences: Default::default(),
             carrier_data_existed_at_open: false,
@@ -547,6 +551,12 @@ impl World {
     }
     pub fn loaded(&self, x: i32, z: i32) -> bool {
         self.chunks.contains_key(&(x >> 4, z >> 4))
+    }
+    /// Takes chunk `key` out of the level as it unloads, with the capability generations its
+    /// positions held.
+    pub fn unload_chunk(&mut self, key: (i32, i32)) -> Option<Arc<Chunk>> {
+        self.capability_generations.unload_chunk(key);
+        self.chunks.remove(&key)
     }
     /// `Level.isLoaded`: `y` is inside the build height and the chunk of `(x, z)` is loaded.
     /// Never loads a chunk.

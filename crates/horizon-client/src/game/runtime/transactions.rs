@@ -165,6 +165,9 @@ pub(super) enum After {
     Updated(Pos),
     /// `Level.sendBlockUpdated` alone, without marking the save dirty.
     NotifyClients(Pos),
+    /// A provider's answer changed here (`level_invalidate_capabilities`): the capability
+    /// generation moves on.
+    Capabilities(Pos),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// Deferred interaction effects, replayed in the same root-commit order.
@@ -575,6 +578,7 @@ impl Game<'_> {
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
+            After::Capabilities(pos) => self.world.capability_generations.invalidate(pos),
             After::Effect(effect) => match effect {
                 DeferredEffect::CustomStat {
                     player,
