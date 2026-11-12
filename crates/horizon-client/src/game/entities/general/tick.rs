@@ -23,13 +23,18 @@ use mod_api::EntityRef;
 
 impl Game<'_> {
     /// The general rows' entity phase: roots in join order, each root's
-    /// common bookkeeping and subscribed server behavior, then its rider
-    /// subtree. A row that joined this tick ticks from the next (the tick
-    /// list's passive swap), a rider never ticks as a root, rows outside
-    /// entity-ticking chunks stay (`ServerLevel.tick`'s range gate), and a
-    /// parked level never reaches here at all. A type slot resolved without
-    /// subscribers costs its common tick and nothing else: no per-row type
-    /// lookup, call, or event allocation.
+    /// bookkeeping, subscribed server behavior and the global tick pair,
+    /// then its riders — every passenger gets the same Pre, tick and Post
+    /// inside its own ride tick, at any depth of a stack, in the flat order
+    /// the maintainers ruled: vehicle Pre, tick, Post, then each passenger
+    /// (Pre, tick, Post), then that passenger's own passengers, depth
+    /// first. A canceled vehicle Pre skips only the vehicle: no
+    /// bookkeeping, no tick, no Post — its passengers still ride. A row
+    /// that joined this tick ticks from the next (the tick list's passive
+    /// swap), rows outside entity-ticking chunks stay (`ServerLevel.tick`'s
+    /// range gate), and a parked level never reaches here at all. A type
+    /// slot resolved without subscribers costs its bookkeeping and nothing
+    /// else: no per-row type lookup, call, or event allocation.
     pub(in crate::game) fn tick_general(&mut self) -> horizon_client::Result<()> {
         if self.resident_entities.general.rows.is_empty() {
             return Ok(());
@@ -74,52 +79,58 @@ impl Game<'_> {
             if !entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
                 continue;
             }
-            // Live before the bookkeeping: an earlier row's callback can
-            // have queued this row's removal — `entity_remove` leaves it in
-            // the list until the sweep — or rewritten its mount. The ordered
+            // Live before anything: an earlier row's callback can have
+            // queued this row's removal — `entity_remove` leaves it in the
+            // list until the sweep — or rewritten its mount. The ordered
             // run re-resolves its join before each entity
             // (`run_ordered_ticks`' `locate`), and the mob tick checks
             // `removed`; this walk re-reads the row by its index.
             if !general_row_live(self, index, mount) {
                 continue;
             }
-            // `Entity.commonTick`'s setOldPosAndRot: the row's previous
-            // position is its current one. The rest of the common tick
-            // (tick counting, invulnerable time) has no row field yet.
-            self.resident_entities.general.rows[index].previous =
-                self.resident_entities.general.rows[index].position;
             let kind = catalog.key(slot);
             let ticks = !round.listening() || self.native_tick_pre_one(&mut round, id, kind);
-            // The Pre's listeners may have removed or remounted the row: a
+            // A row that rides nothing and whose Pre was canceled skips its
+            // bookkeeping too (the ruling's only-skip list); a Pre's
+            // listeners may also have removed or remounted the row, and a
             // row that no longer ticks hears no Post, as a merged item's
             // does not (the round's own `not_ticked`).
-            if ticks && !general_row_live(self, index, mount) {
-                round.not_ticked(id);
-                continue;
-            }
             if ticks {
-                if subscribed.get(slot).copied().unwrap_or(false)
-                    && let Some(epoch) = epoch
-                {
-                    self.dispatch_general_tick(kind, epoch, id);
+                if general_row_live(self, index, mount) {
+                    // `Entity.commonTick`'s setOldPosAndRot: the row's
+                    // previous position is its current one. The rest of the
+                    // common tick (tick counting, invulnerable time) has no
+                    // row field yet.
+                    self.resident_entities.general.rows[index].previous =
+                        self.resident_entities.general.rows[index].position;
+                    if subscribed.get(slot).copied().unwrap_or(false)
+                        && let Some(epoch) = epoch
+                    {
+                        self.dispatch_general_tick(kind, epoch, id);
+                    }
+                    if round.listening() {
+                        self.native_tick_post_one(&round, id, kind);
+                    }
+                } else {
+                    round.not_ticked(id);
                 }
-                self.tick_general_riders(id, born, catalog, &subscribed, epoch, &riders);
             }
-            if round.listening() {
-                self.native_tick_post_one(&round, id, kind);
-            }
+            // The vehicle's canceled Pre does not stop its passengers: every
+            // rider still takes its own ride tick.
+            self.tick_general_riders(id, born, catalog, &subscribed, epoch, &mut round, &riders);
         }
         Ok(())
     }
 
-    /// `tickPassenger` for one vehicle's subtree: each rider's common tick
-    /// and its own subscribed behavior, depth-first as vanilla recurses into
-    /// the rider's riders. A rider rides its vehicle's tick: no Pre of its
-    /// own, and it ticks wherever its vehicle does (the root already passed
-    /// the chunk gate). A rider that joined this tick waits for the next
-    /// pass with its root — a tree joins whole. The parent's callback is
-    /// re-checked at every edge (`tickPassenger`'s `getVehicle` check): a
-    /// rider the callback removed or dismounted does not tick in this pass.
+    /// One vehicle's riders, each with its own ride tick: Pre, bookkeeping,
+    /// tick, Post, then that rider's own riders, depth first — the flat
+    /// order of the maintainers' ruling, not a nested one. A canceled
+    /// rider's Pre skips only its entity tick and its Post: the rider still
+    /// follows its vehicle (the bookkeeping runs), and its own passengers
+    /// still tick. The parent's callbacks are re-checked at every edge
+    /// (`tickPassenger`'s `getVehicle` gate): a rider the callback removed
+    /// or dismounted does not tick in this pass. A rider that joined this
+    /// tick waits for the next pass with its root — a tree joins whole.
     fn tick_general_riders(
         &mut self,
         vehicle: u32,
@@ -127,6 +138,7 @@ impl Game<'_> {
         catalog: &GeneralTypeCatalog,
         subscribed: &[bool],
         epoch: Option<mod_api::WorldEpoch>,
+        round: &mut crate::game::native_ticks::TickRound,
         riders: &[(u32, usize)],
     ) {
         for &(rider_vehicle, index) in riders {
@@ -145,14 +157,29 @@ impl Game<'_> {
             if !general_row_live(self, index, Some(vehicle)) {
                 continue;
             }
+            let kind = catalog.key(slot);
+            let ticks = !round.listening() || self.native_tick_pre_one(round, id, kind);
+            // The bookkeeping runs even for a canceled rider: it still
+            // follows its vehicle (the ruling). A removal the Pre queued
+            // takes the whole step instead.
+            if ticks && !general_row_live(self, index, Some(vehicle)) {
+                round.not_ticked(id);
+                self.tick_general_riders(id, born, catalog, subscribed, epoch, round, riders);
+                continue;
+            }
             self.resident_entities.general.rows[index].previous =
                 self.resident_entities.general.rows[index].position;
-            if subscribed.get(slot).copied().unwrap_or(false)
-                && let Some(epoch) = epoch
-            {
-                self.dispatch_general_tick(catalog.key(slot), epoch, id);
+            if ticks {
+                if subscribed.get(slot).copied().unwrap_or(false)
+                    && let Some(epoch) = epoch
+                {
+                    self.dispatch_general_tick(kind, epoch, id);
+                }
+                if round.listening() {
+                    self.native_tick_post_one(round, id, kind);
+                }
             }
-            self.tick_general_riders(id, born, catalog, subscribed, epoch, riders);
+            self.tick_general_riders(id, born, catalog, subscribed, epoch, round, riders);
         }
     }
 

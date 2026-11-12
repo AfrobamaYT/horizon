@@ -33,6 +33,11 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
 /// What the part saw, in call order: each row's id.
 type Trace = Arc<Mutex<Vec<u32>>>;
 
+/// The whole pass's global pair and ticks, in call order: a row's id and
+/// which moment it heard — the flat rider order and the cancel rules are
+/// asserted against this.
+type Events = Arc<Mutex<Vec<(u32, &'static str)>>>;
+
 /// What a listener does from inside one row's callback: the liveness tests'
 /// mid-pass removals and dismounts, armed by the test before the tick.
 enum OnTick {
@@ -49,6 +54,7 @@ enum OnTick {
 /// counters live apart in their attachments.
 struct Counter {
     trace: Trace,
+    events: Events,
     /// Panics on this row's first tick only, after its write: the
     /// containment row's failing subscriber (0 arms nothing — a test sets
     /// its target once its rows have ids).
@@ -84,6 +90,10 @@ impl EntityPart for Counter {
                 assert!(other(id).stop_riding(host));
             }
         }
+        self.events
+            .lock()
+            .unwrap()
+            .push((event.entity.id(), "tick"));
         self.trace.lock().unwrap().push(event.entity.id());
     }
 }
@@ -97,14 +107,15 @@ impl Counter {
 
 /// Declares the two fixture types and attaches the counter part to
 /// `mymod:robot`; `ghost` stays part-free for the zero-callback rows. The
-/// same mod listens to the entity tick gates, cancels the row named by
-/// `cancel` when armed (the Pre row of the matrix), and queues the removal
-/// of `pre_victim` from `pre_on`'s own Pre.
+/// same mod listens to the entity tick gates, records the global pair into
+/// the events log, cancels the row named by `cancel_on` when armed, and
+/// queues the removal of `pre_victim` from `pre_on`'s own Pre.
 struct Declare {
     trace: Trace,
+    events: Events,
     panic_on: Arc<std::sync::atomic::AtomicU32>,
     action: Arc<Mutex<OnTick>>,
-    cancel: Arc<std::sync::atomic::AtomicBool>,
+    cancel_on: Arc<std::sync::atomic::AtomicU32>,
     pre_on: Arc<std::sync::atomic::AtomicU32>,
     pre_victim: Arc<std::sync::atomic::AtomicU32>,
 }
@@ -135,6 +146,7 @@ impl Hooks for Declare {
             "mymod:robot",
             Counter {
                 trace: self.trace.clone(),
+                events: self.events.clone(),
                 panic_on: self.panic_on.clone(),
                 action: self.action.clone(),
                 fired: std::sync::atomic::AtomicBool::new(false),
@@ -149,6 +161,7 @@ impl Hooks for Declare {
         host: &mut dyn ServerHost,
         event: &mut EntityTickPreEvent<'_>,
     ) -> Flow {
+        self.events.lock().unwrap().push((event.entity, "pre"));
         if self.pre_on.load(std::sync::atomic::Ordering::Relaxed) == event.entity {
             let victim = self.pre_victim.load(std::sync::atomic::Ordering::Relaxed);
             let victim = host
@@ -156,10 +169,17 @@ impl Hooks for Declare {
                 .expect("the victim is a live row at the remover's Pre");
             assert!(victim.discard(host));
         }
-        if self.cancel.load(std::sync::atomic::Ordering::Relaxed) && event.kind == "mymod:robot" {
+        if self.cancel_on.load(std::sync::atomic::Ordering::Relaxed) == event.entity {
             return Flow::Cancel;
         }
         Flow::Continue
+    }
+    fn entity_tick_post(
+        &self,
+        _: &mut dyn ServerHost,
+        event: &mut mod_api::EntityTickPostEvent<'_>,
+    ) {
+        self.events.lock().unwrap().push((event.entity, "post"));
     }
 }
 
@@ -172,17 +192,19 @@ impl Hooks for Declare {
 fn with_counter(test: impl FnOnce(&mut Game<'_>, Levers)) {
     let declare = Declare {
         trace: Arc::default(),
+        events: Arc::default(),
         panic_on: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         action: Arc::new(Mutex::new(OnTick::Nothing)),
-        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        cancel_on: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         pre_on: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         pre_victim: Arc::new(std::sync::atomic::AtomicU32::new(0)),
     };
     let levers = Levers {
         trace: declare.trace.clone(),
+        events: declare.events.clone(),
         panic_on: declare.panic_on.clone(),
         action: declare.action.clone(),
-        cancel: declare.cancel.clone(),
+        cancel_on: declare.cancel_on.clone(),
         pre_on: declare.pre_on.clone(),
         pre_victim: declare.pre_victim.clone(),
     };
@@ -210,9 +232,10 @@ fn with_counter(test: impl FnOnce(&mut Game<'_>, Levers)) {
 /// The test's handles into the fixture's listeners.
 struct Levers {
     trace: Trace,
+    events: Events,
     panic_on: Arc<std::sync::atomic::AtomicU32>,
     action: Arc<Mutex<OnTick>>,
-    cancel: Arc<std::sync::atomic::AtomicBool>,
+    cancel_on: Arc<std::sync::atomic::AtomicU32>,
     pre_on: Arc<std::sync::atomic::AtomicU32>,
     pre_victim: Arc<std::sync::atomic::AtomicU32>,
 }
@@ -560,25 +583,107 @@ fn a_panicking_row_rolls_back_and_the_next_tick_proceeds() {
     });
 }
 
-/// The Pre row: a canceled `entity_tick_pre` skips the row's behavior and
-/// its whole rider subtree this tick (the vanilla event wraps
-/// `tickNonPassenger`); nothing is written and no callback runs.
+/// The ruling's flat order: the vehicle's Pre, tick and Post, then each
+/// passenger's own triple, then that passenger's passengers, depth first —
+/// a branching three-generation tree spells its whole pass out.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn a_canceled_pre_skips_the_row_and_its_subtree() {
+fn every_row_gets_its_pre_tick_post_in_the_flat_rider_order() {
+    with_counter(|game, l| {
+        let grandchild = record_at("mymod:robot", [8, 8, 8, 8], [0.5, 64.0, 0.5], Vec::new());
+        let rider = record_at(
+            "mymod:robot",
+            [9, 9, 9, 9],
+            [0.5, 64.0, 0.5],
+            vec![grandchild],
+        );
+        let sibling = record_at("mymod:robot", [7, 7, 7, 7], [0.5, 64.0, 0.5], Vec::new());
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![rider, sibling]);
+        let ids = row_ids(game);
+        tick(game);
+        assert_eq!(
+            *l.events.lock().unwrap(),
+            [
+                (root, "pre"),
+                (root, "tick"),
+                (root, "post"),
+                (ids[1], "pre"),
+                (ids[1], "tick"),
+                (ids[1], "post"),
+                (ids[2], "pre"),
+                (ids[2], "tick"),
+                (ids[2], "post"),
+                (ids[3], "pre"),
+                (ids[3], "tick"),
+                (ids[3], "post"),
+            ]
+        );
+    });
+}
+
+/// The ruling's cancel rules, the vehicle's side: a canceled vehicle Pre
+/// skips only the vehicle — no bookkeeping, no tick, no Post — and its
+/// passengers still ride their own ticks.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_canceled_vehicle_pre_still_ticks_its_passengers() {
     with_counter(|game, l| {
         let rider = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], Vec::new());
         let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![rider]);
+        let rider_id = row_ids(game)[1];
         tick(game);
-        assert_eq!(l.trace.lock().unwrap().len(), 2);
-        l.trace.lock().unwrap().clear();
-        l.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        l.events.lock().unwrap().clear();
+        l.cancel_on
+            .store(root, std::sync::atomic::Ordering::Relaxed);
         tick(game);
-        assert!(l.trace.lock().unwrap().is_empty());
-        assert_eq!(counter(game, root), 1);
-        l.cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            *l.events.lock().unwrap(),
+            [
+                (root, "pre"),
+                (rider_id, "pre"),
+                (rider_id, "tick"),
+                (rider_id, "post"),
+            ]
+        );
+        l.cancel_on.store(0, std::sync::atomic::Ordering::Relaxed);
+    });
+}
+
+/// The ruling's cancel rules, the passenger's side: a canceled passenger
+/// Pre skips only its entity tick and its Post — it still follows its
+/// vehicle, the bookkeeping runs, and its own passengers still tick. A
+/// stack of three covers the depth.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_canceled_passenger_still_follows_and_his_passengers_tick() {
+    with_counter(|game, l| {
+        let bottom = record_at("mymod:robot", [8, 8, 8, 8], [0.5, 64.0, 0.5], Vec::new());
+        let middle = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], vec![bottom]);
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![middle]);
+        let ids = row_ids(game);
         tick(game);
-        assert_eq!(l.trace.lock().unwrap().len(), 2);
+        l.events.lock().unwrap().clear();
+        l.cancel_on
+            .store(ids[1], std::sync::atomic::Ordering::Relaxed);
+        tick(game);
+        assert_eq!(
+            *l.events.lock().unwrap(),
+            [
+                (root, "pre"),
+                (root, "tick"),
+                (root, "post"),
+                (ids[1], "pre"),
+                (ids[2], "pre"),
+                (ids[2], "tick"),
+                (ids[2], "post"),
+            ]
+        );
+        // The canceled passenger still follows its vehicle: its bookkeeping
+        // ran, and only its own counter stood still.
+        assert_eq!(counter(game, ids[1]), 1);
+        assert_eq!(counter(game, root), 2);
+        assert_eq!(counter(game, ids[2]), 2);
+        l.cancel_on.store(0, std::sync::atomic::Ordering::Relaxed);
     });
 }
 
