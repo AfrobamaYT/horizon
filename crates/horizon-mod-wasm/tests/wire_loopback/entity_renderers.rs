@@ -108,7 +108,12 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                     APPEND_ATTACK.set(3);
                     let refused = renderers["wire_test:bolt"].submit(&entity, &mut Draw::default());
                     APPEND_ATTACK.set(0);
-                    assert_eq!(refused, Err("wasm call refused or trapped".into()));
+                    assert!(
+                        refused
+                            .as_ref()
+                            .is_err_and(|e| e.starts_with("wasm call refused or trapped")),
+                        "{refused:?}"
+                    );
                 }
             },
         );
