@@ -83,3 +83,57 @@ and some are waiting for Ludovic:
   collects no telemetry, so it cannot determine this from usage data. Then drop `SHA256SUMS.sig` from nightly-build.yml's
   publish step and the `--tag nightly` check before it, and remove `NIGHTLY` from horizon-release-sign. Releases (not
   Nightlies) keep their single `SHA256SUMS.sig`, which is already signed for their tag.
+  **Fork releases (`arismoko/horizon`):** the launcher chooses keys by repository. Only
+  `crates/horizon-release-sign/fork-release-keys.txt` authorizes fork downloads; upstream's keys
+  authorize only `horizon-rust/horizon`, and unknown repositories have no trusted keys. An empty
+  fork key file refuses every fork release. Upstream's legacy checksum pins never authorize a
+  fork archive: every fork game or launcher download needs a fork signature. The real private key
+  exists only as the repository secret `RELEASE_SIGNING_KEY`; dry runs receive no release secrets
+  and sign with an ephemeral test key instead. To rotate, first ship the next public key in the
+  same fork key file, then enable `RELEASE_SIGNING_KEY_NEXT` for overlapping signatures before
+  replacing the primary secret and eventually retiring the old public key. Nightly title,
+  channel and exact-version signature binding remain unchanged.
+- **Upstream release machinery needs the council.** The workflows, the release and signing tools, the update-checking code
+  and the installers are listed in `.github/CODEOWNERS`. Once main's protection requires code owners' reviews, a
+  change to any of them waits for a review from the `horizon-rust/council` team (council poll P35). Everything else still merges as soon as its checks pass.
+- **Agents get their own, smaller identity** (prepared, switched on by Ludovic). The `horizon-agent` GitHub App
+  can read and write code, pull requests and issues, and read the checks. It cannot change settings, workflows,
+  secrets or members, and its tokens last an hour. Once agents use it, their pull requests are the app's, and
+  Ludovic approves the rare pipeline change with one tap.
+
+## What still needs Ludovic
+
+- **Approving pipeline changes** (rare): a pull request touching a file in `.github/CODEOWNERS`.
+- **Holding releases back or speeding one up**, from his phone if he likes. Label an issue `release-blocker` to
+  hold every release until it is closed; label a pull request `release-now` to release it as soon as it merges.
+- **Creating the GitHub App**: one link, "Create GitHub App", then "Install". His login, his clicks.
+- **Fork pull requests**: their checks run only after a maintainer approves them, and they run on the Mac mini only
+  after a maintainer has read them and added `run-parity`.
+- **A leaked key**: rotate it (docs/release-flow.md, "Signed checksums"). Launchers older than the new key then
+  refuse new versions until players download the launcher again.
+
+## What this doesn't solve
+
+- **Code that merges is code that ships.** Signing proves a build came from Horizon's pipeline, not that the code
+  is good. Against a bad change, the safety nets are the checks and harnesses, review, the release smoke test and
+  the release-blocker label. Since the single channel there is no 6-hour beta: a change reaches every player
+  within minutes of merging.
+- **Until agents switch to the App**, they still work with Ludovic's own account, so nothing technical tells his
+  actions from theirs. Code owners' reviews are switched on together with the App.
+- **The Mac mini** builds the macOS release and also runs pull requests' parity checks: a pull request from this
+  repository runs its code there before review, and a fork's does once a maintainer adds `run-parity`. Code
+  running there as the runner's user could tamper with what the next release builds. Releases check out clean
+  (#1024), which removes anything a pull request left in the work folder by accident, but
+  not a deliberate attack. The protection is review: only agents and maintainers push to this repository, and a
+  maintainer reads a fork's change before labelling it.
+- **The first install** with `install.sh` or `install.ps1` checks the signature when OpenSSL 3 is installed: it
+  verifies `SHA256SUMS.sig` (a Nightly's `SHA256SUMS.v2.sig`, for its own version) against the release key built
+  into the script, then the archive against `SHA256SUMS`. `install.ps1` looks for OpenSSL on the PATH and in Git
+  for Windows, which ships it; Windows itself can't check Ed25519. With an older OpenSSL, LibreSSL (what macOS
+  ships) or none, the script says so and checks only the SHA-256 GitHub publishes. Every update after that checks
+  the signature.
+
+## Reporting a security problem
+
+Use GitHub's private vulnerability reporting (the repository's **Security** tab, "Report a vulnerability"), not a
+public issue or Discord. Say what you found and how to reproduce it; we answer there.
