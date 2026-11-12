@@ -693,7 +693,7 @@ impl Game<'_> {
         if amount == 0 {
             return;
         }
-        let (updated, broken) = self.damage_stack(&stack, amount as i32, false);
+        let (updated, broken) = self.damage_living_stack(&stack, amount, id);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
@@ -726,7 +726,7 @@ impl Game<'_> {
         if !horizon_client::stations::is_damageable(self.res.items(), &stack) {
             return;
         }
-        let loss = self.durability_loss(&stack, 1);
+        let loss = self.durability_loss(&stack, 1, super::durability::Wearer::Living(id));
         if loss == 0 {
             return;
         }
@@ -832,7 +832,7 @@ impl Game<'_> {
                 return;
             }
         }
-        let (updated, broken) = self.damage_stack(&body, amount.min(i32::MAX as u32) as i32, false);
+        let (updated, broken) = self.damage_living_stack(&body, amount, id);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };

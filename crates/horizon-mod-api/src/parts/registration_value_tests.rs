@@ -636,7 +636,14 @@ fn a_damage_reaches_only_the_parts_of_the_worn_item_and_changes_its_wear() {
     let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
     let mut wear = |stack: &ItemStack, points: i32| {
         let (mut amount, mut canceled) = (points, false);
-        dispatch_damage_item(&mut host, stack, &mut amount, &mut canceled);
+        dispatch_damage_item(
+            &mut host,
+            stack,
+            None,
+            &mut amount,
+            &mut canceled,
+            &mut false,
+        );
         (amount, canceled)
     };
     assert_eq!(wear(&stick(), 4), (12, false));
