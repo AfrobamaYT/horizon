@@ -1,4 +1,4 @@
-# Server attachments
+# Attachments
 
 Use `AttachmentType<T>` to store mod data on a player, entity, block entity,
 chunk or level. Declare a type once, then pass the hook's host and a `Holder`

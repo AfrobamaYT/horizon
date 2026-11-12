@@ -1,4 +1,4 @@
-# Making a content mod
+# Content mods
 
 Add blocks, items, fluids, entities and world-generation data with a content package.
 Create a project, edit its JSON files, then build and run it.

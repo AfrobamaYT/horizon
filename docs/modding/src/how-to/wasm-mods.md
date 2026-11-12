@@ -1,4 +1,4 @@
-# Building a mod to `mod.wasm`
+# WebAssembly mods
 
 A mod written against `mod_api` builds either way from the same source: native, compiled against
 the pinned prebuilt game by the launcher ([Native mods](native-mods.md)), or to `mod.wasm`, which runs in a game with

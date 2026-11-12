@@ -129,6 +129,16 @@ class ConceptPages(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "root-relative link"):
                     pages.validate(text, "concepts/parts/a-item.md", self.src, {})
 
+    def test_links_in_code_are_not_checked(self):
+        text = "```markdown\n[example](missing.md)\n```\n\nInline `[x](gone.md)` code.\n"
+        pages.validate(text, "concepts/parts/a-item.md", self.src, {})
+
+    def test_explicit_heading_ids_are_anchors(self):
+        (self.src / "concepts/parts/b-block.md").write_text("# Block parts\n\n## Landing {#custom}\n")
+        pages.validate("[x](b-block.md#custom)", "concepts/parts/a-item.md", self.src, {})
+        with self.assertRaisesRegex(AssertionError, "missing anchor"):
+            pages.validate("[x](b-block.md#landing-custom)", "concepts/parts/a-item.md", self.src, {})
+
     def test_missing_compiled_include_anchor_fails(self):
         (self.src / "code.rs").write_text("// ANCHOR: present\n// ANCHOR_END: present\n")
         text = "{{#include ../../code.rs:missing}}"

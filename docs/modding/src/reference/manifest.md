@@ -1,4 +1,4 @@
-# Mod files
+# The manifest and the package
 
 A `.hmod` is one mod: content, native code, or both. `horizon_mod_package::Package` reads the shared manifest and
 validates the package; `horizon_mod_package::Content` reads its resources, and `horizon_mod_package::index::native::Bundle`

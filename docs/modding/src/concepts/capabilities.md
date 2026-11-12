@@ -1,4 +1,4 @@
-# Capability providers
+# Capabilities
 
 Use capability providers to expose a block's storage to pipes, machines and hoppers. Register a
 provider for a block entity type, including a vanilla type, or for a block with or without a block entity.

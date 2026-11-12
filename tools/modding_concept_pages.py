@@ -43,6 +43,10 @@ def headings(text):
             fenced = not fenced
         if not fenced and re.match(r"^#{1,6} ", line):
             title = line.split(" ", 1)[1]
+            explicit = re.fullmatch(r"(.*?)\s*\{#([\w-]+)\}\s*", title)
+            if explicit:
+                yield explicit[1], explicit[2]
+                continue
             slug = re.sub(r"[^\w\- ]", "", title.lower()).replace(" ", "-")
             n = counts[slug]
             counts[slug] += 1
@@ -53,8 +57,21 @@ def page_title(text, path):
     return next((title for title, _ in headings(text)), path.stem.replace("-", " ").capitalize())
 
 
+def prose(text):
+    """`text` without fenced code blocks and inline code spans, whose brackets are not links."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append(re.sub(r"(`+)(?:(?!\1).)+?\1", "", line))
+    return "\n".join(out)
+
+
 def validate(text, path, src, contents):
-    for match in chain(LINK.finditer(text), REFERENCE.finditer(text)):
+    body = prose(text)
+    for match in chain(LINK.finditer(body), REFERENCE.finditer(body)):
         url = urlsplit(match[2])
         if url.scheme or url.netloc:
             continue
