@@ -418,7 +418,7 @@ mod tests {
             let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(16_384);
             let _owner =
-                mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                mod_platform::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
                     id: "a",
                     hook: "test",
                     part: None,
@@ -453,12 +453,13 @@ mod tests {
             ]));
             let mut draw = WorldGeometry::default();
             {
-                let _other =
-                    mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                let _other = mod_platform::content::crash::enter_native_mod(
+                    mod_api::content::crash::ModCall {
                         id: "b",
                         hook: "test",
                         part: None,
-                    });
+                    },
+                );
                 assert_eq!(group.write(game, 0, &[near]), Err(GroupError::Stale));
                 assert_eq!(group.set_len(game, 0), Err(GroupError::Stale));
                 assert_eq!(
@@ -668,7 +669,7 @@ mod tests {
             let _restore = Restore;
             let model = grass(game);
             let _owner =
-                mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                mod_platform::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
                     id: "group-owner",
                     hook: "test",
                     part: None,
@@ -807,12 +808,13 @@ mod tests {
                 Err(GroupError::CapacityExceeded)
             );
             let other_group = {
-                let _other =
-                    mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                let _other = mod_platform::content::crash::enter_native_mod(
+                    mod_api::content::crash::ModCall {
                         id: "unaffected-owner",
                         hook: "test",
                         part: None,
-                    });
+                    },
+                );
                 assert_eq!(released.set_len(game, 1), Err(GroupError::Stale));
                 game.create_group(model, 1).unwrap()
             };
@@ -825,12 +827,13 @@ mod tests {
             );
             assert_eq!(draw.copy_count(), 0);
             {
-                let _other =
-                    mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                let _other = mod_platform::content::crash::enter_native_mod(
+                    mod_api::content::crash::ModCall {
                         id: "unaffected-owner",
                         hook: "test",
                         part: None,
-                    });
+                    },
+                );
                 other_group.set_len(game, 1).unwrap();
                 other_group.destroy(game).unwrap();
             }

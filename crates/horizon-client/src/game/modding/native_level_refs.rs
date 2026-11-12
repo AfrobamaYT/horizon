@@ -1811,7 +1811,7 @@ mod tests {
     }
 
     fn in_mod(id: &'static str) -> mod_api::content::crash::ModGuard {
-        mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+        mod_platform::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
             id,
             hook: "test",
             part: None,

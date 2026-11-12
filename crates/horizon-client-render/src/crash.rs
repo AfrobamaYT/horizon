@@ -5,8 +5,18 @@
 //! reads it and shares it by hand.
 pub use mod_api::content::crash::{
     ConvertedCall, ConvertedPackage, ConvertedPackageGuard, ConvertedPackages, ModCall, ModGuard,
-    clear_detail, current_converted_call, current_native_mod, enter_native_mod, set_detail,
+    current_converted_call, current_native_mod,
 };
+// Tests run without the executable's startup: the platform's versions install the crash
+// backend on first use and keep details, as the started game's do.
+#[cfg(not(test))]
+use mod_api::content::crash::details;
+#[cfg(not(test))]
+pub use mod_api::content::crash::{clear_detail, enter_native_mod, set_detail};
+#[cfg(test)]
+use mod_platform::content::crash::details;
+#[cfg(test)]
+pub use mod_platform::content::crash::{clear_detail, enter_native_mod, set_detail};
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -318,7 +328,7 @@ pub fn system_details(side: &str) -> Vec<(String, String)> {
         ("Memory".to_owned(), memory()),
     ];
     out.extend(
-        mod_api::content::crash::details()
+        details()
             .into_iter()
             .filter(|(k, _)| side != "server" || *k != "Render Settings")
             .map(|(k, v)| (k.to_owned(), v)),
