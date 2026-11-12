@@ -30,6 +30,7 @@ mod retrogen_biomes;
 mod rule_test_bounds;
 mod snbt_unicode_order;
 mod state_provider_bounds;
+mod template_loading;
 mod tick_data;
 mod weighted_provider;
 mod world_io;
