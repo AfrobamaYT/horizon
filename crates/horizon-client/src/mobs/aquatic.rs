@@ -1368,7 +1368,8 @@ mod pufferfish_sting_tests {
                 .iter()
                 .enumerate()
                 .map(|(i, (name, x))| {
-                    mob(i as u32 + 2, name, Vec3::new(0.5 + x, 64.0, 0.5)).seen(None, &crate::items::Items::empty())
+                    mob(i as u32 + 2, name, Vec3::new(0.5 + x, 64.0, 0.5))
+                        .seen(None, &crate::items::Items::empty())
                 })
                 .collect();
             built = Some((fish, seen));
@@ -1674,7 +1675,10 @@ mod pufferfish_sting_tests {
                 fish.extra.size = 2;
                 let pig_a = make_mob(2, "minecraft:pig", Vec3::new(0.6, 64.0, 0.5));
                 let pig_b = make_mob(3, "minecraft:pig", Vec3::new(0.4, 64.0, 0.5));
-                let seen = [pig_a.seen(None, &crate::items::Items::empty()), pig_b.seen(None, &crate::items::Items::empty())];
+                let seen = [
+                    pig_a.seen(None, &crate::items::Items::empty()),
+                    pig_b.seen(None, &crate::items::Items::empty()),
+                ];
                 let world = MobWorld {
                     goal_host: None,
                     others: &seen,

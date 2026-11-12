@@ -35,7 +35,7 @@ use horizon_client::{
     crafting::Recipes,
     graphics::EntityCullingMode,
     health::{Attack, HealthEvent, HurtSource, Hurting, Knock},
-    items::ItemStack,
+    items::{ItemStack, Items},
     mesher::Vertex,
     mobs::{
         Damage, DamageKind, Mob, MobEvent, MobWorld, PlayerView, Seen, SpawnSetup, Species, Who,
@@ -355,7 +355,7 @@ fn flame_geometry(
         ss += 1;
     }
 }
-pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>) -> Seen {
+pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>, items: &Items) -> Seen {
     m.seen(player, items)
 }
 /// Whether a mob a packet named may take the click: `mob_hit` skips a mob in
@@ -10082,7 +10082,7 @@ mod breeding_tests {
                 seed,
             },
         );
-        let others = [partner.seen(None, items)];
+        let others = [partner.seen(None, game.items())];
         let mut events = Vec::new();
         let mut test_level = horizon_client::health::TestLevel::new(321);
         let mut experience = None;
@@ -10450,7 +10450,7 @@ mod breeding_tests {
                 .clone();
             let mut mate = Mob::new(2, kind.clone(), Vec3::new(0.5, 64.0, 0.0), 0.0);
             mate.extra.in_love = 600;
-            let others = [mate.seen(None, items)];
+            let others = [mate.seen(None, game.items())];
             let run = || {
                 let world = MobWorld {
                     others: &others,

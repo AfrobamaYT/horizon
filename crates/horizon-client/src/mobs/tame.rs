@@ -1858,7 +1858,10 @@ mod tests {
                 m
             })
             .collect();
-        let seen: Vec<Seen> = mobs.iter().map(|m| m.seen(None, &crate::items::Items::empty())).collect();
+        let seen: Vec<Seen> = mobs
+            .iter()
+            .map(|m| m.seen(None, &crate::items::Items::empty()))
+            .collect();
         let grid = SeenGrid::new(seen.iter().map(|s| s.bounds));
         with_test_world(&seen, |w, _| {
             let indexed = MobWorld {

@@ -4867,7 +4867,10 @@ mod same_vehicle_push_tests {
                 husk.extra.mount = Some(camel.id);
                 riders.push(husk.seen(None, &crate::items::Items::empty()));
                 if zombie_too {
-                    riders.push(mob(3, "minecraft:zombie", Vec3::new(0.5, 64.0, 0.0)).seen(None, &crate::items::Items::empty()));
+                    riders.push(
+                        mob(3, "minecraft:zombie", Vec3::new(0.5, 64.0, 0.0))
+                            .seen(None, &crate::items::Items::empty()),
+                    );
                 }
                 out = Some(camel);
             });
@@ -4920,14 +4923,17 @@ mod same_vehicle_push_tests {
             return;
         };
         let mut events = Vec::new();
-        let ran = with_test_world(&[villager.seen(None, &crate::items::Items::empty())], |w, _| {
-            push_entities(
-                &mut cow,
-                w,
-                &mut crate::health::TestLevel::new(0).level(),
-                &mut events,
-            );
-        });
+        let ran = with_test_world(
+            &[villager.seen(None, &crate::items::Items::empty())],
+            |w, _| {
+                push_entities(
+                    &mut cow,
+                    w,
+                    &mut crate::health::TestLevel::new(0).level(),
+                    &mut events,
+                );
+            },
+        );
         // Without the vanilla data under .local/horizon-client the world
         // cannot be built: the test has nothing to check.
         let _ = ran;
@@ -5060,9 +5066,10 @@ mod same_vehicle_push_tests {
 
         let (horse, mut cow) = pair(true).unwrap();
         let mut events = Vec::new();
-        with_test_world(&[horse.seen(None, &crate::items::Items::empty())], |w, _| {
-            push_entities(&mut cow, w, level, &mut events)
-        });
+        with_test_world(
+            &[horse.seen(None, &crate::items::Items::empty())],
+            |w, _| push_entities(&mut cow, w, level, &mut events),
+        );
         assert_eq!(
             pushed(&events),
             Vec::<u32>::new(),
@@ -5072,9 +5079,10 @@ mod same_vehicle_push_tests {
 
         let (horse, mut cow) = pair(false).unwrap();
         let mut events = Vec::new();
-        with_test_world(&[horse.seen(None, &crate::items::Items::empty())], |w, _| {
-            push_entities(&mut cow, w, level, &mut events)
-        });
+        with_test_world(
+            &[horse.seen(None, &crate::items::Items::empty())],
+            |w, _| push_entities(&mut cow, w, level, &mut events),
+        );
         assert_eq!(
             pushed(&events),
             vec![1],
@@ -5107,7 +5115,11 @@ mod warden_push_tests {
                 set_pose(&mut warden, pose);
                 let standing = pose == Pose::Standing;
                 assert_eq!(warden.pushable(), standing, "{pose:?}");
-                assert_eq!(warden.seen(None, &crate::items::Items::empty()).pushable, standing, "{pose:?}");
+                assert_eq!(
+                    warden.seen(None, &crate::items::Items::empty()).pushable,
+                    standing,
+                    "{pose:?}"
+                );
 
                 // The warden's tick: an overlapping mob must not move it.
                 let mut cow = mob(2, "minecraft:cow", 1.0);
@@ -7390,7 +7402,10 @@ mod trader_llama_no_ai_tests {
                     Vec3::new(40.5, 200.0, 40.5),
                     0.0,
                 );
-                let seen = [trader.seen(None, &crate::items::Items::empty()), cow.seen(None, &crate::items::Items::empty())];
+                let seen = [
+                    trader.seen(None, &crate::items::Items::empty()),
+                    cow.seen(None, &crate::items::Items::empty()),
+                ];
                 assert_eq!(seen[0].delay, 13);
                 let view = MobWorld {
                     others: &seen,

@@ -2907,11 +2907,11 @@ impl Mob {
         self.ticks_frozen >= crate::motion::PlayerMotion::TICKS_REQUIRED_TO_FREEZE
     }
 
-    /// What other mobs see of this one this tick (`_player` is unused: it keyed the villager
-    /// reputation that nothing read). Inline: the game's snapshot of every mob writes each one in
-    /// its slot, not through a copy.
+    /// What other mobs see of this one this tick, its villager food counted by `items` (`_player`
+    /// is unused: it keyed the villager reputation that nothing read). Inline: the game's snapshot
+    /// of every mob writes each one in its slot, not through a copy.
     #[inline]
-    pub fn seen(&self, _player: Option<[i32; 4]>) -> Seen {
+    pub fn seen(&self, _player: Option<[i32; 4]>, items: &crate::items::Items) -> Seen {
         let m = self;
         let villager = m.species() == Species::Villager;
         Seen {

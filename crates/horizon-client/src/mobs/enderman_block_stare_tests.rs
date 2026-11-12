@@ -65,7 +65,13 @@ fn the_enderman_itself_never_blocks_a_placement() {
     };
     for (others, blocked) in [
         (vec![m.seen(None, &crate::items::Items::empty())], false),
-        (vec![m.seen(None, &crate::items::Items::empty()), other.seen(None, &crate::items::Items::empty())], true),
+        (
+            vec![
+                m.seen(None, &crate::items::Items::empty()),
+                other.seen(None, &crate::items::Items::empty()),
+            ],
+            true,
+        ),
     ] {
         with_test_world(&others, |w, _| {
             let events = tick_at(&mut m, w, [0, 0, 0], pick, &mut LeaveBlock);

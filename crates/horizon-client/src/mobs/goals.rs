@@ -3277,8 +3277,8 @@ mod breeding_variant_tests {
                 "minecraft:wolf",
             ] {
                 let kind = Arc::new(types.types[id].clone());
-                let partner =
-                    [Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0).seen(None, &crate::items::Items::empty())];
+                let partner = [Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0)
+                    .seen(None, &crate::items::Items::empty())];
                 for (ask_mods, mob_drops) in
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
@@ -3889,7 +3889,10 @@ mod peaceful_targets_tests {
             };
             let ghast = mob(2, "minecraft:ghast", Vec3::new(2.5, 64.0, 0.5));
             let zombie = mob(3, "minecraft:zombie", Vec3::new(3.5, 64.0, 0.5));
-            seen = Some([ghast.seen(None, &crate::items::Items::empty()), zombie.seen(None, &crate::items::Items::empty())]);
+            seen = Some([
+                ghast.seen(None, &crate::items::Items::empty()),
+                zombie.seen(None, &crate::items::Items::empty()),
+            ]);
         });
         let Some(seen) = seen else { return };
         with_test_world(&seen, |w, types| {

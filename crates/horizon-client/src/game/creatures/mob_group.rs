@@ -13,6 +13,8 @@ use horizon_core::random::LegacyRandom;
 /// What every mob of the loop reads and none writes.
 pub(super) struct Shared<'a> {
     pub uuid: Option<[i32; 4]>,
+    /// The item registry the mobs live with: what a villager's snapshot counts its food by.
+    pub items: &'a horizon_client::items::Items,
     pub level_id: &'static str,
     /// The blocks whose collision changed since the last tick: mobs re-path around them.
     pub path_changes: &'a [[i32; 3]],
