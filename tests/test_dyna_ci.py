@@ -292,6 +292,7 @@ class DynaRoutingTests(unittest.TestCase):
                 elif case in ("wrong-link", "dangling-link"):
                     target.symlink_to(other if case == "wrong-link" else root / "missing")
                 before = target.lstat() if case != "absent" else None
+                before_link = os.readlink(target) if case in ("wrong-link", "dangling-link") else None
                 env = dict(os.environ, CARGO_TARGET_DIR=str(persistent))
                 result = subprocess.run(["bash", "-e", "-c", script], cwd=root, env=env,
                                         capture_output=True, text=True)
@@ -300,7 +301,13 @@ class DynaRoutingTests(unittest.TestCase):
                     self.assertEqual(target.resolve(), persistent)
                 else:
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertEqual(target.lstat(), before)
+                    after = target.lstat()
+                    # Following a symlink may update atime without modifying it.
+                    fields = ("st_ino", "st_dev", "st_mode", "st_size", "st_mtime_ns")
+                    self.assertEqual(tuple(getattr(after, field) for field in fields),
+                                     tuple(getattr(before, field) for field in fields))
+                    if case in ("wrong-link", "dangling-link"):
+                        self.assertEqual(os.readlink(target), before_link)
                     if case == "directory":
                         self.assertEqual((target / "keep").read_text(), "retained")
                     elif case == "file":
