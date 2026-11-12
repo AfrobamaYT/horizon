@@ -1505,6 +1505,9 @@ pub(super) mod tests {
             .map(|p| p.unwrap().path())
             .collect();
         assert_eq!(reports.len(), 1);
+        // `MinecraftServer.runServer` saves a server report even under a client install.
+        let file = reports[0].file_name().unwrap().to_string_lossy();
+        assert!(file.ends_with("-server.txt"), "{file}");
         let text = std::fs::read_to_string(&reports[0]).unwrap();
         assert!(text.contains("Description: Exception in server tick loop"));
         assert!(text.contains("Server thread"));

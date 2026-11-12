@@ -602,9 +602,11 @@ pub fn install(home: PathBuf, side: &'static str) {
         default(info);
         let main = std::thread::current().name() == Some("main");
         if std::thread::current().name() == Some(INTEGRATED_SERVER_THREAD) {
+            // `MinecraftServer.runServer` saves its own `-server.txt` report before
+            // `onServerCrash` hands it to the client, which then only prints its path.
             let report = Report {
                 description: "Exception in server tick loop".into(),
-                ..panic_report(info, side)
+                ..panic_report(info, "server")
             };
             deliver(&home, report);
             SERVER_CRASHED.store(true, std::sync::atomic::Ordering::Release);
@@ -784,6 +786,14 @@ mod tests {
                 .collect();
             assert_eq!(reports.len(), count);
             if count == 1 {
+                // Both are server reports: `main` is installed as a dedicated server here,
+                // and the integrated server thread writes its own even under a client install.
+                let file = reports[0]
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                assert!(file.ends_with("-server.txt"), "{file}");
                 let text = std::fs::read_to_string(&reports[0]).unwrap();
                 assert!(text.contains(&format!("Description: {title}")));
                 assert!(text.contains("posted server crash 3494"));
