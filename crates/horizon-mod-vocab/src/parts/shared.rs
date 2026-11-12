@@ -86,6 +86,8 @@ pub struct Parts {
     pub(crate) place_providers: HashMap<&'static str, PlaceProviderPart>,
     /// The tooltip appenders, in registration order.
     pub(crate) tooltip_appenders: Vec<TooltipAppenderPart>,
+    /// The crash report lines, in registration order.
+    pub(crate) crash_sections: Vec<CrashSectionPart>,
     /// Command argument types the mods registered, by namespaced id, in registration order.
     pub(crate) command_arguments: Vec<CommandArgumentInfo>,
     /// Frozen raw payload declarations and their sole receiving owners.
