@@ -862,21 +862,30 @@ impl Game<'_> {
                     }
                 }),
         };
-        let own = self.explosion_hurt_player(
-            &context,
-            radius,
-            damage_type,
-            exploding,
-            attacker.as_ref(),
-            blast_source.as_ref(),
-        );
+        let own = if self
+            .lan_acting_entity
+            .is_some_and(|id| self.combat.spares(id))
+        {
+            None
+        } else {
+            self.explosion_hurt_player(
+                &context,
+                radius,
+                damage_type,
+                exploding,
+                attacker.as_ref(),
+                blast_source.as_ref(),
+            )
+        };
         let mut pushed: Vec<_> = self.lan_acting.zip(own).into_iter().collect();
         if let Some(host) = self.lan.as_ref() {
+            let combat = &self.combat;
             let guests: Vec<u32> = host
                 .hub
                 .guests
                 .iter()
                 .filter(|g| host.hub.here(g))
+                .filter(|g| !u32::try_from(g.entity_id).is_ok_and(|id| combat.spares(id)))
                 .map(|g| g.conn)
                 .collect();
             for conn in guests {
@@ -958,7 +967,13 @@ impl Game<'_> {
                 EntityHandle::Cart(i) => EntityHandle::Cart(i - carts_gone),
                 other => other,
             };
-            let hit = with_entity!(self, handle, e => self.blast_hit(e, center, diameter, &blast));
+            // An entity `explosion_detonate` took out is neither hurt nor pushed.
+            let spared = with_entity!(self, handle, e => self.combat.spares(e.id()));
+            let hit = if spared {
+                None
+            } else {
+                with_entity!(self, handle, e => self.blast_hit(e, center, diameter, &blast))
+            };
             let mut destroyed = false;
             if let Some(Hit {
                 dist,
@@ -1453,10 +1468,11 @@ impl Game<'_> {
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets = self.exploded_positions(center, radius, resists, source.portal_proof);
-        let dimension = self.dim.id();
-        self.native_explosion_detonate(dimension, center, &mut targets);
+        let spared = self.explosion_detonate(center, radius, &mut targets);
+        let outer = std::mem::replace(&mut self.combat.blast_spared, spared);
         let pushed =
             self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
+        self.combat.blast_spared = outer;
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {

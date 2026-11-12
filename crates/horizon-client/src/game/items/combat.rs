@@ -150,6 +150,9 @@ pub(super) struct CombatTracker {
     /// blast leaves it out (`getEntities(source, box)`). A source guessed
     /// from the mobs near the centre is still hurt: it may be a bystander.
     pub(super) explosion_source_named: bool,
+    /// The entities `explosion_detonate` took out of the blast now hurting
+    /// entities: none of them is hurt or pushed (`explosion_detonate.rs`).
+    pub(super) blast_spared: Vec<u32>,
     /// The blast's direct source is in water (`Explosion.getDirectSourceEntity`
     /// `.isInWater`): paintings, item frames and cushions ignore it
     /// (`BlockAttachedEntity.ignoreExplosion`).
@@ -184,6 +187,11 @@ pub(super) struct CombatTracker {
     fall_before: f64,
 }
 impl CombatTracker {
+    /// `explosion_detonate` took entity `id` out of the blast now hurting entities.
+    pub(super) fn spares(&self, id: u32) -> bool {
+        self.blast_spared.contains(&id)
+    }
+
     /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, scoped)`).
     pub(super) fn attack(&self) -> &Attack {
         &self.attack
