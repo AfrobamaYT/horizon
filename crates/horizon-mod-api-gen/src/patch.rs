@@ -136,6 +136,8 @@ struct Source {
     /// `macro_rules!` names the crate defines without `#[macro_export]`: a body using one can't
     /// leave the crate.
     local_macros: BTreeSet<String>,
+    /// Each loaded lower crate's library name (`[lib] name`), by its folder's crate name.
+    libraries: BTreeMap<String, String>,
 }
 
 impl Source {
@@ -163,6 +165,7 @@ impl Source {
             files,
             parsed: BTreeMap::new(),
             local_macros,
+            libraries: BTreeMap::new(),
         })
     }
 
@@ -171,7 +174,10 @@ impl Source {
         if self.loaded.contains(krate) {
             return true;
         }
-        let Ok((_, lib)) = crate::source::crate_root(&self.root, krate) else {
+        let Ok((package, lib)) = crate::source::crate_root(&self.root, krate) else {
+            return false;
+        };
+        let Ok(library) = crate::replace::library_name(&package) else {
             return false;
         };
         let dir = lib.parent().expect("a source file has a folder").to_owned();
@@ -188,6 +194,7 @@ impl Source {
         }
         self.local_macros
             .extend(local.into_iter().filter(|name| !exported.contains(name)));
+        self.libraries.insert(krate.to_owned(), library);
         self.loaded.insert(krate.to_owned());
         true
     }
@@ -1265,6 +1272,19 @@ fn prettyplease_or_tokens(tokens: proc_macro2::TokenStream) -> String {
     }
 }
 
+/// The module `path` of the game's source as the patch crate names it: a lower crate's folder
+/// name gives the path's first segment, and its library's name (`[lib] name`) the extern.
+fn original_path(libraries: &BTreeMap<String, String>, path: &str) -> String {
+    let (krate, rest) = path
+        .split_once("::")
+        .map_or((path, None), |(k, r)| (k, Some(r)));
+    let library = libraries.get(krate).map_or(krate, String::as_str);
+    match rest {
+        Some(rest) => format!("::{library}::{rest}"),
+        None => format!("::{library}"),
+    }
+}
+
 /// The mirror of module `path` and its children in `tree`.
 fn mirror(
     source: &mut Source,
@@ -1274,7 +1294,8 @@ fn mirror(
     used: Option<&BTreeSet<String>>,
 ) -> Result<proc_macro2::TokenStream, String> {
     let items = source.module(path)?.items.clone();
-    let original: syn::Path = syn::parse_str(&format!("::{path}")).expect("a module path");
+    let original: syn::Path =
+        syn::parse_str(&original_path(&source.libraries, path)).expect("a module path");
     let reserved: BTreeSet<String> = tree
         .children
         .keys()
@@ -1547,6 +1568,36 @@ fn collect_names(tree: &syn::UseTree, out: &mut Vec<String>) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_lower_crate_is_mirrored_through_its_library_name() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("crates/horizon-mod-render");
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        std::fs::write(
+            package.join("Cargo.toml"),
+            "[package]\nname = 'horizon-mod-render'\n[lib]\nname = 'mod_render'\n",
+        )
+        .unwrap();
+        std::fs::write(package.join("src/lib.rs"), "pub mod render {}\n").unwrap();
+        let mut source = Source {
+            root: root.path().to_owned(),
+            loaded: BTreeSet::new(),
+            files: BTreeMap::new(),
+            parsed: BTreeMap::new(),
+            local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
+        };
+        assert!(source.load("horizon_mod_render"));
+        assert_eq!(
+            original_path(&source.libraries, "horizon_mod_render::render"),
+            "::mod_render::render"
+        );
+        assert_eq!(
+            original_path(&source.libraries, "horizon_client::game::autosave"),
+            "::horizon_client::game::autosave"
+        );
+    }
+
     fn root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
@@ -1629,6 +1680,7 @@ mod tests {
                 },
             )]),
             local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
         };
         let ancestor = mirror(
             &mut source,
@@ -1685,6 +1737,7 @@ mod tests {
             files: BTreeMap::from([("fixture".to_owned(), vec![file])]),
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
         };
         let used = BTreeSet::from(["Arc".to_owned()]);
         let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
@@ -1711,6 +1764,7 @@ mod tests {
             files: BTreeMap::from([("fixture".to_owned(), vec![outer, included])]),
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
         };
         let out = mirror(&mut source, "fixture", &Tree::default(), false, None).unwrap();
         let parsed: syn::File = syn::parse2(out).unwrap();
