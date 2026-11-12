@@ -458,12 +458,20 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'push' }}
         run: python3 tools/layering/scan_engine_mod_edges.py --map target/layering/mod-host-map-tables.md
       - name: Upload the mod-host map tables
+        id: mod_host_map_upload
         if: ${{ !cancelled() && github.event_name == 'push' }}
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: mod-host-map
           path: target/layering/mod-host-map-tables.md
           if-no-files-found: error
+      - name: Report optional mod-host map upload failure
+        if: ${{ !cancelled() && steps.mod_host_map_upload.outcome == 'failure' }}
+        run: |
+          echo '::warning::Optional mod-host-map artifact upload failed; inspect the upload step for details.'
+          echo '### Optional mod-host-map artifact unavailable' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The upload failed. Map generation remains a required step; the optional download is unavailable.' >> "$GITHUB_STEP_SUMMARY"
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known

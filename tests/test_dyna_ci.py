@@ -284,6 +284,21 @@ class DynaRoutingTests(unittest.TestCase):
             with self.subTest(replacement=replacement), self.assertRaises(AssertionError):
                 self.assert_positive_stage_export(verify.replace(command, replacement, 1))
 
+    def test_optional_map_upload_is_nonblocking_and_reports_its_failure(self):
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        upload = verify.split("        id: mod_host_map_upload\n", 1)[1].split("\n      - ", 1)[0]
+        fields = dict(line.strip().split(":", 1) for line in upload.splitlines()
+                      if line.startswith("        ") and ":" in line and not line.lstrip().startswith("#"))
+        self.assertEqual(fields["continue-on-error"].strip(), "true")
+        self.assertIn("uses: actions/upload-artifact@", upload)
+        report = verify.split("- name: Report optional mod-host map upload failure\n", 1)[1].split("\n      - ", 1)[0]
+        condition = report.split("if:", 1)[1].split("\n", 1)[0]
+        self.assertIn("!cancelled()", condition)
+        self.assertIn("steps.mod_host_map_upload.outcome == 'failure'", condition)
+        self.assertIn("::warning::", report)
+        self.assertIn('>> "$GITHUB_STEP_SUMMARY"', report)
+
     def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
         # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).
         from test_ci_runners import jobs
