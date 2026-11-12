@@ -1,5 +1,4 @@
 use super::*;
-use mod_api::RailShape;
 
 impl GameLevel<'_> {
     /// `IBaseRailBlockExtension.getRailDirection`: `shape` starts at the rail's `shape`

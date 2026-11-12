@@ -93,7 +93,9 @@ pub(crate) use mod_api::{
     BlockRim, ClientPacket, ClientPayload, ColoredLight, ExplosionStart, ItemFished, LootDrops,
     PanelEvent, PortalShape, ScreenView,
 };
-use mod_api::{CameraType, Despawn, Identifier, MobRef, PermissionLevel, SoundPlay, SoundRef};
+use mod_api::{
+    CameraType, Despawn, Identifier, MobRef, PermissionLevel, RailShape, SoundPlay, SoundRef,
+};
 use std::{
     collections::HashMap,
     fs,
