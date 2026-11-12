@@ -194,6 +194,35 @@ fn string_list(v: &Value) -> Vec<String> {
         _ => vec![],
     }
 }
+/// `supported_items` / `primary_items` specs: ids and `#tags`, or a NeoForge
+/// set object kept as its JSON text, resolved against the loaded items.
+fn item_specs(v: &Value) -> Vec<String> {
+    match v {
+        Value::Object(_) => vec![v.to_string()],
+        other => string_list(other),
+    }
+}
+/// An `exclusive_set` written as a NeoForge set object.
+/// shortcut: one entry can't list the whole enchantment registry, so `any` and
+/// `not` see no entries; resolve after the registry loads if a pack needs them.
+fn exclusive_object(
+    id: &str,
+    set: &Value,
+    tags: &HashMap<String, Vec<Arc<str>>>,
+) -> crate::Result<Vec<Arc<str>>> {
+    let lookup = horizon_world::holder_set::StringLookup {
+        what: "enchantment",
+        ids: None,
+        tag: &|tag| {
+            let members = tags.get(tag).into_iter().flatten();
+            Ok(members.map(|member| member.to_string()).collect())
+        },
+        entry: &|id| Ok(vec![id.to_owned()]),
+    };
+    let ids = horizon_world::holder_set::resolve(set, &lookup)
+        .map_err(|error| format!("{id}: exclusive_set: {error}"))?;
+    Ok(ids.iter().map(|id| Arc::from(id.as_str())).collect())
+}
 fn read_tag_dir(
     dir: &Path,
     conditions: &horizon_world::conditions::LoadConditions,
@@ -237,6 +266,27 @@ fn expand_ordered(
         }
     }
 }
+/// Whether a NeoForge item set object (`item_specs`) names `item`.
+fn item_set_holds(items: &Items, spec: &str, item: &str) -> bool {
+    let Ok(set) = serde_json::from_str::<Value>(spec) else {
+        return false;
+    };
+    let ids = || -> Vec<String> { items.order.iter().map(|id| id.to_string()).collect() };
+    let lookup = horizon_world::holder_set::StringLookup {
+        what: "item",
+        ids: Some(&ids),
+        tag: &|tag| {
+            let tag = crate::recipe_sources::qualified(tag);
+            let members = items.tag_members(crate::items::TagRegistry::Item, &tag);
+            Ok(members.map(<[String]>::to_vec).unwrap_or_default())
+        },
+        entry: &|id| Ok(vec![crate::recipe_sources::qualified(id)]),
+    };
+    horizon_world::holder_set::resolve(&set, &lookup).is_ok_and(|ids| {
+        ids.iter()
+            .any(|id| crate::properties::same_item_id(id, item))
+    })
+}
 /// Roman numerals as in `enchantment.level.N` (falls back to the number).
 pub fn level_name(level: u32) -> String {
     const NAMES: [&str; 10] = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
@@ -269,6 +319,7 @@ fn parse_entry(
         .map_err(|error| format!("{id}: {error}"))?;
     let exclusive = match &v["exclusive_set"] {
         Value::String(s) if s.starts_with('#') => tags.get(&s[1..]).cloned().unwrap_or_default(),
+        set @ Value::Object(_) => exclusive_object(id, set, tags)?,
         other => string_list(other)
             .into_iter()
             .map(|s| Arc::from(s.as_str()))
@@ -293,8 +344,8 @@ fn parse_entry(
         anvil_cost: v["anvil_cost"].as_u64().unwrap_or(0) as u32,
         min_cost: Cost::parse(&v["min_cost"]),
         max_cost: Cost::parse(&v["max_cost"]),
-        supported: string_list(&v["supported_items"]),
-        primary: v.get("primary_items").map(string_list),
+        supported: item_specs(&v["supported_items"]),
+        primary: v.get("primary_items").map(item_specs),
         exclusive: exclusive.into_iter().collect(),
         slots: string_list(&v["slots"]),
         effects: v["effects"].clone(),
@@ -590,8 +641,11 @@ impl Enchantments {
     }
     /// Whether `item` matches an id / `#tag` list.
     pub fn item_in(items: &Items, specs: &[String], item: &str) -> bool {
-        specs.iter().any(|spec| {
-            crate::properties::item_matches(spec, item, |tag| items.item_in_tag(tag, item))
+        specs.iter().any(|spec| match spec.starts_with('{') {
+            true => item_set_holds(items, spec, item),
+            false => {
+                crate::properties::item_matches(spec, item, |tag| items.item_in_tag(tag, item))
+            }
         })
     }
     /// `Enchantment.canEnchant` / `isSupportedItem`.
@@ -2099,5 +2153,24 @@ mod ignite_tests {
         assert_eq!(fire(1) * 20.0, 80.0);
         assert_eq!(fire(2) * 20.0, 160.0);
         assert_eq!(reg.ignite_seconds(&[], &ctx, &mut random), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod holder_set_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_neoforge_supported_items_object_admits_its_tag_and_ids() {
+        let items = Items::for_tests(HashMap::from([(
+            "minecraft:swords".to_owned(),
+            HashSet::from(["minecraft:iron_sword".to_owned()]),
+        )]));
+        let specs = item_specs(&json!({"type": "neoforge:or",
+            "values": ["#minecraft:swords", "minecraft:stick"]}));
+        assert!(Enchantments::item_in(&items, &specs, "minecraft:stick"));
+        assert!(Enchantments::item_in(&items, &specs, "minecraft:iron_sword"));
+        assert!(!Enchantments::item_in(&items, &specs, "minecraft:dirt"));
     }
 }

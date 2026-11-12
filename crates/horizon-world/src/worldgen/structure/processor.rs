@@ -676,40 +676,19 @@ impl SpawnerMobs {
     }
 }
 
+/// A block holder set in any form `crate::holder_set` reads; a tag no pack
+/// defines holds no blocks.
 fn holder_set(
     value: &Value,
     bindings: &FeatureBlockBindings<'_>,
 ) -> Result<Arc<BTreeSet<BlockStateId>>, DecodeError> {
-    let names: Vec<&str> = match value {
-        Value::String(s) => vec![s.as_str()],
-        Value::Array(a) => a.iter().filter_map(Value::as_str).collect(),
-        _ => return Err(DecodeError::Field("block holder set")),
+    let lookup = super::super::block_feature::BlockSetLookup {
+        bindings,
+        unknown_tags_empty: true,
     };
-    let mut out = BTreeSet::new();
-    for name in names {
-        if let Some(tag) = name.strip_prefix('#') {
-            let tag = super::super::tags::identifier(tag)?;
-            out.extend(
-                bindings
-                    .tags
-                    .get(&tag)
-                    .map(|s| s.iter().copied())
-                    .into_iter()
-                    .flatten(),
-            );
-        } else {
-            let name = super::super::tags::identifier(name)?;
-            out.extend(
-                bindings
-                    .blocks
-                    .get(&name)
-                    .ok_or_else(|| DecodeError::Registry(format!("unknown block {name}")))?
-                    .iter()
-                    .copied(),
-            );
-        }
-    }
-    Ok(Arc::new(out))
+    crate::holder_set::resolve(value, &lookup)
+        .map(|ids| Arc::new(ids.into_iter().collect()))
+        .map_err(DecodeError::Registry)
 }
 pub(super) fn json_to_nbt(value: &Value) -> Tag {
     match value {

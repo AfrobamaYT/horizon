@@ -1041,7 +1041,7 @@ impl LootData {
     fn tag(&self, registry: &str, name: &str) -> Vec<String> {
         loot_tags::members(&self.tags, registry, name)
     }
-    /// A HolderSet: "#tag", "id" or a list of ids.
+    /// A HolderSet: "#tag", "id", a list of ids or a NeoForge set object.
     fn holder_set(&self, registry: &str, v: &Value) -> Vec<String> {
         match v {
             Value::String(s) => match s.strip_prefix('#') {
@@ -1053,7 +1053,7 @@ impl LootData {
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect(),
-            _ => Vec::new(),
+            _ => loot_tags::holder_set_object(self, registry, v),
         }
     }
     fn item_in(&self, item: &str, set: &Value) -> bool {

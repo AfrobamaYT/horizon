@@ -238,24 +238,43 @@ impl StartCache {
     }
 }
 
+/// A structure's biome holder set in any form `crate::holder_set` reads. An
+/// absent field, an unknown biome or tag names nothing, and a list may also
+/// hold tags, as this reader always allowed.
 fn biome_set(data: &GeneratorData, value: &Value) -> Result<BTreeSet<BiomeId>, super::DecodeError> {
-    let names: Vec<&str> = match value {
-        Value::String(s) => vec![s.as_str()],
-        Value::Array(a) => a.iter().filter_map(Value::as_str).collect(),
-        _ => Vec::new(),
+    let lookup = StructureBiomes(data);
+    let resolve = |set: &Value| {
+        crate::holder_set::resolve(set, &lookup)
+            .map(|ids| ids.into_iter().collect::<BTreeSet<_>>())
+            .map_err(super::DecodeError::Registry)
     };
-    let mut out = BTreeSet::new();
-    for name in names {
-        match name.strip_prefix('#') {
-            Some(tag) => {
-                for biome in data.biome_tags.get(tag).into_iter().flatten() {
-                    out.extend(data.biome_id(biome));
-                }
-            }
-            None => out.extend(data.biome_id(name)),
-        }
+    match value {
+        Value::Null => Ok(BTreeSet::new()),
+        Value::Array(list) => list.iter().try_fold(BTreeSet::new(), |mut out, set| {
+            out.extend(resolve(set)?);
+            Ok::<_, super::DecodeError>(out)
+        }),
+        set => resolve(set),
     }
-    Ok(out)
+}
+struct StructureBiomes<'a>(&'a GeneratorData);
+impl crate::holder_set::HolderLookup for StructureBiomes<'_> {
+    type Id = BiomeId;
+    fn what(&self) -> &str {
+        "biome"
+    }
+    fn entry(&self, id: &str) -> Result<Vec<BiomeId>, String> {
+        Ok(self.0.biome_id(id).into_iter().collect())
+    }
+    fn tag(&self, tag: &str) -> Result<Vec<BiomeId>, String> {
+        let members = self.0.biome_tags.get(tag).into_iter().flatten();
+        Ok(members.filter_map(|biome| self.0.biome_id(biome)).collect())
+    }
+    fn all(&self) -> Vec<BiomeId> {
+        (0..self.0.biome_names().len() as u32)
+            .map(BiomeId)
+            .collect()
+    }
 }
 impl StructureState {
     pub(super) fn new(
