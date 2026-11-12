@@ -3039,7 +3039,7 @@ impl Minecart {
             map.remove(&JavaString::from("DisplayState"));
             map.remove(&JavaString::from("explosion_power"));
             map.remove(&JavaString::from("explosion_speed_factor"));
-            crate::game::boats::put_ticks_frozen(map, self.ticks_frozen);
+            super::boats::put_ticks_frozen(map, self.ticks_frozen);
             let mut put = |k: &str, v: Tag| {
                 map.insert(JavaString::from(k), v);
             };
@@ -3166,7 +3166,7 @@ impl Minecart {
         };
         // Entity.load: OnGround and fall_distance, as saved.
         (c.on_ground, c.fall_distance) = horizon_client::entity_nbt::ground_from_nbt(tag);
-        c.ticks_frozen = crate::game::boats::saved_ticks_frozen(tag);
+        c.ticks_frozen = super::boats::saved_ticks_frozen(tag);
         c.flipped = flag("FlippedRotation", false);
         c.first_tick = flag("HasTicked", false);
         if kind.slots() > 0 {
@@ -4178,33 +4178,37 @@ mod hook_mutation_regressions {
 }
 
 #[cfg(test)]
-#[test]
-fn tnt_cart_power_round_trips_live_state_and_clears_stale_defaults() {
-    use horizon_core::nbt::{Tag, parse_snbt};
-    let raw = parse_snbt("{Pos:[1d,200d,1d],explosion_power:200f,explosion_speed_factor:-2d}")
-        .unwrap()
-        .0;
-    let mut cart = Minecart::from_nbt(&raw, 1, CartKind::Tnt).unwrap();
-    assert_eq!(cart.explosion_power, 128.0);
-    assert_eq!(cart.explosion_speed_factor, 0.0);
-    let saved = cart.to_nbt([0; 4], Some(&raw));
-    assert_eq!(
-        saved.get("explosion_power"),
-        Some(&Tag::Float(128.0f32.to_bits()))
-    );
-    assert_eq!(
-        saved.get("explosion_speed_factor"),
-        Some(&Tag::Float(0.0f32.to_bits()))
-    );
-    cart.explosion_power = DEFAULT_EXPLOSION_POWER;
-    cart.explosion_speed_factor = DEFAULT_EXPLOSION_SPEED_FACTOR;
-    let saved = cart.to_nbt([0; 4], Some(&raw));
-    assert!(saved.get("explosion_power").is_none());
-    assert!(saved.get("explosion_speed_factor").is_none());
-    let restored = Minecart::from_nbt(&saved, 2, CartKind::Tnt).unwrap();
-    assert_eq!(restored.explosion_power, DEFAULT_EXPLOSION_POWER);
-    assert_eq!(
-        restored.explosion_speed_factor,
-        DEFAULT_EXPLOSION_SPEED_FACTOR
-    );
+mod tnt_cart_power_tests {
+    use super::*;
+
+    #[test]
+    fn tnt_cart_power_round_trips_live_state_and_clears_stale_defaults() {
+        use horizon_core::nbt::{Tag, parse_snbt};
+        let raw = parse_snbt("{Pos:[1d,200d,1d],explosion_power:200f,explosion_speed_factor:-2d}")
+            .unwrap()
+            .0;
+        let mut cart = Minecart::from_nbt(&raw, 1, CartKind::Tnt).unwrap();
+        assert_eq!(cart.explosion_power, 128.0);
+        assert_eq!(cart.explosion_speed_factor, 0.0);
+        let saved = cart.to_nbt([0; 4], Some(&raw));
+        assert_eq!(
+            saved.get("explosion_power"),
+            Some(&Tag::Float(128.0f32.to_bits()))
+        );
+        assert_eq!(
+            saved.get("explosion_speed_factor"),
+            Some(&Tag::Float(0.0f32.to_bits()))
+        );
+        cart.explosion_power = DEFAULT_EXPLOSION_POWER;
+        cart.explosion_speed_factor = DEFAULT_EXPLOSION_SPEED_FACTOR;
+        let saved = cart.to_nbt([0; 4], Some(&raw));
+        assert!(saved.get("explosion_power").is_none());
+        assert!(saved.get("explosion_speed_factor").is_none());
+        let restored = Minecart::from_nbt(&saved, 2, CartKind::Tnt).unwrap();
+        assert_eq!(restored.explosion_power, DEFAULT_EXPLOSION_POWER);
+        assert_eq!(
+            restored.explosion_speed_factor,
+            DEFAULT_EXPLOSION_SPEED_FACTOR
+        );
+    }
 }
