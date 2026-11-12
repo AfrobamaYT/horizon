@@ -126,15 +126,15 @@ pub(super) struct Minecart {
     /// `AbstractMinecart.onRails`: transitions into rails need a position snap.
     pub(super) on_rails: bool,
     pub(super) on_ground: bool,
-    horizontal_collision: bool,
+    pub(super) horizontal_collision: bool,
     pub(super) fall_distance: f64,
     /// The squared speed `MinecartTNT.causeFallDamage` blows up with, set by
     /// a landing of three blocks or more and taken by the cart's next tick
     /// step (vanilla explodes inside the move itself).
-    fall_blast: Option<f64>,
+    pub(super) fall_blast: Option<f64>,
     /// `Entity.stuckSpeedMultiplier`: set by a cobweb the cart's box is in,
     /// scaled into its next move.
-    stuck: Vec3,
+    pub(super) stuck: Vec3,
     pub hurt_time: i32,
     pub hurt_dir: i32,
     pub damage: f32,
@@ -679,7 +679,7 @@ impl Game<'_> {
     /// `AbstractBoat.canVehicleCollide` takes any other cart, boat, shulker or pushable mob and
     /// player, except one riding this cart. A cart that runs into one has a horizontal
     /// collision, which sets a TNT minecart off.
-    fn cart_entity_collisions(&self, c: &Minecart) -> Vec<Aabb> {
+    pub(super) fn cart_entity_collisions(&self, c: &Minecart) -> Vec<Aabb> {
         let near = c.bounds().inflate(Vec3::new(2.0, 2.0, 2.0));
         // Every cart asks about every entity of the level each tick, and the box
         // turns nearly all of them away: it is tested first, before a mob's
@@ -738,74 +738,6 @@ impl Game<'_> {
             );
         }
         boxes
-    }
-    /// Entity.move for a cart: collisions zero the blocked components, the world border's walls
-    /// among them (`CollisionGetter.borderCollision`, asked for every entity).
-    fn move_cart(&self, c: &mut Minecart, mut delta: Vec3) {
-        // Entity.move: a stuck multiplier scales this move and zeroes the velocity.
-        if c.stuck.length_squared() > 1.0e-7 {
-            delta = delta.multiply(c.stuck);
-            c.stuck = Vec3::ZERO;
-            c.velocity = Vec3::ZERO;
-        }
-        let scene = SceneCollisions {
-            world: &self.world,
-            binding: self.collision,
-            subject: None,
-        };
-        // A zero move stays zero whatever surrounds it (`Entity.collide`, and the
-        // step-up needs a blocked horizontal move): a cart standing on its rails,
-        // as most do, gathers no entity boxes.
-        let entities = if delta.length_squared() == 0.0 {
-            Vec::new()
-        } else {
-            self.cart_entity_collisions(c)
-        };
-        let mut scene = horizon_client::collisions::EntityCollisions {
-            blocks: scene,
-            entities: &entities,
-            border: Some((self.border.geometry(), [c.position.x, c.position.z])),
-        };
-        if let Ok(moved) = scene.resolve(c.bounds(), delta, 0.0, c.on_ground) {
-            c.fall_distance = self.vehicle_fall_reset(c.fall_distance, c.position, moved);
-            c.position = Vec3::new(
-                c.position.x + moved.x,
-                c.position.y + moved.y,
-                c.position.z + moved.z,
-            );
-            c.on_ground = delta.y < 0.0 && moved.y > delta.y;
-            c.horizontal_collision =
-                (moved.x - delta.x).abs() > 1.0e-7 || (moved.z - delta.z).abs() > 1.0e-7;
-            if (moved.x - delta.x).abs() > 1.0e-7 {
-                c.velocity.x = 0.0;
-            }
-            if (moved.z - delta.z).abs() > 1.0e-7 {
-                c.velocity.z = 0.0;
-            }
-            if (moved.y - delta.y).abs() > 1.0e-7 {
-                c.velocity.y = 0.0;
-            }
-            // Entity.checkFallDamage: the move's drop counts (not in water, as of
-            // the tick before: `isInWater` is `wasTouchingWater`),
-            // and a landing hands the whole fall to causeFallDamage, which
-            // sets a TNT minecart off at (fall / 10) squared.
-            if moved.y < 0.0 && !c.in_water {
-                c.fall_distance -= f64::from(moved.y as f32);
-            }
-            // A move up or none leaves the fall as it is (a saved one too).
-            if c.on_ground {
-                if c.kind == CartKind::Tnt && c.fall_distance >= 3.0 {
-                    let power = c.fall_distance / 10.0;
-                    c.fall_blast = Some(power * power);
-                }
-                c.fall_distance = 0.0;
-            }
-        }
-        // OldMinecartBehavior applies block effects here and at tick end.
-        // NewMinecartBehavior applies them after recording each track step.
-        if !self.minecart_improvements() {
-            self.cart_block_effects(c);
-        }
     }
     fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if c.in_water { 0.2 } else { 0.4 };
@@ -1438,7 +1370,7 @@ impl Game<'_> {
     }
     /// `applyEffectsFromBlocks` for a cart: a bubble column lifts or drags it
     /// and resets the fall distance.
-    fn cart_block_effects(&self, c: &mut Minecart) {
+    pub(super) fn cart_block_effects(&self, c: &mut Minecart) {
         if c.push_by_bubble_column(
             &self.world,
             self.pack.assets.registry,
